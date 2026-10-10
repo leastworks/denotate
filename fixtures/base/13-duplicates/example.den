@@ -1,0 +1,8 @@
+module example;
+
+sort Slot;
+const a: Slot;
+const a: Slot;
+relation known(slot: Slot);
+relation known(slot: Slot);
+known(a);

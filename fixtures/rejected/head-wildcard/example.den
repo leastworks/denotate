@@ -1,0 +1,7 @@
+module example;
+
+sort Slot;
+const a: Slot;
+
+relation p(x: Slot);
+p(_) :- p(a);

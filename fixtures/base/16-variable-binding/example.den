@@ -1,0 +1,13 @@
+module example;
+use computation;
+
+// Same spelling in separate rules must not share a variable identity.
+given(D) :- supplies(S, D);
+available(D) :- given(D);
+given(D) :- supplies(_, D);
+// Each underscore is fresh; this is not an equality condition.
+available(a) :- mapped_to(_, _);
+const a: Slot;
+// Syntax-valid unsafe head and negative read; semantic errors.
+given(D) :- present(S);
+given(D) :- supplies(S, D), !mapped_to(Other, D);

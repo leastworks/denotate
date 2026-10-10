@@ -1,0 +1,20 @@
+module example;
+use computation;
+use missing;
+
+const a, b, result: Slot;
+const input_a, input_b: Source;
+const calculate: Computation;
+
+mapped_to(input_a, a);
+
+// Use input_b for b only when a is available.
+mapped_to(input_b, b) :- available(a);
+
+// This computation has one unconditional, mandatory output.
+output_slot(calculate, result);
+
+// Its dependency conditions are rules lowered from the DSL program.
+applies(calculate) :-
+    available(a),
+    available(b);

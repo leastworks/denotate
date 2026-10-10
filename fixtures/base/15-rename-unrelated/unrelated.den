@@ -1,0 +1,8 @@
+module unrelated;
+
+sort Slot;
+sort Source;
+const a: Slot;
+const input_a: Source;
+relation mapped_to(source: Source, slot: Slot);
+mapped_to(input_a, a);

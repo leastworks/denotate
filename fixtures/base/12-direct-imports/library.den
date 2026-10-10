@@ -1,0 +1,4 @@
+module library;
+use types;
+
+relation known(slot: Slot);

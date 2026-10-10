@@ -1,0 +1,14 @@
+module example;
+
+// Only exact keywords are reserved. Context, not capitalization, identifies sorts.
+sort slot;
+sort Input;
+const input_a, obligation, verification: slot;
+const b2, mixedCase: Input;
+relation Known(value: slot);
+relation known(value: Input);
+Known(input_a);
+Known(obligation);
+Known(verification);
+known(b2);
+known(mixedCase);

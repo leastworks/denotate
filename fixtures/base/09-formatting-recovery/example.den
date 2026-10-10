@@ -1,0 +1,9 @@
+module example;
+// café 🦀 — comments must survive, including their token boundaries.
+sort Slot;
+const a:Slot;
+relation available( slot: Slot ); // Keep this trailing comment.
+available(a); , @ // Unexpected punctuation and an unrecognized character.
+// Keep this standalone comment.
+relation given(slot:Slot);
+given(a) :- available(a);

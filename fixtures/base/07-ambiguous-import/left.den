@@ -1,0 +1,4 @@
+module left;
+use types;
+
+relation masked(slot: Slot);

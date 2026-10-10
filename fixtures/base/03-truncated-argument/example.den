@@ -1,0 +1,8 @@
+module example;
+use computation;
+
+const input_b: Source;
+const b: Slot;
+
+// Completion here should offer Slot constants, including b.
+mapped_to(input_b,

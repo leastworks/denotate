@@ -1,0 +1,7 @@
+module signals;
+
+relation enabled();
+input paused();
+relation running();
+enabled();
+running() :- enabled(), !paused();

@@ -1,0 +1,6 @@
+module example;
+
+sort Slot;
+const a: Slot;
+
+relation input(x: Slot);

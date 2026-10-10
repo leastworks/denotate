@@ -1,0 +1,7 @@
+module example;
+
+sort Slot;
+const a: Slot;
+relation enabled();
+// Syntax-valid in extended mode; one supplied argument is a semantic error.
+enabled(a);

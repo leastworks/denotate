@@ -1,0 +1,4 @@
+module types;
+
+sort Slot;
+const a: Slot;

@@ -1,0 +1,3 @@
+module example;
+
+relation enabled(

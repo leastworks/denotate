@@ -1,0 +1,42 @@
+module computation;
+
+sort Slot;         // A named place for a value.
+sort Source;       // An external source, observed in the fixed input snapshot.
+sort Computation;  // A computation, such as a UDF, that can derive slot values.
+
+// Program facts or conditional rules map an external source to a slot.
+relation mapped_to(source: Source, slot: );
+
+// Observed input: this external source is present in the input snapshot.
+input present(source: Source);
+
+// Program facts or rules determine masks, applicability, and output slots.
+relation masked(slot: Slot);
+relation applies(computation: Computation);
+relation output_slot(computation: Computation, slot: Slot);
+
+// External contribution after masking; retain the source identity as evidence.
+relation supplies(source: Source, slot: Slot);
+relation given(slot: Slot);      // At least one external source supplies it.
+relation derived(slot: Slot);    // At least one applicable computation outputs it.
+relation available(slot: Slot);
+
+// A mask blocks all external sources mapped to this slot, not computations.
+supplies(S, D) :-
+    mapped_to(S, D),
+    present(S),
+    !masked(D);
+
+given(D) :- supplies(_, D);
+
+derived(D) :-
+    applies(C),
+    output_slot(C, D);
+
+// Availability is an OR; it does not silently choose between competing paths.
+available(D) :- given(D);
+available(D) :- derived(D);
+
+// Retain conflicting paths as evidence; contracts are outside this prototype.
+relation path_conflict(slot: Slot);
+path_conflict(D) :- given(D), derived(D);
