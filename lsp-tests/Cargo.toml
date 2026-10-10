@@ -1,0 +1,10 @@
+[package]
+name = "denotate-lsp-tests"
+version = "0.0.1"
+edition = "2021"
+publish = false
+rust-version = "1.78"
+
+[dev-dependencies]
+serde_json = "=1.0.145"
+tempfile = "=3.15.0"

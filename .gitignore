@@ -31,3 +31,10 @@ htmlcov/
 .DS_Store
 *.swp
 *.swo
+
+# Frontend prototype dependencies and generated build artifacts
+/frontend-prototype/**/node_modules/
+/frontend-prototype/**/dist/
+/frontend-prototype/langium/src/generated/
+/frontend-prototype/target/
+/frontend-prototype/.vscode-test/

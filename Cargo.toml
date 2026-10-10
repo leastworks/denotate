@@ -1,0 +1,3 @@
+[workspace]
+members = ["lsp-tests", "xtask"]
+resolver = "2"
