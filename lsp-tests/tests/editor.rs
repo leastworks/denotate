@@ -7,14 +7,8 @@ fn outline_is_positional_and_retains_repeated_rule_heads() {
     let mut client = Client::start("base/00-valid");
     assert_eq!(client.capabilities["documentSymbolProvider"], true);
     // Capabilities can be enabled by either true or an options object.
-    // A1.1 must advertise neither form for features requiring resolution.
-    for capability in [
-        "renameProvider",
-        "definitionProvider",
-        "referencesProvider",
-        "hoverProvider",
-        "workspaceSymbolProvider",
-    ] {
+    // These features remain disabled until their safety/presentation work lands.
+    for capability in ["renameProvider", "hoverProvider", "workspaceSymbolProvider"] {
         assert!(
             matches!(
                 client.capabilities.get(capability),
@@ -22,6 +16,13 @@ fn outline_is_positional_and_retains_repeated_rule_heads() {
             ),
             "{capability} must be absent or false, got {:?}",
             client.capabilities.get(capability)
+        );
+    }
+    for capability in ["definitionProvider", "referencesProvider"] {
+        let value = &client.capabilities[capability];
+        assert!(
+            value == &json!(true) || value.is_object(),
+            "{capability} must be true or an options object, got {value}"
         );
     }
     let (uri, _) = client.open("computation.den");

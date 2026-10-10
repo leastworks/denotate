@@ -45,6 +45,7 @@ pub struct Client {
     stderr: Arc<Mutex<String>>,
     trace: Vec<String>,
     pending: Vec<Value>,
+    registrations: Vec<Value>,
     next_id: u64,
     pub workspace: TempDir,
     pub capabilities: Value,
@@ -145,6 +146,7 @@ impl Client {
             stderr,
             trace: vec![],
             pending: vec![],
+            registrations: vec![],
             next_id: 1,
             workspace,
             capabilities: Value::Null,
@@ -155,7 +157,8 @@ impl Client {
             "workspaceFolders": [{"uri": uri, "name": "fixture"}],
             "capabilities": {
                 "general": {"positionEncodings": ["utf-16"]},
-                "workspace": {"workspaceFolders": true, "configuration": true},
+                "workspace": {"workspaceFolders": true, "configuration": true,
+                    "didChangeWatchedFiles": {"dynamicRegistration": true}},
                 "textDocument": {
                     "documentSymbol": {"hierarchicalDocumentSymbolSupport": true},
                     "completion": {"completionItem": {"snippetSupport": false}},
@@ -209,12 +212,22 @@ impl Client {
                     "workspace/workspaceFolders" => {
                         json!([{"uri": file_uri(self.workspace.path()), "name": "fixture"}])
                     }
-                    "client/registerCapability"
-                    | "client/unregisterCapability"
-                    | "window/workDoneProgress/create" => Value::Null,
+                    "client/registerCapability" => {
+                        self.registrations.extend(
+                            message["params"]["registrations"]
+                                .as_array()
+                                .unwrap()
+                                .clone(),
+                        );
+                        Value::Null
+                    }
+                    "client/unregisterCapability" | "window/workDoneProgress/create" => Value::Null,
                     other => panic!("Unhandled server request: {other}"),
                 };
                 self.send(json!({"jsonrpc": "2.0", "id": message["id"], "result": result}));
+                if predicate(&message) {
+                    return message;
+                }
             } else if predicate(&message) {
                 return message;
             } else {
@@ -227,7 +240,8 @@ impl Client {
         let id = self.next_id;
         self.next_id += 1;
         self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
-        let reply = self.wait(|message| message["id"] == id);
+        // Server and client request IDs have independent namespaces.
+        let reply = self.wait(|message| message["id"] == id && message.get("method").is_none());
         assert!(reply.get("error").is_none(), "{method}: {reply}");
         reply["result"].clone()
     }
@@ -287,6 +301,49 @@ impl Client {
     pub fn shutdown(&mut self) {
         self.request("shutdown", Value::Null);
         self.notify("exit", Value::Null);
+    }
+
+    #[allow(dead_code)] // Used by the resolution integration binary, not editor.rs.
+    pub fn file_watcher_registration(&mut self) -> Value {
+        if !self
+            .registrations
+            .iter()
+            .any(|r| r["method"] == "workspace/didChangeWatchedFiles")
+        {
+            self.wait(|m| {
+                m["method"] == "client/registerCapability"
+                    && m["params"]["registrations"].as_array().is_some_and(|rs| {
+                        rs.iter()
+                            .any(|r| r["method"] == "workspace/didChangeWatchedFiles")
+                    })
+            });
+        }
+        self.registrations
+            .iter()
+            .find(|r| r["method"] == "workspace/didChangeWatchedFiles")
+            .unwrap()
+            .clone()
+    }
+
+    #[allow(dead_code)] // Used by the resolution integration binary, not editor.rs.
+    pub fn watched_change(&mut self, file: &str, kind: u32, dependent_uri: &str, version: i64) {
+        let changed_uri = file_uri(&self.workspace.path().join(file));
+        self.discard_diagnostics(dependent_uri);
+        // Also require a fresh publication when asserting deletion clears the
+        // changed file's diagnostics; do not reuse an earlier empty result.
+        self.discard_diagnostics(&changed_uri);
+        self.pending.retain(|m| {
+            !(m["method"] == "denotate/test/validated" && m["params"]["uri"] == dependent_uri)
+        });
+        self.notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes": [{
+                "uri": changed_uri, "type": kind
+            }]}),
+        );
+        // Disk changes do not increment the dependent editor document version.
+        // Serialized events still require a fresh diagnostic/build publication.
+        self.validated(dependent_uri, version);
     }
 }
 
