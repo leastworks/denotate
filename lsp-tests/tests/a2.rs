@@ -6,6 +6,115 @@ fn stats(client: &mut Client) -> Value {
     client.request("denotate/test/analysis", json!({}))
 }
 
+#[test]
+fn module_and_declaration_diagnostics_are_native_reused_and_repairable() {
+    if std::env::var("DENOTATE_BACKEND").as_deref() == Ok("langium") {
+        return;
+    }
+    let mut client = Client::start("base/00-valid");
+    let (uri, _) = client.open("example.den");
+    let source = "module wrong;\nuse computation;\nuse missing;\nconst a, a: Slot;\n";
+    client.change(&uri, 2, source);
+    let initial = client.diagnostics(&uri);
+    assert_eq!(
+        initial.as_array().unwrap().len(),
+        3,
+        "one owner per diagnostic"
+    );
+    for code in ["module-filename", "duplicate-declaration"] {
+        assert!(initial
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == code));
+    }
+    assert!(initial
+        .to_string()
+        .contains("Could not resolve reference to Module named 'missing'"));
+    let target = client.request(
+        "textDocument/definition",
+        json!({
+            "textDocument": {"uri": uri}, "position": position(source, "use computation", 4)
+        }),
+    );
+    assert!(target[0]["targetUri"]
+        .as_str()
+        .unwrap()
+        .ends_with("computation.den"));
+    let before = stats(&mut client);
+    let moved = format!("// comment 🦀\n{source}");
+    client.change(&uri, 3, &moved);
+    for key in [
+        "moduleQueryExecutions",
+        "declarationQueryExecutions",
+        "nameDiagnosticQueryExecutions",
+    ] {
+        assert!(
+            before[key].as_u64().unwrap() > 0,
+            "{key} must be Rust-owned"
+        );
+        assert_eq!(
+            stats(&mut client)[key],
+            before[key],
+            "comment must reuse {key}"
+        );
+    }
+    for diagnostic in client.diagnostics(&uri).as_array().unwrap() {
+        let old = initial
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["message"] == diagnostic["message"])
+            .unwrap();
+        assert_eq!(
+            diagnostic["range"]["start"]["line"].as_u64().unwrap(),
+            old["range"]["start"]["line"].as_u64().unwrap() + 1
+        );
+    }
+    let repaired = "module example;\nuse computation;\nconst a: Slot;\n";
+    client.change(&uri, 4, repaired);
+    assert_eq!(client.diagnostics(&uri), json!([]));
+    assert!(
+        stats(&mut client)["declarationQueryExecutions"]
+            .as_u64()
+            .unwrap()
+            > before["declarationQueryExecutions"].as_u64().unwrap()
+    );
+    // A library's module/filename mismatch removes its import target. No
+    // last-good module identity should keep navigation alive.
+    let (lib_uri, library) = client.open("computation.den");
+    client.change(
+        &lib_uri,
+        2,
+        &library.replace("module computation;", "module changed;"),
+    );
+    assert!(client
+        .diagnostics(&uri)
+        .to_string()
+        .contains("Could not resolve reference to Module named 'computation'"));
+    let missing = client.request(
+        "textDocument/definition",
+        json!({
+            "textDocument": {"uri": uri}, "position": position(repaired, "use computation", 4)
+        }),
+    );
+    assert!(missing.is_null() || missing.as_array().is_some_and(|items| items.is_empty()));
+    client.change(&lib_uri, 3, &library);
+    assert_eq!(client.diagnostics(&uri), json!([]));
+    let restored = client.request(
+        "textDocument/definition",
+        json!({
+            "textDocument": {"uri": uri}, "position": position(repaired, "use computation", 4)
+        }),
+    );
+    assert_eq!(restored[0]["targetUri"], target[0]["targetUri"]);
+    assert_eq!(
+        restored[0]["targetSelectionRange"],
+        target[0]["targetSelectionRange"]
+    );
+    client.shutdown();
+}
+
 fn definition(client: &mut Client, uri: &str, source: &str) -> Value {
     let prefix = &source[..source.find("mapped_to(input_a").unwrap()];
     client.request(

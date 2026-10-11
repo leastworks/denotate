@@ -9,8 +9,10 @@ use std::{
 };
 
 mod arguments;
+mod declarations;
 mod rules;
 pub use arguments::ConstantDiagnostic;
+pub use declarations::{DeclarationDiagnostic, NameKind};
 pub use rules::{RuleAnalysis, RuleSyntax};
 
 /// Partial syntax projection: identity and semantic fields only, never spans.
@@ -92,13 +94,16 @@ enum QueryKind {
     Rules,
     ConstantDiagnostics,
     SortLabels,
+    Modules,
+    Declarations,
+    NameDiagnostics,
 }
 
 #[salsa::db]
 #[derive(Clone, Default)]
 struct Database {
     storage: salsa::Storage<Self>,
-    executions: Arc<[AtomicU32; 7]>,
+    executions: Arc<[AtomicU32; 10]>,
 }
 
 #[salsa::db]
@@ -116,18 +121,15 @@ fn visible_files(db: &dyn Db, catalog: Catalog, file: File) -> Vec<File> {
         return vec![];
     }
     let imports = file.imports(db);
-    let directory = file.directory(db);
     let mut visible = vec![file];
-    for &candidate in catalog.files(db) {
-        if candidate == file || !candidate.present(db) || candidate.directory(db) != directory {
+    for &candidate in declarations::importable_files(db, catalog, file) {
+        if candidate == file {
             continue;
         }
         let Some(module) = candidate.module(db) else {
             continue;
         };
-        if candidate.filename(db) == &format!("{module}.den")
-            && imports.iter().any(|item| item.as_ref() == Some(module))
-        {
+        if imports.iter().any(|item| item.as_ref() == Some(module)) {
             visible.push(candidate);
         }
     }
@@ -258,6 +260,9 @@ pub struct QueryCounts {
     rules: u32,
     constant_diagnostics: u32,
     sort_labels: u32,
+    modules: u32,
+    declarations: u32,
+    name_diagnostics: u32,
 }
 
 pub struct Analysis {
@@ -402,6 +407,36 @@ impl Analysis {
             .unwrap_or_default()
     }
 
+    pub fn module_candidates(&self, uri: &str) -> Vec<Symbol> {
+        self.files
+            .get(uri)
+            .map(|&file| declarations::module_candidates(&self.db, self.catalog, file).clone())
+            .unwrap_or_default()
+    }
+
+    pub fn declaration_diagnostics(&self, uri: &str) -> Vec<DeclarationDiagnostic> {
+        self.files
+            .get(uri)
+            .map(|&file| {
+                declarations::declaration_diagnostics(&self.db, self.catalog, file).clone()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn name_diagnostic(
+        &self,
+        uri: &str,
+        kind: NameKind,
+        name: String,
+        relation: String,
+        index: usize,
+    ) -> Option<String> {
+        self.files.get(uri).and_then(|&file| {
+            declarations::name_diagnostic(&self.db, self.catalog, file, kind, name, relation, index)
+                .clone()
+        })
+    }
+
     pub fn visible_sorts(&self, uri: &str) -> Vec<Symbol> {
         self.files
             .get(uri)
@@ -440,6 +475,9 @@ impl Analysis {
             rules,
             constant_diagnostics,
             sort_labels,
+            modules,
+            declarations,
+            name_diagnostics,
         ] = self
             .db
             .executions
@@ -453,6 +491,9 @@ impl Analysis {
             rules,
             constant_diagnostics,
             sort_labels,
+            modules,
+            declarations,
+            name_diagnostics,
         }
     }
 }
@@ -460,6 +501,147 @@ impl Analysis {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn module_lookup_and_diagnostics_track_create_rename_delete_and_ignore_signature_edits() {
+        let mut core = Analysis::default();
+        let caller = doc("caller", "caller", &["lib"], &[]);
+        core.update(caller.clone());
+        let error = |core: &Analysis| {
+            core.name_diagnostic("caller", NameKind::Module, "lib".into(), "".into(), 0)
+        };
+        let found = |core: &Analysis| {
+            core.module_candidates("caller")
+                .iter()
+                .any(|s| s.name == "lib")
+        };
+        assert!(!found(&core));
+        assert_eq!(error(&core), None);
+        let mut lib = typed_doc("lib", "lib", &[], &["Source"]);
+        core.update(lib.clone());
+        assert!(found(&core));
+        assert_eq!(error(&core), None);
+        assert_eq!(
+            core.module_candidates("caller")
+                .iter()
+                .find(|s| s.name == "lib")
+                .unwrap()
+                .id,
+            ""
+        );
+        let before = core.query_counts();
+        lib.signatures[0].parameters = None;
+        core.update(lib.clone());
+        core.update(caller);
+        assert_eq!(error(&core), None);
+        assert_eq!(core.query_counts().modules, before.modules);
+        assert_eq!(
+            core.query_counts().name_diagnostics,
+            before.name_diagnostics
+        );
+        lib.module = Some("renamed".into());
+        core.update(lib.clone());
+        assert!(!found(&core));
+        assert_eq!(
+            core.declaration_diagnostics("lib")[0].code,
+            "module-filename"
+        );
+        lib.module = Some("lib".into());
+        core.update(lib.clone());
+        assert!(found(&core));
+        assert_eq!(error(&core), None);
+        core.remove("lib");
+        assert!(!found(&core));
+        assert!(core.declaration_diagnostics("lib").is_empty());
+        core.update(lib.clone());
+        assert!(found(&core));
+        assert_eq!(error(&core), None);
+        lib.directory = "elsewhere".into();
+        core.update(lib);
+        assert!(
+            !found(&core),
+            "same name outside the directory is not importable"
+        );
+    }
+
+    #[test]
+    fn missing_module_relation_and_sort_leave_generic_wording_to_the_frontend() {
+        let mut core = Analysis::default();
+        core.update(doc("caller", "caller", &[], &[]));
+        for kind in [NameKind::Module, NameKind::Relation, NameKind::Sort] {
+            assert_eq!(
+                core.name_diagnostic("caller", kind, "missing".into(), "".into(), 0),
+                None
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_checks_use_namespaces_sort_identity_and_cache_reuse() {
+        let mut core = Analysis::default();
+        let mut file = typed_doc("lib", "lib", &[], &["Source", "Slot"]);
+        file.constants = vec![
+            constant("a", "same", "Source"),
+            constant("b", "same", "Slot"),
+            constant("c", "same", "Source"),
+            constant("d", "same", "Missing"),
+        ];
+        file.relations.push(NamedDeclaration {
+            id: "duplicate".into(),
+            name: "r".into(),
+        });
+        core.update(file.clone());
+        let diagnostics = core.declaration_diagnostics("lib");
+        assert_eq!(
+            diagnostics
+                .iter()
+                .map(|d| d.id.as_str())
+                .collect::<Vec<_>>(),
+            ["duplicate", "c"]
+        );
+        let before = core.query_counts().declarations;
+        file.signatures[0].parameters = None;
+        core.update(file.clone());
+        assert_eq!(core.declaration_diagnostics("lib"), diagnostics);
+        assert_eq!(core.query_counts().declarations, before);
+        file.sorts.push(NamedDeclaration {
+            id: "duplicate-sort".into(),
+            name: "Source".into(),
+        });
+        core.update(file);
+        assert_eq!(
+            core.declaration_diagnostics("lib")
+                .iter()
+                .map(|d| d.id.as_str())
+                .collect::<Vec<_>>(),
+            ["duplicate-sort", "duplicate"],
+            "ambiguous sort must not invent constant duplicates"
+        );
+    }
+
+    #[test]
+    fn native_name_diagnostics_report_all_ambiguous_modules_and_clear_after_deletion() {
+        let mut core = Analysis::default();
+        core.update(typed_doc("left", "left", &[], &["Source"]));
+        core.update(typed_doc("right", "right", &[], &["Source"]));
+        core.update(doc("caller", "caller", &["right", "left", "left"], &[]));
+        assert_eq!(
+            core.name_diagnostic("caller", NameKind::Relation, "r".into(), "".into(), 0)
+                .as_deref(),
+            Some("Ambiguous name 'r': 2 visible declarations (left, right).")
+        );
+        assert_eq!(
+            core.name_diagnostic("caller", NameKind::Sort, "Source".into(), "".into(), 0)
+                .as_deref(),
+            Some("Ambiguous name 'Source': 2 visible declarations (left, right).")
+        );
+        core.remove("right");
+        assert_eq!(
+            core.name_diagnostic("caller", NameKind::Relation, "r".into(), "".into(), 0),
+            None
+        );
+    }
+
     fn error_message(diagnostic: ConstantDiagnostic) -> String {
         match diagnostic {
             ConstantDiagnostic::Error { message } => message,
