@@ -254,6 +254,45 @@ fn intact_library_declarations_still_resolve_with_a_broken_signature() {
 }
 
 #[test]
+fn cold_broken_library_and_edit_to_same_text_have_identical_editor_results() {
+    let broken = std::fs::read_to_string(
+        support::root().join("fixtures/base/06-broken-library-declaration/computation.den"),
+    )
+    .unwrap();
+    let mut snapshots = vec![];
+    for workspace in ["base/06-broken-library-declaration", "base/00-valid"] {
+        let mut client = Client::start(workspace);
+        let (lib_uri, library) = client.open("computation.den");
+        let (uri, source) = client.open("example.den");
+        if workspace == "base/00-valid" {
+            client.change(&lib_uri, 2, &broken);
+            client.change(&uri, 2, &source);
+        }
+        let snapshot = json!({
+            "libraryDiagnostics":client.diagnostics(&lib_uri),
+            "importerDiagnostics":client.diagnostics(&uri),
+            "mapped":definition(&mut client, &uri, &source, "mapped_to(input_a", 0),
+            "available":definition(&mut client, &uri, &source, "available(a)", 0),
+            "hover":hover(&mut client, &uri, &source, "mapped_to(input_a", 0),
+            "signature":signature(&mut client, &uri, &source, "mapped_to(input_a, a)", 18)
+        });
+        let normalized = snapshot
+            .to_string()
+            .replace(&support::file_uri(client.workspace.path()), "WORKSPACE");
+        snapshots.push(normalized);
+        if workspace == "base/00-valid" {
+            client.change(&lib_uri, 3, &library);
+            client.change(&uri, 3, &source);
+            assert_eq!(client.diagnostics(&lib_uri), json!([]));
+            assert_eq!(client.diagnostics(&uri), json!([]));
+            assert!(!signature(&mut client, &uri, &source, "mapped_to(input_a, a)", 18).is_null());
+        }
+        client.shutdown();
+    }
+    assert_eq!(snapshots[0], snapshots[1], "no last-good semantic fallback");
+}
+
+#[test]
 fn damaged_signatures_do_not_invent_arity_or_argument_type_errors() {
     let mut client = Client::start("base/00-valid");
     let (uri, source) = client.open("example.den");
