@@ -270,3 +270,114 @@ fn parameter_sort_changes_constant_targets_and_completion_but_not_visibility() {
     assert!(typed_completions(&mut client, &uri, &moved_source).contains(&"source_only".into()));
     client.shutdown();
 }
+
+#[test]
+fn argument_diagnostics_and_sort_labels_are_native_cached_and_follow_signature_edits() {
+    if std::env::var("DENOTATE_BACKEND").as_deref() == Ok("langium") {
+        return;
+    }
+    let mut client = Client::start("base/00-valid");
+    let (uri, _) = client.open("example.den");
+    let (lib_uri, library) = client.open("computation.den");
+    let source = "module example;\nuse computation;\nconst a: Slot;\nmapped_to(a);\n";
+    client.change(&uri, 2, source);
+    let initial = client.diagnostics(&uri);
+    assert_eq!(
+        initial.as_array().unwrap().len(),
+        2,
+        "one arity and one wrong-sort error, not duplicate ownership"
+    );
+    assert!(initial
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "arity"));
+    assert!(initial
+        .to_string()
+        .contains("No constant 'a' of sort Source (found: Slot)."));
+    let hover = client.request(
+        "textDocument/hover",
+        json!({"textDocument": {"uri": uri}, "position": position(source, "const a:", 6)}),
+    );
+    assert!(hover.to_string().contains("const a: Slot"));
+    let before = stats(&mut client);
+    for key in [
+        "constantDiagnosticQueryExecutions",
+        "sortLabelQueryExecutions",
+    ] {
+        assert!(
+            before[key].as_u64().unwrap() > 0,
+            "{key} must be Rust-owned"
+        );
+    }
+    let moved = format!("// comment 🦀\n{source}");
+    client.change(&uri, 3, &moved);
+    client.request(
+        "textDocument/hover",
+        json!({"textDocument": {"uri": uri}, "position": position(&moved, "const a:", 6)}),
+    );
+    let after = stats(&mut client);
+    for key in [
+        "constantDiagnosticQueryExecutions",
+        "sortLabelQueryExecutions",
+        "ruleQueryExecutions",
+    ] {
+        assert_eq!(after[key], before[key], "comment reuses {key}");
+    }
+    for diagnostic in client.diagnostics(&uri).as_array().unwrap() {
+        let old = initial
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["message"] == diagnostic["message"])
+            .unwrap();
+        assert_eq!(
+            diagnostic["range"]["start"]["line"].as_u64().unwrap(),
+            old["range"]["start"]["line"].as_u64().unwrap() + 1
+        );
+    }
+    client.change(
+        &lib_uri,
+        2,
+        &library.replace(
+            "mapped_to(source: Source, slot: Slot)",
+            "mapped_to(source: Slot, slot: Slot)",
+        ),
+    );
+    let diagnostics = client.diagnostics(&uri);
+    assert_eq!(diagnostics.as_array().unwrap().len(), 1);
+    assert_eq!(diagnostics[0]["code"], "arity");
+    client.change(
+        &lib_uri,
+        3,
+        &library.replace(
+            "mapped_to(source: Source, slot: Slot)",
+            "mapped_to(source: Slot)",
+        ),
+    );
+    assert_eq!(client.diagnostics(&uri), json!([]));
+    client.change(
+        &lib_uri,
+        4,
+        &library.replace(
+            "mapped_to(source: Source, slot: Slot)",
+            "mapped_to(source: Source,)",
+        ),
+    );
+    assert_eq!(
+        client.diagnostics(&uri),
+        json!([]),
+        "damaged declaration must not invent argument errors"
+    );
+    client.change(&lib_uri, 5, &library);
+    assert_eq!(client.diagnostics(&uri).as_array().unwrap().len(), 2);
+    assert!(
+        stats(&mut client)["constantDiagnosticQueryExecutions"]
+            .as_u64()
+            .unwrap()
+            > before["constantDiagnosticQueryExecutions"]
+                .as_u64()
+                .unwrap()
+    );
+    client.shutdown();
+}

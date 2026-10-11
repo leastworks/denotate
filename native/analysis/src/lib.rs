@@ -8,7 +8,9 @@ use std::{
     },
 };
 
+mod arguments;
 mod rules;
+pub use arguments::ConstantDiagnostic;
 pub use rules::{RuleAnalysis, RuleSyntax};
 
 /// Partial syntax projection: identity and semantic fields only, never spans.
@@ -88,13 +90,15 @@ enum QueryKind {
     ExpectedSorts,
     Constants,
     Rules,
+    ConstantDiagnostics,
+    SortLabels,
 }
 
 #[salsa::db]
 #[derive(Clone, Default)]
 struct Database {
     storage: salsa::Storage<Self>,
-    executions: Arc<[AtomicU32; 5]>,
+    executions: Arc<[AtomicU32; 7]>,
 }
 
 #[salsa::db]
@@ -180,14 +184,12 @@ fn resolve_sort(db: &dyn Db, catalog: Catalog, file: File, name: String) -> Opti
 }
 
 #[salsa::tracked]
-fn expected_argument_sort(
+fn resolved_signature(
     db: &dyn Db,
     catalog: Catalog,
     file: File,
     relation: String,
-    index: usize,
-) -> Option<Symbol> {
-    db.record_query(QueryKind::ExpectedSorts);
+) -> Option<(File, Signature)> {
     let mut matches = visible_relations(db, catalog, file)
         .iter()
         .filter(|item| item.name == relation);
@@ -202,9 +204,22 @@ fn expected_argument_sort(
         .signatures(db)
         .iter()
         .find(|item| item.id == target.id)?;
+    Some((owner, signature.clone()))
+}
+
+#[salsa::tracked]
+fn expected_argument_sort(
+    db: &dyn Db,
+    catalog: Catalog,
+    file: File,
+    relation: String,
+    index: usize,
+) -> Option<Symbol> {
+    db.record_query(QueryKind::ExpectedSorts);
+    let (owner, signature) = resolved_signature(db, catalog, file, relation).as_ref()?;
     let sort = signature.parameters.as_ref()?.get(index)?.as_ref()?;
     // A signature's names resolve in its declaring module, not its caller.
-    resolve_sort(db, catalog, owner, sort.clone()).clone()
+    resolve_sort(db, catalog, *owner, sort.clone()).clone()
 }
 
 #[salsa::tracked]
@@ -241,6 +256,8 @@ pub struct QueryCounts {
     expected_sorts: u32,
     constants: u32,
     rules: u32,
+    constant_diagnostics: u32,
+    sort_labels: u32,
 }
 
 pub struct Analysis {
@@ -356,6 +373,28 @@ impl Analysis {
         }
     }
 
+    pub fn constant_diagnostic(
+        &self,
+        uri: &str,
+        relation: String,
+        index: usize,
+        name: String,
+    ) -> ConstantDiagnostic {
+        self.files
+            .get(uri)
+            .map(|&file| {
+                arguments::constant_diagnostic(&self.db, self.catalog, file, relation, index, name)
+                    .clone()
+            })
+            .unwrap_or(ConstantDiagnostic::Suppressed)
+    }
+
+    pub fn sort_label(&self, uri: &str, owner_uri: &str, id: String) -> Option<String> {
+        let &file = self.files.get(uri)?;
+        let &owner = self.files.get(owner_uri)?;
+        arguments::sort_label(&self.db, self.catalog, file, owner, id).clone()
+    }
+
     pub fn visible_relations(&self, uri: &str) -> Vec<Symbol> {
         self.files
             .get(uri)
@@ -393,7 +432,15 @@ impl Analysis {
     }
 
     pub fn query_counts(&self) -> QueryCounts {
-        let [relations, sorts, expected_sorts, constants, rules] = self
+        let [
+            relations,
+            sorts,
+            expected_sorts,
+            constants,
+            rules,
+            constant_diagnostics,
+            sort_labels,
+        ] = self
             .db
             .executions
             .each_ref()
@@ -404,6 +451,8 @@ impl Analysis {
             expected_sorts,
             constants,
             rules,
+            constant_diagnostics,
+            sort_labels,
         }
     }
 }
@@ -411,6 +460,162 @@ impl Analysis {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn error_message(diagnostic: ConstantDiagnostic) -> String {
+        match diagnostic {
+            ConstantDiagnostic::Error { message } => message,
+            other => panic!("Expected error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn constant_diagnostics_distinguish_resolution_errors_and_missing_context() {
+        let mut core = Analysis::default();
+        let mut lib = typed_doc("lib", "lib", &[], &["Source", "Slot"]);
+        lib.constants = vec![
+            constant("good", "good", "Source"),
+            constant("wrong", "wrong", "Slot"),
+            constant("unknown", "unknown", "Missing"),
+        ];
+        core.update(lib.clone());
+        assert_eq!(
+            core.constant_diagnostic("lib", "r".into(), 0, "good".into()),
+            ConstantDiagnostic::Resolved
+        );
+        assert_eq!(
+            error_message(core.constant_diagnostic("lib", "r".into(), 0, "wrong".into())),
+            "No constant 'wrong' of sort Source (found: Slot)."
+        );
+        assert_eq!(
+            error_message(core.constant_diagnostic("lib", "r".into(), 0, "absent".into())),
+            "No constant 'absent' of sort Source (no visible declaration)."
+        );
+        assert_eq!(
+            error_message(core.constant_diagnostic("lib", "r".into(), 0, "unknown".into())),
+            "No constant 'unknown' of sort Source (found: unresolved sort)."
+        );
+        assert!(
+            error_message(core.constant_diagnostic("lib", "r".into(), 1, "good".into()))
+                .contains("Extra argument 'good'")
+        );
+        assert!(
+            error_message(core.constant_diagnostic("lib", "r".into(), 1, "absent".into()))
+                .contains("Unknown constant 'absent'")
+        );
+        lib.constants.push(constant("duplicate", "good", "Source"));
+        core.update(lib.clone());
+        assert_eq!(
+            core.constant_diagnostic("lib", "r".into(), 0, "good".into()),
+            ConstantDiagnostic::Ambiguous
+        );
+        lib.signatures[0].parameters = None;
+        core.update(lib.clone());
+        assert_eq!(
+            core.constant_diagnostic("lib", "r".into(), 1, "absent".into()),
+            ConstantDiagnostic::Suppressed
+        );
+        lib.signatures[0].parameters = Some(vec![Some("Missing".into())]);
+        core.update(lib);
+        assert_eq!(
+            core.constant_diagnostic("lib", "r".into(), 0, "absent".into()),
+            ConstantDiagnostic::Suppressed
+        );
+        assert!(
+            matches!(
+                core.constant_diagnostic("lib", "r".into(), 1, "absent".into()),
+                ConstantDiagnostic::Error { .. }
+            ),
+            "out-of-range is not an unknown parameter sort"
+        );
+        assert_eq!(
+            core.constant_diagnostic("lib", "missing_relation".into(), 0, "absent".into()),
+            ConstantDiagnostic::Suppressed
+        );
+    }
+
+    #[test]
+    fn diagnostic_labels_use_sort_identity_and_reuse_queries_until_visibility_changes() {
+        let mut core = Analysis::default();
+        let left = typed_doc("left", "left", &[], &["Source"]);
+        let mut right = typed_doc("right", "right", &[], &["Source"]);
+        right.relations.clear();
+        right.constants.push(constant("c", "c", "Source"));
+        let mut caller = doc("caller", "caller", &["left", "right"], &[]);
+        core.update(left);
+        core.update(right);
+        core.update(caller.clone());
+        let error = core.constant_diagnostic("caller", "r".into(), 0, "c".into());
+        assert_eq!(
+            error_message(error.clone()),
+            "No constant 'c' of sort left.Source (found: right.Source)."
+        );
+        assert_eq!(
+            core.sort_label("caller", "left", "sort0".into()).as_deref(),
+            Some("left.Source")
+        );
+        let before = core.query_counts();
+        core.update(caller.clone());
+        assert_eq!(
+            core.constant_diagnostic("caller", "r".into(), 0, "c".into()),
+            error
+        );
+        core.sort_label("caller", "left", "sort0".into());
+        assert_eq!(
+            core.query_counts().constant_diagnostics,
+            before.constant_diagnostics
+        );
+        assert_eq!(core.query_counts().sort_labels, before.sort_labels);
+        caller.imports.pop();
+        core.update(caller);
+        assert_eq!(
+            error_message(core.constant_diagnostic("caller", "r".into(), 0, "c".into())),
+            "No constant 'c' of sort Source (no visible declaration)."
+        );
+        assert_eq!(
+            core.sort_label("caller", "left", "sort0".into()).as_deref(),
+            Some("Source")
+        );
+        core.remove("left");
+        assert_eq!(core.sort_label("caller", "left", "sort0".into()), None);
+        assert_eq!(
+            core.constant_diagnostic("caller", "r".into(), 0, "c".into()),
+            ConstantDiagnostic::Suppressed
+        );
+    }
+
+    #[test]
+    fn arity_checks_require_an_unambiguous_reliable_signature() {
+        let mut core = Analysis::default();
+        let mut lib = typed_doc("lib", "lib", &[], &["Source"]);
+        core.update(lib.clone());
+        let check = |core: &Analysis, count| {
+            arguments::arity_error(&core.db, core.catalog, core.files["lib"], "r", count)
+        };
+        assert!(check(&core, 1).is_none());
+        assert_eq!(
+            check(&core, 0).as_deref(),
+            Some("Relation 'r' expects 1 argument, got 0.")
+        );
+        assert_eq!(
+            check(&core, 2).as_deref(),
+            Some("Relation 'r' expects 1 argument, got 2.")
+        );
+        lib.signatures[0].parameters = None;
+        core.update(lib.clone());
+        assert!(check(&core, 2).is_none());
+        lib.signatures[0].parameters = Some(vec![Some("Missing".into()), None]);
+        core.update(lib.clone());
+        assert_eq!(
+            check(&core, 1).as_deref(),
+            Some("Relation 'r' expects 2 arguments, got 1.")
+        );
+        lib.relations.push(NamedDeclaration {
+            id: "duplicate".into(),
+            name: "r".into(),
+        });
+        core.update(lib);
+        assert!(check(&core, 1).is_none());
+    }
+
     fn typed_doc(uri: &str, module: &str, imports: &[&str], sort_names: &[&str]) -> Document {
         let mut document = doc(uri, module, imports, &["r"]);
         document.sorts = sort_names

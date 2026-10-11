@@ -66,6 +66,18 @@ pub(super) fn analyze_rule(
     let mut positive = std::collections::HashSet::new();
     let mut requiring = std::collections::HashSet::new();
     for atom in &syntax.atoms {
+        // Arity needs a reliable declaration, independent of rule completeness.
+        // Preserve the editor's existing check on recovered argument lists.
+        if let Some(message) =
+            arguments::arity_error(db, catalog, file, &atom.relation, atom.variables.len())
+        {
+            result.diagnostics.push(RuleDiagnostic {
+                id: atom.id.clone(),
+                code: "arity".into(),
+                warning: false,
+                message,
+            });
+        }
         if syntax.complete && atom.role == Role::Head {
             let matches: Vec<_> = visible_relations(db, catalog, file)
                 .iter()
@@ -123,7 +135,8 @@ pub(super) fn analyze_rule(
         }
     }
     // Recovery may have lost a binding or another occurrence. Keep navigation
-    // and known sort evidence, but do not diagnose from incomplete rule syntax.
+    // and known sort evidence, but do not diagnose variable uses from incomplete
+    // rule syntax. Arity above retains the existing editor recovery policy.
     if syntax.complete {
         for variable in &result.variables {
             let unsafe_binding =
