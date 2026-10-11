@@ -12,6 +12,68 @@ use tempfile::TempDir;
 
 const TIMEOUT: Duration = Duration::from_secs(20);
 
+/// Apply LSP TextEdits against the original text, never against shifted offsets.
+/// Reject invalid ranges instead of letting a malformed server edit pass a test.
+#[allow(dead_code)] // This support module is compiled into each integration test.
+pub fn apply_edits(text: &str, edits: &[Value]) -> String {
+    let mut lines = vec![0];
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\r' {
+            i += 1;
+            if bytes.get(i) == Some(&b'\n') {
+                i += 1;
+            }
+            lines.push(i);
+        } else if bytes[i] == b'\n' {
+            i += 1;
+            lines.push(i);
+        } else {
+            i += 1;
+        }
+    }
+    let offset = |position: &Value| {
+        let line = position["line"].as_u64().expect("line number") as usize;
+        let column = position["character"].as_u64().expect("UTF-16 column") as usize;
+        let start = *lines.get(line).expect("line outside document");
+        let mut units = 0;
+        for (byte, ch) in text[start..].char_indices() {
+            if units == column {
+                return start + byte;
+            }
+            assert!(ch != '\r' && ch != '\n', "column past end of line");
+            units += ch.len_utf16();
+            assert!(units <= column, "position splits a UTF-16 surrogate pair");
+        }
+        assert_eq!(units, column, "column past end of document");
+        text.len()
+    };
+    let mut ranges: Vec<_> = edits
+        .iter()
+        .map(|edit| {
+            let start = offset(&edit["range"]["start"]);
+            let end = offset(&edit["range"]["end"]);
+            assert!(start <= end, "reversed edit range");
+            (
+                start,
+                end,
+                edit["newText"].as_str().expect("edit replacement"),
+            )
+        })
+        .collect();
+    // Stable order preserves the supplied order for insertions at one position.
+    ranges.sort_by_key(|(start, end, _)| (*start, *end));
+    for pair in ranges.windows(2) {
+        assert!(pair[0].1 <= pair[1].0, "overlapping edits");
+    }
+    let mut result = text.to_owned();
+    for (start, end, replacement) in ranges.into_iter().rev() {
+        result.replace_range(start..end, replacement);
+    }
+    result
+}
+
 pub fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -237,13 +299,18 @@ impl Client {
     }
 
     pub fn request(&mut self, method: &str, params: Value) -> Value {
+        let reply = self.request_reply(method, params);
+        assert!(reply.get("error").is_none(), "{method}: {reply}");
+        reply["result"].clone()
+    }
+
+    pub fn request_reply(&mut self, method: &str, params: Value) -> Value {
         let id = self.next_id;
         self.next_id += 1;
         self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
         // Server and client request IDs have independent namespaces.
         let reply = self.wait(|message| message["id"] == id && message.get("method").is_none());
-        assert!(reply.get("error").is_none(), "{method}: {reply}");
-        reply["result"].clone()
+        reply
     }
 
     pub fn open(&mut self, file: &str) -> (String, String) {
