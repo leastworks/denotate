@@ -37,4 +37,5 @@ htmlcov/
 /frontend-prototype/**/dist/
 /frontend-prototype/langium/src/generated/
 /frontend-prototype/target/
+/frontend-prototype/native/target/
 /frontend-prototype/.vscode-test/

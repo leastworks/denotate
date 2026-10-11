@@ -1,0 +1,9 @@
+[package]
+name = "denotate-analysis"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.93"
+
+[dependencies]
+salsa.workspace = true
+serde.workspace = true

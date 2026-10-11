@@ -18,9 +18,17 @@ jobs:
           cache-dependency-path: frontend-prototype/langium/package-lock.json
       - name: Install frontend dependencies
         run: npm ci --prefix frontend-prototype/langium
+      - name: Install native core toolchain
+        run: rustup toolchain install 1.93.0 --profile minimal
+      - name: Native analysis unit tests
+        run: cargo +1.93.0 test --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-analysis
       - name: Parser fixtures and inventory checks
         run: npm test --prefix frontend-prototype/langium
       - name: Install Rust toolchain
         run: rustup toolchain install 1.78.0 --profile minimal
       - name: Shared LSP acceptance tests
+        run: cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests
+      - name: Retained A1 LSP baseline
+        env:
+          DENOTATE_BACKEND: langium
         run: cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests
