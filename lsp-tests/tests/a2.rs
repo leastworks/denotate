@@ -159,3 +159,114 @@ fn signature_edits_refresh_editor_help_without_invalidating_relation_visibility(
     );
     client.shutdown();
 }
+
+fn position(source: &str, needle: &str, offset: usize) -> Value {
+    let prefix = &source[..source.find(needle).unwrap() + offset];
+    json!({"line": prefix.bytes().filter(|b| *b == b'\n').count(),
+        "character": prefix.rsplit('\n').next().unwrap().encode_utf16().count()})
+}
+
+fn typed_definition(client: &mut Client, uri: &str, source: &str) -> Value {
+    client.request(
+        "textDocument/definition",
+        json!({"textDocument": {"uri": uri},
+        "position": position(source, "mapped_to(shared, shared)", 10)}),
+    )
+}
+
+fn typed_completions(client: &mut Client, uri: &str, source: &str) -> Vec<String> {
+    let result = client.request(
+        "textDocument/completion",
+        json!({"textDocument": {"uri": uri},
+        "position": position(source, "mapped_to(shared, shared)", 10)}),
+    );
+    result
+        .as_array()
+        .or_else(|| result["items"].as_array())
+        .unwrap()
+        .iter()
+        .map(|item| item["label"].as_str().unwrap().to_owned())
+        .collect()
+}
+
+#[test]
+fn parameter_sort_changes_constant_targets_and_completion_but_not_visibility() {
+    let mut client = Client::start("base/00-valid");
+    let (uri, _) = client.open("example.den");
+    let source = "module example;\nuse computation;\nconst shared, source_only: Source;\nconst shared, slot_only: Slot;\nmapped_to(shared, shared);\n";
+    client.change(&uri, 2, source);
+    let (lib_uri, library) = client.open("computation.den");
+    let target = typed_definition(&mut client, &uri, source);
+    assert_eq!(
+        target[0]["targetSelectionRange"]["start"],
+        position(source, "const shared, source_only", 6)
+    );
+    let offered = typed_completions(&mut client, &uri, source);
+    assert!(offered.contains(&"source_only".into()) && !offered.contains(&"slot_only".into()));
+    let before = stats(&mut client);
+    let native = before["backend"] == "rust";
+    if native {
+        for key in [
+            "sortQueryExecutions",
+            "expectedSortQueryExecutions",
+            "constantQueryExecutions",
+        ] {
+            assert!(
+                before[key].as_u64().unwrap() > 0,
+                "{key} must be Rust-owned"
+            );
+        }
+    }
+
+    let moved_source = format!("// Comment 🦀\n{source}");
+    client.change(&uri, 3, &moved_source);
+    let moved = typed_definition(&mut client, &uri, &moved_source);
+    assert_eq!(
+        moved[0]["targetSelectionRange"]["start"],
+        position(&moved_source, "const shared, source_only", 6)
+    );
+    typed_completions(&mut client, &uri, &moved_source);
+    if native {
+        let after = stats(&mut client);
+        for key in [
+            "relationQueryExecutions",
+            "sortQueryExecutions",
+            "expectedSortQueryExecutions",
+            "constantQueryExecutions",
+        ] {
+            assert_eq!(after[key], before[key], "comment must reuse {key}");
+        }
+    }
+
+    let changed = library.replace(
+        "mapped_to(source: Source, slot: Slot)",
+        "mapped_to(source: Slot, slot: Slot)",
+    );
+    assert_ne!(changed, library);
+    client.change(&lib_uri, 2, &changed);
+    let changed_target = typed_definition(&mut client, &uri, &moved_source);
+    assert_eq!(
+        changed_target[0]["targetSelectionRange"]["start"],
+        position(&moved_source, "const shared, slot_only", 6)
+    );
+    let offered = typed_completions(&mut client, &uri, &moved_source);
+    assert!(offered.contains(&"slot_only".into()) && !offered.contains(&"source_only".into()));
+    if native {
+        let after = stats(&mut client);
+        assert_eq!(
+            after["relationQueryExecutions"],
+            before["relationQueryExecutions"]
+        );
+        assert_eq!(after["sortQueryExecutions"], before["sortQueryExecutions"]);
+        for key in ["expectedSortQueryExecutions", "constantQueryExecutions"] {
+            assert!(
+                after[key].as_u64().unwrap() > before[key].as_u64().unwrap(),
+                "{key} must invalidate"
+            );
+        }
+    }
+    client.change(&lib_uri, 3, &library);
+    assert_eq!(typed_definition(&mut client, &uri, &moved_source), moved);
+    assert!(typed_completions(&mut client, &uri, &moved_source).contains(&"source_only".into()));
+    client.shutdown();
+}
