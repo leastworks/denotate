@@ -108,6 +108,7 @@ pub struct Client {
     trace: Vec<String>,
     pending: Vec<Value>,
     registrations: Vec<Value>,
+    publications: Vec<Value>,
     next_id: u64,
     pub workspace: TempDir,
     pub capabilities: Value,
@@ -209,6 +210,7 @@ impl Client {
             trace: vec![],
             pending: vec![],
             registrations: vec![],
+            publications: vec![],
             next_id: 1,
             workspace,
             capabilities: Value::Null,
@@ -260,6 +262,9 @@ impl Client {
                 .expect("LSP timed out; protocol trace follows")
                 .expect("LSP framing/connection failure");
             self.trace.push(format!("< {message}"));
+            if message["method"] == "textDocument/publishDiagnostics" {
+                self.publications.push(message["params"].clone());
+            }
             if message.get("id").is_some() && message.get("method").is_some() {
                 let method = message["method"].as_str().unwrap();
                 let result = match method {
@@ -305,12 +310,33 @@ impl Client {
     }
 
     pub fn request_reply(&mut self, method: &str, params: Value) -> Value {
+        let id = self.begin_request(method, params);
+        self.await_reply(id)
+    }
+
+    #[allow(dead_code)]
+    pub fn begin_request(&mut self, method: &str, params: Value) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
         self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params}));
+        id
+    }
+
+    #[allow(dead_code)]
+    pub fn await_reply(&mut self, id: u64) -> Value {
         // Server and client request IDs have independent namespaces.
         let reply = self.wait(|message| message["id"] == id && message.get("method").is_none());
         reply
+    }
+
+    #[allow(dead_code)]
+    pub fn notification(&mut self, method: &str) -> Value {
+        self.wait(|m| m["method"] == method)["params"].clone()
+    }
+
+    #[allow(dead_code)]
+    pub fn publications(&self) -> &[Value] {
+        &self.publications
     }
 
     pub fn open(&mut self, file: &str) -> (String, String) {
@@ -355,6 +381,12 @@ impl Client {
     }
 
     pub fn change(&mut self, uri: &str, version: i64, text: &str) {
+        self.change_without_waiting(uri, version, text);
+        self.validated(uri, version);
+    }
+
+    #[allow(dead_code)]
+    pub fn change_without_waiting(&mut self, uri: &str, version: i64, text: &str) {
         self.discard_diagnostics(uri);
         self.notify(
             "textDocument/didChange",
@@ -362,7 +394,6 @@ impl Client {
                 "textDocument": {"uri": uri, "version": version}, "contentChanges": [{"text": text}]
             }),
         );
-        self.validated(uri, version);
     }
 
     pub fn shutdown(&mut self) {
