@@ -8,7 +8,7 @@ fn outline_is_positional_and_retains_repeated_rule_heads() {
     assert_eq!(client.capabilities["documentSymbolProvider"], true);
     // Capabilities can be enabled by either true or an options object.
     // These features remain disabled until their safety/presentation work lands.
-    for capability in ["renameProvider", "hoverProvider", "workspaceSymbolProvider"] {
+    for capability in ["renameProvider", "workspaceSymbolProvider"] {
         assert!(
             matches!(
                 client.capabilities.get(capability),
@@ -18,7 +18,7 @@ fn outline_is_positional_and_retains_repeated_rule_heads() {
             client.capabilities.get(capability)
         );
     }
-    for capability in ["definitionProvider", "referencesProvider"] {
+    for capability in ["definitionProvider", "referencesProvider", "hoverProvider"] {
         let value = &client.capabilities[capability];
         assert!(
             value == &json!(true) || value.is_object(),

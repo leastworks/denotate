@@ -71,7 +71,6 @@ fn imports_sorts_and_relations_navigate_and_reference_across_files() {
         4,
         "declaration, library body, two program heads: {refs}"
     );
-    // Rule variables are deliberately not given false per-occurrence identities.
     let (lib_uri, lib_source) = client.open("computation.den");
     let from_declaration = references(&mut client, &lib_uri, &lib_source, "relation mapped_to", 9);
     let locations = |value: &Value| -> std::collections::BTreeSet<String> {
@@ -91,13 +90,11 @@ fn imports_sorts_and_relations_navigate_and_reference_across_files() {
         locations(&refs),
         "declaration and use must return the same locations"
     );
-    assert_unresolved(&definition(
-        &mut client,
-        &lib_uri,
-        &lib_source,
-        "supplies(S, D) :-",
-        9,
-    ));
+    assert_target(
+        &definition(&mut client, &lib_uri, &lib_source, "supplies(S, D) :-", 9),
+        "computation.den",
+        position(&lib_source, "supplies(S, D) :-", 9),
+    );
     client.shutdown();
 }
 
@@ -310,7 +307,7 @@ fn damaged_signatures_do_not_invent_arity_or_argument_type_errors() {
     assert!(client
         .diagnostics(&uri)
         .to_string()
-        .contains("Relation 'available' expects 1 arguments, got 2."));
+        .contains("Relation 'available' expects 1 argument, got 2."));
     // Repair restores checking of mapped_to itself.
     client.change(&lib_uri, 8, &library);
     client.change(&uri, 8, &format!("{source}\nmapped_to(input_a);\n"));
@@ -442,16 +439,20 @@ fn changing_an_imported_declaration_invalidates_navigation_then_repairs_it() {
 fn wrong_arity_is_reported_in_heads_and_bodies_without_hiding_extra_constants() {
     let mut client = Client::start("base/00-valid");
     let (uri, source) = client.open("example.den");
-    for (index, atom) in ["mapped_to(input_a, a, nonexistent)", "mapped_to(input_a)"]
-        .iter()
-        .enumerate()
+    for (index, atom) in [
+        "mapped_to(input_a, a, nonexistent)",
+        "mapped_to(input_a)",
+        "mapped_to(input_a, a, a)",
+    ]
+    .iter()
+    .enumerate()
     {
         let text = format!("{source}\n{atom};\navailable(a) :- {atom}, !{atom};\n");
         client.change(&uri, (index + 2) as i64, &text);
         let diagnostics = client.diagnostics(&uri);
         let expected = format!(
             "expects 2 arguments, got {}",
-            if index == 0 { 3 } else { 1 }
+            if index == 1 { 1 } else { 3 }
         );
         assert_eq!(
             diagnostics
@@ -463,6 +464,15 @@ fn wrong_arity_is_reported_in_heads_and_bodies_without_hiding_extra_constants() 
             3,
             "{diagnostics}"
         );
+        assert!(
+            !diagnostics
+                .to_string()
+                .contains("Could not resolve reference"),
+            "{diagnostics}"
+        );
+        if index == 2 {
+            assert!(diagnostics.to_string().contains("Extra argument 'a' to relation 'mapped_to': no parameter 3 supplies an expected sort for constant lookup."));
+        }
         if index == 0 {
             assert_eq!(
                 diagnostics
@@ -476,7 +486,7 @@ fn wrong_arity_is_reported_in_heads_and_bodies_without_hiding_extra_constants() 
             );
         }
     }
-    client.change(&uri, 4, &source);
+    client.change(&uri, 5, &source);
     assert_eq!(client.diagnostics(&uri), json!([]));
     client.shutdown();
 }
@@ -570,5 +580,270 @@ fn watched_creation_introduces_ambiguity_module_edits_break_imports_and_deletion
     assert_eq!(client.diagnostics(&right_uri), json!([]));
     assert_unresolved(&definition(&mut client, &uri, source, "use right", 4));
     assert!(client.diagnostics(&uri).to_string().contains("right"));
+    client.shutdown();
+}
+
+fn hover(client: &mut Client, uri: &str, source: &str, needle: &str, offset: usize) -> Value {
+    client.request(
+        "textDocument/hover",
+        json!({
+            "textDocument": {"uri": uri}, "position": position(source, needle, offset)
+        }),
+    )
+}
+
+fn signature(client: &mut Client, uri: &str, source: &str, needle: &str, offset: usize) -> Value {
+    client.request(
+        "textDocument/signatureHelp",
+        json!({
+            "textDocument": {"uri": uri}, "position": position(source, needle, offset)
+        }),
+    )
+}
+
+#[test]
+fn variable_identity_is_rule_local_and_uses_first_occurrence_as_navigation_target() {
+    let mut client = Client::start("base/16-variable-binding");
+    let (uri, source) = client.open("example.den");
+    for (rule, first_offset, body_offset) in [
+        (
+            "given(D) :- supplies(S, D);",
+            "given(".len(),
+            "given(D) :- supplies(S, ".len(),
+        ),
+        (
+            "available(D) :- given(D);",
+            "available(".len(),
+            "available(D) :- given(".len(),
+        ),
+    ] {
+        assert_target(
+            &definition(&mut client, &uri, &source, rule, body_offset),
+            "example.den",
+            position(&source, rule, first_offset),
+        );
+        let from_first = references(&mut client, &uri, &source, rule, first_offset);
+        let from_body = references(&mut client, &uri, &source, rule, body_offset);
+        assert_eq!(from_first, from_body);
+        assert_eq!(from_first.as_array().unwrap().len(), 2, "{from_first}");
+        for occurrence in from_first.as_array().unwrap() {
+            assert_eq!(
+                occurrence["range"]["start"]["line"],
+                position(&source, rule, first_offset)["line"]
+            );
+        }
+        let without_first = client.request(
+            "textDocument/references",
+            json!({
+                "textDocument": {"uri": uri}, "position": position(&source, rule, body_offset),
+                "context": {"includeDeclaration": false}
+            }),
+        );
+        assert_eq!(without_first.as_array().unwrap().len(), 1);
+        assert_eq!(
+            without_first[0]["range"]["start"],
+            position(&source, rule, body_offset)
+        );
+        assert_eq!(
+            hover(&mut client, &uri, &source, rule, body_offset)["contents"]["value"],
+            "variable D: Slot"
+        );
+    }
+    // Renaming a variable spelling through an edit cannot retain an old identity.
+    let changed = source.replace("given(D) :- supplies(S, D);", "given(D) :- supplies(S, E);");
+    client.change(&uri, 2, &changed);
+    let rule = "given(D) :- supplies(S, E);";
+    let at_e = "given(D) :- supplies(S, ".len();
+    assert_target(
+        &definition(&mut client, &uri, &changed, rule, at_e),
+        "example.den",
+        position(&changed, rule, at_e),
+    );
+    assert_eq!(
+        references(&mut client, &uri, &changed, rule, at_e)
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let conflicting = "module example;\nuse computation;\ngiven(D) :- supplies(D, D);\n";
+    client.change(&uri, 3, conflicting);
+    let conflict = hover(&mut client, &uri, conflicting, "given(D)", 6);
+    assert!(
+        conflict["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("Conflicting expected sorts: computation.Slot, computation.Source"),
+        "{conflict}"
+    );
+    client.shutdown();
+}
+
+#[test]
+fn anonymous_hover_reports_argument_sort_without_navigation_or_shared_references() {
+    let mut client = Client::start("base/16-variable-binding");
+    let (uri, source) = client.open("example.den");
+    for (needle, offset, sort) in [
+        ("supplies(_, D)", "supplies(".len(), "Source"),
+        ("mapped_to(_, _)", "mapped_to(".len(), "Source"),
+        ("mapped_to(_, _)", "mapped_to(_, ".len(), "Slot"),
+    ] {
+        let result = hover(&mut client, &uri, &source, needle, offset);
+        assert!(
+            result["contents"]["value"]
+                .as_str()
+                .unwrap()
+                .starts_with(&format!("_: {sort}")),
+            "{result}"
+        );
+        assert_eq!(result["range"]["start"], position(&source, needle, offset));
+        assert_unresolved(&definition(&mut client, &uri, &source, needle, offset));
+        assert_eq!(
+            references(&mut client, &uri, &source, needle, offset),
+            json!([])
+        );
+    }
+    client.shutdown();
+}
+
+#[test]
+fn declaration_and_typed_constant_hovers_show_the_resolved_signature_or_sort() {
+    let mut client = Client::start("base/10-typed-constants");
+    let (uri, source) = client.open("example.den");
+    for (needle, offset, expected) in [
+        (
+            "mapped_to(shared, shared)",
+            0,
+            "relation mapped_to(source: Source, slot: Slot)",
+        ),
+        ("mapped_to(shared, shared)", 10, "const shared: Source"),
+        ("mapped_to(shared, shared)", 18, "const shared: Slot"),
+        ("use computation", 4, "module computation"),
+        (": Slot", 2, "sort Slot"),
+    ] {
+        assert_eq!(
+            hover(&mut client, &uri, &source, needle, offset)["contents"]["value"],
+            expected
+        );
+    }
+    let (lib_uri, library) = client.open("computation.den");
+    assert_eq!(
+        hover(&mut client, &lib_uri, &library, "relation mapped_to", 9)["contents"]["value"],
+        "relation mapped_to(source: Source, slot: Slot)"
+    );
+    client.shutdown();
+}
+
+#[test]
+fn constant_hover_qualifies_same_named_sorts_in_the_callers_scope() {
+    let mut client = Client::start("base/07-ambiguous-import");
+    let (left_uri, _) = client.open("left.den");
+    let (right_uri, _) = client.open("right.den");
+    client.change(
+        &left_uri,
+        2,
+        "module left; sort Slot; const shared: Slot; relation from_left(value: Slot);",
+    );
+    client.change(
+        &right_uri,
+        2,
+        "module right; sort Slot; const shared: Slot; relation from_right(value: Slot);",
+    );
+    let (uri, _) = client.open("example.den");
+    let source = "module example; use left; use right; from_left(shared); from_right(shared);";
+    client.change(&uri, 2, source);
+    assert_eq!(client.diagnostics(&uri), json!([]));
+    for (needle, offset, expected) in [
+        ("from_left(shared)", 10, "const shared: left.Slot"),
+        ("from_right(shared)", 11, "const shared: right.Slot"),
+    ] {
+        assert_eq!(
+            hover(&mut client, &uri, source, needle, offset)["contents"]["value"],
+            expected
+        );
+    }
+    client.shutdown();
+}
+
+#[test]
+fn signature_help_tracks_arguments_in_complete_and_unfinished_calls() {
+    let mut client = Client::start("base/00-valid");
+    assert_eq!(
+        client.capabilities["signatureHelpProvider"]["triggerCharacters"],
+        json!(["(", ","])
+    );
+    let (uri, source) = client.open("example.den");
+    let complete = signature(&mut client, &uri, &source, "mapped_to(input_a, a)", 18);
+    assert_eq!(complete["activeParameter"], 1);
+    for (index, (suffix, parameter)) in [
+        ("mapped_to(", json!(0)),
+        ("mapped_to(input_b,", json!(1)),
+        ("mapped_to(input_b, // ignored comma ,\n", json!(1)),
+        ("mapped_to(input_b, b, ", Value::Null),
+    ]
+    .iter()
+    .enumerate()
+    {
+        let text = format!("{source}\n{suffix}");
+        client.change(&uri, (index + 2) as i64, &text);
+        let result = signature(&mut client, &uri, &text, suffix, suffix.len());
+        assert_eq!(
+            result["signatures"][0]["label"], "mapped_to(source: Source, slot: Slot)",
+            "{suffix}: {result}"
+        );
+        assert_eq!(
+            result.get("activeParameter"),
+            Some(parameter),
+            "{suffix}: {result}"
+        );
+        assert_eq!(
+            result["signatures"][0]["parameters"],
+            json!([{"label":"source: Source"}, {"label":"slot: Slot"}])
+        );
+    }
+    client.change(&uri, 6, &source);
+    assert!(signature(
+        &mut client,
+        &uri,
+        &source,
+        "mapped_to(input_a, a)",
+        "mapped_to(input_a, a)".len()
+    )
+    .is_null());
+    let missing = format!("{source}\nmissing(");
+    client.change(&uri, 7, &missing);
+    assert!(signature(&mut client, &uri, &missing, "missing(", 8).is_null());
+    client.shutdown();
+}
+
+#[test]
+fn damaged_signatures_and_ambiguous_relations_do_not_invent_hover_types_or_signature_help() {
+    let mut client = Client::start("base/06-broken-library-declaration");
+    let (uri, source) = client.open("example.den");
+    assert!(
+        hover(&mut client, &uri, &source, "mapped_to(input_a", 0)["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("damaged")
+    );
+    assert!(signature(&mut client, &uri, &source, "mapped_to(input_a, a)", 18).is_null());
+    let (lib_uri, library) = client.open("computation.den");
+    let partial = library.replace(
+        "relation supplies(source: Source, slot: Slot);",
+        "relation supplies(source: Source,);",
+    );
+    client.change(&lib_uri, 2, &partial);
+    assert!(
+        hover(&mut client, &lib_uri, &partial, "supplies(_, D)", 9)["contents"]["value"]
+            .as_str()
+            .unwrap()
+            .contains("unknown sort")
+    );
+    client.shutdown();
+
+    let mut client = Client::start("base/07-ambiguous-import");
+    let (uri, source) = client.open("example.den");
+    assert!(hover(&mut client, &uri, &source, "masked(a)", 0).is_null());
+    assert!(signature(&mut client, &uri, &source, "masked(a)", 7).is_null());
     client.shutdown();
 }
