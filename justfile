@@ -11,6 +11,11 @@ test-lsp: _check-node
     npm run build --prefix frontend-prototype/langium
     cargo test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests
 
+# Measure real LSP round trips at three sizes; no timing pass/fail threshold.
+bench-lsp: _check-node
+    npm run build --prefix frontend-prototype/langium
+    cargo test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --test latency -- --ignored --nocapture --test-threads=1
+
 # Launch an isolated VS Code, smoke-test the extension, then close it.
 test-vscode: _check-node
     DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix frontend-prototype/langium
