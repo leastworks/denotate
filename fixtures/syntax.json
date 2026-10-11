@@ -51,6 +51,7 @@
     {"file":"rejected/uppercase-constant/example.den","base":"reject","extended":"reject"},
     {"file":"rejected/unicode-identifier/example.den","base":"reject","extended":"reject"},
     {"file":"rejected/reserved-name/example.den","base":"reject","extended":"reject"},
+    {"file":"rejected/reserved-constant/example.den","base":"reject","extended":"reject"},
     {"file":"rejected/block-comment/example.den","base":"reject","extended":"reject"},
     {"file":"rejected/empty-body/example.den","base":"reject","extended":"reject"},
     {"file":"rejected/qualified-name/example.den","base":"reject","extended":"reject"},

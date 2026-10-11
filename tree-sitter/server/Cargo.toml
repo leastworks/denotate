@@ -1,0 +1,17 @@
+[package]
+name = "denotate-tree-sitter"
+version = "0.0.1"
+edition = "2021"
+publish = false
+workspace = "../../native"
+
+[dependencies]
+tree-sitter = "=0.25.10"
+tree-sitter-language = "=0.1.5"
+lsp-server = "=0.7.9"
+lsp-types = "=0.95.1"
+serde.workspace = true
+serde_json.workspace = true
+
+[build-dependencies]
+cc = "=1.5.1"

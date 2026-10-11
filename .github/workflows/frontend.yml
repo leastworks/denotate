@@ -21,7 +21,7 @@ jobs:
       - name: Install native core toolchain
         run: rustup toolchain install 1.93.0 --profile minimal
       - name: Native analysis and timing unit tests
-        run: cargo +1.93.0 test --manifest-path frontend-prototype/native/Cargo.toml --locked --workspace
+        run: cargo +1.93.0 test --manifest-path frontend-prototype/native/Cargo.toml --locked --workspace --exclude denotate-tree-sitter
       - name: Parser fixtures and inventory checks
         run: npm test --prefix frontend-prototype/langium
       - name: Install Rust toolchain
@@ -37,4 +37,10 @@ jobs:
       - name: Post-baseline shared scenarios in Langium-only mode
         env:
           DENOTATE_BACKEND: langium
-        run: cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --test acceptance --test lifecycle
+        run: cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --test acceptance --test lifecycle --test b1
+      - name: Install B frontend dependencies
+        run: npm ci --prefix frontend-prototype/tree-sitter
+      - name: Tree-sitter syntax manifest and component tests
+        run: npm test --prefix frontend-prototype/tree-sitter
+      - name: B1 shared LSP subset
+        run: npm run test:lsp --prefix frontend-prototype/tree-sitter

@@ -12,7 +12,16 @@ test-lsp: _check-node
 
 # Test the Rust/Salsa core and native timing instrumentation.
 test-native:
-    cargo +1.93.0 test --manifest-path frontend-prototype/native/Cargo.toml --locked --workspace
+    cargo +1.93.0 test --manifest-path frontend-prototype/native/Cargo.toml --locked --workspace --exclude denotate-tree-sitter
+
+# Build B1, check the shared syntax manifest and run its supported LSP scenarios.
+test-b: _check-node
+    npm test --prefix frontend-prototype/tree-sitter
+    npm run test:lsp --prefix frontend-prototype/tree-sitter
+
+# Launch an isolated VS Code with only the Tree-sitter prototype under test.
+test-b-vscode: _check-node
+    DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix frontend-prototype/tree-sitter
 
 # Run the retained A1 frontend without loading or building the native extension.
 test-a1: _check-node

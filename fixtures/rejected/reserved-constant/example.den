@@ -1,0 +1,9 @@
+module example;
+sort S;
+relation r(value: S);
+const use: S;
+r(input);
+r(sort);
+r(module);
+r(X) :- r(const);
+r(X) :- !r(relation);
