@@ -31,4 +31,6 @@ jobs:
       - name: Retained A1 LSP baseline
         env:
           DENOTATE_BACKEND: langium
-        run: cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests
+        run: cargo +1.78.0 run --manifest-path frontend-prototype/Cargo.toml --locked -p xtask -- test-lsp
+      - name: Test runner selection
+        run: cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p xtask

@@ -8,8 +8,7 @@ test-parser: _check-node
 
 # Build the server and run the Rust tests against it over LSP.
 test-lsp: _check-node
-    npm run build --prefix frontend-prototype/langium
-    cargo test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests
+    cargo run --manifest-path frontend-prototype/Cargo.toml --locked -p xtask -- test-lsp
 
 # Test the host-independent Rust/Salsa analysis core.
 test-native:
@@ -17,8 +16,7 @@ test-native:
 
 # Run the retained A1 frontend without loading or building the native extension.
 test-a1: _check-node
-    DENOTATE_BACKEND=langium npm run build --prefix frontend-prototype/langium
-    DENOTATE_BACKEND=langium cargo test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests
+    DENOTATE_BACKEND=langium cargo run --manifest-path frontend-prototype/Cargo.toml --locked -p xtask -- test-lsp
 
 # Measure real LSP round trips at three sizes; no timing pass/fail threshold.
 bench-lsp: _check-node

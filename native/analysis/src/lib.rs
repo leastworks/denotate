@@ -8,6 +8,9 @@ use std::{
     },
 };
 
+mod rules;
+pub use rules::{RuleAnalysis, RuleSyntax};
+
 /// Partial syntax projection: identity and semantic fields only, never spans.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NamedDeclaration {
@@ -40,6 +43,10 @@ pub struct Document {
     pub sorts: Vec<NamedDeclaration>,
     pub signatures: Vec<Signature>,
     pub constants: Vec<Constant>,
+    #[serde(default)]
+    pub input_relations: Vec<String>,
+    #[serde(default)]
+    pub rules: Vec<RuleSyntax>,
 }
 
 #[salsa::input]
@@ -53,6 +60,7 @@ struct File {
     sorts: Vec<NamedDeclaration>,
     signatures: Vec<Signature>,
     constants: Vec<Constant>,
+    input_relations: Vec<String>,
     present: bool,
 }
 
@@ -79,13 +87,14 @@ enum QueryKind {
     Sorts,
     ExpectedSorts,
     Constants,
+    Rules,
 }
 
 #[salsa::db]
 #[derive(Clone, Default)]
 struct Database {
     storage: salsa::Storage<Self>,
-    executions: Arc<[AtomicU32; 4]>,
+    executions: Arc<[AtomicU32; 5]>,
 }
 
 #[salsa::db]
@@ -231,12 +240,14 @@ pub struct QueryCounts {
     sorts: u32,
     expected_sorts: u32,
     constants: u32,
+    rules: u32,
 }
 
 pub struct Analysis {
     db: Database,
     catalog: Catalog,
     files: HashMap<String, File>,
+    rules: HashMap<String, HashMap<String, rules::RuleInput>>,
 }
 
 impl Default for Analysis {
@@ -247,6 +258,7 @@ impl Default for Analysis {
             db,
             catalog,
             files: HashMap::new(),
+            rules: HashMap::new(),
         }
     }
 }
@@ -254,7 +266,9 @@ impl Default for Analysis {
 impl Analysis {
     // Updates arrive synchronously in caller order. Add revision validation
     // when the boundary introduces asynchronous work, not before.
-    pub fn update(&mut self, doc: Document) {
+    pub fn update(&mut self, mut doc: Document) {
+        let uri = doc.uri.clone();
+        let rules = std::mem::take(&mut doc.rules);
         if let Some(&file) = self.files.get(&doc.uri) {
             // Salsa setters mark changes; compare first so identical projections
             // do not invalidate semantic queries.
@@ -282,6 +296,10 @@ impl Analysis {
             if file.constants(&self.db) != &doc.constants {
                 file.set_constants(&mut self.db).to(doc.constants);
             }
+            if file.input_relations(&self.db) != &doc.input_relations {
+                file.set_input_relations(&mut self.db)
+                    .to(doc.input_relations);
+            }
             if !file.present(&self.db) {
                 file.set_present(&mut self.db).to(true);
             }
@@ -297,6 +315,7 @@ impl Analysis {
                 doc.sorts,
                 doc.signatures,
                 doc.constants,
+                doc.input_relations,
                 true,
             );
             self.files.insert(doc.uri, file);
@@ -304,11 +323,36 @@ impl Analysis {
             files.push(file);
             self.catalog.set_files(&mut self.db).to(files);
         }
+        let current: std::collections::HashSet<_> = rules.iter().map(|rule| &rule.id).collect();
+        let file_rules = self.rules.entry(uri).or_default();
+        file_rules.retain(|id, _| current.contains(id));
+        for rule in rules {
+            if let Some(&input) = file_rules.get(&rule.id) {
+                if input.syntax(&self.db) != &rule {
+                    input.set_syntax(&mut self.db).to(rule);
+                }
+            } else {
+                file_rules.insert(rule.id.clone(), rules::RuleInput::new(&self.db, rule));
+            }
+        }
     }
 
     pub fn remove(&mut self, uri: &str) {
         if let Some(file) = self.files.get(uri) {
             file.set_present(&mut self.db).to(false);
+        }
+        self.rules.remove(uri);
+    }
+
+    pub fn rule_analysis(&self, uri: &str, id: &str) -> RuleAnalysis {
+        match (
+            self.files.get(uri),
+            self.rules.get(uri).and_then(|rules| rules.get(id)),
+        ) {
+            (Some(&file), Some(&rule)) => {
+                rules::analyze_rule(&self.db, self.catalog, file, rule).clone()
+            }
+            _ => RuleAnalysis::default(),
         }
     }
 
@@ -349,7 +393,7 @@ impl Analysis {
     }
 
     pub fn query_counts(&self) -> QueryCounts {
-        let [relations, sorts, expected_sorts, constants] = self
+        let [relations, sorts, expected_sorts, constants, rules] = self
             .db
             .executions
             .each_ref()
@@ -359,6 +403,7 @@ impl Analysis {
             sorts,
             expected_sorts,
             constants,
+            rules,
         }
     }
 }
@@ -400,6 +445,8 @@ mod tests {
             sorts: vec![],
             signatures: vec![],
             constants: vec![],
+            input_relations: vec![],
+            rules: vec![],
             relations: names
                 .iter()
                 .enumerate()
