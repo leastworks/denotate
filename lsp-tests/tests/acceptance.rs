@@ -1,0 +1,131 @@
+mod support;
+use serde_json::{json, Value};
+use support::{apply_edits, Client};
+
+fn position(source: &str, needle: &str, offset: usize) -> Value {
+    let prefix = &source[..source.find(needle).unwrap() + offset];
+    json!({"line": prefix.bytes().filter(|b| *b == b'\n').count(),
+        "character": prefix.rsplit('\n').next().unwrap().encode_utf16().count()})
+}
+
+fn references(client: &mut Client, uri: &str, position: Value) -> Vec<Value> {
+    let result = client.request(
+        "textDocument/references",
+        json!({
+            "textDocument": {"uri": uri}, "position": position,
+            "context": {"includeDeclaration": true}
+        }),
+    );
+    let mut positions: Vec<_> = result
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|location| {
+            assert_eq!(location["uri"], uri);
+            location["range"]["start"].clone()
+        })
+        .collect();
+    positions.sort_by_key(|p| {
+        (
+            p["line"].as_u64().unwrap(),
+            p["character"].as_u64().unwrap(),
+        )
+    });
+    positions
+}
+
+#[test]
+fn signature_edit_rebinds_reference_membership_and_applied_rename() {
+    let mut client = Client::start("base/00-valid");
+    let (uri, _) = client.open("example.den");
+    let (library_uri, _) = client.open("computation.den");
+    let library = "module computation;\nsort Source; sort Slot;\nrelation mapped_to(source: Source, slot: Slot);\n";
+    let source = "module example;\nuse computation;\nconst shared: Source;\nconst shared: Slot;\nmapped_to(shared, shared);\n";
+    client.change(&library_uri, 2, library);
+    client.change(&uri, 2, source);
+    let source_decl = position(source, "const shared: Source", 6);
+    let slot_decl = position(source, "const shared: Slot", 6);
+    let first = position(source, "mapped_to(shared, shared)", 10);
+    let second = position(source, "mapped_to(shared, shared)", 18);
+    let changed = library.replace("source: Source", "source: Slot");
+
+    // Warm both identities, then switch and repair without editing the uses.
+    for (version, text, slot_binding) in [
+        (2, library, false),
+        (3, changed.as_str(), true),
+        (4, library, false),
+        (5, changed.as_str(), true),
+    ] {
+        if version > 2 {
+            client.change(&library_uri, version, text);
+        }
+        assert_eq!(client.diagnostics(&uri), json!([]));
+        assert_eq!(client.diagnostics(&library_uri), json!([]));
+        let expected_source = if slot_binding {
+            vec![source_decl.clone()]
+        } else {
+            vec![source_decl.clone(), first.clone()]
+        };
+        let expected_slot = if slot_binding {
+            vec![slot_decl.clone(), first.clone(), second.clone()]
+        } else {
+            vec![slot_decl.clone(), second.clone()]
+        };
+        assert_eq!(
+            references(&mut client, &uri, source_decl.clone()),
+            expected_source
+        );
+        assert_eq!(
+            references(&mut client, &uri, slot_decl.clone()),
+            expected_slot
+        );
+        assert_eq!(
+            references(&mut client, &uri, first.clone()),
+            if slot_binding {
+                expected_slot
+            } else {
+                expected_source
+            }
+        );
+
+        let rename = |position: Value| json!({"textDocument": {"uri": uri}, "position": position, "newName": "renamed"});
+        let result = client.request("textDocument/rename", rename(first.clone()));
+        assert_eq!(
+            result,
+            client.request(
+                "textDocument/rename",
+                rename(if slot_binding {
+                    slot_decl.clone()
+                } else {
+                    source_decl.clone()
+                })
+            )
+        );
+        let changes = result["documentChanges"].as_array().unwrap();
+        assert_eq!(changes.len(), 1);
+        assert_eq!(
+            changes[0]["textDocument"],
+            json!({"uri": uri, "version": 2})
+        );
+        let renamed = apply_edits(source, changes[0]["edits"].as_array().unwrap());
+        let expected = if slot_binding {
+            source
+                .replace("const shared: Slot", "const renamed: Slot")
+                .replace("mapped_to(shared, shared)", "mapped_to(renamed, renamed)")
+        } else {
+            source
+                .replace("const shared: Source", "const renamed: Source")
+                .replace("mapped_to(shared, shared)", "mapped_to(renamed, shared)")
+        };
+        assert_eq!(
+            renamed, expected,
+            "rename must follow the current binding, version {version}"
+        );
+        if version == 5 {
+            std::fs::write(client.workspace.path().join("example.den"), &renamed).unwrap();
+            client.change(&uri, 3, &renamed);
+            assert_eq!(client.diagnostics(&uri), json!([]));
+        }
+    }
+    client.shutdown();
+}
