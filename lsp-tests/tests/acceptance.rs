@@ -129,3 +129,92 @@ fn signature_edit_rebinds_reference_membership_and_applied_rename() {
     }
     client.shutdown();
 }
+
+#[test]
+fn insertion_and_reordering_keep_answers_current_and_report_query_reruns() {
+    let mut client = Client::start("base/00-valid");
+    let (uri, _) = client.open("example.den");
+    // Distinct variables prevent positional identities from accidentally reusing
+    // identical neighbouring rules. One warning tests current diagnostic anchors.
+    let rules: Vec<_> = (0..20)
+        .map(|i| {
+            if i == 7 {
+                format!("available(D{i}) :- given(D{i}), present(S{i});\n")
+            } else {
+                format!("available(D{i}) :- given(D{i});\n")
+            }
+        })
+        .collect();
+    let original = format!("module example;\nuse computation;\n{}", rules.concat());
+    let inserted = original.replacen(
+        "module example;\n",
+        "module example;\nconst extra: Slot;\n",
+        1,
+    );
+    let reordered = format!(
+        "module example;\nconst extra: Slot;\nuse computation;\n{}",
+        rules.iter().rev().cloned().collect::<Vec<_>>().concat()
+    );
+    let native = std::env::var("DENOTATE_BACKEND").as_deref() != Ok("langium");
+    let mut previous = None;
+    for (version, phase, source) in [
+        (2, "warm", original),
+        (3, "insert", inserted),
+        (4, "reverse", reordered),
+    ] {
+        client.change(&uri, version, &source);
+        for i in 0..20 {
+            let result = client.request(
+                "textDocument/definition",
+                json!({
+                    "textDocument": {"uri": uri},
+                    "position": position(&source, &format!("given(D{i})"), 6)
+                }),
+            );
+            assert_eq!(result.as_array().unwrap().len(), 1);
+            assert_eq!(result[0]["targetUri"], uri);
+            assert_eq!(
+                result[0]["targetSelectionRange"]["start"],
+                position(&source, &format!("available(D{i})"), 10)
+            );
+        }
+        let diagnostics = client.diagnostics(&uri);
+        if native {
+            assert_eq!(diagnostics.as_array().unwrap().len(), 1);
+            assert_eq!(diagnostics[0]["code"], "singleton-variable");
+            assert_eq!(
+                diagnostics[0]["range"]["start"],
+                position(&source, "present(S7)", 8)
+            );
+        } else {
+            assert_eq!(diagnostics, json!([]), "A1 has no singleton lint");
+        }
+        let stats = client.request("denotate/test/analysis", json!({}));
+        if native {
+            let current = stats["ruleQueryExecutions"]
+                .as_u64()
+                .expect("shared-core rule counter");
+            assert!(
+                current >= 20,
+                "warm all rules before measuring structural edits"
+            );
+            if let Some(before) = previous {
+                let reruns = current.checked_sub(before).expect("cumulative counter");
+                // This is a comparison measurement, not a zero-rerun promise.
+                println!(
+                    "DENOTATE_IDENTITY {}",
+                    json!({"phase": phase, "unchanged_rules": 20,
+                    "rule_query_executions": reruns, "source_bytes": source.len()})
+                );
+            }
+            previous = Some(current);
+        } else if phase != "warm" {
+            println!(
+                "DENOTATE_IDENTITY {}",
+                json!({"phase": phase, "unchanged_rules": 20,
+                "rule_query_executions": null, "reason": "A1 has no Salsa counters"})
+            );
+        }
+    }
+    client.shutdown();
+}
