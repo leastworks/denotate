@@ -20,8 +20,8 @@ jobs:
         run: npm ci --prefix frontend-prototype/langium
       - name: Install native core toolchain
         run: rustup toolchain install 1.93.0 --profile minimal
-      - name: Native analysis unit tests
-        run: cargo +1.93.0 test --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-analysis
+      - name: Native analysis and timing unit tests
+        run: cargo +1.93.0 test --manifest-path frontend-prototype/native/Cargo.toml --locked --workspace
       - name: Parser fixtures and inventory checks
         run: npm test --prefix frontend-prototype/langium
       - name: Install Rust toolchain

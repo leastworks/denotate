@@ -10,9 +10,9 @@ test-parser: _check-node
 test-lsp: _check-node
     cargo run --manifest-path frontend-prototype/Cargo.toml --locked -p xtask -- test-lsp
 
-# Test the host-independent Rust/Salsa analysis core.
+# Test the Rust/Salsa core and native timing instrumentation.
 test-native:
-    cargo +1.93.0 test --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-analysis
+    cargo +1.93.0 test --manifest-path frontend-prototype/native/Cargo.toml --locked --workspace
 
 # Run the retained A1 frontend without loading or building the native extension.
 test-a1: _check-node
@@ -22,6 +22,11 @@ test-a1: _check-node
 bench-lsp: _check-node
     npm run build --prefix frontend-prototype/langium
     cargo test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --test latency -- --ignored --nocapture --test-threads=1
+
+# Profile projection, boundary and Rust costs for cold/comment/semantic edits.
+profile-lsp: _check-node
+    npm run build --prefix frontend-prototype/langium
+    cargo test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --test profiling -- --ignored --nocapture --test-threads=1
 
 # Launch an isolated VS Code, smoke-test the extension, then close it.
 test-vscode: _check-node
