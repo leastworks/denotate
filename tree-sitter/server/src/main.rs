@@ -11,7 +11,12 @@ use lsp_types::{
     InitializeParams, TextDocumentPositionParams, Url,
 };
 use serde_json::{json, Value};
-use std::{collections::HashMap, error::Error, fs, path::PathBuf};
+use std::{
+    collections::{HashMap, VecDeque},
+    error::Error,
+    fs,
+    path::PathBuf,
+};
 use syntax::Document;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
@@ -24,6 +29,8 @@ struct Server {
     semantics: semantic::Semantics,
     diagnostics: HashMap<Url, Vec<Diagnostic>>,
     diagnostics_dirty: bool,
+    // Latest rejected version; retained text is not authoritative until resync.
+    out_of_sync: HashMap<Url, i32>,
 }
 
 impl Server {
@@ -54,6 +61,9 @@ impl Server {
     }
 
     fn publish(&mut self, connection: &Connection, uri: &Url) -> Result<()> {
+        if !self.out_of_sync.is_empty() {
+            return Ok(());
+        }
         self.refresh_diagnostics();
         if let Some(doc) = self.documents.get(uri) {
             Self::send(
@@ -74,6 +84,11 @@ impl Server {
     }
 
     fn publish_all(&mut self, connection: &Connection) -> Result<()> {
+        // A missing observation can affect every importer. Pause the whole
+        // small prototype workspace rather than publishing guessed dependents.
+        if !self.out_of_sync.is_empty() {
+            return Ok(());
+        }
         // Refresh all indexed dependents. Salsa reuses unchanged semantics;
         // selective publication/scheduling is not claimed by this prototype.
         let mut uris: Vec<_> = self.documents.keys().cloned().collect();
@@ -97,6 +112,7 @@ impl Server {
     }
 
     fn store(&mut self, uri: Url, doc: Document) {
+        self.out_of_sync.remove(&uri);
         // A declaration change can invalidate diagnostics in any importer.
         self.diagnostics_dirty = true;
         self.semantics.update(&uri, &doc);
@@ -104,10 +120,32 @@ impl Server {
     }
 
     fn remove(&mut self, uri: &Url) {
+        self.out_of_sync.remove(uri);
         self.documents.remove(uri);
         self.semantics.remove(uri);
         self.diagnostics.remove(uri);
         self.diagnostics_dirty = true;
+    }
+
+    fn lose_sync(&mut self, connection: &Connection, uri: &Url, version: i32) -> Result<()> {
+        let newly_lost = !self.out_of_sync.contains_key(uri);
+        self.out_of_sync
+            .entry(uri.clone())
+            .and_modify(|v| *v = (*v).max(version))
+            .or_insert(version);
+        self.semantics.remove(uri);
+        self.diagnostics.clear();
+        self.diagnostics_dirty = true;
+        if newly_lost {
+            // Withdraw stale diagnostics, without claiming to have analyzed a
+            // version of the now-unknown text or emitting a validation barrier.
+            Self::send(
+                connection,
+                "textDocument/publishDiagnostics",
+                json!({"uri": uri, "diagnostics": []}),
+            )?;
+        }
+        Ok(())
     }
 
     fn read_disk(&mut self, uri: &Url) -> Result<()> {
@@ -132,6 +170,9 @@ impl Server {
     }
 
     fn request(&mut self, request: &Request) -> Result<Value> {
+        if request.method.starts_with("textDocument/") && !self.out_of_sync.is_empty() {
+            return Err("Workspace is out of sync; reopen the affected document or send a full-text change.".into());
+        }
         match request.method.as_str() {
             "textDocument/formatting" | "textDocument/rangeFormatting" => {
                 let params: DocumentSymbolParams = serde_json::from_value(request.params.clone())?;
@@ -235,28 +276,62 @@ impl Server {
                 self.publish_all(connection)?;
             }
             "textDocument/didChange" => {
+                // Keep only identity/version for recovery if decoding fails;
+                // do not clone the potentially large full-text change payload.
+                let metadata = notification.params["textDocument"].clone();
                 let params: DidChangeTextDocumentParams =
-                    serde_json::from_value(notification.params)?;
+                    match serde_json::from_value(notification.params) {
+                        Ok(params) => params,
+                        Err(error) => {
+                            if let Some(uri) =
+                                metadata["uri"].as_str().and_then(|s| Url::parse(s).ok())
+                            {
+                                if let Some(doc) = self.documents.get(&uri).filter(|d| d.open) {
+                                    let version = metadata["version"]
+                                        .as_i64()
+                                        .and_then(|v| i32::try_from(v).ok())
+                                        .unwrap_or(doc.version);
+                                    self.lose_sync(connection, &uri, version)?;
+                                }
+                            }
+                            return Err(error.into());
+                        }
+                    };
                 let uri = params.text_document.uri;
                 let previous = self.documents.get(&uri).ok_or("Change before open")?;
-                if !previous.open || params.text_document.version <= previous.version {
+                if !previous.open
+                    || params.text_document.version
+                        <= self
+                            .out_of_sync
+                            .get(&uri)
+                            .copied()
+                            .unwrap_or(previous.version)
+                {
                     return Ok(());
                 }
-                // Full sync until B4 adds ranged edits and old-tree reuse.
-                if params
-                    .content_changes
-                    .iter()
-                    .any(|change| change.range.is_some())
-                {
-                    return Err("Server advertises full-document synchronization".into());
-                }
-                if let Some(last) = params.content_changes.into_iter().last() {
-                    let doc = Document::new(
+                if !params.content_changes.is_empty() {
+                    // A full replacement makes earlier changes in this batch
+                    // irrelevant and is the only safe basis after a rejection.
+                    let full = params
+                        .content_changes
+                        .iter()
+                        .rposition(|c| c.range.is_none());
+                    if self.out_of_sync.contains_key(&uri) && full.is_none() {
+                        self.lose_sync(connection, &uri, params.text_document.version)?;
+                        return Err("Document is out of sync; reopen or send full text.".into());
+                    }
+                    let changed = previous.changed(
                         &mut self.parser,
-                        last.text,
+                        &params.content_changes[full.unwrap_or(0)..],
                         params.text_document.version,
-                        true,
                     );
+                    let doc = match changed {
+                        Ok(doc) => doc,
+                        Err(error) => {
+                            self.lose_sync(connection, &uri, params.text_document.version)?;
+                            return Err(error.into());
+                        }
+                    };
                     self.store(uri, doc);
                     self.publish_all(connection)?;
                 }
@@ -295,15 +370,32 @@ impl Server {
                 }
                 self.publish_all(connection)?;
             }
-            _ => {} // Unsupported notifications; cancellation is still B4 work.
+            _ => {} // Late cancellation is harmless; queued/active checks live in dispatch.
         }
         Ok(())
     }
 }
 
+// Bounded draining prevents an endless stream from monopolizing dispatch.
+// This is a checkpoint, not preemption of parsing or synchronous Salsa calls.
+fn receive_ready(connection: &Connection, pending: &mut VecDeque<Message>) {
+    pending.extend(connection.receiver.try_iter().take(256));
+}
+
+fn take_cancellation(pending: &mut VecDeque<Message>, id: &lsp_server::RequestId) -> bool {
+    let mut cancelled = false;
+    pending.retain(|message| {
+        let matches = matches!(message, Message::Notification(n)
+            if n.method == "$/cancelRequest" && n.params.get("id") == Some(&json!(id)));
+        cancelled |= matches;
+        !matches
+    });
+    cancelled
+}
+
 fn run(connection: &Connection) -> Result<()> {
     let params = connection.initialize(json!({
-        "positionEncoding": "utf-16", "textDocumentSync": {"openClose": true, "change": 1},
+        "positionEncoding": "utf-16", "textDocumentSync": {"openClose": true, "change": 2},
         "documentSymbolProvider": true, "definitionProvider": true,
         "completionProvider": {"triggerCharacters": ["(", ",", ":"]},
         "referencesProvider": true, "hoverProvider": true, "renameProvider": {"prepareProvider": true},
@@ -330,6 +422,7 @@ fn run(connection: &Connection) -> Result<()> {
         semantics: semantic::Semantics::default(),
         diagnostics: HashMap::new(),
         diagnostics_dirty: true,
+        out_of_sync: HashMap::new(),
     };
     // Only direct .den children of explicitly opened roots; never walk ancestors
     // or dependencies outside the workspace. Stable order also stabilizes catalog.
@@ -357,43 +450,24 @@ fn run(connection: &Connection) -> Result<()> {
                 "registerOptions": {"watchers": [{"globPattern": "**/*.den", "kind": 7}]}}]
         }))))?;
     }
-    for message in &connection.receiver {
+    let mut pending = VecDeque::new();
+    loop {
+        if pending.is_empty() {
+            let Ok(message) = connection.receiver.recv() else {
+                break;
+            };
+            pending.push_back(message);
+        }
+        receive_ready(connection, &mut pending);
+        let Some(message) = pending.pop_front() else {
+            continue;
+        };
         match message {
             Message::Request(request) => {
                 if connection.handle_shutdown(&request)? {
                     break;
                 }
-                let supported = matches!(
-                    request.method.as_str(),
-                    "textDocument/documentSymbol"
-                        | "textDocument/semanticTokens/full"
-                        | "textDocument/definition"
-                        | "textDocument/completion"
-                        | "textDocument/references"
-                        | "textDocument/hover"
-                        | "textDocument/signatureHelp"
-                        | "textDocument/rename"
-                        | "textDocument/prepareRename"
-                        | "textDocument/formatting"
-                        | "textDocument/rangeFormatting"
-                ) || (server.test_mode
-                    && matches!(
-                        request.method.as_str(),
-                        "denotate/test/idle" | "denotate/test/analysis"
-                    ));
-                let response = if !supported {
-                    Response::new_err(
-                        request.id,
-                        -32601,
-                        format!("Unsupported request: {}", request.method),
-                    )
-                } else {
-                    match server.request(&request) {
-                        Ok(value) => Response::new_ok(request.id, value),
-                        Err(error) => Response::new_err(request.id, -32602, error.to_string()),
-                    }
-                };
-                connection.sender.send(Message::Response(response))?;
+                dispatch_request(&mut server, request, connection, &mut pending)?;
             }
             Message::Notification(notification) => {
                 if notification.method == "exit" {
@@ -406,6 +480,60 @@ fn run(connection: &Connection) -> Result<()> {
             Message::Response(_) => {} // Registration acknowledgment.
         }
     }
+    Ok(())
+}
+
+fn dispatch_request(
+    server: &mut Server,
+    request: Request,
+    connection: &Connection,
+    pending: &mut VecDeque<Message>,
+) -> Result<()> {
+    let supported = matches!(
+        request.method.as_str(),
+        "textDocument/documentSymbol"
+            | "textDocument/semanticTokens/full"
+            | "textDocument/definition"
+            | "textDocument/completion"
+            | "textDocument/references"
+            | "textDocument/hover"
+            | "textDocument/signatureHelp"
+            | "textDocument/rename"
+            | "textDocument/prepareRename"
+            | "textDocument/formatting"
+            | "textDocument/rangeFormatting"
+    ) || (server.test_mode
+        && matches!(
+            request.method.as_str(),
+            "denotate/test/idle" | "denotate/test/analysis"
+        ));
+    let mut response = if take_cancellation(pending, &request.id) {
+        Response::new_err(request.id.clone(), -32800, "Request cancelled".into())
+    } else if !supported {
+        Response::new_err(
+            request.id.clone(),
+            -32601,
+            format!("Unsupported request: {}", request.method),
+        )
+    } else {
+        match server.request(&request) {
+            Ok(value) => Response::new_ok(request.id.clone(), value),
+            Err(error) => Response::new_err(
+                request.id.clone(),
+                if server.out_of_sync.is_empty() {
+                    -32602
+                } else {
+                    -32801
+                },
+                error.to_string(),
+            ),
+        }
+    };
+    receive_ready(connection, pending);
+    if take_cancellation(pending, &request.id) {
+        response = Response::new_err(request.id, -32800, "Request cancelled".into());
+    }
+    connection.sender.send(Message::Response(response))?;
     Ok(())
 }
 
@@ -422,6 +550,157 @@ mod tests {
     use super::*;
 
     #[test]
+    fn old_versions_and_invalid_ranges_cannot_replace_current_observation() {
+        let mut server = Server {
+            parser: syntax::parser(),
+            documents: HashMap::new(),
+            roots: vec![],
+            test_mode: true,
+            semantics: semantic::Semantics::default(),
+            diagnostics: HashMap::new(),
+            diagnostics_dirty: true,
+            out_of_sync: HashMap::new(),
+        };
+        let uri = Url::parse("file:///example.den").unwrap();
+        let doc = Document::new(&mut server.parser, "module example; sort S".into(), 4, true);
+        server.store(uri.clone(), doc);
+        let (transport, client) = Connection::memory();
+        server.publish(&transport, &uri).unwrap();
+        let Message::Notification(initial) = client.receiver.recv().unwrap() else {
+            panic!("initial diagnostics expected")
+        };
+        assert!(!initial.params["diagnostics"].as_array().unwrap().is_empty());
+        let assert_withdrawal = || {
+            let Message::Notification(clear) = client.receiver.try_recv().unwrap() else {
+                panic!("diagnostic withdrawal expected")
+            };
+            assert_eq!(clear.method, "textDocument/publishDiagnostics");
+            assert_eq!(clear.params, json!({"uri": uri, "diagnostics": []}));
+            // In particular, no validated barrier for the rejected observation.
+            assert!(client.receiver.try_recv().is_err());
+        };
+        for version in [3, 4] {
+            server.notification(&transport, Notification::new("textDocument/didChange".into(), json!({
+                "textDocument": {"uri": uri, "version": version}, "contentChanges": [{"text": "broken"}]
+            }))).unwrap();
+        }
+        let invalid = server.notification(&transport, Notification::new("textDocument/didChange".into(), json!({
+            "textDocument": {"uri": uri, "version": 5}, "contentChanges": [
+                {"range": {"start": {"line":0,"character":0}, "end": {"line":0,"character":0}}, "text":" "},
+                {"range": {"start": {"line":0,"character":2}, "end": {"line":0,"character":1}}, "text":"bad"}
+            ]
+        })));
+        assert!(invalid.is_err());
+        assert_eq!(server.documents[&uri].version, 4);
+        assert_eq!(server.documents[&uri].text, "module example; sort S");
+        assert_withdrawal();
+        assert_eq!(server.out_of_sync[&uri], 5);
+        assert!(!server.semantics.files.contains_key(&uri));
+        // An otherwise applicable subsequent range must not run on stale text.
+        assert!(server.notification(&transport, Notification::new("textDocument/didChange".into(), json!({
+            "textDocument": {"uri": uri, "version": 6}, "contentChanges": [{
+                "range": {"start":{"line":0,"character":21},"end":{"line":0,"character":21}}, "text":"x"
+            }]
+        }))).is_err());
+        assert_eq!(server.out_of_sync[&uri], 6);
+        assert_eq!(server.documents[&uri].version, 4);
+        server.publish_all(&transport).unwrap();
+        assert!(client.receiver.try_recv().is_err());
+        for method in [
+            "textDocument/formatting",
+            "textDocument/rename",
+            "textDocument/prepareRename",
+            "textDocument/definition",
+        ] {
+            let error = server
+                .request(&Request::new(
+                    1.into(),
+                    method.into(),
+                    json!({"textDocument":{"uri":uri}}),
+                ))
+                .unwrap_err();
+            assert!(error.to_string().contains("out of sync"));
+        }
+        // A later full replacement is authoritative even after earlier ranges
+        // in the same notification; no stale prefix is needed to apply it.
+        server.notification(&transport, Notification::new("textDocument/didChange".into(), json!({
+            "textDocument": {"uri": uri, "version": 7}, "contentChanges": [
+                {"range":{"start":{"line":0,"character":3},"end":{"line":0,"character":1}},"text":"bad"},
+                {"text":"module example; sort Recovered;"}
+            ]
+        }))).unwrap();
+        assert!(server.out_of_sync.is_empty());
+        assert_eq!(server.documents[&uri].version, 7);
+        assert_eq!(
+            server.documents[&uri].text,
+            "module example; sort Recovered;"
+        );
+        let Message::Notification(publication) = client.receiver.recv().unwrap() else {
+            panic!("publication expected")
+        };
+        assert_eq!(publication.params["version"], 7);
+        assert_eq!(publication.params["diagnostics"], json!([]));
+        let Message::Notification(barrier) = client.receiver.recv().unwrap() else {
+            panic!("recovery validation expected")
+        };
+        assert_eq!(barrier.method, "denotate/test/validated");
+        assert_eq!(barrier.params["version"], 7);
+        // Even payloads rejected by deserialization lose sync, not just ranges
+        // rejected by the text editor. didOpen starts a new authoritative buffer.
+        assert!(server.notification(&transport, Notification::new("textDocument/didChange".into(), json!({
+            "textDocument":{"uri":uri,"version":8}, "contentChanges":[{"text":"x","range":{"start":{"line":-1,"character":0},"end":{"line":0,"character":0}}}]
+        }))).is_err());
+        assert_eq!(server.out_of_sync[&uri], 8);
+        assert_withdrawal();
+        server.notification(&transport, Notification::new("textDocument/didOpen".into(), json!({
+            "textDocument":{"uri":uri,"version":1,"languageId":"denotate","text":"module example; sort Reopened;"}
+        }))).unwrap();
+        assert!(server.out_of_sync.is_empty());
+        assert_eq!(server.documents[&uri].version, 1);
+        assert_eq!(
+            server.documents[&uri].text,
+            "module example; sort Reopened;"
+        );
+    }
+
+    #[test]
+    fn cancellation_checkpoints_preserve_other_messages_and_ignore_late_ids() {
+        let (server, client) = Connection::memory();
+        let id = lsp_server::RequestId::from(7);
+        let change = Message::Notification(Notification::new(
+            "textDocument/didChange".into(),
+            json!({"version": 3}),
+        ));
+        client.sender.send(change.clone()).unwrap();
+        client
+            .sender
+            .send(Message::Notification(Notification::new(
+                "$/cancelRequest".into(),
+                json!({"id": 7}),
+            )))
+            .unwrap();
+        let mut pending = VecDeque::new();
+        receive_ready(&server, &mut pending);
+        assert!(take_cancellation(&mut pending, &id));
+        assert_eq!(pending.len(), 1);
+        assert_eq!(
+            serde_json::to_value(pending.front().unwrap()).unwrap(),
+            serde_json::to_value(change).unwrap()
+        );
+        assert!(!take_cancellation(&mut pending, &id));
+        client
+            .sender
+            .send(Message::Notification(Notification::new(
+                "$/cancelRequest".into(),
+                json!({"id": 7}),
+            )))
+            .unwrap();
+        receive_ready(&server, &mut pending);
+        assert!(!take_cancellation(&mut pending, &8.into()));
+        assert!(take_cancellation(&mut pending, &id));
+    }
+
+    #[test]
     fn published_diagnostics_are_reused_and_invalidated_with_dependencies() {
         let mut server = Server {
             parser: syntax::parser(),
@@ -431,7 +710,51 @@ mod tests {
             semantics: semantic::Semantics::default(),
             diagnostics: HashMap::new(),
             diagnostics_dirty: true,
+            out_of_sync: HashMap::new(),
         };
+        // Exercise the real dispatch path with cancellation already queued:
+        // even malformed params must not reach request execution.
+        let (transport, client) = Connection::memory();
+        let mut pending = VecDeque::from([Message::Notification(Notification::new(
+            "$/cancelRequest".into(),
+            json!({"id": 7}),
+        ))]);
+        dispatch_request(
+            &mut server,
+            Request::new(7.into(), "textDocument/rename".into(), Value::Null),
+            &transport,
+            &mut pending,
+        )
+        .unwrap();
+        let Message::Response(reply) = client.receiver.recv().unwrap() else {
+            panic!("response expected")
+        };
+        assert_eq!(reply.error.unwrap().code, -32800);
+        assert!(reply.result.is_none());
+        assert!(server.diagnostics_dirty);
+        assert!(client.receiver.try_recv().is_err());
+        // Cancellation received at the post-computation checkpoint also wins.
+        client
+            .sender
+            .send(Message::Notification(Notification::new(
+                "$/cancelRequest".into(),
+                json!({"id": 8}),
+            )))
+            .unwrap();
+        server.test_mode = true;
+        dispatch_request(
+            &mut server,
+            Request::new(8.into(), "denotate/test/analysis".into(), json!({})),
+            &transport,
+            &mut pending,
+        )
+        .unwrap();
+        let Message::Response(reply) = client.receiver.recv().unwrap() else {
+            panic!("response expected")
+        };
+        assert_eq!(reply.error.unwrap().code, -32800);
+        assert!(reply.result.is_none());
+        server.test_mode = false;
         let library = Url::parse("file:///computation.den").unwrap();
         let program = Url::parse("file:///example.den").unwrap();
         let doc = Document::new(
@@ -455,6 +778,9 @@ mod tests {
         server.refresh_diagnostics();
         assert_eq!(cached, server.diagnostics[&program].as_ptr());
 
+        // The owner can have computed a diagnostic set before a newer input.
+        // Publication must refresh from that input, never relabel the old set.
+
         // Loading a dependency outside publication must invalidate importers too.
         let doc = Document::new(
             &mut server.parser,
@@ -467,6 +793,12 @@ mod tests {
         server.refresh_diagnostics();
         assert!(server.diagnostics[&program].is_empty());
         assert!(server.diagnostics[&library].is_empty());
+        server.publish(&connection, &program).unwrap();
+        let Message::Notification(published) = client.receiver.recv().unwrap() else {
+            panic!("diagnostics expected")
+        };
+        assert_eq!(published.params["diagnostics"], json!([]));
+        assert_eq!(published.params["version"], 1); // importer itself did not change
 
         let doc = Document::new(
             &mut server.parser,

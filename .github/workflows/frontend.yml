@@ -37,10 +37,10 @@ jobs:
       - name: Post-baseline shared scenarios in Langium-only mode
         env:
           DENOTATE_BACKEND: langium
-        run: cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --test acceptance --test lifecycle --test b1 --test b2
+        run: cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --test acceptance --test lifecycle --test b1 --test b2 --test b4
       - name: Install B frontend dependencies
         run: npm ci --prefix frontend-prototype/tree-sitter
       - name: Tree-sitter syntax manifest and component tests
         run: npm test --prefix frontend-prototype/tree-sitter
-      - name: B1–B3 shared editor LSP scenarios
+      - name: B1–B4 shared editor and lifecycle LSP scenarios
         run: npm run test:lsp --prefix frontend-prototype/tree-sitter

@@ -1,5 +1,8 @@
-use lsp_types::{Diagnostic, DiagnosticSeverity, DocumentSymbol, Position, Range, SymbolKind};
-use tree_sitter::{Node, Parser, Tree};
+use lsp_types::{
+    Diagnostic, DiagnosticSeverity, DocumentSymbol, Position, Range, SymbolKind,
+    TextDocumentContentChangeEvent,
+};
+use tree_sitter::{InputEdit, Node, Parser, Point, Tree};
 use tree_sitter_language::LanguageFn;
 
 extern "C" {
@@ -28,8 +31,11 @@ pub struct Document {
 
 impl Document {
     pub fn new(parser: &mut Parser, text: String, version: i32, open: bool) -> Self {
-        // B1 deliberately parses afresh. Old-tree edits/reuse are the B4 exercise.
         let tree = parser.parse(&text, None).expect("uncancelled parse");
+        Self::from_tree(text, version, open, tree)
+    }
+
+    fn from_tree(text: String, version: i32, open: bool, tree: Tree) -> Self {
         let mut lines = vec![0];
         let bytes = text.as_bytes();
         let mut i = 0;
@@ -56,6 +62,52 @@ impl Document {
         }
     }
 
+    /// Apply the LSP sequence transactionally. Each range addresses the text
+    /// after preceding changes. Tree-sitter points count LF rows and byte columns,
+    /// unlike the editor's CR/CRLF-aware UTF-16 positions.
+    pub fn changed(
+        &self,
+        parser: &mut Parser,
+        changes: &[TextDocumentContentChangeEvent],
+        version: i32,
+    ) -> Result<Self, &'static str> {
+        let mut next = Self::from_tree(self.text.clone(), version, self.open, self.tree.clone());
+        let mut reuse = true;
+        for change in changes {
+            if let Some(range) = change.range {
+                if range.start > range.end {
+                    return Err("Reversed edit range");
+                }
+                let start = next.offset(range.start).ok_or("Invalid edit start")?;
+                let end = next.offset(range.end).ok_or("Invalid edit end")?;
+                if start > end {
+                    return Err("Reversed edit range");
+                }
+                let start_position = point(&next.text, start);
+                let old_end_position = point(&next.text, end);
+                next.text.replace_range(start..end, &change.text);
+                if reuse {
+                    next.tree.edit(&InputEdit {
+                        start_byte: start,
+                        old_end_byte: end,
+                        new_end_byte: start + change.text.len(),
+                        start_position,
+                        old_end_position,
+                        new_end_position: point(&next.text, start + change.text.len()),
+                    });
+                }
+            } else {
+                next.text = change.text.clone();
+                reuse = false; // Full replacements retain the frozen fresh-parse workload.
+            }
+            next = Self::from_tree(next.text, version, self.open, next.tree);
+        }
+        next.tree = parser
+            .parse(&next.text, reuse.then_some(&next.tree))
+            .ok_or("Parse cancelled")?;
+        Ok(next)
+    }
+
     pub fn position(&self, byte: usize) -> Position {
         let line = self.lines.partition_point(|start| *start <= byte) - 1;
         Position::new(
@@ -65,21 +117,26 @@ impl Document {
     }
 
     pub fn offset(&self, position: Position) -> Option<usize> {
-        let start = *self.lines.get(position.line as usize)?;
+        // LSP clamps positions past a line/document end. A UTF-16 position
+        // inside a surrogate pair rounds down to that scalar's start, so edits
+        // never split a UTF-8 character in the retained source.
+        let Some(&start) = self.lines.get(position.line as usize) else {
+            return Some(self.text.len());
+        };
         let mut column = 0;
         for (byte, ch) in self.text[start..].char_indices() {
             if column == position.character {
                 return Some(start + byte);
             }
             if ch == '\r' || ch == '\n' {
-                return None;
+                return Some(start + byte);
             }
             column += ch.len_utf16() as u32;
             if column > position.character {
-                return None;
+                return Some(start + byte);
             }
         }
-        (column == position.character).then_some(self.text.len())
+        Some(self.text.len())
     }
 
     fn range(&self, node: Node<'_>) -> Range {
@@ -204,11 +261,144 @@ impl Document {
     }
 }
 
+fn point(text: &str, byte: usize) -> Point {
+    let prefix = &text[..byte];
+    Point::new(
+        prefix.bytes().filter(|b| *b == b'\n').count(),
+        prefix.rfind('\n').map_or(byte, |at| byte - at - 1),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::Value;
     use std::{fs, path::Path};
+
+    fn equivalent(incremental: &Document) {
+        let fresh = Document::new(
+            &mut parser(),
+            incremental.text.clone(),
+            incremental.version,
+            true,
+        );
+        fn shape(
+            node: Node<'_>,
+        ) -> Vec<(String, std::ops::Range<usize>, Point, Point, bool, bool)> {
+            let mut result = vec![(
+                node.kind().into(),
+                node.byte_range(),
+                node.start_position(),
+                node.end_position(),
+                node.is_error(),
+                node.is_missing(),
+            )];
+            for child in node.children(&mut node.walk()) {
+                result.extend(shape(child));
+            }
+            result
+        }
+        assert_eq!(
+            shape(incremental.tree.root_node()),
+            shape(fresh.tree.root_node()),
+            "{}",
+            incremental.text
+        );
+        assert_eq!(incremental.diagnostics(), fresh.diagnostics());
+        assert_eq!(incremental.symbols(), fresh.symbols());
+        let uri = lsp_types::Url::parse("file:///example.den").unwrap();
+        let a = crate::projection::Projection::new(incremental, &uri);
+        let b = crate::projection::Projection::new(&fresh, &uri);
+        assert_eq!(a.input, b.input);
+        assert_eq!(a.anchors, b.anchors);
+        assert_eq!(a.rule_anchors, b.rule_anchors);
+    }
+
+    fn change(
+        doc: &Document,
+        start: usize,
+        end: usize,
+        text: &str,
+    ) -> TextDocumentContentChangeEvent {
+        TextDocumentContentChangeEvent {
+            range: Some(Range::new(doc.position(start), doc.position(end))),
+            range_length: None,
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn incremental_and_fresh_agree_through_damage_and_repair_for_every_fixture() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
+        let manifest: Value =
+            serde_json::from_str(&fs::read_to_string(root.join("syntax.json")).unwrap()).unwrap();
+        let mut parser = parser();
+        for case in manifest["cases"].as_array().unwrap() {
+            let text = fs::read_to_string(root.join(case["file"].as_str().unwrap())).unwrap();
+            let doc = Document::new(&mut parser, text, 1, true);
+            let insertion = change(&doc, 0, 0, "// 🦀\r\n");
+            let moved = doc.changed(&mut parser, &[insertion], 2).unwrap();
+            equivalent(&moved);
+            if let Some(at) = moved.text.find(';') {
+                let damaged = moved
+                    .changed(&mut parser, &[change(&moved, at, at + 1, "")], 3)
+                    .unwrap();
+                equivalent(&damaged);
+                let repaired = damaged
+                    .changed(&mut parser, &[change(&damaged, at, at, ";")], 4)
+                    .unwrap();
+                equivalent(&repaired);
+                assert_eq!(repaired.text, moved.text);
+            }
+        }
+    }
+
+    #[test]
+    fn sequential_ranges_handle_astral_text_crlf_lone_cr_and_reject_invalid_edits_atomically() {
+        let mut parser = parser();
+        let doc = Document::new(
+            &mut parser,
+            "module example; // 🦀\r\nsort S;\rrelation r(x: S);".into(),
+            1,
+            true,
+        );
+        let end = doc.text.find('\r').unwrap();
+        let edits = [
+            change(&doc, end, end, " hello"),
+            change(&doc, end, end, "!"),
+        ];
+        let result = doc.changed(&mut parser, &edits, 2).unwrap();
+        assert!(result.text.contains("🦀! hello\r\n"));
+        equivalent(&result);
+        let at = result.text.find("relation").unwrap();
+        let result = result
+            .changed(&mut parser, &[change(&result, at, at, "// 🦀\r")], 3)
+            .unwrap();
+        equivalent(&result);
+        let invalid = TextDocumentContentChangeEvent {
+            range: Some(Range::new(Position::new(0, 2), Position::new(0, 1))),
+            range_length: None,
+            text: "x".into(),
+        };
+        assert!(doc
+            .changed(&mut parser, &[change(&doc, 0, 0, " "), invalid], 4)
+            .is_err());
+        assert_eq!(doc.version, 1);
+        equivalent(&doc);
+        let full = TextDocumentContentChangeEvent {
+            range: None,
+            range_length: None,
+            text: "module example;\nsort Longer;".into(),
+        };
+        let edit = TextDocumentContentChangeEvent {
+            range: Some(Range::new(Position::new(1, 5), Position::new(1, 11))),
+            range_length: None,
+            text: "S".into(),
+        };
+        let mixed = doc.changed(&mut parser, &[full, edit], 5).unwrap();
+        assert_eq!(mixed.text, "module example;\nsort S;");
+        equivalent(&mixed);
+    }
 
     #[test]
     fn shared_syntax_manifest() {
@@ -282,5 +472,25 @@ mod tests {
             doc.position(text.find("Source").unwrap()),
             Position::new(2, 5)
         );
+    }
+
+    #[test]
+    fn positions_clamp_to_line_document_and_unicode_scalar_boundaries() {
+        for eol in ["\n", "\r\n", "\r"] {
+            let text = format!("// 🦀{eol}sort S;");
+            let doc = Document::new(&mut parser(), text.clone(), 1, true);
+            assert_eq!(doc.offset(Position::new(0, 999)), Some("// 🦀".len()));
+            assert_eq!(doc.offset(Position::new(99, 0)), Some(text.len()));
+            assert_eq!(doc.offset(Position::new(1, 999)), Some(text.len()));
+            assert_eq!(doc.offset(Position::new(0, 4)), Some(3));
+            let insert = TextDocumentContentChangeEvent {
+                range: Some(Range::new(Position::new(0, 4), Position::new(0, 4))),
+                range_length: None,
+                text: "ok".into(),
+            };
+            let changed = doc.changed(&mut parser(), &[insert], 2).unwrap();
+            assert!(changed.text.starts_with("// ok🦀"));
+            equivalent(&changed);
+        }
     }
 }
