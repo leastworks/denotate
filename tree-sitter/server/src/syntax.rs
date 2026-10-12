@@ -31,6 +31,7 @@ pub struct Document {
 
 impl Document {
     pub fn new(parser: &mut Parser, text: String, version: i32, open: bool) -> Self {
+        let _timer = crate::timing::interval("parseAndText");
         let tree = parser.parse(&text, None).expect("uncancelled parse");
         Self::from_tree(text, version, open, tree)
     }
@@ -71,6 +72,7 @@ impl Document {
         changes: &[TextDocumentContentChangeEvent],
         version: i32,
     ) -> Result<Self, &'static str> {
+        let _timer = crate::timing::interval("parseAndText");
         let mut next = Self::from_tree(self.text.clone(), version, self.open, self.tree.clone());
         let mut reuse = true;
         for change in changes {
@@ -412,10 +414,10 @@ mod tests {
             let file = case["file"].as_str().unwrap();
             let text = fs::read_to_string(fixtures.join(file)).unwrap();
             let doc = Document::new(&mut parser, text, 1, true);
-            if doc.diagnostics().is_empty() != (case["base"] == "accept") {
+            if doc.diagnostics().is_empty() != (case["extended"] == "accept") {
                 failures.push(format!(
                     "{file}: expected {}\n{}\n{:?}",
-                    case["base"],
+                    case["extended"],
                     doc.tree.root_node().to_sexp(),
                     doc.diagnostics()
                 ));

@@ -7,7 +7,7 @@ on:
     paths: ['frontend-prototype/**', '.github/workflows/frontend.yml']
 
 jobs:
-  langium-base:
+  frontend-comparison:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,10 +37,10 @@ jobs:
       - name: Post-baseline shared scenarios in Langium-only mode
         env:
           DENOTATE_BACKEND: langium
-        run: cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --test acceptance --test lifecycle --test b1 --test b2 --test b4
+        run: cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --test acceptance --test lifecycle --test b1 --test b2 --test b4 --test zero_arity
       - name: Install B frontend dependencies
         run: npm ci --prefix frontend-prototype/tree-sitter
       - name: Tree-sitter syntax manifest and component tests
         run: npm test --prefix frontend-prototype/tree-sitter
-      - name: B1–B4 shared editor and lifecycle LSP scenarios
+      - name: B shared editor, lifecycle and extension scenarios
         run: npm run test:lsp --prefix frontend-prototype/tree-sitter

@@ -3,6 +3,7 @@ mod projection;
 mod rename;
 mod semantic;
 mod syntax;
+mod timing;
 
 use lsp_server::{Connection, Message, Notification, Request, Response};
 use lsp_types::{
@@ -170,6 +171,10 @@ impl Server {
     }
 
     fn request(&mut self, request: &Request) -> Result<Value> {
+        let _timer = request
+            .method
+            .starts_with("textDocument/")
+            .then(|| timing::interval("editorRequest"));
         if request.method.starts_with("textDocument/") && !self.out_of_sync.is_empty() {
             return Err("Workspace is out of sync; reopen the affected document or send a full-text change.".into());
         }
@@ -258,7 +263,17 @@ impl Server {
                     _ => self.semantics.completion(&uri, doc, params.position),
                 })
             }
-            "denotate/test/analysis" if self.test_mode => Ok(self.semantics.stats()),
+            "denotate/test/analysis" if self.test_mode => {
+                let mut result = self.semantics.stats();
+                if let Some(timings) = timing::snapshot() {
+                    result["timings"] = json!({"rust": timings});
+                }
+                Ok(result)
+            }
+            "denotate/test/profiling" if self.test_mode => {
+                timing::reset(request.params.as_bool().ok_or("Expected boolean")?);
+                Ok(Value::Null)
+            }
             // Serial owner loop: all prior notification work is complete.
             "denotate/test/idle" if self.test_mode => Ok(Value::Null),
             _ => Err("Unsupported request".into()),
@@ -505,7 +520,7 @@ fn dispatch_request(
     ) || (server.test_mode
         && matches!(
             request.method.as_str(),
-            "denotate/test/idle" | "denotate/test/analysis"
+            "denotate/test/idle" | "denotate/test/analysis" | "denotate/test/profiling"
         ));
     let mut response = if take_cancellation(pending, &request.id) {
         Response::new_err(request.id.clone(), -32800, "Request cancelled".into())

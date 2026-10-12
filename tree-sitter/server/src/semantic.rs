@@ -3,7 +3,7 @@ use crate::{
     projection::{Lookup, Projection, Reference},
     syntax::Document,
 };
-use denotate_analysis::{Analysis, NameKind, Symbol};
+use denotate_analysis::{NameKind, Symbol};
 use lsp_types::{Diagnostic, DiagnosticSeverity, NumberOrString, Position, Range, Url};
 use serde_json::{json, Value};
 use std::{collections::HashMap, ops::Range as ByteRange, sync::Arc};
@@ -17,14 +17,17 @@ pub struct Target {
 
 #[derive(Default)]
 pub struct Semantics {
-    pub core: Analysis,
+    pub core: crate::timing::Core,
     pub files: HashMap<Url, Projection>,
     projections: u64,
 }
 
 impl Semantics {
     pub fn update(&mut self, uri: &Url, doc: &Document) {
-        let projection = Projection::new(doc, uri);
+        let projection = {
+            let _timer = crate::timing::interval("projection");
+            Projection::new(doc, uri)
+        };
         self.core.update(projection.input.clone());
         self.files.insert(uri.clone(), projection);
         self.projections += 1;
@@ -95,6 +98,7 @@ impl Semantics {
     }
 
     pub fn target_span(&self, target: &Target) -> Option<&ByteRange<usize>> {
+        let _timer = crate::timing::interval("sourceLookup");
         let file = self.files.get(&target.uri)?;
         match &target.rule {
             Some(rule) => file.rule_anchors.get(rule.as_ref())?.get(&target.id),
@@ -107,6 +111,7 @@ impl Semantics {
         target: &Target,
         include_declaration: bool,
     ) -> Vec<(Url, ByteRange<usize>)> {
+        let _timer = crate::timing::interval("references");
         let mut result = vec![];
         for (uri, file) in &self.files {
             if target.rule.is_some() && uri != &target.uri {
@@ -344,6 +349,7 @@ impl Semantics {
     }
 
     pub fn diagnostics(&self, uri: &Url, doc: &Document) -> Vec<Diagnostic> {
+        let _timer = crate::timing::interval("diagnostics");
         let Some(file) = self.files.get(uri) else {
             return vec![];
         };

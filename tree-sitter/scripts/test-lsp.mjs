@@ -8,7 +8,7 @@ const env = { ...process.env, DENOTATE_BACKEND: 'tree-sitter', DENOTATE_LSP_COMM
 for (const [binary, filter] of [
     ['b1'], ['b2'], ['editor'], ['resolution'], ['rename'], ['formatting'],
     ['deferred'], ['rules'], ['acceptance'], ['a2'], ['b4'],
-    ['lifecycle', 'rapid_edits_converge_to_latest_diagnostics_navigation_and_completion']
+    ['lifecycle', 'rapid_edits_converge_to_latest_diagnostics_navigation_and_completion'], ['b5'], ['zero_arity']
 ]) {
     const result = spawnSync('cargo', ['test', '--manifest-path', `${root}Cargo.toml`, '--locked',
         '-p', 'denotate-lsp-tests', '--test', binary, ...(filter ? [filter] : []), '--', '--nocapture'], { env, stdio: 'inherit' });

@@ -37,6 +37,10 @@ profile-lsp: _check-node
     npm run build --prefix frontend-prototype/langium
     cargo test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --test profiling -- --ignored --nocapture --test-threads=1
 
+# Rebuild and compare A2/B latency and pipeline costs in three alternating runs.
+compare-frontends: _check-node
+    node frontend-prototype/measure/compare.mjs
+
 # Launch an isolated VS Code, smoke-test the extension, then close it.
 test-vscode: _check-node
     DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix frontend-prototype/langium
