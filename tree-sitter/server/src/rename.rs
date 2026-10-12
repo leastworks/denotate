@@ -7,7 +7,7 @@ use crate::{
 use lsp_types::{Position, Range, Url};
 use serde_json::{json, Value};
 use std::{
-    collections::HashMap,
+    collections::{BTreeSet, HashMap},
     path::{Path, PathBuf},
 };
 
@@ -134,8 +134,12 @@ pub fn rename(
     if occurrences.is_empty() {
         return Err("No reliable rename locations.".into());
     }
-    editable(&target.uri, roots)?;
-    for (uri, _) in &occurrences {
+    // Filesystem permissions belong to files, not individual occurrences.
+    // Recheck each file on every request; do not cache access across edits.
+    let files: BTreeSet<_> = std::iter::once(&target.uri)
+        .chain(occurrences.iter().map(|(uri, _)| uri))
+        .collect();
+    for uri in files {
         editable(uri, roots)?;
     }
     let Some(name) = name else {
