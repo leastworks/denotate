@@ -49,5 +49,38 @@ exports.run = async function () {
     const constants = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', exampleUri, example.positionAt(call + 18));
     assert.ok(constants.items.some(item => item.label === 'a'));
     assert.ok(!constants.items.some(item => item.label === 'input_a'));
-    console.log('Denotate B2 smoke passed: syntax/repair, outline, imported definition and typed completion through Rust/Salsa.');
+    const references = await vscode.commands.executeCommand('vscode.executeReferenceProvider', exampleUri, example.positionAt(call));
+    assert.ok(references.some(reference => reference.uri.toString() === uri.toString()));
+    assert.ok(references.some(reference => reference.uri.toString() === exampleUri.toString()));
+    const hovers = await vscode.commands.executeCommand('vscode.executeHoverProvider', exampleUri, example.positionAt(call));
+    // Match the client's actual plaintext-to-Markdown conversion, as A does.
+    const expectedHover = new vscode.MarkdownString().appendText('relation mapped_to(source: Source, slot: Slot)').value;
+    const hoverTexts = hovers.flatMap(hover => hover.contents.map(content => typeof content === 'string' ? content : content.value));
+    assert.ok(hoverTexts.includes(expectedHover), JSON.stringify(hoverTexts));
+    const signature = await vscode.commands.executeCommand('vscode.executeSignatureHelpProvider', exampleUri, example.positionAt(call + 18));
+    assert.equal(signature.activeParameter, 1);
+    assert.ok(signature.signatures[0].label.includes('slot: Slot'));
+
+    const originalExample = example.getText();
+    const originalLibrary = document.getText();
+    const rename = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', exampleUri, example.positionAt(call), 'mapping');
+    assert.ok(await vscode.workspace.applyEdit(rename));
+    assert.equal(example.getText(), originalExample.replaceAll('mapped_to', 'mapping'));
+    assert.equal(document.getText(), originalLibrary.replaceAll('mapped_to', 'mapping'));
+    const undo = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', exampleUri, example.positionAt(call), 'mapped_to');
+    assert.ok(await vscode.workspace.applyEdit(undo));
+    assert.equal(example.getText(), originalExample);
+    assert.equal(document.getText(), originalLibrary);
+
+    const options = { tabSize: 4, insertSpaces: true };
+    const edits = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', uri, options);
+    assert.ok(edits.length > 0, 'formatting must do useful work');
+    const formatting = new vscode.WorkspaceEdit();
+    formatting.set(uri, edits);
+    assert.ok(await vscode.workspace.applyEdit(formatting));
+    assert.ok(document.getText().includes('given(D) :-\n    supplies(_, D);'));
+    // VS Code can normalize a provider's empty edit list to undefined.
+    const secondFormat = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', uri, options);
+    assert.equal(secondFormat?.length ?? 0, 0);
+    console.log('Denotate B3 smoke passed: syntax/repair, outline, definition/completion, references, hover/signatures, applied cross-file rename round trip and idempotent formatting.');
 };

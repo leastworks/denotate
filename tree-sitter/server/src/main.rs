@@ -1,12 +1,14 @@
+mod formatting;
 mod projection;
+mod rename;
 mod semantic;
 mod syntax;
 
 use lsp_server::{Connection, Message, Notification, Request, Response};
 use lsp_types::{
-    DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, DocumentSymbolParams, FileChangeType, InitializeParams,
-    TextDocumentPositionParams, Url,
+    Diagnostic, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
+    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams, FileChangeType,
+    InitializeParams, TextDocumentPositionParams, Url,
 };
 use serde_json::{json, Value};
 use std::{collections::HashMap, error::Error, fs, path::PathBuf};
@@ -20,6 +22,8 @@ struct Server {
     roots: Vec<PathBuf>,
     test_mode: bool,
     semantics: semantic::Semantics,
+    diagnostics: HashMap<Url, Vec<Diagnostic>>,
+    diagnostics_dirty: bool,
 }
 
 impl Server {
@@ -33,24 +37,32 @@ impl Server {
         Ok(())
     }
 
-    fn publish(&self, connection: &Connection, uri: &Url) -> Result<()> {
+    fn refresh_diagnostics(&mut self) {
+        if !self.diagnostics_dirty {
+            return;
+        }
+        self.diagnostics = self
+            .documents
+            .iter()
+            .map(|(uri, doc)| {
+                let mut diagnostics = doc.diagnostics();
+                diagnostics.extend(self.semantics.diagnostics(uri, doc));
+                (uri.clone(), diagnostics)
+            })
+            .collect();
+        self.diagnostics_dirty = false;
+    }
+
+    fn publish(&mut self, connection: &Connection, uri: &Url) -> Result<()> {
+        self.refresh_diagnostics();
         if let Some(doc) = self.documents.get(uri) {
-            let mut diagnostics = doc.diagnostics();
-            diagnostics.extend(self.semantics.diagnostics(uri, doc));
             Self::send(
                 connection,
                 "textDocument/publishDiagnostics",
                 json!({
-                    "uri": uri, "version": doc.version, "diagnostics": diagnostics
+                    "uri": uri, "version": doc.version, "diagnostics": self.diagnostics[uri]
                 }),
             )?;
-            if self.test_mode {
-                Self::send(
-                    connection,
-                    "denotate/test/validated",
-                    json!({"uri": uri, "version": doc.version}),
-                )?;
-            }
         } else {
             Self::send(
                 connection,
@@ -61,20 +73,41 @@ impl Server {
         Ok(())
     }
 
-    fn publish_all(&self, connection: &Connection) -> Result<()> {
-        // B2 refreshes all indexed dependents. Salsa reuses unchanged semantics;
+    fn publish_all(&mut self, connection: &Connection) -> Result<()> {
+        // Refresh all indexed dependents. Salsa reuses unchanged semantics;
         // selective publication/scheduling is not claimed by this prototype.
-        let mut uris: Vec<_> = self.documents.keys().collect();
+        let mut uris: Vec<_> = self.documents.keys().cloned().collect();
         uris.sort();
-        for uri in uris {
+        for uri in &uris {
             self.publish(connection, uri)?;
+        }
+        // A barrier covers the entire update, including importer diagnostics.
+        // Otherwise a caller waiting on the library can observe old importer
+        // diagnostics that were still queued behind an earlier library barrier.
+        if self.test_mode {
+            for uri in uris {
+                Self::send(
+                    connection,
+                    "denotate/test/validated",
+                    json!({"uri": uri, "version": self.documents[&uri].version}),
+                )?;
+            }
         }
         Ok(())
     }
 
     fn store(&mut self, uri: Url, doc: Document) {
+        // A declaration change can invalidate diagnostics in any importer.
+        self.diagnostics_dirty = true;
         self.semantics.update(&uri, &doc);
         self.documents.insert(uri, doc);
+    }
+
+    fn remove(&mut self, uri: &Url) {
+        self.documents.remove(uri);
+        self.semantics.remove(uri);
+        self.diagnostics.remove(uri);
+        self.diagnostics_dirty = true;
     }
 
     fn read_disk(&mut self, uri: &Url) -> Result<()> {
@@ -100,27 +133,88 @@ impl Server {
 
     fn request(&mut self, request: &Request) -> Result<Value> {
         match request.method.as_str() {
-            "textDocument/documentSymbol" => {
+            "textDocument/formatting" | "textDocument/rangeFormatting" => {
                 let params: DocumentSymbolParams = serde_json::from_value(request.params.clone())?;
                 let uri = params.text_document.uri;
                 if !self.documents.contains_key(&uri) {
                     self.read_disk(&uri)?;
                 }
-                Ok(serde_json::to_value(self.documents[&uri].symbols())?)
+                let range = request
+                    .params
+                    .get("range")
+                    .map(|r| serde_json::from_value(r.clone()))
+                    .transpose()?;
+                Ok(formatting::format(&self.documents[&uri], range))
             }
-            "textDocument/definition" | "textDocument/completion" => {
+            "textDocument/documentSymbol" | "textDocument/semanticTokens/full" => {
+                let params: DocumentSymbolParams = serde_json::from_value(request.params.clone())?;
+                let uri = params.text_document.uri;
+                if !self.documents.contains_key(&uri) {
+                    self.read_disk(&uri)?;
+                }
+                if request.method == "textDocument/documentSymbol" {
+                    Ok(serde_json::to_value(self.documents[&uri].symbols())?)
+                } else {
+                    Ok(self.semantics.semantic_tokens(&uri, &self.documents[&uri]))
+                }
+            }
+            "textDocument/definition"
+            | "textDocument/completion"
+            | "textDocument/references"
+            | "textDocument/hover"
+            | "textDocument/signatureHelp"
+            | "textDocument/prepareRename"
+            | "textDocument/rename" => {
                 let params: TextDocumentPositionParams =
                     serde_json::from_value(request.params.clone())?;
                 let uri = params.text_document.uri;
                 if !self.documents.contains_key(&uri) {
                     self.read_disk(&uri)?;
                 }
+                if matches!(
+                    request.method.as_str(),
+                    "textDocument/prepareRename" | "textDocument/rename"
+                ) {
+                    // Normally publication has already refreshed this cache.
+                    // Also cover cold requests and files loaded lazily by requests.
+                    self.refresh_diagnostics();
+                }
                 let doc = &self.documents[&uri];
-                Ok(if request.method == "textDocument/definition" {
-                    self.semantics
-                        .definition(&uri, doc, params.position, &self.documents)
-                } else {
-                    self.semantics.completion(&uri, doc, params.position)
+                Ok(match request.method.as_str() {
+                    "textDocument/definition" => {
+                        self.semantics
+                            .definition(&uri, doc, params.position, &self.documents)
+                    }
+                    "textDocument/references" => self.semantics.references(
+                        &uri,
+                        doc,
+                        params.position,
+                        request.params["context"]["includeDeclaration"] == true,
+                        &self.documents,
+                    ),
+                    "textDocument/hover" => self.semantics.hover(&uri, doc, params.position),
+                    "textDocument/signatureHelp" => {
+                        self.semantics.signature_help(&uri, doc, params.position)
+                    }
+                    "textDocument/prepareRename" | "textDocument/rename" => rename::rename(
+                        &self.semantics,
+                        &self.documents,
+                        &self.diagnostics,
+                        &self.roots,
+                        &uri,
+                        params.position,
+                        if request.method == "textDocument/rename" {
+                            Some(
+                                request.params["newName"]
+                                    .as_str()
+                                    .ok_or("Missing newName")?,
+                            )
+                        } else {
+                            None
+                        },
+                    )
+                    .map_err(|e| -> Box<dyn Error> { e.into() })?,
+                    _ => self.semantics.completion(&uri, doc, params.position),
                 })
             }
             "denotate/test/analysis" if self.test_mode => Ok(self.semantics.stats()),
@@ -170,8 +264,7 @@ impl Server {
             "textDocument/didClose" => {
                 let params: DidCloseTextDocumentParams =
                     serde_json::from_value(notification.params)?;
-                self.documents.remove(&params.text_document.uri);
-                self.semantics.remove(&params.text_document.uri);
+                self.remove(&params.text_document.uri);
                 self.publish(connection, &params.text_document.uri)?;
                 // Closing an unsaved buffer restores disk facts, not stale edits.
                 let _ = self.read_disk(&params.text_document.uri);
@@ -186,8 +279,7 @@ impl Server {
                     if self.documents.get(&event.uri).is_some_and(|doc| doc.open) {
                         continue;
                     }
-                    self.documents.remove(&event.uri);
-                    self.semantics.remove(&event.uri);
+                    self.remove(&event.uri);
                     if event.typ != FileChangeType::DELETED {
                         if let Err(error) = self.read_disk(&event.uri) {
                             eprintln!("disk update: {error}");
@@ -213,7 +305,11 @@ fn run(connection: &Connection) -> Result<()> {
     let params = connection.initialize(json!({
         "positionEncoding": "utf-16", "textDocumentSync": {"openClose": true, "change": 1},
         "documentSymbolProvider": true, "definitionProvider": true,
-        "completionProvider": {"triggerCharacters": ["(", ",", ":"]}
+        "completionProvider": {"triggerCharacters": ["(", ",", ":"]},
+        "referencesProvider": true, "hoverProvider": true, "renameProvider": {"prepareProvider": true},
+        "documentFormattingProvider": true, "documentRangeFormattingProvider": true,
+        "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [","]},
+        "semanticTokensProvider": {"legend": {"tokenTypes": ["type", "variable", "function", "namespace", "parameter"], "tokenModifiers": ["readonly"]}, "full": true}
     }))?;
     let initialize: InitializeParams = serde_json::from_value(params.clone())?;
     #[allow(deprecated)]
@@ -232,6 +328,8 @@ fn run(connection: &Connection) -> Result<()> {
         roots,
         test_mode: std::env::var("DENOTATE_TEST_MODE").as_deref() == Ok("1"),
         semantics: semantic::Semantics::default(),
+        diagnostics: HashMap::new(),
+        diagnostics_dirty: true,
     };
     // Only direct .den children of explicitly opened roots; never walk ancestors
     // or dependencies outside the workspace. Stable order also stabilizes catalog.
@@ -268,8 +366,16 @@ fn run(connection: &Connection) -> Result<()> {
                 let supported = matches!(
                     request.method.as_str(),
                     "textDocument/documentSymbol"
+                        | "textDocument/semanticTokens/full"
                         | "textDocument/definition"
                         | "textDocument/completion"
+                        | "textDocument/references"
+                        | "textDocument/hover"
+                        | "textDocument/signatureHelp"
+                        | "textDocument/rename"
+                        | "textDocument/prepareRename"
+                        | "textDocument/formatting"
+                        | "textDocument/rangeFormatting"
                 ) || (server.test_mode
                     && matches!(
                         request.method.as_str(),
@@ -279,7 +385,7 @@ fn run(connection: &Connection) -> Result<()> {
                     Response::new_err(
                         request.id,
                         -32601,
-                        format!("Not implemented in B2: {}", request.method),
+                        format!("Unsupported request: {}", request.method),
                     )
                 } else {
                     match server.request(&request) {
@@ -309,4 +415,76 @@ fn main() -> Result<()> {
     drop(connection);
     threads.join()?;
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn published_diagnostics_are_reused_and_invalidated_with_dependencies() {
+        let mut server = Server {
+            parser: syntax::parser(),
+            documents: HashMap::new(),
+            roots: vec![],
+            test_mode: false,
+            semantics: semantic::Semantics::default(),
+            diagnostics: HashMap::new(),
+            diagnostics_dirty: true,
+        };
+        let library = Url::parse("file:///computation.den").unwrap();
+        let program = Url::parse("file:///example.den").unwrap();
+        let doc = Document::new(
+            &mut server.parser,
+            "module example; use computation; const a: Slot; r(a);".into(),
+            1,
+            true,
+        );
+        server.store(program.clone(), doc);
+        let (connection, client) = Connection::memory();
+        server.publish(&connection, &program).unwrap();
+        let Message::Notification(published) = client.receiver.recv().unwrap() else {
+            panic!("diagnostics expected")
+        };
+        assert_eq!(
+            published.params["diagnostics"],
+            json!(server.diagnostics[&program])
+        );
+        assert!(!server.diagnostics[&program].is_empty());
+        let cached = server.diagnostics[&program].as_ptr();
+        server.refresh_diagnostics();
+        assert_eq!(cached, server.diagnostics[&program].as_ptr());
+
+        // Loading a dependency outside publication must invalidate importers too.
+        let doc = Document::new(
+            &mut server.parser,
+            "module computation; sort Slot; relation r(x: Slot);".into(),
+            0,
+            false,
+        );
+        server.store(library.clone(), doc);
+        assert!(server.diagnostics_dirty);
+        server.refresh_diagnostics();
+        assert!(server.diagnostics[&program].is_empty());
+        assert!(server.diagnostics[&library].is_empty());
+
+        let doc = Document::new(
+            &mut server.parser,
+            "module computation; sort Slot; relation r(x: );".into(),
+            1,
+            true,
+        );
+        server.store(library.clone(), doc);
+        server.refresh_diagnostics();
+        assert!(server.diagnostics[&library]
+            .iter()
+            .any(|d| d.source.as_deref() == Some("denotate-syntax")));
+
+        server.remove(&library);
+        assert!(!server.diagnostics.contains_key(&library));
+        server.refresh_diagnostics();
+        assert!(server.diagnostics[&program]
+            .iter()
+            .any(|d| d.code == Some(lsp_types::NumberOrString::String("resolution".into()))));
+    }
 }

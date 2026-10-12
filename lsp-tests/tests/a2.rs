@@ -6,6 +6,21 @@ fn stats(client: &mut Client) -> Value {
     client.request("denotate/test/analysis", json!({}))
 }
 
+fn assert_unknown_module(diagnostics: &Value, name: &str) {
+    // The frontend supplies not-found wording; do not require B to reproduce
+    // Langium's AST type names. The missing name and error remain mandatory.
+    let messages = [
+        format!("Could not resolve reference to Module named '{name}'."),
+        format!("Unknown module '{name}'."),
+    ];
+    assert!(
+        diagnostics.as_array().unwrap().iter().any(|d| {
+            d["severity"] == 1 && messages.iter().any(|message| d["message"] == *message)
+        }),
+        "missing unresolved-module diagnostic: {diagnostics}"
+    );
+}
+
 #[test]
 fn module_and_declaration_diagnostics_are_native_reused_and_repairable() {
     if std::env::var("DENOTATE_BACKEND").as_deref() == Ok("langium") {
@@ -28,9 +43,7 @@ fn module_and_declaration_diagnostics_are_native_reused_and_repairable() {
             .iter()
             .any(|d| d["code"] == code));
     }
-    assert!(initial
-        .to_string()
-        .contains("Could not resolve reference to Module named 'missing'"));
+    assert_unknown_module(&initial, "missing");
     let target = client.request(
         "textDocument/definition",
         json!({
@@ -88,10 +101,7 @@ fn module_and_declaration_diagnostics_are_native_reused_and_repairable() {
         2,
         &library.replace("module computation;", "module changed;"),
     );
-    assert!(client
-        .diagnostics(&uri)
-        .to_string()
-        .contains("Could not resolve reference to Module named 'computation'"));
+    assert_unknown_module(&client.diagnostics(&uri), "computation");
     let missing = client.request(
         "textDocument/definition",
         json!({

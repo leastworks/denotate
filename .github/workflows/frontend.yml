@@ -42,5 +42,5 @@ jobs:
         run: npm ci --prefix frontend-prototype/tree-sitter
       - name: Tree-sitter syntax manifest and component tests
         run: npm test --prefix frontend-prototype/tree-sitter
-      - name: B1/B2 shared LSP subset
+      - name: B1–B3 shared editor LSP scenarios
         run: npm run test:lsp --prefix frontend-prototype/tree-sitter

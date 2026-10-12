@@ -444,6 +444,16 @@ impl Analysis {
             .unwrap_or_default()
     }
 
+    pub fn resolve_sort(&self, uri: &str, name: String) -> Option<Symbol> {
+        let &file = self.files.get(uri)?;
+        resolve_sort(&self.db, self.catalog, file, name).clone()
+    }
+
+    pub fn expected_sort(&self, uri: &str, relation: String, index: usize) -> Option<Symbol> {
+        let &file = self.files.get(uri)?;
+        expected_argument_sort(&self.db, self.catalog, file, relation, index).clone()
+    }
+
     pub fn constant_candidates(
         &self,
         uri: &str,

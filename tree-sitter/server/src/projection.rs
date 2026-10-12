@@ -14,7 +14,15 @@ pub enum Lookup {
     Relation,
     Constant { relation: String, index: usize },
     Variable { rule: Arc<str>, occurrence: String },
+    Anonymous { relation: String, index: usize },
+    Parameter,
     Declaration(String),
+}
+
+pub struct DeclarationInfo {
+    pub kind: String,
+    pub name: String,
+    pub parameters: Option<Vec<(String, Option<String>)>>,
 }
 
 #[derive(Clone, Debug)]
@@ -36,6 +44,7 @@ pub struct Projection {
     pub anchors: HashMap<String, Range<usize>>,
     pub rule_anchors: HashMap<String, HashMap<String, Range<usize>>>,
     pub references: Vec<Reference>,
+    pub declarations: HashMap<String, DeclarationInfo>,
     pub tokens: Vec<Token>,
     counts: HashMap<String, usize>,
 }
@@ -96,6 +105,7 @@ impl Projection {
             anchors: HashMap::new(),
             rule_anchors: HashMap::new(),
             references: vec![],
+            declarations: HashMap::new(),
             tokens: vec![],
             counts: HashMap::new(),
         };
@@ -133,6 +143,14 @@ impl Projection {
     fn declaration(&mut self, doc: &Document, node: Node<'_>, key: String) -> NamedDeclaration {
         let id = self.identity(key);
         self.anchors.insert(id.clone(), node.byte_range());
+        self.declarations.insert(
+            id.clone(),
+            DeclarationInfo {
+                kind: node.parent().map_or("", |n| n.kind()).into(),
+                name: text(doc, node).into(),
+                parameters: None,
+            },
+        );
         self.reference(doc, node, Lookup::Declaration(id.clone()));
         NamedDeclaration {
             id,
@@ -149,6 +167,14 @@ impl Projection {
                     if let Some(name) = name {
                         self.input.module = Some(text(doc, name).into());
                         self.anchors.insert(String::new(), name.byte_range());
+                        self.declarations.insert(
+                            String::new(),
+                            DeclarationInfo {
+                                kind: "module".into(),
+                                name: text(doc, name).into(),
+                                parameters: None,
+                            },
+                        );
                         self.reference(doc, name, Lookup::Declaration(String::new()));
                     }
                 }
@@ -169,11 +195,20 @@ impl Projection {
                         let decl =
                             self.declaration(doc, name, format!("relation:{}", text(doc, name)));
                         let mut parameters = vec![];
+                        let mut labels = vec![];
                         for param in node
                             .named_children(&mut node.walk())
                             .filter(|n| n.kind() == "parameter")
                         {
                             let sort = field(param, "sort");
+                            let parameter_name = field(param, "name");
+                            labels.push((
+                                parameter_name.map_or("?", |n| text(doc, n)).into(),
+                                sort.map(|s| text(doc, s).into()),
+                            ));
+                            if let Some(name) = parameter_name {
+                                self.reference(doc, name, Lookup::Parameter);
+                            }
                             parameters.push(sort.map(|s| text(doc, s).into()));
                             if let Some(sort) = sort {
                                 self.reference(doc, sort, Lookup::Sort);
@@ -184,6 +219,16 @@ impl Projection {
                             id: decl.id.clone(),
                             parameters: (!node.has_error()).then_some(parameters),
                         });
+                        self.declarations.insert(
+                            decl.id.clone(),
+                            DeclarationInfo {
+                                kind: field(node, "kind")
+                                    .map_or("relation", |n| text(doc, n))
+                                    .into(),
+                                name: decl.name.clone(),
+                                parameters: (!node.has_error()).then_some(labels),
+                            },
+                        );
                         if field(node, "kind").is_some_and(|n| text(doc, n) == "input") {
                             self.input.input_relations.push(decl.id.clone());
                         }
@@ -286,6 +331,16 @@ impl Projection {
                         name: text(doc, term).into(),
                     })
                 } else {
+                    if term.kind() == "anonymous" {
+                        self.reference(
+                            doc,
+                            term,
+                            Lookup::Anonymous {
+                                relation: relation.clone(),
+                                index,
+                            },
+                        );
+                    }
                     if term.kind() == "constant" && !reserved(text(doc, term)) {
                         self.reference(
                             doc,
