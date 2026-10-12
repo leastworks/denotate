@@ -39,7 +39,8 @@ pub struct RuleAnalysis {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 pub struct Variable {
     pub name: String,
-    /// First occurrence is the definition; all IDs are relative to this file.
+    /// First occurrence is the definition. IDs are caller-owned and only need
+    /// to be unique within this rule; source mapping must retain that scope.
     pub occurrences: Vec<String>,
     pub sorts: Vec<Symbol>,
     pub unknown: bool,

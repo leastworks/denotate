@@ -64,6 +64,24 @@ impl Document {
         )
     }
 
+    pub fn offset(&self, position: Position) -> Option<usize> {
+        let start = *self.lines.get(position.line as usize)?;
+        let mut column = 0;
+        for (byte, ch) in self.text[start..].char_indices() {
+            if column == position.character {
+                return Some(start + byte);
+            }
+            if ch == '\r' || ch == '\n' {
+                return None;
+            }
+            column += ch.len_utf16() as u32;
+            if column > position.character {
+                return None;
+            }
+        }
+        (column == position.character).then_some(self.text.len())
+    }
+
     fn range(&self, node: Node<'_>) -> Range {
         Range::new(
             self.position(node.start_byte()),
@@ -81,11 +99,8 @@ impl Document {
         // Tree-sitter's reserved set applies to its `identifier` word token,
         // not the separate lowercase `constant` token. Enforce the same lexical
         // restriction here, before semantic analysis (including declarations).
-        let reserved_constant = node.kind() == "constant"
-            && matches!(
-                &self.text[node.byte_range()],
-                "module" | "use" | "sort" | "const" | "relation" | "input"
-            );
+        let reserved_constant =
+            node.kind() == "constant" && crate::projection::reserved(&self.text[node.byte_range()]);
         if node.is_error() || node.is_missing() || reserved_constant {
             result.push(Diagnostic {
                 range: self.range(node),

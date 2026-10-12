@@ -1,5 +1,5 @@
 import { build } from 'esbuild';
-import { copyFile, mkdir, chmod } from 'node:fs/promises';
+import { copyFile, mkdir, chmod, rm } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('.', import.meta.url));
 await mkdir(new URL('dist/', import.meta.url), { recursive: true });
@@ -15,5 +15,8 @@ for (const [from, to] of [
 ]) await copyFile(new URL(from, import.meta.url), new URL(to, import.meta.url));
 const suffix = process.platform === 'win32' ? '.exe' : '';
 const target = new URL(`dist/denotate-lsp${suffix}`, import.meta.url);
+// Replace the inode: overwriting a signed executable can leave stale macOS
+// code-signing state and cause SIGKILL at launch, even with identical bytes.
+await rm(target, { force: true });
 await copyFile(new URL(`../native/target/release/denotate-tree-sitter${suffix}`, import.meta.url), target);
 if (!suffix) await chmod(target, 0o755);

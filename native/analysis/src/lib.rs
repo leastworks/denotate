@@ -13,7 +13,7 @@ mod declarations;
 mod rules;
 pub use arguments::ConstantDiagnostic;
 pub use declarations::{DeclarationDiagnostic, NameKind};
-pub use rules::{RuleAnalysis, RuleSyntax};
+pub use rules::{Role, RuleAnalysis, RuleAtom, RuleSyntax};
 
 /// Partial syntax projection: identity and semantic fields only, never spans.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

@@ -38,5 +38,16 @@ exports.run = async function () {
     const repair = new vscode.WorkspaceEdit();
     repair.insert(uri, at, ';');
     await editAndWait(repair, false);
-    console.log('Denotate B1 smoke passed: activation, .den/TextMate registration, Rust server, outline, syntax error and repair.');
+    const exampleUri = vscode.Uri.joinPath(folder, 'example.den');
+    const example = await vscode.workspace.openTextDocument(exampleUri);
+    await vscode.window.showTextDocument(example);
+    const call = example.getText().indexOf('mapped_to(input_a, a)');
+    assert.ok(call >= 0);
+    const definitions = await vscode.commands.executeCommand('vscode.executeDefinitionProvider', exampleUri, example.positionAt(call));
+    assert.equal(definitions.length, 1);
+    assert.equal((definitions[0].targetUri ?? definitions[0].uri).toString(), uri.toString());
+    const constants = await vscode.commands.executeCommand('vscode.executeCompletionItemProvider', exampleUri, example.positionAt(call + 18));
+    assert.ok(constants.items.some(item => item.label === 'a'));
+    assert.ok(!constants.items.some(item => item.label === 'input_a'));
+    console.log('Denotate B2 smoke passed: syntax/repair, outline, imported definition and typed completion through Rust/Salsa.');
 };

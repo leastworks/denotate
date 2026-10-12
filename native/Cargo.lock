@@ -133,6 +133,7 @@ name = "denotate-tree-sitter"
 version = "0.0.1"
 dependencies = [
  "cc",
+ "denotate-analysis",
  "lsp-server",
  "lsp-types",
  "serde",

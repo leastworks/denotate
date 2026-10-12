@@ -14,7 +14,7 @@ test-lsp: _check-node
 test-native:
     cargo +1.93.0 test --manifest-path frontend-prototype/native/Cargo.toml --locked --workspace --exclude denotate-tree-sitter
 
-# Build B1, check the shared syntax manifest and run its supported LSP scenarios.
+# Build B, check the shared syntax manifest and run its supported LSP scenarios.
 test-b: _check-node
     npm test --prefix frontend-prototype/tree-sitter
     npm run test:lsp --prefix frontend-prototype/tree-sitter

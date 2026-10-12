@@ -6,6 +6,7 @@ publish = false
 workspace = "../../native"
 
 [dependencies]
+denotate-analysis = { path = "../../native/analysis" }
 tree-sitter = "=0.25.10"
 tree-sitter-language = "=0.1.5"
 lsp-server = "=0.7.9"
