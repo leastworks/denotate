@@ -214,6 +214,16 @@ fn equal_slot_values_retain_precise_distinct_occurrences_and_conditions() {
     let b2 = &second.head.arguments()[1];
     assert_eq!(b1.value(), b2.value());
     assert_ne!(b1.id(), b2.id());
+    let guard1 = first.body[0].atom();
+    let guard2 = second.body[0].atom();
+    assert_eq!(guard1.relation(), guard2.relation());
+    assert_ne!(guard1.id(), guard2.id());
+    assert_eq!(guard1.arguments()[0].value(), guard2.arguments()[0].value());
+    assert_ne!(guard1.arguments()[0].id(), guard2.arguments()[0].id());
+    assert_ne!(
+        e.provenance.origins(guard1.id())[0].span,
+        e.provenance.origins(guard2.id())[0].span
+    );
     let first_span = e.provenance.origins(b1.id())[0].span;
     let second_span = e.provenance.origins(b2.id())[0].span;
     assert_ne!(first_span, second_span);
