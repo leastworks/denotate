@@ -1,0 +1,18 @@
+input input_a, input_b, input_bb, input_x;
+slot a, b, c;
+
+b <- input_b when available(a) or available(c);
+b <- input_b when available(a);
+b <- input_bb when not available(a);
+b <- input_b when not present(input_x);
+b <- input_b when not (available(a) and available(c));
+b <- input_b when (available(a) or available(c)) and present(input_b);
+b <- input_b when available(a);
+a <- input_a when not available(a);
+b <- input_b when available(missing);
+b <- input_b when available(input_a);
+b <- input_b when present(a);
+b <- input_b when not (available(a) or available(c));
+b <- input_b when not not available(a);
+b <- input_b when not (available(a) or (available(c) and present(input_x)));
+b <- input_b when (available(a) or available(c)) and (present(input_b) or present(input_x));
