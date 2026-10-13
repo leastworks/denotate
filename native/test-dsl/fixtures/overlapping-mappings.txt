@@ -1,0 +1,6 @@
+source input_a, input_b, input_bb;
+slot a, b;
+
+a <- input_a;
+b <- input_b  when available(a);
+b <- input_bb when available(a);

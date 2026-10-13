@@ -118,6 +118,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "denotate-ir"
+version = "0.0.1"
+
+[[package]]
 name = "denotate-native"
 version = "0.0.1"
 dependencies = [
@@ -126,6 +130,13 @@ dependencies = [
  "napi-build",
  "napi-derive",
  "serde_json",
+]
+
+[[package]]
+name = "denotate-test-dsl"
+version = "0.0.1"
+dependencies = [
+ "denotate-ir",
 ]
 
 [[package]]

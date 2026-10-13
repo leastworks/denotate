@@ -1,0 +1,9 @@
+[package]
+name = "denotate-test-dsl"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.93"
+publish = false
+
+[dependencies]
+denotate-ir = { path = "../ir" }
