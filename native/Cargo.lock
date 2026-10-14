@@ -118,6 +118,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "denotate-check"
+version = "0.0.1"
+dependencies = [
+ "denotate-ir",
+ "denotate-test-dsl",
+]
+
+[[package]]
 name = "denotate-ir"
 version = "0.0.1"
 

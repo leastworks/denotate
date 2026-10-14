@@ -10,7 +10,7 @@ test-parser: _check-node
 test-lsp: _check-node
     cargo run --manifest-path frontend-prototype/Cargo.toml --locked -p xtask -- test-lsp
 
-# Test Rust/Salsa analysis, IR construction, the test DSL and native instrumentation.
+# Test Rust/Salsa analysis, IR, concrete checking, the test DSL and instrumentation.
 test-native:
     cargo +1.93.0 test --manifest-path frontend-prototype/native/Cargo.toml --locked --workspace --exclude denotate-tree-sitter
 

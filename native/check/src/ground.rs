@@ -1,0 +1,348 @@
+use crate::{
+    graph,
+    limits::{Budget, Result},
+    *,
+};
+use denotate_ir::*;
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::atomic::{AtomicU64, Ordering},
+};
+
+#[cfg(test)]
+#[path = "cartesian_oracle.rs"]
+mod cartesian_oracle;
+#[path = "sparse.rs"]
+mod sparse;
+
+/// Explicit finite domains, not inferred from constants mentioned in rules.
+pub type Domains = BTreeMap<SortId, Vec<ConstantId>>;
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GroundAtom {
+    pub relation: RelationId,
+    pub arguments: Vec<ConstantId>,
+}
+impl GroundAtom {
+    pub fn new(relation: RelationId, arguments: impl IntoIterator<Item = ConstantId>) -> Self {
+        Self {
+            relation,
+            arguments: arguments.into_iter().collect(),
+        }
+    }
+}
+
+// IDs are scoped to this immutable preparation, not interchangeable between
+// preparations even when they used the same corpus. IR IDs remain unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct GroundRuleId {
+    pub(crate) preparation: u64,
+    pub(crate) index: usize,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ComponentId {
+    pub(crate) preparation: u64,
+    pub(crate) index: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Polarity {
+    Positive,
+    Negative,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroundOccurrence {
+    pub atom: GroundAtom,
+    pub occurrence: OccurrenceId,
+    pub arguments: Vec<OccurrenceId>,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroundLiteral {
+    pub polarity: Polarity,
+    pub term: GroundOccurrence,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GroundRule {
+    pub id: GroundRuleId,
+    pub source: RuleId,
+    pub head: GroundOccurrence,
+    pub body: Vec<GroundLiteral>,
+}
+
+/// A nontrivial group of distinct possible tuples. This is preparation data,
+/// not an obligation result: tuples may still depend on blocked components.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AtMostOneGroup {
+    pub obligation: ObligationId,
+    pub key: Vec<ConstantId>,
+    pub tuples: Vec<GroundAtom>,
+}
+
+/// Checked, immutable finite ground program, with provider-first components.
+/// Owns a snapshot of rule structure; source IDs point back to the original IR.
+#[derive(Debug)]
+pub struct GroundProgram {
+    pub(crate) preparation: u64,
+    signatures: BTreeMap<RelationId, Vec<SortId>>,
+    domains: Domains,
+    pub(crate) atoms: Vec<GroundAtom>,
+    pub(crate) atom_index: BTreeMap<GroundAtom, usize>,
+    pub(crate) inputs: BTreeSet<GroundAtom>,
+    pub(crate) rules: Vec<GroundRule>,
+    pub(crate) components: Vec<Component>,
+    pub(crate) atom_components: Vec<ComponentId>,
+    pub(crate) component_rules: Vec<Vec<usize>>,
+    pub(crate) dependencies: Vec<Dependency>,
+    groups: Vec<AtMostOneGroup>,
+}
+impl GroundProgram {
+    pub fn prepare(corpus: &Corpus, domains: &Domains, limits: &Limits) -> Result<Self> {
+        let mut budget = Budget::new(limits);
+        let domains = validate_domains(corpus, domains, &mut budget)?;
+        let mut p = Self::empty(corpus, domains);
+        sparse::populate(corpus, &mut p, &mut budget)?;
+        p.build_groups(corpus, &mut budget)?;
+        graph::analyze(&mut p, &mut budget)?;
+        Ok(p)
+    }
+
+    fn empty(corpus: &Corpus, domains: Domains) -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        Self {
+            preparation: NEXT.fetch_add(1, Ordering::Relaxed),
+            signatures: corpus
+                .relations()
+                .map(|r| (r.id, r.parameters.iter().map(|p| p.sort).collect()))
+                .collect(),
+            domains,
+            atoms: vec![],
+            atom_index: BTreeMap::new(),
+            inputs: BTreeSet::new(),
+            rules: vec![],
+            components: vec![],
+            atom_components: vec![],
+            component_rules: vec![],
+            dependencies: vec![],
+            groups: vec![],
+        }
+    }
+
+    pub(crate) fn validate_atom(&self, atom: &GroundAtom) -> Result<()> {
+        let legal = self.signatures.get(&atom.relation).is_some_and(|sorts| {
+            sorts.len() == atom.arguments.len()
+                && sorts
+                    .iter()
+                    .zip(&atom.arguments)
+                    .all(|(sort, value)| self.domains[sort].binary_search(value).is_ok())
+        });
+        if legal {
+            Ok(())
+        } else {
+            Err(CheckError::UnknownAtom(atom.clone()))
+        }
+    }
+
+    /// Legality and possibility are independent of whether a replay derives a fact.
+    pub fn is_possible(&self, atom: &GroundAtom) -> Result<bool> {
+        self.validate_atom(atom)?;
+        Ok(self.atom_index.contains_key(atom))
+    }
+
+    fn build_groups(&mut self, corpus: &Corpus, budget: &mut Budget<'_>) -> Result<()> {
+        let mut by_relation = BTreeMap::<_, Vec<_>>::new();
+        for atom in &self.atoms {
+            budget.tick("obligation groups")?;
+            by_relation.entry(atom.relation).or_default().push(atom);
+        }
+        for obligation in corpus.obligations() {
+            budget.tick("obligation groups")?;
+            let Requirement::AtMostOne { relation, group_by } = &obligation.requirement;
+            let mut groups = BTreeMap::<Vec<ConstantId>, Vec<GroundAtom>>::new();
+            if let Some(atoms) = by_relation.get(relation) {
+                for atom in atoms {
+                    budget.tick("obligation groups")?;
+                    let mut key = Vec::new();
+                    for column in group_by {
+                        budget.tick("obligation groups")?;
+                        key.push(atom.arguments[*column]);
+                    }
+                    groups.entry(key).or_default().push((*atom).clone());
+                }
+            }
+            for (key, tuples) in groups {
+                budget.tick("obligation groups")?;
+                if tuples.len() >= 2 {
+                    self.groups.push(AtMostOneGroup {
+                        obligation: obligation.id,
+                        key,
+                        tuples,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Only groups with at least two possible tuples need checking. Missing
+    /// empty/singleton groups are trivially at-most-one, not global admission.
+    pub fn at_most_one_groups(&self) -> impl Iterator<Item = &AtMostOneGroup> {
+        self.groups.iter()
+    }
+
+    pub fn atoms(&self) -> impl Iterator<Item = &GroundAtom> {
+        self.atoms.iter()
+    }
+    pub fn input_atoms(&self) -> impl Iterator<Item = &GroundAtom> {
+        self.inputs.iter()
+    }
+    pub fn rules(&self) -> impl Iterator<Item = &GroundRule> {
+        self.rules.iter()
+    }
+    pub fn rule(&self, id: GroundRuleId) -> Option<&GroundRule> {
+        (id.preparation == self.preparation)
+            .then(|| self.rules.get(id.index))
+            .flatten()
+    }
+    pub fn components(&self) -> impl Iterator<Item = &Component> {
+        self.components.iter()
+    }
+    pub fn component(&self, id: ComponentId) -> Option<&Component> {
+        (id.preparation == self.preparation)
+            .then(|| self.components.get(id.index))
+            .flatten()
+    }
+    /// Looks up a represented node. For legal unrepresented atoms use
+    /// is_possible() or Replay::fact(); they have no component.
+    pub fn component_for(&self, atom: &GroundAtom) -> Result<&Component> {
+        let index = self
+            .atom_index
+            .get(atom)
+            .ok_or_else(|| CheckError::UnknownAtom(atom.clone()))?;
+        Ok(&self.components[self.atom_components[*index].index])
+    }
+    pub fn dependencies(&self) -> impl Iterator<Item = &Dependency> {
+        self.dependencies.iter()
+    }
+    pub fn is_admitted(&self) -> bool {
+        self.components.iter().all(|c| c.blocked_by.is_empty())
+    }
+}
+
+fn validate_domains(
+    corpus: &Corpus,
+    domains: &Domains,
+    budget: &mut Budget<'_>,
+) -> Result<Domains> {
+    let mut normalized = Domains::new();
+    for (sort, values) in domains {
+        budget.tick("domains")?;
+        if corpus.sort(*sort).is_none() {
+            return Err(CheckError::InvalidDomain {
+                sort: *sort,
+                reason: "unknown or foreign sort",
+            });
+        }
+        let mut distinct = BTreeSet::new();
+        for value in values {
+            budget.tick("domains")?;
+            if corpus.constant(*value).map(|c| c.sort) != Some(*sort) {
+                return Err(CheckError::InvalidDomain {
+                    sort: *sort,
+                    reason: "unknown, foreign or wrong-sort constant",
+                });
+            }
+            if !distinct.insert(*value) {
+                return Err(CheckError::InvalidDomain {
+                    sort: *sort,
+                    reason: "duplicate constant",
+                });
+            }
+        }
+        normalized.insert(*sort, distinct.into_iter().collect());
+    }
+    for sort in corpus.sorts() {
+        budget.tick("domains")?;
+        if !domains.contains_key(&sort.id) {
+            return Err(CheckError::InvalidDomain {
+                sort: sort.id,
+                reason: "missing finite domain",
+            });
+        }
+    }
+    for rule in corpus.rules() {
+        budget.tick("domains")?;
+        for atom in std::iter::once(&rule.head).chain(rule.body.iter().map(Literal::atom)) {
+            budget.tick("domains")?;
+            for term in atom.arguments() {
+                budget.tick("domains")?;
+                if let Term::Constant(id) = term.value() {
+                    let c = corpus
+                        .constant(*id)
+                        .ok_or(CheckError::Internal("IR constant missing"))?;
+                    if normalized[&c.sort].binary_search(id).is_err() {
+                        return Err(CheckError::ConstantOutsideDomain(*id));
+                    }
+                }
+            }
+        }
+    }
+    Ok(normalized)
+}
+
+fn ground_atom(
+    atom: &Atom,
+    binding: &BTreeMap<&str, ConstantId>,
+    budget: &mut Budget<'_>,
+) -> Result<GroundOccurrence> {
+    let mut values = Vec::new();
+    let mut origins = Vec::new();
+    for term in atom.arguments() {
+        budget.tick("grounding")?;
+        values.push(match term.value() {
+            Term::Constant(id) => *id,
+            Term::Variable { name, .. } => *binding
+                .get(name.as_str())
+                .ok_or(CheckError::Internal("unbound grounding variable"))?,
+        });
+        origins.push(term.id());
+    }
+    Ok(GroundOccurrence {
+        atom: GroundAtom::new(atom.relation(), values),
+        occurrence: atom.id(),
+        arguments: origins,
+    })
+}
+
+// Streaming Cartesian product: do not allocate a product-sized intermediate.
+fn each_tuple(
+    columns: &[&[ConstantId]],
+    budget: &mut Budget<'_>,
+    mut emit: impl FnMut(&[ConstantId], &mut Budget<'_>) -> Result<()>,
+) -> Result<()> {
+    if columns.iter().any(|c| c.is_empty()) {
+        return Ok(());
+    }
+    let mut positions = vec![0; columns.len()];
+    loop {
+        budget.tick("grounding")?;
+        let mut values = Vec::new();
+        for (column, index) in columns.iter().zip(&positions) {
+            budget.tick("grounding")?;
+            values.push(column[*index]);
+        }
+        emit(&values, budget)?;
+        let mut at = columns.len();
+        loop {
+            if at == 0 {
+                return Ok(());
+            }
+            at -= 1;
+            positions[at] += 1;
+            if positions[at] < columns[at].len() {
+                break;
+            }
+            positions[at] = 0;
+        }
+    }
+}
