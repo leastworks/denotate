@@ -63,6 +63,59 @@ pub(super) fn assert_symbolic_agrees(program: &GroundProgram) {
             }
         }
     }
+    let verified = symbolic.verify_at_most_one(&limits).unwrap();
+    assert_eq!(verified.whole_program_admitted(), program.is_admitted());
+    for group in &verified.groups {
+        if let VerifiedOutcome::Counterexample(example) = &group.outcome {
+            assert!(
+                example
+                    .observation
+                    .present
+                    .is_disjoint(&example.observation.absent)
+            );
+            assert_eq!(
+                example
+                    .observation
+                    .present
+                    .union(&example.observation.absent)
+                    .cloned()
+                    .collect::<BTreeSet<_>>(),
+                inputs.iter().cloned().collect()
+            );
+            let replay = program
+                .evaluate(example.observation.present.iter().cloned(), &limits)
+                .unwrap();
+            assert!(example.tuples.len() >= 2);
+            for tuple in &example.tuples {
+                assert_eq!(replay.fact(tuple).unwrap(), FactState::Settled(true));
+            }
+            assert_eq!(
+                example.replay_scope == ReplayScope::WholeProgram,
+                program.is_admitted()
+            );
+            for (fact, step) in &example.evidence {
+                assert_eq!(replay.fact(fact).unwrap(), FactState::Settled(true));
+                if let GroundEvidence::Derived { rule, premises } = &step.evidence {
+                    assert_eq!(&rule.head.atom, fact);
+                    assert_eq!(program.rule(rule.id), Some(rule));
+                    assert_eq!(rule.body.len(), premises.len());
+                    for premise in premises {
+                        match premise {
+                            PremiseEvidence::Positive { fact, .. } => {
+                                assert!(example.evidence[fact].order < step.order)
+                            }
+                            PremiseEvidence::Absent { fact, provider, .. } => assert_eq!(
+                                replay.absence_provider(fact).unwrap().as_ref(),
+                                Some(provider)
+                            ),
+                        }
+                    }
+                } else {
+                    assert!(example.observation.present.contains(fact));
+                }
+            }
+        }
+    }
 }
 
 fn relation(c: &mut Corpus, name: &str, input: bool) -> RelationId {

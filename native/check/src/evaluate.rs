@@ -43,7 +43,7 @@ pub enum Evidence {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Derivation {
     /// Positive premises refer to facts with a smaller order. This is internal
     /// replay order, not an author-visible variable binding or semantic value.
@@ -58,13 +58,14 @@ pub struct Replay<'a> {
     program: &'a GroundProgram,
     present: BTreeSet<GroundAtom>,
     derivations: BTreeMap<GroundAtom, Derivation>,
+    completed: BTreeSet<ComponentId>,
 }
 impl Replay<'_> {
     pub fn program(&self) -> &GroundProgram {
         self.program
     }
     pub fn is_complete(&self) -> bool {
-        self.program.is_admitted()
+        self.program.is_admitted() && self.completed.len() == self.program.components.len()
     }
     pub fn present_inputs(&self) -> impl Iterator<Item = &GroundAtom> {
         self.present.iter()
@@ -81,6 +82,9 @@ impl Replay<'_> {
         let component = self.program.component_for(atom)?;
         if !component.blocked_by.is_empty() {
             return Ok(FactState::Blocked(component.blocked_by.clone()));
+        }
+        if !self.completed.contains(&component.id) {
+            return Err(CheckError::OutsideReplay(atom.clone()));
         }
         Ok(FactState::Settled(self.derivations.contains_key(atom)))
     }
@@ -113,7 +117,16 @@ impl GroundProgram {
         present: impl IntoIterator<Item = GroundAtom>,
         limits: &Limits,
     ) -> Result<Replay<'_>> {
-        let mut budget = Budget::new(limits);
+        self.evaluate_selected(present, None, &mut Budget::new(limits))
+    }
+
+    /// Internal caller supplies a dependency-closed set of admitted components.
+    pub(crate) fn evaluate_selected(
+        &self,
+        present: impl IntoIterator<Item = GroundAtom>,
+        selected: Option<&BTreeSet<ComponentId>>,
+        budget: &mut Budget<'_>,
+    ) -> Result<Replay<'_>> {
         let mut snapshot = BTreeSet::new();
         for input in present {
             budget.tick("observation")?;
@@ -126,6 +139,7 @@ impl GroundProgram {
             program: self,
             present: snapshot,
             derivations: BTreeMap::new(),
+            completed: BTreeSet::new(),
         };
         for atom in &replay.present {
             budget.tick("evaluation")?;
@@ -139,8 +153,15 @@ impl GroundProgram {
         }
         for (index, component) in self.components.iter().enumerate() {
             budget.tick("evaluation")?;
-            if !component.blocked_by.is_empty() {
+            if !component.blocked_by.is_empty()
+                || selected.is_some_and(|set| !set.contains(&component.id))
+            {
                 continue;
+            }
+            if !component.dependencies.is_subset(&replay.completed) {
+                return Err(CheckError::Internal(
+                    "replay scope is not dependency-closed",
+                ));
             }
             loop {
                 let mut changed = false;
@@ -217,6 +238,7 @@ impl GroundProgram {
                     break;
                 }
             }
+            replay.completed.insert(component.id);
         }
         Ok(replay)
     }

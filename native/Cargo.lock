@@ -149,6 +149,7 @@ dependencies = [
  "biodivine-lib-bdd",
  "denotate-ir",
  "denotate-test-dsl",
+ "serde_json",
 ]
 
 [[package]]
@@ -170,6 +171,7 @@ dependencies = [
 name = "denotate-test-dsl"
 version = "0.0.1"
 dependencies = [
+ "denotate-check",
  "denotate-ir",
 ]
 

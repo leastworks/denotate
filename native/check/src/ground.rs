@@ -7,6 +7,7 @@ use denotate_ir::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::atomic::{AtomicU64, Ordering},
+    time::{Duration, Instant},
 };
 
 #[cfg(test)]
@@ -17,6 +18,14 @@ mod sparse;
 
 /// Explicit finite domains, not inferred from constants mentioned in rules.
 pub type Domains = BTreeMap<SortId, Vec<ConstantId>>;
+
+#[derive(Debug, Default)]
+pub struct PreparationMetrics {
+    /// Domain validation, possible closure, instances and obligation grouping.
+    pub grounding: Duration,
+    /// Ground dependency graph and local stratification.
+    pub admissibility: Duration,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GroundAtom {
@@ -95,16 +104,25 @@ pub struct GroundProgram {
     pub(crate) component_rules: Vec<Vec<usize>>,
     pub(crate) dependencies: Vec<Dependency>,
     groups: Vec<AtMostOneGroup>,
+    metrics: PreparationMetrics,
 }
 impl GroundProgram {
     pub fn prepare(corpus: &Corpus, domains: &Domains, limits: &Limits) -> Result<Self> {
+        let start = Instant::now();
         let mut budget = Budget::new(limits);
         let domains = validate_domains(corpus, domains, &mut budget)?;
         let mut p = Self::empty(corpus, domains);
         sparse::populate(corpus, &mut p, &mut budget)?;
         p.build_groups(corpus, &mut budget)?;
+        p.metrics.grounding = start.elapsed();
+        let start = Instant::now();
         graph::analyze(&mut p, &mut budget)?;
+        p.metrics.admissibility = start.elapsed();
         Ok(p)
+    }
+
+    pub fn metrics(&self) -> &PreparationMetrics {
+        &self.metrics
     }
 
     fn empty(corpus: &Corpus, domains: Domains) -> Self {
@@ -125,6 +143,7 @@ impl GroundProgram {
             component_rules: vec![],
             dependencies: vec![],
             groups: vec![],
+            metrics: PreparationMetrics::default(),
         }
     }
 

@@ -11,3 +11,4 @@ biodivine-lib-bdd = "=0.6.3"
 
 [dev-dependencies]
 denotate-test-dsl = { path = "../test-dsl" }
+serde_json.workspace = true

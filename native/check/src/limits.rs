@@ -14,6 +14,7 @@ pub enum CheckError {
     ConstantOutsideDomain(ConstantId),
     InvalidObservation(GroundAtom),
     UnknownAtom(GroundAtom),
+    OutsideReplay(GroundAtom),
     ForeignCondition,
     LimitExceeded {
         phase: &'static str,

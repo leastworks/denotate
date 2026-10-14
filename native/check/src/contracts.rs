@@ -93,7 +93,7 @@ impl GroundProgram {
 pub enum GroupOutcome {
     /// Proved only for this dependency-closed group, over every input observation.
     Proved,
-    /// Nonempty violation condition. Not yet a replayed counterexample (3d).
+    /// Raw nonempty violation condition; use verify_at_most_one for a replayed finding.
     Overlap(Condition),
     Unsupported,
 }

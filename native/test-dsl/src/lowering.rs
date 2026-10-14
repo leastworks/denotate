@@ -352,6 +352,7 @@ impl Lowerer<'_> {
         statement: SourceSpan,
         helper: Option<SourceSpan>,
     ) -> Result<()> {
+        let guard = condition.as_ref().map(|view| view.span);
         let mut alternatives = Vec::new();
         if let Some(view) = condition {
             Self::alternatives(view, &mut alternatives);
@@ -377,6 +378,8 @@ impl Lowerer<'_> {
             let mut origins = vec![Origin::new(statement, "mapping")];
             if let Some(span) = helper {
                 origins.push(Origin::new(span, "subexpression"));
+            } else if let Some(span) = guard {
+                origins.push(Origin::new(span, "guard"));
             }
             if let Some(view) = alternative {
                 if split {

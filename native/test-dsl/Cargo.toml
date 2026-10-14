@@ -7,3 +7,4 @@ publish = false
 
 [dependencies]
 denotate-ir = { path = "../ir" }
+denotate-check = { path = "../check" }

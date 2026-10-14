@@ -3,7 +3,17 @@ use crate::{
     *,
 };
 use biodivine_lib_bdd::{Bdd, BddValuation, BddVariable, BddVariableSet, op_function};
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
+
+/// A complete Boolean assignment: every ground input fact is present or absent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Observation {
+    pub present: BTreeSet<GroundAtom>,
+    pub absent: BTreeSet<GroundAtom>,
+}
 
 /// An opaque Boolean function in one immutable ground program's input universe.
 /// Cloning shares storage; callers cannot inject BDDs from another universe.
@@ -131,6 +141,50 @@ impl ConditionContext {
         Ok(self
             .apply(a, b, op_function::xor, &mut Budget::new(limits))?
             .is_false())
+    }
+
+    /// Select a satisfying assignment, preferring false branches and leaving
+    /// unused inputs absent. This is deterministic completion, not minimization.
+    pub fn witness(&self, condition: &Condition, limits: &Limits) -> Result<Option<Observation>> {
+        self.witness_with_budget(condition, &mut Budget::new(limits))
+    }
+    pub(crate) fn witness_with_budget(
+        &self,
+        condition: &Condition,
+        budget: &mut Budget<'_>,
+    ) -> Result<Option<Observation>> {
+        self.check(condition, budget)?;
+        if condition.is_false() {
+            return Ok(None);
+        }
+        budget.charge(self.inputs.len(), "witness")?;
+        let mut valuation = BddValuation::all_false(self.inputs.len() as u16);
+        // Traverse links, not node-vector order: semantic correctness must not
+        // depend on the BDD library's preferred serialization order.
+        let mut node = condition.bdd.root_pointer();
+        while !node.is_one() {
+            budget.tick("witness")?;
+            let low = condition.bdd.low_link_of(node);
+            if !low.is_zero() {
+                node = low;
+            } else {
+                valuation.set_value(condition.bdd.var_of(node), true);
+                node = condition.bdd.high_link_of(node);
+            }
+        }
+        let mut observation = Observation {
+            present: BTreeSet::new(),
+            absent: BTreeSet::new(),
+        };
+        for (atom, variable) in &self.inputs {
+            budget.tick("witness")?;
+            if valuation.value(*variable) {
+                observation.present.insert(atom.clone());
+            } else {
+                observation.absent.insert(atom.clone());
+            }
+        }
+        Ok(Some(observation))
     }
 
     /// Test a complete observation (omitted inputs are absent). This is Boolean

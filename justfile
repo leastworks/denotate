@@ -14,6 +14,14 @@ test-lsp: _check-node
 test-native:
     cargo +1.93.0 test --manifest-path frontend-prototype/native/Cargo.toml --locked --workspace --exclude denotate-tree-sitter
 
+# Source-linked InputMapping findings; also try mixed, requires-c or fixed.
+demo-overlap mode="overlap":
+    cargo +1.93.0 run --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --example overlap -- {{mode}}
+
+# Optional independent Python/Z3 check of four Rust fixture corpora (needs z3-solver).
+test-check-z3:
+    python3 semantics/check_rust_findings.py
+
 # Build B, check the shared syntax manifest and run its supported LSP scenarios.
 test-b: _check-node
     npm test --prefix frontend-prototype/tree-sitter
