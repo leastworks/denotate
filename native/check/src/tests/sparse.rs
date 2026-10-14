@@ -267,7 +267,7 @@ fn repeated_arrivals_deduplicate_bindings_but_not_authored_rules() {
     }
 }
 
-fn mapping_corpus(size: usize, chained_guards: bool) -> (Corpus, Domains) {
+pub(super) fn mapping_corpus(size: usize, chained_guards: bool) -> (Corpus, Domains) {
     let mut c = Corpus::new();
     let i = c.declare_sort("Inputs").unwrap();
     let s = c.declare_sort("Slots").unwrap();
@@ -504,6 +504,7 @@ fn recursive_joins_match_warshall_over_all_three_node_graphs_and_input_worlds() 
         let p =
             GroundProgram::prepare(&c, &Domains::from([(node, nodes.clone())]), &limits).unwrap();
         let possible = closure(edges); // All three input nodes may be active.
+        super::symbolic::assert_symbolic_agrees(&p);
         assert!(p.is_admitted(), "graph {graph}");
         assert_eq!(
             p.rules().filter(|r| r.source == direct).count(),

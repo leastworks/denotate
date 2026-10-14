@@ -28,6 +28,9 @@ pub struct Component {
     pub id: ComponentId,
     pub atoms: Vec<GroundAtom>,
     pub dependencies: BTreeSet<ComponentId>,
+    /// Has an internal dependency edge, including a singleton's self-loop.
+    /// Components without one need only a single evaluation pass.
+    pub recursive: bool,
     /// Root unresolved components, including this one if it has a negative cycle.
     pub blocked_by: BTreeSet<ComponentId>,
     pub cycle: Option<Cycle>,
@@ -138,6 +141,7 @@ pub(crate) fn analyze(p: &mut GroundProgram, budget: &mut Budget<'_>) -> Result<
             index,
         };
         let mut dependencies = BTreeSet::new();
+        let mut recursive = false;
         let mut negative = None;
         for node in group {
             for edge in &adjacent[*node] {
@@ -150,8 +154,11 @@ pub(crate) fn analyze(p: &mut GroundProgram, budget: &mut Budget<'_>) -> Result<
                         return Err(CheckError::Internal("components not provider-first"));
                     }
                     dependencies.insert(other);
-                } else if e.polarity == Polarity::Negative && negative.is_none() {
-                    negative = Some(*edge);
+                } else {
+                    recursive = true;
+                    if e.polarity == Polarity::Negative && negative.is_none() {
+                        negative = Some(*edge);
+                    }
                 }
             }
         }
@@ -172,6 +179,7 @@ pub(crate) fn analyze(p: &mut GroundProgram, budget: &mut Budget<'_>) -> Result<
             id,
             atoms: group.iter().map(|i| p.atoms[*i].clone()).collect(),
             dependencies,
+            recursive,
             blocked_by,
             cycle,
         });

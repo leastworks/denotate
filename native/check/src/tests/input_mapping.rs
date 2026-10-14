@@ -125,6 +125,7 @@ fn prepare(p: &LoweredProgram) -> GroundProgram {
         .collect();
     let prepared = GroundProgram::prepare(&p.corpus, &domains, &Limits::default()).unwrap();
     super::sparse::assert_equivalent(&p.corpus, &domains, &prepared);
+    super::symbolic::assert_symbolic_agrees(&prepared);
     prepared
 }
 fn atom(p: &LoweredProgram, name: &str, args: &[&str]) -> GroundAtom {

@@ -14,6 +14,7 @@ pub enum CheckError {
     ConstantOutsideDomain(ConstantId),
     InvalidObservation(GroundAtom),
     UnknownAtom(GroundAtom),
+    ForeignCondition,
     LimitExceeded {
         phase: &'static str,
         resource: &'static str,
@@ -29,7 +30,7 @@ impl std::error::Error for CheckError {}
 
 pub(crate) type Result<T> = std::result::Result<T, CheckError>;
 
-/// Per prepare/evaluate call. Limits cover construction and graph work too.
+/// Per checker operation, including preparation, evaluation and Boolean queries.
 /// Exceeding a limit returns no partial successful result. Deadlines are checked
 /// cooperatively between work items, not a promise of hard real-time preemption.
 #[derive(Debug, Clone)]
@@ -39,6 +40,12 @@ pub struct Limits {
     pub max_dependencies: usize,
     pub max_work: usize,
     pub timeout: Duration,
+    pub max_bdd_variables: usize,
+    pub max_bdd_nodes: usize,
+    pub max_bdd_tasks: usize,
+    /// Sum of BDD sizes retained in one symbolic meaning or property report.
+    /// Counts shared conditions conservatively, not exact heap usage.
+    pub max_condition_nodes: usize,
 }
 impl Default for Limits {
     fn default() -> Self {
@@ -48,6 +55,10 @@ impl Default for Limits {
             max_dependencies: 1_000_000,
             max_work: 20_000_000,
             timeout: Duration::from_secs(10),
+            max_bdd_variables: 10_000,
+            max_bdd_nodes: 100_000,
+            max_bdd_tasks: 100_000,
+            max_condition_nodes: 1_000_000,
         }
     }
 }
@@ -66,19 +77,28 @@ impl<'a> Budget<'a> {
         }
     }
     pub fn tick(&mut self, phase: &'static str) -> Result<()> {
+        self.charge(1, phase)
+    }
+    pub fn remaining(&self) -> usize {
+        self.limits.max_work.saturating_sub(self.work)
+    }
+    pub fn used(&self) -> usize {
+        self.work
+    }
+    pub fn charge(&mut self, amount: usize, phase: &'static str) -> Result<()> {
         if self.start.elapsed() >= self.limits.timeout {
             return Err(CheckError::LimitExceeded {
                 phase,
                 resource: "time",
             });
         }
-        if self.work >= self.limits.max_work {
+        if amount > self.remaining() {
             return Err(CheckError::LimitExceeded {
                 phase,
                 resource: "work",
             });
         }
-        self.work += 1;
+        self.work += amount;
         Ok(())
     }
     pub fn room(

@@ -535,11 +535,22 @@ fn long_dependency_chain_uses_iterative_graph_walks_and_provider_order() {
     assert!(p.is_admitted());
     let order: BTreeMap<_, _> = p.components().enumerate().map(|(i, c)| (c.id, i)).collect();
     for component in p.components() {
+        assert!(!component.recursive);
         for dependency in &component.dependencies {
             assert!(order[dependency] < order[&component.id]);
         }
     }
-    let r = p.evaluate([], &Limits::default()).unwrap();
+    // One component visit, one rule visit and at most one premise per atom.
+    // A second confirmation pass would exceed this work budget.
+    let r = p
+        .evaluate(
+            [],
+            &Limits {
+                max_work: 3 * 1500,
+                ..Limits::default()
+            },
+        )
+        .unwrap();
     assert_eq!(r.fact(&atom(head)).unwrap(), FactState::Settled(true));
     assert_eq!(r.established_facts().count(), 1500);
 }
@@ -576,6 +587,12 @@ fn all_two_node_signed_graphs_agree_with_an_independent_reachability_oracle() {
         }
         let p = prepare(&c);
         for from in 0..2 {
+            let recursive = (0..2).any(|to| signs[from][to] != 0 && reach[to][from]);
+            assert_eq!(
+                p.component_for(&atom(rel[from])).unwrap().recursive,
+                recursive,
+                "graph {shape}, node {from}"
+            );
             let blocked =
                 (0..2).any(|u| (0..2).any(|v| reach[from][u] && signs[u][v] == 2 && reach[v][u]));
             assert_eq!(

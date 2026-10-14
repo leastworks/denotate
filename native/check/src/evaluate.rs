@@ -13,9 +13,9 @@ pub enum FactState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CompletedProvider {
-    /// Absent from the prepared positive closure with all legal inputs present.
+    /// Absent from the prepared positive closure with all legal input facts included.
     NoPossibleProducer,
-    /// The complete set of present inputs supplied to this Replay.
+    /// The complete set of input facts supplied to this Replay.
     InputSnapshot,
     Component(ComponentId),
 }
@@ -105,7 +105,7 @@ impl Replay<'_> {
 }
 
 impl GroundProgram {
-    /// Inputs are a complete snapshot: omitted input tuples are absent. Rules
+    /// Input facts form a complete snapshot: omitted input tuples are absent. Rules
     /// never restrict that snapshot. Non-stratifiable components remain blocked
     /// even if a particular observation could make their cycles inactive.
     pub fn evaluate(
@@ -213,7 +213,7 @@ impl GroundProgram {
                         changed = true;
                     }
                 }
-                if !changed {
+                if !component.recursive || !changed {
                     break;
                 }
             }
