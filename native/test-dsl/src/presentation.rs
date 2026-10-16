@@ -12,6 +12,7 @@ pub enum DiagnosticKind {
     OverlappingMappings,
     UnsupportedCycle,
     UnsupportedGroup,
+    Inconclusive,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticSeverity {
@@ -24,7 +25,7 @@ impl DiagnosticKind {
         match self {
             Self::OverlappingMappings => DiagnosticSeverity::Error,
             Self::UnsupportedCycle => DiagnosticSeverity::Warning,
-            Self::UnsupportedGroup => DiagnosticSeverity::Information,
+            Self::UnsupportedGroup | Self::Inconclusive => DiagnosticSeverity::Information,
         }
     }
 }
@@ -118,7 +119,10 @@ pub fn present(
             ));
         }
         let slot = group.group.key[0];
-        if matches!(group.outcome, VerifiedOutcome::Unsupported) {
+        if matches!(
+            group.outcome,
+            VerifiedOutcome::Unsupported | VerifiedOutcome::Inconclusive(_)
+        ) {
             // A skipped check has no counterexample derivation to follow. Attribute the
             // skipped check to every possible mapping producer in this group,
             // not to dependency mappings for other slots in the same cone.
@@ -138,11 +142,7 @@ pub fn present(
                 ));
             }
             let mut targets = BTreeSet::new();
-            for id in &group.cone.rules {
-                let rule = report
-                    .program()
-                    .rule(*id)
-                    .ok_or(PresentationError::InvalidFinding("missing blocked rule"))?;
+            for rule in report.program().rules() {
                 if !mappings.contains(&rule.head.atom) {
                     continue;
                 }
@@ -153,7 +153,10 @@ pub fn present(
                 };
                 targets.extend(required(*target, "target")?.into_iter().map(|o| o.span));
             }
-            if targets.is_empty() || group.cone.blocked_by.is_empty() {
+            if targets.is_empty()
+                || (group.cone.blocked_by.is_empty()
+                    && matches!(group.outcome, VerifiedOutcome::Unsupported))
+            {
                 return Err(PresentationError::InvalidFinding(
                     "unsupported group has no mappings or blocking cycles",
                 ));
@@ -179,13 +182,24 @@ pub fn present(
             } else {
                 "unsupported cycles"
             };
-            let message = format!(
+            let mut message = format!(
                 "Overlap check for slot {} was skipped: it depends on {cause}. See related locations.",
                 name(slot)?
             );
+            let kind = if let VerifiedOutcome::Inconclusive(cause) = group.outcome {
+                message = format!(
+                    "Overlap check for slot {} is inconclusive: {} exhausted its {} budget.",
+                    name(slot)?,
+                    cause.phase,
+                    cause.resource
+                );
+                DiagnosticKind::Inconclusive
+            } else {
+                DiagnosticKind::UnsupportedGroup
+            };
             for primary in targets {
                 diagnostics.push(Diagnostic {
-                    kind: DiagnosticKind::UnsupportedGroup,
+                    kind,
                     message: message.clone(),
                     primary,
                     related: unique_origins(related.iter().cloned()),
@@ -284,9 +298,13 @@ pub fn present(
     for region in &report.unresolved {
         let (targets, related) = cycle_locations(region, &origins, view)?;
         for primary in targets {
+            let (kind, message) = match region.outcome {
+                RegionOutcome::Unsupported => (DiagnosticKind::UnsupportedCycle, "This dependency cycle contains negation and is unsupported by the current checker.".into()),
+                RegionOutcome::Inconclusive(cause) => (DiagnosticKind::Inconclusive, format!("Admission of this dependency cycle is inconclusive: {} exhausted its {} budget.", cause.phase, cause.resource)),
+            };
             diagnostics.push(Diagnostic {
-                kind: DiagnosticKind::UnsupportedCycle,
-                message: "This dependency cycle contains negation and is unsupported by the current checker.".into(),
+                kind,
+                message,
                 primary,
                 related: unique_origins(related.iter().filter(|o| o.span != primary).cloned()),
                 notes: vec!["This is not a proof that the program has no meaning. Independent obligation results remain available.".into()],

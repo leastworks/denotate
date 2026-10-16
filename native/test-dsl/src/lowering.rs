@@ -60,6 +60,7 @@ pub struct LoweredProgram {
     pub corpus: Corpus,
     pub library: MappingLibrary,
     pub provenance: Provenance,
+    pub rewrite_metadata: crate::warnings::RewriteMetadata,
 }
 
 pub enum LoweringOutcome {
@@ -120,6 +121,7 @@ pub fn lower(program: &Program, sources: &Sources) -> Result<LoweringOutcome> {
 
     let mut corpus = Corpus::new();
     let library = library::build(&mut corpus)?;
+    let library_rules: Vec<_> = corpus.rules().map(|r| r.id).collect();
     let mut lowerer = Lowerer {
         corpus,
         library,
@@ -170,10 +172,43 @@ pub fn lower(program: &Program, sources: &Sources) -> Result<LoweringOutcome> {
             None,
         )?;
     }
+    let mut rewrite_metadata = crate::warnings::RewriteMetadata::default();
+    for rule in lowerer.corpus.rules() {
+        rewrite_metadata.owners.insert(
+            rule.id,
+            if library_rules.contains(&rule.id) {
+                crate::warnings::Contribution::Library
+            } else {
+                crate::warnings::Contribution::Program
+            },
+        );
+    }
+    for mapping in &program.mappings {
+        for (negated, edit) in crate::warnings::removals(mapping, sources)? {
+            let occurrences: Vec<_> = lowerer
+                .corpus
+                .rules()
+                .flat_map(|r| &r.body)
+                .filter(|l| matches!(l, Literal::Negative(_)))
+                .filter(|l| {
+                    lowerer
+                        .provenance
+                        .origins(l.atom().id())
+                        .iter()
+                        .any(|o| o.role == "negated expression" && o.span == negated)
+                })
+                .map(|l| l.atom().id())
+                .collect();
+            if let [occurrence] = occurrences.as_slice() {
+                rewrite_metadata.removals.insert(*occurrence, edit);
+            }
+        }
+    }
     Ok(LoweringOutcome::Lowered(LoweredProgram {
         corpus: lowerer.corpus,
         library: lowerer.library,
         provenance: lowerer.provenance,
+        rewrite_metadata,
     }))
 }
 

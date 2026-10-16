@@ -4,6 +4,7 @@ use crate::{
 };
 use denotate_ir::OccurrenceId;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Direction: consumer depends on provider. The premise occurrence points to
 /// the signed atom in the original rule, including its lowering origins.
@@ -23,7 +24,7 @@ pub struct Cycle {
     pub edges: Vec<Dependency>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Component {
     pub id: ComponentId,
     pub atoms: Vec<GroundAtom>,
@@ -37,11 +38,18 @@ pub struct Component {
 }
 
 pub(crate) fn analyze(p: &mut GroundProgram, budget: &mut Budget<'_>) -> Result<()> {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    p.graph_revision = NEXT.fetch_add(1, Ordering::Relaxed);
+    p.dependencies.clear();
+    p.components.clear();
     let n = p.atoms.len();
     let mut adjacent = vec![Vec::new(); n];
     let mut reverse = vec![Vec::new(); n];
     for rule in &p.rules {
         budget.tick("dependencies")?;
+        if p.rewrites.dropped.contains(&rule.id) {
+            continue;
+        }
         let consumer = p.atom_index[&rule.head.atom];
         for literal in &rule.body {
             budget.tick("dependencies")?;
@@ -131,13 +139,13 @@ pub(crate) fn analyze(p: &mut GroundProgram, budget: &mut Budget<'_>) -> Result<
     p.atom_components = membership
         .iter()
         .map(|index| ComponentId {
-            preparation: p.preparation,
+            preparation: p.graph_revision,
             index: *index,
         })
         .collect();
     for (index, group) in groups.iter().enumerate() {
         let id = ComponentId {
-            preparation: p.preparation,
+            preparation: p.graph_revision,
             index,
         };
         let mut dependencies = BTreeSet::new();
@@ -187,6 +195,9 @@ pub(crate) fn analyze(p: &mut GroundProgram, budget: &mut Budget<'_>) -> Result<
     p.component_rules = vec![vec![]; p.components.len()];
     for (index, rule) in p.rules.iter().enumerate() {
         budget.tick("components")?;
+        if p.rewrites.dropped.contains(&rule.id) {
+            continue;
+        }
         p.component_rules[p.atom_components[p.atom_index[&rule.head.atom]].index].push(index);
     }
     Ok(())

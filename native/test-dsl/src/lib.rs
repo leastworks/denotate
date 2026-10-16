@@ -6,3 +6,4 @@ pub mod ast;
 pub mod library;
 pub mod lowering;
 pub mod presentation;
+pub mod warnings;

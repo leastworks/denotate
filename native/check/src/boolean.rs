@@ -196,7 +196,15 @@ impl ConditionContext {
         limits: &Limits,
     ) -> Result<bool> {
         let mut budget = Budget::new(limits);
-        self.check(condition, &mut budget)?;
+        self.evaluate_with_budget(condition, present, &mut budget)
+    }
+    pub(crate) fn evaluate_with_budget(
+        &self,
+        condition: &Condition,
+        present: impl IntoIterator<Item = GroundAtom>,
+        budget: &mut Budget<'_>,
+    ) -> Result<bool> {
+        self.check(condition, budget)?;
         budget.charge(
             self.inputs.len() + condition.node_count(),
             "BDD observation",

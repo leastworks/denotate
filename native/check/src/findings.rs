@@ -42,6 +42,7 @@ pub enum VerifiedOutcome {
     Proved,
     Counterexample(Counterexample),
     Unsupported,
+    Inconclusive(Inconclusive),
 }
 #[derive(Debug)]
 pub struct VerifiedGroup {
@@ -57,6 +58,12 @@ pub struct UnresolvedRegion {
     pub component: ComponentId,
     pub cycle: Cycle,
     pub rules: Vec<GroundRule>,
+    pub outcome: RegionOutcome,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegionOutcome {
+    Unsupported,
+    Inconclusive(Inconclusive),
 }
 #[derive(Debug, Default)]
 pub struct FindingMetrics {
@@ -71,6 +78,7 @@ pub struct Verification<'p> {
     pub unresolved: Vec<UnresolvedRegion>,
     pub property_metrics: SymbolicMetrics,
     pub finding_metrics: FindingMetrics,
+    pub incomplete_evaluation: BTreeMap<ComponentId, Inconclusive>,
 }
 impl Verification<'_> {
     pub fn program(&self) -> &GroundProgram {
@@ -83,6 +91,7 @@ impl Verification<'_> {
     /// program is never a global pass, even if its independent groups are proved.
     pub fn all_obligations_proved(&self) -> bool {
         self.whole_program_admitted()
+            && self.incomplete_evaluation.is_empty()
             && self
                 .groups
                 .iter()
@@ -91,64 +100,76 @@ impl Verification<'_> {
 }
 
 impl<'p> SymbolicMeaning<'p> {
-    /// Synchronous checked findings. No partial successful report escapes a limit
-    /// or replay failure. Use check_at_most_one for raw, unreplayed conditions.
+    /// Converts budget exhaustion before a report exists to a top-level outcome.
+    pub fn verify_checked(&self, limits: &Limits) -> Result<AnalysisOutcome<Verification<'p>>> {
+        AnalysisOutcome::from_result(self.verify_at_most_one(limits))
+    }
+    /// Synchronous findings. Limits become explicit inconclusive groups; a
+    /// replay mismatch is an internal failure, never a reported counterexample.
     pub fn verify_at_most_one(&self, limits: &Limits) -> Result<Verification<'p>> {
         let report = self.check_at_most_one(limits)?;
         let mut budget = Budget::new(limits);
         let mut metrics = FindingMetrics::default();
         let mut groups = Vec::new();
         for check in report.groups {
-            budget.tick("findings")?;
-            let outcome = match check.outcome {
-                GroupOutcome::Proved => VerifiedOutcome::Proved,
-                GroupOutcome::Unsupported => VerifiedOutcome::Unsupported,
-                GroupOutcome::Overlap(condition) => {
-                    let start = Instant::now();
-                    let observation = self
-                        .context
-                        .witness_with_budget(&condition, &mut budget)?
-                        .ok_or(CheckError::Internal("overlap has no witness"))?;
-                    metrics.witness += start.elapsed();
-                    let start = Instant::now();
-                    let selected = (!self.program.is_admitted()).then_some(&check.cone.components);
-                    let replay = self.program.evaluate_selected(
-                        observation.present.iter().cloned(),
-                        selected,
-                        &mut budget,
-                    )?;
-                    let replay_scope = if replay.is_complete() {
-                        ReplayScope::WholeProgram
-                    } else {
-                        ReplayScope::ConeOnly
-                    };
-                    let mut tuples = BTreeSet::new();
-                    for tuple in &check.group.tuples {
-                        budget.tick("replay confirmation")?;
-                        match replay.fact(tuple)? {
-                            FactState::Settled(true) => {
-                                tuples.insert(tuple.clone());
-                            }
-                            FactState::Settled(false) => {}
-                            FactState::Blocked(_) => {
-                                return Err(CheckError::Internal("overlap replay is blocked"));
+            let result = (|| -> Result<VerifiedOutcome> {
+                let outcome = match check.outcome {
+                    GroupOutcome::Proved => VerifiedOutcome::Proved,
+                    GroupOutcome::Unsupported => VerifiedOutcome::Unsupported,
+                    GroupOutcome::Inconclusive(cause) => VerifiedOutcome::Inconclusive(cause),
+                    GroupOutcome::Overlap(condition) => {
+                        let start = Instant::now();
+                        let observation = self
+                            .context
+                            .witness_with_budget(&condition, &mut budget)?
+                            .ok_or(CheckError::Internal("overlap has no witness"))?;
+                        metrics.witness += start.elapsed();
+                        let start = Instant::now();
+                        let selected =
+                            (!self.program.is_admitted()).then_some(&check.cone.components);
+                        let replay = self.program.evaluate_selected(
+                            observation.present.iter().cloned(),
+                            selected,
+                            &mut budget,
+                        )?;
+                        let replay_scope = if replay.is_complete() {
+                            ReplayScope::WholeProgram
+                        } else {
+                            ReplayScope::ConeOnly
+                        };
+                        let mut tuples = BTreeSet::new();
+                        for tuple in &check.group.tuples {
+                            budget.tick("replay confirmation")?;
+                            match replay.fact(tuple)? {
+                                FactState::Settled(true) => {
+                                    tuples.insert(tuple.clone());
+                                }
+                                FactState::Settled(false) => {}
+                                FactState::Blocked(_) => {
+                                    return Err(CheckError::Internal("overlap replay is blocked"));
+                                }
                             }
                         }
+                        if tuples.len() < 2 {
+                            return Err(CheckError::Internal("symbolic overlap did not replay"));
+                        }
+                        metrics.replay += start.elapsed();
+                        let start = Instant::now();
+                        let evidence = collect_evidence(&replay, &tuples, &mut budget)?;
+                        metrics.evidence += start.elapsed();
+                        VerifiedOutcome::Counterexample(Counterexample {
+                            observation,
+                            replay_scope,
+                            tuples,
+                            evidence,
+                        })
                     }
-                    if tuples.len() < 2 {
-                        return Err(CheckError::Internal("symbolic overlap did not replay"));
-                    }
-                    metrics.replay += start.elapsed();
-                    let start = Instant::now();
-                    let evidence = collect_evidence(&replay, &tuples, &mut budget)?;
-                    metrics.evidence += start.elapsed();
-                    VerifiedOutcome::Counterexample(Counterexample {
-                        observation,
-                        replay_scope,
-                        tuples,
-                        evidence,
-                    })
-                }
+                };
+                Ok(outcome)
+            })();
+            let outcome = match result {
+                Ok(value) => value,
+                Err(error) => VerifiedOutcome::Inconclusive(Inconclusive::from_error(error)?),
             };
             groups.push(VerifiedGroup {
                 group: check.group,
@@ -157,8 +178,9 @@ impl<'p> SymbolicMeaning<'p> {
             });
         }
         let mut unresolved = Vec::new();
+        // Copy already bounded, prepared cycle metadata even if witness work
+        // exhausted its budget. Otherwise a limit would hide the blocked regions.
         for id in report.unresolved_components {
-            budget.tick("cycle evidence")?;
             let component = self
                 .program
                 .component(id)
@@ -170,13 +192,11 @@ impl<'p> SymbolicMeaning<'p> {
             let mut rules = Vec::new();
             let mut seen = BTreeSet::new();
             for edge in &cycle.edges {
-                budget.tick("cycle evidence")?;
                 if seen.insert(edge.rule) {
                     let rule = self
                         .program
                         .rule(edge.rule)
                         .ok_or(CheckError::Internal("missing cycle rule"))?;
-                    budget.charge(rule.body.len(), "cycle evidence")?;
                     rules.push(rule.clone());
                 }
             }
@@ -184,6 +204,10 @@ impl<'p> SymbolicMeaning<'p> {
                 component: id,
                 cycle: cycle.clone(),
                 rules,
+                outcome: self
+                    .program
+                    .admission_limit()
+                    .map_or(RegionOutcome::Unsupported, RegionOutcome::Inconclusive),
             });
         }
         Ok(Verification {
@@ -192,6 +216,7 @@ impl<'p> SymbolicMeaning<'p> {
             unresolved,
             property_metrics: report.metrics,
             finding_metrics: metrics,
+            incomplete_evaluation: self.inconclusive.clone(),
         })
     }
 }
@@ -216,11 +241,22 @@ fn collect_evidence(
             Evidence::Derived { rule, premises } => {
                 let rule = replay
                     .program()
-                    .rule(*rule)
+                    .original_rule(*rule)
                     .ok_or(CheckError::Internal("missing evidence rule"))?;
                 for premise in premises {
                     budget.tick("evidence")?;
                     match premise {
+                        PremiseEvidence::Discharged {
+                            literal_occurrence,
+                            proof,
+                        } => {
+                            replay.validate_discharge(
+                                rule.id,
+                                *literal_occurrence,
+                                *proof,
+                                budget,
+                            )?;
+                        }
                         PremiseEvidence::Positive { fact, .. } => {
                             let support = replay
                                 .derivation(fact)

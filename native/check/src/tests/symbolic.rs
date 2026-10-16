@@ -60,6 +60,7 @@ pub(super) fn assert_symbolic_agrees(program: &GroundProgram) {
                     check.group.key
                 ),
                 GroupOutcome::Unsupported => panic!("admitted cone was not checked"),
+                GroupOutcome::Inconclusive(cause) => panic!("unexpected limit: {cause:?}"),
             }
         }
     }
@@ -101,6 +102,9 @@ pub(super) fn assert_symbolic_agrees(program: &GroundProgram) {
                     assert_eq!(rule.body.len(), premises.len());
                     for premise in premises {
                         match premise {
+                            PremiseEvidence::Discharged { .. } => {
+                                panic!("baseline did not run admission rewrites")
+                            }
                             PremiseEvidence::Positive { fact, .. } => {
                                 assert!(example.evidence[fact].order < step.order)
                             }
@@ -800,10 +804,16 @@ fn bdd_and_property_limits_return_errors_not_successful_partial_results() {
             ..limits.clone()
         },
     ] {
-        assert!(matches!(
-            m.check_at_most_one(&low),
-            Err(CheckError::LimitExceeded { .. })
-        ));
+        match m.check_at_most_one(&low) {
+            Err(CheckError::LimitExceeded { .. }) => {}
+            Ok(report) => assert!(
+                report
+                    .groups
+                    .iter()
+                    .all(|g| matches!(g.outcome, GroupOutcome::Inconclusive(_)))
+            ),
+            other => panic!("unexpected result: {other:?}"),
+        }
     }
 }
 

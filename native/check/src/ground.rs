@@ -19,7 +19,7 @@ mod sparse;
 /// Explicit finite domains, not inferred from constants mentioned in rules.
 pub type Domains = BTreeMap<SortId, Vec<ConstantId>>;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct PreparationMetrics {
     /// Domain validation, possible closure, instances and obligation grouping.
     pub grounding: Duration,
@@ -90,15 +90,17 @@ pub struct AtMostOneGroup {
 
 /// Checked, immutable finite ground program, with provider-first components.
 /// Owns a snapshot of rule structure; source IDs point back to the original IR.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GroundProgram {
     pub(crate) preparation: u64,
+    pub(crate) graph_revision: u64,
     signatures: BTreeMap<RelationId, Vec<SortId>>,
     domains: Domains,
     pub(crate) atoms: Vec<GroundAtom>,
     pub(crate) atom_index: BTreeMap<GroundAtom, usize>,
     pub(crate) inputs: BTreeSet<GroundAtom>,
     pub(crate) rules: Vec<GroundRule>,
+    pub(crate) rewrites: crate::rewrite::Rewrites,
     pub(crate) components: Vec<Component>,
     pub(crate) atom_components: Vec<ComponentId>,
     pub(crate) component_rules: Vec<Vec<usize>>,
@@ -129,6 +131,8 @@ impl GroundProgram {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         Self {
             preparation: NEXT.fetch_add(1, Ordering::Relaxed),
+            graph_revision: 0,
+            rewrites: Default::default(),
             signatures: corpus
                 .relations()
                 .map(|r| (r.id, r.parameters.iter().map(|p| p.sort).collect()))
@@ -216,10 +220,12 @@ impl GroundProgram {
         self.inputs.iter()
     }
     pub fn rules(&self) -> impl Iterator<Item = &GroundRule> {
-        self.rules.iter()
+        self.rules
+            .iter()
+            .filter(|r| !self.rewrites.dropped.contains(&r.id))
     }
     pub fn rule(&self, id: GroundRuleId) -> Option<&GroundRule> {
-        (id.preparation == self.preparation)
+        (id.preparation == self.preparation && !self.rewrites.dropped.contains(&id))
             .then(|| self.rules.get(id.index))
             .flatten()
     }
@@ -227,7 +233,7 @@ impl GroundProgram {
         self.components.iter()
     }
     pub fn component(&self, id: ComponentId) -> Option<&Component> {
-        (id.preparation == self.preparation)
+        (id.preparation == self.graph_revision)
             .then(|| self.components.get(id.index))
             .flatten()
     }

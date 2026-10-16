@@ -27,7 +27,7 @@ struct ConeIndex<'p> {
 impl<'p> ConeIndex<'p> {
     fn new(program: &'p GroundProgram, budget: &mut Budget<'_>) -> Result<Self> {
         let mut producers = BTreeMap::<_, Vec<_>>::new();
-        for rule in &program.rules {
+        for rule in program.rules() {
             budget.tick("dependency cones")?;
             producers.entry(&rule.head.atom).or_default().push(rule);
         }
@@ -96,6 +96,7 @@ pub enum GroupOutcome {
     /// Raw nonempty violation condition; use verify_at_most_one for a replayed finding.
     Overlap(Condition),
     Unsupported,
+    Inconclusive(Inconclusive),
 }
 #[derive(Debug, Clone)]
 pub struct GroupCheck {
@@ -116,7 +117,8 @@ pub struct PropertyReport {
 impl SymbolicMeaning<'_> {
     /// Check all represented at_most_one obligations over every input assignment.
     /// Assumptions are not supported yet; rules never restrict the input worlds.
-    /// An error yields no partial successful report.
+    /// Budget exhaustion is explicit per group once indexing succeeds. Earlier
+    /// completed groups are retained; internal failures still return an error.
     pub fn check_at_most_one(&self, limits: &Limits) -> Result<PropertyReport> {
         let start = Instant::now();
         let mut budget = Budget::new(limits);
@@ -124,32 +126,57 @@ impl SymbolicMeaning<'_> {
         let mut groups = Vec::new();
         let mut retained = 0;
         for group in self.program.at_most_one_groups() {
-            budget.tick("property checks")?;
-            let cone = index.build(group.tuples.iter().cloned(), &mut budget)?;
-            let outcome = if !cone.blocked_by.is_empty() {
-                GroupOutcome::Unsupported
-            } else {
-                let mut violation = self.context.false_condition();
-                for (i, left) in group.tuples.iter().enumerate() {
-                    for right in &group.tuples[i + 1..] {
-                        budget.tick("property checks")?;
-                        let pair = self.context.apply(
-                            &self.known(left),
-                            &self.known(right),
-                            op_function::and,
-                            &mut budget,
-                        )?;
-                        violation =
-                            self.context
-                                .apply(&violation, &pair, op_function::or, &mut budget)?;
-                    }
-                }
-                if violation.is_false() {
-                    GroupOutcome::Proved
+            let mut cone = DependencyCone {
+                roots: group.tuples.iter().cloned().collect(),
+                facts: BTreeSet::new(),
+                rules: BTreeSet::new(),
+                components: BTreeSet::new(),
+                blocked_by: BTreeSet::new(),
+            };
+            let result = (|| -> Result<GroupOutcome> {
+                budget.tick("property checks")?;
+                cone = index.build(group.tuples.iter().cloned(), &mut budget)?;
+                let outcome = if let Some(cause) = cone
+                    .components
+                    .iter()
+                    .find_map(|id| self.inconclusive.get(id))
+                {
+                    GroupOutcome::Inconclusive(*cause)
+                } else if !cone.blocked_by.is_empty() {
+                    self.program
+                        .admission_limit()
+                        .map_or(GroupOutcome::Unsupported, GroupOutcome::Inconclusive)
                 } else {
-                    retained = retain(retained, 0, violation.node_count(), limits)?;
-                    GroupOutcome::Overlap(violation)
-                }
+                    let mut violation = self.context.false_condition();
+                    for (i, left) in group.tuples.iter().enumerate() {
+                        for right in &group.tuples[i + 1..] {
+                            budget.tick("property checks")?;
+                            let pair = self.context.apply(
+                                &self.known(left),
+                                &self.known(right),
+                                op_function::and,
+                                &mut budget,
+                            )?;
+                            violation = self.context.apply(
+                                &violation,
+                                &pair,
+                                op_function::or,
+                                &mut budget,
+                            )?;
+                        }
+                    }
+                    if violation.is_false() {
+                        GroupOutcome::Proved
+                    } else {
+                        retained = retain(retained, 0, violation.node_count(), limits)?;
+                        GroupOutcome::Overlap(violation)
+                    }
+                };
+                Ok(outcome)
+            })();
+            let outcome = match result {
+                Ok(value) => value,
+                Err(error) => GroupOutcome::Inconclusive(Inconclusive::from_error(error)?),
             };
             groups.push(GroupCheck {
                 group: group.clone(),
@@ -159,12 +186,10 @@ impl SymbolicMeaning<'_> {
         }
         let mut unresolved_components = BTreeSet::new();
         for component in self.program.components() {
-            budget.tick("property checks")?;
             if component.cycle.is_some() {
                 unresolved_components.insert(component.id);
             }
         }
-        budget.charge(0, "property checks")?;
         Ok(PropertyReport {
             whole_program_admitted: self.is_complete(),
             unresolved_components,

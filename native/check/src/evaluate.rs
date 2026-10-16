@@ -22,6 +22,10 @@ pub enum CompletedProvider {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PremiseEvidence {
+    Discharged {
+        literal_occurrence: OccurrenceId,
+        proof: RewriteProofId,
+    },
     Positive {
         fact: GroundAtom,
         occurrence: OccurrenceId,
@@ -173,8 +177,18 @@ impl GroundProgram {
                     } // keep first grounded derivation
                     let mut premises = Vec::new();
                     let mut enabled = true;
-                    for literal in &rule.body {
+                    let authored = self
+                        .original_rule(rule.id)
+                        .ok_or(CheckError::Internal("missing authored rule"))?;
+                    for literal in &authored.body {
                         budget.tick("evaluation")?;
+                        if let Some(proof) = self.discharge(rule.id, literal.term.occurrence) {
+                            premises.push(PremiseEvidence::Discharged {
+                                literal_occurrence: literal.term.occurrence,
+                                proof: proof.id,
+                            });
+                            continue;
+                        }
                         let fact = &literal.term.atom;
                         let occurrence = literal.term.occurrence;
                         match literal.polarity {
@@ -220,6 +234,20 @@ impl GroundProgram {
                         }
                     }
                     if enabled {
+                        for premise in &premises {
+                            if let PremiseEvidence::Discharged {
+                                literal_occurrence,
+                                proof,
+                            } = premise
+                            {
+                                replay.validate_discharge(
+                                    rule.id,
+                                    *literal_occurrence,
+                                    *proof,
+                                    budget,
+                                )?;
+                            }
+                        }
                         let order = replay.derivations.len();
                         replay.derivations.insert(
                             rule.head.atom.clone(),
@@ -241,5 +269,44 @@ impl GroundProgram {
             replay.completed.insert(component.id);
         }
         Ok(replay)
+    }
+}
+
+impl Replay<'_> {
+    pub(crate) fn validate_discharge(
+        &self,
+        rule: GroundRuleId,
+        occurrence: OccurrenceId,
+        id: RewriteProofId,
+        budget: &mut Budget<'_>,
+    ) -> Result<()> {
+        let proof = self
+            .program
+            .rewrite_proof(id)
+            .ok_or(CheckError::Internal("foreign rewrite proof"))?;
+        if proof.candidate.rule.id != rule
+            || proof.kind
+                != (RewriteKind::Discharge {
+                    literal_occurrence: occurrence,
+                })
+        {
+            return Err(CheckError::Internal(
+                "rewrite proof does not justify this premise",
+            ));
+        }
+        let ctx = ConditionContext::build(self.program, budget)?;
+        // Check applicability to this observation, not just the presence of a
+        // proof ID. This does not add proof dependencies to the replay cone.
+        if !ctx.evaluate_with_budget(
+            &proof.candidate.condition,
+            self.present.iter().cloned(),
+            budget,
+        )? || ctx.evaluate_with_budget(&proof.coverage, self.present.iter().cloned(), budget)?
+        {
+            return Err(CheckError::Internal(
+                "discharge proof does not apply to observation",
+            ));
+        }
+        Ok(())
     }
 }

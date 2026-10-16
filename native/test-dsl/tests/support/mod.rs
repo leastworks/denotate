@@ -138,6 +138,45 @@ impl Fixture {
         }
         f
     }
+    pub fn exclusive() -> Self {
+        let mut f = Self::new(
+            "input input_a, input_b, input_x;\nslot a, b;\na <- input_a when present(input_x) and not available(b);\nb <- input_b when not present(input_x) and not available(a);\n",
+            &["input_a", "input_b", "input_x"],
+            &["a", "b"],
+        );
+        for (slot, input, other, neg_input) in
+            [("a", "input_a", "b", false), ("b", "input_b", "a", true)]
+        {
+            let line = f
+                .text
+                .lines()
+                .find(|s| s.starts_with(&format!("{slot} <-")))
+                .unwrap()
+                .to_owned();
+            let span = f.span(&line);
+            let t = f.atom(span, "present", "input_x");
+            let t = if neg_input { f.not(t) } else { t };
+            let condition = f.binary(t, f.not(f.atom(span, "available", other)), true);
+            f.mapping(span, slot, input, Some(condition));
+        }
+        f
+    }
+    pub fn redundant() -> Self {
+        let mut f = Self::new(
+            "input input_a;\nslot a;\na <- input_a;\na <- input_a when not available(a);\n",
+            &["input_a"],
+            &["a"],
+        );
+        f.mapping(f.span("a <- input_a;"), "a", "input_a", None);
+        let span = f.span("a <- input_a when not available(a);");
+        f.mapping(
+            span,
+            "a",
+            "input_a",
+            Some(f.not(f.atom(span, "available", "a"))),
+        );
+        f
+    }
     pub fn mixed(require_c: bool, fix_c: bool) -> Self {
         let guard = if require_c {
             "available(a) and present(input_c)"

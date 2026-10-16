@@ -32,7 +32,8 @@ impl std::error::Error for CheckError {}
 pub(crate) type Result<T> = std::result::Result<T, CheckError>;
 
 /// Per checker operation, including preparation, evaluation and Boolean queries.
-/// Exceeding a limit returns no partial successful result. Deadlines are checked
+/// Low-level operations return LimitExceeded; reporting APIs preserve completed
+/// scopes and label unfinished work Inconclusive. Deadlines are checked
 /// cooperatively between work items, not a promise of hard real-time preemption.
 #[derive(Debug, Clone)]
 pub struct Limits {
