@@ -2,6 +2,7 @@
 //! No observation-specific admission. Frontends own presentation.
 
 mod boolean;
+mod completion;
 mod contracts;
 mod evaluate;
 mod findings;
@@ -13,6 +14,7 @@ mod symbolic;
 mod upper_bounds;
 
 pub use boolean::*;
+pub use completion::*;
 pub use contracts::*;
 pub use evaluate::*;
 pub use findings::*;

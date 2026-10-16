@@ -8,6 +8,9 @@ use std::{
     sync::Arc,
 };
 
+mod equations;
+pub(crate) use equations::{EquationContext, Formula};
+
 /// A complete Boolean assignment: every ground input fact is present or absent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Observation {
@@ -57,6 +60,54 @@ pub struct ConditionContext {
 impl GroundProgram {
     pub fn condition_context(&self, limits: &Limits) -> Result<ConditionContext> {
         ConditionContext::build(self, &mut Budget::new(limits))
+    }
+
+    /// Return the exact conjunction of input literals, if this condition is one.
+    /// Values say whether each fact must be present or absent; unmentioned facts
+    /// are unconstrained. True gives an empty map; false and non-conjunctions
+    /// give None. This is not a satisfying assignment or a DNF expansion.
+    pub fn input_conjunction(
+        &self,
+        condition: &Condition,
+        limits: &Limits,
+    ) -> Result<Option<BTreeMap<GroundAtom, bool>>> {
+        let mut budget = Budget::new(limits);
+        budget.tick("condition summary")?;
+        if condition.universe != self.preparation
+            || usize::from(condition.bdd.num_vars()) != self.inputs.len()
+        {
+            return Err(CheckError::ForeignCondition);
+        }
+        if condition.node_count() > limits.max_bdd_nodes {
+            return Err(limit("condition summary", "BDD nodes"));
+        }
+        if condition.is_false() {
+            return Ok(None);
+        }
+        // A conjunction's reduced BDD has one continuing branch at each node;
+        // its other branch is false. Follow links, not serialization order.
+        let mut literals = BTreeMap::new();
+        let mut node = condition.bdd.root_pointer();
+        while !node.is_one() {
+            budget.tick("condition summary")?;
+            let low = condition.bdd.low_link_of(node);
+            let high = condition.bdd.high_link_of(node);
+            let (value, next) = match (low.is_zero(), high.is_zero()) {
+                (true, false) => (true, high),
+                (false, true) => (false, low),
+                _ => return Ok(None),
+            };
+            literals.insert(condition.bdd.var_of(node).to_index(), value);
+            node = next;
+        }
+        let mut result = BTreeMap::new();
+        for (index, atom) in self.inputs.iter().enumerate() {
+            budget.tick("condition summary")?;
+            if let Some(value) = literals.get(&index) {
+                result.insert(atom.clone(), *value);
+            }
+        }
+        Ok(Some(result))
     }
 }
 
@@ -231,7 +282,9 @@ impl ConditionContext {
     }
     fn check(&self, condition: &Condition, budget: &mut Budget<'_>) -> Result<()> {
         budget.tick("BDD operation")?;
-        if condition.universe != self.universe {
+        if condition.universe != self.universe
+            || condition.bdd.num_vars() != self.variables.num_vars()
+        {
             return Err(CheckError::ForeignCondition);
         }
         if condition.node_count() > budget.limits.max_bdd_nodes {
@@ -277,6 +330,106 @@ mod tests {
     use super::*;
     use biodivine_lib_bdd::{BddNode, BddPointer};
     use denotate_ir::{Corpus, RelationRole};
+
+    #[test]
+    fn input_conjunction_is_exact_and_omits_dont_care_inputs() {
+        let limits = Limits::default();
+        let mut corpus = Corpus::new();
+        let atoms: Vec<_> = ["x", "y", "z"]
+            .into_iter()
+            .map(|name| {
+                GroundAtom::new(
+                    corpus
+                        .declare_relation(name, RelationRole::Input, [])
+                        .unwrap(),
+                    [],
+                )
+            })
+            .collect();
+        let program = GroundProgram::prepare(&corpus, &Domains::new(), &limits).unwrap();
+        let ctx = program.condition_context(&limits).unwrap();
+        let x = ctx.input(&atoms[0], &limits).unwrap();
+        let y = ctx.input(&atoms[1], &limits).unwrap();
+        let not_z = ctx
+            .not(&ctx.input(&atoms[2], &limits).unwrap(), &limits)
+            .unwrap();
+        let conjunction = ctx.and(&x, &not_z, &limits).unwrap();
+        // Two authored alternatives can simplify to one exact conjunction.
+        let simplified = ctx
+            .or(
+                &ctx.and(&conjunction, &y, &limits).unwrap(),
+                &ctx.and(&conjunction, &ctx.not(&y, &limits).unwrap(), &limits)
+                    .unwrap(),
+                &limits,
+            )
+            .unwrap();
+        for (condition, expected) in [
+            (ctx.true_condition(), BTreeMap::new()),
+            (x.clone(), BTreeMap::from([(atoms[0].clone(), true)])),
+            (not_z, BTreeMap::from([(atoms[2].clone(), false)])),
+            (
+                conjunction,
+                BTreeMap::from([(atoms[0].clone(), true), (atoms[2].clone(), false)]),
+            ),
+            (
+                simplified,
+                BTreeMap::from([(atoms[0].clone(), true), (atoms[2].clone(), false)]),
+            ),
+        ] {
+            let literals = program
+                .input_conjunction(&condition, &limits)
+                .unwrap()
+                .unwrap();
+            assert_eq!(literals, expected);
+            for bits in 0..8 {
+                let present: BTreeSet<_> = atoms
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, _)| bits & (1 << i) != 0)
+                    .map(|(_, a)| a.clone())
+                    .collect();
+                assert_eq!(
+                    ctx.evaluate(&condition, present.iter().cloned(), &limits)
+                        .unwrap(),
+                    literals
+                        .iter()
+                        .all(|(atom, value)| present.contains(atom) == *value),
+                );
+            }
+        }
+        assert_eq!(
+            program
+                .input_conjunction(&ctx.false_condition(), &limits)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            program
+                .input_conjunction(&ctx.or(&x, &y, &limits).unwrap(), &limits)
+                .unwrap(),
+            None
+        );
+        let foreign = GroundProgram::prepare(&corpus, &Domains::new(), &limits).unwrap();
+        assert_eq!(
+            foreign.input_conjunction(&x, &limits),
+            Err(CheckError::ForeignCondition)
+        );
+        for limited in [
+            Limits {
+                max_work: 0,
+                ..limits.clone()
+            },
+            Limits {
+                max_bdd_nodes: 2,
+                ..limits.clone()
+            },
+        ] {
+            assert!(matches!(
+                program.input_conjunction(&x, &limited),
+                Err(CheckError::LimitExceeded { .. })
+            ));
+        }
+    }
 
     #[test]
     fn equivalent_meanings_do_not_require_equal_node_vectors() {

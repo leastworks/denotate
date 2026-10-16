@@ -3,9 +3,9 @@ use denotate_ir::*;
 use std::collections::BTreeSet;
 
 #[path = "../../../test-dsl/tests/support/mod.rs"]
-mod dsl_fixture;
+pub(super) mod dsl_fixture;
 
-fn rel(c: &mut Corpus, name: &str, input: bool) -> RelationId {
+pub(super) fn rel(c: &mut Corpus, name: &str, input: bool) -> RelationId {
     c.declare_relation(
         name,
         if input {
@@ -17,10 +17,10 @@ fn rel(c: &mut Corpus, name: &str, input: bool) -> RelationId {
     )
     .unwrap()
 }
-fn atom(r: RelationId) -> GroundAtom {
+pub(super) fn atom(r: RelationId) -> GroundAtom {
     GroundAtom::new(r, [])
 }
-fn rule(c: &mut Corpus, head: RelationId, body: &[(RelationId, bool)]) -> RuleId {
+pub(super) fn rule(c: &mut Corpus, head: RelationId, body: &[(RelationId, bool)]) -> RuleId {
     let head = c.atom(head, []).unwrap();
     let body: Vec<_> = body
         .iter()
@@ -38,7 +38,7 @@ fn rule(c: &mut Corpus, head: RelationId, body: &[(RelationId, bool)]) -> RuleId
 
 // Independent truth oracle: no BDD, SCC/admission result, sparse grounding or
 // production evaluator. Exponential enumeration is deliberately capped.
-fn subsets(atoms: &[GroundAtom]) -> Vec<BTreeSet<GroundAtom>> {
+pub(super) fn subsets(atoms: &[GroundAtom]) -> Vec<BTreeSet<GroundAtom>> {
     assert!(atoms.len() <= 12, "tiny stable-model oracle only");
     (0..1usize << atoms.len())
         .map(|bits| {
@@ -51,7 +51,7 @@ fn subsets(atoms: &[GroundAtom]) -> Vec<BTreeSet<GroundAtom>> {
         })
         .collect()
 }
-fn stable_models(
+pub(super) fn stable_models(
     atoms: &[GroundAtom],
     inputs: &BTreeSet<GroundAtom>,
     rules: &[GroundRule],
@@ -147,7 +147,7 @@ fn lowered_input_mapping_forwarding_agrees_with_cartesian_stable_model_oracle() 
 
 // Completion/supported-model oracle, independent of BDDs and the rewrite
 // implementation. Unlike stable models, these can contain positive self-support.
-fn supported_models(
+pub(super) fn supported_models(
     p: &GroundProgram,
     rules: &[GroundRule],
     world: &BTreeSet<GroundAtom>,

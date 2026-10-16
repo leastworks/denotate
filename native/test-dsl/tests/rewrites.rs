@@ -298,7 +298,19 @@ fn exhausted_admission_reports_inconclusive_but_keeps_independent_overlap() {
         ds.iter()
             .filter(|d| d.kind == DiagnosticKind::Inconclusive)
             .count()
-            >= 3
+            >= 2
+    );
+    // Completion has a separate allowance: exhausted admission does not erase
+    // the independently established no-meaning finding on the cycle itself.
+    let failure = ds
+        .iter()
+        .find(|d| d.kind == DiagnosticKind::NoMeaning)
+        .unwrap();
+    assert!(
+        failure
+            .notes
+            .iter()
+            .any(|n| n.contains("Admission remains inconclusive"))
     );
     assert!(ds.iter().all(|d| d.kind != DiagnosticKind::UnsupportedGroup
         && d.kind != DiagnosticKind::UnsupportedCycle));

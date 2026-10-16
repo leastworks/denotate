@@ -27,10 +27,12 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "requires-c" => Fixture::mixed(true, false),
         "fixed" => Fixture::mixed(true, true),
         "exclusive" => Fixture::exclusive(),
+        "ambiguous" => Fixture::ambiguous(),
         "redundant" => Fixture::redundant(),
         _ => {
             return Err(
-                "expected overlap, mixed, requires-c, fixed, exclusive or redundant".into(),
+                "expected overlap, mixed, requires-c, fixed, exclusive, ambiguous or redundant"
+                    .into(),
             );
         }
     };
@@ -78,7 +80,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         if report.whole_program_admitted() {
             "established"
         } else {
-            "incomplete (unsupported cycle)"
+            "incomplete (see region findings)"
         }
     );
     for diagnostic in &diagnostics {
@@ -201,7 +203,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     let ms = |d: std::time::Duration| d.as_secs_f64() * 1000.0;
     println!(
-        "\nCosts (ms): grounding {:.3}, stratification {:.3}, rewrites {:.3}, symbolic {:.3}, properties {:.3}, witness {:.3}, replay {:.3}, evidence {:.3}",
+        "\nCosts (ms): grounding {:.3}, stratification {:.3}, rewrites {:.3}, symbolic {:.3}, properties {:.3}, witness {:.3}, replay {:.3}, evidence {:.3}, completion {:.3}",
         ms(ground.metrics().grounding),
         ms(ground.metrics().admissibility),
         ms(rewrite_elapsed),
@@ -209,7 +211,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         ms(report.property_metrics.elapsed),
         ms(report.finding_metrics.witness),
         ms(report.finding_metrics.replay),
-        ms(report.finding_metrics.evidence)
+        ms(report.finding_metrics.evidence),
+        ms(report.finding_metrics.completion)
     );
     println!(
         "All obligations proved: {}",

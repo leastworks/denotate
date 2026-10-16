@@ -138,6 +138,17 @@ impl Fixture {
         }
         f
     }
+    pub fn ambiguous() -> Self {
+        let text = "input input_a, input_b;\nslot a, b;\na <- input_a when not available(b);\nb <- input_b when not available(a);\n";
+        let mut f = Self::new(text, &["input_a", "input_b"], &["a", "b"]);
+        for (line, target, input, other) in [(2, "a", "input_a", "b"), (3, "b", "input_b", "a")] {
+            let span = f.span(text.lines().nth(line).unwrap());
+            let guard = f.not(f.atom(span, "available", other));
+            f.mapping(span, target, input, Some(guard));
+        }
+        f
+    }
+
     pub fn exclusive() -> Self {
         let mut f = Self::new(
             "input input_a, input_b, input_x;\nslot a, b;\na <- input_a when present(input_x) and not available(b);\nb <- input_b when not present(input_x) and not available(a);\n",

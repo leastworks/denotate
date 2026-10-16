@@ -1,3 +1,4 @@
+mod completion;
 mod core;
 mod findings;
 mod input_mapping;

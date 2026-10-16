@@ -59,6 +59,8 @@ pub struct UnresolvedRegion {
     pub cycle: Cycle,
     pub rules: Vec<GroundRule>,
     pub outcome: RegionOutcome,
+    /// Separate from admission: a solution does not admit this region.
+    pub completion: CompletionOutcome,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegionOutcome {
@@ -70,6 +72,7 @@ pub struct FindingMetrics {
     pub witness: Duration,
     pub replay: Duration,
     pub evidence: Duration,
+    pub completion: Duration,
 }
 #[derive(Debug)]
 pub struct Verification<'p> {
@@ -107,6 +110,16 @@ impl<'p> SymbolicMeaning<'p> {
     /// Synchronous findings. Limits become explicit inconclusive groups; a
     /// replay mismatch is an internal failure, never a reported counterexample.
     pub fn verify_at_most_one(&self, limits: &Limits) -> Result<Verification<'p>> {
+        self.verify_with_completion_limits(limits, limits)
+    }
+
+    /// Completion has its own budget and runs after overlap checks/replay, so
+    /// an expensive broken region cannot consume their allowance.
+    pub fn verify_with_completion_limits(
+        &self,
+        limits: &Limits,
+        completion_limits: &Limits,
+    ) -> Result<Verification<'p>> {
         let report = self.check_at_most_one(limits)?;
         let mut budget = Budget::new(limits);
         let mut metrics = FindingMetrics::default();
@@ -178,6 +191,9 @@ impl<'p> SymbolicMeaning<'p> {
             });
         }
         let mut unresolved = Vec::new();
+        let completion_start = Instant::now();
+        let mut completion_budget = Budget::new(completion_limits);
+        let mut completion_nodes = 0;
         // Copy already bounded, prepared cycle metadata even if witness work
         // exhausted its budget. Otherwise a limit would hide the blocked regions.
         for id in report.unresolved_components {
@@ -200,16 +216,29 @@ impl<'p> SymbolicMeaning<'p> {
                     rules.push(rule.clone());
                 }
             }
+            let completion = match self.complete_component(
+                component,
+                completion_nodes,
+                &mut completion_budget,
+            ) {
+                Ok(outcome) => outcome,
+                Err(error) => CompletionOutcome::Inconclusive(Inconclusive::from_error(error)?),
+            };
+            if let CompletionOutcome::NoMeaning(finding) = &completion {
+                completion_nodes += finding.bad_input.node_count();
+            }
             unresolved.push(UnresolvedRegion {
                 component: id,
                 cycle: cycle.clone(),
                 rules,
+                completion,
                 outcome: self
                     .program
                     .admission_limit()
                     .map_or(RegionOutcome::Unsupported, RegionOutcome::Inconclusive),
             });
         }
+        metrics.completion = completion_start.elapsed();
         Ok(Verification {
             program: self.program,
             groups,

@@ -186,15 +186,41 @@ fn unresolved_region_never_restricts_the_overlap_witness_or_hides_independent_re
                 );
                 let diagnostic = messages
                     .iter()
-                    .find(|d| d.kind == DiagnosticKind::UnsupportedCycle)
+                    .find(|d| d.kind == DiagnosticKind::NoMeaning)
                     .unwrap();
                 assert_eq!(f.sources.text(diagnostic.primary).unwrap(), "not");
+                assert_eq!(diagnostic.kind.severity(), DiagnosticSeverity::Error);
+                assert_eq!(
+                    diagnostic.message,
+                    "These rules have no consistent result whenever input_c is present."
+                );
+                let CompletionOutcome::NoMeaning(failure) = &cycle.completion else {
+                    panic!()
+                };
+                assert!(
+                    failure
+                        .observation
+                        .present
+                        .contains(&atom(&p, "present", &["input_c"]))
+                );
+                assert!(
+                    diagnostic
+                        .notes
+                        .iter()
+                        .any(|n| n.contains("Other observations remain unsupported"))
+                );
+                assert!(
+                    diagnostic
+                        .notes
+                        .iter()
+                        .any(|n| n.starts_with("Example observation") && n.contains("input_c"))
+                );
                 assert_eq!(diagnostic.cycle_rules.len(), 3);
                 for notice in skipped {
                     assert_eq!(notice.kind.severity(), DiagnosticSeverity::Information);
                     assert_eq!(
                         notice.message,
-                        "Overlap check for slot d was skipped: it depends on an unsupported cycle. See related locations."
+                        "Overlap check for slot d was skipped: it depends on a region with a no-consistent-result finding. See related locations."
                     );
                     assert_eq!(
                         notice.notes,
@@ -204,7 +230,7 @@ fn unresolved_region_never_restricts_the_overlap_witness_or_hides_independent_re
                         notice
                             .related
                             .iter()
-                            .any(|o| o.role == "blocking unsupported cycle"
+                            .any(|o| o.role == "blocking no-meaning finding"
                                 && o.span == diagnostic.primary)
                     );
                     assert_eq!(
@@ -355,7 +381,7 @@ fn unlocated_library_negation_falls_back_without_hiding_other_findings() {
     assert_eq!(
         messages
             .iter()
-            .filter(|d| d.kind == DiagnosticKind::UnsupportedCycle)
+            .filter(|d| d.kind == DiagnosticKind::NoMeaning)
             .map(|d| d.primary)
             .collect::<BTreeSet<_>>(),
         expected_rule_locations
@@ -430,7 +456,7 @@ fn unlocated_library_negation_falls_back_without_hiding_other_findings() {
     assert_eq!(
         messages
             .iter()
-            .filter(|d| d.kind == DiagnosticKind::UnsupportedCycle)
+            .filter(|d| d.kind == DiagnosticKind::NoMeaning)
             .map(|d| d.primary)
             .collect::<Vec<_>>(),
         [user_mapping.target.span]

@@ -85,7 +85,14 @@ impl GroundProgram {
         limits: &Limits,
     ) -> Result<DependencyCone> {
         let mut budget = Budget::new(limits);
-        ConeIndex::new(self, &mut budget)?.build(roots, &mut budget)
+        self.dependency_cone_with_budget(roots, &mut budget)
+    }
+    pub(crate) fn dependency_cone_with_budget(
+        &self,
+        roots: impl IntoIterator<Item = GroundAtom>,
+        budget: &mut Budget<'_>,
+    ) -> Result<DependencyCone> {
+        ConeIndex::new(self, budget)?.build(roots, budget)
     }
 }
 

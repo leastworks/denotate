@@ -11,6 +11,7 @@ use std::{collections::BTreeSet, fmt};
 pub enum DiagnosticKind {
     OverlappingMappings,
     UnsupportedCycle,
+    NoMeaning,
     UnsupportedGroup,
     Inconclusive,
 }
@@ -23,7 +24,7 @@ pub enum DiagnosticSeverity {
 impl DiagnosticKind {
     pub fn severity(self) -> DiagnosticSeverity {
         match self {
-            Self::OverlappingMappings => DiagnosticSeverity::Error,
+            Self::OverlappingMappings | Self::NoMeaning => DiagnosticSeverity::Error,
             Self::UnsupportedCycle => DiagnosticSeverity::Warning,
             Self::UnsupportedGroup | Self::Inconclusive => DiagnosticSeverity::Information,
         }
@@ -163,6 +164,7 @@ pub fn present(
             }
             let mut related = Vec::new();
             let mut cycle_rules = BTreeSet::new();
+            let mut has_no_meaning = false;
             for component in &group.cone.blocked_by {
                 let region = report
                     .unresolved
@@ -170,14 +172,23 @@ pub fn present(
                     .find(|r| r.component == *component)
                     .ok_or(PresentationError::InvalidFinding("missing blocking cycle"))?;
                 let (cycle_targets, _) = cycle_locations(region, &origins, view)?;
-                related.extend(
-                    cycle_targets
-                        .into_iter()
-                        .map(|span| Origin::new(span, "blocking unsupported cycle")),
-                );
+                let proven_failure = matches!(region.completion, CompletionOutcome::NoMeaning(_));
+                has_no_meaning |= proven_failure;
+                related.extend(cycle_targets.into_iter().map(|span| {
+                    Origin::new(
+                        span,
+                        if proven_failure {
+                            "blocking no-meaning finding"
+                        } else {
+                            "blocking unsupported cycle"
+                        },
+                    )
+                }));
                 cycle_rules.extend(region.rules.iter().map(|r| r.source));
             }
-            let cause = if group.cone.blocked_by.len() == 1 {
+            let cause = if has_no_meaning {
+                "a region with a no-consistent-result finding"
+            } else if group.cone.blocked_by.len() == 1 {
                 "an unsupported cycle"
             } else {
                 "unsupported cycles"
@@ -296,23 +307,146 @@ pub fn present(
         }
     }
     for region in &report.unresolved {
-        let (targets, related) = cycle_locations(region, &origins, view)?;
-        for primary in targets {
-            let (kind, message) = match region.outcome {
-                RegionOutcome::Unsupported => (DiagnosticKind::UnsupportedCycle, "This dependency cycle contains negation and is unsupported by the current checker.".into()),
+        let (targets, mut related) = cycle_locations(region, &origins, view)?;
+        let mut rules = region
+            .rules
+            .iter()
+            .map(|r| r.source)
+            .collect::<BTreeSet<_>>();
+        let mut notes = vec!["This is not a proof that the program has no meaning. Independent obligation results remain available.".into()];
+        let (kind, message) = match &region.completion {
+            CompletionOutcome::NoMeaning(finding) => {
+                rules = finding.rules.iter().map(|r|r.source).collect();
+                for rule in &finding.rules { related.extend(origins(rule.source.into())?); }
+                notes = vec![
+                    observation_note(lowered, &finding.observation)?,
+                    "Other observations remain unsupported unless separately certified; a consistent equation solution does not establish meaning.".into(),
+                    "Independent obligation results remain available.".into(),
+                ];
+                (DiagnosticKind::NoMeaning, no_meaning_message(lowered, report.program(), &finding.bad_input)?)
+            }
+            CompletionOutcome::Inconclusive(cause) => (DiagnosticKind::Inconclusive, format!("Consistency checking for this dependency cycle is inconclusive: {} exhausted its {} budget.",cause.phase,cause.resource)),
+            CompletionOutcome::Deferred { blocked_by } => {
+                for id in blocked_by {
+                    if let Some(upstream) = report.unresolved.iter().find(|r|r.component==*id) {
+                        let (locations, _) = cycle_locations(upstream, &origins, view)?;
+                        related.extend(locations.into_iter().map(|span| Origin::new(span,
+                            if matches!(upstream.completion,CompletionOutcome::NoMeaning(_)) { "upstream no-meaning finding" }
+                            else { "unsettled upstream component" })));
+                    }
+                }
+                (DiagnosticKind::UnsupportedCycle, "Consistency checking for this cycle was deferred: an upstream component is not settled. See related locations.".into())
+            }
+            CompletionOutcome::NoContradiction => match region.outcome {
+                RegionOutcome::Unsupported => (DiagnosticKind::UnsupportedCycle, "This dependency cycle contains negation and is unsupported by the current checker. Its equations have a solution for every input observation, but that does not establish meaning.".into()),
                 RegionOutcome::Inconclusive(cause) => (DiagnosticKind::Inconclusive, format!("Admission of this dependency cycle is inconclusive: {} exhausted its {} budget.", cause.phase, cause.resource)),
-            };
+            },
+        };
+        if kind == DiagnosticKind::NoMeaning {
+            if let RegionOutcome::Inconclusive(cause) = region.outcome {
+                notes.push(format!("Admission remains inconclusive: {} exhausted its {} budget. The separate consistency check established this failure.",cause.phase,cause.resource));
+            }
+        }
+        for primary in targets {
             diagnostics.push(Diagnostic {
                 kind,
-                message,
+                message: message.clone(),
                 primary,
                 related: unique_origins(related.iter().filter(|o| o.span != primary).cloned()),
-                notes: vec!["This is not a proof that the program has no meaning. Independent obligation results remain available.".into()],
-                cycle_rules: region.rules.iter().map(|r| r.source).collect(),
+                notes: notes.clone(),
+                cycle_rules: rules.iter().copied().collect(),
             });
         }
     }
     Ok(diagnostics)
+}
+
+fn no_meaning_message(
+    lowered: &LoweredProgram,
+    program: &GroundProgram,
+    condition: &Condition,
+) -> Result<String> {
+    let literals = match program.input_conjunction(condition, &Limits::default()) {
+        Ok(Some(literals)) => literals,
+        // Wording is optional: a summary budget must not suppress a finding.
+        Ok(None) | Err(CheckError::LimitExceeded { .. }) => {
+            return Ok(
+                "These rules have no consistent result in the example input observation.".into(),
+            );
+        }
+        Err(_) => {
+            return Err(PresentationError::InvalidFinding(
+                "invalid failure condition",
+            ));
+        }
+    };
+    if literals.is_empty() {
+        return Ok("These rules have no consistent result for any input observation.".into());
+    }
+    let mut clauses = Vec::new();
+    for (atom, value) in literals {
+        if atom.relation != lowered.library.present || atom.arguments.len() != 1 {
+            return Err(PresentationError::InvalidFinding(
+                "unexpected InputMapping input",
+            ));
+        }
+        let input = lowered
+            .corpus
+            .constant(atom.arguments[0])
+            .ok_or(PresentationError::InvalidFinding("unknown input value"))?;
+        clauses.push(format!(
+            "{} is {}",
+            input.name,
+            if value { "present" } else { "absent" }
+        ));
+    }
+    Ok(format!(
+        "These rules have no consistent result whenever {}.",
+        clauses.join(" and ")
+    ))
+}
+
+fn observation_note(lowered: &LoweredProgram, observation: &Observation) -> Result<String> {
+    let show = |facts: &BTreeSet<GroundAtom>| -> Result<String> {
+        facts
+            .iter()
+            .map(|a| {
+                let relation = lowered
+                    .corpus
+                    .relation(a.relation)
+                    .ok_or(PresentationError::InvalidFinding("unknown input relation"))?;
+                let values = a
+                    .arguments
+                    .iter()
+                    .map(|id| {
+                        lowered
+                            .corpus
+                            .constant(*id)
+                            .map(|c| c.name.as_str())
+                            .ok_or(PresentationError::InvalidFinding("unknown input value"))
+                    })
+                    .collect::<Result<Vec<_>>>()?
+                    .join(", ");
+                Ok(if a.relation == lowered.library.present {
+                    values
+                } else {
+                    format!("{}({values})", relation.name)
+                })
+            })
+            .collect::<Result<Vec<_>>>()
+            .map(|v| {
+                if v.is_empty() {
+                    "(none)".into()
+                } else {
+                    v.join(", ")
+                }
+            })
+    };
+    Ok(format!(
+        "Example observation - inputs present: {}; inputs absent: {}.",
+        show(&observation.present)?,
+        show(&observation.absent)?
+    ))
 }
 
 fn cycle_locations(
