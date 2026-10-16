@@ -289,9 +289,34 @@ pub fn present(
             ));
         }
         let mut notes = vec![match example.replay_scope {
+            ReplayScope::WholeProgram if !report.whole_program_admitted() => "Counterexample replayed on the whole program for this observation only; whole-program admissibility across all inputs remains incomplete.".into(),
             ReplayScope::WholeProgram => "Counterexample replayed on the whole program.".into(),
             ReplayScope::ConeOnly => "Counterexample replayed on this obligation's dependency cone only; whole-program admissibility is incomplete.".into(),
         }];
+        match &example.certification {
+            Some(CertificationOutcome::NotCertified) => notes.push("Whole-program replay was not certified for the attempted observations. Failure to certify alone is not proof of no meaning.".into()),
+            Some(CertificationOutcome::Inconclusive(cause)) => notes.push(format!("Whole-program replay certification is inconclusive: {} exhausted its {} budget. The cone counterexample is unchanged.", cause.phase, cause.resource)),
+            _ => {}
+        }
+        for component in &example.confined_to_no_meaning {
+            let region = report
+                .unresolved
+                .iter()
+                .find(|r| r.component == *component)
+                .filter(|r| matches!(r.completion, CompletionOutcome::NoMeaning(_)))
+                .ok_or(PresentationError::InvalidFinding(
+                    "missing no-meaning implication target",
+                ))?;
+            let (locations, _) = cycle_locations(region, &origins, view)?;
+            related.extend(
+                locations
+                    .into_iter()
+                    .map(|span| Origin::new(span, "conflict confined to no-meaning region")),
+            );
+        }
+        if !example.confined_to_no_meaning.is_empty() {
+            notes.push("This conflict only occurs in observations where the rules at the related no-meaning locations have no consistent result. It remains a cone-only conflict, not a whole-program execution.".into());
+        }
         notes.push(
             "Locations follow the retained grounded derivation for each conflicting tuple.".into(),
         );

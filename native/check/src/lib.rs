@@ -1,7 +1,8 @@
 //! Finite grounding, conservative rewrites, BDD checking and replayed findings.
-//! No observation-specific admission. Frontends own presentation.
+//! Observation certificates are scoped to one input snapshot. Frontends own presentation.
 
 mod boolean;
+mod certification;
 mod completion;
 mod contracts;
 mod evaluate;
@@ -14,6 +15,7 @@ mod symbolic;
 mod upper_bounds;
 
 pub use boolean::*;
+pub use certification::*;
 pub use completion::*;
 pub use contracts::*;
 pub use evaluate::*;

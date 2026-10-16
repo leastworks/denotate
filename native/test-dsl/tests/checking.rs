@@ -139,13 +139,26 @@ fn unresolved_region_never_restricts_the_overlap_witness_or_hides_independent_re
             );
             assert_eq!(
                 example.replay_scope,
-                if fix_c {
+                if fix_c || !require_c {
                     ReplayScope::WholeProgram
                 } else {
                     ReplayScope::ConeOnly
                 }
             );
             assert_eq!(report.whole_program_admitted(), fix_c);
+            if !fix_c {
+                assert!(if require_c {
+                    matches!(
+                        example.certification,
+                        Some(CertificationOutcome::NotCertified)
+                    )
+                } else {
+                    matches!(
+                        example.certification,
+                        Some(CertificationOutcome::Certified(_))
+                    )
+                });
+            }
             assert!(!report.all_obligations_proved());
             let d = atom(&p, "available", &["d"]).arguments;
             let group = report.groups.iter().find(|g| g.group.key == d).unwrap();
@@ -153,6 +166,31 @@ fn unresolved_region_never_restricts_the_overlap_witness_or_hides_independent_re
                 assert!(matches!(group.outcome, VerifiedOutcome::Unsupported));
             }
             let messages = presentation::present(&p, &report, &f.sources, "test-dsl").unwrap();
+            assert_eq!(
+                example.confined_to_no_meaning.len(),
+                usize::from(require_c && !fix_c)
+            );
+            for message in messages
+                .iter()
+                .filter(|m| m.kind == DiagnosticKind::OverlappingMappings)
+            {
+                assert_eq!(
+                    message
+                        .notes
+                        .iter()
+                        .any(|n| n.starts_with("This conflict only occurs")),
+                    require_c && !fix_c
+                );
+                if !require_c && !fix_c {
+                    assert!(
+                        message
+                            .notes
+                            .iter()
+                            .any(|n| n.contains("for this observation only")
+                                && n.contains("remains incomplete"))
+                    );
+                }
+            }
             assert_eq!(
                 messages
                     .iter()

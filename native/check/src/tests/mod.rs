@@ -1,3 +1,4 @@
+mod certification;
 mod completion;
 mod core;
 mod findings;

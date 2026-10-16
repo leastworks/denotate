@@ -15,7 +15,7 @@ pub enum ReplayScope {
 
 /// A finite grounded proof DAG. Positive premises name earlier steps; negative
 /// premises only reference a completed provider and its confirmed absence.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GroundEvidence {
     Input,
     Derived {
@@ -23,7 +23,7 @@ pub enum GroundEvidence {
         premises: Vec<PremiseEvidence>,
     },
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EvidenceStep {
     pub order: usize,
     pub evidence: GroundEvidence,
@@ -36,6 +36,11 @@ pub struct Counterexample {
     /// derivations of one tuple. At least two, confirmed by concrete replay.
     pub tuples: BTreeSet<GroundAtom>,
     pub evidence: BTreeMap<GroundAtom, EvidenceStep>,
+    /// None when the original globally admitted program already replayed fully.
+    pub certification: Option<CertificationOutcome>,
+    /// Proven implications from this group's full violation condition to a
+    /// region's no-meaning condition, not inferences from failed certification.
+    pub confined_to_no_meaning: Vec<ComponentId>,
 }
 #[derive(Debug)]
 pub enum VerifiedOutcome {
@@ -73,6 +78,7 @@ pub struct FindingMetrics {
     pub replay: Duration,
     pub evidence: Duration,
     pub completion: Duration,
+    pub certification: Duration,
 }
 #[derive(Debug)]
 pub struct Verification<'p> {
@@ -120,11 +126,27 @@ impl<'p> SymbolicMeaning<'p> {
         limits: &Limits,
         completion_limits: &Limits,
     ) -> Result<Verification<'p>> {
+        self.verify_with_phase_limits(limits, completion_limits, limits)
+    }
+
+    /// Independent allowances for required findings and the optional replay
+    /// upgrade. Each phase shares its budget across groups/components in order.
+    pub fn verify_with_phase_limits(
+        &self,
+        limits: &Limits,
+        completion_limits: &Limits,
+        certification_limits: &Limits,
+    ) -> Result<Verification<'p>> {
         let report = self.check_at_most_one(limits)?;
         let mut budget = Budget::new(limits);
         let mut metrics = FindingMetrics::default();
         let mut groups = Vec::new();
+        let mut violations = Vec::new();
         for check in report.groups {
+            violations.push(match &check.outcome {
+                GroupOutcome::Overlap(c) => Some(c.clone()),
+                _ => None,
+            });
             let result = (|| -> Result<VerifiedOutcome> {
                 let outcome = match check.outcome {
                     GroupOutcome::Proved => VerifiedOutcome::Proved,
@@ -175,6 +197,8 @@ impl<'p> SymbolicMeaning<'p> {
                             replay_scope,
                             tuples,
                             evidence,
+                            certification: None,
+                            confined_to_no_meaning: vec![],
                         })
                     }
                 };
@@ -239,6 +263,50 @@ impl<'p> SymbolicMeaning<'p> {
             });
         }
         metrics.completion = completion_start.elapsed();
+        let certification_start = Instant::now();
+        let mut certification_budget = Budget::new(certification_limits);
+        for (group, condition) in groups.iter_mut().zip(violations) {
+            if let (VerifiedOutcome::Counterexample(example), Some(condition)) =
+                (&mut group.outcome, condition)
+            {
+                if example.replay_scope == ReplayScope::ConeOnly {
+                    self.certify_counterexample(
+                        example,
+                        &group.group,
+                        &condition,
+                        &mut certification_budget,
+                    )?;
+                    if example.replay_scope == ReplayScope::ConeOnly {
+                        for region in &unresolved {
+                            let CompletionOutcome::NoMeaning(finding) = &region.completion else {
+                                continue;
+                            };
+                            // Require a permitted observation outside the failure
+                            // region; otherwise every conflict implies it vacuously.
+                            // W is currently true. With assumptions, this must test
+                            // satisfiability of W AND NOT bad_input instead.
+                            if finding.bad_input.is_true() {
+                                continue;
+                            }
+                            match self.context.apply(
+                                &condition,
+                                &finding.bad_input,
+                                biodivine_lib_bdd::op_function::and_not,
+                                &mut certification_budget,
+                            ) {
+                                Ok(outside) if outside.is_false() => {
+                                    example.confined_to_no_meaning.push(region.component)
+                                }
+                                Ok(_) => {}
+                                Err(CheckError::LimitExceeded { .. }) => break, // Optional wording only.
+                                Err(error) => return Err(error),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        metrics.certification = certification_start.elapsed();
         Ok(Verification {
             program: self.program,
             groups,
@@ -250,7 +318,7 @@ impl<'p> SymbolicMeaning<'p> {
     }
 }
 
-fn collect_evidence(
+pub(crate) fn collect_evidence(
     replay: &Replay<'_>,
     roots: &BTreeSet<GroundAtom>,
     budget: &mut Budget<'_>,

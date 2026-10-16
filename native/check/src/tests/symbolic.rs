@@ -93,6 +93,10 @@ pub(super) fn assert_symbolic_agrees(program: &GroundProgram) {
             assert_eq!(
                 example.replay_scope == ReplayScope::WholeProgram,
                 program.is_admitted()
+                    || matches!(
+                        example.certification,
+                        Some(CertificationOutcome::Certified(_))
+                    )
             );
             for (fact, step) in &example.evidence {
                 assert_eq!(replay.fact(fact).unwrap(), FactState::Settled(true));
@@ -108,10 +112,29 @@ pub(super) fn assert_symbolic_agrees(program: &GroundProgram) {
                             PremiseEvidence::Positive { fact, .. } => {
                                 assert!(example.evidence[fact].order < step.order)
                             }
-                            PremiseEvidence::Absent { fact, provider, .. } => assert_eq!(
-                                replay.absence_provider(fact).unwrap().as_ref(),
-                                Some(provider)
-                            ),
+                            PremiseEvidence::Absent { fact, provider, .. } => {
+                                if let Some(CertificationOutcome::Certified(certified)) =
+                                    &example.certification
+                                {
+                                    assert!(!certified.facts.contains(fact));
+                                    match provider {
+                                        CompletedProvider::Component(id) => {
+                                            assert!(certified.providers[id].contains(fact))
+                                        }
+                                        CompletedProvider::InputSnapshot => {
+                                            assert!(certified.observation.absent.contains(fact))
+                                        }
+                                        CompletedProvider::NoPossibleProducer => {
+                                            assert!(!program.is_possible(fact).unwrap())
+                                        }
+                                    }
+                                } else {
+                                    assert_eq!(
+                                        replay.absence_provider(fact).unwrap().as_ref(),
+                                        Some(provider)
+                                    );
+                                }
+                            }
                         }
                     }
                 } else {

@@ -231,3 +231,46 @@ fn completion_exhaustion_is_informational_and_keeps_the_overlap_errors() {
     assert_eq!(exhausted.kind.severity(), DiagnosticSeverity::Information);
     assert!(exhausted.message.contains("Consistency checking"));
 }
+
+#[test]
+fn certification_exhaustion_keeps_cone_errors_and_separate_no_meaning_error() {
+    let f = Fixture::mixed(false, false);
+    let p = f.lower();
+    let limits = Limits::default();
+    let g = GroundProgram::prepare(&p.corpus, &domains(&p), &limits).unwrap();
+    let m = g.symbolic(&limits).unwrap();
+    let report = m
+        .verify_with_phase_limits(
+            &limits,
+            &limits,
+            &Limits {
+                max_work: 0,
+                ..limits.clone()
+            },
+        )
+        .unwrap();
+    let diagnostics = presentation::present(&p, &report, &f.sources, "test-dsl").unwrap();
+    let conflicts: Vec<_> = diagnostics
+        .iter()
+        .filter(|d| d.kind == DiagnosticKind::OverlappingMappings)
+        .collect();
+    assert_eq!(conflicts.len(), 2);
+    for d in conflicts {
+        assert!(
+            d.notes
+                .iter()
+                .any(|n| n.contains("certification is inconclusive"))
+        );
+        assert!(d.notes.iter().any(|n| n.contains("dependency cone only")));
+        assert!(
+            !d.notes
+                .iter()
+                .any(|n| n.starts_with("This conflict only occurs"))
+        );
+    }
+    assert!(
+        diagnostics
+            .iter()
+            .any(|d| d.kind == DiagnosticKind::NoMeaning)
+    );
+}

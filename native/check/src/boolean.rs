@@ -238,6 +238,39 @@ impl ConditionContext {
         Ok(Some(observation))
     }
 
+    /// Complete only inputs outside the function's full Boolean support as
+    /// present. Variables skipped on one satisfying path are not don't-cares.
+    pub(crate) fn present_dont_cares(
+        &self,
+        condition: &Condition,
+        observation: &Observation,
+        budget: &mut Budget<'_>,
+    ) -> Result<Observation> {
+        self.check(condition, budget)?;
+        let mut pending = vec![condition.bdd.root_pointer()];
+        let mut visited = BTreeSet::new();
+        let mut support = BTreeSet::new();
+        while let Some(node) = pending.pop() {
+            budget.tick("witness support")?;
+            if node.is_zero() || node.is_one() || !visited.insert(node) {
+                continue;
+            }
+            support.insert(condition.bdd.var_of(node));
+            pending.push(condition.bdd.low_link_of(node));
+            pending.push(condition.bdd.high_link_of(node));
+        }
+        budget.charge(self.inputs.len(), "witness completion")?;
+        let mut next = observation.clone();
+        for (atom, variable) in &self.inputs {
+            budget.tick("witness completion")?;
+            if !support.contains(variable) {
+                next.absent.remove(atom);
+                next.present.insert(atom.clone());
+            }
+        }
+        Ok(next)
+    }
+
     /// Test a complete observation (omitted inputs are absent). This is Boolean
     /// evaluation, not concrete relational replay or a counterexample certificate.
     pub fn evaluate(
