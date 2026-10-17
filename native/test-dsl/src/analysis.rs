@@ -1,9 +1,9 @@
 //! Snapshot-owned frontend/checker bridge. No LSP I/O or scheduling here.
+use crate::attribution::SourceView;
+use crate::{lowering::*, presentation, syntax, warnings};
 use denotate_check::*;
 use denotate_editor::Document;
 use denotate_ir::{SnapshotId, SourceSpan, Sources};
-use denotate_test_dsl::attribution::SourceView;
-use denotate_test_dsl::{lowering::*, presentation, syntax, warnings};
 use lsp_types::{
     Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString, Range,
     Url,
@@ -332,7 +332,7 @@ mod tests {
 
     #[test]
     fn attribution_failure_is_for_the_creator_not_a_user_finding() {
-        let text = include_str!("../../fixtures/overlapping-mappings.txt");
+        let text = include_str!("../fixtures/overlapping-mappings.txt");
         let doc = Arc::new(Document::new(
             &mut syntax::parser().unwrap(),
             text.into(),

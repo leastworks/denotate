@@ -1,7 +1,7 @@
 //! Recorded before changing the library, independently of the live old lowerer.
-use super::analysis;
 use denotate_check::*;
 use denotate_editor::Document;
+use denotate_test_dsl::analysis;
 use denotate_test_dsl::{lowering::incremental::Session, syntax};
 use lsp_types::Url;
 use serde_json::{Value, json};

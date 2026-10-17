@@ -1,19 +1,18 @@
 //! Single-document programs, two-speed diagnostics and a revision-gated worker.
 //! B's serial transport loop stays unchanged; this frontend owns scheduling.
-mod analysis;
 #[cfg(test)]
 mod premask;
 #[cfg(test)]
 mod prenormalize;
 mod worker;
 
-use analysis::Failure;
 use crossbeam_channel::{Sender, bounded};
 use denotate_check::{Cancellation, Limits};
 use denotate_editor::{
     Document, Documents, test_support,
     transport::{Result, send},
 };
+use denotate_test_dsl::analysis::{self, Failure};
 use denotate_test_dsl::{lowering::incremental::Session, syntax};
 use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
 use lsp_types::{

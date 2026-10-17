@@ -1,7 +1,7 @@
 //! One serial checking worker. The server owns coalescing, cancellation and publication.
-use super::analysis::{Failure, Output, Program};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use denotate_check::Limits;
+use denotate_test_dsl::analysis::{Failure, Output, Program};
 use lsp_types::Url;
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
