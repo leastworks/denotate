@@ -1,0 +1,159 @@
+input input_a, input_b, input_bb;
+slot a, b;
+
+a <- input_a;
+b <- input_b  when available(a);
+b <- input_bb when available(a);
+
+---
+input input_a, input_b, input_x;
+slot a, b;
+a <- input_a when present(input_x) and not available(b);
+b <- input_b when not present(input_x) and not available(a);
+
+---
+input input_a, input_b;
+slot a, b;
+a <- input_a when not available(b);
+b <- input_b when not available(a);
+
+---
+input input_a;
+slot a;
+a <- input_a;
+a <- input_a when not available(a);
+
+---
+input input_a, input_b, input_bb, input_c, input_d, input_dd;
+slot a, b, c, d;
+a <- input_a;
+b <- input_b when available(a);
+b <- input_bb when available(a);
+c <- input_c when not available(c);
+d <- input_d when not available(c);
+d <- input_dd;
+
+---
+input input_a, input_b, input_bb, input_c, input_d, input_dd;
+slot a, b, c, d;
+a <- input_a;
+b <- input_b when available(a);
+b <- input_bb when available(a) and present(input_c);
+c <- input_c when not available(c);
+d <- input_d when not available(c);
+d <- input_dd;
+
+---
+input input_a, input_b, input_bb, input_c, input_d, input_dd;
+slot a, b, c, d;
+a <- input_a;
+b <- input_b when available(a);
+b <- input_bb when available(a);
+c <- input_c;
+d <- input_d when not available(c);
+d <- input_dd;
+
+---
+input input_a, input_b, input_bb, input_x;
+slot a, b, c;
+b <- input_b when available(a) or available(c);
+
+---
+input input_a, input_b, input_bb, input_x;
+slot a, b, c;
+b <- input_b when available(a);
+
+---
+input input_a, input_b, input_bb, input_x;
+slot a, b, c;
+b <- input_bb when not available(a);
+
+---
+input input_a, input_b, input_bb, input_x;
+slot a, b, c;
+b <- input_b when not present(input_x);
+
+---
+input input_a, input_b, input_bb, input_x;
+slot a, b, c;
+b <- input_b when not (available(a) and available(c));
+
+---
+input input_a, input_b, input_bb, input_x;
+slot a, b, c;
+b <- input_b when (available(a) or available(c)) and present(input_b);
+
+---
+input input_a, input_b, input_bb, input_x;
+slot a, b, c;
+a <- input_a when not available(a);
+
+---
+input input_a, input_b, input_bb, input_x;
+slot a, b, c;
+b <- input_b when available(missing);
+
+---
+input input_a, input_b, input_bb, input_x;
+slot a, b, c;
+b <- input_b when available(input_a);
+
+---
+input input_a, input_b, input_bb, input_x;
+slot a, b, c;
+b <- input_b when present(a);
+
+---
+input input_a, input_b, input_bb, input_x;
+slot a, b, c;
+b <- input_b when not (available(a) or available(c));
+
+---
+input input_a, input_b, input_bb, input_x;
+slot a, b, c;
+b <- input_b when not not available(a);
+
+---
+input input_a, input_b, input_bb, input_x;
+slot a, b, c;
+b <- input_b when not (available(a) or (available(c) and present(input_x)));
+
+---
+input input_a, input_b, input_bb, input_x;
+slot a, b, c;
+b <- input_b when (available(a) or available(c)) and (present(input_b) or present(input_x));
+
+---
+input i, j, x, y; slot a, b; a <- i; b <- i; b <- j; mask b when present(x); mask b when present(y);
+---
+input i, j; slot a, b; a <- i; b <- j when not available(a); mask a when available(b);
+---
+input i, j; slot a, b; a <- i; b <- j; mask a when available(b); mask b when not available(a);
+---
+input i; slot a; a <- i when not available(a); mask a when present(i);
+---
+input i; slot a; a <- i; mask a when available(a);
+---
+input i, j; slot a, b; a <- i; b <- j; mask a when available(b); mask b when available(a);
+---
+input i; slot a; a <- i; mask a when (available(a) or present(i)) and available(a);
+---
+input i; slot a, b; a <- i; mask b; mask b when available(a) or present(i);
+---
+input i, x; slot a; a <- i when not present(x); mask a when present(x) and available(a);
+---
+input i, j, x; slot b, c; b <- i; b <- j; c <- x; mask c when available(c);
+---
+input i; slot a, b; mask b when not (available(a) and present(i));
+---
+input i; slot a; mask <- i;
+---
+input i; slot a; mask a when present(mask);
+---
+input i; slot a; mask mask;
+---
+input i; slot a; a <- i when not not available(a);
+---
+input i, j; slot a, b; a <- i when not (not (present(i) or available(b))); mask b when not (present(i) and not present(j));
+---
+input i; slot a; a <- i; a <- i; mask a when not not present(i);

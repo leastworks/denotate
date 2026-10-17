@@ -165,6 +165,9 @@ dependencies = [
 [[package]]
 name = "denotate-ir"
 version = "0.0.1"
+dependencies = [
+ "denotate-normalize",
+]
 
 [[package]]
 name = "denotate-native"
@@ -178,6 +181,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "denotate-normalize"
+version = "0.0.1"
+
+[[package]]
 name = "denotate-test-dsl"
 version = "0.0.1"
 dependencies = [
@@ -186,6 +193,7 @@ dependencies = [
  "denotate-check",
  "denotate-editor",
  "denotate-ir",
+ "denotate-normalize",
  "lsp-server",
  "lsp-types",
  "salsa",

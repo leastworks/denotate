@@ -14,6 +14,8 @@ pub mod incremental;
 pub mod projection;
 pub mod recipe;
 pub mod semantic;
+/// 5.3a candidate pipeline; the server still uses the existing recipes.
+pub mod shared;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiagnosticKind {

@@ -228,6 +228,8 @@ pub struct Corpus {
     sorts: BTreeMap<SortId, Sort>,
     constants: BTreeMap<ConstantId, Constant>,
     relations: BTreeMap<RelationId, Relation>,
+    // Generated relation display names are not members of the frontend namespace.
+    generated_relations: BTreeSet<RelationId>,
     rules: BTreeMap<RuleId, Rule>,
     obligations: BTreeMap<ObligationId, Obligation>,
     occurrences: BTreeSet<OccurrenceId>,
@@ -241,6 +243,7 @@ impl Default for Corpus {
             sorts: BTreeMap::new(),
             constants: BTreeMap::new(),
             relations: BTreeMap::new(),
+            generated_relations: BTreeSet::new(),
             rules: BTreeMap::new(),
             obligations: BTreeMap::new(),
             occurrences: BTreeSet::new(),
@@ -351,7 +354,10 @@ impl Corpus {
     ) -> Result<RelationId> {
         let name = name.into();
         named(&name, "relation")?;
-        if self.relations().any(|r| r.name == name) {
+        if self
+            .relations()
+            .any(|r| r.name == name && !self.is_generated_relation(r.id))
+        {
             return Err(ConstructionError::DuplicateName {
                 kind: "relation",
                 name,
@@ -381,6 +387,31 @@ impl Corpus {
         );
         self.occurrences.insert(id.into());
         Ok(id)
+    }
+
+    /// A generated identity outside the frontend relation-name namespace.
+    /// Display labels preserve deterministic document-wide helper numbering.
+    /// A frontend may declare the same display name before or after this call;
+    /// consumers must resolve frontend names only among non-generated relations.
+    pub fn declare_generated_relation(&mut self) -> RelationId {
+        let id = RelationId(self.fresh());
+        let name = format!("$condition_{}", self.generated_relations.len() + 1);
+        self.relations.insert(
+            id,
+            Relation {
+                id,
+                name,
+                role: RelationRole::Derived,
+                parameters: vec![],
+            },
+        );
+        self.generated_relations.insert(id);
+        self.occurrences.insert(id.into());
+        id
+    }
+
+    pub fn is_generated_relation(&self, id: RelationId) -> bool {
+        self.generated_relations.contains(&id)
     }
 
     pub fn atom(

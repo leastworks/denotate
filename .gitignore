@@ -40,3 +40,6 @@ htmlcov/
 /frontend-prototype/target/
 /frontend-prototype/native/target/
 /frontend-prototype/.vscode-test/
+
+# local IDE settings
+/.vscode/

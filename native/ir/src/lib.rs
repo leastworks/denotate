@@ -5,6 +5,7 @@
 //! separately in [`Provenance`], keyed by occurrences rather than semantic values.
 
 mod ids;
+pub mod installation;
 mod model;
 mod provenance;
 

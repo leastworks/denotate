@@ -3,6 +3,8 @@
 mod analysis;
 #[cfg(test)]
 mod premask;
+#[cfg(test)]
+mod prenormalize;
 mod worker;
 
 use analysis::{Failure, diagnostic};
