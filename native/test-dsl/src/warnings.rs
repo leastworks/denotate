@@ -2,7 +2,10 @@
 use crate::{
     ast::*,
     attribution::{RelatedLocation, SourceView},
-    lowering::LoweredProgram,
+    lowering::{
+        LoweredProgram,
+        semantic::{AstPath, ExprPath, Step},
+    },
 };
 use denotate_check::*;
 use denotate_ir::*;
@@ -116,21 +119,23 @@ pub fn present_rewrites(
 
 /// Only flat conjunctions of direct conditions are editable here. Compound
 /// negation, grouping, OR splitting and generated helpers remain warn-only.
-pub(crate) fn removals<'a>(
-    mapping: &'a Mapping,
+pub(crate) fn removals(
+    mapping: &Mapping,
     sources: &Sources,
-) -> Result<Vec<(&'a Expr, SourceEdit)>, ProvenanceError> {
-    fn leaves<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) -> bool {
+) -> Result<Vec<(AstPath, SourceEdit)>, ProvenanceError> {
+    fn leaves<'a>(expr: &'a Expr, path: ExprPath, out: &mut Vec<(&'a Expr, ExprPath)>) -> bool {
         match &expr.kind {
-            ExprKind::And(a, b) => leaves(a, out) && leaves(b, out),
+            ExprKind::And(a, b) => {
+                leaves(a, path.child(Step::Left), out) && leaves(b, path.child(Step::Right), out)
+            }
             ExprKind::Available(_) | ExprKind::Present(_) => {
-                out.push(expr);
+                out.push((expr, path));
                 true
             }
             ExprKind::Not { operand, .. }
                 if matches!(operand.kind, ExprKind::Available(_) | ExprKind::Present(_)) =>
             {
-                out.push(expr);
+                out.push((expr, path));
                 true
             }
             _ => false,
@@ -140,17 +145,17 @@ pub(crate) fn removals<'a>(
         return Ok(vec![]);
     };
     let mut parts = Vec::new();
-    if !leaves(condition, &mut parts) {
+    if !leaves(condition, ExprPath::default(), &mut parts) {
         return Ok(vec![]);
     }
     let snapshot = condition.span.snapshot();
-    if parts.iter().any(|p| p.span.snapshot() != snapshot)
+    if parts.iter().any(|(p, _)| p.span.snapshot() != snapshot)
         || mapping.input.span.snapshot() != snapshot
     {
         return Ok(vec![]);
     }
     let mut result = Vec::new();
-    for (i, part) in parts.iter().enumerate() {
+    for (i, (part, path)) in parts.iter().enumerate() {
         if !matches!(part.kind, ExprKind::Not { .. }) {
             continue;
         }
@@ -161,12 +166,12 @@ pub(crate) fn removals<'a>(
             )
         } else if i == 0 {
             (
-                part.span.byte_range().start..parts[1].span.byte_range().start,
+                part.span.byte_range().start..parts[1].0.span.byte_range().start,
                 "and",
             )
         } else {
             (
-                parts[i - 1].span.byte_range().end..part.span.byte_range().end,
+                parts[i - 1].0.span.byte_range().end..part.span.byte_range().end,
                 "and",
             )
         };
@@ -174,7 +179,7 @@ pub(crate) fn removals<'a>(
         let remainder = sources.text(span)?.replace(sources.text(part.span)?, "");
         if remainder.trim() == separator {
             result.push((
-                *part,
+                AstPath::Expression(path.clone()),
                 SourceEdit {
                     span,
                     replacement: String::new(),
