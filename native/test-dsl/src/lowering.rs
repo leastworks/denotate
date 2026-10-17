@@ -14,8 +14,6 @@ pub mod incremental;
 pub mod projection;
 pub mod recipe;
 pub mod semantic;
-/// 5.3a candidate pipeline; the server still uses the existing recipes.
-pub mod shared;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiagnosticKind {
@@ -47,6 +45,13 @@ pub enum LoweringFailure {
     Provenance(ProvenanceError),
     InvalidAst(String),
     Attribution(AttributionError),
+    Recipe(recipe::RecipeError),
+}
+
+impl From<recipe::RecipeError> for LoweringFailure {
+    fn from(error: recipe::RecipeError) -> Self {
+        Self::Recipe(error)
+    }
 }
 
 impl From<AttributionError> for LoweringFailure {
@@ -85,8 +90,8 @@ pub enum LoweringOutcome {
 
 type Result<T> = std::result::Result<T, LoweringFailure>;
 
-/// Uncached reference pipeline. Names must be valid before any IR
-/// is assembled; all source-dependent locations are rebuilt for this snapshot.
+/// Uncached pipeline using the same normalizer as the cached path. Names must
+/// be valid before assembly; source locations are rebuilt for this snapshot.
 pub fn lower(program: &Program, sources: &Sources) -> Result<LoweringOutcome> {
     let projection = projection::project(program, sources)?;
     let keys = projection.keys();
@@ -96,10 +101,10 @@ pub fn lower(program: &Program, sources: &Sources) -> Result<LoweringOutcome> {
             projection.diagnostics(&diagnostics)?,
         ));
     }
-    let recipes: Vec<_> = keys
+    let recipes = keys
         .iter()
-        .map(|key| recipe::Recipe::lower(key.form.clone()))
-        .collect();
+        .map(|s| recipe::Recipe::lower(s.form.clone()))
+        .collect::<std::result::Result<Vec<_>, _>>()?;
     Ok(LoweringOutcome::Lowered(assembly::assemble(
         &projection,
         &recipes,

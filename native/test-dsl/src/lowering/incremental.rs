@@ -1,5 +1,9 @@
 //! Per-document lowering cache. No spans, arenas or worker state enter Salsa.
-use super::{LoweringOutcome, Result, assembly, projection, recipe::Recipe, semantic::*};
+use super::{
+    LoweringOutcome, Result, assembly, projection,
+    recipe::{Recipe, RecipeError},
+    semantic::*,
+};
 use crate::ast::{Kind, Program};
 use denotate_ir::Sources;
 use salsa::Setter;
@@ -43,6 +47,8 @@ enum Query {
 #[salsa::db]
 trait Db: salsa::Database {
     fn record(&self, query: Query);
+    #[cfg(test)]
+    fn recipe_error(&self, form: &SemanticStatement) -> Option<RecipeError>;
 }
 
 #[salsa::db]
@@ -50,11 +56,20 @@ trait Db: salsa::Database {
 struct Database {
     storage: salsa::Storage<Self>,
     counts: Option<Arc<[AtomicU64; 4]>>,
+    #[cfg(test)]
+    recipe_error: Option<(Arc<SemanticStatement>, RecipeError)>,
 }
 #[salsa::db]
 impl salsa::Database for Database {}
 #[salsa::db]
 impl Db for Database {
+    #[cfg(test)]
+    fn recipe_error(&self, form: &SemanticStatement) -> Option<RecipeError> {
+        self.recipe_error
+            .as_ref()
+            .filter(|(target, _)| target.as_ref() == form)
+            .map(|(_, error)| error.clone())
+    }
     fn record(&self, query: Query) {
         if let Some(counts) = &self.counts {
             counts[query as usize].fetch_add(1, Ordering::Relaxed);
@@ -63,8 +78,12 @@ impl Db for Database {
 }
 
 #[salsa::tracked(returns(ref))]
-fn recipe(db: &dyn Db, form: Form<'_>) -> Recipe {
+fn recipe(db: &dyn Db, form: Form<'_>) -> std::result::Result<Recipe, RecipeError> {
     db.record(Query::Recipe);
+    #[cfg(test)]
+    if let Some(error) = db.recipe_error(form.content(db)) {
+        return Err(error);
+    }
     Recipe::lower(form.content(db).clone())
 }
 
@@ -216,8 +235,12 @@ impl Session {
             self.stats.last.queries_ns = elapsed(start);
             return Ok(LoweringOutcome::UserErrors(errors));
         }
-        let recipes: Vec<_> = forms.iter().map(|&form| recipe(&self.db, form)).collect();
+        let recipes = forms
+            .iter()
+            .map(|&form| recipe(&self.db, form).as_ref().map_err(Clone::clone))
+            .collect::<std::result::Result<Vec<_>, _>>();
         self.stats.last.queries_ns = elapsed(start);
+        let recipes = recipes?;
         let start = self.clock();
         if self.db.counts.is_some() {
             self.stats.assemblies += 1;
@@ -234,4 +257,89 @@ impl Session {
 
 fn elapsed(start: Option<Instant>) -> u64 {
     start.map_or(0, |t| t.elapsed().as_nanos().min(u64::MAX as u128) as u64)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{analysis, syntax};
+    use denotate_editor::Document;
+    use denotate_normalize::ConstructionError;
+    use lsp_types::Url;
+
+    #[test]
+    fn cached_construction_errors_stop_snapshot_before_assembly_and_checking() {
+        let form = Arc::new(SemanticStatement::Mapping {
+            target: "a".into(),
+            input: "i".into(),
+            condition: None,
+        });
+        for error in [
+            ConstructionError::DuplicateInputKey(AstPath::Statement),
+            ConstructionError::HelperCapturesVariables {
+                expression: AstPath::Statement,
+            },
+        ] {
+            let expected = RecipeError::Normalization(error);
+            let mut session = Session::new(true);
+            // Configure once before the first query. No production switch and no
+            // mutation of an untracked dependency after Salsa has cached a value.
+            session.db.recipe_error = Some((form.clone(), expected.clone()));
+            let uri = Url::parse("file:///cached-error.inputmapping").unwrap();
+            let mut checks = 0;
+            let mut prepare = |session: &mut Session, text: &str, revision| {
+                let document = Arc::new(Document::new(
+                    &mut syntax::parser().unwrap(),
+                    text.into(),
+                    revision as i32,
+                    true,
+                ));
+                let prepared = analysis::prepare(&uri, revision, document, session)?;
+                if let Some(program) = prepared.program {
+                    checks += 1;
+                    program
+                        .check(&denotate_check::Limits::default(), || {})
+                        .unwrap();
+                }
+                Ok::<_, String>(prepared.fast)
+            };
+            let text = "input i; slot a; a <- i;";
+            let failure = prepare(&mut session, text, 1).unwrap_err();
+            assert!(failure.contains("InputMapping lowering failed: Recipe("));
+            assert!(failure.contains(&expected.to_string()));
+            let before = session.stats().queries;
+            assert_eq!(before.recipe, 3);
+            assert_eq!(session.stats().assemblies, 0);
+            assert_eq!(
+                prepare(&mut session, &format!("// moved\n{text}"), 2).unwrap_err(),
+                failure
+            );
+            assert_eq!(session.stats().queries, before);
+            // Whole-snapshot validation wins even with this recipe error cached.
+            for (offset, invalid) in [
+                "input i; slot a; a <- i; a <- missing;",
+                "input i; slot a; a <- i; a <- a;",
+                "input i; slot a; a <- i; slot a;",
+            ]
+            .iter()
+            .enumerate()
+            {
+                let diagnostics = prepare(&mut session, invalid, 3 + offset as u64).unwrap();
+                assert!(
+                    diagnostics
+                        .iter()
+                        .any(|d| d.code == Some(lsp_types::NumberOrString::String("name".into())))
+                );
+                assert_eq!(session.stats().queries.recipe, before.recipe);
+                assert_eq!(session.stats().assemblies, 0);
+            }
+            assert_eq!(prepare(&mut session, text, 6).unwrap_err(), failure);
+            assert_eq!(session.stats().queries.recipe, before.recipe);
+            assert_eq!(session.stats().assemblies, 0);
+            // A different valid form is a positive control for checker dispatch.
+            prepare(&mut session, "input i; slot a; a <- i when present(i);", 7).unwrap();
+            assert_eq!(session.stats().assemblies, 1);
+            assert_eq!(checks, 1);
+        }
+    }
 }

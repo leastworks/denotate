@@ -7,7 +7,7 @@ mod premask;
 mod prenormalize;
 mod worker;
 
-use analysis::{Failure, diagnostic};
+use analysis::Failure;
 use crossbeam_channel::{Sender, bounded};
 use denotate_check::{Cancellation, Limits};
 use denotate_editor::{
@@ -17,8 +17,8 @@ use denotate_editor::{
 use denotate_test_dsl::{lowering::incremental::Session, syntax};
 use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
 use lsp_types::{
-    Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
-    DidOpenTextDocumentParams, Range, Url,
+    Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
+    Url,
 };
 use serde_json::{Value, json};
 use std::{
@@ -314,7 +314,7 @@ impl Server {
                     1,
                     format!("DSL implementation failure: {error}"),
                 )?;
-                (vec![creator_failure()], None)
+                (vec![analysis::creator_failure()], None)
             }
         };
         self.documents.insert(
@@ -394,7 +394,7 @@ impl Server {
                     1,
                     format!("DSL implementation failure: {error}"),
                 )?;
-                diagnostics.push(creator_failure());
+                diagnostics.push(analysis::creator_failure());
             }
             Err(Failure::Cancelled) => return Ok(()),
         }
@@ -427,7 +427,4 @@ fn log(connection: &Connection, kind: u32, message: String) -> Result<()> {
         "window/logMessage",
         json!({"type": kind, "message": message}),
     )
-}
-fn creator_failure() -> Diagnostic {
-    diagnostic(Range::default(), "creator-failure", "Semantic checking failed inside the DSL implementation; see the server log. This is not an error in a mapping.".into(), DiagnosticSeverity::INFORMATION)
 }

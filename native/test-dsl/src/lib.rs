@@ -9,3 +9,10 @@ pub mod lowering;
 pub mod presentation;
 pub mod syntax;
 pub mod warnings;
+
+// Exercise cached creator failures through the actual snapshot/checker bridge.
+#[cfg(test)]
+extern crate self as denotate_test_dsl;
+#[cfg(test)]
+#[path = "server/analysis.rs"]
+mod analysis;

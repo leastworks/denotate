@@ -47,7 +47,7 @@ fn recipes(projection: &projection::Projection) -> Vec<Recipe> {
     projection
         .keys()
         .into_iter()
-        .map(|s| Recipe::lower(s.form))
+        .map(|s| Recipe::lower(s.form).unwrap())
         .collect()
 }
 fn constant(p: &LoweredProgram, id: ConstantId) -> String {
@@ -479,7 +479,7 @@ fn local_helpers_and_duplicate_occurrences_survive_new_assembly_order() {
                 old_recipes
                     .get(k)
                     .cloned()
-                    .unwrap_or_else(|| Recipe::lower(k.form.clone()))
+                    .unwrap_or_else(|| Recipe::lower(k.form.clone()).unwrap())
             })
             .collect();
         let assembled = assembly::assemble(&projection, &reused, &sources).unwrap();

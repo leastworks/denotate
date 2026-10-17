@@ -1,34 +1,29 @@
-//! Replays recipes into a fresh IR arena, then reconnects current-source paths.
-
+//! Fresh snapshot installation and source binding of cached recipes.
 use super::{
-    LoweredProgram, LoweringFailure, Result,
     projection::Projection,
-    recipe::*,
+    recipe::{Payload, Recipe, Relation},
     semantic::{AstPath, ExprPath, SemanticStatement},
+    *,
 };
 use crate::{
-    ast::Kind,
-    attribution::{Attribution, MaskAttribution, SourceView},
+    attribution::{MaskAttribution, SourceView},
     library,
     warnings::Contribution,
 };
-use denotate_ir::{
-    Atom, ConstantId, Corpus, Literal as IrLiteral, OccurrenceId, Origin, RelationRole, Sources,
-    Term,
-};
-use std::{borrow::Borrow, collections::BTreeMap};
+use denotate_ir::installation::{self, BoundAtom};
+use std::collections::BTreeMap;
 
-fn invalid(message: &str) -> LoweringFailure {
-    LoweringFailure::InvalidAst(message.into())
+fn failure(e: impl std::fmt::Display) -> LoweringFailure {
+    LoweringFailure::InvalidAst(e.to_string())
 }
 
-pub fn assemble<R: Borrow<Recipe>>(
+pub fn assemble<R: std::borrow::Borrow<Recipe>>(
     projection: &Projection,
     recipes: &[R],
     sources: &Sources,
 ) -> Result<LoweredProgram> {
     if recipes.len() != projection.statements.len() {
-        return Err(invalid("recipe/source statement count differs"));
+        return Err(failure("recipe/source statement count differs"));
     }
     let mut corpus = Corpus::new();
     let library = library::build(&mut corpus)?;
@@ -39,144 +34,108 @@ pub fn assemble<R: Borrow<Recipe>>(
             .owners
             .insert(rule.id, Contribution::Library);
     }
-    let mut constants = BTreeMap::<(Kind, String), ConstantId>::new();
-    let mut next_helper = 1;
+    let mut constants = BTreeMap::new();
     for (source, recipe) in projection.statements.iter().zip(recipes) {
         let recipe = recipe.borrow();
         if source.key.form != recipe.form {
-            return Err(invalid("recipe does not match current semantic statement"));
+            return Err(failure("recipe does not match current semantic statement"));
         }
-        let mut occurrences = BTreeMap::<LocalOccurrence, OccurrenceId>::new();
-        let mut helpers = BTreeMap::new();
-        let mut atoms = BTreeMap::<LocalOccurrence, Atom>::new();
-        let mut rules = BTreeMap::new();
-        for instruction in &recipe.instructions {
-            match instruction {
-                Instruction::Constant { id, value } => {
-                    let sort = match value.kind {
-                        Kind::Input => library.input,
-                        Kind::Slot => library.slot,
-                    };
-                    let constant = corpus.declare_constant(&value.name, sort)?;
-                    constants.insert((value.kind, value.name.clone()), constant);
-                    occurrences.insert(*id, constant.into());
-                }
-                Instruction::Helper { id } => {
-                    let relation = corpus.declare_relation(
-                        format!("$condition_{next_helper}"),
-                        RelationRole::Derived,
-                        [],
-                    )?;
-                    next_helper += 1;
-                    helpers.insert(*id, relation);
-                    occurrences.insert(*id, relation.into());
-                }
-                Instruction::Atom {
-                    id,
-                    relation,
-                    arguments,
-                } => {
-                    let relation = match relation {
-                        RelationRef::MappedTo => library.mapped_to,
-                        RelationRef::Masked => library.masked,
-                        RelationRef::Present => library.present,
-                        RelationRef::Available => library.available,
-                        RelationRef::Helper(id) => *helpers
-                            .get(id)
-                            .ok_or_else(|| invalid("undeclared recipe helper"))?,
-                    };
-                    let terms = arguments
-                        .iter()
-                        .map(|arg| {
-                            constants
-                                .get(&(arg.value.kind, arg.value.name.clone()))
-                                .copied()
-                                .map(Term::Constant)
-                                .ok_or_else(|| invalid("validated name missing during assembly"))
+        if let SemanticStatement::Declaration { kind, names } = recipe.form.as_ref() {
+            for (index, name) in names.iter().enumerate() {
+                let sort = match kind {
+                    Kind::Input => library.input,
+                    Kind::Slot => library.slot,
+                };
+                let constant = corpus.declare_constant(name, sort)?;
+                constants.insert((*kind, name.clone()), constant);
+                attribution.provenance.attach(
+                    &corpus,
+                    sources,
+                    constant,
+                    [Origin::new(source.span(&AstPath::DeclaredName(index))?)],
+                )?;
+            }
+            continue;
+        }
+        let normalized = recipe
+            .normalized
+            .as_ref()
+            .ok_or_else(|| failure("missing normalized definition"))?;
+        let binding = |p: &Payload| -> std::result::Result<BoundAtom, installation::InstallError> {
+            let relation = match p.relation {
+                Relation::MappedTo => library.mapped_to,
+                Relation::Masked => library.masked,
+                Relation::Present => library.present,
+                Relation::Available => library.available,
+            };
+            let arguments = p
+                .arguments
+                .iter()
+                .map(|a| {
+                    constants
+                        .get(&(a.kind, a.name.clone()))
+                        .copied()
+                        .map(Term::Constant)
+                        .ok_or_else(|| {
+                            installation::InstallError::Binding(format!(
+                                "validated constant missing: {:?} {}",
+                                a.kind, a.name
+                            ))
                         })
-                        .collect::<Result<Vec<_>>>()?;
-                    let atom = corpus.atom(relation, terms)?;
-                    occurrences.insert(*id, atom.id());
-                    for (arg, term) in arguments.iter().zip(atom.arguments()) {
-                        occurrences.insert(arg.id, term.id());
-                    }
-                    atoms.insert(*id, atom);
-                }
-                Instruction::Rule { id, head, body } => {
-                    let head = atoms
-                        .remove(head)
-                        .ok_or_else(|| invalid("recipe head missing or reused"))?;
-                    let body = body
-                        .iter()
-                        .map(|literal| {
-                            let atom = atoms
-                                .remove(&literal.atom)
-                                .ok_or_else(|| invalid("recipe body atom missing or reused"))?;
-                            Ok(if literal.negative {
-                                IrLiteral::Negative(atom)
-                            } else {
-                                IrLiteral::Positive(atom)
-                            })
-                        })
-                        .collect::<Result<Vec<_>>>()?;
-                    let rule = corpus.add_rule(head, body)?;
-                    rules.insert(*id, rule);
-                    occurrences.insert(*id, rule.into());
-                    attribution
-                        .rewrites
-                        .owners
-                        .insert(rule, Contribution::Program);
-                    if let SemanticStatement::Mask { target, condition } = source.key.form.as_ref()
-                    {
-                        attribution.masks.insert(
-                            rule,
-                            MaskAttribution {
-                                target: *constants
-                                    .get(&(Kind::Slot, target.clone()))
-                                    .ok_or_else(|| invalid("validated mask target missing"))?,
-                                statement: source.span(&AstPath::Statement)?,
-                                condition: condition
-                                    .as_ref()
-                                    .map(|_| source.span(&AstPath::Expression(ExprPath::default())))
-                                    .transpose()?,
-                            },
-                        );
-                    }
-                }
+                })
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            Ok(BoundAtom {
+                relation,
+                arguments,
+            })
+        };
+        let installed =
+            installation::install(&mut corpus, normalized, binding, binding).map_err(failure)?;
+        let origins = recipe
+            .assignments
+            .origins
+            .iter()
+            .map(|(id, path)| Ok((*id, vec![Origin::new(source.span(path)?)])))
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        installed
+            .transfer(&corpus, sources, &mut attribution.provenance, &origins)
+            .map_err(failure)?;
+        for (local, rule) in installed.rules() {
+            attribution
+                .rewrites
+                .owners
+                .insert(*rule, Contribution::Program);
+            if let Some(path) = recipe.assignments.guards.get(local) {
+                let span = source.span(path)?;
+                let view = SourceView::try_from(sources.snapshot(span.snapshot())?.view.as_str())?;
+                attribution.guards.insert((*rule, view), span);
+            }
+            if let SemanticStatement::Mask { target, condition } = recipe.form.as_ref() {
+                attribution.masks.insert(
+                    *rule,
+                    MaskAttribution {
+                        target: *constants
+                            .get(&(Kind::Slot, target.clone()))
+                            .ok_or_else(|| failure("validated mask target missing"))?,
+                        statement: source.span(&AstPath::Statement)?,
+                        condition: condition
+                            .as_ref()
+                            .map(|_| source.span(&AstPath::Expression(ExprPath::default())))
+                            .transpose()?,
+                    },
+                );
             }
         }
-        if !atoms.is_empty() {
-            return Err(invalid("unconsumed recipe atoms"));
-        }
-        let occurrence = |id: &LocalOccurrence| {
-            occurrences
-                .get(id)
-                .copied()
-                .ok_or_else(|| invalid("missing assembled occurrence"))
-        };
-        // Attach only after rules register their atoms with the construction API.
-        for (id, path) in &recipe.origins {
-            attribution.provenance.attach(
-                &corpus,
-                sources,
-                occurrence(id)?,
-                [Origin::new(source.span(path)?)],
-            )?;
-        }
-        for (id, path) in &recipe.guards {
-            let rule = *rules
-                .get(id)
-                .ok_or_else(|| invalid("guard references a non-rule occurrence"))?;
-            let span = source.span(path)?;
-            let view = SourceView::try_from(sources.snapshot(span.snapshot())?.view.as_str())?;
-            attribution.guards.insert((rule, view), span);
-        }
-        for (id, path) in &recipe.removals {
+        for (id, path) in &recipe.assignments.removals {
             if let Some(edit) = source.removals.get(path) {
+                let occurrence = installed
+                    .occurrences()
+                    .get(id)
+                    .ok_or_else(|| failure("missing removal occurrence"))?;
                 attribution
                     .rewrites
                     .removals
-                    .insert(occurrence(id)?, edit.clone());
+                    .insert(*occurrence, edit.clone());
             }
         }
     }

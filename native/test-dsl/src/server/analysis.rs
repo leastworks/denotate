@@ -58,6 +58,10 @@ fn range(document: &Document, span: SourceSpan) -> Range {
     let bytes = span.byte_range();
     Range::new(document.position(bytes.start), document.position(bytes.end))
 }
+pub fn creator_failure() -> Diagnostic {
+    diagnostic(Range::default(), "creator-failure", "Semantic checking failed inside the DSL implementation; see the server log. This is not an error in a mapping.".into(), DiagnosticSeverity::INFORMATION)
+}
+
 fn paused() -> Diagnostic {
     diagnostic(
         Range::default(),
@@ -345,11 +349,11 @@ mod tests {
         .program
         .unwrap();
         p.lowered.attribution.provenance = denotate_ir::Provenance::new();
-        assert!(matches!(
-            p.check(&Limits::default(), || {}),
-            Err(Failure::Creator(_))
-        ));
-        let notice = super::super::creator_failure();
+        let Err(Failure::Creator(message)) = p.check(&Limits::default(), || {}) else {
+            panic!("expected creator failure");
+        };
+        assert!(!message.is_empty());
+        let notice = super::creator_failure();
         assert_eq!(notice.range, Range::default());
         assert_eq!(notice.severity, Some(DiagnosticSeverity::INFORMATION));
         assert!(notice.message.contains("DSL implementation"));

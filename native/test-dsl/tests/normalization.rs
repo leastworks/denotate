@@ -12,7 +12,7 @@ use denotate_normalize as n;
 use denotate_test_dsl::{
     ast::Program,
     library,
-    lowering::{self, projection, semantic::*, shared},
+    lowering::{self, assembly, projection, recipe, semantic::*},
     syntax,
 };
 use std::{collections::BTreeMap, sync::Arc};
@@ -42,10 +42,10 @@ fn lowered(outcome: lowering::LoweringOutcome) -> lowering::LoweredProgram {
 }
 fn compare_recipes(form: Arc<SemanticStatement>) {
     let old = reference::Recipe::lower(form.clone());
-    let new = shared::Recipe::lower(form).unwrap();
+    let new = recipe::Recipe::lower(form).unwrap();
     let Some(recipe) = new.normalized else { return };
     let local = |id: n::Local| reference::LocalOccurrence(id.0);
-    let constant = |a: &shared::Constant| reference::ConstantRef {
+    let constant = |a: &recipe::Constant| reference::ConstantRef {
         kind: a.kind,
         name: a.name.clone(),
     };
@@ -63,10 +63,10 @@ fn compare_recipes(form: Arc<SemanticStatement>) {
                     n::Target::Helper(id) => (reference::RelationRef::Helper(local(*id)), vec![]),
                     n::Target::Head(p) | n::Target::Leaf(p) => (
                         match p.relation {
-                            shared::Relation::MappedTo => reference::RelationRef::MappedTo,
-                            shared::Relation::Masked => reference::RelationRef::Masked,
-                            shared::Relation::Present => reference::RelationRef::Present,
-                            shared::Relation::Available => reference::RelationRef::Available,
+                            recipe::Relation::MappedTo => reference::RelationRef::MappedTo,
+                            recipe::Relation::Masked => reference::RelationRef::Masked,
+                            recipe::Relation::Present => reference::RelationRef::Present,
+                            recipe::Relation::Available => reference::RelationRef::Available,
                         },
                         p.arguments.iter().map(constant).collect(),
                     ),
@@ -109,7 +109,7 @@ fn compare_recipes(form: Arc<SemanticStatement>) {
     assert_eq!(old.removals, convert(new.assignments.removals));
 }
 #[test]
-fn frozen_recipes_and_installed_structure_agree_for_mapping_mask_and_nested_conditions() {
+fn frozen_recipes_agree_for_mapping_mask_and_nested_conditions() {
     let capture: serde_json::Value =
         serde_json::from_str(include_str!("../fixtures/pre-normalize.json")).unwrap();
     // Syntax-error captures are exercised through the server, before lowering.
@@ -127,23 +127,8 @@ fn frozen_recipes_and_installed_structure_agree_for_mapping_mask_and_nested_cond
         for s in projected.keys() {
             compare_recipes(s.form);
         }
-        match (
-            lowering::lower(&ast, &sources).unwrap(),
-            shared::lower(&ast, &sources).unwrap(),
-        ) {
-            (lowering::LoweringOutcome::Lowered(old), lowering::LoweringOutcome::Lowered(new)) => {
-                assert_eq!(
-                    fingerprint::fingerprint(&old, &sources),
-                    fingerprint::fingerprint(&new, &sources),
-                    "{text}"
-                )
-            }
-            (
-                lowering::LoweringOutcome::UserErrors(old),
-                lowering::LoweringOutcome::UserErrors(new),
-            ) => assert_eq!(old, new),
-            _ => panic!("outcomes differ"),
-        }
+        // Installed compatibility is pinned independently in the server capture
+        // and additional_installed_cases_match_frozen_legacy_output below.
     }
 }
 #[test]
@@ -154,22 +139,17 @@ fn unchanged_recipes_rebind_moved_sources_and_duplicate_statements_independently
     let recipes: Vec<_> = original
         .keys()
         .iter()
-        .map(|s| shared::Recipe::lower(s.form.clone()).unwrap())
+        .map(|s| recipe::Recipe::lower(s.form.clone()).unwrap())
         .collect();
     assert_eq!(recipes[2], recipes[3]);
     for (revision, text) in cases::moved() {
         let (ast, sources) = parse(&text, revision);
         let projected = projection::project(&ast, &sources).unwrap();
-        let reused = shared::assemble(&projected, &recipes, &sources).unwrap();
-        let fresh = lowered(shared::lower(&ast, &sources).unwrap());
-        let old = lowered(lowering::lower(&ast, &sources).unwrap());
+        let reused = assembly::assemble(&projected, &recipes, &sources).unwrap();
+        let fresh = lowered(lowering::lower(&ast, &sources).unwrap());
         assert_eq!(
             fingerprint::fingerprint(&reused, &sources),
             fingerprint::fingerprint(&fresh, &sources)
-        );
-        assert_eq!(
-            fingerprint::fingerprint(&reused, &sources),
-            fingerprint::fingerprint(&old, &sources)
         );
         assert_eq!(
             fingerprint::fingerprint(&reused, &sources),
@@ -186,7 +166,7 @@ fn unchanged_recipes_rebind_moved_sources_and_duplicate_statements_independently
     // A changed semantic form must not accept an old recipe.
     let (ast, sources) = parse(&text.replace("present(j)", "present(i)"), 4);
     assert!(
-        shared::assemble(
+        assembly::assemble(
             &projection::project(&ast, &sources).unwrap(),
             &recipes,
             &sources
@@ -195,7 +175,8 @@ fn unchanged_recipes_rebind_moved_sources_and_duplicate_statements_independently
     );
 }
 #[test]
-fn name_errors_gate_the_candidate_pipeline_and_repair_agrees() {
+fn name_errors_gate_cached_and_uncached_pipelines_and_repair_agrees() {
+    let mut session = lowering::incremental::Session::new(true);
     for text in [
         "input i; slot a; a <- missing when present(i);",
         "input i; slot a; mask a when present(a);",
@@ -205,7 +186,7 @@ fn name_errors_gate_the_candidate_pipeline_and_repair_agrees() {
         let (ast, sources) = parse(text, 1);
         match (
             lowering::lower(&ast, &sources).unwrap(),
-            shared::lower(&ast, &sources).unwrap(),
+            session.lower(&ast, &sources).unwrap(),
         ) {
             (
                 lowering::LoweringOutcome::UserErrors(a),
@@ -339,10 +320,11 @@ fn variable_library_definition_equals_hand_written_conjunctive_rule() {
 }
 
 #[test]
-#[ignore = "manual release phase measurement; not a cache integration or speedup claim"]
+#[ignore = "manual integrated release phase measurement; not a speedup claim"]
 fn measure_shared_normalization_phases() {
     use denotate_check::{GroundProgram, Limits};
     use std::time::Instant;
+    assert!(!cfg!(debug_assertions), "run this probe with --release");
     let mut rows = vec![];
     for size in [10, 100, 1000] {
         let slots = (0..size)
@@ -368,11 +350,11 @@ fn measure_shared_normalization_phases() {
             let start = Instant::now();
             let recipes = keys
                 .iter()
-                .map(|s| shared::Recipe::lower(s.form.clone()).unwrap())
+                .map(|s| recipe::Recipe::lower(s.form.clone()).unwrap())
                 .collect::<Vec<_>>();
             let normalization_assignment_ns = start.elapsed().as_nanos();
             let start = Instant::now();
-            let program = shared::assemble(&projection, &recipes, &sources).unwrap();
+            let program = assembly::assemble(&projection, &recipes, &sources).unwrap();
             let assembly_attribution_ns = start.elapsed().as_nanos();
             let start = Instant::now();
             let limits = Limits::default();
@@ -390,13 +372,13 @@ fn measure_shared_normalization_phases() {
             let checking_ns = start.elapsed().as_nanos();
             session.lower(&ast, &sources).unwrap();
             assert_eq!(before, session.stats().queries);
-            samples.push(serde_json::json!({"projection_ns":projection_ns,"normalization_assignment_ns":normalization_assignment_ns,"assembly_attribution_ns":assembly_attribution_ns,"checking_ns":checking_ns,"legacy_cached_query_access_ns":session.stats().last.queries_ns}));
+            samples.push(serde_json::json!({"projection_ns":projection_ns,"normalization_assignment_ns":normalization_assignment_ns,"assembly_attribution_ns":assembly_attribution_ns,"checking_ns":checking_ns,"cached_query_access_ns":session.stats().last.queries_ns,"cached_projection_ns":session.stats().last.projection_ns,"cached_assembly_attribution_ns":session.stats().last.assembly_attribution_ns}));
         }
-        rows.push(serde_json::json!({"mappings":size,"helpers":size,"inputs":2,"source":text,"samples":samples}));
+        rows.push(serde_json::json!({"mappings":size,"helpers":size,"inputs":2,"source":text,"queries_before":before,"queries_after":session.stats().queries,"samples":samples}));
     }
     println!(
         "NORMALIZATION_PHASES={}",
-        serde_json::json!({"rows":rows,"note":"Candidate normalization plus frontend assignment is uncached. Query access is measured separately on the unchanged legacy Salsa path; no candidate cache integration or speedup claim. Parsing, name validation, diagnostics and serialization are outside the timed candidate phases."})
+        serde_json::json!({"rows":rows,"note":"Shared normalization plus frontend assignment is uncached. Query access is measured separately on the integrated Salsa path with unchanged-form reuse asserted; no speedup claim. Parsing, name validation, diagnostics and serialization are outside the timed phases."})
     );
 }
 
@@ -419,12 +401,13 @@ fn additional_installed_cases_match_frozen_legacy_output() {
         capture["cases"].as_array().unwrap().len(),
         expected_cases.len()
     );
+    let mut session = lowering::incremental::Session::new(true);
     for (revision, text) in expected_cases {
         let (ast, sources) = parse(&text, revision);
         let expected = frozen_installed(&text, revision);
-        let legacy = lowered(lowering::lower(&ast, &sources).unwrap());
-        let candidate = lowered(shared::lower(&ast, &sources).unwrap());
-        assert_eq!(fingerprint::fingerprint(&legacy, &sources), expected);
-        assert_eq!(fingerprint::fingerprint(&candidate, &sources), expected);
+        let uncached = lowered(lowering::lower(&ast, &sources).unwrap());
+        let cached = lowered(session.lower(&ast, &sources).unwrap());
+        assert_eq!(fingerprint::fingerprint(&uncached, &sources), expected);
+        assert_eq!(fingerprint::fingerprint(&cached, &sources), expected);
     }
 }

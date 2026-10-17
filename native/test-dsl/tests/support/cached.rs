@@ -1,4 +1,5 @@
-//! Scripted edits compared with the uncached 5a pipeline, not another copy.
+//! Caching correctness: scripted edits compared with uncached shared normalization.
+//! Frozen captures and before_normalization.rs establish legacy compatibility.
 use super::*;
 use denotate_test_dsl::lowering::incremental::{QueryCounts, Session};
 

@@ -13,7 +13,7 @@ mod support;
 #[path = "../../tests/support/normalization_fingerprint.rs"]
 mod fingerprint;
 
-fn capture(shared: bool) -> Value {
+fn capture(uncached: bool) -> Value {
     let mut cases = Vec::new();
     let texts = include_str!("../../fixtures/pre-normalize.txt").split("\n---\n");
     for text in texts {
@@ -34,14 +34,14 @@ fn capture(shared: bool) -> Value {
             cases.push(json!({"text": text, "diagnostics": prepared.fast}));
             continue;
         };
-        if shared {
+        if uncached {
             let syntax::ParseOutcome::Parsed(ast) =
                 syntax::project(&program.document, &program.sources, program.snapshot).unwrap()
             else {
                 panic!("captured syntax")
             };
             let denotate_test_dsl::lowering::LoweringOutcome::Lowered(lowered) =
-                denotate_test_dsl::lowering::shared::lower(&ast, &program.sources).unwrap()
+                denotate_test_dsl::lowering::lower(&ast, &program.sources).unwrap()
             else {
                 panic!("captured names")
             };
