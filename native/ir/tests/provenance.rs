@@ -71,9 +71,9 @@ fn many_to_many_origins_survive_splits_merges_and_additional_source_views() {
     let den = sources
         .add("file:///example.den", 1, "denotate", "p();")
         .unwrap();
-    let a = Origin::new(sources.span(dsl, 0..1).unwrap(), "condition");
-    let b = Origin::new(sources.span(dsl, 2..3).unwrap(), "target");
-    let generated = Origin::new(sources.span(den, 0..4).unwrap(), "generated statement");
+    let a = Origin::new(sources.span(dsl, 0..1).unwrap());
+    let b = Origin::new(sources.span(dsl, 2..3).unwrap());
+    let generated = Origin::new(sources.span(den, 0..4).unwrap());
     let mut provenance = Provenance::new();
     provenance
         .attach(&corpus, &sources, one, [a.clone()])
@@ -115,10 +115,10 @@ fn failed_attachments_are_atomic_and_do_not_accept_foreign_or_uncommitted_nodes(
     let (corpus, [one, _, _]) = facts();
     let mut sources = Sources::new();
     let doc = sources.add("file:///one", 1, "dsl", "x").unwrap();
-    let good = Origin::new(sources.span(doc, 0..1).unwrap(), "target");
+    let good = Origin::new(sources.span(doc, 0..1).unwrap());
     let mut other_sources = Sources::new();
     let other_doc = other_sources.add("file:///one", 1, "dsl", "x").unwrap();
-    let bad = Origin::new(other_sources.span(other_doc, 0..1).unwrap(), "target");
+    let bad = Origin::new(other_sources.span(other_doc, 0..1).unwrap());
     let mut provenance = Provenance::new();
     assert!(
         provenance
@@ -152,7 +152,7 @@ fn hand_authored_denotate_needs_no_dsl_origin() {
     let doc = sources
         .add("file:///library.den", 1, "denotate", "p();")
         .unwrap();
-    let origin = Origin::new(sources.span(doc, 0..4).unwrap(), "statement");
+    let origin = Origin::new(sources.span(doc, 0..4).unwrap());
     let mut provenance = Provenance::new();
     provenance
         .attach(&corpus, &sources, one, [origin.clone()])

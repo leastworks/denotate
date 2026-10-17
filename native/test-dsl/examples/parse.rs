@@ -1,6 +1,7 @@
 //! Exercise real source -> AST -> IR, without running semantic checking or LSP.
 use denotate_editor::Document;
 use denotate_ir::Sources;
+use denotate_test_dsl::attribution::SourceView;
 use denotate_test_dsl::{
     lowering::{LoweringOutcome, lower},
     syntax::{self, ParseOutcome},
@@ -24,7 +25,7 @@ fn run() -> Result<bool, Box<dyn std::error::Error>> {
         .ok_or("expected an InputMapping file path")?;
     let text = std::fs::read_to_string(&path)?;
     let mut sources = Sources::new();
-    let snapshot = sources.add(&path, 1, "test-dsl", text.as_str())?;
+    let snapshot = sources.add(&path, 1, SourceView::TestDsl.as_str(), text.as_str())?;
     let document = Document::new(&mut syntax::parser()?, text, 1, false);
     let at = |span: denotate_ir::SourceSpan, message: &str| {
         let position = document.position(span.byte_range().start);

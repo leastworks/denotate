@@ -1,4 +1,5 @@
 use denotate_ir::*;
+use denotate_test_dsl::attribution::{Attribution, SourceView};
 use denotate_test_dsl::library::{self, MappingLibrary};
 
 const DSL: &str = include_str!("../fixtures/overlapping-mappings.txt");
@@ -8,7 +9,7 @@ struct Example {
     library: MappingLibrary,
     mappings: Vec<RuleId>,
     sources: Sources,
-    provenance: Provenance,
+    attribution: Attribution,
 }
 
 // Deliberate direct construction, not a parser or DSL AST lowerer. Test-owned
@@ -23,7 +24,12 @@ fn example() -> Example {
     let input_bb = corpus.declare_constant("input_bb", library.input).unwrap();
     let mut sources = Sources::new();
     let document = sources
-        .add("file:///overlapping-mappings.flow", 1, "test-dsl", DSL)
+        .add(
+            "file:///overlapping-mappings.flow",
+            1,
+            SourceView::TestDsl.as_str(),
+            DSL,
+        )
         .unwrap();
     let mut provenance = Provenance::new();
     let mut mappings = Vec::new();
@@ -61,11 +67,8 @@ fn example() -> Example {
         if conditional {
             let condition = corpus.atom(library.available, [a.into()]).unwrap();
             let at = statement.find("available(a)").unwrap();
-            condition_origins.push((condition.id(), Origin::new(span(at, 12), "condition")));
-            condition_origins.push((
-                condition.arguments()[0].id(),
-                Origin::new(span(at + 10, 1), "condition argument"),
-            ));
+            condition_origins.push((condition.id(), Origin::new(span(at, 12))));
+            condition_origins.push((condition.arguments()[0].id(), Origin::new(span(at + 10, 1))));
             body.push(Literal::Positive(condition));
         }
         let rule = corpus.add_rule(head, body).unwrap();
@@ -74,7 +77,7 @@ fn example() -> Example {
                 &corpus,
                 &sources,
                 rule,
-                [Origin::new(span(0, statement.len()), "mapping")],
+                [Origin::new(span(0, statement.len()))],
             )
             .unwrap();
         let input_at = statement.find(input_name).unwrap();
@@ -83,10 +86,7 @@ fn example() -> Example {
                 &corpus,
                 &sources,
                 head_id,
-                [Origin::new(
-                    span(0, input_at + input_name.len()),
-                    "mapping target and input",
-                )],
+                [Origin::new(span(0, input_at + input_name.len()))],
             )
             .unwrap();
         provenance
@@ -94,16 +94,11 @@ fn example() -> Example {
                 &corpus,
                 &sources,
                 input_id,
-                [Origin::new(span(input_at, input_name.len()), "input")],
+                [Origin::new(span(input_at, input_name.len()))],
             )
             .unwrap();
         provenance
-            .attach(
-                &corpus,
-                &sources,
-                slot_id,
-                [Origin::new(span(0, 1), "target")],
-            )
+            .attach(&corpus, &sources, slot_id, [Origin::new(span(0, 1))])
             .unwrap();
         for (occurrence, origin) in condition_origins {
             provenance
@@ -112,12 +107,17 @@ fn example() -> Example {
         }
         mappings.push(rule);
     }
+    let attribution = Attribution {
+        provenance,
+        ..Default::default()
+    };
+    attribution.validate(&corpus, &sources).unwrap();
     Example {
         corpus,
         library,
         mappings,
         sources,
-        provenance,
+        attribution,
     }
 }
 
@@ -221,11 +221,11 @@ fn equal_slot_values_retain_precise_distinct_occurrences_and_conditions() {
     assert_eq!(guard1.arguments()[0].value(), guard2.arguments()[0].value());
     assert_ne!(guard1.arguments()[0].id(), guard2.arguments()[0].id());
     assert_ne!(
-        e.provenance.origins(guard1.id())[0].span,
-        e.provenance.origins(guard2.id())[0].span
+        e.attribution.provenance.origins(guard1.id())[0].span,
+        e.attribution.provenance.origins(guard2.id())[0].span
     );
-    let first_span = e.provenance.origins(b1.id())[0].span;
-    let second_span = e.provenance.origins(b2.id())[0].span;
+    let first_span = e.attribution.provenance.origins(b1.id())[0].span;
+    let second_span = e.attribution.provenance.origins(b2.id())[0].span;
     assert_ne!(first_span, second_span);
     assert_eq!(
         first_span.byte_range().start,
@@ -236,7 +236,11 @@ fn equal_slot_values_retain_precise_distinct_occurrences_and_conditions() {
         DSL.find("b <- input_bb").unwrap()
     );
     for (rule, input) in [(first, "input_b"), (second, "input_bb")] {
-        let quote = |id| e.sources.text(e.provenance.origins(id)[0].span).unwrap();
+        let quote = |id| {
+            e.sources
+                .text(e.attribution.provenance.origins(id)[0].span)
+                .unwrap()
+        };
         assert_eq!(quote(rule.head.arguments()[0].id()), input);
         assert_eq!(quote(rule.head.arguments()[1].id()), "b");
         assert_eq!(quote(rule.body[0].atom().id()), "available(a)");
@@ -257,33 +261,38 @@ fn adding_a_denotate_view_does_not_replace_dsl_term_origins() {
     let mut e = example();
     let rule = e.corpus.rule(e.mappings[1]).unwrap();
     let target = rule.head.arguments()[1].id();
-    let original = e.provenance.origins(target).to_vec();
+    let original = e.attribution.provenance.origins(target).to_vec();
     let generated_text = "mapped_to(input_b, b) :- available(a);";
     let doc = e
         .sources
-        .add("file:///generated.den", 1, "denotate", generated_text)
+        .add(
+            "file:///generated.den",
+            1,
+            SourceView::Denotate.as_str(),
+            generated_text,
+        )
         .unwrap();
     let start = generated_text.find(", b").unwrap() + 2;
-    e.provenance
+    e.attribution
+        .provenance
         .attach(
             &e.corpus,
             &e.sources,
             target,
-            [Origin::new(
-                e.sources.span(doc, start..start + 1).unwrap(),
-                "target",
-            )],
+            [Origin::new(e.sources.span(doc, start..start + 1).unwrap())],
         )
         .unwrap();
     assert_eq!(
-        e.provenance
-            .in_view(target, &e.sources, "test-dsl")
+        e.attribution
+            .provenance
+            .in_view(target, &e.sources, SourceView::TestDsl.as_str())
             .unwrap(),
         original.iter().collect::<Vec<_>>()
     );
     let denotate_origins = e
+        .attribution
         .provenance
-        .in_view(target, &e.sources, "denotate")
+        .in_view(target, &e.sources, SourceView::Denotate.as_str())
         .unwrap();
     assert_eq!(denotate_origins.len(), 1);
     assert_eq!(e.sources.text(denotate_origins[0].span).unwrap(), "b");

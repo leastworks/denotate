@@ -3,6 +3,7 @@
 
 use crate::{
     ast::*,
+    attribution::{Attribution, AttributionError, SourceView},
     library::{self, MappingLibrary},
 };
 use denotate_ir::*;
@@ -37,6 +38,13 @@ pub enum LoweringFailure {
     Construction(ConstructionError),
     Provenance(ProvenanceError),
     InvalidAst(String),
+    Attribution(AttributionError),
+}
+
+impl From<AttributionError> for LoweringFailure {
+    fn from(error: AttributionError) -> Self {
+        Self::Attribution(error)
+    }
 }
 
 impl From<ConstructionError> for LoweringFailure {
@@ -59,8 +67,7 @@ impl std::error::Error for LoweringFailure {}
 pub struct LoweredProgram {
     pub corpus: Corpus,
     pub library: MappingLibrary,
-    pub provenance: Provenance,
-    pub rewrite_metadata: crate::warnings::RewriteMetadata,
+    pub attribution: Attribution,
 }
 
 pub enum LoweringOutcome {
@@ -125,7 +132,7 @@ pub fn lower(program: &Program, sources: &Sources) -> Result<LoweringOutcome> {
     let mut lowerer = Lowerer {
         corpus,
         library,
-        provenance: Provenance::new(),
+        attribution: Attribution::default(),
         sources,
         constants: BTreeMap::new(),
         next_helper: 1,
@@ -140,13 +147,7 @@ pub fn lower(program: &Program, sources: &Sources) -> Result<LoweringOutcome> {
             lowerer
                 .constants
                 .insert((declaration.kind, name.text.clone()), id);
-            lowerer.attach(
-                id,
-                [
-                    Origin::new(declaration.span, "declaration"),
-                    Origin::new(name.span, "name"),
-                ],
-            )?;
+            lowerer.attach(id, name.span)?;
         }
     }
     for mapping in &program.mappings {
@@ -156,25 +157,20 @@ pub fn lower(program: &Program, sources: &Sources) -> Result<LoweringOutcome> {
                 lowerer.constant(&mapping.input, Kind::Input)?.into(),
                 lowerer.constant(&mapping.target, Kind::Slot)?.into(),
             ],
-            origins: vec![
-                Origin::new(mapping.target.span, "target"),
-                Origin::new(mapping.input.span, "input"),
-            ],
-            argument_origins: vec![
-                Origin::new(mapping.input.span, "input"),
-                Origin::new(mapping.target.span, "target"),
-            ],
+            origin: mapping.span,
+            argument_origins: vec![mapping.input.span, mapping.target.span],
         };
+        let removals = crate::warnings::removals(mapping, sources)?;
         lowerer.define(
             &head,
             mapping.condition.as_ref().map(View::new),
             mapping.span,
-            None,
+            mapping.condition.as_ref().map(|expr| expr.span),
+            &removals,
         )?;
     }
-    let mut rewrite_metadata = crate::warnings::RewriteMetadata::default();
     for rule in lowerer.corpus.rules() {
-        rewrite_metadata.owners.insert(
+        lowerer.attribution.rewrites.owners.insert(
             rule.id,
             if library_rules.contains(&rule.id) {
                 crate::warnings::Contribution::Library
@@ -183,32 +179,11 @@ pub fn lower(program: &Program, sources: &Sources) -> Result<LoweringOutcome> {
             },
         );
     }
-    for mapping in &program.mappings {
-        for (negated, edit) in crate::warnings::removals(mapping, sources)? {
-            let occurrences: Vec<_> = lowerer
-                .corpus
-                .rules()
-                .flat_map(|r| &r.body)
-                .filter(|l| matches!(l, Literal::Negative(_)))
-                .filter(|l| {
-                    lowerer
-                        .provenance
-                        .origins(l.atom().id())
-                        .iter()
-                        .any(|o| o.role == "negated expression" && o.span == negated)
-                })
-                .map(|l| l.atom().id())
-                .collect();
-            if let [occurrence] = occurrences.as_slice() {
-                rewrite_metadata.removals.insert(*occurrence, edit);
-            }
-        }
-    }
+    lowerer.attribution.validate(&lowerer.corpus, sources)?;
     Ok(LoweringOutcome::Lowered(LoweredProgram {
         corpus: lowerer.corpus,
         library: lowerer.library,
-        provenance: lowerer.provenance,
-        rewrite_metadata,
+        attribution: lowerer.attribution,
     }))
 }
 
@@ -296,7 +271,10 @@ struct View<'a> {
     expr: &'a Expr,
     span: SourceSpan,
     negative: bool,
-    origins: Vec<Origin>,
+    /// Outermost authored negation affecting this literal. Child views inherit
+    /// it; helper definitions start a fresh context. Also ties a direct safe
+    /// removal to the AST node, never to a search through provenance spans.
+    normalized_by: Option<&'a Expr>,
 }
 impl<'a> View<'a> {
     fn new(expr: &'a Expr) -> Self {
@@ -304,17 +282,15 @@ impl<'a> View<'a> {
             expr,
             span: expr.span,
             negative: false,
-            origins: vec![],
+            normalized_by: None,
         }
     }
     fn peel(mut self) -> Self {
         loop {
             match &self.expr.kind {
                 ExprKind::Group(inner) => self.expr = inner,
-                ExprKind::Not { keyword, operand } => {
-                    self.origins.push(Origin::new(*keyword, "not"));
-                    self.origins
-                        .push(Origin::new(self.expr.span, "negated expression"));
+                ExprKind::Not { operand, .. } => {
+                    self.normalized_by.get_or_insert(self.expr);
                     self.negative = !self.negative;
                     self.span = operand.span;
                     self.expr = operand;
@@ -328,7 +304,7 @@ impl<'a> View<'a> {
             expr,
             span: expr.span,
             negative: self.negative,
-            origins: self.origins.clone(),
+            normalized_by: self.normalized_by,
         }
     }
 }
@@ -336,28 +312,27 @@ impl<'a> View<'a> {
 struct Head {
     relation: RelationId,
     arguments: Vec<Term>,
-    origins: Vec<Origin>,
-    argument_origins: Vec<Origin>,
+    origin: SourceSpan,
+    argument_origins: Vec<SourceSpan>,
 }
 
 struct Lowerer<'a> {
     corpus: Corpus,
     library: MappingLibrary,
-    provenance: Provenance,
+    attribution: Attribution,
     sources: &'a Sources,
     constants: BTreeMap<(Kind, String), ConstantId>,
     next_helper: usize,
 }
 
 impl Lowerer<'_> {
-    fn attach(
-        &mut self,
-        id: impl Into<OccurrenceId>,
-        origins: impl IntoIterator<Item = Origin>,
-    ) -> Result<()> {
-        Ok(self
-            .provenance
-            .attach(&self.corpus, self.sources, id, origins)?)
+    fn attach(&mut self, id: impl Into<OccurrenceId>, span: SourceSpan) -> Result<()> {
+        Ok(self.attribution.provenance.attach(
+            &self.corpus,
+            self.sources,
+            id,
+            [Origin::new(span)],
+        )?)
     }
     fn constant(&self, name: &Name, kind: Kind) -> Result<ConstantId> {
         self.constants
@@ -385,14 +360,13 @@ impl Lowerer<'_> {
         head: &Head,
         condition: Option<View<'_>>,
         statement: SourceSpan,
-        helper: Option<SourceSpan>,
+        guard: Option<SourceSpan>,
+        removals: &[(&Expr, crate::warnings::SourceEdit)],
     ) -> Result<()> {
-        let guard = condition.as_ref().map(|view| view.span);
         let mut alternatives = Vec::new();
         if let Some(view) = condition {
             Self::alternatives(view, &mut alternatives);
         }
-        let split = alternatives.len() > 1;
         let alternatives: Vec<_> = if alternatives.is_empty() {
             vec![None]
         } else {
@@ -402,27 +376,20 @@ impl Lowerer<'_> {
             let mut body = Vec::new();
             let mut links = Vec::new();
             if let Some(view) = &alternative {
-                self.body(view.clone(), statement, &mut body, &mut links)?;
+                self.body(view.clone(), &mut body, &mut links, removals)?;
             }
             let atom = self.corpus.atom(head.relation, head.arguments.clone())?;
-            links.push((atom.id(), head.origins.clone()));
+            links.push((atom.id(), head.origin));
             for (term, origin) in atom.arguments().iter().zip(&head.argument_origins) {
-                links.push((term.id(), vec![origin.clone()]));
+                links.push((term.id(), *origin));
             }
             let id = self.corpus.add_rule(atom, body)?;
-            let mut origins = vec![Origin::new(statement, "mapping")];
-            if let Some(span) = helper {
-                origins.push(Origin::new(span, "subexpression"));
-            } else if let Some(span) = guard {
-                origins.push(Origin::new(span, "guard"));
+            self.attach(id, statement)?;
+            if let Some(span) = guard {
+                let view =
+                    SourceView::try_from(self.sources.snapshot(span.snapshot())?.view.as_str())?;
+                self.attribution.guards.insert((id, view), span);
             }
-            if let Some(view) = alternative {
-                if split {
-                    origins.push(Origin::new(view.span, "alternative"));
-                }
-                origins.extend(view.origins);
-            }
-            self.attach(id, origins)?;
             for (id, origins) in links {
                 self.attach(id, origins)?;
             }
@@ -433,19 +400,19 @@ impl Lowerer<'_> {
     fn body(
         &mut self,
         view: View<'_>,
-        statement: SourceSpan,
         body: &mut Vec<Literal>,
-        links: &mut Vec<(OccurrenceId, Vec<Origin>)>,
+        links: &mut Vec<(OccurrenceId, SourceSpan)>,
+        removals: &[(&Expr, crate::warnings::SourceEdit)],
     ) -> Result<()> {
         let view = view.peel();
         match &view.expr.kind {
             ExprKind::And(a, b) if !view.negative => {
-                self.body(view.child(a), statement, body, links)?;
-                self.body(view.child(b), statement, body, links)?;
+                self.body(view.child(a), body, links, removals)?;
+                self.body(view.child(b), body, links, removals)?;
             }
             ExprKind::Or(a, b) if view.negative => {
-                self.body(view.child(a), statement, body, links)?;
-                self.body(view.child(b), statement, body, links)?;
+                self.body(view.child(a), body, links, removals)?;
+                self.body(view.child(b), body, links, removals)?;
             }
             ExprKind::Available(name) | ExprKind::Present(name) => {
                 let (relation, kind) = if matches!(view.expr.kind, ExprKind::Available(_)) {
@@ -456,13 +423,24 @@ impl Lowerer<'_> {
                 let atom = self
                     .corpus
                     .atom(relation, [self.constant(name, kind)?.into()])?;
-                let mut origins = vec![Origin::new(view.expr.span, "condition")];
-                origins.extend(view.origins);
-                links.push((atom.id(), origins));
                 links.push((
-                    atom.arguments()[0].id(),
-                    vec![Origin::new(name.span, "condition argument")],
+                    atom.id(),
+                    view.normalized_by.map_or(view.expr.span, |expr| expr.span),
                 ));
+                links.push((atom.arguments()[0].id(), name.span));
+                if view.negative {
+                    for (expr, edit) in removals {
+                        if view
+                            .normalized_by
+                            .is_some_and(|origin| std::ptr::eq(origin, *expr))
+                        {
+                            self.attribution
+                                .rewrites
+                                .removals
+                                .insert(atom.id(), edit.clone());
+                        }
+                    }
+                }
                 body.push(if view.negative {
                     Literal::Negative(atom)
                 } else {
@@ -478,24 +456,19 @@ impl Lowerer<'_> {
                 let relation = self
                     .corpus
                     .declare_relation(name, RelationRole::Derived, [])?;
-                let origin = Origin::new(view.span, "subexpression");
-                self.attach(relation, [origin.clone()])?;
+                self.attach(relation, view.span)?;
                 let helper = Head {
                     relation,
                     arguments: vec![],
-                    origins: vec![origin.clone()],
+                    origin: view.span,
                     argument_origins: vec![],
                 };
-                self.define(
-                    &helper,
-                    Some(View::new(view.expr)),
-                    statement,
-                    Some(view.span),
-                )?;
+                self.define(&helper, Some(View::new(view.expr)), view.span, None, &[])?;
                 let atom = self.corpus.atom(relation, [])?;
-                let mut origins = vec![origin];
-                origins.extend(view.origins);
-                links.push((atom.id(), origins));
+                links.push((
+                    atom.id(),
+                    view.normalized_by.map_or(view.span, |expr| expr.span),
+                ));
                 body.push(if view.negative {
                     Literal::Negative(atom)
                 } else {

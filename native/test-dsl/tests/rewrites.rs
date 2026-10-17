@@ -1,3 +1,4 @@
+use denotate_test_dsl::attribution::SourceView;
 mod support;
 use denotate_check::*;
 use denotate_ir::*;
@@ -46,14 +47,17 @@ fn direct_dsl_condition_warns_at_exact_negation_and_offers_whole_condition_edit(
         .admit(&limits)
         .unwrap();
     assert!(ground.is_admitted());
-    let warnings = present_rewrites(&p, &ground, &f.sources, "test-dsl").unwrap();
+    let warnings = present_rewrites(&p, &ground, &f.sources, SourceView::TestDsl.as_str()).unwrap();
     assert_eq!(warnings.len(), 1);
     let mut edited = f.text.clone();
     let mut edits: Vec<_> = warnings
         .iter()
         .map(|w| {
             assert_eq!(w.owner, Contribution::Program);
-            assert_eq!(f.sources.text(w.primary.unwrap()).unwrap(), "not");
+            assert_eq!(
+                f.sources.text(w.primary.unwrap()).unwrap(),
+                "not available(a)"
+            );
             let edit = w.edit.as_ref().unwrap();
             assert!(
                 f.sources
@@ -128,7 +132,7 @@ fn direct_dsl_condition_warns_at_exact_negation_and_offers_whole_condition_edit(
                 .verify_at_most_one(&limits)
                 .unwrap(),
             &f.sources,
-            "test-dsl"
+            SourceView::TestDsl.as_str()
         )
         .unwrap()
         .is_empty()
@@ -176,14 +180,19 @@ fn transformed_negations_and_generated_helpers_warn_without_edits() {
             .admit(&limits)
             .unwrap();
         assert!(ground.is_admitted(), "{shape}");
-        let warnings = present_rewrites(&p, &ground, &f.sources, "test-dsl").unwrap();
+        let warnings =
+            present_rewrites(&p, &ground, &f.sources, SourceView::TestDsl.as_str()).unwrap();
         let a = warnings.iter().find(|w| p.corpus.rule(w.rule).unwrap().head.arguments().iter().any(|t| matches!(t.value(),Term::Constant(id) if p.corpus.constant(*id).unwrap().name=="a"))).unwrap();
         assert_eq!(a.owner, Contribution::Program);
         assert!(
             a.edit.is_none(),
             "transformed {shape} must not offer an edit"
         );
-        assert!(a.related.iter().any(|o| o.role == "negated expression"));
+        assert!(
+            a.related
+                .iter()
+                .any(|o| o.label == "redundant condition" && Some(o.span) == a.primary)
+        );
         for r in p.corpus.rules().filter(|r| {
             p.corpus
                 .relation(r.head.relation())
@@ -191,7 +200,7 @@ fn transformed_negations_and_generated_helpers_warn_without_edits() {
                 .name
                 .starts_with('$')
         }) {
-            assert_eq!(p.rewrite_metadata.owners[&r.id], Contribution::Program);
+            assert_eq!(p.attribution.rewrites.owners[&r.id], Contribution::Program);
         }
     }
 }
@@ -233,7 +242,10 @@ fn library_warnings_do_not_borrow_user_locations_or_change_owner_with_view() {
                 ],
             )
             .unwrap();
-        p.rewrite_metadata.owners.insert(r, Contribution::Library);
+        p.attribution
+            .rewrites
+            .owners
+            .insert(r, Contribution::Library);
         rules.push((r, occurrence));
     }
     let limits = Limits::default();
@@ -241,7 +253,7 @@ fn library_warnings_do_not_borrow_user_locations_or_change_owner_with_view() {
         .unwrap()
         .admit(&limits)
         .unwrap();
-    let warnings = present_rewrites(&p, &ground, &sources, "test-dsl").unwrap();
+    let warnings = present_rewrites(&p, &ground, &sources, SourceView::TestDsl.as_str()).unwrap();
     assert_eq!(
         warnings
             .iter()
@@ -256,13 +268,19 @@ fn library_warnings_do_not_borrow_user_locations_or_change_owner_with_view() {
             .all(|w| w.primary.is_none() && w.edit.is_none())
     );
     let snapshot = sources
-        .add("file:///library.den", 1, "denotate", "!right()")
+        .add(
+            "file:///library.den",
+            1,
+            SourceView::Denotate.as_str(),
+            "!right()",
+        )
         .unwrap();
     let span = sources.span(snapshot, 0..1).unwrap();
-    p.provenance
-        .attach(&p.corpus, &sources, rules[0].1, [Origin::new(span, "not")])
+    p.attribution
+        .provenance
+        .attach(&p.corpus, &sources, rules[0].1, [Origin::new(span)])
         .unwrap();
-    let warnings = present_rewrites(&p, &ground, &sources, "denotate").unwrap();
+    let warnings = present_rewrites(&p, &ground, &sources, SourceView::Denotate.as_str()).unwrap();
     let warning = warnings.iter().find(|w| w.rule == rules[0].0).unwrap();
     assert_eq!(warning.owner, Contribution::Library);
     assert_eq!(warning.primary, Some(span));
@@ -287,7 +305,7 @@ fn exhausted_admission_reports_inconclusive_but_keeps_independent_overlap() {
         .verify_at_most_one(&limits)
         .unwrap();
     assert!(!report.all_obligations_proved());
-    let ds = presentation::present(&p, &report, &f.sources, "test-dsl").unwrap();
+    let ds = presentation::present(&p, &report, &f.sources, SourceView::TestDsl.as_str()).unwrap();
     assert_eq!(
         ds.iter()
             .filter(|d| d.kind == DiagnosticKind::OverlappingMappings)
@@ -315,7 +333,7 @@ fn exhausted_admission_reports_inconclusive_but_keeps_independent_overlap() {
     assert!(ds.iter().all(|d| d.kind != DiagnosticKind::UnsupportedGroup
         && d.kind != DiagnosticKind::UnsupportedCycle));
     assert!(
-        present_rewrites(&p, &ground, &f.sources, "test-dsl")
+        present_rewrites(&p, &ground, &f.sources, SourceView::TestDsl.as_str())
             .unwrap()
             .is_empty()
     );
@@ -340,7 +358,7 @@ fn redundant_mapping_warns_on_the_dropped_statement_not_a_fake_derivation() {
         .admit(&limits)
         .unwrap();
     assert!(ground.is_admitted());
-    let warnings = present_rewrites(&p, &ground, &f.sources, "test-dsl").unwrap();
+    let warnings = present_rewrites(&p, &ground, &f.sources, SourceView::TestDsl.as_str()).unwrap();
     assert_eq!(warnings.len(), 1);
     let w = &warnings[0];
     assert_eq!(w.owner, Contribution::Program);
@@ -405,21 +423,27 @@ fn a_partial_ground_discharge_never_offers_an_authored_edit() {
             ],
         )
         .unwrap();
-    p.rewrite_metadata
+    p.attribution
+        .rewrites
         .owners
         .insert(rule, Contribution::Program);
     // A frontend-supplied edit is still insufficient without all instances.
-    let edit = p.rewrite_metadata.removals.values().next().unwrap().clone();
-    p.rewrite_metadata.removals.insert(occurrence, edit);
-    p.provenance
+    let edit = p
+        .attribution
+        .rewrites
+        .removals
+        .values()
+        .next()
+        .unwrap()
+        .clone();
+    p.attribution.rewrites.removals.insert(occurrence, edit);
+    p.attribution
+        .provenance
         .attach(
             &p.corpus,
             &f.sources,
             occurrence,
-            [Origin::new(
-                f.span("not available(b)"),
-                "negated expression",
-            )],
+            [Origin::new(f.span("not available(b)"))],
         )
         .unwrap();
     for (i, value) in values.iter().enumerate() {
@@ -440,7 +464,10 @@ fn a_partial_ground_discharge_never_offers_an_authored_edit() {
                 ],
             )
             .unwrap();
-        p.rewrite_metadata.owners.insert(id, Contribution::Library);
+        p.attribution
+            .rewrites
+            .owners
+            .insert(id, Contribution::Library);
     }
     let ground = GroundProgram::prepare(&p.corpus, &domains(&p), &limits)
         .unwrap()
@@ -450,7 +477,7 @@ fn a_partial_ground_discharge_never_offers_an_authored_edit() {
         ground.original_rules().filter(|r| r.source == rule).count(),
         2
     );
-    let warnings = present_rewrites(&p, &ground, &f.sources, "test-dsl").unwrap();
+    let warnings = present_rewrites(&p, &ground, &f.sources, SourceView::TestDsl.as_str()).unwrap();
     let w = warnings.iter().find(|w| w.rule == rule).unwrap();
     assert_eq!(w.proofs.len(), 1);
     assert_eq!(w.literal, Some(occurrence));
@@ -469,7 +496,7 @@ fn exclusivity_through_library_forwarding_discharges_and_warns_at_both_nots() {
     assert!(ground.is_admitted());
     assert!(ground.admission_limit().is_none());
     assert_eq!(ground.rewrite_proofs().count(), 2);
-    let warnings = present_rewrites(&p, &ground, &f.sources, "test-dsl").unwrap();
+    let warnings = present_rewrites(&p, &ground, &f.sources, SourceView::TestDsl.as_str()).unwrap();
     assert_eq!(warnings.len(), 2);
     let mut edited = f.text.clone();
     let mut edits = Vec::new();
@@ -478,7 +505,7 @@ fn exclusivity_through_library_forwarding_discharges_and_warns_at_both_nots() {
         .zip(["not available(b)", "not available(a)"])
     {
         assert_eq!(warning.owner, Contribution::Program);
-        let expected = f.within(f.span(negation), "not");
+        let expected = f.span(negation);
         assert_eq!(warning.primary, Some(expected));
         edits.push(warning.edit.as_ref().unwrap());
     }

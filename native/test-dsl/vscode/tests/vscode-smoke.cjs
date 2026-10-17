@@ -127,7 +127,7 @@ exports.run = async function () {
         const failure = noMeaning.find(d => d.code === 'NoMeaning');
         assert.ok(failure);
         assert.equal(failure.severity, vscode.DiagnosticSeverity.Error);
-        assert.equal(document.getText(failure.range), 'not');
+        assert.equal(document.getText(failure.range), 'not available(a)');
         assert.match(failure.message, /whenever input_a is present/);
         overlaps(await validUpdate(() => replace(original)));
         console.log('InputMapping: current ranges and no-meaning diagnostic passed');

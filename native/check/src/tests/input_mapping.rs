@@ -1,5 +1,6 @@
 use crate::*;
 use denotate_ir::*;
+use denotate_test_dsl::attribution::SourceView;
 use denotate_test_dsl::{ast::*, lowering::*};
 use std::collections::BTreeSet;
 
@@ -15,7 +16,7 @@ impl Fixture {
     fn new(text: &'static str, inputs: &[&str], slots: &[&str]) -> Self {
         let mut sources = Sources::new();
         let snapshot = sources
-            .add("file:///replay.flow", 1, "test-dsl", text)
+            .add("file:///replay.flow", 1, SourceView::TestDsl.as_str(), text)
             .unwrap();
         let mut f = Self {
             sources,
@@ -259,19 +260,9 @@ fn unresolved_c_blocks_d_but_not_b_and_preserves_the_dsl_negative_premise() {
         .iter()
         .find(|e| e.polarity == Polarity::Negative)
         .unwrap();
-    let origins = lowered.provenance.origins(negative.premise);
-    assert_eq!(
-        f.sources
-            .text(origins.iter().find(|o| o.role == "not").unwrap().span)
-            .unwrap(),
-        "not"
-    );
-    assert_eq!(
-        f.sources
-            .text(origins.iter().find(|o| o.role == "condition").unwrap().span)
-            .unwrap(),
-        "available(c)"
-    );
+    let origins = lowered.attribution.provenance.origins(negative.premise);
+    assert_eq!(origins.len(), 1);
+    assert_eq!(f.sources.text(origins[0].span).unwrap(), "not available(c)");
     let source_rule = lowered
         .corpus
         .rule(p.rule(negative.rule).unwrap().source)
@@ -380,13 +371,12 @@ fn generated_zero_argument_helper_replays_and_retains_its_negative_use_origin() 
                 *provider,
                 CompletedProvider::Component(p.component_for(&helper).unwrap().id)
             );
-            let origin = lowered
-                .provenance
-                .origins(*occurrence)
-                .iter()
-                .find(|o| o.role == "not")
-                .unwrap();
-            assert_eq!(f.sources.text(origin.span).unwrap(), "not");
+            let origins = lowered.attribution.provenance.origins(*occurrence);
+            assert_eq!(origins.len(), 1);
+            assert_eq!(
+                f.sources.text(origins[0].span).unwrap(),
+                "not (available(a) and available(c))"
+            );
         }
     }
 }
@@ -456,12 +446,8 @@ fn impossible_guards_prune_positive_mappings_and_explain_negative_mappings() {
         };
         assert_eq!(*fact, atom(&lowered, "available", &["c"]));
         assert_eq!(*provider, CompletedProvider::NoPossibleProducer);
-        let origin = lowered
-            .provenance
-            .origins(*occurrence)
-            .iter()
-            .find(|o| o.role == "not")
-            .unwrap();
-        assert_eq!(f.sources.text(origin.span).unwrap(), "not");
+        let origins = lowered.attribution.provenance.origins(*occurrence);
+        assert_eq!(origins.len(), 1);
+        assert_eq!(f.sources.text(origins[0].span).unwrap(), "not available(c)");
     }
 }

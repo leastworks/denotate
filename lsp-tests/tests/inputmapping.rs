@@ -171,6 +171,12 @@ fn source_semantics_and_scoped_findings_survive_the_protocol_adapter() {
     assert!(!no_meaning.is_empty());
     assert_eq!(no_meaning[0]["severity"], 1);
     assert_eq!(no_meaning[0]["range"]["start"]["character"], 18);
+    // The entire authored condition, not just the `not` keyword.
+    assert_eq!(no_meaning[0]["range"]["end"]["character"], 34);
+    assert_eq!(
+        no_meaning[0]["range"]["start"]["line"],
+        no_meaning[0]["range"]["end"]["line"]
+    );
     assert!(!codes(&c, &u, "UnsupportedGroup").is_empty());
     c.shutdown();
 }

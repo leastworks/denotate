@@ -1,6 +1,7 @@
 #![allow(dead_code)] // Shared by integration tests and the small CLI example.
 use denotate_check::*;
 use denotate_ir::*;
+use denotate_test_dsl::attribution::SourceView;
 use denotate_test_dsl::{ast::*, lowering::*};
 
 /// Builds explicit ASTs against fixture text. This is not a parser.
@@ -14,7 +15,12 @@ impl Fixture {
     pub fn new(text: &str, inputs: &[&str], slots: &[&str]) -> Self {
         let mut sources = Sources::new();
         let snapshot = sources
-            .add("file:///example.inputmapping", 1, "test-dsl", text)
+            .add(
+                "file:///example.inputmapping",
+                1,
+                SourceView::TestDsl.as_str(),
+                text,
+            )
             .unwrap();
         let mut f = Self {
             sources,

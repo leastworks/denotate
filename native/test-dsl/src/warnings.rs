@@ -1,5 +1,9 @@
 //! Rewrite wording and edit eligibility belong to the frontend, not the IR.
-use crate::{ast::*, lowering::LoweredProgram};
+use crate::{
+    ast::*,
+    attribution::{RelatedLocation, SourceView},
+    lowering::LoweredProgram,
+};
 use denotate_check::*;
 use denotate_ir::*;
 use std::collections::BTreeMap;
@@ -32,7 +36,7 @@ pub struct RewriteWarning {
     /// Constructed/library IR may have no location in this view. Keep the
     /// creator warning without borrowing a user's unrelated source location.
     pub primary: Option<SourceSpan>,
-    pub related: Vec<Origin>,
+    pub related: Vec<RelatedLocation>,
     pub edit: Option<SourceEdit>,
 }
 
@@ -43,6 +47,8 @@ pub fn present_rewrites(
     view: &str,
 ) -> Result<Vec<RewriteWarning>, crate::presentation::PresentationError> {
     use crate::presentation::PresentationError;
+    let view = SourceView::try_from(view)?;
+    lowered.attribution.validate(&lowered.corpus, sources)?;
     let mut grouped = BTreeMap::<_, Vec<_>>::new();
     for proof in program.rewrite_proofs() {
         let rule = proof.candidate.rule.source;
@@ -65,27 +71,32 @@ pub fn present_rewrites(
                 "rewrite belongs to another corpus",
             ));
         }
-        let owner = *lowered.rewrite_metadata.owners.get(&rule).ok_or(
+        let owner = *lowered.attribution.rewrites.owners.get(&rule).ok_or(
             PresentationError::InvalidFinding("missing rewrite contribution owner"),
         )?;
-        let related: Vec<_> = lowered
-            .provenance
-            .in_view(literal.unwrap_or(rule.into()), sources, view)?
+        let primary = lowered
+            .attribution
+            .origin(literal.unwrap_or(rule.into()), sources, view)?;
+        let related = primary
             .into_iter()
-            .cloned()
+            .map(|span| {
+                RelatedLocation::new(
+                    span,
+                    if literal.is_some() {
+                        "redundant condition"
+                    } else {
+                        "redundant definition"
+                    },
+                )
+            })
             .collect();
-        let primary = related
-            .iter()
-            .find(|o| o.role == if literal.is_some() { "not" } else { "mapping" })
-            .or_else(|| related.first())
-            .map(|o| o.span);
         let all_justified = program
             .original_rules()
             .filter(|r| r.source == rule)
             .all(|r| proofs.iter().any(|p| p.candidate.rule.id == r.id));
         let edit = literal.and_then(|literal| {
-            let edit = lowered.rewrite_metadata.removals.get(&literal)?;
-            (all_justified && sources.snapshot(edit.span.snapshot()).ok()?.view == view)
+            let edit = lowered.attribution.rewrites.removals.get(&literal)?;
+            (all_justified && sources.snapshot(edit.span.snapshot()).ok()?.view == view.as_str())
                 .then(|| edit.clone())
         });
         result.push(RewriteWarning {
@@ -105,10 +116,10 @@ pub fn present_rewrites(
 
 /// Only flat conjunctions of direct conditions are editable here. Compound
 /// negation, grouping, OR splitting and generated helpers remain warn-only.
-pub(crate) fn removals(
-    mapping: &Mapping,
+pub(crate) fn removals<'a>(
+    mapping: &'a Mapping,
     sources: &Sources,
-) -> Result<Vec<(SourceSpan, SourceEdit)>, ProvenanceError> {
+) -> Result<Vec<(&'a Expr, SourceEdit)>, ProvenanceError> {
     fn leaves<'a>(expr: &'a Expr, out: &mut Vec<&'a Expr>) -> bool {
         match &expr.kind {
             ExprKind::And(a, b) => leaves(a, out) && leaves(b, out),
@@ -163,7 +174,7 @@ pub(crate) fn removals(
         let remainder = sources.text(span)?.replace(sources.text(part.span)?, "");
         if remainder.trim() == separator {
             result.push((
-                part.span,
+                *part,
                 SourceEdit {
                     span,
                     replacement: String::new(),

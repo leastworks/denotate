@@ -1,4 +1,5 @@
 //! No parser or LSP: select a hand-built, source-spanned AST and use public APIs.
+use denotate_test_dsl::attribution::SourceView;
 #[path = "../tests/support/mod.rs"]
 mod support;
 use denotate_check::*;
@@ -55,12 +56,17 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         println!("Inconclusive: checking budget exhausted.");
         return Ok(());
     };
-    let diagnostics = presentation::present(&lowered, &report, &fixture.sources, "test-dsl")?;
+    let diagnostics = presentation::present(
+        &lowered,
+        &report,
+        &fixture.sources,
+        SourceView::TestDsl.as_str(),
+    )?;
     let warnings = denotate_test_dsl::warnings::present_rewrites(
         &lowered,
         &ground,
         &fixture.sources,
-        "test-dsl",
+        SourceView::TestDsl.as_str(),
     )?;
     println!("{}", fixture.text);
     for warning in &warnings {
@@ -95,7 +101,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         for origin in &diagnostic.related {
             println!(
                 "  {}: `{}` @ bytes {:?}",
-                origin.role,
+                origin.label,
                 fixture.sources.text(origin.span)?,
                 origin.span.byte_range()
             );

@@ -1,3 +1,4 @@
+use denotate_test_dsl::attribution::SourceView;
 mod support;
 use denotate_check::*;
 use denotate_ir::*;
@@ -37,7 +38,7 @@ fn moving_the_second_mapping_to_another_slot_clears_the_conflict() {
     let report = meaning.verify_at_most_one(&limits).unwrap();
     assert!(report.all_obligations_proved());
     assert!(
-        presentation::present(&p, &report, &f.sources, "test-dsl")
+        presentation::present(&p, &report, &f.sources, SourceView::TestDsl.as_str())
             .unwrap()
             .is_empty()
     );
@@ -72,7 +73,8 @@ fn fixture_overlap_has_replayed_ground_evidence_and_exact_term_locations() {
         example.observation.present.len() + example.observation.absent.len(),
         3
     );
-    let messages = presentation::present(&p, &report, &f.sources, "test-dsl").unwrap();
+    let messages =
+        presentation::present(&p, &report, &f.sources, SourceView::TestDsl.as_str()).unwrap();
     assert_eq!(messages.len(), 2);
     let expected: BTreeSet<_> = f.ast.mappings[1..].iter().map(|m| m.target.span).collect();
     assert_eq!(
@@ -90,12 +92,14 @@ fn fixture_overlap_has_replayed_ground_evidence_and_exact_term_locations() {
                 diagnostic
                     .related
                     .iter()
-                    .any(|o| o.role == "input" && o.span == mapping.input.span)
+                    .any(|o| o.label == "conflicting Input" && o.span == mapping.input.span)
             );
             assert!(
-                diagnostic.related.iter().any(
-                    |o| o.role == "guard" && o.span == mapping.condition.as_ref().unwrap().span
-                )
+                diagnostic
+                    .related
+                    .iter()
+                    .any(|o| o.label == "mapping condition"
+                        && o.span == mapping.condition.as_ref().unwrap().span)
             );
         }
     }
@@ -106,12 +110,16 @@ fn fixture_overlap_has_replayed_ground_evidence_and_exact_term_locations() {
             panic!()
         };
         assert_eq!(
-            p.provenance.origins(rule.head.arguments[0])[0].role,
-            "input"
+            f.sources
+                .text(p.attribution.provenance.origins(rule.head.arguments[0])[0].span)
+                .unwrap(),
+            input
         );
         assert_eq!(
-            p.provenance.origins(rule.head.arguments[1])[0].role,
-            "target"
+            f.sources
+                .text(p.attribution.provenance.origins(rule.head.arguments[1])[0].span)
+                .unwrap(),
+            "b"
         );
         assert_eq!(ground.rule(rule.id), Some(rule));
     }
@@ -165,7 +173,9 @@ fn unresolved_region_never_restricts_the_overlap_witness_or_hides_independent_re
             if !fix_c {
                 assert!(matches!(group.outcome, VerifiedOutcome::Unsupported));
             }
-            let messages = presentation::present(&p, &report, &f.sources, "test-dsl").unwrap();
+            let messages =
+                presentation::present(&p, &report, &f.sources, SourceView::TestDsl.as_str())
+                    .unwrap();
             assert_eq!(
                 example.confined_to_no_meaning.len(),
                 usize::from(require_c && !fix_c)
@@ -226,7 +236,10 @@ fn unresolved_region_never_restricts_the_overlap_witness_or_hides_independent_re
                     .iter()
                     .find(|d| d.kind == DiagnosticKind::NoMeaning)
                     .unwrap();
-                assert_eq!(f.sources.text(diagnostic.primary).unwrap(), "not");
+                assert_eq!(
+                    f.sources.text(diagnostic.primary).unwrap(),
+                    "not available(c)"
+                );
                 assert_eq!(diagnostic.kind.severity(), DiagnosticSeverity::Error);
                 assert_eq!(
                     diagnostic.message,
@@ -268,7 +281,7 @@ fn unresolved_region_never_restricts_the_overlap_witness_or_hides_independent_re
                         notice
                             .related
                             .iter()
-                            .any(|o| o.role == "blocking no-meaning finding"
+                            .any(|o| o.label == "blocking no-meaning finding"
                                 && o.span == diagnostic.primary)
                     );
                     assert_eq!(
@@ -276,12 +289,9 @@ fn unresolved_region_never_restricts_the_overlap_witness_or_hides_independent_re
                         diagnostic.cycle_rules.iter().copied().collect()
                     );
                 }
-                assert!(
-                    diagnostic
-                        .related
-                        .iter()
-                        .any(|o| o.role == "negated expression"
-                            && f.sources.text(o.span).unwrap() == "not available(c)")
+                assert_eq!(
+                    f.sources.text(diagnostic.primary).unwrap(),
+                    "not available(c)"
                 );
             } else {
                 assert!(
@@ -373,9 +383,15 @@ fn unlocated_library_negation_falls_back_without_hiding_other_findings() {
     let library_text = "available(c) :- !mapped_to(input_c, c);";
     let library_snapshot = f
         .sources
-        .add("file:///library.den", 1, "denotate", library_text)
+        .add(
+            "file:///library.den",
+            1,
+            SourceView::Denotate.as_str(),
+            library_text,
+        )
         .unwrap();
-    p.provenance
+    p.attribution
+        .provenance
         .attach(
             &p.corpus,
             &f.sources,
@@ -387,7 +403,6 @@ fn unlocated_library_negation_falls_back_without_hiding_other_findings() {
                         library_text.find('!').unwrap()..library_text.len() - 1,
                     )
                     .unwrap(),
-                "condition",
             )],
         )
         .unwrap();
@@ -405,17 +420,15 @@ fn unlocated_library_negation_falls_back_without_hiding_other_findings() {
             .iter()
             .any(|e| e.polarity == Polarity::Negative && e.premise == negative_id)
     );
-    let messages = presentation::present(&p, &report, &f.sources, "test-dsl").unwrap();
+    let messages =
+        presentation::present(&p, &report, &f.sources, SourceView::TestDsl.as_str()).unwrap();
     let user_mapping = f
         .ast
         .mappings
         .iter()
         .find(|m| m.target.text == "c")
         .unwrap();
-    let expected_rule_locations = BTreeSet::from([
-        user_mapping.span,
-        user_mapping.condition.as_ref().unwrap().span,
-    ]);
+    let expected_rule_locations = BTreeSet::from([user_mapping.span]);
     assert_eq!(
         messages
             .iter()
@@ -477,7 +490,7 @@ fn unlocated_library_negation_falls_back_without_hiding_other_findings() {
     let mut term_only = Provenance::new();
     let mut no_cycle = Provenance::new();
     for occurrence in p.corpus.rules().flat_map(occurrences) {
-        let origins = p.provenance.origins(occurrence).iter().cloned();
+        let origins = p.attribution.provenance.origins(occurrence).iter().cloned();
         if !cycle_occurrences.contains(&occurrence) {
             no_cycle
                 .attach(&p.corpus, &f.sources, occurrence, origins.clone())
@@ -489,8 +502,9 @@ fn unlocated_library_negation_falls_back_without_hiding_other_findings() {
                 .unwrap();
         }
     }
-    p.provenance = term_only;
-    let messages = presentation::present(&p, &report, &f.sources, "test-dsl").unwrap();
+    p.attribution.provenance = term_only;
+    let messages =
+        presentation::present(&p, &report, &f.sources, SourceView::TestDsl.as_str()).unwrap();
     assert_eq!(
         messages
             .iter()
@@ -506,13 +520,10 @@ fn unlocated_library_negation_falls_back_without_hiding_other_findings() {
             .count(),
         2
     );
-    p.provenance = no_cycle;
+    p.attribution.provenance = no_cycle;
     assert!(matches!(
-        presentation::present(&p, &report, &f.sources, "test-dsl"),
-        Err(PresentationError::MissingOrigin {
-            role: "cycle location",
-            ..
-        })
+        presentation::present(&p, &report, &f.sources, SourceView::TestDsl.as_str()),
+        Err(PresentationError::MissingOrigin { .. })
     ));
 }
 
@@ -577,7 +588,7 @@ fn complementary_guards_duplicates_or_paths_and_one_input_to_two_slots_do_not_co
         let report = meaning.verify_at_most_one(&limits).unwrap();
         assert!(report.all_obligations_proved());
         assert!(
-            presentation::present(&p, &report, &f.sources, "test-dsl")
+            presentation::present(&p, &report, &f.sources, SourceView::TestDsl.as_str())
                 .unwrap()
                 .is_empty()
         );
@@ -646,12 +657,9 @@ fn helper_and_input_absence_keep_references_and_quote_the_original_negative_guar
                         );
                         assert_eq!(replay.fact(fact).unwrap(), FactState::Settled(false));
                         assert!(!example.evidence.contains_key(fact)); // no why-not expansion
-                        assert!(
-                            p.provenance
-                                .origins(*occurrence)
-                                .iter()
-                                .any(|o| o.role == "not")
-                        );
+                        let origins = p.attribution.provenance.origins(*occurrence);
+                        assert_eq!(origins.len(), 1);
+                        assert_eq!(f.sources.text(origins[0].span).unwrap(), guard);
                         if guard.contains("present") {
                             assert_eq!(*provider, CompletedProvider::InputSnapshot);
                         } else if guard.contains("and") {
@@ -664,7 +672,8 @@ fn helper_and_input_absence_keep_references_and_quote_the_original_negative_guar
             }
         }
         assert_eq!(absences, 1);
-        let messages = presentation::present(&p, &report, &f.sources, "test-dsl").unwrap();
+        let messages =
+            presentation::present(&p, &report, &f.sources, SourceView::TestDsl.as_str()).unwrap();
         assert!(
             messages
                 .iter()
@@ -682,13 +691,18 @@ fn denotate_view_selects_supplied_term_origins_and_missing_origins_are_creator_f
     let meaning = ground.symbolic(&limits).unwrap();
     let report = meaning.verify_at_most_one(&limits).unwrap();
     assert!(matches!(
-        presentation::present(&p, &report, &f.sources, "denotate"),
+        presentation::present(&p, &report, &f.sources, SourceView::Denotate.as_str()),
         Err(PresentationError::MissingOrigin { .. })
     ));
     let text = "mapped_to(input_b, b) :- available(a);\nmapped_to(input_bb, b) :- available(a);\n";
     let snapshot = f
         .sources
-        .add("file:///example.den", 7, "denotate", text)
+        .add(
+            "file:///example.den",
+            7,
+            SourceView::Denotate.as_str(),
+            text,
+        )
         .unwrap();
     let mut targets = BTreeSet::new();
     for (input, start) in [("input_b", 0), ("input_bb", text.find('\n').unwrap() + 1)] {
@@ -711,16 +725,20 @@ fn denotate_view_selects_supplied_term_origins_and_missing_origins_are_creator_f
             .span(snapshot, guard_at..guard_at + "available(a)".len())
             .unwrap();
         for (id, origin) in [
-            (rule.head.arguments[0], Origin::new(input_span, "input")),
-            (rule.head.arguments[1], Origin::new(target, "target")),
-            (rule.source.into(), Origin::new(guard, "guard")),
+            (rule.head.arguments[0], Origin::new(input_span)),
+            (rule.head.arguments[1], Origin::new(target)),
         ] {
-            p.provenance
+            p.attribution
+                .provenance
                 .attach(&p.corpus, &f.sources, id, [origin])
                 .unwrap();
         }
+        p.attribution
+            .guards
+            .insert((rule.source, SourceView::Denotate), guard);
     }
-    let messages = presentation::present(&p, &report, &f.sources, "denotate").unwrap();
+    let messages =
+        presentation::present(&p, &report, &f.sources, SourceView::Denotate.as_str()).unwrap();
     assert_eq!(
         messages.iter().map(|d| d.primary).collect::<BTreeSet<_>>(),
         targets
@@ -729,9 +747,15 @@ fn denotate_view_selects_supplied_term_origins_and_missing_origins_are_creator_f
         assert_eq!(f.sources.text(d.primary).unwrap(), "b");
         assert!(d.related.iter().all(|o| o.span.snapshot() == snapshot));
     }
-    let other = Fixture::overlap().lower();
+    let other_fixture = Fixture::overlap();
+    let other = other_fixture.lower();
     assert!(matches!(
-        presentation::present(&other, &report, &f.sources, "test-dsl"),
+        presentation::present(
+            &other,
+            &report,
+            &other_fixture.sources,
+            SourceView::TestDsl.as_str()
+        ),
         Err(PresentationError::InvalidFinding(_))
     ));
 }

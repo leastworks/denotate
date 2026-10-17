@@ -1,3 +1,4 @@
+use denotate_test_dsl::attribution::SourceView;
 mod support;
 use denotate_check::{GroundProgram, Limits};
 use denotate_editor::Document;
@@ -18,7 +19,12 @@ struct Parsed {
 fn parse(text: &str) -> Parsed {
     let mut sources = Sources::new();
     let snapshot = sources
-        .add("file:///example.inputmapping", 1, "test-dsl", text)
+        .add(
+            "file:///example.inputmapping",
+            1,
+            SourceView::TestDsl.as_str(),
+            text,
+        )
         .unwrap();
     let document = Document::new(&mut syntax::parser().unwrap(), text.into(), 1, true);
     let ParseOutcome::Parsed(ast) = syntax::project(&document, &sources, snapshot).unwrap() else {
@@ -35,11 +41,11 @@ fn lowered(p: &Parsed) -> LoweredProgram {
     };
     ir
 }
-fn quotes(p: &Parsed, ir: &LoweredProgram, id: impl Into<OccurrenceId>, role: &str) -> Vec<String> {
-    ir.provenance
+fn quotes(p: &Parsed, ir: &LoweredProgram, id: impl Into<OccurrenceId>) -> Vec<String> {
+    ir.attribution
+        .provenance
         .origins(id)
         .iter()
-        .filter(|o| o.role == role)
         .map(|o| p.sources.text(o.span).unwrap().into())
         .collect()
 }
@@ -115,7 +121,7 @@ fn helper_and_negated_use_keep_different_origins_from_parsed_text() {
         .find(|r| r.name == "$condition_1")
         .unwrap();
     assert_eq!(
-        quotes(&p, &ir, helper.id, "subexpression"),
+        quotes(&p, &ir, helper.id),
         ["(available(a) and available(c))"]
     );
     let rule = ir
@@ -124,16 +130,15 @@ fn helper_and_negated_use_keep_different_origins_from_parsed_text() {
         .find(|r| r.head.relation() == helper.id)
         .unwrap();
     assert_eq!(
-        quotes(&p, &ir, rule.id, "subexpression"),
+        quotes(&p, &ir, rule.id),
         ["(available(a) and available(c))"]
     );
     let use_rule = ir.corpus.rules().last().unwrap();
     let Literal::Negative(atom) = &use_rule.body[0] else {
         panic!("negative helper expected")
     };
-    assert_eq!(quotes(&p, &ir, atom.id(), "not"), ["not"]);
     assert_eq!(
-        quotes(&p, &ir, atom.id(), "negated expression"),
+        quotes(&p, &ir, atom.id()),
         ["not (available(a) and available(c))"]
     );
 }
@@ -148,14 +153,11 @@ fn alternatives_and_duplicate_statements_keep_distinct_occurrences() {
     assert_eq!(rules.len(), 4);
     for (index, rule) in rules.iter().enumerate() {
         let mapping = &p.ast.mappings[index / 2];
-        let origins = ir.provenance.origins(rule.id);
-        assert!(
-            origins
-                .iter()
-                .any(|o| o.role == "mapping" && o.span == mapping.span)
-        );
+        let origins = ir.attribution.provenance.origins(rule.id);
+        assert_eq!(origins.len(), 1);
+        assert_eq!(origins[0].span, mapping.span);
         assert_eq!(
-            quotes(&p, &ir, rule.id, "alternative"),
+            quotes(&p, &ir, rule.body[0].atom().id()),
             [if index % 2 == 0 {
                 "available(a)"
             } else {
@@ -163,7 +165,8 @@ fn alternatives_and_duplicate_statements_keep_distinct_occurrences() {
             }]
         );
         assert!(
-            ir.provenance
+            ir.attribution
+                .provenance
                 .origins(rule.head.arguments()[1].id())
                 .iter()
                 .any(|o| o.span == mapping.target.span)
@@ -184,7 +187,8 @@ fn original_text_reaches_replayed_overlap_diagnostics_on_both_targets() {
         .unwrap()
         .verify_at_most_one(&limits)
         .unwrap();
-    let diagnostics = presentation::present(&ir, &report, &p.sources, "test-dsl").unwrap();
+    let diagnostics =
+        presentation::present(&ir, &report, &p.sources, SourceView::TestDsl.as_str()).unwrap();
     assert_eq!(diagnostics.len(), 2);
     for mapping in &p.ast.mappings[1..] {
         let d = diagnostics
@@ -286,7 +290,12 @@ fn malformed_source_never_projects_a_partial_program() {
         let text = format!("input seed; slot kept; kept <- seed;\n{broken}\nslot after;");
         let mut sources = Sources::new();
         let snapshot = sources
-            .add("file:///broken.inputmapping", 1, "test-dsl", text.as_str())
+            .add(
+                "file:///broken.inputmapping",
+                1,
+                SourceView::TestDsl.as_str(),
+                text.as_str(),
+            )
             .unwrap();
         let document = Document::new(&mut syntax::parser().unwrap(), text, 1, true);
         let ParseOutcome::SyntaxErrors(errors) =
@@ -326,7 +335,7 @@ fn keywords_are_reserved_in_every_identifier_position_but_prefixes_are_names() {
                 .add(
                     "file:///reserved.inputmapping",
                     1,
-                    "test-dsl",
+                    SourceView::TestDsl.as_str(),
                     text.as_str(),
                 )
                 .unwrap();
@@ -378,7 +387,12 @@ fn missing_tokens_have_insertion_spans_and_snapshot_mismatch_is_a_creator_failur
     let text = "input i";
     let mut sources = Sources::new();
     let snapshot = sources
-        .add("file:///a.inputmapping", 1, "test-dsl", text)
+        .add(
+            "file:///a.inputmapping",
+            1,
+            SourceView::TestDsl.as_str(),
+            text,
+        )
         .unwrap();
     let document = Document::new(&mut syntax::parser().unwrap(), text.into(), 1, true);
     let ParseOutcome::SyntaxErrors(errors) =
@@ -390,7 +404,12 @@ fn missing_tokens_have_insertion_spans_and_snapshot_mismatch_is_a_creator_failur
     assert_eq!(errors[0].message, "Expected ';'.");
     assert_eq!(errors[0].span.byte_range(), text.len()..text.len());
     let newer = sources
-        .add("file:///a.inputmapping", 2, "test-dsl", "input input_long;")
+        .add(
+            "file:///a.inputmapping",
+            2,
+            SourceView::TestDsl.as_str(),
+            "input input_long;",
+        )
         .unwrap();
     assert!(matches!(
         syntax::project(&document, &sources, newer),
@@ -405,7 +424,12 @@ fn incremental_damage_and_repair_match_fresh_projection_at_the_current_snapshot(
     let mut document = Document::new(&mut parser, text.into(), 1, true);
     let mut sources = Sources::new();
     let initial = sources
-        .add("file:///edit.inputmapping", 1, "test-dsl", text)
+        .add(
+            "file:///edit.inputmapping",
+            1,
+            SourceView::TestDsl.as_str(),
+            text,
+        )
         .unwrap();
     let ParseOutcome::Parsed(old_ast) = syntax::project(&document, &sources, initial).unwrap()
     else {
@@ -453,7 +477,7 @@ fn incremental_damage_and_repair_match_fresh_projection_at_the_current_snapshot(
             .add(
                 "file:///edit.inputmapping",
                 version as u64,
-                "test-dsl",
+                SourceView::TestDsl.as_str(),
                 document.text.as_str(),
             )
             .unwrap();
@@ -484,7 +508,8 @@ fn incremental_damage_and_repair_match_fresh_projection_at_the_current_snapshot(
             };
             let rule = ir.corpus.rules().nth(3).unwrap();
             assert!(
-                ir.provenance
+                ir.attribution
+                    .provenance
                     .origins(rule.head.arguments()[1].id())
                     .iter()
                     .any(|o| o.span == target)

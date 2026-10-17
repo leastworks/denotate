@@ -1,8 +1,11 @@
 //! InputMapping wording and source-view selection. The checker knows neither
-//! this vocabulary nor these attribution roles; a different DSL supplies its own
+//! this vocabulary nor the source-selection policy; a different DSL supplies its own
 //! presenter. Missing attribution is a creator failure, never a user error.
 
-use crate::lowering::LoweredProgram;
+use crate::{
+    attribution::{AttributionError, RelatedLocation, SourceView},
+    lowering::LoweredProgram,
+};
 use denotate_check::*;
 use denotate_ir::*;
 use std::{collections::BTreeSet, fmt};
@@ -35,7 +38,7 @@ pub struct Diagnostic {
     pub kind: DiagnosticKind,
     pub message: String,
     pub primary: SourceSpan,
-    pub related: Vec<Origin>,
+    pub related: Vec<RelatedLocation>,
     pub notes: Vec<String>,
     /// Every original rule on the reported/blocking cycles, even library rules with no
     /// location in this source view. Ground instances remain in Verification.
@@ -45,12 +48,17 @@ pub struct Diagnostic {
 #[derive(Debug)]
 pub enum PresentationError {
     Provenance(ProvenanceError),
+    Attribution(AttributionError),
     MissingOrigin {
         occurrence: OccurrenceId,
-        role: &'static str,
-        view: String,
+        view: SourceView,
     },
     InvalidFinding(&'static str),
+}
+impl From<AttributionError> for PresentationError {
+    fn from(error: AttributionError) -> Self {
+        Self::Attribution(error)
+    }
 }
 impl From<ProvenanceError> for PresentationError {
     fn from(e: ProvenanceError) -> Self {
@@ -66,7 +74,7 @@ impl std::error::Error for PresentationError {}
 type Result<T> = std::result::Result<T, PresentationError>;
 
 /// Call only after successful checking. Returns no partial diagnostic list on
-/// missing/foreign provenance. `view` selects e.g. "test-dsl" or "denotate";
+/// missing/foreign provenance. `view` selects DSL or Denotate attribution;
 /// locations always belong to the immutable source snapshots supplied here.
 pub fn present(
     lowered: &LoweredProgram,
@@ -74,33 +82,34 @@ pub fn present(
     sources: &Sources,
     view: &str,
 ) -> Result<Vec<Diagnostic>> {
-    let origins = |id: OccurrenceId| -> Result<Vec<Origin>> {
+    let view = SourceView::try_from(view)?;
+    lowered.attribution.validate(&lowered.corpus, sources)?;
+    let origins = |id: OccurrenceId| -> Result<Vec<RelatedLocation>> {
         if !lowered.corpus.contains_occurrence(id) {
             return Err(PresentationError::InvalidFinding(
                 "finding belongs to another corpus",
             ));
         }
         Ok(lowered
-            .provenance
-            .in_view(id, sources, view)?
+            .attribution
+            .origin(id, sources, view)?
             .into_iter()
-            .cloned()
+            .map(|span| RelatedLocation::new(span, "cycle contributor"))
             .collect())
     };
-    let required = |id: OccurrenceId, role: &'static str| -> Result<Vec<Origin>> {
-        let values: Vec<_> = origins(id)?
-            .into_iter()
-            .filter(|o| o.role == role)
-            .collect();
-        if values.is_empty() {
-            Err(PresentationError::MissingOrigin {
-                occurrence: id,
-                role,
-                view: view.into(),
-            })
-        } else {
-            Ok(values)
+    let required = |id: OccurrenceId| -> Result<SourceSpan> {
+        if !lowered.corpus.contains_occurrence(id) {
+            return Err(PresentationError::InvalidFinding(
+                "finding belongs to another corpus",
+            ));
         }
+        lowered
+            .attribution
+            .origin(id, sources, view)?
+            .ok_or(PresentationError::MissingOrigin {
+                occurrence: id,
+                view,
+            })
     };
     let name = |id| -> Result<&str> {
         lowered
@@ -152,7 +161,7 @@ pub fn present(
                         "unexpected mapping arity",
                     ));
                 };
-                targets.extend(required(*target, "target")?.into_iter().map(|o| o.span));
+                targets.insert(required(*target)?);
             }
             if targets.is_empty()
                 || (group.cone.blocked_by.is_empty()
@@ -175,7 +184,7 @@ pub fn present(
                 let proven_failure = matches!(region.completion, CompletionOutcome::NoMeaning(_));
                 has_no_meaning |= proven_failure;
                 related.extend(cycle_targets.into_iter().map(|span| {
-                    Origin::new(
+                    RelatedLocation::new(
                         span,
                         if proven_failure {
                             "blocking no-meaning finding"
@@ -213,7 +222,7 @@ pub fn present(
                     kind,
                     message: message.clone(),
                     primary,
-                    related: unique_origins(related.iter().cloned()),
+                    related: unique_locations(related.iter().cloned()),
                     notes: vec!["No proof or counterexample is available for this slot.".into()],
                     cycle_rules: cycle_rules.iter().copied().collect(),
                 });
@@ -254,19 +263,22 @@ pub fn present(
                     "unexpected mapping evidence arity",
                 ));
             };
-            for origin in required(*target_occurrence, "target")? {
-                targets.insert(origin.span);
-                related.push(Origin::new(origin.span, "conflicting mapping target"));
-            }
-            related.extend(required(*input_occurrence, "input")?);
-            let rule_guards = if rule.body.is_empty() {
-                vec![]
-            } else {
-                required(rule.source.into(), "guard")?
-            };
-            for origin in rule_guards {
-                guards.insert(sources.text(origin.span)?.to_owned());
-                related.push(origin);
+            let target = required(*target_occurrence)?;
+            targets.insert(target);
+            related.push(RelatedLocation::new(target, "conflicting mapping target"));
+            related.push(RelatedLocation::new(
+                required(*input_occurrence)?,
+                "conflicting Input",
+            ));
+            if !rule.body.is_empty() {
+                let guard = *lowered.attribution.guards.get(&(rule.source, view)).ok_or(
+                    PresentationError::MissingOrigin {
+                        occurrence: rule.source.into(),
+                        view,
+                    },
+                )?;
+                guards.insert(sources.text(guard)?.to_owned());
+                related.push(RelatedLocation::new(guard, "mapping condition"));
             }
         }
         let template = &lowered
@@ -309,9 +321,9 @@ pub fn present(
                 ))?;
             let (locations, _) = cycle_locations(region, &origins, view)?;
             related.extend(
-                locations
-                    .into_iter()
-                    .map(|span| Origin::new(span, "conflict confined to no-meaning region")),
+                locations.into_iter().map(|span| {
+                    RelatedLocation::new(span, "conflict confined to no-meaning region")
+                }),
             );
         }
         if !example.confined_to_no_meaning.is_empty() {
@@ -325,7 +337,7 @@ pub fn present(
                 kind: DiagnosticKind::OverlappingMappings,
                 primary,
                 message: message.clone(),
-                related: unique_origins(related.iter().filter(|o| o.span != primary).cloned()),
+                related: unique_locations(related.iter().filter(|o| o.span != primary).cloned()),
                 notes: notes.clone(),
                 cycle_rules: vec![],
             });
@@ -355,7 +367,7 @@ pub fn present(
                 for id in blocked_by {
                     if let Some(upstream) = report.unresolved.iter().find(|r|r.component==*id) {
                         let (locations, _) = cycle_locations(upstream, &origins, view)?;
-                        related.extend(locations.into_iter().map(|span| Origin::new(span,
+                        related.extend(locations.into_iter().map(|span| RelatedLocation::new(span,
                             if matches!(upstream.completion,CompletionOutcome::NoMeaning(_)) { "upstream no-meaning finding" }
                             else { "unsettled upstream component" })));
                     }
@@ -377,7 +389,7 @@ pub fn present(
                 kind,
                 message: message.clone(),
                 primary,
-                related: unique_origins(related.iter().filter(|o| o.span != primary).cloned()),
+                related: unique_locations(related.iter().filter(|o| o.span != primary).cloned()),
                 notes: notes.clone(),
                 cycle_rules: rules.iter().copied().collect(),
             });
@@ -476,9 +488,9 @@ fn observation_note(lowered: &LoweredProgram, observation: &Observation) -> Resu
 
 fn cycle_locations(
     region: &UnresolvedRegion,
-    origins: &impl Fn(OccurrenceId) -> Result<Vec<Origin>>,
-    view: &str,
-) -> Result<(BTreeSet<SourceSpan>, Vec<Origin>)> {
+    origins: &impl Fn(OccurrenceId) -> Result<Vec<RelatedLocation>>,
+    view: SourceView,
+) -> Result<(BTreeSet<SourceSpan>, Vec<RelatedLocation>)> {
     let mut related = Vec::new();
     let mut targets = BTreeSet::new();
     let mut rule_locations = BTreeSet::new();
@@ -490,12 +502,7 @@ fn cycle_locations(
     for edge in &region.cycle.edges {
         let locations = origins(edge.premise)?;
         if edge.polarity == Polarity::Negative {
-            let preferred: Vec<_> = locations.iter().filter(|o| o.role == "not").collect();
-            if preferred.is_empty() {
-                targets.extend(locations.iter().map(|o| o.span));
-            } else {
-                targets.extend(preferred.into_iter().map(|o| o.span));
-            }
+            targets.extend(locations.iter().map(|o| o.span));
         }
         related.extend(locations);
     }
@@ -529,14 +536,13 @@ fn cycle_locations(
                 .first()
                 .ok_or(PresentationError::InvalidFinding("empty reported cycle"))?
                 .premise,
-            role: "cycle location",
-            view: view.into(),
+            view,
         });
     }
     Ok((targets, related))
 }
 
-fn unique_origins(origins: impl IntoIterator<Item = Origin>) -> Vec<Origin> {
+fn unique_locations(origins: impl IntoIterator<Item = RelatedLocation>) -> Vec<RelatedLocation> {
     let mut result = Vec::new();
     for origin in origins {
         if !result.contains(&origin) {

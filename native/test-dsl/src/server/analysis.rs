@@ -2,6 +2,7 @@
 use denotate_check::*;
 use denotate_editor::Document;
 use denotate_ir::{SnapshotId, SourceSpan, Sources};
+use denotate_test_dsl::attribution::SourceView;
 use denotate_test_dsl::{lowering::*, presentation, syntax, warnings};
 use lsp_types::{
     Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString, Range,
@@ -69,7 +70,12 @@ fn paused() -> Diagnostic {
 pub fn prepare(uri: &Url, revision: u64, document: Arc<Document>) -> Result<Prepared, String> {
     let mut sources = Sources::new();
     let snapshot = sources
-        .add(uri.as_str(), revision, "test-dsl", document.text.as_str())
+        .add(
+            uri.as_str(),
+            revision,
+            SourceView::TestDsl.as_str(),
+            document.text.as_str(),
+        )
         .map_err(|e| e.to_string())?;
     let ast = match syntax::project(&document, &sources, snapshot).map_err(|e| e.to_string())? {
         syntax::ParseOutcome::Parsed(ast) => ast,
@@ -194,11 +200,20 @@ impl Program {
             return Ok(inconclusive("verification"));
         };
         limits.cancellation.check()?;
-        let findings = presentation::present(&self.lowered, &report, &self.sources, "test-dsl")
-            .map_err(|e| Failure::Creator(e.to_string()))?;
-        let rewrites =
-            warnings::present_rewrites(&self.lowered, &ground, &self.sources, "test-dsl")
-                .map_err(|e| Failure::Creator(e.to_string()))?;
+        let findings = presentation::present(
+            &self.lowered,
+            &report,
+            &self.sources,
+            SourceView::TestDsl.as_str(),
+        )
+        .map_err(|e| Failure::Creator(e.to_string()))?;
+        let rewrites = warnings::present_rewrites(
+            &self.lowered,
+            &ground,
+            &self.sources,
+            SourceView::TestDsl.as_str(),
+        )
+        .map_err(|e| Failure::Creator(e.to_string()))?;
         let mut output = Output {
             diagnostics: vec![],
             creator_warnings: vec![],
@@ -227,7 +242,7 @@ impl Program {
                     .map(|o| {
                         Ok(DiagnosticRelatedInformation {
                             location: self.location(o.span)?,
-                            message: o.role,
+                            message: o.label,
                         })
                     })
                     .collect::<Result<_, Failure>>()?,
@@ -255,7 +270,7 @@ impl Program {
                     .map(|o| {
                         Ok(DiagnosticRelatedInformation {
                             location: self.location(o.span)?,
-                            message: o.role,
+                            message: o.label,
                         })
                     })
                     .collect::<Result<_, Failure>>()?,
@@ -296,7 +311,7 @@ mod tests {
             .unwrap()
             .program
             .unwrap();
-        p.lowered.provenance = denotate_ir::Provenance::new();
+        p.lowered.attribution.provenance = denotate_ir::Provenance::new();
         assert!(matches!(
             p.check(&Limits::default(), || {}),
             Err(Failure::Creator(_))

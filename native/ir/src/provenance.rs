@@ -151,20 +151,16 @@ impl Sources {
     }
 }
 
-/// A source occurrence and its frontend-defined role ("target", "condition",
-/// "library", etc.). Roles describe attribution, not relational semantics.
+/// A source span attributed to an IR occurrence, not derivation evidence or
+/// diagnostic wording. Frontends decide which authored construct to attribute.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Origin {
     pub span: SourceSpan,
-    pub role: String,
 }
 
 impl Origin {
-    pub fn new(span: SourceSpan, role: impl Into<String>) -> Self {
-        Self {
-            span,
-            role: role.into(),
-        }
+    pub fn new(span: SourceSpan) -> Self {
+        Self { span }
     }
 }
 
@@ -211,6 +207,15 @@ impl Provenance {
             .get(&occurrence.into())
             .map(Vec::as_slice)
             .unwrap_or(&[])
+    }
+
+    /// All attributed occurrences, including declarations no finding reads.
+    /// Frontends can validate their own attribution policy without restricting
+    /// this generic table's many-to-many representation.
+    pub fn entries(&self) -> impl Iterator<Item = (OccurrenceId, &[Origin])> {
+        self.links
+            .iter()
+            .map(|(id, origins)| (*id, origins.as_slice()))
     }
 
     /// A split copies origins to each output; a merge takes the union. The

@@ -1,3 +1,4 @@
+use denotate_test_dsl::attribution::SourceView;
 mod support;
 use denotate_check::*;
 use denotate_test_dsl::presentation::{self, DiagnosticKind, DiagnosticSeverity};
@@ -33,7 +34,8 @@ fn exact_conjunction_is_worded_as_a_condition_not_a_complete_witness() {
         .unwrap()
         .verify_at_most_one(&limits)
         .unwrap();
-    let diagnostics = presentation::present(&p, &report, &f.sources, "test-dsl").unwrap();
+    let diagnostics =
+        presentation::present(&p, &report, &f.sources, SourceView::TestDsl.as_str()).unwrap();
     let failure = diagnostics
         .iter()
         .find(|d| d.kind == DiagnosticKind::NoMeaning)
@@ -83,7 +85,8 @@ fn disjunctive_failure_keeps_example_wording_instead_of_generalizing_a_witness()
         .unwrap()
         .verify_at_most_one(&limits)
         .unwrap();
-    let diagnostics = presentation::present(&p, &report, &f.sources, "test-dsl").unwrap();
+    let diagnostics =
+        presentation::present(&p, &report, &f.sources, SourceView::TestDsl.as_str()).unwrap();
     let failure = diagnostics
         .iter()
         .find(|d| d.kind == DiagnosticKind::NoMeaning)
@@ -114,7 +117,8 @@ fn ambiguity_is_still_a_warning_not_a_contradiction_error() {
         .unwrap()
         .verify_at_most_one(&limits)
         .unwrap();
-    let diagnostics = presentation::present(&p, &report, &f.sources, "test-dsl").unwrap();
+    let diagnostics =
+        presentation::present(&p, &report, &f.sources, SourceView::TestDsl.as_str()).unwrap();
     assert!(!diagnostics.is_empty());
     assert!(
         diagnostics
@@ -161,18 +165,19 @@ fn deferred_cycle_cites_upstream_failure_without_inventing_its_own_witness() {
         .unwrap()
         .verify_at_most_one(&limits)
         .unwrap();
-    let diagnostics = presentation::present(&p, &report, &f.sources, "test-dsl").unwrap();
+    let diagnostics =
+        presentation::present(&p, &report, &f.sources, SourceView::TestDsl.as_str()).unwrap();
     assert_eq!(diagnostics.len(), 2);
     let failure = diagnostics
         .iter()
         .find(|d| d.kind == DiagnosticKind::NoMeaning)
         .unwrap();
-    assert_eq!(failure.primary, f.within(c, "not"));
+    assert_eq!(failure.primary, f.within(c, "not available(c)"));
     let deferred = diagnostics
         .iter()
         .find(|d| d.kind == DiagnosticKind::UnsupportedCycle)
         .unwrap();
-    assert_eq!(deferred.primary, f.within(d, "not"));
+    assert_eq!(deferred.primary, f.within(d, "not available(d)"));
     assert!(
         deferred
             .message
@@ -182,7 +187,7 @@ fn deferred_cycle_cites_upstream_failure_without_inventing_its_own_witness() {
         deferred
             .related
             .iter()
-            .any(|o| o.span == failure.primary && o.role == "upstream no-meaning finding")
+            .any(|o| o.span == failure.primary && o.label == "upstream no-meaning finding")
     );
     assert!(
         !deferred
@@ -211,7 +216,8 @@ fn completion_exhaustion_is_informational_and_keeps_the_overlap_errors() {
             },
         )
         .unwrap();
-    let diagnostics = presentation::present(&p, &report, &f.sources, "test-dsl").unwrap();
+    let diagnostics =
+        presentation::present(&p, &report, &f.sources, SourceView::TestDsl.as_str()).unwrap();
     assert_eq!(
         diagnostics
             .iter()
@@ -249,7 +255,8 @@ fn certification_exhaustion_keeps_cone_errors_and_separate_no_meaning_error() {
             },
         )
         .unwrap();
-    let diagnostics = presentation::present(&p, &report, &f.sources, "test-dsl").unwrap();
+    let diagnostics =
+        presentation::present(&p, &report, &f.sources, SourceView::TestDsl.as_str()).unwrap();
     let conflicts: Vec<_> = diagnostics
         .iter()
         .filter(|d| d.kind == DiagnosticKind::OverlappingMappings)
