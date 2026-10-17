@@ -153,6 +153,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "denotate-editor"
+version = "0.0.1"
+dependencies = [
+ "lsp-server",
+ "lsp-types",
+ "serde_json",
+ "tree-sitter",
+]
+
+[[package]]
 name = "denotate-ir"
 version = "0.0.1"
 
@@ -181,6 +191,7 @@ version = "0.0.1"
 dependencies = [
  "cc",
  "denotate-analysis",
+ "denotate-editor",
  "lsp-server",
  "lsp-types",
  "serde",
