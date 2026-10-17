@@ -1,3 +1,5 @@
+#[path = "support/normalization_cases.rs"]
+mod cases;
 #[path = "support/normalization_fingerprint.rs"]
 mod fingerprint;
 #[path = "support/before_normalization.rs"]
@@ -118,27 +120,7 @@ fn frozen_recipes_and_installed_structure_agree_for_mapping_mask_and_nested_cond
         .filter(|c| c.get("structure").is_some())
         .map(|c| c["text"].as_str().unwrap().to_owned())
         .collect();
-    let leaves = [
-        "present(i)",
-        "available(a)",
-        "not present(j)",
-        "not not (available(b))",
-    ];
-    for a in leaves {
-        for b in leaves {
-            for shape in [
-                format!("not (({a}) or ({b}))"),
-                format!("not (({a}) and ({b}))"),
-                format!("not (not (({a}) or ({b})))"),
-                format!("({a}) and (({b}) or not ({a}))"),
-                format!("not (not (({a}) and ({b})))"),
-            ] {
-                texts.push(format!(
-                    "input i, j; slot a, b; a <- i when {shape}; mask b when {shape};"
-                ));
-            }
-        }
-    }
+    texts.extend(cases::nested());
     for text in texts {
         let (ast, sources) = parse(&text, 1);
         let projected = projection::project(&ast, &sources).unwrap();
@@ -166,7 +148,7 @@ fn frozen_recipes_and_installed_structure_agree_for_mapping_mask_and_nested_cond
 }
 #[test]
 fn unchanged_recipes_rebind_moved_sources_and_duplicate_statements_independently() {
-    let text = "input i, j; slot a, b; a <- i when not (available(b) and present(j)); a <- i when not (available(b) and present(j)); mask b when not present(j);";
+    let text = cases::DUPLICATES;
     let (ast, sources) = parse(text, 1);
     let original = projection::project(&ast, &sources).unwrap();
     let recipes: Vec<_> = original
@@ -175,10 +157,7 @@ fn unchanged_recipes_rebind_moved_sources_and_duplicate_statements_independently
         .map(|s| shared::Recipe::lower(s.form.clone()).unwrap())
         .collect();
     assert_eq!(recipes[2], recipes[3]);
-    for (revision, text) in [
-        (2, format!("// moved\n{text}")),
-        (3, text.replace("not present(j)", "not    present(j)")),
-    ] {
+    for (revision, text) in cases::moved() {
         let (ast, sources) = parse(&text, revision);
         let projected = projection::project(&ast, &sources).unwrap();
         let reused = shared::assemble(&projected, &recipes, &sources).unwrap();
@@ -191,6 +170,10 @@ fn unchanged_recipes_rebind_moved_sources_and_duplicate_statements_independently
         assert_eq!(
             fingerprint::fingerprint(&reused, &sources),
             fingerprint::fingerprint(&old, &sources)
+        );
+        assert_eq!(
+            fingerprint::fingerprint(&reused, &sources),
+            frozen_installed(&text, revision)
         );
         let helpers: Vec<_> = reused
             .corpus
@@ -415,4 +398,33 @@ fn measure_shared_normalization_phases() {
         "NORMALIZATION_PHASES={}",
         serde_json::json!({"rows":rows,"note":"Candidate normalization plus frontend assignment is uncached. Query access is measured separately on the unchanged legacy Salsa path; no candidate cache integration or speedup claim. Parsing, name validation, diagnostics and serialization are outside the timed candidate phases."})
     );
+}
+
+fn frozen_installed(text: &str, revision: u64) -> serde_json::Value {
+    let capture: serde_json::Value = serde_json::from_str(include_str!(
+        "../fixtures/pre-integration-fingerprints.json"
+    ))
+    .unwrap();
+    capture["cases"].as_array().unwrap().iter().find(|case|case["text"]==text && case["revision"]==revision)
+        .unwrap_or_else(||panic!("missing frozen case at revision {revision}: {text}"))["fingerprint"].clone()
+}
+#[test]
+fn additional_installed_cases_match_frozen_legacy_output() {
+    let capture: serde_json::Value = serde_json::from_str(include_str!(
+        "../fixtures/pre-integration-fingerprints.json"
+    ))
+    .unwrap();
+    let expected_cases = cases::capture_cases();
+    assert_eq!(
+        capture["cases"].as_array().unwrap().len(),
+        expected_cases.len()
+    );
+    for (revision, text) in expected_cases {
+        let (ast, sources) = parse(&text, revision);
+        let expected = frozen_installed(&text, revision);
+        let legacy = lowered(lowering::lower(&ast, &sources).unwrap());
+        let candidate = lowered(shared::lower(&ast, &sources).unwrap());
+        assert_eq!(fingerprint::fingerprint(&legacy, &sources), expected);
+        assert_eq!(fingerprint::fingerprint(&candidate, &sources), expected);
+    }
 }
