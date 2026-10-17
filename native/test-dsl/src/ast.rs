@@ -1,5 +1,5 @@
 //! Ground InputMapping syntax. Spans refer to immutable UTF-8 source snapshots.
-//! There is deliberately no parser, name resolution or IR identity in this AST.
+//! Parsing is separate; there is no name resolution or IR identity in this AST.
 
 use denotate_ir::SourceSpan;
 
@@ -9,20 +9,20 @@ pub enum Kind {
     Slot,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Name {
     pub text: String,
     pub span: SourceSpan,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Declaration {
     pub kind: Kind,
     pub names: Vec<Name>,
     pub span: SourceSpan,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mapping {
     pub target: Name,
     pub input: Name,
@@ -30,13 +30,13 @@ pub struct Mapping {
     pub span: SourceSpan,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Expr {
     pub kind: ExprKind,
     pub span: SourceSpan,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ExprKind {
     Available(Name),
     Present(Name),
@@ -49,7 +49,7 @@ pub enum ExprKind {
     Group(Box<Expr>),
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Program {
     pub declarations: Vec<Declaration>,
     pub mappings: Vec<Mapping>,

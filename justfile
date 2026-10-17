@@ -18,6 +18,14 @@ test-native:
 demo-overlap mode="overlap":
     cargo +1.93.0 run --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --example overlap -- {{mode}}
 
+# Parse actual InputMapping text and lower it to IR; no semantic checking or editor.
+parse-inputmapping file="frontend-prototype/native/test-dsl/fixtures/overlapping-mappings.txt":
+    cargo +1.93.0 run --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --example parse -- '{{file}}'
+
+# Regenerate the committed DSL parser with B's pinned CLI (npm ci there first).
+generate-inputmapping: _check-node
+    cd frontend-prototype/native/test-dsl/grammar && ../../../tree-sitter/node_modules/.bin/tree-sitter generate
+
 # Optional independent Python/Z3 check of four Rust fixture corpora (needs z3-solver).
 test-check-z3:
     python3 semantics/check_rust_findings.py

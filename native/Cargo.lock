@@ -181,8 +181,13 @@ dependencies = [
 name = "denotate-test-dsl"
 version = "0.0.1"
 dependencies = [
+ "cc",
  "denotate-check",
+ "denotate-editor",
  "denotate-ir",
+ "lsp-types",
+ "tree-sitter",
+ "tree-sitter-language",
 ]
 
 [[package]]

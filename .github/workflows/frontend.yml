@@ -40,6 +40,11 @@ jobs:
         run: cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --test acceptance --test lifecycle --test b1 --test b2 --test b4 --test zero_arity
       - name: Install B frontend dependencies
         run: npm ci --prefix frontend-prototype/tree-sitter
+      - name: InputMapping generated parser is current
+        run: |
+          cd frontend-prototype/native/test-dsl/grammar
+          ../../../tree-sitter/node_modules/.bin/tree-sitter generate
+          test -z "$(git status --porcelain --untracked-files=all -- src)"
       - name: Tree-sitter syntax manifest and component tests
         run: npm test --prefix frontend-prototype/tree-sitter
       - name: B shared editor, lifecycle and extension scenarios

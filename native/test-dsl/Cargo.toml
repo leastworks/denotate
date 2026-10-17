@@ -8,3 +8,12 @@ publish = false
 [dependencies]
 denotate-ir = { path = "../ir" }
 denotate-check = { path = "../check" }
+denotate-editor = { path = "../editor" }
+tree-sitter = "=0.25.10"
+tree-sitter-language = "=0.1.5"
+
+[build-dependencies]
+cc = "=1.5.1"
+
+[dev-dependencies]
+lsp-types = "=0.95.1"
