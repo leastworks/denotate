@@ -188,6 +188,8 @@ dependencies = [
  "denotate-ir",
  "lsp-server",
  "lsp-types",
+ "salsa",
+ "serde",
  "serde_json",
  "tree-sitter",
  "tree-sitter-language",

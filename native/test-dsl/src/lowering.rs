@@ -10,6 +10,7 @@ use denotate_ir::*;
 use std::fmt;
 
 pub mod assembly;
+pub mod incremental;
 pub mod projection;
 pub mod recipe;
 pub mod semantic;
@@ -82,12 +83,12 @@ pub enum LoweringOutcome {
 
 type Result<T> = std::result::Result<T, LoweringFailure>;
 
-/// Each stage is an ordinary function in 5a. Names must be valid before any IR
+/// Uncached reference pipeline. Names must be valid before any IR
 /// is assembled; all source-dependent locations are rebuilt for this snapshot.
 pub fn lower(program: &Program, sources: &Sources) -> Result<LoweringOutcome> {
     let projection = projection::project(program, sources)?;
     let keys = projection.keys();
-    let diagnostics = semantic::validate(&keys);
+    let diagnostics = semantic::validate(&keys)?;
     if !diagnostics.is_empty() {
         return Ok(LoweringOutcome::UserErrors(
             projection.diagnostics(&diagnostics)?,

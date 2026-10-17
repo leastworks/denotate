@@ -60,6 +60,214 @@ fn assert_paused(client: &Client, uri: &str, error_code: &str) {
         .all(|d| d["code"] == "paused" || d["code"] == error_code));
 }
 
+fn stats(client: &mut Client) -> Value {
+    idle(client);
+    client.request("inputmapping/test/stats", Value::Null)
+}
+
+fn queries(stats: &Value, uri: &str) -> [u64; 4] {
+    let q = &stats["lowering"][uri]["queries"];
+    ["recipe", "declarations", "resolve", "validate"].map(|k| q[k].as_u64().unwrap())
+}
+
+#[test]
+fn lowering_reuses_forms_across_comments_helpers_reordering_and_duplicates() {
+    let mut c = Client::start("base/00-valid");
+    let u = uri(&c, "cached.inputmapping");
+    open(&mut c, &u, SOURCE);
+    c.validated(&u, 1);
+    let initial = stats(&mut c);
+    assert_eq!(queries(&initial, &u), [5, 1, 5, 3]);
+    let commented = format!("// current snapshot\n{SOURCE}");
+    change(&mut c, &u, 2, &commented);
+    let after = stats(&mut c);
+    assert_eq!(queries(&after, &u), queries(&initial, &u));
+    assert_eq!(after["lowering"][&u]["declaration_updates"], 1);
+    assert_eq!(after["lowering"][&u]["assemblies"], 2);
+    let errors = codes(&c, &u, "OverlappingMappings");
+    assert_eq!(errors.len(), 2);
+    for line in [5, 6] {
+        assert!(errors.iter().any(|d| d["range"]
+            == json!({"start":{"line":line,"character":0}, "end":{"line":line,"character":1}})));
+        assert!(errors.iter().all(|d| d["relatedInformation"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["location"]["range"]["start"] == json!({"line":line,"character":5}))));
+    }
+    let helper = "a <- input_a when not (present(input_a) and present(input_b));";
+    let inserted = commented.replace("a <- input_a;", &format!("{helper}\na <- input_a;"));
+    change(&mut c, &u, 3, &inserted);
+    assert_eq!(queries(&stats(&mut c), &u), [6, 1, 5, 4]);
+    change(&mut c, &u, 4, &format!("{commented}\n{helper}\n{helper}\n"));
+    assert_eq!(queries(&stats(&mut c), &u), [6, 1, 5, 4]);
+    let edited = commented.replace(
+        "b <- input_bb when available(a)",
+        "b <- input_bb when not not available(a)",
+    );
+    change(&mut c, &u, 5, &edited);
+    assert_eq!(queries(&stats(&mut c), &u), [7, 1, 5, 5]);
+    assert_eq!(codes(&c, &u, "OverlappingMappings").len(), 2);
+    c.shutdown();
+}
+
+#[test]
+fn cached_errors_and_duplicate_checks_block_assembly_and_worker_dispatch() {
+    let mut c = Client::start("base/00-valid");
+    let u = uri(&c, "cached-errors.inputmapping");
+    open(&mut c, &u, SOURCE);
+    c.validated(&u, 1);
+    let initial = stats(&mut c);
+    let bad = SOURCE.replace("b <- input_bb", "b <- missing");
+    for (version, text) in [
+        (2, bad.clone()),
+        (3, format!("// shift\n{bad}")),
+        (4, format!("{SOURCE}\nslot b;")),
+    ] {
+        change(&mut c, &u, version, &text);
+        assert_paused(&c, &u, "name");
+        let current = stats(&mut c);
+        assert_eq!(
+            current["lowering"][&u]["assemblies"],
+            initial["lowering"][&u]["assemblies"]
+        );
+        assert_eq!(current["started"], initial["started"]);
+        assert_eq!(current["lowering"][&u]["queries"]["recipe"], 5);
+        if version == 2 || version == 3 {
+            assert_eq!(queries(&current, &u), [5, 1, 6, 4]);
+            assert_eq!(
+                codes(&c, &u, "name")[0]["range"],
+                json!({"start":{"line":version+3,"character":5},"end":{"line":version+3,"character":12}})
+            );
+        }
+    }
+    let wrong = SOURCE.replace("available(a)", "available(input_a)");
+    change(&mut c, &u, 5, &wrong);
+    let previous = stats(&mut c);
+    let moved = wrong.replace("input input_a", "input unused, input_a");
+    change(&mut c, &u, 6, &moved);
+    let current = stats(&mut c);
+    assert_eq!(
+        current["lowering"][&u]["queries"]["validate"],
+        previous["lowering"][&u]["queries"]["validate"]
+    );
+    assert_eq!(current["started"], initial["started"]);
+    for error in codes(&c, &u, "name") {
+        assert_eq!(
+            error["relatedInformation"][0]["location"]["range"],
+            json!({"start":{"line":0,"character":14},"end":{"line":0,"character":21}})
+        );
+    }
+    change(&mut c, &u, 7, SOURCE);
+    let repaired = stats(&mut c);
+    assert_eq!(repaired["lowering"][&u]["assemblies"], 2);
+    assert_eq!(repaired["started"].as_array().unwrap().len(), 2);
+    assert_eq!(codes(&c, &u, "OverlappingMappings").len(), 2);
+    c.shutdown();
+}
+
+#[test]
+fn lowering_sessions_survive_syntax_errors_but_are_isolated_and_dropped_on_close() {
+    let mut c = Client::start("base/00-valid");
+    let a = uri(&c, "first.inputmapping");
+    let b = uri(&c, "second.inputmapping");
+    open(&mut c, &a, SOURCE);
+    c.validated(&a, 1);
+    let initial = stats(&mut c);
+    change(&mut c, &a, 2, &SOURCE.replace("a <- input_a;", "a <- ;"));
+    assert_paused(&c, &a, "syntax");
+    assert_eq!(stats(&mut c)["lowering"][&a], initial["lowering"][&a]);
+    open(&mut c, &b, &SOURCE.replace("slot a, b;", "slot a;"));
+    c.validated(&b, 1);
+    assert_paused(&c, &b, "name");
+    assert_eq!(stats(&mut c)["lowering"][&b]["assemblies"], 0);
+    change(&mut c, &a, 3, SOURCE);
+    let repaired = stats(&mut c);
+    assert_eq!(queries(&repaired, &a), queries(&initial, &a));
+    assert_eq!(repaired["lowering"][&a]["assemblies"], 2);
+    c.notify("textDocument/didClose", json!({"textDocument":{"uri":a}}));
+    assert!(stats(&mut c)["lowering"].get(&a).is_none());
+    open(&mut c, &a, SOURCE);
+    c.validated(&a, 1);
+    let reopened = stats(&mut c);
+    assert_eq!(queries(&reopened, &a), [5, 1, 5, 3]);
+    assert_eq!(reopened["lowering"][&a]["assemblies"], 1);
+    assert_eq!(reopened["lowering"][&b], repaired["lowering"][&b]);
+    c.shutdown();
+}
+
+#[test]
+#[ignore = "manual phase measurement; run against a release InputMapping server"]
+fn measure_cached_lowering_phases() {
+    let mut c = Client::start("base/00-valid");
+    let mut records = Vec::new();
+    for mappings in [10, 100, 1000] {
+        let u = uri(&c, &format!("measure-{mappings}.inputmapping"));
+        // Wide, nonrecursive program with one input fact; not a deep-chain benchmark.
+        let names = (0..mappings)
+            .map(|i| format!("s{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let rules = (0..mappings)
+            .map(|i| format!("s{i} <- i;\n"))
+            .collect::<String>();
+        let text = format!("input i; slot {names};\n{rules}");
+        open(&mut c, &u, &text);
+        c.validated(&u, 1);
+        let mut previous_queries = [0; 4];
+        for version in 1..=16 {
+            let (kind, edited, expected_delta) = match version {
+                1 => (
+                    "cold",
+                    text.clone(),
+                    [mappings + 2, 1, mappings + 1, mappings],
+                ),
+                2..=6 => ("comment", format!("// revision {version}\n{text}"), [0; 4]),
+                7..=11 => (
+                    // A fresh form each time, not a toggle between cached forms.
+                    // All referenced names already resolved in the initial program.
+                    "mapping",
+                    text.replacen(
+                        "s0 <- i;",
+                        &format!("s0 <- i when available(s{});", version - 6),
+                        1,
+                    ),
+                    [1, 0, 0, 1],
+                ),
+                _ => (
+                    // One unused Slot changes declaration data without changing
+                    // the input-fact universe or any mapping's resolved meaning.
+                    "declaration",
+                    format!("input i; slot unused{version}, {names};\n{rules}"),
+                    [1, 1, mappings + 1, 0],
+                ),
+            };
+            if version > 1 {
+                change(&mut c, &u, version, &edited);
+            }
+            let current = stats(&mut c);
+            let finished = current["finished"].as_array().unwrap().last().unwrap();
+            assert_eq!(finished["snapshot"]["uri"], u);
+            assert_eq!(finished["snapshot"]["version"], version);
+            assert_eq!(finished["status"], "published");
+            assert_eq!(c.diagnostics(&u), json!([]));
+            let lower = &current["lowering"][&u];
+            let current_queries = queries(&current, &u);
+            let query_delta =
+                std::array::from_fn::<_, 4, _>(|i| current_queries[i] - previous_queries[i]);
+            assert_eq!(
+                query_delta, expected_delta,
+                "{mappings} mappings, {kind} v{version}"
+            );
+            previous_queries = current_queries;
+            records.push(json!({"mappings":mappings,"kind":kind,"version":version,"query_delta":query_delta,"lowering":lower,"check_ns":finished["check_ns"]}));
+        }
+        c.notify("textDocument/didClose", json!({"textDocument":{"uri":u}}));
+    }
+    println!("{}", serde_json::to_string_pretty(&records).unwrap());
+    c.shutdown();
+}
+
 #[test]
 fn parsed_program_reports_both_targets_related_terms_and_clears_on_repair() {
     let mut c = Client::start("base/00-valid");

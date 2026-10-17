@@ -1,5 +1,7 @@
 #[path = "support/before_recipes.rs"]
 mod before_recipes;
+#[path = "support/cached.rs"]
+mod cached;
 mod support;
 
 use denotate_check::*;
@@ -397,13 +399,13 @@ fn path_diagnostics_move_primary_and_related_locations_without_revalidation() {
     ] {
         let (old_sources, old_ast) = parse(text);
         let old = projection::project(&old_ast, &old_sources).unwrap();
-        let diagnostics = semantic::validate(&old.keys());
+        let diagnostics = semantic::validate(&old.keys()).unwrap();
         assert!(!diagnostics.is_empty());
         let shifted = format!("// new snapshot 😀\n{text}");
         let (sources, ast) = parse(&shifted);
         let current = projection::project(&ast, &sources).unwrap();
         assert_eq!(old.keys(), current.keys());
-        assert_eq!(diagnostics, semantic::validate(&current.keys()));
+        assert_eq!(diagnostics, semantic::validate(&current.keys()).unwrap());
         let relocated = current.diagnostics(&diagnostics).unwrap();
         let LoweringOutcome::UserErrors(fresh) = lowering::lower(&ast, &sources).unwrap() else {
             panic!()

@@ -10,7 +10,7 @@ use denotate_editor::{
     Document, Documents, test_support,
     transport::{Result, send},
 };
-use denotate_test_dsl::syntax;
+use denotate_test_dsl::{lowering::incremental::Session, syntax};
 use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
 use lsp_types::{
     Diagnostic, DiagnosticSeverity, DidChangeTextDocumentParams, DidCloseTextDocumentParams,
@@ -49,6 +49,7 @@ struct TestHooks {
 }
 struct Server {
     documents: Documents<OpenDocument>,
+    lowering: BTreeMap<Url, Session>,
     parser: tree_sitter::Parser,
     revision: u64,
     worker: Worker,
@@ -67,6 +68,7 @@ pub fn run(connection: &Connection) -> Result<()> {
     }))?;
     let mut server = Server {
         documents: Documents::default(),
+        lowering: BTreeMap::new(),
         parser: syntax::parser()?,
         revision: 0,
         worker: Worker::spawn()?,
@@ -189,8 +191,13 @@ impl Server {
                 None => Err((-32602, "No held worker at that revision")),
             }
         } else if self.tests && request.method == "inputmapping/test/stats" {
+            let lowering: BTreeMap<_, _> = self
+                .lowering
+                .iter()
+                .map(|(uri, session)| (uri.as_str(), session.stats()))
+                .collect();
             Ok(
-                json!({"started": self.hooks.started, "finished": self.hooks.finished, "pending": self.pending.iter().map(|j| identity(&j.id)).collect::<Vec<_>>() }),
+                json!({"started": self.hooks.started, "finished": self.hooks.finished, "pending": self.pending.iter().map(|j| identity(&j.id)).collect::<Vec<_>>(), "lowering": lowering }),
             )
         } else {
             Err((-32601, "Unsupported request"))
@@ -209,6 +216,8 @@ impl Server {
                 let p: DidOpenTextDocumentParams = serde_json::from_value(n.params)?;
                 let t = p.text_document;
                 let document = Document::new(&mut self.parser, t.text, t.version, true);
+                // An explicit open starts a fresh session, even for a reused URI.
+                self.lowering.remove(&t.uri);
                 self.install(connection, t.uri, document)?;
             }
             "textDocument/didChange" => {
@@ -253,6 +262,7 @@ impl Server {
                 let uri = p.text_document.uri;
                 self.cancel(&uri);
                 self.documents.remove(&uri);
+                self.lowering.remove(&uri);
                 publish(connection, &uri, None, vec![])?;
             }
             "$/cancelRequest" => {
@@ -288,7 +298,11 @@ impl Server {
         let revision = self.revision;
         let version = document.version;
         let document = Arc::new(document);
-        let (fast, program) = match analysis::prepare(&uri, revision, document.clone()) {
+        let lowering = self
+            .lowering
+            .entry(uri.clone())
+            .or_insert_with(|| Session::new(self.tests));
+        let (fast, program) = match analysis::prepare(&uri, revision, document.clone(), lowering) {
             Ok(p) => (p.fast, p.program),
             Err(error) => {
                 log(
@@ -321,6 +335,7 @@ impl Server {
                 program,
                 limits: Limits::default(),
                 hold: None,
+                measure: self.tests,
             });
         } else if self.tests {
             test_support::validated(connection, &uri, version)?;
@@ -329,14 +344,14 @@ impl Server {
     }
 
     fn completed(&mut self, connection: &Connection, event: Event) -> Result<()> {
-        let (id, result) = match event {
+        let (id, result, check_ns) = match event {
             Event::Checkpoint(id) => {
                 if self.tests {
                     send(connection, "inputmapping/test/checkpoint", identity(&id))?;
                 }
                 return Ok(());
             }
-            Event::Finished(id, result) => (id, result),
+            Event::Finished(id, result, check_ns) => (id, result, check_ns),
         };
         self.active = None;
         self.hooks.releases.remove(&id.revision);
@@ -356,7 +371,7 @@ impl Server {
         if self.tests {
             self.hooks
                 .finished
-                .push(json!({"snapshot": identity(&id), "status": status}));
+                .push(json!({"snapshot": identity(&id), "status": status, "check_ns": check_ns}));
         }
         if !current || matches!(result, Err(Failure::Cancelled)) {
             return Ok(());

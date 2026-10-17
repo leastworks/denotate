@@ -67,7 +67,12 @@ fn paused() -> Diagnostic {
     )
 }
 
-pub fn prepare(uri: &Url, revision: u64, document: Arc<Document>) -> Result<Prepared, String> {
+pub fn prepare(
+    uri: &Url,
+    revision: u64,
+    document: Arc<Document>,
+    lowering: &mut incremental::Session,
+) -> Result<Prepared, String> {
     let mut sources = Sources::new();
     let snapshot = sources
         .add(
@@ -98,7 +103,7 @@ pub fn prepare(uri: &Url, revision: u64, document: Arc<Document>) -> Result<Prep
             });
         }
     };
-    match lower(&ast, &sources).map_err(|e| e.to_string())? {
+    match lowering.lower(&ast, &sources).map_err(|e| e.to_string())? {
         LoweringOutcome::Lowered(lowered) => Ok(Prepared {
             fast: vec![],
             program: Some(Program {
@@ -307,10 +312,15 @@ mod tests {
             1,
             true,
         ));
-        let mut p = prepare(&Url::parse("file:///example.inputmapping").unwrap(), 1, doc)
-            .unwrap()
-            .program
-            .unwrap();
+        let mut p = prepare(
+            &Url::parse("file:///example.inputmapping").unwrap(),
+            1,
+            doc,
+            &mut incremental::Session::default(),
+        )
+        .unwrap()
+        .program
+        .unwrap();
         p.lowered.attribution.provenance = denotate_ir::Provenance::new();
         assert!(matches!(
             p.check(&Limits::default(), || {}),
@@ -330,10 +340,15 @@ mod tests {
             1,
             true,
         ));
-        let p = prepare(&Url::parse("file:///example.inputmapping").unwrap(), 1, doc)
-            .unwrap()
-            .program
-            .unwrap();
+        let p = prepare(
+            &Url::parse("file:///example.inputmapping").unwrap(),
+            1,
+            doc,
+            &mut incremental::Session::default(),
+        )
+        .unwrap()
+        .program
+        .unwrap();
         let limits = Limits {
             max_work: 0,
             ..Limits::default()

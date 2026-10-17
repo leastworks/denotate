@@ -15,6 +15,8 @@ lsp-types = "=0.95.1"
 lsp-server = "=0.7.9"
 crossbeam-channel = "=0.5.17"
 serde_json.workspace = true
+serde.workspace = true
+salsa.workspace = true
 
 [build-dependencies]
 cc = "=1.5.1"

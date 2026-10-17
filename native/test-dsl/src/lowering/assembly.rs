@@ -11,15 +11,15 @@ use denotate_ir::{
     Atom, ConstantId, Corpus, Literal as IrLiteral, OccurrenceId, Origin, RelationRole, Sources,
     Term,
 };
-use std::collections::BTreeMap;
+use std::{borrow::Borrow, collections::BTreeMap};
 
 fn invalid(message: &str) -> LoweringFailure {
     LoweringFailure::InvalidAst(message.into())
 }
 
-pub fn assemble(
+pub fn assemble<R: Borrow<Recipe>>(
     projection: &Projection,
-    recipes: &[Recipe],
+    recipes: &[R],
     sources: &Sources,
 ) -> Result<LoweredProgram> {
     if recipes.len() != projection.statements.len() {
@@ -37,6 +37,7 @@ pub fn assemble(
     let mut constants = BTreeMap::<(Kind, String), ConstantId>::new();
     let mut next_helper = 1;
     for (source, recipe) in projection.statements.iter().zip(recipes) {
+        let recipe = recipe.borrow();
         if source.key.form != recipe.form {
             return Err(invalid("recipe does not match current semantic statement"));
         }

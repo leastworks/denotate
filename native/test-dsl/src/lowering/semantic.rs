@@ -28,8 +28,8 @@ pub enum Expression {
     Group(Box<Self>),
 }
 
-/// Document-local content identity, not an edit-history identity. Arc only
-/// shares owned data here; no interning or Salsa is involved in 5a.
+/// Document-local occurrence identity, not an edit-history or query identity.
+/// The incremental pipeline interns the form separately, without this index.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StatementKey {
     pub form: Arc<SemanticStatement>,
@@ -80,11 +80,19 @@ pub struct PathDiagnostic {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Resolution {
     Resolved,
-    WrongKind { found: Kind, declaration: Location },
+    WrongKind { found: Kind },
     Missing,
 }
 
-#[derive(Debug, Default)]
+/// A cached error describes meaning, not a particular statement occurrence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidationDiagnostic {
+    pub kind: DiagnosticKind,
+    pub primary: AstPath,
+    pub related: Option<(Kind, String)>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct Names(BTreeMap<(Kind, String), Location>);
 impl Names {
     pub fn collect(statements: &[StatementKey]) -> (Self, Vec<PathDiagnostic>) {
@@ -121,7 +129,7 @@ impl Names {
         (names, errors)
     }
 
-    /// The result of one name lookup is the future tracked dependency, not a
+    /// The result of one name lookup is the tracked dependency, not a
     /// declaration-table revision or a declaration's current source range.
     pub fn resolve(&self, name: &str, expected: Kind) -> Resolution {
         if self.0.contains_key(&(expected, name.into())) {
@@ -132,19 +140,50 @@ impl Names {
             Kind::Slot => Kind::Input,
         };
         match self.0.get(&(other, name.into())) {
-            Some(declaration) => Resolution::WrongKind {
-                found: other,
-                declaration: declaration.clone(),
-            },
+            Some(_) => Resolution::WrongKind { found: other },
             None => Resolution::Missing,
         }
     }
+
+    /// Bind shared errors to this occurrence and the current declaration list.
+    pub fn bind(
+        &self,
+        statement: &StatementKey,
+        diagnostics: &[ValidationDiagnostic],
+    ) -> super::Result<Vec<PathDiagnostic>> {
+        diagnostics
+            .iter()
+            .map(|d| {
+                let related = d
+                    .related
+                    .as_ref()
+                    .map(|name| {
+                        self.0.get(name).cloned().ok_or_else(|| {
+                            super::LoweringFailure::InvalidAst(
+                                "diagnostic declaration is missing".into(),
+                            )
+                        })
+                    })
+                    .transpose()?
+                    .into_iter()
+                    .collect();
+                Ok(PathDiagnostic {
+                    kind: d.kind.clone(),
+                    primary: Location {
+                        statement: statement.clone(),
+                        path: d.primary.clone(),
+                    },
+                    related,
+                })
+            })
+            .collect()
+    }
 }
 
-pub fn validate_mapping(
-    statement: &StatementKey,
+pub fn validate_form(
+    form: &SemanticStatement,
     mut resolve: impl FnMut(&str, Kind) -> Resolution,
-) -> Vec<PathDiagnostic> {
+) -> Vec<ValidationDiagnostic> {
     let mut errors = Vec::new();
     let mut check = |name: &str, expected, path| {
         let (kind, related) = match resolve(name, expected) {
@@ -154,23 +193,20 @@ pub fn validate_mapping(
                     name: name.into(),
                     expected,
                 },
-                vec![],
+                None,
             ),
-            Resolution::WrongKind { found, declaration } => (
+            Resolution::WrongKind { found } => (
                 DiagnosticKind::WrongKind {
                     name: name.into(),
                     expected,
                     found,
                 },
-                vec![declaration],
+                Some((found, name.into())),
             ),
         };
-        errors.push(PathDiagnostic {
+        errors.push(ValidationDiagnostic {
             kind,
-            primary: Location {
-                statement: statement.clone(),
-                path,
-            },
+            primary: path,
             related,
         });
     };
@@ -190,7 +226,7 @@ pub fn validate_mapping(
         target,
         input,
         condition,
-    } = statement.form.as_ref()
+    } = form
     {
         check(target, Kind::Slot, AstPath::Target);
         check(input, Kind::Input, AstPath::Input);
@@ -201,12 +237,11 @@ pub fn validate_mapping(
     errors
 }
 
-pub fn validate(statements: &[StatementKey]) -> Vec<PathDiagnostic> {
+pub fn validate(statements: &[StatementKey]) -> super::Result<Vec<PathDiagnostic>> {
     let (names, mut errors) = Names::collect(statements);
     for statement in statements {
-        errors.extend(validate_mapping(statement, |name, kind| {
-            names.resolve(name, kind)
-        }));
+        let diagnostics = validate_form(&statement.form, |name, kind| names.resolve(name, kind));
+        errors.extend(names.bind(statement, &diagnostics)?);
     }
-    errors
+    Ok(errors)
 }

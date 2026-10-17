@@ -4,6 +4,7 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 use denotate_check::Limits;
 use lsp_types::Url;
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
 #[derive(Clone)]
 pub struct Identity {
@@ -26,10 +27,11 @@ pub struct Job {
     pub limits: Limits,
     /// Test-only checkpoint, assigned by the server only in explicit test mode.
     pub hold: Option<Hold>,
+    pub measure: bool,
 }
 pub enum Event {
     Checkpoint(Identity),
-    Finished(Identity, Result<Output, Failure>),
+    Finished(Identity, Result<Output, Failure>, Option<u64>),
 }
 pub struct Worker {
     pub jobs: Sender<Job>,
@@ -52,13 +54,19 @@ impl Worker {
                             }
                         }
                     };
+                    let start = job.measure.then(Instant::now);
                     let result = job
                         .program
                         .check(&job.limits, || checkpoint(HoldStage::AfterPrepare));
+                    let check_ns =
+                        start.map(|t| t.elapsed().as_nanos().min(u64::MAX as u128) as u64);
                     // Deliberately after checking's final cancellation test: exercises
                     // the publication gate even if a result completed before an edit.
                     checkpoint(HoldStage::BeforeResult);
-                    if send.send(Event::Finished(job.id, result)).is_err() {
+                    if send
+                        .send(Event::Finished(job.id, result, check_ns))
+                        .is_err()
+                    {
                         break;
                     }
                 }
