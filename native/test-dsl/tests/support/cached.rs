@@ -4,6 +4,55 @@ use denotate_test_dsl::lowering::incremental::{QueryCounts, Session};
 
 const BASE: &str = "input i, x;\nslot a, b;\na <- i;\nb <- x when available(a);\n";
 
+#[test]
+fn masks_share_normalization_refresh_attribution_and_do_not_invalidate_mappings() {
+    let mut session = Session::new(true);
+    compare_cached(&mut session, BASE);
+    let before = session.stats().queries;
+    let mask = "mask b when not (available(a) and present(x));";
+    let text = format!("{BASE}{mask}\n");
+    compare_cached(&mut session, &text);
+    assert_eq!(
+        delta(before, session.stats().queries),
+        QueryCounts {
+            recipe: 1,
+            validate: 1,
+            ..Default::default()
+        }
+    );
+    let before = session.stats().queries;
+    for text in [
+        format!("// current snapshot\n{text}"),
+        format!("{mask}\n{BASE}{mask}"),
+        BASE.into(),
+        text.clone(),
+    ] {
+        compare_cached(&mut session, &text);
+        assert_eq!(before, session.stats().queries);
+    }
+    let assemblies = session.stats().assemblies;
+    for text in [
+        text.replace("mask b", "mask missing"),
+        text.replace("mask b", "mask i"),
+    ] {
+        let (_, outcome) = compare_cached(&mut session, &text);
+        assert!(matches!(outcome, LoweringOutcome::UserErrors(_)));
+        assert_eq!(session.stats().assemblies, assemblies);
+    }
+    compare_cached(&mut session, &text);
+    assert_eq!(session.stats().assemblies, assemblies + 1);
+    for guard in [
+        "not (available(a) or present(x))",
+        "not not available(a)",
+        "(available(a) or present(i)) and not present(x)",
+        "present(i) and not available(b)",
+    ] {
+        let text = format!("{BASE}mask b when {guard};");
+        compare_cached(&mut session, &text);
+        compare_cached(&mut session, &format!("// moved\n{text}"));
+    }
+}
+
 fn compare_cached(session: &mut Session, text: &str) -> (Sources, LoweringOutcome) {
     let (sources, ast) = parse(text);
     let cached = session.lower(&ast, &sources).unwrap();

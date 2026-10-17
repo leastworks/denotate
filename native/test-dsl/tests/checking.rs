@@ -650,6 +650,11 @@ fn helper_and_input_absence_keep_references_and_quote_the_original_negative_guar
                         provider,
                     } = premise
                     {
+                        if fact.relation == p.library.masked {
+                            assert_eq!(*provider, CompletedProvider::NoPossibleProducer);
+                            assert!(p.attribution.provenance.origins(*occurrence).is_empty());
+                            continue; // New library absence is not an authored guard.
+                        }
                         absences += 1;
                         assert_eq!(
                             replay.absence_provider(fact).unwrap().as_ref(),

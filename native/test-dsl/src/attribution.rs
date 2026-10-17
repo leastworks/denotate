@@ -62,6 +62,16 @@ pub struct Attribution {
     /// Complete authored guards for quoting, not split-alternative metadata.
     pub guards: BTreeMap<(RuleId, SourceView), SourceSpan>,
     pub rewrites: RewriteMetadata,
+    /// Authored masks (including their helper rules), for mask-cycle locations
+    /// and unconditional coverage warnings. This is DSL metadata, not IR roles.
+    pub masks: BTreeMap<RuleId, MaskAttribution>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MaskAttribution {
+    pub target: ConstantId,
+    pub statement: SourceSpan,
+    pub condition: Option<SourceSpan>,
 }
 
 impl Attribution {
@@ -106,6 +116,27 @@ impl Attribution {
                 return Err(AttributionError::InvalidMetadata(
                     "rewrite owner belongs to another corpus",
                 ));
+            }
+        }
+        for (rule, mask) in &self.masks {
+            if corpus.rule(*rule).is_none() || corpus.constant(mask.target).is_none() {
+                return Err(AttributionError::InvalidMetadata(
+                    "mask belongs to another corpus",
+                ));
+            }
+            sources.text(mask.statement)?;
+            for span in std::iter::once(mask.statement).chain(mask.condition) {
+                sources.text(span)?;
+                if SourceView::try_from(sources.snapshot(span.snapshot())?.view.as_str())?
+                    != SourceView::TestDsl
+                    || span.snapshot() != mask.statement.snapshot()
+                    || span.byte_range().start < mask.statement.byte_range().start
+                    || span.byte_range().end > mask.statement.byte_range().end
+                {
+                    return Err(AttributionError::InvalidMetadata(
+                        "mask attribution is outside its DSL statement",
+                    ));
+                }
             }
         }
         for (occurrence, edit) in &self.rewrites.removals {

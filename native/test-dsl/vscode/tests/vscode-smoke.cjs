@@ -105,6 +105,10 @@ exports.run = async function () {
         overlaps(await validUpdate(() => replace(original)));
         console.log('InputMapping: repair clears final findings; restoring the conflict restores both');
 
+        assert.deepEqual(await validUpdate(() => replace(original + '\nmask b;\n')), []);
+        overlaps(await validUpdate(() => replace(original)));
+        console.log('InputMapping: masking clears the overlap; removal restores both exact target ranges');
+
         for (const [broken, code] of [
             [original.replace('input_bb when', 'when'), 'syntax'],
             [original.replace('available(a)', 'available(missing)'), 'name']
@@ -129,6 +133,12 @@ exports.run = async function () {
         assert.equal(failure.severity, vscode.DiagnosticSeverity.Error);
         assert.equal(document.getText(failure.range), 'not available(a)');
         assert.match(failure.message, /whenever input_a is present/);
+        const masked = await validUpdate(() => replace('input i;\nslot a;\na <- i;\nmask a when available(a);\n'));
+        const maskFailure = masked.find(d => d.code === 'NoMeaning');
+        assert.ok(maskFailure);
+        assert.equal(document.getText(maskFailure.range), 'available(a)');
+        assert.match(maskFailure.message, /Masking Slot a depends on its own availability/);
+        assert.ok(maskFailure.relatedInformation.some(r => document.getText(r.location.range) === 'a <- i;'));
         overlaps(await validUpdate(() => replace(original)));
         console.log('InputMapping: current ranges and no-meaning diagnostic passed');
     } finally {

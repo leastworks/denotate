@@ -1,9 +1,20 @@
 import assert from 'node:assert/strict';
 import { readFile, access, constants } from 'node:fs/promises';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 
 const root = new URL('../', import.meta.url);
 const read = file => readFile(new URL(file, root), 'utf8');
+
+test('pre-mask snapshot and embedded fixture sources retain their recorded hashes', async () => {
+    const bytes = await read('../fixtures/pre-mask.json');
+    const data = JSON.parse(bytes);
+    const hashes = JSON.parse(await read('../fixtures/pre-mask-sources.json'));
+    const hash = text => createHash('sha256').update(text).digest('hex');
+    assert.equal(data.revision, hashes.revision);
+    assert.equal(hash(bytes), hashes.artifact_sha256);
+    assert.deepEqual(data.cases.map(c => hash(c.text)), hashes.source_sha256);
+});
 
 test('the editor example is the existing lowering/provenance fixture', async () => {
     assert.equal(await read('examples/overlap.inputmapping'), await read('../fixtures/overlapping-mappings.txt'));

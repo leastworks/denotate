@@ -43,6 +43,54 @@ pub struct RewriteWarning {
     pub edit: Option<SourceEdit>,
 }
 
+/// A frontend coverage warning, not a checker rewrite or an admission proof.
+/// No rule is removed. An unconditional mask makes every other mask for the
+/// same Slot redundant, regardless of that other mask's guard.
+pub struct MaskWarning {
+    pub primary: SourceSpan,
+    pub related: Vec<RelatedLocation>,
+    pub message: String,
+}
+
+pub fn covered_masks(
+    lowered: &LoweredProgram,
+    sources: &Sources,
+) -> Result<Vec<MaskWarning>, crate::presentation::PresentationError> {
+    lowered.attribution.validate(&lowered.corpus, sources)?;
+    let mut unconditional = BTreeMap::<_, Vec<_>>::new();
+    let mut conditional = BTreeMap::new();
+    for mask in lowered.attribution.masks.values() {
+        if mask.condition.is_none() {
+            let spans = unconditional.entry(mask.target).or_default();
+            if !spans.contains(&mask.statement) {
+                spans.push(mask.statement);
+            }
+        } else {
+            conditional.insert(mask.statement, mask.target);
+        }
+    }
+    let mut warnings = Vec::new();
+    for (primary, target) in conditional {
+        if let Some(covering) = unconditional.get(&target) {
+            let target = lowered.corpus.constant(target).ok_or(
+                crate::presentation::PresentationError::InvalidFinding("unknown mask target"),
+            )?;
+            warnings.push(MaskWarning {
+                primary,
+                related: covering
+                    .iter()
+                    .map(|s| RelatedLocation::new(*s, "unconditional mask"))
+                    .collect(),
+                message: format!(
+                    "This mask adds no effect: Slot {} is already masked unconditionally.",
+                    target.name
+                ),
+            });
+        }
+    }
+    Ok(warnings)
+}
+
 pub fn present_rewrites(
     lowered: &LoweredProgram,
     program: &GroundProgram,
@@ -73,6 +121,21 @@ pub fn present_rewrites(
             return Err(PresentationError::InvalidFinding(
                 "rewrite belongs to another corpus",
             ));
+        }
+        // The DSL coverage warning already explains this whole statement.
+        // Keep the checker's proof in the report, without publishing it twice.
+        if view == SourceView::TestDsl
+            && literal.is_none()
+            && lowered.attribution.masks.get(&rule).is_some_and(|mask| {
+                mask.condition.is_some()
+                    && lowered
+                        .attribution
+                        .masks
+                        .values()
+                        .any(|m| m.target == mask.target && m.condition.is_none())
+            })
+        {
+            continue;
         }
         let owner = *lowered.attribution.rewrites.owners.get(&rule).ok_or(
             PresentationError::InvalidFinding("missing rewrite contribution owner"),
@@ -123,6 +186,14 @@ pub(crate) fn removals(
     mapping: &Mapping,
     sources: &Sources,
 ) -> Result<Vec<(AstPath, SourceEdit)>, ProvenanceError> {
+    condition_removals(mapping.condition.as_ref(), mapping.input.span, sources)
+}
+
+pub(crate) fn condition_removals(
+    condition: Option<&Expr>,
+    before_when: SourceSpan,
+    sources: &Sources,
+) -> Result<Vec<(AstPath, SourceEdit)>, ProvenanceError> {
     fn leaves<'a>(expr: &'a Expr, path: ExprPath, out: &mut Vec<(&'a Expr, ExprPath)>) -> bool {
         match &expr.kind {
             ExprKind::And(a, b) => {
@@ -141,7 +212,7 @@ pub(crate) fn removals(
             _ => false,
         }
     }
-    let Some(condition) = &mapping.condition else {
+    let Some(condition) = condition else {
         return Ok(vec![]);
     };
     let mut parts = Vec::new();
@@ -150,7 +221,7 @@ pub(crate) fn removals(
     }
     let snapshot = condition.span.snapshot();
     if parts.iter().any(|(p, _)| p.span.snapshot() != snapshot)
-        || mapping.input.span.snapshot() != snapshot
+        || before_when.snapshot() != snapshot
     {
         return Ok(vec![]);
     }
@@ -161,7 +232,7 @@ pub(crate) fn removals(
         }
         let (bytes, separator) = if parts.len() == 1 {
             (
-                mapping.input.span.byte_range().end..condition.span.byte_range().end,
+                before_when.byte_range().end..condition.span.byte_range().end,
                 "when",
             )
         } else if i == 0 {

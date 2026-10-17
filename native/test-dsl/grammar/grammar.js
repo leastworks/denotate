@@ -5,10 +5,10 @@ module.exports = grammar({
   extras: $ => [/[ \t\r\n]+/, $.comment],
   word: $ => $.identifier,
   reserved: {
-    global: $ => ['input', 'slot', 'when', 'available', 'present', 'and', 'or', 'not']
+    global: $ => ['input', 'slot', 'mask', 'when', 'available', 'present', 'and', 'or', 'not']
   },
   rules: {
-    source_file: $ => seq(optional('\uFEFF'), repeat(choice($.declaration, $.mapping))),
+    source_file: $ => seq(optional('\uFEFF'), repeat(choice($.declaration, $.mapping, $.mask))),
     declaration: $ => seq(
       field('kind', choice('input', 'slot')),
       field('name', $.identifier), repeat(seq(',', field('name', $.identifier))), ';'
@@ -17,6 +17,8 @@ module.exports = grammar({
       field('target', $.identifier), '<-', field('input', $.identifier),
       optional(seq('when', field('condition', $._expression))), ';'
     ),
+    mask: $ => seq('mask', field('target', $.identifier),
+      optional(seq('when', field('condition', $._expression))), ';'),
     _expression: $ => choice($.available, $.present, $.and, $.or, $.not, $.group),
     available: $ => seq('available', '(', field('argument', $.identifier), ')'),
     present: $ => seq('present', '(', field('argument', $.identifier), ')'),

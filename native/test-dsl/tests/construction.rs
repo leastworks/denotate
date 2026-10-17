@@ -166,7 +166,7 @@ fn constructs_the_example_and_library_via_the_public_api() {
         ["Slot", "Input"]
     );
     assert_eq!(e.corpus.constants().count(), 5);
-    assert_eq!(e.corpus.relations().count(), 4);
+    assert_eq!(e.corpus.relations().count(), 5);
     assert_eq!(
         e.corpus.relation(e.library.present).unwrap().role,
         RelationRole::Input
@@ -177,7 +177,7 @@ fn constructs_the_example_and_library_via_the_public_api() {
             .map(|r| rule_text(&e.corpus, r))
             .collect::<Vec<_>>(),
         [
-            "supplies(I, D) :- mapped_to(I, D), present(I);",
+            "supplies(I, D) :- mapped_to(I, D), present(I), !masked(D);",
             "available(D) :- supplies(I, D);",
             "mapped_to(input_a, a);",
             "mapped_to(input_b, b) :- available(a);",

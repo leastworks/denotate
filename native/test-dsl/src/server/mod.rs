@@ -1,6 +1,8 @@
 //! Single-document programs, two-speed diagnostics and a revision-gated worker.
 //! B's serial transport loop stays unchanged; this frontend owns scheduling.
 mod analysis;
+#[cfg(test)]
+mod premask;
 mod worker;
 
 use analysis::{Failure, diagnostic};

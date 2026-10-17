@@ -145,6 +145,88 @@ fn lowered_input_mapping_forwarding_agrees_with_cartesian_stable_model_oracle() 
     }
 }
 
+#[test]
+fn masking_self_contradiction_and_mutual_ambiguity_match_independent_stable_models() {
+    use denotate_test_dsl::ast::Mask;
+    for mutual in [false, true] {
+        let text = if mutual {
+            "input i, j;\nslot a, b;\na <- i;\nb <- j;\nmask a when available(b);\nmask b when available(a);"
+        } else {
+            "input i;\nslot a;\na <- i;\nmask a when available(a);"
+        };
+        let mut f = dsl_fixture::Fixture::new(
+            text,
+            if mutual { &["i", "j"] } else { &["i"] },
+            if mutual { &["a", "b"] } else { &["a"] },
+        );
+        f.mapping(f.span("a <- i;"), "a", "i", None);
+        if mutual {
+            f.mapping(f.span("b <- j;"), "b", "j", None);
+        }
+        for (slot, guard) in if mutual {
+            vec![("a", "b"), ("b", "a")]
+        } else {
+            vec![("a", "a")]
+        } {
+            let span = f.span(&format!("mask {slot} when available({guard});"));
+            // The target starts after `mask ` (searching "a" would hit the keyword).
+            let target_span = f
+                .sources
+                .span(
+                    f.snapshot,
+                    span.byte_range().start + 5..span.byte_range().start + 6,
+                )
+                .unwrap();
+            f.ast.masks.push(Mask {
+                target: denotate_test_dsl::ast::Name {
+                    text: slot.into(),
+                    span: target_span,
+                },
+                condition: Some(f.atom(span, "available", guard)),
+                span,
+            });
+        }
+        let p = f.lower();
+        let domains = dsl_fixture::domains(&p);
+        let limits = Limits::default();
+        let oracle = GroundProgram::prepare_cartesian(&p.corpus, &domains, &limits).unwrap();
+        let atoms: Vec<_> = oracle.atoms().cloned().collect();
+        let inputs: BTreeSet<_> = oracle.input_atoms().cloned().collect();
+        let rules: Vec<_> = oracle.rules().cloned().collect();
+        let ground = GroundProgram::prepare(&p.corpus, &domains, &limits)
+            .unwrap()
+            .admit(&limits)
+            .unwrap();
+        assert!(!ground.is_admitted());
+        let meaning = ground.symbolic(&limits).unwrap();
+        let report = meaning.verify_at_most_one(&limits).unwrap();
+        for world in subsets(&inputs.iter().cloned().collect::<Vec<_>>()) {
+            let models = stable_models(&atoms, &inputs, &rules, &world);
+            assert_eq!(
+                models.len(),
+                if mutual {
+                    if world.len() == 2 { 2 } else { 1 }
+                } else {
+                    if world.is_empty() { 1 } else { 0 }
+                }
+            );
+            for region in &report.unresolved {
+                match &region.completion {
+                    CompletionOutcome::NoMeaning(finding) => assert_eq!(
+                        meaning
+                            .context()
+                            .evaluate(&finding.bad_input, world.iter().cloned(), &limits)
+                            .unwrap(),
+                        models.is_empty()
+                    ),
+                    CompletionOutcome::NoContradiction => assert!(mutual),
+                    other => panic!("unexpected completion {other:?}"),
+                }
+            }
+        }
+    }
+}
+
 // Completion/supported-model oracle, independent of BDDs and the rewrite
 // implementation. Unlike stable models, these can contain positive self-support.
 pub(super) fn supported_models(

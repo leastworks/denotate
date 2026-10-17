@@ -71,6 +71,105 @@ fn queries(stats: &Value, uri: &str) -> [u64; 4] {
 }
 
 #[test]
+fn masks_clear_and_restore_overlap_with_current_ranges_and_cached_mapping_recipes() {
+    let mut c = Client::start("base/00-valid");
+    let u = uri(&c, "masks.inputmapping");
+    open(&mut c, &u, SOURCE);
+    c.validated(&u, 1);
+    assert_eq!(codes(&c, &u, "OverlappingMappings").len(), 2);
+    let initial = queries(&stats(&mut c), &u);
+    change(&mut c, &u, 2, &format!("{SOURCE}\nmask b;\n"));
+    assert!(c.diagnostics(&u).as_array().unwrap().is_empty());
+    assert_eq!(
+        queries(&stats(&mut c), &u),
+        [initial[0] + 1, initial[1], initial[2], initial[3] + 1]
+    );
+    change(&mut c, &u, 3, &format!("// shifted\n{SOURCE}"));
+    assert_eq!(codes(&c, &u, "OverlappingMappings").len(), 2);
+    for d in codes(&c, &u, "OverlappingMappings") {
+        assert!([5, 6].contains(&d["range"]["start"]["line"].as_u64().unwrap()));
+        assert_eq!(d["range"]["end"]["character"], 1);
+    }
+    let before = stats(&mut c);
+    for (version, mask, code) in [
+        (4, "mask missing;", "name"),
+        (5, "mask input_a;", "name"),
+        (6, "mask b when ;", "syntax"),
+        (7, "input mask;", "syntax"),
+    ] {
+        change(&mut c, &u, version, &format!("{SOURCE}\n{mask}"));
+        assert_paused(&c, &u, code);
+        assert_eq!(stats(&mut c)["started"], before["started"]);
+    }
+    change(
+        &mut c,
+        &u,
+        8,
+        &format!("{SOURCE}\nmask b;\nmask b when available(a);\n"),
+    );
+    let warnings = codes(&c, &u, "redundant-mask");
+    assert_eq!(warnings.len(), 1);
+    assert_eq!(warnings[0]["severity"], 2);
+    assert_eq!(
+        warnings[0]["message"],
+        "This mask adds no effect: Slot b is already masked unconditionally."
+    );
+    let line = SOURCE.lines().count() + 2;
+    assert_eq!(
+        warnings[0]["range"],
+        json!({"start":{"line":line,"character":0},"end":{"line":line,"character":25}})
+    );
+    assert_eq!(
+        warnings[0]["relatedInformation"][0]["location"]["range"],
+        json!({"start":{"line":line-1,"character":0},"end":{"line":line-1,"character":7}})
+    );
+    c.shutdown();
+}
+
+#[test]
+fn mask_cycles_report_conditions_and_related_mappings_without_inventing_authored_not() {
+    let mut c = Client::start("base/00-valid");
+    let u = uri(&c, "mask-cycles.inputmapping");
+    let single = "input i;\nslot a;\na <- i;\nmask a when available(a);\n";
+    open(&mut c, &u, single);
+    c.validated(&u, 1);
+    let failures = codes(&c, &u, "NoMeaning");
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0]["severity"], 1);
+    assert_eq!(
+        failures[0]["range"],
+        json!({"start":{"line":3,"character":12},"end":{"line":3,"character":24}})
+    );
+    assert!(failures[0]["message"].as_str().unwrap().starts_with("Masking Slot a depends on its own availability; no consistent result exists when Input i is present."));
+    assert!(failures[0]["message"]
+        .as_str()
+        .unwrap()
+        .contains("Other observations remain unsupported"));
+    assert!(failures[0]["relatedInformation"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["location"]["range"]
+            == json!({"start":{"line":2,"character":0},"end":{"line":2,"character":7}})));
+    change(&mut c,&u,2,"input i, j;\nslot a, b;\na <- i;\nb <- j;\nmask a when available(b);\nmask b when available(a);\n");
+    assert!(codes(&c, &u, "NoMeaning").is_empty());
+    let cycles = codes(&c, &u, "UnsupportedCycle");
+    assert_eq!(cycles.len(), 2);
+    for (d, line) in cycles.iter().zip([4, 5]) {
+        assert_eq!(d["severity"], 2);
+        assert_eq!(
+            d["range"],
+            json!({"start":{"line":line,"character":12},"end":{"line":line,"character":24}})
+        );
+        assert!(d["message"].as_str().unwrap().starts_with("Masking Slots a and b depends cyclically on their availability. The checker could not establish a single result."));
+        for line in [2, 3] {
+            assert!(d["relatedInformation"].as_array().unwrap().iter().any(|r|r["location"]["range"]==json!({"start":{"line":line,"character":0},"end":{"line":line,"character":7}})));
+        }
+    }
+    c.shutdown();
+}
+
+#[test]
 fn lowering_reuses_forms_across_comments_helpers_reordering_and_duplicates() {
     let mut c = Client::start("base/00-valid");
     let u = uri(&c, "cached.inputmapping");
@@ -265,6 +364,59 @@ fn measure_cached_lowering_phases() {
         c.notify("textDocument/didClose", json!({"textDocument":{"uri":u}}));
     }
     println!("{}", serde_json::to_string_pretty(&records).unwrap());
+    c.shutdown();
+}
+
+#[test]
+#[ignore = "manual masking measurement; run against a release InputMapping server"]
+fn measure_masking_phases() {
+    let mut c = Client::start("base/00-valid");
+    let mut records = Vec::new();
+    for mappings in [10, 100, 1000] {
+        for masks in [0, mappings / 2] {
+            let u = uri(&c, &format!("masks-{mappings}-{masks}.inputmapping"));
+            let slots = (0..mappings)
+                .map(|i| format!("s{i}"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let rules = (0..mappings)
+                .map(|i| format!("s{i} <- i;\n"))
+                .collect::<String>();
+            let masked = (0..masks)
+                .map(|i| format!("mask s{i} when present(x);\n"))
+                .collect::<String>();
+            let text = format!("input i, x; slot {slots};\n{rules}{masked}");
+            open(&mut c, &u, &text);
+            c.validated(&u, 1);
+            let initial = queries(&stats(&mut c), &u);
+            assert_eq!(
+                initial,
+                [
+                    mappings + 2 + masks,
+                    1,
+                    mappings + 1 + u64::from(masks > 0),
+                    mappings + masks
+                ]
+            );
+            for version in 1..=6 {
+                if version > 1 {
+                    change(&mut c, &u, version, &format!("// edit {version}\n{text}"));
+                }
+                let current = stats(&mut c);
+                assert_eq!(queries(&current, &u), initial);
+                assert_eq!(c.diagnostics(&u), json!([]));
+                let finished = current["finished"].as_array().unwrap().last().unwrap();
+                assert_eq!(finished["snapshot"]["version"], version);
+                assert_eq!(finished["status"], "published");
+                records.push(json!({"mappings":mappings,"masks":masks,"version":version,"kind":if version==1 {"cold"}else{"comment"},"lowering":current["lowering"][&u],"check_ns":finished["check_ns"]}));
+            }
+            c.notify("textDocument/didClose", json!({"textDocument":{"uri":u}}));
+        }
+    }
+    println!(
+        "MASK_MEASUREMENTS={}",
+        serde_json::to_string(&records).unwrap()
+    );
     c.shutdown();
 }
 

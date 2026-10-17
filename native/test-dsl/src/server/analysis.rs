@@ -282,6 +282,29 @@ impl Program {
             );
             output.diagnostics.push(d);
         }
+        for warning in warnings::covered_masks(&self.lowered, &self.sources)
+            .map_err(|e| Failure::Creator(e.to_string()))?
+        {
+            let mut d = diagnostic(
+                self.location(warning.primary)?.range,
+                "redundant-mask",
+                warning.message,
+                DiagnosticSeverity::WARNING,
+            );
+            d.related_information = Some(
+                warning
+                    .related
+                    .into_iter()
+                    .map(|o| {
+                        Ok(DiagnosticRelatedInformation {
+                            location: self.location(o.span)?,
+                            message: o.label,
+                        })
+                    })
+                    .collect::<Result<_, Failure>>()?,
+            );
+            output.diagnostics.push(d);
+        }
         limits.cancellation.check()?;
         Ok(output)
     }

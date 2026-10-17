@@ -16,6 +16,7 @@ pub struct ConstantRef {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RelationRef {
     MappedTo,
+    Masked,
     Present,
     Available,
     Helper(LocalOccurrence),
@@ -109,6 +110,26 @@ impl Recipe {
                             AstPath::Target,
                         ),
                     ],
+                    origin: AstPath::Statement,
+                };
+                recipe.define(
+                    &head,
+                    condition
+                        .as_ref()
+                        .map(|e| View::new(e, ExprPath::default())),
+                    condition.is_some(),
+                );
+            }
+            SemanticStatement::Mask { target, condition } => {
+                let head = Head {
+                    relation: RelationRef::Masked,
+                    arguments: vec![(
+                        ConstantRef {
+                            kind: Kind::Slot,
+                            name: target.clone(),
+                        },
+                        AstPath::Target,
+                    )],
                     origin: AstPath::Statement,
                 };
                 recipe.define(

@@ -36,6 +36,11 @@ bench-inputmapping-lowering:
     cargo +1.93.0 build --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp --release
     DENOTATE_LSP_COMMAND="{{justfile_directory()}}/frontend-prototype/native/target/release/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --features inputmapping --test inputmapping measure_cached_lowering_phases -- --ignored --nocapture --test-threads=1
 
+# Compare cold/comment-edit phases with zero masks or conditional masks on half the Slots.
+bench-inputmapping-masking:
+    cargo +1.93.0 build --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp --release
+    DENOTATE_LSP_COMMAND="{{justfile_directory()}}/frontend-prototype/native/target/release/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --features inputmapping --test inputmapping measure_masking_phases -- --ignored --nocapture --test-threads=1
+
 # Build the InputMapping VS Code extension and check its package/example (no GUI).
 test-inputmapping-extension: _check-node
     npm test --prefix frontend-prototype/native/test-dsl/vscode

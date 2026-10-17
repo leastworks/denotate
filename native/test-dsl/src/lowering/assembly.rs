@@ -1,9 +1,14 @@
 //! Replays recipes into a fresh IR arena, then reconnects current-source paths.
 
-use super::{LoweredProgram, LoweringFailure, Result, projection::Projection, recipe::*};
+use super::{
+    LoweredProgram, LoweringFailure, Result,
+    projection::Projection,
+    recipe::*,
+    semantic::{AstPath, ExprPath, SemanticStatement},
+};
 use crate::{
     ast::Kind,
-    attribution::{Attribution, SourceView},
+    attribution::{Attribution, MaskAttribution, SourceView},
     library,
     warnings::Contribution,
 };
@@ -73,6 +78,7 @@ pub fn assemble<R: Borrow<Recipe>>(
                 } => {
                     let relation = match relation {
                         RelationRef::MappedTo => library.mapped_to,
+                        RelationRef::Masked => library.masked,
                         RelationRef::Present => library.present,
                         RelationRef::Available => library.available,
                         RelationRef::Helper(id) => *helpers
@@ -120,6 +126,22 @@ pub fn assemble<R: Borrow<Recipe>>(
                         .rewrites
                         .owners
                         .insert(rule, Contribution::Program);
+                    if let SemanticStatement::Mask { target, condition } = source.key.form.as_ref()
+                    {
+                        attribution.masks.insert(
+                            rule,
+                            MaskAttribution {
+                                target: *constants
+                                    .get(&(Kind::Slot, target.clone()))
+                                    .ok_or_else(|| invalid("validated mask target missing"))?,
+                                statement: source.span(&AstPath::Statement)?,
+                                condition: condition
+                                    .as_ref()
+                                    .map(|_| source.span(&AstPath::Expression(ExprPath::default())))
+                                    .transpose()?,
+                            },
+                        );
+                    }
                 }
             }
         }

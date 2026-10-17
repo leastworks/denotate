@@ -204,6 +204,52 @@
     }
   },
   {
+    "type": "mask",
+    "named": true,
+    "fields": {
+      "condition": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "and",
+            "named": true
+          },
+          {
+            "type": "available",
+            "named": true
+          },
+          {
+            "type": "group",
+            "named": true
+          },
+          {
+            "type": "not",
+            "named": true
+          },
+          {
+            "type": "or",
+            "named": true
+          },
+          {
+            "type": "present",
+            "named": true
+          }
+        ]
+      },
+      "target": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "not",
     "named": true,
     "fields": {
@@ -347,6 +393,10 @@
         {
           "type": "mapping",
           "named": true
+        },
+        {
+          "type": "mask",
+          "named": true
         }
       ]
     }
@@ -390,6 +440,10 @@
   },
   {
     "type": "input",
+    "named": false
+  },
+  {
+    "type": "mask",
     "named": false
   },
   {

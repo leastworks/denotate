@@ -30,6 +30,10 @@
               {
                 "type": "SYMBOL",
                 "name": "mapping"
+              },
+              {
+                "type": "SYMBOL",
+                "name": "mask"
               }
             ]
           }
@@ -108,6 +112,52 @@
         {
           "type": "FIELD",
           "name": "input",
+          "content": {
+            "type": "SYMBOL",
+            "name": "identifier"
+          }
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "when"
+                },
+                {
+                  "type": "FIELD",
+                  "name": "condition",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "_expression"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": ";"
+        }
+      ]
+    },
+    "mask": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "mask"
+        },
+        {
+          "type": "FIELD",
+          "name": "target",
           "content": {
             "type": "SYMBOL",
             "name": "identifier"
@@ -372,6 +422,10 @@
       {
         "type": "STRING",
         "value": "slot"
+      },
+      {
+        "type": "STRING",
+        "value": "mask"
       },
       {
         "type": "STRING",

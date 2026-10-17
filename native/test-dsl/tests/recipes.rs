@@ -184,10 +184,25 @@ fn fingerprint(p: &LoweredProgram, sources: &Sources) -> Value {
         .iter()
         .map(|(id, owner)| (ids[&(*id).into()].clone(), format!("{owner:?}")))
         .collect();
+    let masks: BTreeMap<_, _> = p
+        .attribution
+        .masks
+        .iter()
+        .map(|(id, mask)| {
+            (
+                ids[&(*id).into()].clone(),
+                json!([
+                    constant(p, mask.target),
+                    span(sources, mask.statement),
+                    mask.condition.map(|s| span(sources, s))
+                ]),
+            )
+        })
+        .collect();
     json!({
         "constants": p.corpus.constants().map(|c| constant(p, c.id)).collect::<Vec<_>>(),
         "relations": p.corpus.relations().map(|r| json!([r.name, format!("{:?}",r.role), r.parameters.iter().map(|a| json!([a.name, p.corpus.sort(a.sort).unwrap().name])).collect::<Vec<_>>()])).collect::<Vec<_>>(),
-        "rules": rules, "origins": origins, "guards": guards, "edits": edits, "owners": owners
+        "rules": rules, "origins": origins, "guards": guards, "edits": edits, "owners": owners, "masks": masks
     })
 }
 

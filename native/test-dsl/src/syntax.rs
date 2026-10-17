@@ -117,6 +117,14 @@ pub fn project(
                     .transpose()?,
                 span: projection.span(node)?,
             }),
+            "mask" => program.masks.push(Mask {
+                target: projection.name(field(node, "target")?)?,
+                condition: node
+                    .child_by_field_name("condition")
+                    .map(|n| projection.expr(n))
+                    .transpose()?,
+                span: projection.span(node)?,
+            }),
             other => return Err(ParseFailure::UnexpectedTree(other.into())),
         }
     }

@@ -198,7 +198,10 @@ impl Session {
         let declarations = declarations(&self.db, self.input);
         let mut errors = declarations.errors.clone();
         for (source, &form) in projection.statements.iter().zip(&forms) {
-            if matches!(source.key.form.as_ref(), SemanticStatement::Mapping { .. }) {
+            if !matches!(
+                source.key.form.as_ref(),
+                SemanticStatement::Declaration { .. }
+            ) {
                 errors.extend(
                     declarations
                         .names

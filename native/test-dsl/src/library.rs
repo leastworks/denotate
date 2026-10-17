@@ -10,6 +10,7 @@ pub struct MappingLibrary {
     pub present: RelationId,
     pub supplies: RelationId,
     pub available: RelationId,
+    pub masked: RelationId,
     pub unique_input: ObligationId,
 }
 
@@ -37,15 +38,25 @@ pub fn build(corpus: &mut Corpus) -> Result<MappingLibrary, ConstructionError> {
         RelationRole::Derived,
         [Parameter::new("slot", slot)],
     )?;
+    let masked = corpus.declare_relation(
+        "masked",
+        RelationRole::Derived,
+        [Parameter::new("slot", slot)],
+    )?;
 
     let i = Term::variable("I", input);
     let d = Term::variable("D", slot);
     let head = corpus.atom(supplies, [i.clone(), d.clone()])?;
     let mapping = corpus.atom(mapped_to, [i.clone(), d.clone()])?;
     let presence = corpus.atom(present, [i.clone()])?;
+    let mask = corpus.atom(masked, [d.clone()])?;
     corpus.add_rule(
         head,
-        [Literal::Positive(mapping), Literal::Positive(presence)],
+        [
+            Literal::Positive(mapping),
+            Literal::Positive(presence),
+            Literal::Negative(mask),
+        ],
     )?;
 
     let head = corpus.atom(available, [d.clone()])?;
@@ -65,6 +76,7 @@ pub fn build(corpus: &mut Corpus) -> Result<MappingLibrary, ConstructionError> {
         present,
         supplies,
         available,
+        masked,
         unique_input,
     })
 }

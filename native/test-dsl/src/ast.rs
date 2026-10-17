@@ -31,6 +31,13 @@ pub struct Mapping {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Mask {
+    pub target: Name,
+    pub condition: Option<Expr>,
+    pub span: SourceSpan,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Expr {
     pub kind: ExprKind,
     pub span: SourceSpan,
@@ -53,4 +60,5 @@ pub enum ExprKind {
 pub struct Program {
     pub declarations: Vec<Declaration>,
     pub mappings: Vec<Mapping>,
+    pub masks: Vec<Mask>,
 }

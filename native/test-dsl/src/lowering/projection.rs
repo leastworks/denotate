@@ -69,7 +69,8 @@ pub fn project(program: &ast::Program, sources: &Sources) -> Result<Projection> 
         });
         *duplicate += 1;
     };
-    // Keep the pre-5a declaration and mapping order, including hand-built ASTs.
+    // Declarations, mappings, then masks; each list retains authored order.
+    // This preserves pre-mask IR order and also supports hand-built ASTs.
     for declaration in &program.declarations {
         sources.text(declaration.span)?;
         let mut spans = BTreeMap::from([(AstPath::Statement, declaration.span)]);
@@ -110,6 +111,29 @@ pub fn project(program: &ast::Program, sources: &Sources) -> Result<Projection> 
             },
             spans,
             warnings::removals(mapping, sources)?.into_iter().collect(),
+        );
+    }
+    for mask in &program.masks {
+        sources.text(mask.span)?;
+        validate_name(&mask.target, sources)?;
+        let mut spans = BTreeMap::from([
+            (AstPath::Statement, mask.span),
+            (AstPath::Target, mask.target.span),
+        ]);
+        let condition = mask
+            .condition
+            .as_ref()
+            .map(|expr| expression(expr, &ExprPath::default(), &mut spans, sources))
+            .transpose()?;
+        push(
+            SemanticStatement::Mask {
+                target: mask.target.text.clone(),
+                condition,
+            },
+            spans,
+            warnings::condition_removals(mask.condition.as_ref(), mask.target.span, sources)?
+                .into_iter()
+                .collect(),
         );
     }
     Ok(result)

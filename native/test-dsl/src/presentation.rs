@@ -180,7 +180,8 @@ pub fn present(
                     .iter()
                     .find(|r| r.component == *component)
                     .ok_or(PresentationError::InvalidFinding("missing blocking cycle"))?;
-                let (cycle_targets, _) = cycle_locations(region, &origins, view)?;
+                let (cycle_targets, _) =
+                    cycle_locations(lowered, report.program(), region, &origins, view)?;
                 let proven_failure = matches!(region.completion, CompletionOutcome::NoMeaning(_));
                 has_no_meaning |= proven_failure;
                 related.extend(cycle_targets.into_iter().map(|span| {
@@ -319,7 +320,8 @@ pub fn present(
                 .ok_or(PresentationError::InvalidFinding(
                     "missing no-meaning implication target",
                 ))?;
-            let (locations, _) = cycle_locations(region, &origins, view)?;
+            let (locations, _) =
+                cycle_locations(lowered, report.program(), region, &origins, view)?;
             related.extend(
                 locations.into_iter().map(|span| {
                     RelatedLocation::new(span, "conflict confined to no-meaning region")
@@ -344,7 +346,35 @@ pub fn present(
         }
     }
     for region in &report.unresolved {
-        let (targets, mut related) = cycle_locations(region, &origins, view)?;
+        let (targets, mut related) =
+            cycle_locations(lowered, report.program(), region, &origins, view)?;
+        let masks = mask_cycle(lowered, region, view);
+        let slots = masks
+            .iter()
+            .map(|m| name(m.target))
+            .collect::<Result<BTreeSet<_>>>()?
+            .into_iter()
+            .collect::<Vec<_>>();
+        let mut authored_negation = false;
+        for edge in &region.cycle.edges {
+            if edge.polarity == Polarity::Negative && !origins(edge.premise)?.is_empty() {
+                authored_negation = true;
+            }
+        }
+        let mask_dependency = match slots.as_slice() {
+            [] => None,
+            _ if authored_negation => Some(
+                "This dependency cycle involves masking and an authored negated condition".into(),
+            ),
+            [slot] => Some(format!(
+                "Masking Slot {} depends on its own availability",
+                slot
+            )),
+            _ => Some(format!(
+                "Masking Slots {} depends cyclically on their availability",
+                slots.join(" and ")
+            )),
+        };
         let mut rules = region
             .rules
             .iter()
@@ -360,13 +390,14 @@ pub fn present(
                     "Other observations remain unsupported unless separately certified; a consistent equation solution does not establish meaning.".into(),
                     "Independent obligation results remain available.".into(),
                 ];
-                (DiagnosticKind::NoMeaning, no_meaning_message(lowered, report.program(), &finding.bad_input)?)
+                let message = no_meaning_message(lowered, report.program(), &finding.bad_input, mask_dependency.as_deref())?;
+                (DiagnosticKind::NoMeaning, message)
             }
             CompletionOutcome::Inconclusive(cause) => (DiagnosticKind::Inconclusive, format!("Consistency checking for this dependency cycle is inconclusive: {} exhausted its {} budget.",cause.phase,cause.resource)),
             CompletionOutcome::Deferred { blocked_by } => {
                 for id in blocked_by {
                     if let Some(upstream) = report.unresolved.iter().find(|r|r.component==*id) {
-                        let (locations, _) = cycle_locations(upstream, &origins, view)?;
+                        let (locations, _) = cycle_locations(lowered, report.program(), upstream, &origins, view)?;
                         related.extend(locations.into_iter().map(|span| RelatedLocation::new(span,
                             if matches!(upstream.completion,CompletionOutcome::NoMeaning(_)) { "upstream no-meaning finding" }
                             else { "unsettled upstream component" })));
@@ -375,7 +406,7 @@ pub fn present(
                 (DiagnosticKind::UnsupportedCycle, "Consistency checking for this cycle was deferred: an upstream component is not settled. See related locations.".into())
             }
             CompletionOutcome::NoContradiction => match region.outcome {
-                RegionOutcome::Unsupported => (DiagnosticKind::UnsupportedCycle, "This dependency cycle contains negation and is unsupported by the current checker. Its equations have a solution for every input observation, but that does not establish meaning.".into()),
+                RegionOutcome::Unsupported => (DiagnosticKind::UnsupportedCycle, mask_dependency.as_ref().map(|d| format!("{d}. The checker could not establish a single result.")).unwrap_or_else(|| "This dependency cycle contains negation and is unsupported by the current checker. Its equations have a solution for every input observation, but that does not establish meaning.".into())),
                 RegionOutcome::Inconclusive(cause) => (DiagnosticKind::Inconclusive, format!("Admission of this dependency cycle is inconclusive: {} exhausted its {} budget.", cause.phase, cause.resource)),
             },
         };
@@ -402,14 +433,16 @@ fn no_meaning_message(
     lowered: &LoweredProgram,
     program: &GroundProgram,
     condition: &Condition,
+    mask_dependency: Option<&str>,
 ) -> Result<String> {
+    let subject = mask_dependency
+        .map(|d| format!("{d}; no consistent result exists"))
+        .unwrap_or_else(|| "These rules have no consistent result".into());
     let literals = match program.input_conjunction(condition, &Limits::default()) {
         Ok(Some(literals)) => literals,
         // Wording is optional: a summary budget must not suppress a finding.
         Ok(None) | Err(CheckError::LimitExceeded { .. }) => {
-            return Ok(
-                "These rules have no consistent result in the example input observation.".into(),
-            );
+            return Ok(format!("{subject} in the example input observation."));
         }
         Err(_) => {
             return Err(PresentationError::InvalidFinding(
@@ -418,7 +451,7 @@ fn no_meaning_message(
         }
     };
     if literals.is_empty() {
-        return Ok("These rules have no consistent result for any input observation.".into());
+        return Ok(format!("{subject} for any input observation."));
     }
     let mut clauses = Vec::new();
     for (atom, value) in literals {
@@ -432,13 +465,23 @@ fn no_meaning_message(
             .constant(atom.arguments[0])
             .ok_or(PresentationError::InvalidFinding("unknown input value"))?;
         clauses.push(format!(
-            "{} is {}",
+            "{}{} is {}",
+            if mask_dependency.is_some() {
+                "Input "
+            } else {
+                ""
+            },
             input.name,
             if value { "present" } else { "absent" }
         ));
     }
     Ok(format!(
-        "These rules have no consistent result whenever {}.",
+        "{subject} {} {}.",
+        if mask_dependency.is_some() {
+            "when"
+        } else {
+            "whenever"
+        },
         clauses.join(" and ")
     ))
 }
@@ -486,7 +529,30 @@ fn observation_note(lowered: &LoweredProgram, observation: &Observation) -> Resu
     ))
 }
 
+fn mask_cycle<'a>(
+    lowered: &'a LoweredProgram,
+    region: &UnresolvedRegion,
+    view: SourceView,
+) -> Vec<&'a crate::attribution::MaskAttribution> {
+    if view != SourceView::TestDsl
+        || !region.rules.iter().any(|r| {
+            r.body.iter().any(|l| {
+                l.polarity == Polarity::Negative && l.term.atom.relation == lowered.library.masked
+            })
+        })
+    {
+        return vec![];
+    }
+    region
+        .rules
+        .iter()
+        .filter_map(|r| lowered.attribution.masks.get(&r.source))
+        .collect()
+}
+
 fn cycle_locations(
+    lowered: &LoweredProgram,
+    program: &GroundProgram,
     region: &UnresolvedRegion,
     origins: &impl Fn(OccurrenceId) -> Result<Vec<RelatedLocation>>,
     view: SourceView,
@@ -505,6 +571,45 @@ fn cycle_locations(
             targets.extend(locations.iter().map(|o| o.span));
         }
         related.extend(locations);
+    }
+    // Library negation has no authored `not`. Attribute the finding to the
+    // participating mask conditions, retaining any authored negations too.
+    // Supporting mappings stay related only.
+    let masks = mask_cycle(lowered, region, view);
+    if !masks.is_empty() {
+        let mask_targets: BTreeSet<_> = masks
+            .iter()
+            .map(|m| m.condition.unwrap_or(m.statement))
+            .collect();
+        related.extend(
+            mask_targets
+                .iter()
+                .map(|s| RelatedLocation::new(*s, "mask condition")),
+        );
+        targets.extend(mask_targets);
+        // Mapping facts can be settled outside the SCC while supplying its
+        // Slots. These are related dependencies, not additional error sites.
+        let mapping_facts: BTreeSet<_> = region
+            .rules
+            .iter()
+            .flat_map(|r| r.body.iter())
+            .filter(|l| {
+                l.polarity == Polarity::Positive
+                    && l.term.atom.relation == lowered.library.mapped_to
+            })
+            .map(|l| &l.term.atom)
+            .collect();
+        let cycle_rules: BTreeSet<_> = region.rules.iter().map(|r| r.source).collect();
+        for rule in program
+            .original_rules()
+            .filter(|r| mapping_facts.contains(&r.head.atom) && !cycle_rules.contains(&r.source))
+        {
+            related.extend(
+                origins(rule.source.into())?
+                    .into_iter()
+                    .map(|o| RelatedLocation::new(o.span, "supporting InputMapping")),
+            );
+        }
     }
     // A library can introduce the negative edge without a location in the
     // user's source view. Point to participating authored rules instead; this
@@ -543,9 +648,15 @@ fn cycle_locations(
 }
 
 fn unique_locations(origins: impl IntoIterator<Item = RelatedLocation>) -> Vec<RelatedLocation> {
-    let mut result = Vec::new();
+    let mut result: Vec<RelatedLocation> = Vec::new();
     for origin in origins {
-        if !result.contains(&origin) {
+        if let Some(existing) = result.iter_mut().find(|item| item.span == origin.span) {
+            // Keep traversal order, but prefer a specific display label over
+            // the generic cycle label when both describe the same location.
+            if existing.label == "cycle contributor" && origin.label != "cycle contributor" {
+                *existing = origin;
+            }
+        } else {
             result.push(origin);
         }
     }

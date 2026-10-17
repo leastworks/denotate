@@ -15,6 +15,10 @@ pub enum SemanticStatement {
         input: String,
         condition: Option<Expression>,
     },
+    Mask {
+        target: String,
+        condition: Option<Expression>,
+    },
 }
 
 /// Preserve authored grouping and negations, even when their meanings coincide.
@@ -222,17 +226,24 @@ pub fn validate_form(
             Expression::Group(e) => expression(e, &path.child(Step::Inner), check),
         }
     }
-    if let SemanticStatement::Mapping {
-        target,
-        input,
-        condition,
-    } = form
-    {
-        check(target, Kind::Slot, AstPath::Target);
-        check(input, Kind::Input, AstPath::Input);
-        if let Some(expr) = condition {
-            expression(expr, &ExprPath::default(), &mut check);
+    let condition = match form {
+        SemanticStatement::Mapping {
+            target,
+            input,
+            condition,
+        } => {
+            check(target, Kind::Slot, AstPath::Target);
+            check(input, Kind::Input, AstPath::Input);
+            condition
         }
+        SemanticStatement::Mask { target, condition } => {
+            check(target, Kind::Slot, AstPath::Target);
+            condition
+        }
+        SemanticStatement::Declaration { .. } => return errors,
+    };
+    if let Some(expr) = condition {
+        expression(expr, &ExprPath::default(), &mut check);
     }
     errors
 }
