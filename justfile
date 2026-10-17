@@ -31,6 +31,14 @@ test-inputmapping-lsp:
     cargo +1.93.0 build --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp
     DENOTATE_LSP_COMMAND="{{justfile_directory()}}/frontend-prototype/native/target/debug/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --features inputmapping --test inputmapping
 
+# Build the InputMapping VS Code extension and check its package/example (no GUI).
+test-inputmapping-extension: _check-node
+    npm test --prefix frontend-prototype/native/test-dsl/vscode
+
+# Launch an isolated VS Code and test source-linked InputMapping diagnostics.
+test-inputmapping-vscode: _check-node
+    DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix frontend-prototype/native/test-dsl/vscode
+
 # Optional independent Python/Z3 check of four Rust fixture corpora (needs z3-solver).
 test-check-z3:
     python3 semantics/check_rust_findings.py

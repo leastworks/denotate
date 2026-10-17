@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "InputMapping",
+  "scopeName": "source.inputmapping",
+  "patterns": [
+    { "name": "comment.line.double-slash.inputmapping", "match": "//[^\\r\\n]*" },
+    { "name": "keyword.declaration.inputmapping", "match": "\\b(input|slot)\\b" },
+    { "name": "keyword.control.inputmapping", "match": "\\bwhen\\b" },
+    { "name": "keyword.operator.logical.inputmapping", "match": "\\b(and|or|not)\\b" },
+    { "name": "support.function.inputmapping", "match": "\\b(available|present)\\b" },
+    { "name": "keyword.operator.assignment.inputmapping", "match": "<-" },
+    { "name": "punctuation.separator.inputmapping", "match": "[,;]" }
+  ]
+}

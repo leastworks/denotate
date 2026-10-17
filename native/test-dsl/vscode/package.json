@@ -1,0 +1,32 @@
+{
+  "name": "inputmapping-prototype",
+  "displayName": "InputMapping (Denotate prototype)",
+  "description": "Source-linked semantic diagnostics for the InputMapping test DSL",
+  "version": "0.0.1",
+  "publisher": "denotate",
+  "private": true,
+  "engines": { "node": ">=22.0.0", "vscode": "^1.141.0" },
+  "categories": ["Programming Languages"],
+  "main": "./dist/extension.cjs",
+  "activationEvents": ["onLanguage:inputmapping"],
+  "contributes": {
+    "languages": [{
+      "id": "inputmapping",
+      "aliases": ["InputMapping"],
+      "extensions": [".inputmapping"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "inputmapping",
+      "scopeName": "source.inputmapping",
+      "path": "./syntaxes/inputmapping.tmLanguage.json"
+    }]
+  },
+  "scripts": {
+    "build": "cargo +1.93.0 build --manifest-path ../../Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp --release && node build.mjs",
+    "test": "npm run build && node --test tests/package.test.mjs",
+    "test:vscode": "npm run build && node scripts/run-vscode-smoke.mjs"
+  },
+  "dependencies": { "vscode-languageclient": "10.1.2" },
+  "devDependencies": { "esbuild": "0.25.12", "@vscode/test-electron": "2.5.2" }
+}
