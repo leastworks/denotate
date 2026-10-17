@@ -110,6 +110,7 @@ pub struct GroundProgram {
 }
 impl GroundProgram {
     pub fn prepare(corpus: &Corpus, domains: &Domains, limits: &Limits) -> Result<Self> {
+        limits.cancellation.check()?;
         let start = Instant::now();
         let mut budget = Budget::new(limits);
         let domains = validate_domains(corpus, domains, &mut budget)?;
@@ -120,6 +121,7 @@ impl GroundProgram {
         let start = Instant::now();
         graph::analyze(&mut p, &mut budget)?;
         p.metrics.admissibility = start.elapsed();
+        limits.cancellation.check()?;
         Ok(p)
     }
 

@@ -9,6 +9,17 @@ use serde_json::json;
 
 pub const IDLE: &str = "denotate/test/idle";
 pub const VALIDATED: &str = "denotate/test/validated";
+pub const FRONTEND_READY: &str = "denotate/test/frontendReady";
+
+/// Async frontends send this after withdrawing old semantic findings. It does
+/// not replace validated, which follows the final publication for the snapshot.
+pub fn frontend_ready(connection: &Connection, uri: &Url, version: i32) -> Result<()> {
+    send(
+        connection,
+        FRONTEND_READY,
+        json!({"uri": uri, "version": version}),
+    )
+}
 
 pub fn validated(connection: &Connection, uri: &Url, version: i32) -> Result<()> {
     send(
@@ -47,5 +58,18 @@ mod tests {
         assert_eq!(barrier.params, json!({"uri": uri, "version": 7}));
         assert_eq!(IDLE, "denotate/test/idle");
         assert!(client.receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn async_frontend_ready_is_a_distinct_versioned_barrier() {
+        let (server, client) = Connection::memory();
+        let uri = Url::parse("file:///example.inputmapping").unwrap();
+        frontend_ready(&server, &uri, 4).unwrap();
+        let Message::Notification(n) = client.receiver.try_recv().unwrap() else {
+            panic!()
+        };
+        assert_eq!(n.method, FRONTEND_READY);
+        assert_ne!(n.method, VALIDATED);
+        assert_eq!(n.params, json!({"uri": uri, "version": 4}));
     }
 }

@@ -42,6 +42,7 @@ impl GroundProgram {
         present: impl IntoIterator<Item = GroundAtom>,
         limits: &Limits,
     ) -> Result<CertificationOutcome> {
+        limits.cancellation.check()?;
         let result = self.certify_with_budget(present, &mut Budget::new(limits));
         match result {
             Ok(outcome) => Ok(outcome),

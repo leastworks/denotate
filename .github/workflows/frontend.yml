@@ -26,6 +26,10 @@ jobs:
         run: npm test --prefix frontend-prototype/langium
       - name: Install Rust toolchain
         run: rustup toolchain install 1.78.0 --profile minimal
+      - name: InputMapping worker and diagnostics over LSP
+        run: |
+          cargo +1.93.0 build --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp
+          DENOTATE_LSP_COMMAND="$GITHUB_WORKSPACE/frontend-prototype/native/target/debug/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --features inputmapping --test inputmapping
       - name: Shared LSP acceptance tests
         run: cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests
       - name: Retained A1 LSP baseline

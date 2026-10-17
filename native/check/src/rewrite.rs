@@ -152,12 +152,14 @@ impl GroundProgram {
     /// A limit leaves the last fully committed rewrite batch intact, with an
     /// explicit inconclusive cause for remaining unresolved regions.
     pub fn admit(mut self, limits: &Limits) -> Result<Self> {
+        limits.cancellation.check()?;
         self.rewrites.inconclusive = None;
         let mut budget = Budget::new(limits);
         let result = self.rewrite_loop(&mut budget);
         if let Err(error) = result {
             self.rewrites.inconclusive = Some(Inconclusive::from_error(error)?);
         }
+        limits.cancellation.check()?;
         Ok(self)
     }
 

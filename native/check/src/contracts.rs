@@ -84,6 +84,7 @@ impl GroundProgram {
         roots: impl IntoIterator<Item = GroundAtom>,
         limits: &Limits,
     ) -> Result<DependencyCone> {
+        limits.cancellation.check()?;
         let mut budget = Budget::new(limits);
         self.dependency_cone_with_budget(roots, &mut budget)
     }
@@ -127,6 +128,7 @@ impl SymbolicMeaning<'_> {
     /// Budget exhaustion is explicit per group once indexing succeeds. Earlier
     /// completed groups are retained; internal failures still return an error.
     pub fn check_at_most_one(&self, limits: &Limits) -> Result<PropertyReport> {
+        limits.cancellation.check()?;
         let start = Instant::now();
         let mut budget = Budget::new(limits);
         let index = ConeIndex::new(self.program, &mut budget)?;

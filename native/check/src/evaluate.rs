@@ -121,6 +121,7 @@ impl GroundProgram {
         present: impl IntoIterator<Item = GroundAtom>,
         limits: &Limits,
     ) -> Result<Replay<'_>> {
+        limits.cancellation.check()?;
         self.evaluate_selected(present, None, &mut Budget::new(limits))
     }
 
@@ -131,6 +132,7 @@ impl GroundProgram {
         selected: Option<&BTreeSet<ComponentId>>,
         budget: &mut Budget<'_>,
     ) -> Result<Replay<'_>> {
+        budget.limits.cancellation.check()?;
         let mut snapshot = BTreeSet::new();
         for input in present {
             budget.tick("observation")?;

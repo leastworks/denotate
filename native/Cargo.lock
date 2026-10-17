@@ -182,10 +182,13 @@ name = "denotate-test-dsl"
 version = "0.0.1"
 dependencies = [
  "cc",
+ "crossbeam-channel",
  "denotate-check",
  "denotate-editor",
  "denotate-ir",
+ "lsp-server",
  "lsp-types",
+ "serde_json",
  "tree-sitter",
  "tree-sitter-language",
 ]

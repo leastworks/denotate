@@ -137,6 +137,7 @@ impl<'p> SymbolicMeaning<'p> {
         completion_limits: &Limits,
         certification_limits: &Limits,
     ) -> Result<Verification<'p>> {
+        limits.cancellation.check()?;
         let report = self.check_at_most_one(limits)?;
         let mut budget = Budget::new(limits);
         let mut metrics = FindingMetrics::default();
@@ -216,6 +217,7 @@ impl<'p> SymbolicMeaning<'p> {
         }
         let mut unresolved = Vec::new();
         let completion_start = Instant::now();
+        completion_limits.cancellation.check()?;
         let mut completion_budget = Budget::new(completion_limits);
         let mut completion_nodes = 0;
         // Copy already bounded, prepared cycle metadata even if witness work
@@ -264,6 +266,7 @@ impl<'p> SymbolicMeaning<'p> {
         }
         metrics.completion = completion_start.elapsed();
         let certification_start = Instant::now();
+        certification_limits.cancellation.check()?;
         let mut certification_budget = Budget::new(certification_limits);
         for (group, condition) in groups.iter_mut().zip(violations) {
             if let (VerifiedOutcome::Counterexample(example), Some(condition)) =
@@ -307,6 +310,9 @@ impl<'p> SymbolicMeaning<'p> {
             }
         }
         metrics.certification = certification_start.elapsed();
+        limits.cancellation.check()?;
+        completion_limits.cancellation.check()?;
+        certification_limits.cancellation.check()?;
         Ok(Verification {
             program: self.program,
             groups,

@@ -26,6 +26,11 @@ parse-inputmapping file="frontend-prototype/native/test-dsl/fixtures/overlapping
 generate-inputmapping: _check-node
     cd frontend-prototype/native/test-dsl/grammar && ../../../tree-sitter/node_modules/.bin/tree-sitter generate
 
+# Build the InputMapping diagnostics server and exercise it over real LSP (no GUI).
+test-inputmapping-lsp:
+    cargo +1.93.0 build --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp
+    DENOTATE_LSP_COMMAND="{{justfile_directory()}}/frontend-prototype/native/target/debug/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --features inputmapping --test inputmapping
+
 # Optional independent Python/Z3 check of four Rust fixture corpora (needs z3-solver).
 test-check-z3:
     python3 semantics/check_rust_findings.py

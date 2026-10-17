@@ -2,11 +2,17 @@ use crate::GroundAtom;
 use denotate_ir::{ConstantId, SortId};
 use std::{
     fmt,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
     time::{Duration, Instant},
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckError {
+    /// Superseded work, not a resource limit or a semantic result.
+    Cancelled,
     InvalidDomain {
         sort: SortId,
         reason: &'static str,
@@ -31,12 +37,30 @@ impl std::error::Error for CheckError {}
 
 pub(crate) type Result<T> = std::result::Result<T, CheckError>;
 
+/// One-way, per-run cancellation. Clones refer to the same request; a new run
+/// gets a fresh token. Cancellation does not interrupt a BDD operation mid-call.
+#[derive(Debug, Clone, Default)]
+pub struct Cancellation(Arc<AtomicBool>);
+impl Cancellation {
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+    pub fn check(&self) -> Result<()> {
+        if self.0.load(Ordering::Relaxed) {
+            Err(CheckError::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+}
+
 /// Per checker operation, including preparation, evaluation and Boolean queries.
 /// Low-level operations return LimitExceeded; reporting APIs preserve completed
 /// scopes and label unfinished work Inconclusive. Deadlines are checked
 /// cooperatively between work items, not a promise of hard real-time preemption.
 #[derive(Debug, Clone)]
 pub struct Limits {
+    pub cancellation: Cancellation,
     pub max_atoms: usize,
     pub max_rules: usize,
     pub max_dependencies: usize,
@@ -52,6 +76,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
+            cancellation: Cancellation::default(),
             max_atoms: 100_000,
             max_rules: 200_000,
             max_dependencies: 1_000_000,
@@ -88,6 +113,7 @@ impl<'a> Budget<'a> {
         self.work
     }
     pub fn charge(&mut self, amount: usize, phase: &'static str) -> Result<()> {
+        self.limits.cancellation.check()?;
         if self.start.elapsed() >= self.limits.timeout {
             return Err(CheckError::LimitExceeded {
                 phase,
