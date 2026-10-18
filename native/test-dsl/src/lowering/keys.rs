@@ -8,6 +8,9 @@ pub const LIBRARY: &str = "InputMapping/library";
 const DOCUMENT: &str = "InputMapping/document";
 
 pub fn owner(statement: &StatementKey) -> OwnerKey {
+    // This encoding relies on DERIVED Debug for EVERY type nested inside
+    // SemanticStatement (including future fields). A custom Debug implementation
+    // must not erase semantic distinctions; change the encoding before adding one.
     // Debug of these closed, derived structural enums is injective (strings are
     // escaped and variants/fields delimited). Numeric aliases already normalize.
     OwnerKey::new(

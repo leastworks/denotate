@@ -1,5 +1,5 @@
-//! Derived semantic index over a fresh preparation. IDs and execution order stay
-//! unchanged. Membership identities are not complete cache inputs.
+//! Derived semantic index over the committed ground round, with original instances
+//! retained for provenance. Membership identities are not complete cache inputs.
 use crate::*;
 use denotate_ir::*;
 use std::{
@@ -79,8 +79,23 @@ impl KeyedGroups {
         })
     }
 }
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum KeyedRewriteKind {
+    Discharge(OccurrenceKey),
+    RedundantProducer,
+}
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct RewriteEvidenceKey {
+    pub candidate: InstanceKey,
+    pub kind: KeyedRewriteKind,
+    pub producers: BTreeSet<InstanceKey>,
+}
 #[derive(Debug)]
 pub struct GroundKeyIndex {
+    /// Current executable content; original instances remain available for provenance.
+    pub committed: BTreeMap<InstanceKey, GroundInstance>,
+    pub dropped: BTreeSet<InstanceKey>,
+    pub rewrites: BTreeMap<RewriteProofId, RewriteEvidenceKey>,
     pub atoms: BTreeMap<GroundAtom, AtomKey>,
     pub instances: BTreeMap<GroundRuleId, InstanceKey>,
     pub content: BTreeMap<InstanceKey, GroundInstance>,
@@ -89,9 +104,9 @@ pub struct GroundKeyIndex {
     pub elapsed: Duration,
 }
 impl GroundKeyIndex {
-    /// Index fresh preparation, before admission rewrites remove source premises.
+    /// Index the committed round, retaining original instances for provenance.
     /// Key errors are creator failures, separate from resource exhaustion. The
-    /// 6a.1 phase adds no logical charges to existing preparation/check budgets.
+    /// key phase adds no logical charges to existing preparation/check budgets.
     pub fn build(
         corpus: &Corpus,
         keys: &SemanticKeys,
@@ -99,12 +114,10 @@ impl GroundKeyIndex {
     ) -> std::result::Result<Self, KeyError> {
         let start = Instant::now();
         keys.validate(corpus)?;
-        if program.rewrite_proofs().next().is_some() {
-            return Err(KeyError::InvalidStructure(
-                "key index requires fresh preparation",
-            ));
-        }
         let mut out = Self {
+            committed: BTreeMap::new(),
+            dropped: BTreeSet::new(),
+            rewrites: BTreeMap::new(),
             atoms: BTreeMap::new(),
             instances: BTreeMap::new(),
             content: BTreeMap::new(),
@@ -115,7 +128,7 @@ impl GroundKeyIndex {
         // Include impossible negative premises too; they have identity but no SCC.
         for atom in program.atoms().chain(
             program
-                .rules()
+                .original_rules()
                 .flat_map(|r| r.body.iter().map(|l| &l.term.atom)),
         ) {
             if !out.atoms.contains_key(atom) {
@@ -139,7 +152,7 @@ impl GroundKeyIndex {
                         .collect::<std::result::Result<_, _>>()?,
                 })
             };
-        for r in program.rules() {
+        for r in program.original_rules() {
             let source = corpus
                 .rule(r.source)
                 .ok_or(KeyError::UnknownOccurrence(r.source.into()))?;
@@ -149,7 +162,7 @@ impl GroundKeyIndex {
                 })
             {
                 return Err(KeyError::InvalidStructure(
-                    "key index requires fresh ground rules",
+                    "original ground rule does not match source schema",
                 ));
             }
             let mut substitution = BTreeMap::new();
@@ -215,6 +228,48 @@ impl GroundKeyIndex {
                 return Err(KeyError::InvalidStructure("duplicate ground instance key"));
             }
             out.instances.insert(r.id, key);
+        }
+        for r in program.rules() {
+            let key = out.instances[&r.id].clone();
+            out.committed.insert(
+                key.clone(),
+                GroundInstance {
+                    schema: out.content[&key].schema.clone(),
+                    head: occurrence(&r.head)?,
+                    body: r
+                        .body
+                        .iter()
+                        .map(|l| Ok((l.polarity == Polarity::Negative, occurrence(&l.term)?)))
+                        .collect::<std::result::Result<_, KeyError>>()?,
+                },
+            );
+        }
+        out.dropped = out
+            .content
+            .keys()
+            .filter(|k| !out.committed.contains_key(*k))
+            .cloned()
+            .collect();
+        for proof in program.rewrite_proofs() {
+            out.rewrites.insert(
+                proof.id,
+                RewriteEvidenceKey {
+                    candidate: out.instances[&proof.candidate.rule.id].clone(),
+                    kind: match proof.kind {
+                        RewriteKind::Discharge { literal_occurrence } => {
+                            KeyedRewriteKind::Discharge(
+                                keys.bindings().key(literal_occurrence)?.clone(),
+                            )
+                        }
+                        RewriteKind::RedundantProducer => KeyedRewriteKind::RedundantProducer,
+                    },
+                    producers: proof
+                        .producers
+                        .iter()
+                        .map(|p| out.instances[&p.rule.id].clone())
+                        .collect(),
+                },
+            );
         }
         for c in program.components() {
             let atoms: BTreeSet<_> = c.atoms.iter().map(|a| out.atoms[a].clone()).collect();

@@ -740,16 +740,19 @@ fn bdd_and_property_limits_return_errors_not_successful_partial_results() {
             max_work: 0,
             ..limits.clone()
         },
-        Limits {
-            timeout: Duration::ZERO,
-            ..limits.clone()
-        },
     ] {
         assert!(matches!(
             p.symbolic(&low),
             Err(CheckError::LimitExceeded { .. })
         ));
     }
+    assert!(matches!(
+        p.symbolic(&Limits {
+            timeout: Duration::ZERO,
+            ..limits.clone()
+        }),
+        Err(CheckError::Deadline { .. })
+    ));
     let ctx = p.condition_context(&limits).unwrap();
     let x = ctx.input(&nullary(x), &limits).unwrap();
     let y = ctx.input(&nullary(y), &limits).unwrap();
@@ -765,10 +768,6 @@ fn bdd_and_property_limits_return_errors_not_successful_partial_results() {
         },
         Limits {
             max_work: 0,
-            ..limits.clone()
-        },
-        Limits {
-            timeout: Duration::ZERO,
             ..limits.clone()
         },
     ] {
@@ -821,10 +820,6 @@ fn bdd_and_property_limits_return_errors_not_successful_partial_results() {
         },
         Limits {
             max_condition_nodes: 0,
-            ..limits.clone()
-        },
-        Limits {
-            timeout: Duration::ZERO,
             ..limits.clone()
         },
     ] {

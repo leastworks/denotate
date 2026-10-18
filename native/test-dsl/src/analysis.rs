@@ -22,18 +22,22 @@ pub struct Program {
     pub lowered: LoweredProgram,
 }
 pub struct Output {
+    pub key_computation: std::time::Duration,
+    pub results: ScopedResults,
     pub diagnostics: Vec<Diagnostic>,
     pub creator_warnings: Vec<String>,
 }
 #[derive(Debug)]
 pub enum Failure {
     Cancelled,
+    Deadline,
     Creator(String),
 }
 impl From<CheckError> for Failure {
     fn from(error: CheckError) -> Self {
         match error {
             CheckError::Cancelled => Self::Cancelled,
+            CheckError::Deadline { .. } => Self::Deadline,
             other => Self::Creator(other.to_string()),
         }
     }
@@ -60,6 +64,16 @@ fn range(document: &Document, span: SourceSpan) -> Range {
 }
 pub fn creator_failure() -> Diagnostic {
     diagnostic(Range::default(), "creator-failure", "Semantic checking failed inside the DSL implementation; see the server log. This is not an error in a mapping.".into(), DiagnosticSeverity::INFORMATION)
+}
+
+/// An editor-only operational notice, never a checker finding or cached result.
+pub fn deadline_notice() -> Diagnostic {
+    diagnostic(
+        Range::default(),
+        "deadline",
+        "Semantic checking stopped at its deadline; results are incomplete.".into(),
+        DiagnosticSeverity::INFORMATION,
+    )
 }
 
 fn paused() -> Diagnostic {
@@ -186,36 +200,49 @@ impl Program {
 
     pub fn check(&self, limits: &Limits, after_prepare: impl FnOnce()) -> Result<Output, Failure> {
         limits.cancellation.check()?;
-        let AnalysisOutcome::Complete(ground) =
-            AnalysisOutcome::from_result(self.lowered.prepare_keyed(limits))?
-        else {
-            return Ok(inconclusive("preparation"));
+        let request = self.lowered.request(limits)?;
+        let operations = OperationalLimits::from(limits);
+        let ground = match request.prepare(&self.lowered.corpus, &self.lowered.keys, &operations)? {
+            AnalysisOutcome::Complete(p) => p,
+            AnalysisOutcome::Inconclusive(c) => {
+                return Ok(inconclusive(
+                    "preparation",
+                    request.exhausted(c),
+                    self.lowered.key_computation,
+                ));
+            }
         };
         after_prepare();
         limits.cancellation.check()?;
-        let ground = ground.program.admit(limits)?;
-        let AnalysisOutcome::Complete(meaning) = ground.symbolic_checked(limits)? else {
-            return Ok(inconclusive("symbolic evaluation"));
-        };
-        let AnalysisOutcome::Complete(report) = meaning.verify_checked(limits)? else {
-            return Ok(inconclusive("verification"));
+        let ground = ground.admit(&operations)?;
+        let report = match ground.verify(&operations)? {
+            CheckOutcome::Complete(r) => r,
+            CheckOutcome::Inconclusive { stage, reason } => {
+                return Ok(inconclusive(
+                    stage.label(),
+                    request.exhausted(reason),
+                    self.lowered.key_computation + ground.key_computation(),
+                ));
+            }
         };
         limits.cancellation.check()?;
         let findings = presentation::present(
             &self.lowered,
-            &report,
+            &report.verification,
             &self.sources,
             SourceView::TestDsl.as_str(),
         )
         .map_err(|e| Failure::Creator(e.to_string()))?;
         let rewrites = warnings::present_rewrites(
             &self.lowered,
-            &ground,
+            ground.program(),
             &self.sources,
             SourceView::TestDsl.as_str(),
         )
         .map_err(|e| Failure::Creator(e.to_string()))?;
         let mut output = Output {
+            results: report.results,
+            key_computation: self.lowered.key_computation + ground.key_computation(),
             diagnostics: vec![],
             creator_warnings: vec![],
         };
@@ -306,8 +333,14 @@ impl Program {
     }
 }
 
-fn inconclusive(phase: &str) -> Output {
+fn inconclusive(
+    phase: &str,
+    results: ScopedResults,
+    key_computation: std::time::Duration,
+) -> Output {
     Output {
+        results,
+        key_computation,
         diagnostics: vec![diagnostic(
             Range::default(),
             "inconclusive",

@@ -111,12 +111,28 @@ impl LoweredProgram {
             })
             .collect()
     }
+    pub fn request(
+        &self,
+        limits: &denotate_check::Limits,
+    ) -> std::result::Result<denotate_check::CheckRequest, denotate_check::CheckError> {
+        denotate_check::CheckRequest::all_obligations(
+            &self.corpus,
+            &self.keys,
+            &self.domains(),
+            &[denotate_check::InputAtMostOne {
+                relation: self.library.value,
+                group_by: vec![0],
+            }],
+            limits,
+        )
+    }
     pub fn prepare(
         &self,
         limits: &denotate_check::Limits,
     ) -> std::result::Result<denotate_check::GroundProgram, denotate_check::CheckError> {
-        denotate_check::GroundProgram::prepare_with_input_groups(
+        denotate_check::GroundProgram::prepare_keyed_inputs(
             &self.corpus,
+            &self.keys,
             &self.domains(),
             &[denotate_check::InputAtMostOne {
                 relation: self.library.value,

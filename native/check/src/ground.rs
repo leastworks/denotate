@@ -111,6 +111,7 @@ pub struct GroundProgram {
     pub(crate) atoms: Vec<GroundAtom>,
     pub(crate) atom_index: BTreeMap<GroundAtom, usize>,
     pub(crate) inputs: BTreeSet<GroundAtom>,
+    pub(crate) input_order: Option<Vec<GroundAtom>>,
     pub(crate) rules: Vec<GroundRule>,
     pub(crate) rewrites: crate::rewrite::Rewrites,
     pub(crate) components: Vec<Component>,
@@ -152,6 +153,43 @@ impl GroundProgram {
         Ok(p)
     }
 
+    /// Select stable BDD variables without changing grounding, rule IDs or group order.
+    /// The low-level unkeyed API remains the allocation-order reference path.
+    pub fn prepare_keyed_inputs(
+        corpus: &Corpus,
+        keys: &SemanticKeys,
+        domains: &Domains,
+        constraints: &[InputAtMostOne],
+        limits: &Limits,
+    ) -> Result<Self> {
+        limits.cancellation.check()?;
+        keys.validate(corpus).map_err(CheckError::Keys)?;
+        Self::prepare_with_input_groups(corpus, domains, constraints, limits)?
+            .with_atom_key_order(keys)
+    }
+    // Only fresh construction may choose an order: previously issued Conditions
+    // must never be interpreted using a different variable map.
+    pub(crate) fn with_atom_key_order(mut self, keys: &SemanticKeys) -> Result<Self> {
+        let mut ordered = self
+            .inputs
+            .iter()
+            .map(|a| {
+                Ok((
+                    AtomKey::from_atom(keys, a).map_err(CheckError::Keys)?,
+                    a.clone(),
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        ordered.sort_by(|a, b| a.0.cmp(&b.0));
+        self.input_order = Some(ordered.into_iter().map(|(_, a)| a).collect());
+        Ok(self)
+    }
+    pub(crate) fn ordered_inputs(&self) -> Vec<&GroundAtom> {
+        self.input_order
+            .as_ref()
+            .map_or_else(|| self.inputs.iter().collect(), |v| v.iter().collect())
+    }
+
     pub fn domain(&self, sort: SortId) -> Option<&[ConstantId]> {
         self.domains.get(&sort).map(Vec::as_slice)
     }
@@ -174,6 +212,7 @@ impl GroundProgram {
             atoms: vec![],
             atom_index: BTreeMap::new(),
             inputs: BTreeSet::new(),
+            input_order: None,
             rules: vec![],
             components: vec![],
             atom_components: vec![],

@@ -14,6 +14,10 @@ pub enum CheckError {
     Keys(denotate_ir::KeyError),
     /// Superseded work, not a resource limit or a semantic result.
     Cancelled,
+    Deadline {
+        phase: &'static str,
+    },
+    InvalidRequest(&'static str),
     InvalidDomain {
         sort: SortId,
         reason: &'static str,
@@ -149,10 +153,7 @@ impl<'a> Budget<'a> {
     pub fn charge(&mut self, amount: usize, phase: &'static str) -> Result<()> {
         self.limits.cancellation.check()?;
         if self.start.elapsed() >= self.limits.timeout {
-            return Err(CheckError::LimitExceeded {
-                phase,
-                resource: "time",
-            });
+            return Err(CheckError::Deadline { phase });
         }
         if amount > self.remaining() {
             return Err(CheckError::LimitExceeded {

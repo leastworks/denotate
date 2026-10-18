@@ -478,14 +478,7 @@ fn budget_result_lowered(p: &LoweredProgram, max_work: usize) -> Value {
         let g = prepare(&p, &limits)?.admit(&limits)?;
         let m = g.symbolic(&limits)?;
         let report = m.verify_at_most_one(&limits)?;
-        let groups:Vec<_>=report.groups.iter().map(|g| match &g.outcome {
-            VerifiedOutcome::Proved=>json!({"status":"proved"}),
-            VerifiedOutcome::Unsupported=>json!({"status":"unsupported"}),
-            VerifiedOutcome::Inconclusive(c)=>json!({"status":"inconclusive","cause":resource(*c)}),
-            VerifiedOutcome::Counterexample(c)=>json!({"status":"counterexample","present":c.observation.present.iter().map(|a|n.ground(a)).collect::<BTreeSet<_>>(),"absent":c.observation.absent.iter().map(|a|n.ground(a)).collect::<BTreeSet<_>>() }),
-        }).collect();
-        let regions:Vec<_>=report.unresolved.iter().map(|r|json!({"outcome":format!("{:?}",r.outcome),"completion":match &r.completion {CompletionOutcome::NoContradiction=>"no_contradiction",CompletionOutcome::NoMeaning(_)=>"no_meaning",CompletionOutcome::Deferred{..}=>"deferred",CompletionOutcome::Inconclusive(_)=>"inconclusive"}})).collect();
-        Ok(json!({"groups":groups,"regions":regions}))
+        Ok(captured_report(&report, &n))
     })();
     match result {
         Ok(v) => v,
@@ -494,6 +487,17 @@ fn budget_result_lowered(p: &LoweredProgram, max_work: usize) -> Value {
         }
         Err(e) => panic!("{e}"),
     }
+}
+
+fn captured_report(report: &Verification<'_>, n: &Names<'_>) -> Value {
+    let groups:Vec<_>=report.groups.iter().map(|g| match &g.outcome {
+            VerifiedOutcome::Proved=>json!({"status":"proved"}),
+            VerifiedOutcome::Unsupported=>json!({"status":"unsupported"}),
+            VerifiedOutcome::Inconclusive(c)=>json!({"status":"inconclusive","cause":resource(*c)}),
+            VerifiedOutcome::Counterexample(c)=>json!({"status":"counterexample","present":c.observation.present.iter().map(|a|n.ground(a)).collect::<BTreeSet<_>>(),"absent":c.observation.absent.iter().map(|a|n.ground(a)).collect::<BTreeSet<_>>() }),
+        }).collect();
+    let regions:Vec<_>=report.unresolved.iter().map(|r|json!({"outcome":format!("{:?}",r.outcome),"completion":match &r.completion {CompletionOutcome::NoContradiction=>"no_contradiction",CompletionOutcome::NoMeaning(_)=>"no_meaning",CompletionOutcome::Deferred{..}=>"deferred",CompletionOutcome::Inconclusive(_)=>"inconclusive"}})).collect();
+    json!({"groups":groups,"regions":regions})
 }
 
 fn baseline() -> Value {
@@ -696,3 +700,6 @@ fn measure_preparation_shapes() {
 
 #[path = "key_evidence.rs"]
 mod key_evidence;
+
+#[path = "request_evidence.rs"]
+mod request_evidence;

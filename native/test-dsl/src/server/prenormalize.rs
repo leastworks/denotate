@@ -52,10 +52,7 @@ fn capture(uncached: bool) -> Value {
         }
         let p = &program.lowered;
         let limits = Limits::default();
-        let ground = GroundProgram::prepare(&p.corpus, &support::domains(p), &limits)
-            .unwrap()
-            .admit(&limits)
-            .unwrap();
+        let ground = p.prepare(&limits).unwrap().admit(&limits).unwrap();
         let atom = |a: &GroundAtom| {
             format!(
                 "{}({})",

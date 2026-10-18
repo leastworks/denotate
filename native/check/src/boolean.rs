@@ -11,8 +11,8 @@ use std::{
 mod equations;
 pub(crate) use equations::{EquationContext, Formula};
 
-// Diagnostic-only ordering experiment for 6a.1. Production still uses arena
-// order. Thread-local scope and RAII restoration isolate parallel tests/panics.
+// Historical-order probes. Thread-local scope and RAII restoration isolate
+// parallel tests/panics; production request preparation uses AtomKey order.
 #[cfg(test)]
 thread_local! {
     static TEST_INPUT_ORDER: std::cell::RefCell<Option<BTreeMap<GroundAtom, usize>>> = const { std::cell::RefCell::new(None) };
@@ -84,6 +84,19 @@ pub struct ConditionContext {
 }
 
 impl GroundProgram {
+    fn bdd_inputs(&self) -> Vec<&GroundAtom> {
+        #[allow(unused_mut)]
+        let mut inputs = self.ordered_inputs();
+        #[cfg(test)]
+        TEST_INPUT_ORDER.with(|v| {
+            if let Some(order) = v.borrow().as_ref() {
+                assert_eq!(inputs.len(), order.len());
+                inputs.sort_by_key(|a| order[*a]);
+            }
+        });
+        inputs
+    }
+
     pub fn condition_context(&self, limits: &Limits) -> Result<ConditionContext> {
         ConditionContext::build(self, &mut Budget::new(limits))
     }
@@ -127,7 +140,7 @@ impl GroundProgram {
             node = next;
         }
         let mut result = BTreeMap::new();
-        for (index, atom) in self.inputs.iter().enumerate() {
+        for (index, atom) in self.bdd_inputs().into_iter().enumerate() {
             budget.tick("condition summary")?;
             if let Some(value) = literals.get(&index) {
                 result.insert(atom.clone(), *value);
@@ -151,19 +164,7 @@ impl ConditionContext {
         budget.charge(count, "BDD inputs")?;
         let variables = BddVariableSet::new_anonymous(count as u16);
         let mut inputs = BTreeMap::new();
-        #[cfg(test)]
-        let ordered = TEST_INPUT_ORDER.with(|v| {
-            let mut inputs: Vec<_> = program.inputs.iter().collect();
-            if let Some(order) = v.borrow().as_ref() {
-                assert_eq!(inputs.len(), order.len());
-                inputs.sort_by_key(|a| order[*a]);
-            }
-            inputs
-        });
-        #[cfg(test)]
-        let input_order = ordered.into_iter();
-        #[cfg(not(test))]
-        let input_order = program.inputs.iter();
+        let input_order = program.bdd_inputs().into_iter();
         for (atom, variable) in input_order.zip(variables.variables()) {
             budget.tick("BDD inputs")?;
             inputs.insert(atom.clone(), variable);

@@ -476,18 +476,22 @@ fn resource_limits_cover_grounding_dependencies_graph_and_evaluation() {
             },
             "work",
         ),
-        (
-            Limits {
-                timeout: Duration::ZERO,
-                ..Limits::default()
-            },
-            "time",
-        ),
     ] {
         assert!(
             matches!(GroundProgram::prepare(&c, &Domains::new(), &limits), Err(CheckError::LimitExceeded { resource: got, .. }) if got == resource)
         );
     }
+    assert!(matches!(
+        GroundProgram::prepare(
+            &c,
+            &Domains::new(),
+            &Limits {
+                timeout: Duration::ZERO,
+                ..Limits::default()
+            }
+        ),
+        Err(CheckError::Deadline { .. })
+    ));
     let prepared = prepare(&c);
     assert!(matches!(
         prepared.evaluate(

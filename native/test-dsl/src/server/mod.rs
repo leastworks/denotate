@@ -1,6 +1,8 @@
 //! Single-document programs, two-speed diagnostics and a revision-gated worker.
 //! B's serial transport loop stays unchanged; this frontend owns scheduling.
 #[cfg(test)]
+mod deadline;
+#[cfg(test)]
 mod premask;
 #[cfg(test)]
 mod prenormalize;
@@ -368,13 +370,15 @@ impl Server {
             "cancelled"
         } else if !current {
             "discarded"
+        } else if matches!(result, Err(Failure::Deadline)) {
+            "deadline"
         } else {
             "published"
         };
         if self.tests {
             self.hooks
                 .finished
-                .push(json!({"snapshot": identity(&id), "status": status, "check_ns": check_ns}));
+                .push(json!({"snapshot": identity(&id), "status": status, "check_ns": check_ns, "key_computation_ns": result.as_ref().ok().map(|o| o.key_computation.as_nanos())}));
         }
         if !current || matches!(result, Err(Failure::Cancelled)) {
             return Ok(());
@@ -394,6 +398,14 @@ impl Server {
                     format!("DSL implementation failure: {error}"),
                 )?;
                 diagnostics.push(analysis::creator_failure());
+            }
+            Err(Failure::Deadline) => {
+                log(
+                    connection,
+                    3,
+                    "Semantic checking interrupted by deadline.".into(),
+                )?;
+                diagnostics.push(analysis::deadline_notice());
             }
             Err(Failure::Cancelled) => return Ok(()),
         }
