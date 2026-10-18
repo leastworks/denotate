@@ -147,7 +147,9 @@ name = "denotate-check"
 version = "0.0.1"
 dependencies = [
  "biodivine-lib-bdd",
+ "denotate-editor",
  "denotate-ir",
+ "denotate-normalize",
  "denotate-test-dsl",
  "serde_json",
 ]

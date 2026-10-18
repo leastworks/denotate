@@ -16,6 +16,10 @@ mod cartesian_oracle;
 #[path = "sparse.rs"]
 mod sparse;
 
+#[cfg(test)]
+#[path = "tests/preparation_profile.rs"]
+mod preparation_profile;
+
 /// Explicit finite domains, not inferred from constants mentioned in rules.
 pub type Domains = BTreeMap<SortId, Vec<ConstantId>>;
 

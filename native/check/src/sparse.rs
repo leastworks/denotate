@@ -334,6 +334,8 @@ fn populate_with_delta(
             plans.push(Plan { rule, pivot, steps });
         }
     }
+    #[cfg(test)]
+    budget.mark("plans_and_seed_instances");
     // Index definitions must exist before any tuple is indexed.
     for atom in seeds {
         tuples.insert(atom, budget)?;
@@ -354,6 +356,8 @@ fn populate_with_delta(
             tuples.insert(atom, budget)
         })?;
     }
+    #[cfg(test)]
+    budget.mark("input_seeding_and_indexes");
     while let Some(delta) = next(&mut tuples.delta) {
         budget.tick("grounding")?;
         let tuple = &tuples.atoms[delta];
@@ -386,6 +390,8 @@ fn populate_with_delta(
             tuples.insert(head, budget)?;
         }
     }
+    #[cfg(test)]
+    budget.mark("closure_and_instances");
     // Canonical IDs and traversal order, independent of delta discovery order.
     for atom in tuples.seen {
         budget.tick("grounding")?;
@@ -397,6 +403,8 @@ fn populate_with_delta(
         rule.id.index = p.rules.len();
         p.rules.push(rule);
     }
+    #[cfg(test)]
+    budget.mark("grounding_order");
     Ok(())
 }
 

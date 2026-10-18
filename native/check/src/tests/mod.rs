@@ -8,4 +8,5 @@ mod rewrites;
 mod sparse;
 mod symbolic;
 
+mod incremental_inventory;
 mod permitted;

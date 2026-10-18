@@ -95,6 +95,18 @@ pub(crate) struct Budget<'a> {
     pub limits: &'a Limits,
     start: Instant,
     work: usize,
+    #[cfg(test)]
+    pub profile: Option<PreparationProfile>,
+}
+
+/// Diagnostic-only counters. Timed public-path samples leave this disabled.
+#[cfg(test)]
+#[derive(Debug)]
+pub(crate) struct PreparationProfile {
+    pub work: std::collections::BTreeMap<&'static str, usize>,
+    pub calls: std::collections::BTreeMap<&'static str, usize>,
+    pub segments_ns: std::collections::BTreeMap<&'static str, u128>,
+    last: Instant,
 }
 impl<'a> Budget<'a> {
     pub fn new(limits: &'a Limits) -> Self {
@@ -102,6 +114,26 @@ impl<'a> Budget<'a> {
             limits,
             start: Instant::now(),
             work: 0,
+            #[cfg(test)]
+            profile: None,
+        }
+    }
+    #[cfg(test)]
+    pub fn enable_profile(&mut self) {
+        self.profile = Some(PreparationProfile {
+            work: Default::default(),
+            calls: Default::default(),
+            segments_ns: Default::default(),
+            last: Instant::now(),
+        });
+    }
+    #[cfg(test)]
+    pub fn mark(&mut self, label: &'static str) {
+        if let Some(profile) = &mut self.profile {
+            profile
+                .segments_ns
+                .insert(label, profile.last.elapsed().as_nanos());
+            profile.last = Instant::now();
         }
     }
     pub fn tick(&mut self, phase: &'static str) -> Result<()> {
@@ -128,6 +160,11 @@ impl<'a> Budget<'a> {
             });
         }
         self.work += amount;
+        #[cfg(test)]
+        if let Some(profile) = &mut self.profile {
+            *profile.work.entry(phase).or_default() += amount;
+            *profile.calls.entry(phase).or_default() += 1;
+        }
         Ok(())
     }
     pub fn room(

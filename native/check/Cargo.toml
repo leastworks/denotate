@@ -11,4 +11,6 @@ biodivine-lib-bdd = "=0.6.3"
 
 [dev-dependencies]
 denotate-test-dsl = { path = "../test-dsl" }
+denotate-editor = { path = "../editor" }
+denotate-normalize = { path = "../normalize" }
 serde_json.workspace = true
