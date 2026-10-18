@@ -27,9 +27,11 @@ pub struct Condition {
     bdd: Arc<Bdd>,
 }
 impl Condition {
+    /// Raw Boolean falsity, without restricting to permitted input worlds.
     pub fn is_false(&self) -> bool {
         self.bdd.is_false()
     }
+    /// Raw Boolean truth. Use ConditionContext queries for W-relative judgments.
     pub fn is_true(&self) -> bool {
         self.bdd.is_true()
     }
@@ -45,7 +47,8 @@ impl Condition {
 }
 
 /// Boolean conditions over ground input facts.
-/// Every input assignment is permitted; assumptions are not supported yet.
+/// Raw Boolean algebra is unrestricted; semantic queries and witnesses respect
+/// the preparation's input-only at-most-one constraints.
 /// Creating this context does not require evaluating the rules. Conditions for
 /// derived facts come from SymbolicMeaning.
 #[derive(Debug)]
@@ -55,6 +58,7 @@ pub struct ConditionContext {
     variables: BddVariableSet,
     no: Condition,
     yes: Condition,
+    permitted: Condition,
 }
 
 impl GroundProgram {
@@ -133,13 +137,44 @@ impl ConditionContext {
             universe: program.preparation,
             bdd: Arc::new(bdd),
         };
-        Ok(Self {
+        let mut context = Self {
             universe: program.preparation,
             no: wrap(variables.mk_false()),
             yes: wrap(variables.mk_true()),
+            permitted: wrap(variables.mk_true()),
             inputs,
             variables,
-        })
+        };
+        // Linear prefix scheme: each next choice excludes all previous choices.
+        for group in &program.input_groups {
+            let mut seen = context.false_condition();
+            for atom in group {
+                let value = context.input_with_budget(atom, budget)?;
+                let conflict = context.apply(&seen, &value, op_function::and, budget)?;
+                context.permitted =
+                    context.apply(&context.permitted, &conflict, op_function::and_not, budget)?;
+                seen = context.apply(&seen, &value, op_function::or, budget)?;
+            }
+        }
+        crate::symbolic::retain(0, 0, context.permitted.node_count(), budget.limits)?;
+        Ok(context)
+    }
+
+    /// W, independent of the rules; the all-absent world is always permitted.
+    pub fn permitted_worlds(&self) -> Condition {
+        self.permitted.clone()
+    }
+
+    pub(crate) fn restrict(
+        &self,
+        condition: &Condition,
+        budget: &mut Budget<'_>,
+    ) -> Result<Condition> {
+        if self.permitted.is_true() {
+            self.check(condition, budget)?;
+            return Ok(condition.clone());
+        }
+        self.apply(&self.permitted, condition, op_function::and, budget)
     }
 
     pub fn false_condition(&self) -> Condition {
@@ -181,16 +216,30 @@ impl ConditionContext {
         self.complement(a, &mut Budget::new(limits))
     }
     pub fn may_overlap(&self, a: &Condition, b: &Condition, limits: &Limits) -> Result<bool> {
-        Ok(self.and(a, b, limits)?.can_hold())
+        let mut budget = Budget::new(limits);
+        Ok(self
+            .restrict(
+                &self.apply(a, b, op_function::and, &mut budget)?,
+                &mut budget,
+            )?
+            .can_hold())
     }
     pub fn implies(&self, a: &Condition, b: &Condition, limits: &Limits) -> Result<bool> {
+        let mut budget = Budget::new(limits);
         Ok(self
-            .apply(a, b, op_function::and_not, &mut Budget::new(limits))?
+            .restrict(
+                &self.apply(a, b, op_function::and_not, &mut budget)?,
+                &mut budget,
+            )?
             .is_false())
     }
     pub fn equivalent(&self, a: &Condition, b: &Condition, limits: &Limits) -> Result<bool> {
+        let mut budget = Budget::new(limits);
         Ok(self
-            .apply(a, b, op_function::xor, &mut Budget::new(limits))?
+            .restrict(
+                &self.apply(a, b, op_function::xor, &mut budget)?,
+                &mut budget,
+            )?
             .is_false())
     }
 
@@ -204,7 +253,7 @@ impl ConditionContext {
         condition: &Condition,
         budget: &mut Budget<'_>,
     ) -> Result<Option<Observation>> {
-        self.check(condition, budget)?;
+        let condition = self.restrict(condition, budget)?;
         if condition.is_false() {
             return Ok(None);
         }
@@ -246,7 +295,9 @@ impl ConditionContext {
         observation: &Observation,
         budget: &mut Budget<'_>,
     ) -> Result<Observation> {
-        self.check(condition, budget)?;
+        // W participates in support: completing only true don't-cares preserves
+        // both the finding and exclusivity. Grouped choices may stay absent.
+        let condition = self.restrict(condition, budget)?;
         let mut pending = vec![condition.bdd.root_pointer()];
         let mut visited = BTreeSet::new();
         let mut support = BTreeSet::new();
@@ -301,6 +352,12 @@ impl ConditionContext {
                 .get(&atom)
                 .ok_or(CheckError::InvalidObservation(atom))?;
             valuation.set_value(*variable, true);
+        }
+        budget.charge(self.permitted.node_count(), "permitted observation")?;
+        if !self.permitted.bdd.eval_in(&valuation) {
+            return Err(CheckError::InvalidInputGroup(
+                "observation violates input exclusivity",
+            ));
         }
         let result = condition.bdd.eval_in(&valuation);
         budget.charge(0, "BDD observation")?;

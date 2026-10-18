@@ -219,6 +219,7 @@ impl Recipe {
     fn body(&mut self, view: View<'_>, body: &mut Vec<Literal>) {
         let view = view.peel();
         match view.expr {
+            Expression::Value { .. } => panic!("value syntax is outside the frozen reference"),
             Expression::And(a, b) if !view.negative => {
                 self.body(view.child(a, Step::Left), body);
                 self.body(view.child(b, Step::Right), body);

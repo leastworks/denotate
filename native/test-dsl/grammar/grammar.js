@@ -5,7 +5,7 @@ module.exports = grammar({
   extras: $ => [/[ \t\r\n]+/, $.comment],
   word: $ => $.identifier,
   reserved: {
-    global: $ => ['input', 'slot', 'mask', 'when', 'available', 'present', 'and', 'or', 'not']
+    global: $ => ['input', 'slot', 'mask', 'when', 'available', 'present', 'input_value', 'slot_value', 'is', 'and', 'or', 'not']
   },
   rules: {
     source_file: $ => seq(optional('\uFEFF'), repeat(choice($.declaration, $.mapping, $.mask))),
@@ -19,9 +19,12 @@ module.exports = grammar({
     ),
     mask: $ => seq('mask', field('target', $.identifier),
       optional(seq('when', field('condition', $._expression))), ';'),
-    _expression: $ => choice($.available, $.present, $.and, $.or, $.not, $.group),
+    _expression: $ => choice($.available, $.present, $.input_value, $.slot_value, $.and, $.or, $.not, $.group),
     available: $ => seq('available', '(', field('argument', $.identifier), ')'),
     present: $ => seq('present', '(', field('argument', $.identifier), ')'),
+    input_value: $ => seq('input_value', '(', field('argument', $.identifier), ')', 'is', field('literal', $.integer)),
+    slot_value: $ => seq('slot_value', '(', field('argument', $.identifier), ')', 'is', field('literal', $.integer)),
+    integer: _ => /-?[0-9]+/,
     and: $ => prec.left(2, seq(field('left', $._expression), 'and', field('right', $._expression))),
     or: $ => prec.left(1, seq(field('left', $._expression), 'or', field('right', $._expression))),
     not: $ => prec(3, seq(field('keyword', 'not'), field('operand', $._expression))),

@@ -286,10 +286,17 @@ impl<'p> SymbolicMeaning<'p> {
                             };
                             // Require a permitted observation outside the failure
                             // region; otherwise every conflict implies it vacuously.
-                            // W is currently true. With assumptions, this must test
-                            // satisfiability of W AND NOT bad_input instead.
-                            if finding.bad_input.is_true() {
-                                continue;
+                            let outside = self.context.apply(
+                                &self.context.permitted_worlds(),
+                                &finding.bad_input,
+                                biodivine_lib_bdd::op_function::and_not,
+                                &mut certification_budget,
+                            );
+                            match outside {
+                                Ok(outside) if outside.is_false() => continue,
+                                Ok(_) => {}
+                                Err(CheckError::LimitExceeded { .. }) => break,
+                                Err(error) => return Err(error),
                             }
                             match self.context.apply(
                                 &condition,

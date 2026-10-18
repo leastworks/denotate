@@ -167,6 +167,21 @@ fn expression(
                 Expression::Present(name.text.clone())
             }
         }
+        ast::ExprKind::Value {
+            kind,
+            name,
+            literal,
+        } => {
+            validate_name(name, sources)?;
+            validate_name(literal, sources)?;
+            spans.insert(AstPath::Argument(path.clone()), name.span);
+            spans.insert(AstPath::Integer(path.clone()), literal.span);
+            Expression::Value {
+                kind: *kind,
+                name: name.text.clone(),
+                literal: IntegerLiteral::parse(&literal.text),
+            }
+        }
         ast::ExprKind::And(a, b) => Expression::And(child(a, Step::Left)?, child(b, Step::Right)?),
         ast::ExprKind::Or(a, b) => Expression::Or(child(a, Step::Left)?, child(b, Step::Right)?),
         ast::ExprKind::Group(e) => Expression::Group(child(e, Step::Inner)?),

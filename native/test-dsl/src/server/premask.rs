@@ -10,6 +10,9 @@ use std::{collections::BTreeMap, sync::Arc};
 #[path = "../../tests/support/mod.rs"]
 mod support;
 
+#[path = "../../tests/support/value_compatibility.rs"]
+mod value_compatibility;
+
 fn capture() -> Value {
     let mut cases = Vec::new();
     let mut texts: Vec<String> = [
@@ -253,7 +256,7 @@ fn capture() -> Value {
 fn unmasked_programs_match_recorded_pre_mask_meaning_and_lsp_diagnostics() {
     let expected: Value =
         serde_json::from_str(include_str!("../../fixtures/pre-mask.json")).unwrap();
-    assert_eq!(capture(), expected);
+    assert_eq!(value_compatibility::capture(capture()), expected);
 }
 
 #[test]

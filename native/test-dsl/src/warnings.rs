@@ -170,6 +170,8 @@ pub fn present_rewrites(
             covers_all_instances: all_justified,
             message: if !all_justified {
                 "This condition or definition is redundant in some checked cases, but not all its uses are justified for removal.".into()
+            } else if let Some(message) = value_exclusion_message(lowered, &proofs) {
+                message
             } else if literal.is_some() {
                 "This negated condition is redundant: whenever its settled guard holds, the excluded condition cannot hold.".into()
             } else {
@@ -178,6 +180,39 @@ pub fn present_rewrites(
         });
     }
     Ok(result)
+}
+
+fn value_exclusion_message(lowered: &LoweredProgram, proofs: &[&RewriteProof]) -> Option<String> {
+    let proof = proofs.first()?;
+    let RewriteKind::Discharge { literal_occurrence } = proof.kind else {
+        return None;
+    };
+    let excluded = &proof
+        .candidate
+        .rule
+        .body
+        .iter()
+        .find(|l| l.term.occurrence == literal_occurrence)?
+        .term
+        .atom;
+    if excluded.relation != lowered.library.value {
+        return None;
+    }
+    let other = proof.candidate.settled.iter().find(|p| {
+        p.literal.polarity == Polarity::Positive
+            && p.literal.term.atom.relation == lowered.library.value
+            && p.literal.term.atom.arguments[0] == excluded.arguments[0]
+            && p.literal.term.atom.arguments[1] != excluded.arguments[1]
+    })?;
+    Some(format!(
+        "This negated condition is redundant: Input {} has value {} under this guard, so it cannot also have value {}.",
+        lowered.corpus.constant(excluded.arguments[0])?.name,
+        lowered
+            .corpus
+            .constant(other.literal.term.atom.arguments[1])?
+            .name,
+        lowered.corpus.constant(excluded.arguments[1])?.name
+    ))
 }
 
 /// Only flat conjunctions of direct conditions are editable here. Compound
@@ -199,12 +234,15 @@ pub(crate) fn condition_removals(
             ExprKind::And(a, b) => {
                 leaves(a, path.child(Step::Left), out) && leaves(b, path.child(Step::Right), out)
             }
-            ExprKind::Available(_) | ExprKind::Present(_) => {
+            ExprKind::Available(_) | ExprKind::Present(_) | ExprKind::Value { .. } => {
                 out.push((expr, path));
                 true
             }
             ExprKind::Not { operand, .. }
-                if matches!(operand.kind, ExprKind::Available(_) | ExprKind::Present(_)) =>
+                if matches!(
+                    operand.kind,
+                    ExprKind::Available(_) | ExprKind::Present(_) | ExprKind::Value { .. }
+                ) =>
             {
                 out.push((expr, path));
                 true

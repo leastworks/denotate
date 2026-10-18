@@ -458,7 +458,7 @@ impl Mapping {
         GroundAtom::new(self.library.available, [self.slots[slot]])
     }
     fn present(&self, input: usize) -> GroundAtom {
-        GroundAtom::new(self.library.present, [self.inputs[input]])
+        GroundAtom::new(self.library.value, [self.inputs[input], self.library.other])
     }
     fn supply(&self, input: usize, slot: usize) -> GroundAtom {
         GroundAtom::new(
@@ -496,6 +496,7 @@ impl Mapping {
             &Domains::from([
                 (self.library.input, self.inputs.clone()),
                 (self.library.slot, self.slots.clone()),
+                (self.library.integer, vec![self.library.other]),
             ]),
             &Limits::default(),
         )

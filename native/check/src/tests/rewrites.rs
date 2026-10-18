@@ -51,6 +51,60 @@ pub(super) fn subsets(atoms: &[GroundAtom]) -> Vec<BTreeSet<GroundAtom>> {
         })
         .collect()
 }
+// Enumerate guesses only for atoms not functionally fixed by the input world
+// or unused positive output definitions. This eliminates added value-copy leaves
+// without using SCCs, admission, BDDs or a production evaluator. Positive cycles
+// remain guessed, preserving supported (not necessarily stable) models too.
+fn candidates(
+    derived: &[GroundAtom],
+    inputs: &BTreeSet<GroundAtom>,
+    rules: &[GroundRule],
+    world: &BTreeSet<GroundAtom>,
+) -> Vec<BTreeSet<GroundAtom>> {
+    let fixed: BTreeSet<_> = derived
+        .iter()
+        .filter(|a| {
+            let producers: Vec<_> = rules.iter().filter(|r| r.head.atom == **a).collect();
+            !producers.is_empty()
+                && producers
+                    .iter()
+                    .all(|r| r.body.iter().all(|l| l.polarity == Polarity::Positive))
+                && (producers
+                    .iter()
+                    .all(|r| r.body.iter().all(|l| inputs.contains(&l.term.atom)))
+                    || !rules
+                        .iter()
+                        .any(|r| r.body.iter().any(|l| l.term.atom == **a)))
+        })
+        .cloned()
+        .collect();
+    let guessed: Vec<_> = derived
+        .iter()
+        .filter(|a| !fixed.contains(*a))
+        .cloned()
+        .collect();
+    subsets(&guessed)
+        .into_iter()
+        .map(|mut candidate| {
+            candidate.extend(world.iter().cloned());
+            loop {
+                let before = candidate.len();
+                for r in rules {
+                    if fixed.contains(&r.head.atom)
+                        && r.body.iter().all(|l| candidate.contains(&l.term.atom))
+                    {
+                        candidate.insert(r.head.atom.clone());
+                    }
+                }
+                if before == candidate.len() {
+                    break;
+                }
+            }
+            candidate
+        })
+        .collect()
+}
+
 pub(super) fn stable_models(
     atoms: &[GroundAtom],
     inputs: &BTreeSet<GroundAtom>,
@@ -64,10 +118,9 @@ pub(super) fn stable_models(
         .filter(|a| !inputs.contains(*a) && rules.iter().any(|r| r.head.atom == **a))
         .cloned()
         .collect();
-    subsets(&derived)
+    candidates(&derived, inputs, rules, world)
         .into_iter()
-        .filter_map(|mut candidate| {
-            candidate.extend(world.iter().cloned());
+        .filter_map(|candidate| {
             // Gelfond-Lifschitz reduct of the AUTHORED ground rules.
             let reduct: Vec<_> = rules
                 .iter()
@@ -239,10 +292,9 @@ pub(super) fn supported_models(
         .filter(|a| !p.inputs.contains(*a))
         .cloned()
         .collect();
-    subsets(&derived)
+    candidates(&derived, &p.inputs, rules, world)
         .into_iter()
-        .filter_map(|mut candidate| {
-            candidate.extend(world.iter().cloned());
+        .filter_map(|candidate| {
             derived
                 .iter()
                 .all(|a| {

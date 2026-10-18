@@ -39,8 +39,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     };
     let lowered = fixture.lower();
     let limits = Limits::default();
-    let AnalysisOutcome::Complete(ground) =
-        GroundProgram::prepare_checked(&lowered.corpus, &domains(&lowered), &limits)?
+    let AnalysisOutcome::Complete(ground) = AnalysisOutcome::from_result(lowered.prepare(&limits))?
     else {
         println!("Inconclusive: preparation budget exhausted.");
         return Ok(());

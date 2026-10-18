@@ -666,7 +666,12 @@ fn helper_and_input_absence_keep_references_and_quote_the_original_negative_guar
                         assert_eq!(origins.len(), 1);
                         assert_eq!(f.sources.text(origins[0].span).unwrap(), guard);
                         if guard.contains("present") {
-                            assert_eq!(*provider, CompletedProvider::InputSnapshot);
+                            assert_eq!(
+                                *provider,
+                                CompletedProvider::Component(
+                                    ground.component_for(fact).unwrap().id
+                                )
+                            ); // Presence is derived from the input value.
                         } else if guard.contains("and") {
                             assert!(matches!(provider, CompletedProvider::Component(_)));
                         } else {

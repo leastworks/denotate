@@ -13,6 +13,9 @@ mod support;
 #[path = "../../tests/support/normalization_fingerprint.rs"]
 mod fingerprint;
 
+#[path = "../../tests/support/value_compatibility.rs"]
+mod value_compatibility;
+
 fn capture(uncached: bool) -> Value {
     let mut cases = Vec::new();
     let texts = include_str!("../../fixtures/pre-normalize.txt").split("\n---\n");
@@ -212,8 +215,8 @@ fn capture(uncached: bool) -> Value {
 fn completed_masking_matches_pre_normalization_capture() {
     let expected: Value =
         serde_json::from_str(include_str!("../../fixtures/pre-normalize.json")).unwrap();
-    assert_eq!(capture(false), expected);
-    assert_eq!(capture(true), expected);
+    assert_eq!(value_compatibility::capture(capture(false)), expected);
+    assert_eq!(value_compatibility::capture(capture(true)), expected);
 }
 
 #[test]

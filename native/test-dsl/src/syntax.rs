@@ -156,6 +156,15 @@ impl Projection<'_> {
         let kind = match node.kind() {
             "available" => ExprKind::Available(self.name(field(node, "argument")?)?),
             "present" => ExprKind::Present(self.name(field(node, "argument")?)?),
+            "input_value" | "slot_value" => ExprKind::Value {
+                kind: if node.kind() == "input_value" {
+                    Kind::Input
+                } else {
+                    Kind::Slot
+                },
+                name: self.name(field(node, "argument")?)?,
+                literal: self.name(field(node, "literal")?)?,
+            },
             "and" => ExprKind::And(child("left")?, child("right")?),
             "or" => ExprKind::Or(child("left")?, child("right")?),
             "not" => ExprKind::Not {

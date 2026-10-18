@@ -71,6 +71,11 @@ fn parser_matches_independent_hand_built_fixtures_including_every_term_span() {
 
 fn shape(expr: &Expr) -> String {
     match &expr.kind {
+        ExprKind::Value {
+            kind,
+            name,
+            literal,
+        } => format!("{kind:?}_value({}) is {}", name.text, literal.text),
         ExprKind::Available(n) => format!("a({})", n.text),
         ExprKind::Present(n) => format!("p({})", n.text),
         ExprKind::And(a, b) => format!("({}&{})", shape(a), shape(b)),
@@ -149,7 +154,7 @@ fn alternatives_and_duplicate_statements_keep_distinct_occurrences() {
         "input i; slot a, b, c;\nb <- i when available(a) or available(c);\nb <- i when available(a) or available(c);\n",
     );
     let ir = lowered(&p);
-    let rules: Vec<_> = ir.corpus.rules().skip(2).collect();
+    let rules: Vec<_> = ir.corpus.rules().skip(4).collect();
     assert_eq!(rules.len(), 4);
     for (index, rule) in rules.iter().enumerate() {
         let mapping = &p.ast.mappings[index / 2];
@@ -506,7 +511,7 @@ fn incremental_damage_and_repair_match_fresh_projection_at_the_current_snapshot(
             let LoweringOutcome::Lowered(ir) = lowering::lower(&ast, &sources).unwrap() else {
                 panic!()
             };
-            let rule = ir.corpus.rules().nth(3).unwrap();
+            let rule = ir.corpus.rules().nth(5).unwrap();
             assert!(
                 ir.attribution
                     .provenance

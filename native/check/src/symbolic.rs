@@ -106,7 +106,7 @@ impl GroundProgram {
                 retained_condition_nodes: 0,
             },
         };
-        let mut retained = 0;
+        let mut retained = meaning.context.permitted_worlds().node_count();
         for input in &self.inputs {
             let condition = meaning.context.input_with_budget(input, budget)?;
             retained = retain(retained, 0, condition.node_count(), limits)?;

@@ -121,7 +121,15 @@ pub fn prepare(
         LoweringOutcome::UserErrors(errors) => {
             let mut fast = Vec::new();
             for error in errors {
+                let code = if matches!(error.kind, DiagnosticKind::InvalidInteger) {
+                    "literal"
+                } else {
+                    "name"
+                };
                 let message = match error.kind {
+                    DiagnosticKind::InvalidInteger => {
+                        "Expected a signed 64-bit decimal integer.".into()
+                    }
                     DiagnosticKind::UnknownName { name, expected } => {
                         format!("Unknown {expected:?} '{name}'.")
                     }
@@ -138,7 +146,7 @@ pub fn prepare(
                 };
                 let mut d = diagnostic(
                     range(&document, error.span),
-                    "name",
+                    code,
                     message,
                     DiagnosticSeverity::ERROR,
                 );
@@ -178,24 +186,8 @@ impl Program {
 
     pub fn check(&self, limits: &Limits, after_prepare: impl FnOnce()) -> Result<Output, Failure> {
         limits.cancellation.check()?;
-        let domains = self
-            .lowered
-            .corpus
-            .sorts()
-            .map(|sort| {
-                (
-                    sort.id,
-                    self.lowered
-                        .corpus
-                        .constants()
-                        .filter(|c| c.sort == sort.id)
-                        .map(|c| c.id)
-                        .collect(),
-                )
-            })
-            .collect();
         let AnalysisOutcome::Complete(ground) =
-            GroundProgram::prepare_checked(&self.lowered.corpus, &domains, limits)?
+            AnalysisOutcome::from_result(self.lowered.prepare(limits))?
         else {
             return Ok(inconclusive("preparation"));
         };

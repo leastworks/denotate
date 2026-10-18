@@ -68,6 +68,7 @@ impl GroundProgram {
             }
             observation.present.insert(atom);
         }
+        self.validate_input_world(&observation.present, budget)?;
         for atom in &self.inputs {
             budget.tick("certification observation")?;
             if !observation.present.contains(atom) {

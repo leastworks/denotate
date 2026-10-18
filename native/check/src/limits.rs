@@ -19,6 +19,7 @@ pub enum CheckError {
     },
     ConstantOutsideDomain(ConstantId),
     InvalidObservation(GroundAtom),
+    InvalidInputGroup(&'static str),
     UnknownAtom(GroundAtom),
     OutsideReplay(GroundAtom),
     ForeignCondition,

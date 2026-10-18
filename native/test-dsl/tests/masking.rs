@@ -399,7 +399,7 @@ fn library_discharge_keeps_creator_ownership_and_mask_failure_keeps_independent_
 fn masks_use_existing_boolean_recipes_and_exact_term_origins() {
     let text = "input i; slot a, b; mask b when not (available(a) and present(i));";
     let (p, sources) = lower(text);
-    let rules: Vec<_> = p.corpus.rules().skip(2).collect();
+    let rules: Vec<_> = p.corpus.rules().skip(4).collect();
     assert_eq!(
         rules
             .iter()

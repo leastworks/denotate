@@ -76,7 +76,7 @@ fn ordinary_occurrences_use_their_construct_and_complete_guards_live_separately(
         quote(&sources, &p, rule.body[1].atom().arguments()[0].id()),
         "x"
     );
-    for constant in p.corpus.constants() {
+    for constant in p.corpus.constants().filter(|c| c.sort != p.library.integer) {
         assert_eq!(quote(&sources, &p, constant.id), constant.name);
     }
     let guard = p.attribution.guards[&(rule.id, SourceView::TestDsl)];
@@ -357,7 +357,7 @@ fn classical_double_negation_self_loop_is_admitted_but_never_seeded() {
         .unwrap()
         .id;
     let slot = p.corpus.constants().find(|c| c.name == "a").unwrap().id;
-    let present = GroundAtom::new(p.library.present, vec![input]);
+    let present = GroundAtom::new(p.library.value, vec![input, p.library.other]);
     let replay = ground.evaluate([present.clone()], &limits).unwrap();
     assert_eq!(replay.fact(&present).unwrap(), FactState::Settled(true));
     assert_eq!(

@@ -20,6 +20,10 @@
             "named": true
           },
           {
+            "type": "input_value",
+            "named": true
+          },
+          {
             "type": "not",
             "named": true
           },
@@ -29,6 +33,10 @@
           },
           {
             "type": "present",
+            "named": true
+          },
+          {
+            "type": "slot_value",
             "named": true
           }
         ]
@@ -50,6 +58,10 @@
             "named": true
           },
           {
+            "type": "input_value",
+            "named": true
+          },
+          {
             "type": "not",
             "named": true
           },
@@ -59,6 +71,10 @@
           },
           {
             "type": "present",
+            "named": true
+          },
+          {
+            "type": "slot_value",
             "named": true
           }
         ]
@@ -132,6 +148,10 @@
             "named": true
           },
           {
+            "type": "input_value",
+            "named": true
+          },
+          {
             "type": "not",
             "named": true
           },
@@ -141,6 +161,36 @@
           },
           {
             "type": "present",
+            "named": true
+          },
+          {
+            "type": "slot_value",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "input_value",
+    "named": true,
+    "fields": {
+      "argument": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "literal": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "integer",
             "named": true
           }
         ]
@@ -168,6 +218,10 @@
             "named": true
           },
           {
+            "type": "input_value",
+            "named": true
+          },
+          {
             "type": "not",
             "named": true
           },
@@ -177,6 +231,10 @@
           },
           {
             "type": "present",
+            "named": true
+          },
+          {
+            "type": "slot_value",
             "named": true
           }
         ]
@@ -224,6 +282,10 @@
             "named": true
           },
           {
+            "type": "input_value",
+            "named": true
+          },
+          {
             "type": "not",
             "named": true
           },
@@ -233,6 +295,10 @@
           },
           {
             "type": "present",
+            "named": true
+          },
+          {
+            "type": "slot_value",
             "named": true
           }
         ]
@@ -280,6 +346,10 @@
             "named": true
           },
           {
+            "type": "input_value",
+            "named": true
+          },
+          {
             "type": "not",
             "named": true
           },
@@ -289,6 +359,10 @@
           },
           {
             "type": "present",
+            "named": true
+          },
+          {
+            "type": "slot_value",
             "named": true
           }
         ]
@@ -316,6 +390,10 @@
             "named": true
           },
           {
+            "type": "input_value",
+            "named": true
+          },
+          {
             "type": "not",
             "named": true
           },
@@ -325,6 +403,10 @@
           },
           {
             "type": "present",
+            "named": true
+          },
+          {
+            "type": "slot_value",
             "named": true
           }
         ]
@@ -346,6 +428,10 @@
             "named": true
           },
           {
+            "type": "input_value",
+            "named": true
+          },
+          {
             "type": "not",
             "named": true
           },
@@ -355,6 +441,10 @@
           },
           {
             "type": "present",
+            "named": true
+          },
+          {
+            "type": "slot_value",
             "named": true
           }
         ]
@@ -371,6 +461,32 @@
         "types": [
           {
             "type": "identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "slot_value",
+    "named": true,
+    "fields": {
+      "argument": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          }
+        ]
+      },
+      "literal": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "integer",
             "named": true
           }
         ]
@@ -443,6 +559,18 @@
     "named": false
   },
   {
+    "type": "input_value",
+    "named": false
+  },
+  {
+    "type": "integer",
+    "named": true
+  },
+  {
+    "type": "is",
+    "named": false
+  },
+  {
     "type": "mask",
     "named": false
   },
@@ -460,6 +588,10 @@
   },
   {
     "type": "slot",
+    "named": false
+  },
+  {
+    "type": "slot_value",
     "named": false
   },
   {

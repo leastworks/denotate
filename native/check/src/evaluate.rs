@@ -141,6 +141,7 @@ impl GroundProgram {
             }
             snapshot.insert(input);
         }
+        self.validate_input_world(&snapshot, budget)?;
         let mut replay = Replay {
             program: self,
             present: snapshot,

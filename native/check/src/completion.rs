@@ -94,7 +94,7 @@ impl SymbolicMeaning<'_> {
         let answer = eq.eliminate(formula, budget)?;
         let bad = eq.not(&answer, budget)?;
         drop(answer);
-        let bad_input = eq.finish(bad, budget)?;
+        let bad_input = self.context().restrict(&eq.finish(bad, budget)?, budget)?;
         if bad_input.is_false() {
             return Ok(CompletionOutcome::NoContradiction);
         }

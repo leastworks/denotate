@@ -26,10 +26,34 @@ pub enum SemanticStatement {
 pub enum Expression {
     Available(String),
     Present(String),
+    Value {
+        kind: Kind,
+        name: String,
+        literal: IntegerLiteral,
+    },
     And(Box<Self>, Box<Self>),
     Or(Box<Self>, Box<Self>),
     Not(Box<Self>),
     Group(Box<Self>),
+}
+
+/// Invalid spelling is retained as data so validation, not recipe construction,
+/// reports it. Valid integers use numeric identity (01 == 1, -0 == 0).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum IntegerLiteral {
+    Value(i64),
+    Invalid(String),
+}
+impl IntegerLiteral {
+    pub fn parse(text: &str) -> Self {
+        let digits = text.strip_prefix('-').unwrap_or(text);
+        if !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit()) {
+            if let Ok(value) = text.parse() {
+                return Self::Value(value);
+            }
+        }
+        Self::Invalid(text.into())
+    }
 }
 
 /// Document-local occurrence identity, not an edit-history or query identity.
@@ -67,6 +91,7 @@ pub enum AstPath {
     Input,
     Expression(ExprPath),
     Argument(ExprPath),
+    Integer(ExprPath),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -218,6 +243,9 @@ pub fn validate_form(
         match expr {
             Expression::Available(name) => check(name, Kind::Slot, AstPath::Argument(path.clone())),
             Expression::Present(name) => check(name, Kind::Input, AstPath::Argument(path.clone())),
+            Expression::Value { kind, name, .. } => {
+                check(name, *kind, AstPath::Argument(path.clone()))
+            }
             Expression::And(a, b) | Expression::Or(a, b) => {
                 expression(a, &path.child(Step::Left), check);
                 expression(b, &path.child(Step::Right), check);
@@ -244,6 +272,26 @@ pub fn validate_form(
     };
     if let Some(expr) = condition {
         expression(expr, &ExprPath::default(), &mut check);
+        fn literals(expr: &Expression, path: ExprPath, errors: &mut Vec<ValidationDiagnostic>) {
+            match expr {
+                Expression::Value {
+                    literal: IntegerLiteral::Invalid(_),
+                    ..
+                } => errors.push(ValidationDiagnostic {
+                    kind: DiagnosticKind::InvalidInteger,
+                    primary: AstPath::Integer(path),
+                    related: None,
+                }),
+                Expression::And(a, b) | Expression::Or(a, b) => {
+                    literals(a, path.child(Step::Left), errors);
+                    literals(b, path.child(Step::Right), errors);
+                }
+                Expression::Not(e) => literals(e, path.child(Step::Operand), errors),
+                Expression::Group(e) => literals(e, path.child(Step::Inner), errors),
+                _ => {}
+            }
+        }
+        literals(expr, ExprPath::default(), &mut errors);
     }
     errors
 }

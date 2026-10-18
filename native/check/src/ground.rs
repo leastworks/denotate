@@ -88,6 +88,14 @@ pub struct AtMostOneGroup {
     pub tuples: Vec<GroundAtom>,
 }
 
+/// Input-only permitted-world constraint, separate from checked obligations.
+/// Tuples agreeing on these columns are mutually exclusive (zero is allowed).
+#[derive(Debug, Clone)]
+pub struct InputAtMostOne {
+    pub relation: RelationId,
+    pub group_by: Vec<usize>,
+}
+
 /// Checked, immutable finite ground program, with provider-first components.
 /// Owns a snapshot of rule structure; source IDs point back to the original IR.
 #[derive(Debug, Clone)]
@@ -106,10 +114,24 @@ pub struct GroundProgram {
     pub(crate) component_rules: Vec<Vec<usize>>,
     pub(crate) dependencies: Vec<Dependency>,
     groups: Vec<AtMostOneGroup>,
+    pub(crate) input_groups: Vec<Vec<GroundAtom>>,
     metrics: PreparationMetrics,
 }
 impl GroundProgram {
+    /// Prepare unrestricted input worlds (W = true). This does not infer input
+    /// constraints from relation names, signatures or checked obligations.
+    /// Use `prepare_with_input_groups` when the caller selects input exclusivity;
+    /// InputMapping callers should use that frontend's `LoweredProgram::prepare`.
     pub fn prepare(corpus: &Corpus, domains: &Domains, limits: &Limits) -> Result<Self> {
+        Self::prepare_with_input_groups(corpus, domains, &[], limits)
+    }
+
+    pub fn prepare_with_input_groups(
+        corpus: &Corpus,
+        domains: &Domains,
+        constraints: &[InputAtMostOne],
+        limits: &Limits,
+    ) -> Result<Self> {
         limits.cancellation.check()?;
         let start = Instant::now();
         let mut budget = Budget::new(limits);
@@ -117,6 +139,7 @@ impl GroundProgram {
         let mut p = Self::empty(corpus, domains);
         sparse::populate(corpus, &mut p, &mut budget)?;
         p.build_groups(corpus, &mut budget)?;
+        p.build_input_groups(corpus, constraints, &mut budget)?;
         p.metrics.grounding = start.elapsed();
         let start = Instant::now();
         graph::analyze(&mut p, &mut budget)?;
@@ -149,6 +172,7 @@ impl GroundProgram {
             component_rules: vec![],
             dependencies: vec![],
             groups: vec![],
+            input_groups: vec![],
             metrics: PreparationMetrics::default(),
         }
     }
@@ -203,6 +227,64 @@ impl GroundProgram {
                         key,
                         tuples,
                     });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn build_input_groups(
+        &mut self,
+        corpus: &Corpus,
+        constraints: &[InputAtMostOne],
+        budget: &mut Budget<'_>,
+    ) -> Result<()> {
+        for constraint in constraints {
+            budget.tick("input groups")?;
+            let relation = corpus
+                .relation(constraint.relation)
+                .ok_or(CheckError::InvalidInputGroup("unknown relation"))?;
+            if relation.role != RelationRole::Input {
+                return Err(CheckError::InvalidInputGroup("relation must be input-only"));
+            }
+            let mut columns = BTreeSet::new();
+            for column in &constraint.group_by {
+                budget.tick("input groups")?;
+                if *column >= relation.parameters.len() || !columns.insert(*column) {
+                    return Err(CheckError::InvalidInputGroup(
+                        "invalid or duplicate grouping column",
+                    ));
+                }
+            }
+            let mut groups = BTreeMap::<Vec<ConstantId>, Vec<GroundAtom>>::new();
+            for atom in &self.inputs {
+                budget.tick("input groups")?;
+                if atom.relation == constraint.relation {
+                    budget.charge(columns.len(), "input groups")?;
+                    let key = columns.iter().map(|c| atom.arguments[*c]).collect();
+                    groups.entry(key).or_default().push(atom.clone());
+                }
+            }
+            self.input_groups
+                .extend(groups.into_values().filter(|g| g.len() > 1));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn validate_input_world(
+        &self,
+        present: &BTreeSet<GroundAtom>,
+        budget: &mut Budget<'_>,
+    ) -> Result<()> {
+        for group in &self.input_groups {
+            let mut found = false;
+            for atom in group {
+                budget.tick("input observation")?;
+                if present.contains(atom) {
+                    if found {
+                        return Err(CheckError::InvalidObservation(atom.clone()));
+                    }
+                    found = true;
                 }
             }
         }

@@ -164,7 +164,10 @@ impl GroundProgram {
     }
 
     fn rewrite_loop(&mut self, budget: &mut Budget<'_>) -> Result<()> {
-        while !self.is_admitted() {
+        loop {
+            if self.is_admitted() && self.input_groups.is_empty() {
+                return Ok(());
+            }
             budget.tick("rewrite snapshot")?;
             let meaning = self.symbolic_with_budget(budget)?;
             let ctx = meaning.context();
@@ -223,6 +226,45 @@ impl GroundProgram {
                 budget.tick("rewrite candidates")?;
                 let candidate = &summaries[&rule.id];
                 if candidate.exact {
+                    // Narrow value guard rule: only input negations whose
+                    // redundancy depends on W, proved from the OTHER premises.
+                    for excluded in candidate.settled.iter().filter(|p| {
+                        p.literal.polarity == Polarity::Negative
+                            && self.inputs.contains(&p.literal.term.atom)
+                    }) {
+                        let mut guard = candidate.clone();
+                        guard.settled.retain(|p| {
+                            p.literal.term.occurrence != excluded.literal.term.occurrence
+                        });
+                        guard.condition = ctx.true_condition();
+                        for premise in &guard.settled {
+                            guard.condition =
+                                ctx.apply(&guard.condition, &premise.condition, and, budget)?;
+                        }
+                        let coverage =
+                            ctx.input_with_budget(&excluded.literal.term.atom, budget)?;
+                        let conflict = ctx.apply(&guard.condition, &coverage, and, budget)?;
+                        if !conflict.is_false()
+                            && !ctx.restrict(&guard.condition, budget)?.is_false()
+                            && ctx.restrict(&conflict, budget)?.is_false()
+                        {
+                            self.propose(
+                                &mut batch,
+                                &guard,
+                                vec![],
+                                coverage,
+                                RewriteKind::Discharge {
+                                    literal_occurrence: excluded.literal.term.occurrence,
+                                },
+                                None,
+                                &mut retained,
+                                budget,
+                            )?;
+                            // Another negation may rely on this one. Rebuild
+                            // its guard next round before proposing its removal.
+                            break;
+                        }
+                    }
                     continue;
                 }
                 let covering: Vec<_> = producers[&rule.head.atom]
@@ -235,7 +277,10 @@ impl GroundProgram {
                 }
                 if !covering.is_empty()
                     && ctx
-                        .apply(&candidate.condition, &coverage, and_not, budget)?
+                        .restrict(
+                            &ctx.apply(&candidate.condition, &coverage, and_not, budget)?,
+                            budget,
+                        )?
                         .is_false()
                 {
                     self.propose(
@@ -281,7 +326,10 @@ impl GroundProgram {
                     let bounds = &upper_bounds[&component.id];
                     let coverage = bounds.conditions[&literal.term.atom].clone();
                     if ctx
-                        .apply(&candidate.condition, &coverage, and, budget)?
+                        .restrict(
+                            &ctx.apply(&candidate.condition, &coverage, and, budget)?,
+                            budget,
+                        )?
                         .is_false()
                     {
                         self.propose(
@@ -329,7 +377,6 @@ impl GroundProgram {
             crate::graph::analyze(&mut next, budget)?;
             *self = next;
         }
-        Ok(())
     }
 
     fn propose(

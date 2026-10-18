@@ -139,8 +139,25 @@ exports.run = async function () {
         assert.equal(document.getText(maskFailure.range), 'available(a)');
         assert.match(maskFailure.message, /Masking Slot a depends on its own availability/);
         assert.ok(maskFailure.relatedInformation.some(r => document.getText(r.location.range) === 'a <- i;'));
+        const valueConflict = 'input i, j;\nslot a;\na <- i when input_value(i) is 1;\na <- j when input_value(j) is 1;\n';
+        const valueDiagnostics = await validUpdate(() => replace(valueConflict));
+        assert.equal(valueDiagnostics.filter(d => d.code === 'OverlappingMappings').length, 2);
+        const valueWarning = await validUpdate(() => replace(
+            'input i; slot a; a <- i when input_value(i) is 1 and not (input_value(i) is 2);'));
+        const redundant = valueWarning.find(d => d.code === 'redundant');
+        assert.ok(redundant);
+        assert.equal(document.getText(redundant.range), 'not (input_value(i) is 2)');
+        assert.match(redundant.message, /cannot also have value 2/);
+        const published = publication();
+        const validated = notification('denotate/test/validated');
+        await replace('input i; slot a; a <- i when input_value(i) is 9223372036854775808;');
+        const [invalid] = await Promise.all([published, validated]);
+        const literal = invalid.diagnostics.find(d => d.code === 'literal');
+        assert.ok(literal);
+        assert.equal(document.getText(literal.range), '9223372036854775808');
+        assert.ok(invalid.diagnostics.every(d => d.code === 'literal' || d.code === 'paused'));
         overlaps(await validUpdate(() => replace(original)));
-        console.log('InputMapping: current ranges and no-meaning diagnostic passed');
+        console.log('InputMapping: current ranges, no-meaning, value guards and overflow repair passed');
     } finally {
         delete client.clientOptions.middleware.handleDiagnostics;
         publications.dispose();

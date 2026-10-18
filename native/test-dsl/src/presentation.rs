@@ -8,7 +8,10 @@ use crate::{
 };
 use denotate_check::*;
 use denotate_ir::*;
-use std::{collections::BTreeSet, fmt};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DiagnosticKind {
@@ -306,6 +309,9 @@ pub fn present(
             ReplayScope::WholeProgram => "Counterexample replayed on the whole program.".into(),
             ReplayScope::ConeOnly => "Counterexample replayed on this obligation's dependency cone only; whole-program admissibility is incomplete.".into(),
         }];
+        if lowered.has_value_tests() {
+            notes.push(observation_note(lowered, &example.observation)?);
+        }
         match &example.certification {
             Some(CertificationOutcome::NotCertified) => notes.push("Whole-program replay was not certified for the attempted observations. Failure to certify alone is not proof of no meaning.".into()),
             Some(CertificationOutcome::Inconclusive(cause)) => notes.push(format!("Whole-program replay certification is inconclusive: {} exhausted its {} budget. The cone counterexample is unchanged.", cause.phase, cause.resource)),
@@ -455,15 +461,30 @@ fn no_meaning_message(
     }
     let mut clauses = Vec::new();
     for (atom, value) in literals {
-        if atom.relation != lowered.library.present || atom.arguments.len() != 1 {
-            return Err(PresentationError::InvalidFinding(
-                "unexpected InputMapping input",
-            ));
-        }
-        let input = lowered
-            .corpus
-            .constant(atom.arguments[0])
-            .ok_or(PresentationError::InvalidFinding("unknown input value"))?;
+        let (input, value_case) = input_case(lowered, &atom)?;
+        let phrase = if !lowered.has_value_tests() {
+            if value {
+                "present".into()
+            } else {
+                "absent".into()
+            }
+        } else if value_case == lowered.library.other {
+            if value {
+                "an integer outside the tested literals".into()
+            } else {
+                "absent or a tested integer".into()
+            }
+        } else {
+            let number = lowered
+                .corpus
+                .constant(value_case)
+                .ok_or(PresentationError::InvalidFinding("unknown integer"))?;
+            if value {
+                number.name.clone()
+            } else {
+                format!("not {} (including absence)", number.name)
+            }
+        };
         clauses.push(format!(
             "{}{} is {}",
             if mask_dependency.is_some() {
@@ -472,7 +493,7 @@ fn no_meaning_message(
                 ""
             },
             input.name,
-            if value { "present" } else { "absent" }
+            phrase
         ));
     }
     Ok(format!(
@@ -486,47 +507,116 @@ fn no_meaning_message(
     ))
 }
 
+fn input_case<'a>(
+    lowered: &'a LoweredProgram,
+    atom: &GroundAtom,
+) -> Result<(&'a denotate_ir::Constant, ConstantId)> {
+    if atom.relation != lowered.library.value || atom.arguments.len() != 2 {
+        return Err(PresentationError::InvalidFinding(
+            "unexpected InputMapping input",
+        ));
+    }
+    let input = lowered
+        .corpus
+        .constant(atom.arguments[0])
+        .filter(|c| c.sort == lowered.library.input)
+        .ok_or(PresentationError::InvalidFinding("unknown input"))?;
+    let value = lowered
+        .corpus
+        .constant(atom.arguments[1])
+        .filter(|c| c.sort == lowered.library.integer)
+        .ok_or(PresentationError::InvalidFinding("unknown integer case"))?;
+    Ok((input, value.id))
+}
+
+/// Decode an observation into concrete integers. `other` uses one integer outside
+/// K; equality and copying cannot distinguish which outside integer is chosen.
+pub fn decode_observation(
+    lowered: &LoweredProgram,
+    observation: &Observation,
+) -> Result<BTreeMap<ConstantId, Option<i64>>> {
+    let tested: BTreeSet<i64> = lowered
+        .corpus
+        .constants()
+        .filter(|c| c.sort == lowered.library.integer && c.id != lowered.library.other)
+        .map(|c| {
+            c.name
+                .parse()
+                .map_err(|_| PresentationError::InvalidFinding("invalid integer case"))
+        })
+        .collect::<Result<_>>()?;
+    let mut other = 0i64;
+    while tested.contains(&other) {
+        other = other
+            .checked_add(1)
+            .ok_or(PresentationError::InvalidFinding("no other integer"))?;
+    }
+    let mut decoded = BTreeMap::new();
+    for atom in observation.present.iter().chain(&observation.absent) {
+        let (input, _) = input_case(lowered, atom)?;
+        decoded.entry(input.id).or_insert(None);
+    }
+    for atom in &observation.present {
+        let (input, value) = input_case(lowered, atom)?;
+        if observation.absent.contains(atom) {
+            return Err(PresentationError::InvalidFinding(
+                "contradictory observation",
+            ));
+        }
+        let number = if value == lowered.library.other {
+            other
+        } else {
+            lowered
+                .corpus
+                .constant(value)
+                .unwrap()
+                .name
+                .parse()
+                .map_err(|_| PresentationError::InvalidFinding("invalid integer case"))?
+        };
+        if decoded.insert(input.id, Some(number)).flatten().is_some() {
+            return Err(PresentationError::InvalidFinding("multiple input values"));
+        }
+    }
+    Ok(decoded)
+}
+
 fn observation_note(lowered: &LoweredProgram, observation: &Observation) -> Result<String> {
-    let show = |facts: &BTreeSet<GroundAtom>| -> Result<String> {
-        facts
-            .iter()
-            .map(|a| {
-                let relation = lowered
-                    .corpus
-                    .relation(a.relation)
-                    .ok_or(PresentationError::InvalidFinding("unknown input relation"))?;
-                let values = a
-                    .arguments
-                    .iter()
-                    .map(|id| {
-                        lowered
-                            .corpus
-                            .constant(*id)
-                            .map(|c| c.name.as_str())
-                            .ok_or(PresentationError::InvalidFinding("unknown input value"))
-                    })
-                    .collect::<Result<Vec<_>>>()?
-                    .join(", ");
-                Ok(if a.relation == lowered.library.present {
-                    values
-                } else {
-                    format!("{}({values})", relation.name)
-                })
-            })
-            .collect::<Result<Vec<_>>>()
-            .map(|v| {
-                if v.is_empty() {
-                    "(none)".into()
-                } else {
-                    v.join(", ")
-                }
-            })
-    };
-    Ok(format!(
-        "Example observation - inputs present: {}; inputs absent: {}.",
-        show(&observation.present)?,
-        show(&observation.absent)?
-    ))
+    let decoded = decode_observation(lowered, observation)?;
+    if !lowered.has_value_tests() {
+        let show = |present| {
+            let names = decoded
+                .iter()
+                .filter(|(_, v)| v.is_some() == present)
+                .map(|(id, _)| lowered.corpus.constant(*id).unwrap().name.as_str())
+                .collect::<Vec<_>>();
+            if names.is_empty() {
+                "(none)".into()
+            } else {
+                names.join(", ")
+            }
+        };
+        return Ok(format!(
+            "Example observation - inputs present: {}; inputs absent: {}.",
+            show(true),
+            show(false)
+        ));
+    }
+    let mut cases = Vec::new();
+    for (id, value) in decoded {
+        let name = &lowered.corpus.constant(id).unwrap().name;
+        let outside = observation.present.contains(&GroundAtom::new(
+            lowered.library.value,
+            [id, lowered.library.other],
+        ));
+        let value = match value {
+            None => "absent".into(),
+            Some(n) if outside => format!("other integer (e.g. {n})"),
+            Some(n) => n.to_string(),
+        };
+        cases.push(format!("{name}: {value}"));
+    }
+    Ok(format!("Example observation - {}.", cases.join("; ")))
 }
 
 fn mask_cycle<'a>(

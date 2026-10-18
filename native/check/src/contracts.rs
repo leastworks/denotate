@@ -174,6 +174,7 @@ impl SymbolicMeaning<'_> {
                             )?;
                         }
                     }
+                    let violation = self.context.restrict(&violation, &mut budget)?;
                     if violation.is_false() {
                         GroupOutcome::Proved
                     } else {

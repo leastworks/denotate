@@ -163,12 +163,12 @@ fn constructs_the_example_and_library_via_the_public_api() {
             .sorts()
             .map(|s| s.name.as_str())
             .collect::<Vec<_>>(),
-        ["Slot", "Input"]
+        ["Slot", "Input", "IntegerCase"]
     );
-    assert_eq!(e.corpus.constants().count(), 5);
-    assert_eq!(e.corpus.relations().count(), 5);
+    assert_eq!(e.corpus.constants().count(), 6);
+    assert_eq!(e.corpus.relations().count(), 7);
     assert_eq!(
-        e.corpus.relation(e.library.present).unwrap().role,
+        e.corpus.relation(e.library.value).unwrap().role,
         RelationRole::Input
     );
     assert_eq!(
@@ -179,6 +179,8 @@ fn constructs_the_example_and_library_via_the_public_api() {
         [
             "supplies(I, D) :- mapped_to(I, D), present(I), !masked(D);",
             "available(D) :- supplies(I, D);",
+            "present(I) :- value(I, V);",
+            "slot_value(D, V) :- supplies(I, D), value(I, V);",
             "mapped_to(input_a, a);",
             "mapped_to(input_b, b) :- available(a);",
             "mapped_to(input_bb, b) :- available(a);",
@@ -201,7 +203,7 @@ fn constructs_the_example_and_library_via_the_public_api() {
     assert!(
         e.corpus
             .rules()
-            .all(|r| r.head.relation() != e.library.present)
+            .all(|r| r.head.relation() != e.library.value)
     );
 }
 

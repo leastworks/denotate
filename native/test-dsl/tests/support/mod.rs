@@ -256,7 +256,24 @@ pub fn domains(p: &LoweredProgram) -> Domains {
         .collect()
 }
 pub fn atom(p: &LoweredProgram, relation: &str, values: &[&str]) -> GroundAtom {
-    let r = p.corpus.relations().find(|r| r.name == relation).unwrap();
+    // Legacy fixtures describe presence observations. In the K-empty value
+    // encoding these are exactly value(input, other); syntax stays unchanged.
+    let translated;
+    let (relation, values) = if relation == "present" {
+        assert!(!p.has_value_tests(), "legacy presence observation only");
+        translated = vec![values[0], "other_integer"];
+        ("value", translated.as_slice())
+    } else {
+        (relation, values)
+    };
+    let r = p
+        .corpus
+        .relations()
+        .find(|r| {
+            r.name == relation
+                && (relation.starts_with("$condition_") == p.corpus.is_generated_relation(r.id))
+        })
+        .unwrap();
     GroundAtom::new(
         r.id,
         values.iter().zip(&r.parameters).map(|(name, param)| {

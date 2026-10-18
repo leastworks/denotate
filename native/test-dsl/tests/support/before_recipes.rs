@@ -181,6 +181,7 @@ fn check_expr(
 ) -> Result<()> {
     sources.text(expr.span)?;
     match &expr.kind {
+        ExprKind::Value { .. } => panic!("value syntax is outside the frozen reference"),
         ExprKind::Available(name) => check_name(name, Kind::Slot, names, sources, diagnostics)?,
         ExprKind::Present(name) => check_name(name, Kind::Input, names, sources, diagnostics)?,
         ExprKind::And(a, b) | ExprKind::Or(a, b) => {
@@ -342,6 +343,7 @@ impl Lowerer<'_> {
     ) -> Result<()> {
         let view = view.peel();
         match &view.expr.kind {
+            ExprKind::Value { .. } => panic!("value syntax is outside the frozen reference"),
             ExprKind::And(a, b) if !view.negative => {
                 self.body(view.child(a), body, links, removals)?;
                 self.body(view.child(b), body, links, removals)?;

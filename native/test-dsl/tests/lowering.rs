@@ -149,7 +149,7 @@ fn atom_text(c: &Corpus, atom: &Atom) -> String {
 fn rules(p: &LoweredProgram) -> Vec<String> {
     p.corpus
         .rules()
-        .skip(2)
+        .skip(4)
         .map(|r| {
             let head = atom_text(&p.corpus, &r.head);
             if r.is_fact() {
@@ -176,7 +176,7 @@ fn quotes<'a>(f: &'a Fixture, p: &LoweredProgram, id: impl Into<OccurrenceId>) -
         .collect()
 }
 fn assert_terms_have_origins(f: &Fixture, p: &LoweredProgram) {
-    for rule in p.corpus.rules().skip(2) {
+    for rule in p.corpus.rules().skip(4) {
         for atom in std::iter::once(&rule.head).chain(rule.body.iter().map(Literal::atom)) {
             assert!(!p.attribution.provenance.origins(atom.id()).is_empty());
             for arg in atom.arguments() {
@@ -234,7 +234,7 @@ fn existing_overlap_lowers_through_the_api_with_exact_term_origins() {
         }
     );
     assert_terms_have_origins(&f, &p);
-    let mappings: Vec<_> = p.corpus.rules().skip(2).collect();
+    let mappings: Vec<_> = p.corpus.rules().skip(4).collect();
     for (rule, mapping) in mappings.iter().zip(&f.program.mappings) {
         assert_eq!(
             p.attribution.provenance.origins(rule.id)[0].span,
@@ -283,7 +283,7 @@ fn top_level_or_splits_heads_with_shared_statement_origins() {
             "mapped_to(input_b, b) :- available(c);"
         ]
     );
-    let rs: Vec<_> = p.corpus.rules().skip(2).collect();
+    let rs: Vec<_> = p.corpus.rules().skip(4).collect();
     for (r, alt) in rs.iter().zip(["available(a)", "available(c)"]) {
         assert_eq!(quotes(&f, &p, r.id), [f.sources.text(span).unwrap()]);
         assert_eq!(quotes(&f, &p, r.body[0].atom().id()), [alt]);
@@ -328,7 +328,7 @@ fn complementary_guards_and_self_negative_mapping_are_not_admissibility_checked(
             "mapped_to(input_a, a) :- !available(a);"
         ]
     );
-    for r in p.corpus.rules().skip(3) {
+    for r in p.corpus.rules().skip(5) {
         assert_eq!(quotes(&f, &p, r.body[0].atom().id()), ["not available(a)"]);
     }
     assert_terms_have_origins(&f, &p);
@@ -368,7 +368,7 @@ fn negated_conjunction_uses_a_helper_and_keeps_full_negation_origins() {
         p.attribution.provenance.origins(helper.id)[0].span,
         operand_span
     );
-    let rs: Vec<_> = p.corpus.rules().skip(2).collect();
+    let rs: Vec<_> = p.corpus.rules().skip(4).collect();
     assert_eq!(
         quotes(&f, &p, rs[0].id),
         ["(available(a) and available(c))"]
@@ -401,7 +401,7 @@ fn nested_or_uses_a_helper_without_distributing_the_outer_conjunction() {
         ]
     );
     assert_terms_have_origins(&f, &p);
-    let helpers: Vec<_> = p.corpus.rules().skip(2).take(2).collect();
+    let helpers: Vec<_> = p.corpus.rules().skip(4).take(2).collect();
     for (r, alt) in helpers.iter().zip(["available(a)", "available(c)"]) {
         assert_eq!(quotes(&f, &p, r.body[0].atom().id()), [alt]);
         assert_eq!(quotes(&f, &p, r.id), ["(available(a) or available(c))"]);
@@ -423,7 +423,7 @@ fn identical_statements_keep_distinct_occurrences_and_source_spans() {
             "mapped_to(input_b, b) :- available(a);"
         ]
     );
-    let rs: Vec<_> = p.corpus.rules().skip(2).collect();
+    let rs: Vec<_> = p.corpus.rules().skip(4).collect();
     assert_ne!(rs[0].id, rs[1].id);
     assert_ne!(
         p.attribution.provenance.origins(rs[0].id),

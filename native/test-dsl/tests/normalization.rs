@@ -5,6 +5,8 @@ mod fingerprint;
 #[path = "support/before_normalization.rs"]
 mod reference;
 mod support;
+#[path = "support/value_compatibility.rs"]
+mod value_compatibility;
 use denotate_editor::Document;
 use denotate_ir::installation::{self, BoundAtom};
 use denotate_ir::*;
@@ -45,9 +47,14 @@ fn compare_recipes(form: Arc<SemanticStatement>) {
     let new = recipe::Recipe::lower(form).unwrap();
     let Some(recipe) = new.normalized else { return };
     let local = |id: n::Local| reference::LocalOccurrence(id.0);
-    let constant = |a: &recipe::Constant| reference::ConstantRef {
-        kind: a.kind,
-        name: a.name.clone(),
+    let constant = |a: &recipe::Value| {
+        let recipe::Value::Name(a) = a else {
+            panic!("not a legacy leaf");
+        };
+        reference::ConstantRef {
+            kind: a.kind,
+            name: a.name.clone(),
+        }
     };
     let instructions: Vec<_> = recipe
         .instructions()
@@ -67,6 +74,7 @@ fn compare_recipes(form: Arc<SemanticStatement>) {
                             recipe::Relation::Masked => reference::RelationRef::Masked,
                             recipe::Relation::Present => reference::RelationRef::Present,
                             recipe::Relation::Available => reference::RelationRef::Available,
+                            _ => panic!("not a legacy leaf"),
                         },
                         p.arguments.iter().map(constant).collect(),
                     ),
@@ -152,7 +160,7 @@ fn unchanged_recipes_rebind_moved_sources_and_duplicate_statements_independently
             fingerprint::fingerprint(&fresh, &sources)
         );
         assert_eq!(
-            fingerprint::fingerprint(&reused, &sources),
+            value_compatibility::structure(fingerprint::fingerprint(&reused, &sources)),
             frozen_installed(&text, revision)
         );
         let helpers: Vec<_> = reused
@@ -407,7 +415,13 @@ fn additional_installed_cases_match_frozen_legacy_output() {
         let expected = frozen_installed(&text, revision);
         let uncached = lowered(lowering::lower(&ast, &sources).unwrap());
         let cached = lowered(session.lower(&ast, &sources).unwrap());
-        assert_eq!(fingerprint::fingerprint(&uncached, &sources), expected);
-        assert_eq!(fingerprint::fingerprint(&cached, &sources), expected);
+        assert_eq!(
+            value_compatibility::structure(fingerprint::fingerprint(&uncached, &sources)),
+            expected
+        );
+        assert_eq!(
+            value_compatibility::structure(fingerprint::fingerprint(&cached, &sources)),
+            expected
+        );
     }
 }

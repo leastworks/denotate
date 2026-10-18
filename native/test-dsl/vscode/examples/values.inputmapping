@@ -1,0 +1,5 @@
+// Distinct values of kind make these availability negations redundant.
+input kind, first_input, second_input;
+slot first, second;
+first <- first_input when input_value(kind) is 1 and not available(second);
+second <- second_input when input_value(kind) is 2 and not available(first);

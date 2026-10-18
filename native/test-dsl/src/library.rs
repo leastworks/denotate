@@ -1,6 +1,6 @@
 use denotate_ir::{
-    ConstructionError, Corpus, Literal, ObligationId, Parameter, RelationId, RelationRole, SortId,
-    Term,
+    ConstantId, ConstructionError, Corpus, Literal, ObligationId, Parameter, RelationId,
+    RelationRole, SortId, Term,
 };
 
 pub struct MappingLibrary {
@@ -12,6 +12,10 @@ pub struct MappingLibrary {
     pub available: RelationId,
     pub masked: RelationId,
     pub unique_input: ObligationId,
+    pub integer: SortId,
+    pub value: RelationId,
+    pub slot_value: RelationId,
+    pub other: ConstantId,
 }
 
 /// Build semantics, not a solver: no InputMapping-specific type exists in the IR.
@@ -25,7 +29,7 @@ pub fn build(corpus: &mut Corpus) -> Result<MappingLibrary, ConstructionError> {
     )?;
     let present = corpus.declare_relation(
         "present",
-        RelationRole::Input,
+        RelationRole::Derived,
         [Parameter::new("input", input)],
     )?;
     let supplies = corpus.declare_relation(
@@ -42,6 +46,25 @@ pub fn build(corpus: &mut Corpus) -> Result<MappingLibrary, ConstructionError> {
         "masked",
         RelationRole::Derived,
         [Parameter::new("slot", slot)],
+    )?;
+
+    let integer = corpus.declare_sort("IntegerCase")?;
+    let other = corpus.declare_constant("other_integer", integer)?;
+    let value = corpus.declare_relation(
+        "value",
+        RelationRole::Input,
+        [
+            Parameter::new("input", input),
+            Parameter::new("value", integer),
+        ],
+    )?;
+    let slot_value = corpus.declare_relation(
+        "slot_value",
+        RelationRole::Derived,
+        [
+            Parameter::new("slot", slot),
+            Parameter::new("value", integer),
+        ],
     )?;
 
     let i = Term::variable("I", input);
@@ -63,6 +86,20 @@ pub fn build(corpus: &mut Corpus) -> Result<MappingLibrary, ConstructionError> {
     let supply = corpus.atom(supplies, [i, d])?;
     corpus.add_rule(head, [Literal::Positive(supply)])?;
 
+    let i = Term::variable("I", input);
+    let d = Term::variable("D", slot);
+    let v = Term::variable("V", integer);
+    let head = corpus.atom(present, [i.clone()])?;
+    let body = corpus.atom(value, [i.clone(), v.clone()])?;
+    corpus.add_rule(head, [Literal::Positive(body)])?;
+    let head = corpus.atom(slot_value, [d.clone(), v.clone()])?;
+    let supply = corpus.atom(supplies, [i.clone(), d])?;
+    let input_value = corpus.atom(value, [i, v])?;
+    corpus.add_rule(
+        head,
+        [Literal::Positive(supply), Literal::Positive(input_value)],
+    )?;
+
     let unique_input = corpus.at_most_one(
         "one_input_per_slot",
         supplies,
@@ -78,5 +115,9 @@ pub fn build(corpus: &mut Corpus) -> Result<MappingLibrary, ConstructionError> {
         available,
         masked,
         unique_input,
+        integer,
+        value,
+        slot_value,
+        other,
     })
 }

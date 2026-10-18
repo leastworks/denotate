@@ -130,19 +130,7 @@ fn prepare(p: &LoweredProgram) -> GroundProgram {
     prepared
 }
 fn atom(p: &LoweredProgram, name: &str, args: &[&str]) -> GroundAtom {
-    let relation = p.corpus.relations().find(|r| r.name == name).unwrap();
-    GroundAtom::new(
-        relation.id,
-        args.iter()
-            .zip(&relation.parameters)
-            .map(|(name, parameter)| {
-                p.corpus
-                    .constants()
-                    .find(|c| c.name == *name && c.sort == parameter.sort)
-                    .unwrap()
-                    .id
-            }),
-    )
+    super::rewrites::dsl_fixture::atom(p, name, args)
 }
 
 #[test]
@@ -168,7 +156,7 @@ fn lowered_complementary_guards_are_locally_stratified_for_all_input_observation
     let lowered = f.lower();
     let p = prepare(&lowered);
     assert!(p.is_admitted());
-    assert_eq!(p.rules().count(), 9); // two library rules per possible mapping, plus mappings
+    assert_eq!(p.rules().count(), 15); // mappings, supplies/availability, presence and value copies
     for bits in 0..8 {
         let inputs = ["input_a", "input_b", "input_bb"]
             .into_iter()
@@ -411,7 +399,7 @@ fn impossible_guards_prune_positive_mappings_and_explain_negative_mappings() {
         }
         let lowered = f.lower();
         let p = prepare(&lowered); // every observation and legal atom against full grounding
-        assert_eq!(p.rules().count(), 3);
+        assert_eq!(p.rules().count(), 7); // one live mapping plus presence and copy rules
         assert!(
             !p.is_possible(&atom(&lowered, "mapped_to", &["input_a", "a"]))
                 .unwrap()

@@ -1,5 +1,5 @@
 //! Arena-free leaf translation and frontend attribution assignments.
-use super::semantic::{AstPath, ExprPath, Expression, SemanticStatement, Step};
+use super::semantic::{AstPath, ExprPath, Expression, IntegerLiteral, SemanticStatement, Step};
 use crate::ast::Kind;
 use denotate_normalize as n;
 use std::{collections::BTreeMap, sync::Arc};
@@ -15,11 +15,18 @@ pub enum Relation {
     Masked,
     Present,
     Available,
+    Value,
+    SlotValue,
+}
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Value {
+    Name(Constant),
+    Integer(i64),
 }
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Payload {
     pub relation: Relation,
-    pub arguments: Vec<Constant>,
+    pub arguments: Vec<Value>,
 }
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Assignments {
@@ -37,6 +44,7 @@ pub struct Recipe {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RecipeError {
     Normalization(n::ConstructionError<AstPath>),
+    InvalidLiteral(AstPath),
     AssignmentRecordCount { output: n::Local, count: usize },
 }
 impl std::fmt::Display for RecipeError {
@@ -46,7 +54,10 @@ impl std::fmt::Display for RecipeError {
 }
 impl std::error::Error for RecipeError {}
 
-fn expression(expr: &Expression, path: ExprPath) -> n::Expression<Payload, AstPath> {
+fn expression(
+    expr: &Expression,
+    path: ExprPath,
+) -> Result<n::Expression<Payload, AstPath>, RecipeError> {
     let key = AstPath::Expression(path.clone());
     let kind = match expr {
         Expression::Available(name) | Expression::Present(name) => {
@@ -58,10 +69,10 @@ fn expression(expr: &Expression, path: ExprPath) -> n::Expression<Payload, AstPa
             n::ExpressionKind::Leaf {
                 payload: Payload {
                     relation,
-                    arguments: vec![Constant {
+                    arguments: vec![Value::Name(Constant {
                         kind,
                         name: name.clone(),
-                    }],
+                    })],
                 },
                 arguments: vec![n::Argument {
                     key: AstPath::Argument(path),
@@ -69,22 +80,57 @@ fn expression(expr: &Expression, path: ExprPath) -> n::Expression<Payload, AstPa
                 }],
             }
         }
+        Expression::Value {
+            kind,
+            name,
+            literal,
+        } => {
+            let IntegerLiteral::Value(value) = literal else {
+                return Err(RecipeError::InvalidLiteral(AstPath::Integer(path)));
+            };
+            n::ExpressionKind::Leaf {
+                payload: Payload {
+                    relation: if *kind == Kind::Input {
+                        Relation::Value
+                    } else {
+                        Relation::SlotValue
+                    },
+                    arguments: vec![
+                        Value::Name(Constant {
+                            kind: *kind,
+                            name: name.clone(),
+                        }),
+                        Value::Integer(*value),
+                    ],
+                },
+                arguments: vec![
+                    n::Argument {
+                        key: AstPath::Argument(path.clone()),
+                        variable: false,
+                    },
+                    n::Argument {
+                        key: AstPath::Integer(path),
+                        variable: false,
+                    },
+                ],
+            }
+        }
         Expression::And(a, b) => n::ExpressionKind::And(
-            Box::new(expression(a, path.child(Step::Left))),
-            Box::new(expression(b, path.child(Step::Right))),
+            Box::new(expression(a, path.child(Step::Left))?),
+            Box::new(expression(b, path.child(Step::Right))?),
         ),
         Expression::Or(a, b) => n::ExpressionKind::Or(
-            Box::new(expression(a, path.child(Step::Left))),
-            Box::new(expression(b, path.child(Step::Right))),
+            Box::new(expression(a, path.child(Step::Left))?),
+            Box::new(expression(b, path.child(Step::Right))?),
         ),
         Expression::Not(a) => {
-            n::ExpressionKind::Not(Box::new(expression(a, path.child(Step::Operand))))
+            n::ExpressionKind::Not(Box::new(expression(a, path.child(Step::Operand))?))
         }
         Expression::Group(a) => {
-            n::ExpressionKind::Group(Box::new(expression(a, path.child(Step::Inner))))
+            n::ExpressionKind::Group(Box::new(expression(a, path.child(Step::Inner))?))
         }
     };
-    n::Expression { key, kind }
+    Ok(n::Expression { key, kind })
 }
 impl Recipe {
     pub fn lower(form: Arc<SemanticStatement>) -> std::result::Result<Self, RecipeError> {
@@ -126,9 +172,11 @@ impl Recipe {
                     relation,
                     arguments: args
                         .iter()
-                        .map(|(kind, name, _)| Constant {
-                            kind: *kind,
-                            name: (*name).clone(),
+                        .map(|(kind, name, _)| {
+                            Value::Name(Constant {
+                                kind: *kind,
+                                name: (*name).clone(),
+                            })
                         })
                         .collect(),
                 },
@@ -142,7 +190,8 @@ impl Recipe {
             },
             body: condition
                 .as_ref()
-                .map(|e| expression(e, ExprPath::default())),
+                .map(|e| expression(e, ExprPath::default()))
+                .transpose()?,
         };
         let normalized = n::normalize(&definition).map_err(RecipeError::Normalization)?;
         // Frontend policy: choose one origin per output occurrence/view.

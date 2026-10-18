@@ -670,3 +670,86 @@ fn ranged_edits_recover_from_sync_loss_without_blocking_another_document() {
     assert_eq!(codes(&c, &a, "OverlappingMappings").len(), 2);
     c.shutdown();
 }
+
+#[test]
+fn value_literals_validate_before_recipes_and_numeric_aliases_reuse_cached_forms() {
+    let mut c = Client::start("base/00-valid");
+    let u = uri(&c, "values.inputmapping");
+    let text="input i, j;\nslot a;\na <- i when input_value(i) is 1;\na <- j when input_value(j) is 1;\n";
+    open(&mut c, &u, text);
+    c.validated(&u, 1);
+    assert_eq!(codes(&c, &u, "OverlappingMappings").len(), 2);
+    let before = queries(&stats(&mut c), &u);
+    change(
+        &mut c,
+        &u,
+        2,
+        &format!("// moved\n{}", text.replace("is 1", "is 01")),
+    );
+    assert_eq!(queries(&stats(&mut c), &u), before);
+    assert_eq!(
+        codes(&c, &u, "OverlappingMappings")[0]["range"]["start"]["line"],
+        3
+    );
+    let before_stats = stats(&mut c);
+    let invalid = text.replace(
+        "input_value(i) is 1",
+        "input_value(i) is 9223372036854775808",
+    );
+    change(&mut c, &u, 3, &invalid);
+    assert_paused(&c, &u, "literal");
+    let error = codes(&c, &u, "literal").pop().unwrap();
+    assert_eq!(error["range"]["start"], json!({"line":2,"character":30}));
+    let after = stats(&mut c);
+    assert_eq!(queries(&after, &u)[0], before[0]);
+    assert_eq!(
+        after["lowering"][&u]["assemblies"],
+        before_stats["lowering"][&u]["assemblies"]
+    );
+    change(&mut c, &u, 4, text);
+    assert_eq!(codes(&c, &u, "OverlappingMappings").len(), 2);
+    let extended = format!("{text}mask a when input_value(i) is 2;\n");
+    let before = queries(&stats(&mut c), &u);
+    change(&mut c, &u, 5, &extended);
+    assert_eq!(queries(&stats(&mut c), &u)[0], before[0] + 1);
+    c.shutdown();
+}
+
+#[test]
+fn values_copy_through_slots_masks_and_w_sensitive_cycles_in_the_server() {
+    let mut c = Client::start("base/00-valid");
+    let u = uri(&c, "value-copy.inputmapping");
+    let text="input i, j; slot a, b; a <- i; b <- j when slot_value(a) is 1; b <- i when slot_value(a) is 1;";
+    open(&mut c, &u, text);
+    c.validated(&u, 1);
+    assert_eq!(codes(&c, &u, "OverlappingMappings").len(), 2);
+    change(
+        &mut c,
+        &u,
+        2,
+        &format!("{text} mask a when input_value(i) is 1;"),
+    );
+    assert!(codes(&c, &u, "OverlappingMappings").is_empty());
+    let redundant =
+        "input i; slot a; a <- i when input_value(i) is 1 and not (input_value(i) is 2);";
+    change(&mut c, &u, 3, redundant);
+    let ds = codes(&c, &u, "redundant");
+    assert_eq!(ds.len(), 1);
+    assert!(ds[0]["message"]
+        .as_str()
+        .unwrap()
+        .contains("cannot also have value 2"));
+    let cycle="input t, i, j; slot a, b; a <- i when input_value(t) is 1 and not available(b); b <- j when input_value(t) is 2 and not available(a);";
+    change(&mut c, &u, 4, cycle);
+    assert_eq!(codes(&c, &u, "redundant").len(), 2);
+    assert!(codes(&c, &u, "NoMeaning").is_empty());
+    change(
+        &mut c,
+        &u,
+        5,
+        "input i; slot a; a <- i when not input_value(i) is 1 and not available(a);",
+    );
+    assert!(!codes(&c, &u, "NoMeaning").is_empty());
+    assert!(codes(&c, &u, "creator-failure").is_empty());
+    c.shutdown();
+}

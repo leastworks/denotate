@@ -47,6 +47,11 @@ pub struct Expr {
 pub enum ExprKind {
     Available(Name),
     Present(Name),
+    Value {
+        kind: Kind,
+        name: Name,
+        literal: Name,
+    },
     And(Box<Expr>, Box<Expr>),
     Or(Box<Expr>, Box<Expr>),
     Not {

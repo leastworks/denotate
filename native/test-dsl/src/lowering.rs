@@ -17,6 +17,7 @@ pub mod semantic;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DiagnosticKind {
+    InvalidInteger,
     UnknownName {
         name: String,
         expected: Kind,
@@ -81,6 +82,43 @@ pub struct LoweredProgram {
     pub corpus: Corpus,
     pub library: MappingLibrary,
     pub attribution: Attribution,
+}
+
+impl LoweredProgram {
+    pub fn domains(&self) -> denotate_check::Domains {
+        self.corpus
+            .sorts()
+            .map(|s| {
+                (
+                    s.id,
+                    self.corpus
+                        .constants()
+                        .filter(|c| c.sort == s.id)
+                        .map(|c| c.id)
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+    pub fn prepare(
+        &self,
+        limits: &denotate_check::Limits,
+    ) -> std::result::Result<denotate_check::GroundProgram, denotate_check::CheckError> {
+        denotate_check::GroundProgram::prepare_with_input_groups(
+            &self.corpus,
+            &self.domains(),
+            &[denotate_check::InputAtMostOne {
+                relation: self.library.value,
+                group_by: vec![0],
+            }],
+            limits,
+        )
+    }
+    pub fn has_value_tests(&self) -> bool {
+        self.corpus
+            .constants()
+            .any(|c| c.sort == self.library.integer && c.id != self.library.other)
+    }
 }
 
 pub enum LoweringOutcome {
