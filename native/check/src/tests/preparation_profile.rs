@@ -2,7 +2,7 @@
 use super::*;
 
 impl GroundProgram {
-    pub(crate) fn profile_preparation(
+    pub fn profile_preparation(
         corpus: &Corpus,
         domains: &Domains,
         constraints: &[InputAtMostOne],

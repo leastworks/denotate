@@ -171,7 +171,7 @@ impl SymbolicMeaning<'_> {
                 .collect::<Result<BTreeMap<_, _>>>()?;
             ordered = keyed.into_values().collect();
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if queries.is_some() {
             crate::accounting::test_schedule(&mut ordered);
         }

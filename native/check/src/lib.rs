@@ -33,9 +33,12 @@ pub use rewrite::*;
 pub use symbolic::*;
 pub use upper_bounds::ComponentUpperBounds;
 
-// Compile fixtures as unit tests so the Cartesian oracle stays test-only,
-// without a production API or feature exposing the obsolete grounder.
+// Generic oracles remain here; frontend acceptance tests use the opt-in test support.
 #[cfg(test)]
 mod tests;
 #[cfg(test)]
 extern crate self as denotate_check;
+
+#[cfg(any(test, feature = "test-support"))]
+#[doc(hidden)]
+pub mod test_support;

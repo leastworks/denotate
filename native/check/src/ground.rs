@@ -10,13 +10,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 #[path = "cartesian_oracle.rs"]
 mod cartesian_oracle;
 #[path = "sparse.rs"]
 mod sparse;
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 #[path = "tests/preparation_profile.rs"]
 mod preparation_profile;
 

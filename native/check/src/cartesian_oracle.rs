@@ -2,11 +2,7 @@
 use super::*;
 
 impl GroundProgram {
-    pub(crate) fn prepare_cartesian(
-        corpus: &Corpus,
-        domains: &Domains,
-        limits: &Limits,
-    ) -> Result<Self> {
+    pub fn prepare_cartesian(corpus: &Corpus, domains: &Domains, limits: &Limits) -> Result<Self> {
         let mut budget = Budget::new(limits);
         let domains = validate_domains(corpus, domains, &mut budget)?;
         let mut p = Self::empty(corpus, domains);

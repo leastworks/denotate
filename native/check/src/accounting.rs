@@ -214,11 +214,11 @@ impl QueryRun<'_> {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     static TEST_SCHEDULE: std::cell::RefCell<Option<(bool,Vec<QueryKey>)>> = const { std::cell::RefCell::new(None) };
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) fn test_schedule<T>(values: &mut [T]) {
     TEST_SCHEDULE.with(|s| {
         if s.borrow().as_ref().is_some_and(|(reverse, _)| *reverse) {
@@ -226,7 +226,7 @@ pub(crate) fn test_schedule<T>(values: &mut [T]) {
         }
     });
 }
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) fn test_trace(key: &QueryKey) {
     TEST_SCHEDULE.with(|s| {
         if let Some((_, trace)) = s.borrow_mut().as_mut() {
@@ -234,8 +234,8 @@ pub(crate) fn test_trace(key: &QueryKey) {
         }
     });
 }
-#[cfg(test)]
-pub(crate) fn with_test_schedule<T>(reverse: bool, run: impl FnOnce() -> T) -> (T, Vec<QueryKey>) {
+#[cfg(any(test, feature = "test-support"))]
+pub fn with_test_schedule<T>(reverse: bool, run: impl FnOnce() -> T) -> (T, Vec<QueryKey>) {
     struct Restore(Option<(bool, Vec<QueryKey>)>);
     impl Drop for Restore {
         fn drop(&mut self) {

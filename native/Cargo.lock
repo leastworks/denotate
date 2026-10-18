@@ -147,6 +147,14 @@ name = "denotate-check"
 version = "0.0.1"
 dependencies = [
  "biodivine-lib-bdd",
+ "denotate-ir",
+]
+
+[[package]]
+name = "denotate-check-session"
+version = "0.0.1"
+dependencies = [
+ "denotate-check",
  "denotate-editor",
  "denotate-ir",
  "denotate-normalize",

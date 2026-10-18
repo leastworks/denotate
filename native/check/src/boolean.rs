@@ -13,12 +13,12 @@ pub(crate) use equations::{EquationContext, Formula};
 
 // Historical-order probes. Thread-local scope and RAII restoration isolate
 // parallel tests/panics; production request preparation uses AtomKey order.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     static TEST_INPUT_ORDER: std::cell::RefCell<Option<BTreeMap<GroundAtom, usize>>> = const { std::cell::RefCell::new(None) };
 }
-#[cfg(test)]
-pub(crate) fn with_test_input_order<T>(order: Vec<GroundAtom>, run: impl FnOnce() -> T) -> T {
+#[cfg(any(test, feature = "test-support"))]
+pub fn with_test_input_order<T>(order: Vec<GroundAtom>, run: impl FnOnce() -> T) -> T {
     struct Restore(Option<BTreeMap<GroundAtom, usize>>);
     impl Drop for Restore {
         fn drop(&mut self) {
@@ -87,7 +87,7 @@ impl GroundProgram {
     fn bdd_inputs(&self) -> Vec<&GroundAtom> {
         #[allow(unused_mut)]
         let mut inputs = self.ordered_inputs();
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         TEST_INPUT_ORDER.with(|v| {
             if let Some(order) = v.borrow().as_ref() {
                 assert_eq!(inputs.len(), order.len());

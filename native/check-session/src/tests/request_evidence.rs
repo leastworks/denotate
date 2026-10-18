@@ -45,10 +45,14 @@ pub(super) fn fresh_capture(p: &LoweredProgram, max_work: usize) -> Value {
 
 #[test]
 fn frozen_witness_migration_is_exact() {
-    let report: Value = serde_json::from_str(include_str!("../../IDENTITIES-6a.1.json")).unwrap();
-    let delta: Value = serde_json::from_str(include_str!("../../WITNESS-ORDER-6a.2.json")).unwrap();
-    let baseline: Value =
-        serde_json::from_str(include_str!("../../fixtures/SLICE-6.0-BASELINE.json")).unwrap();
+    let report: Value =
+        serde_json::from_str(include_str!("../../../check/IDENTITIES-6a.1.json")).unwrap();
+    let delta: Value =
+        serde_json::from_str(include_str!("../../../check/WITNESS-ORDER-6a.2.json")).unwrap();
+    let baseline: Value = serde_json::from_str(include_str!(
+        "../../../check/fixtures/SLICE-6.0-BASELINE.json"
+    ))
+    .unwrap();
     let report = super::planner_evidence::adapted("identities", report);
     let baseline = super::planner_evidence::adapted("baseline", baseline);
     let mut used = BTreeSet::new();
@@ -274,8 +278,10 @@ fn committed_key_index_retains_original_bindings_and_indexes_rewrites() {
 
 #[test]
 fn frozen_inventory_matches_request_preparation() {
-    let frozen: Value =
-        serde_json::from_str(include_str!("../../fixtures/SLICE-6.0-BASELINE.json")).unwrap();
+    let frozen: Value = serde_json::from_str(include_str!(
+        "../../../check/fixtures/SLICE-6.0-BASELINE.json"
+    ))
+    .unwrap();
     let snapshot = |text: &str| {
         let (ast, sources) = parse(text);
         match lowering::lower(&ast, &sources).unwrap() {

@@ -1,4 +1,4 @@
-use super::rewrites::{atom, dsl_fixture, rel, rule, stable_models, subsets, supported_models};
+use super::rewrites::{atom, rel, rule, stable_models};
 use crate::*;
 use denotate_ir::*;
 use std::collections::BTreeSet;
@@ -6,35 +6,7 @@ use std::collections::BTreeSet;
 // Independent Cartesian grounder + assignment enumeration. These fixtures have
 // a single unresolved SCC with acyclic upstream rules, so completion solutions
 // also uniquely fix the settled boundary. No checker BDD/admission is an oracle.
-fn oracle(c: &Corpus, domains: &Domains, p: &GroundProgram) {
-    let limits = Limits::default();
-    let raw = GroundProgram::prepare_cartesian(c, domains, &limits).unwrap();
-    let m = p.symbolic(&limits).unwrap();
-    let report = m.verify_at_most_one(&limits).unwrap();
-    assert_eq!(report.unresolved.len(), 1);
-    let outcome = &report.unresolved[0].completion;
-    let atoms: Vec<_> = raw.atoms().cloned().collect();
-    let inputs: BTreeSet<_> = raw.input_atoms().cloned().collect();
-    let rules: Vec<_> = raw.rules().cloned().collect();
-    for world in subsets(&inputs.iter().cloned().collect::<Vec<_>>()) {
-        let solutions = supported_models(&raw, &rules, &world);
-        let bad = match outcome {
-            CompletionOutcome::NoMeaning(f) => m
-                .context()
-                .evaluate(&f.bad_input, world.iter().cloned(), &limits)
-                .unwrap(),
-            CompletionOutcome::NoContradiction => false,
-            other => panic!("unexpected completion result: {other:?}"),
-        };
-        assert_eq!(bad, solutions.is_empty());
-        if bad {
-            assert!(stable_models(&atoms, &inputs, &rules, &world).is_empty());
-        }
-    }
-    if let CompletionOutcome::NoMeaning(f) = outcome {
-        assert!(stable_models(&atoms, &inputs, &rules, &f.observation.present).is_empty());
-    }
-}
+pub(super) use crate::test_support::completion::*;
 
 #[test]
 fn no_meaning_is_input_only_and_absent_input_does_not_become_admitted() {
@@ -246,141 +218,6 @@ fn rewritten_equations_keep_all_producers_and_authored_proof_references() {
             )
             .unwrap()
     );
-}
-
-#[test]
-fn ambiguous_input_mapping_has_answers_but_no_admitted_meaning() {
-    let f = dsl_fixture::Fixture::ambiguous();
-    let p = f.lower();
-    let limits = Limits::default();
-    let g = GroundProgram::prepare(&p.corpus, &dsl_fixture::domains(&p), &limits)
-        .unwrap()
-        .admit(&limits)
-        .unwrap();
-    oracle(&p.corpus, &dsl_fixture::domains(&p), &g);
-    let report = g
-        .symbolic(&limits)
-        .unwrap()
-        .verify_at_most_one(&limits)
-        .unwrap();
-    assert!(!report.whole_program_admitted());
-    assert!(matches!(
-        report.unresolved[0].completion,
-        CompletionOutcome::NoContradiction
-    ));
-    let raw =
-        GroundProgram::prepare_cartesian(&p.corpus, &dsl_fixture::domains(&p), &limits).unwrap();
-    let inputs: BTreeSet<_> = raw.input_atoms().cloned().collect();
-    assert_eq!(
-        stable_models(
-            &raw.atoms().cloned().collect::<Vec<_>>(),
-            &inputs,
-            &raw.rules().cloned().collect::<Vec<_>>(),
-            &inputs
-        )
-        .len(),
-        2
-    );
-}
-
-#[test]
-fn lowered_self_negative_mapping_matches_both_independent_oracles() {
-    let text = "input input_a;\nslot a;\na <- input_a when not available(a);\n";
-    let mut f = dsl_fixture::Fixture::new(text, &["input_a"], &["a"]);
-    let span = f.span(text.lines().nth(2).unwrap());
-    f.mapping(
-        span,
-        "a",
-        "input_a",
-        Some(f.not(f.atom(span, "available", "a"))),
-    );
-    let p = f.lower();
-    let limits = Limits::default();
-    let g = GroundProgram::prepare(&p.corpus, &dsl_fixture::domains(&p), &limits)
-        .unwrap()
-        .admit(&limits)
-        .unwrap();
-    oracle(&p.corpus, &dsl_fixture::domains(&p), &g);
-    let m = g.symbolic(&limits).unwrap();
-    let report = m.verify_at_most_one(&limits).unwrap();
-    let CompletionOutcome::NoMeaning(f) = &report.unresolved[0].completion else {
-        panic!()
-    };
-    assert_eq!(f.rules.len(), 3);
-    let input = dsl_fixture::atom(&p, "present", &["input_a"]);
-    assert_eq!(f.observation.present, BTreeSet::from([input.clone()]));
-    assert!(
-        m.context()
-            .equivalent(
-                &f.bad_input,
-                &m.context().input(&input, &limits).unwrap(),
-                &limits
-            )
-            .unwrap()
-    );
-}
-
-#[test]
-fn completion_limits_preserve_overlaps_and_never_publish_partial_failure_claims() {
-    let p = dsl_fixture::Fixture::mixed(false, false).lower();
-    let limits = Limits::default();
-    let g = GroundProgram::prepare(&p.corpus, &dsl_fixture::domains(&p), &limits)
-        .unwrap()
-        .admit(&limits)
-        .unwrap();
-    let m = g.symbolic(&limits).unwrap();
-    let mut passed = false;
-    for max_work in (0..10000).step_by(31) {
-        let report = m
-            .verify_with_completion_limits(
-                &limits,
-                &Limits {
-                    max_work,
-                    ..limits.clone()
-                },
-            )
-            .unwrap();
-        assert!(
-            report
-                .groups
-                .iter()
-                .any(|g| matches!(g.outcome, VerifiedOutcome::Counterexample(_)))
-        );
-        assert!(!report.all_obligations_proved());
-        match &report.unresolved[0].completion {
-            CompletionOutcome::Inconclusive(_) => {}
-            CompletionOutcome::NoMeaning(_) => {
-                passed = true;
-                break;
-            }
-            other => panic!("{other:?}"),
-        }
-    }
-    assert!(passed);
-    for small in [
-        Limits {
-            max_bdd_variables: g.input_atoms().count(),
-            ..limits.clone()
-        },
-        Limits {
-            max_bdd_nodes: 2,
-            ..limits.clone()
-        },
-        Limits {
-            max_condition_nodes: 4,
-            ..limits.clone()
-        },
-        Limits {
-            max_bdd_tasks: 0,
-            ..limits.clone()
-        },
-    ] {
-        let report = m.verify_with_completion_limits(&limits, &small).unwrap();
-        assert!(matches!(
-            report.unresolved[0].completion,
-            CompletionOutcome::Inconclusive(_)
-        ));
-    }
 }
 
 #[test]

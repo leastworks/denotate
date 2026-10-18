@@ -1,0 +1,17 @@
+[package]
+name = "denotate-check-session"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.93"
+publish = false
+
+[dependencies]
+denotate-check = { path = "../check" }
+denotate-ir = { path = "../ir" }
+
+[dev-dependencies]
+denotate-check = { path = "../check", features = ["test-support"] }
+denotate-test-dsl = { path = "../test-dsl" }
+denotate-editor = { path = "../editor" }
+denotate-normalize = { path = "../normalize" }
+serde_json.workspace = true

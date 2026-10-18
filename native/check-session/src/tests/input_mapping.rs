@@ -1,4 +1,4 @@
-use crate::*;
+use denotate_check::*;
 use denotate_ir::*;
 use denotate_test_dsl::attribution::SourceView;
 use denotate_test_dsl::{ast::*, lowering::*};

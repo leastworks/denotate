@@ -105,14 +105,14 @@ pub(crate) struct Budget<'a> {
     start: Instant,
     work: usize,
     charges: Option<WorkCharges>,
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub profile: Option<PreparationProfile>,
 }
 
 /// Diagnostic-only counters. Timed public-path samples leave this disabled.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Debug)]
-pub(crate) struct PreparationProfile {
+pub struct PreparationProfile {
     pub work: std::collections::BTreeMap<&'static str, usize>,
     pub calls: std::collections::BTreeMap<&'static str, usize>,
     pub segments_ns: std::collections::BTreeMap<&'static str, u128>,
@@ -125,7 +125,7 @@ impl<'a> Budget<'a> {
             start: Instant::now(),
             work: 0,
             charges: None,
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-support"))]
             profile: None,
         }
     }
@@ -162,7 +162,7 @@ impl<'a> Budget<'a> {
         key: QueryKey,
         dependencies: impl IntoIterator<Item = QueryKey>,
     ) -> Result<()> {
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         crate::accounting::test_trace(&key);
         let own = self
             .charges
@@ -179,7 +179,7 @@ impl<'a> Budget<'a> {
             )
             .map_err(CheckError::Receipts)
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn enable_profile(&mut self) {
         self.profile = Some(PreparationProfile {
             work: Default::default(),
@@ -188,7 +188,7 @@ impl<'a> Budget<'a> {
             last: Instant::now(),
         });
     }
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn mark(&mut self, label: &'static str) {
         if let Some(profile) = &mut self.profile {
             profile
@@ -241,7 +241,7 @@ impl<'a> Budget<'a> {
                 .checked_add(amount)
                 .ok_or(CheckError::Receipts(crate::ReceiptError::Overflow))?;
         }
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-support"))]
         if let Some(profile) = &mut self.profile {
             let work = profile.work.entry(phase).or_default();
             *work = work

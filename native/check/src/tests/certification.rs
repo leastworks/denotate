@@ -1,81 +1,10 @@
-use super::rewrites::{atom, dsl_fixture, rel, rule, stable_models, subsets};
+use super::rewrites::{atom, rel, rule, stable_models};
 use crate::*;
 use denotate_ir::*;
 use std::collections::BTreeSet;
 
 /// Cartesian grounding and plain-set reduct oracle over the original rules.
 /// Neither certification nor production evaluation defines the expected models.
-fn compare(c: &Corpus, domains: &Domains, admit: bool) -> usize {
-    let limits = Limits::default();
-    let oracle = GroundProgram::prepare_cartesian(c, domains, &limits).unwrap();
-    let atoms: Vec<_> = oracle.atoms().cloned().collect();
-    let inputs: BTreeSet<_> = oracle.input_atoms().cloned().collect();
-    let rules: Vec<_> = oracle.rules().cloned().collect();
-    let p = GroundProgram::prepare(c, domains, &limits).unwrap();
-    let p = if admit { p.admit(&limits).unwrap() } else { p };
-    let before = format!("{p:?}");
-    let mut certified = 0;
-    for world in subsets(&inputs.iter().cloned().collect::<Vec<_>>()) {
-        let models = stable_models(&atoms, &inputs, &rules, &world);
-        match p
-            .certify_observation(world.iter().cloned(), &limits)
-            .unwrap()
-        {
-            CertificationOutcome::Certified(replay) => {
-                certified += 1;
-                assert_eq!(models.len(), 1);
-                assert_eq!(models.first(), Some(&replay.facts));
-                assert_eq!(replay.observation.present, world);
-                assert_eq!(
-                    replay.evidence.keys().cloned().collect::<BTreeSet<_>>(),
-                    replay.facts
-                );
-                for step in &replay.pruning {
-                    assert_ne!(step.value, step.premise.polarity == Polarity::Positive);
-                    assert!(p.rule(step.rule).unwrap().body.contains(&step.premise));
-                    if let CompletedProvider::Component(id) = &step.provider {
-                        assert!(replay.providers[id].contains(&step.premise.term.atom));
-                    }
-                }
-                for (fact, step) in &replay.evidence {
-                    match &step.evidence {
-                        GroundEvidence::Input => assert!(world.contains(fact)),
-                        GroundEvidence::Derived { rule, premises } => {
-                            assert_eq!(p.original_rule(rule.id), Some(rule));
-                            for premise in premises {
-                                match premise {
-                                    PremiseEvidence::Positive { fact, .. } => {
-                                        assert!(replay.evidence[fact].order < step.order)
-                                    }
-                                    PremiseEvidence::Absent { fact, provider, .. } => {
-                                        assert!(!replay.facts.contains(fact));
-                                        if let CompletedProvider::Component(id) = provider {
-                                            assert!(replay.providers[id].contains(fact));
-                                        }
-                                    }
-                                    PremiseEvidence::Discharged { proof, .. } => {
-                                        assert!(p.rewrite_proof(*proof).is_some());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            CertificationOutcome::NotCertified => {}
-            CertificationOutcome::Inconclusive(cause) => {
-                panic!("tiny oracle fixture exhausted {cause:?}")
-            }
-        }
-        assert_eq!(
-            format!("{p:?}"),
-            before,
-            "specialization mutated the original"
-        );
-    }
-    certified
-}
-
 #[test]
 fn signed_guard_matrix_certificates_match_original_stable_models() {
     let mut certified = 0;
@@ -109,31 +38,6 @@ fn signed_guard_matrix_certificates_match_original_stable_models() {
         }
     }
     assert!(certified > 100);
-}
-
-#[test]
-fn lowered_mapping_certificates_match_the_independent_oracle() {
-    // Keep head counts within the oracle's deliberate exponential bound.
-    for f in [
-        dsl_fixture::Fixture::ambiguous(),
-        dsl_fixture::Fixture::exclusive(),
-    ] {
-        let p = f.lower();
-        for admit in [false, true] {
-            assert!(compare(&p.corpus, &dsl_fixture::domains(&p), admit) > 0);
-        }
-    }
-    let text = "input input_c;\nslot c;\nc <- input_c when not available(c);\n";
-    let mut f = dsl_fixture::Fixture::new(text, &["input_c"], &["c"]);
-    let span = f.span(text.lines().nth(2).unwrap());
-    f.mapping(
-        span,
-        "c",
-        "input_c",
-        Some(f.not(f.atom(span, "available", "c"))),
-    );
-    let p = f.lower();
-    assert_eq!(compare(&p.corpus, &dsl_fixture::domains(&p), true), 1);
 }
 
 #[test]
@@ -478,3 +382,5 @@ fn certification_replay_mismatch_is_an_error_not_a_limit_or_an_upgrade() {
     assert_eq!(example.observation, original);
     assert_eq!(example.replay_scope, ReplayScope::ConeOnly);
 }
+
+use crate::test_support::certification::compare;

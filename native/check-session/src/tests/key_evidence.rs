@@ -103,7 +103,7 @@ fn reordered_declarations_change_proposed_witness_but_keep_current_execution() {
     let (_, _, p) = lower("input z, a, m; slot s; s <- z; s <- a; s <- m;");
     let g = prepare(&p, &Limits::default()).unwrap();
     let current = budget_result_lowered(&p, 20_000_000);
-    let proposed = crate::boolean::with_test_input_order(input_order(&p, &g), || {
+    let proposed = denotate_check::test_support::with_test_input_order(input_order(&p, &g), || {
         budget_result_lowered(&p, 20_000_000)
     });
     assert_ne!(current, proposed);
@@ -132,7 +132,7 @@ fn witness_row(name: String, source: &str, max_work: usize) -> Value {
     let mut sorted = current_atoms.clone();
     sorted.sort();
     let current = budget_result_lowered(&p, max_work);
-    let proposed = crate::boolean::with_test_input_order(order.clone(), || {
+    let proposed = denotate_check::test_support::with_test_input_order(order.clone(), || {
         budget_result_lowered(&p, max_work)
     });
     let witness = |result: &Value| {
@@ -158,8 +158,10 @@ fn witness_row(name: String, source: &str, max_work: usize) -> Value {
 #[ignore = "manual release 6a.1 witness delta and key phase evidence"]
 fn measure_key_boundary() {
     assert!(!cfg!(debug_assertions));
-    let baseline: Value =
-        serde_json::from_str(include_str!("../../fixtures/SLICE-6.0-BASELINE.json")).unwrap();
+    let baseline: Value = serde_json::from_str(include_str!(
+        "../../../check/fixtures/SLICE-6.0-BASELINE.json"
+    ))
+    .unwrap();
     let mut witnesses = Vec::new();
     for edit in baseline["edits"].as_array().unwrap() {
         for side in ["before", "after"] {
