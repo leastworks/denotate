@@ -6,6 +6,7 @@ rust-version = "1.93"
 publish = false
 
 [dependencies]
+salsa.workspace = true
 denotate-check = { path = "../check" }
 denotate-ir = { path = "../ir" }
 

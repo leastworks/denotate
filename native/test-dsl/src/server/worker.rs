@@ -33,19 +33,33 @@ pub enum Event {
     Checkpoint(Identity),
     Finished(Identity, Result<Output, Failure>, Option<u64>),
 }
+pub enum Command {
+    Check(Job),
+    Close(Url),
+}
 pub struct Worker {
-    pub jobs: Sender<Job>,
+    pub jobs: Sender<Command>,
     pub events: Receiver<Event>,
     thread: JoinHandle<()>,
 }
 impl Worker {
     pub fn spawn() -> std::io::Result<Self> {
-        let (jobs, pending) = unbounded::<Job>();
+        let (jobs, pending) = unbounded::<Command>();
         let (send, events) = unbounded();
         let thread = thread::Builder::new()
             .name("inputmapping-check".into())
             .spawn(move || {
-                for job in pending {
+                let mut sessions =
+                    std::collections::BTreeMap::<Url, denotate_check_session::Session>::new();
+                for command in pending {
+                    let job = match command {
+                        Command::Check(job) => job,
+                        Command::Close(uri) => {
+                            sessions.remove(&uri);
+                            continue;
+                        }
+                    };
+                    let session = sessions.entry(job.id.uri.clone()).or_default();
                     let checkpoint = |stage| {
                         if let Some(hold) = &job.hold {
                             if hold.stage == stage {
@@ -55,9 +69,11 @@ impl Worker {
                         }
                     };
                     let start = job.measure.then(Instant::now);
-                    let result = job
-                        .program
-                        .check(&job.limits, || checkpoint(HoldStage::AfterPrepare));
+                    let result = job.program.check_cached(
+                        &job.limits,
+                        || checkpoint(HoldStage::AfterPrepare),
+                        session,
+                    );
                     let check_ns =
                         start.map(|t| t.elapsed().as_nanos().min(u64::MAX as u128) as u64);
                     // Deliberately after checking's final cancellation test: exercises

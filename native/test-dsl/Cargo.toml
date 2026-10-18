@@ -9,6 +9,7 @@ publish = false
 denotate-ir = { path = "../ir" }
 denotate-normalize = { path = "../normalize" }
 denotate-check = { path = "../check" }
+denotate-check-session = { path = "../check-session" }
 denotate-editor = { path = "../editor" }
 tree-sitter = "=0.25.10"
 tree-sitter-language = "=0.1.5"

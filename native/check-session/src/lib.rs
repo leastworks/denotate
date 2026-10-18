@@ -1,4 +1,4 @@
-//! Fresh checker session boundary. No memoization or editor lifecycle state yet.
+//! Fresh and memoized checker drivers; snapshot presentation always remains fresh.
 use denotate_check::{CheckError, LocalCheckOutcome, OperationalLimits, PreparedCheck};
 
 #[derive(Default)]
@@ -14,3 +14,8 @@ impl FreshSession {
 }
 #[cfg(test)]
 mod tests;
+
+mod cache;
+pub use cache::*;
+
+mod retention;

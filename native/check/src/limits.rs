@@ -134,6 +134,16 @@ impl<'a> Budget<'a> {
         budget.charges = Some(WorkCharges::default());
         budget
     }
+    pub(crate) fn snapshot(&self) -> WorkCharges {
+        self.charges.clone().expect("tracked budget")
+    }
+    pub(crate) fn resume(limits: &'a Limits, charges: WorkCharges) -> Self {
+        Self {
+            work: charges.work,
+            charges: Some(charges),
+            ..Self::tracked(limits)
+        }
+    }
     pub fn observe(&mut self, phase: &str, resource: &str, count: usize) {
         if let Some(charges) = &mut self.charges {
             let peak = charges

@@ -11,12 +11,139 @@ use std::{
 };
 
 mod input;
+mod memo;
 pub use input::*;
 #[cfg(test)]
 mod tests;
 
 impl PreparedCheck<'_> {
+    fn compute_local_group(
+        &self,
+        cone: &DependencyCone,
+        group: &AtMostOneGroup,
+        key: &GroupKey,
+        mut budget: Budget<'_>,
+        limits: &Limits,
+        metrics: &mut LocalMetrics,
+    ) -> Result<LocalMemo> {
+        let mut receipts = WorkReceipts::default();
+        let start = Instant::now();
+        let evaluation = self
+            .program
+            .symbolic_selected(&mut budget, true, Some(&cone));
+        metrics.evaluation += start.elapsed();
+        let start = Instant::now();
+        let evaluation = evaluation
+            .and_then(|m| export_evaluation(m, self.semantic_keys, &self.keys, &mut budget));
+        metrics.export += start.elapsed();
+        if let Err(e) = &evaluation {
+            Inconclusive::from_error(e.clone())?;
+            budget.failure(e);
+        }
+        budget.record(
+            &mut receipts,
+            QueryKey::ConeEvaluation(key.clone()),
+            [QueryKey::ConeIndex],
+        )?;
+        let mut budget = Budget::tracked(&limits);
+        let (meaning, value) = match evaluation {
+            Ok(v) => v,
+            Err(e) => {
+                let cause = Inconclusive::from_error(e)?;
+                budget.record(
+                    &mut receipts,
+                    QueryKey::Property(key.clone()),
+                    [QueryKey::ConeEvaluation(key.clone())],
+                )?;
+                return Ok(LocalMemo {
+                    reorder_safe: false,
+                    evaluation: None,
+                    answer: None,
+                    failure: Some(cause),
+                    evaluation_receipt: receipts
+                        .get(&QueryKey::ConeEvaluation(key.clone()))
+                        .unwrap()
+                        .clone(),
+                    answer_receipt: receipts
+                        .get(&QueryKey::Property(key.clone()))
+                        .unwrap()
+                        .clone(),
+                });
+            }
+        };
+        let property_start = Instant::now();
+        let outcome = local_property(&meaning, &cone, group, self.semantic_keys, &mut budget);
+        metrics.property += property_start.elapsed();
+        let export_start = Instant::now();
+        let owned = outcome.and_then(|o| match o {
+            GroupOutcome::Overlap(c) => Ok((
+                Some(
+                    meaning
+                        .context
+                        .export(&c, self.semantic_keys, &mut budget)?,
+                ),
+                GroupOutcome::Overlap(c),
+            )),
+            o => Ok((None, o)),
+        });
+        metrics.export += export_start.elapsed();
+        if let Err(e) = &owned {
+            Inconclusive::from_error(e.clone())?;
+            budget.failure(e);
+        }
+        budget.record(
+            &mut receipts,
+            QueryKey::Property(key.clone()),
+            [QueryKey::ConeEvaluation(key.clone())],
+        )?;
+        let (condition, outcome) = match owned {
+            Ok(v) => v,
+            Err(e) => (
+                None,
+                GroupOutcome::Inconclusive(Inconclusive::from_error(e)?),
+            ),
+        };
+        let answer = LocalAnswer::Group(match &outcome {
+            GroupOutcome::Proved => LocalVerdict::Proved,
+            GroupOutcome::Overlap(_) => LocalVerdict::Overlap(condition.as_ref().unwrap().clone()),
+            GroupOutcome::Unsupported => {
+                LocalVerdict::Unsupported(CapabilityReason::UnsettledDependencies(
+                    cone.blocked_by
+                        .iter()
+                        .map(|id| self.keys.components[id].clone())
+                        .collect(),
+                ))
+            }
+            GroupOutcome::Inconclusive(c) => LocalVerdict::Inconclusive((*c).into()),
+        });
+
+        Ok(LocalMemo {
+            reorder_safe: reorder_safe(&meaning, &value),
+            evaluation: Some(value),
+            answer: Some(answer),
+            failure: if let GroupOutcome::Inconclusive(c) = outcome {
+                Some(c)
+            } else {
+                None
+            },
+            evaluation_receipt: receipts
+                .get(&QueryKey::ConeEvaluation(key.clone()))
+                .unwrap()
+                .clone(),
+            answer_receipt: receipts
+                .get(&QueryKey::Property(key.clone()))
+                .unwrap()
+                .clone(),
+        })
+    }
     pub fn verify_local(&self, operations: &OperationalLimits) -> Result<LocalCheckOutcome<'_>> {
+        self.verify_local_with(operations, &mut NoLocalMemo)
+    }
+    pub fn verify_local_with(
+        &self,
+        operations: &OperationalLimits,
+        cache: &mut dyn LocalMemoStore,
+    ) -> Result<LocalCheckOutcome<'_>> {
         operations.cancellation.check()?;
         validate_local_constraints(&self.request.constraints)?;
         let limits = self.request.limits.with_operations(operations);
@@ -67,6 +194,7 @@ impl PreparedCheck<'_> {
             context,
             conditions: BTreeMap::new(),
             inconclusive: BTreeMap::new(),
+            reorder_storage_bound: 0,
             metrics: SymbolicMetrics {
                 elapsed: Duration::ZERO,
                 work: 0,
@@ -139,98 +267,50 @@ impl PreparedCheck<'_> {
             metrics.cone_atoms += input.facts.len();
             metrics.cone_inputs += input.inputs.len();
             unique.extend(input.facts.iter().cloned());
-            let start = Instant::now();
-            let evaluation = self
-                .program
-                .symbolic_selected(&mut budget, true, Some(&cone));
-            let evaluation = evaluation
-                .and_then(|m| export_evaluation(m, self.semantic_keys, &self.keys, &mut budget));
-            metrics.evaluation += start.elapsed();
-            if let Err(e) = &evaluation {
-                Inconclusive::from_error(e.clone())?;
-                budget.failure(e);
-            }
-            budget.record(
-                &mut receipts,
-                QueryKey::ConeEvaluation(key.clone()),
-                [QueryKey::ConeIndex],
-            )?;
-            let mut budget = Budget::tracked(&limits);
-            let (meaning, value) = match evaluation {
-                Ok(v) => v,
-                Err(e) => {
-                    let cause = Inconclusive::from_error(e)?;
-                    artifacts.insert(
-                        scope,
-                        LocalArtifact {
-                            input,
-                            evaluation: None,
-                            answer: None,
-                        },
-                    );
-                    budget.record(
-                        &mut receipts,
-                        QueryKey::Property(key.clone()),
-                        [QueryKey::ConeEvaluation(key.clone())],
-                    )?;
-                    Budget::tracked(&limits).record(
-                        &mut receipts,
-                        QueryKey::FindingConversion(key.clone()),
-                        [QueryKey::Property(key), QueryKey::FindingContext],
-                    )?;
-                    groups.push(GroupCheck {
-                        group: group.clone(),
-                        cone,
-                        outcome: GroupOutcome::Inconclusive(cause),
-                    });
-                    continue;
+            operations.cancellation.check()?;
+            let key_start = Instant::now();
+            let work = self.local_work_input(&cone, budget.snapshot(), false);
+            metrics.keys += key_start.elapsed();
+            let memo = match cache.get(&input, &work) {
+                Some(v) => v,
+                None => {
+                    let v = std::sync::Arc::new(self.compute_local_group(
+                        &cone,
+                        group,
+                        &key,
+                        budget,
+                        &limits,
+                        &mut metrics,
+                    )?);
+                    operations.cancellation.check()?;
+                    cache.put(&input, &work, v.clone());
+                    v
                 }
             };
-            let property_start = Instant::now();
-            let outcome = local_property(&meaning, &cone, group, self.semantic_keys, &mut budget);
-            let owned = outcome.and_then(|o| match o {
-                GroupOutcome::Overlap(c) => Ok((
-                    Some(
-                        meaning
-                            .context
-                            .export(&c, self.semantic_keys, &mut budget)?,
-                    ),
-                    GroupOutcome::Overlap(c),
-                )),
-                o => Ok((None, o)),
-            });
-            metrics.property += property_start.elapsed();
-            if let Err(e) = &owned {
-                Inconclusive::from_error(e.clone())?;
-                budget.failure(e);
-            }
-            budget.record(
-                &mut receipts,
-                QueryKey::Property(key.clone()),
-                [QueryKey::ConeEvaluation(key.clone())],
-            )?;
-            let (condition, mut outcome) = match owned {
-                Ok(v) => v,
-                Err(e) => (
-                    None,
-                    GroupOutcome::Inconclusive(Inconclusive::from_error(e)?),
+            receipts
+                .record(
+                    QueryKey::ConeEvaluation(key.clone()),
+                    memo.evaluation_receipt.clone(),
+                )
+                .map_err(CheckError::Receipts)?;
+            receipts
+                .record(QueryKey::Property(key.clone()), memo.answer_receipt.clone())
+                .map_err(CheckError::Receipts)?;
+            let value = memo.evaluation.as_ref();
+            let answer = memo.answer.as_ref();
+            let condition = match answer {
+                Some(LocalAnswer::Group(LocalVerdict::Overlap(c))) => Some(c),
+                _ => None,
+            };
+            let mut outcome = match answer {
+                Some(LocalAnswer::Group(LocalVerdict::Proved)) => GroupOutcome::Proved,
+                Some(LocalAnswer::Group(LocalVerdict::Unsupported(_))) => GroupOutcome::Unsupported,
+                Some(LocalAnswer::Group(LocalVerdict::Overlap(_))) => GroupOutcome::Proved, // replaced by current-context import below
+                _ => GroupOutcome::Inconclusive(
+                    memo.failure
+                        .ok_or(CheckError::Internal("missing local failure"))?,
                 ),
             };
-            let answer = LocalAnswer::Group(match &outcome {
-                GroupOutcome::Proved => LocalVerdict::Proved,
-                GroupOutcome::Overlap(_) => {
-                    LocalVerdict::Overlap(condition.as_ref().unwrap().clone())
-                }
-                GroupOutcome::Unsupported => {
-                    LocalVerdict::Unsupported(CapabilityReason::UnsettledDependencies(
-                        cone.blocked_by
-                            .iter()
-                            .map(|id| self.keys.components[id].clone())
-                            .collect(),
-                    ))
-                }
-                GroupOutcome::Inconclusive(c) => LocalVerdict::Inconclusive((*c).into()),
-            });
             let start = Instant::now();
             let mut budget = Budget::tracked(&limits);
             let converted = (|| -> Result<()> {
@@ -244,7 +324,10 @@ impl PreparedCheck<'_> {
                     for tuple in &group.tuples {
                         let atom = AtomKey::from_atom(self.semantic_keys, tuple)
                             .map_err(CheckError::Keys)?;
-                        let c = value.conditions.get(&atom);
+                        let c = value
+                            .ok_or(CheckError::Internal("missing local evaluation"))?
+                            .conditions
+                            .get(&atom);
                         let c = match c {
                             Some(c) => presentation.context.import(c, &atoms, &mut budget)?,
                             None => presentation.context.false_condition(),
@@ -270,8 +353,8 @@ impl PreparedCheck<'_> {
                 scope,
                 LocalArtifact {
                     input,
-                    evaluation: Some(value),
-                    answer: Some(answer),
+                    evaluation: value.cloned(),
+                    answer: answer.cloned(),
                 },
             );
             groups.push(GroupCheck {
@@ -289,68 +372,115 @@ impl PreparedCheck<'_> {
         for (key, component) in regions {
             let scope = LocalScope::Region(key.clone());
             let mut budget = Budget::tracked(&limits);
-            let start = Instant::now();
-            let result = (|| -> Result<(SymbolicMeaning<'_>, LocalEvaluation)> {
-                let cone = index.build(component.atoms.iter().cloned(), &mut budget)?;
-                let start = Instant::now();
-                let input = self.local_input(scope.clone(), &cone)?;
-                metrics.keys += start.elapsed();
-                metrics.cone_atoms += input.facts.len();
-                metrics.cone_inputs += input.inputs.len();
-                unique.extend(input.facts.iter().cloned());
-                artifacts.insert(
-                    scope.clone(),
-                    LocalArtifact {
-                        input,
+            let cone = index.build(component.atoms.iter().cloned(), &mut budget);
+            let mut raw = None;
+            let memo = match cone {
+                Ok(cone) => {
+                    let start = Instant::now();
+                    let input = self.local_input(scope.clone(), &cone)?;
+                    metrics.keys += start.elapsed();
+                    metrics.cone_atoms += input.facts.len();
+                    metrics.cone_inputs += input.inputs.len();
+                    unique.extend(input.facts.iter().cloned());
+                    let key_start = Instant::now();
+                    let work = self.local_work_input(&cone, budget.snapshot(), true);
+                    metrics.keys += key_start.elapsed();
+                    operations.cancellation.check()?;
+                    let memo = match cache.get(&input, &work) {
+                        Some(v) => v,
+                        None => {
+                            let (v, source) = self.compute_local_region(
+                                &cone,
+                                component,
+                                &key,
+                                budget,
+                                &limits,
+                                &mut metrics,
+                            )?;
+                            raw = source;
+                            let v = std::sync::Arc::new(v);
+                            operations.cancellation.check()?;
+                            cache.put(&input, &work, v.clone());
+                            v
+                        }
+                    };
+                    artifacts.insert(
+                        scope,
+                        LocalArtifact {
+                            input,
+                            evaluation: memo.evaluation.clone(),
+                            answer: memo.answer.clone(),
+                        },
+                    );
+                    memo
+                }
+                Err(e) => {
+                    let failure = Inconclusive::from_error(e.clone())?;
+                    budget.failure(&e);
+                    let mut local_receipts = WorkReceipts::default();
+                    budget.record(
+                        &mut local_receipts,
+                        QueryKey::RegionEvaluation(key.clone()),
+                        [QueryKey::ConeIndex],
+                    )?;
+                    let mut b = Budget::tracked(&limits);
+                    b.failure(&e);
+                    b.record(
+                        &mut local_receipts,
+                        QueryKey::Completion(key.clone()),
+                        [
+                            QueryKey::RegionEvaluation(key.clone()),
+                            QueryKey::FindingContext,
+                        ],
+                    )?;
+                    std::sync::Arc::new(LocalMemo {
+                        reorder_safe: false,
                         evaluation: None,
                         answer: None,
-                    },
-                );
-                let meaning = self
-                    .program
-                    .symbolic_selected(&mut budget, true, Some(&cone))?;
-                export_evaluation(meaning, self.semantic_keys, &self.keys, &mut budget)
-            })();
-            metrics.evaluation += start.elapsed();
-            if let Err(e) = &result {
-                Inconclusive::from_error(e.clone())?;
-                budget.failure(e);
-            }
-            budget.record(
-                &mut receipts,
-                QueryKey::RegionEvaluation(key.clone()),
-                [QueryKey::ConeIndex],
-            )?;
-            let mut budget = Budget::tracked(&limits);
-            let completion = match result {
-                Ok((m, v)) => {
-                    artifacts.get_mut(&scope).unwrap().evaluation = Some(v);
-                    let start = Instant::now();
-                    let completed = m
-                        .complete_component(component, 0, &mut budget)
-                        .and_then(|c| {
-                            let answer = self.own_completion(&c, &m.context, &mut budget)?;
-                            artifacts.get_mut(&scope).unwrap().answer = Some(answer);
-                            Ok(c)
-                        });
-                    metrics.completion += start.elapsed();
-                    let start = Instant::now();
-                    let converted = completed.and_then(|c| {
-                        convert_completion(
-                            c,
-                            &m.context,
-                            &presentation.context,
-                            self.semantic_keys,
-                            &atoms,
-                            &self.program,
-                            &mut budget,
-                        )
-                    });
-                    metrics.conversion += start.elapsed();
-                    converted
+                        failure: Some(failure),
+                        evaluation_receipt: local_receipts
+                            .get(&QueryKey::RegionEvaluation(key.clone()))
+                            .unwrap()
+                            .clone(),
+                        answer_receipt: local_receipts
+                            .get(&QueryKey::Completion(key.clone()))
+                            .unwrap()
+                            .clone(),
+                    })
                 }
-                Err(e) => Err(e),
             };
+            receipts
+                .record(
+                    QueryKey::RegionEvaluation(key.clone()),
+                    memo.evaluation_receipt.clone(),
+                )
+                .map_err(CheckError::Receipts)?;
+            let mut budget = Budget::resume(&limits, memo.answer_receipt.own.clone());
+            let start = Instant::now();
+            let exports_before = metrics.export;
+            let completion = if let Some((context, c)) = raw {
+                convert_completion(
+                    c,
+                    &context,
+                    &presentation.context,
+                    self.semantic_keys,
+                    &atoms,
+                    &self.program,
+                    &mut budget,
+                    &mut metrics.export,
+                )
+            } else {
+                self.restore_completion(
+                    component,
+                    &memo,
+                    &presentation.context,
+                    &atoms,
+                    &mut budget,
+                )
+            };
+            metrics.conversion += start
+                .elapsed()
+                .saturating_sub(metrics.export - exports_before);
             let completion = match completion {
                 Ok(c) => c,
                 Err(e) => {
@@ -360,11 +490,8 @@ impl PreparedCheck<'_> {
             };
             budget.record(
                 &mut receipts,
-                QueryKey::Completion(key),
-                [
-                    QueryKey::RegionEvaluation(self.keys.components[&component.id].clone()),
-                    QueryKey::FindingContext,
-                ],
+                QueryKey::Completion(key.clone()),
+                [QueryKey::RegionEvaluation(key), QueryKey::FindingContext],
             )?;
             completions.insert(component.id, completion);
         }
@@ -515,6 +642,7 @@ fn local_property(
         Ok(GroupOutcome::Overlap(violation))
     }
 }
+
 fn convert_completion(
     mut c: CompletionOutcome,
     from: &ConditionContext,
@@ -523,11 +651,20 @@ fn convert_completion(
     atoms: &BTreeMap<AtomKey, GroundAtom>,
     program: &GroundProgram,
     budget: &mut Budget<'_>,
+    export_time: &mut Duration,
 ) -> Result<CompletionOutcome> {
     if let CompletionOutcome::NoMeaning(f) = &mut c {
-        f.bad_input = to.import(&from.export(&f.bad_input, keys, budget)?, atoms, budget)?;
+        f.bad_input = to.import(
+            &timed_export(from, &f.bad_input, keys, budget, export_time)?,
+            atoms,
+            budget,
+        )?;
         for b in f.upstream.values_mut() {
-            b.condition = to.import(&from.export(&b.condition, keys, budget)?, atoms, budget)?;
+            b.condition = to.import(
+                &timed_export(from, &b.condition, keys, budget, export_time)?,
+                atoms,
+                budget,
+            )?;
         }
         budget.charge(program.inputs.len(), "local witness extension")?;
         f.observation.absent = program
@@ -538,4 +675,36 @@ fn convert_completion(
         program.validate_input_world(&f.observation.present, budget)?;
     }
     Ok(c)
+}
+
+/// Provider-first component permutations execute identical component-local work.
+/// Reuse only complete evaluation and only when final export storage dominates
+/// the sum of component peak additions. Thus order cannot change the storage
+/// high-water receipt or hit a storage limit. Completed total work also bounds
+/// every reordered prefix, including the charged BDD task preflight.
+fn reorder_safe(meaning: &SymbolicMeaning<'_>, value: &LocalEvaluation) -> bool {
+    let export_final = value.conditions.values().fold(
+        meaning
+            .metrics
+            .retained_condition_nodes
+            .saturating_add(value.permitted.node_count()),
+        |n, c| n.saturating_add(c.node_count()),
+    );
+    meaning.inconclusive.is_empty()
+        && export_final != usize::MAX
+        && meaning.reorder_storage_bound != usize::MAX
+        && export_final >= meaning.reorder_storage_bound
+}
+
+fn timed_export(
+    context: &ConditionContext,
+    condition: &Condition,
+    keys: &SemanticKeys,
+    budget: &mut Budget<'_>,
+    elapsed: &mut Duration,
+) -> Result<OwnedCondition> {
+    let start = Instant::now();
+    let value = context.export(condition, keys, budget);
+    *elapsed += start.elapsed();
+    value
 }

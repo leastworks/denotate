@@ -157,7 +157,7 @@ impl Server {
                 id: job.id.clone(),
                 cancellation: job.limits.cancellation.clone(),
             });
-            self.worker.jobs.send(job)?;
+            self.worker.jobs.send(worker::Command::Check(job))?;
         }
         Ok(())
     }
@@ -268,6 +268,7 @@ impl Server {
                 self.cancel(&uri);
                 self.documents.remove(&uri);
                 self.lowering.remove(&uri);
+                self.worker.jobs.send(worker::Command::Close(uri.clone()))?;
                 publish(connection, &uri, None, vec![])?;
             }
             "$/cancelRequest" => {
@@ -378,7 +379,10 @@ impl Server {
         if self.tests {
             self.hooks
                 .finished
-                .push(json!({"snapshot": identity(&id), "status": status, "check_ns": check_ns, "key_computation_ns": result.as_ref().ok().map(|o| o.key_computation.as_nanos())}));
+                .push(json!({"snapshot": identity(&id), "status": status, "check_ns": check_ns, "key_computation_ns": result.as_ref().ok().map(|o| o.key_computation.as_nanos()),
+                    "cache": result.as_ref().ok().and_then(|o| o.cache).map(|c| json!({"evaluation_hits":c.evaluation_hits,"evaluation_misses":c.evaluation_misses,"verdict_hits":c.verdict_hits,"verdict_misses":c.verdict_misses,"completion_hits":c.completion_hits,"completion_misses":c.completion_misses,"retained_entries":c.retained_entries})),
+                    "local_evaluation_ns": result.as_ref().ok().and_then(|o| o.local_metrics.as_ref()).map(|m| m.evaluation.as_nanos()),
+                    "bdd_export_ns": result.as_ref().ok().and_then(|o| o.local_metrics.as_ref()).map(|m| m.export.as_nanos())}));
         }
         if !current || matches!(result, Err(Failure::Cancelled)) {
             return Ok(());

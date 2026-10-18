@@ -23,6 +23,8 @@ pub struct Program {
 }
 pub struct Output {
     pub key_computation: std::time::Duration,
+    pub local_metrics: Option<LocalMetrics>,
+    pub cache: Option<denotate_check_session::CacheStats>,
     pub results: Accounted<ScopedResults>,
     pub diagnostics: Vec<Diagnostic>,
     pub creator_warnings: Vec<String>,
@@ -198,7 +200,24 @@ impl Program {
         Ok(Location::new(self.uri.clone(), range(&self.document, span)))
     }
 
+    /// Global compatibility oracle. The editor uses `check_cached`.
     pub fn check(&self, limits: &Limits, after_prepare: impl FnOnce()) -> Result<Output, Failure> {
+        self.check_using(limits, after_prepare, None)
+    }
+    pub fn check_cached(
+        &self,
+        limits: &Limits,
+        after_prepare: impl FnOnce(),
+        session: &mut denotate_check_session::Session,
+    ) -> Result<Output, Failure> {
+        self.check_using(limits, after_prepare, Some(session))
+    }
+    fn check_using(
+        &self,
+        limits: &Limits,
+        after_prepare: impl FnOnce(),
+        session: Option<&mut denotate_check_session::Session>,
+    ) -> Result<Output, Failure> {
         limits.cancellation.check()?;
         let request = self.lowered.request(limits)?;
         let operations = OperationalLimits::from(limits);
@@ -218,7 +237,28 @@ impl Program {
         after_prepare();
         limits.cancellation.check()?;
         let ground = ground.admit(&operations)?;
-        let report = match ground.verify(&operations)? {
+        let mut local_metrics = None;
+        let mut cache = None;
+        let outcome = if let Some(session) = session {
+            let result = session.verify(&ground, &operations)?;
+            cache = Some(session.stats());
+            match result {
+                LocalCheckOutcome::Complete(r) => {
+                    local_metrics = Some(r.metrics);
+                    CheckOutcome::Complete(r.checked)
+                }
+                LocalCheckOutcome::Inconclusive { reason, receipts } => {
+                    CheckOutcome::Inconclusive {
+                        stage: CheckStage::Verification,
+                        reason,
+                        receipts,
+                    }
+                }
+            }
+        } else {
+            ground.verify(&operations)?
+        };
+        let report = match outcome {
             CheckOutcome::Complete(r) => r,
             CheckOutcome::Inconclusive {
                 stage,
@@ -252,7 +292,13 @@ impl Program {
         .map_err(|e| Failure::Creator(e.to_string()))?;
         let mut output = Output {
             results: report.results,
-            key_computation: self.lowered.key_computation + ground.key_computation(),
+            key_computation: self.lowered.key_computation
+                + ground.key_computation()
+                + local_metrics
+                    .as_ref()
+                    .map_or(std::time::Duration::ZERO, |m| m.keys),
+            local_metrics,
+            cache,
             diagnostics: vec![],
             creator_warnings: vec![],
         };
@@ -351,6 +397,8 @@ fn inconclusive(
     Output {
         results,
         key_computation,
+        local_metrics: None,
+        cache: None,
         diagnostics: vec![diagnostic(
             Range::default(),
             "inconclusive",

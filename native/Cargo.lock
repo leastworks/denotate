@@ -159,6 +159,7 @@ dependencies = [
  "denotate-ir",
  "denotate-normalize",
  "denotate-test-dsl",
+ "salsa",
  "serde_json",
 ]
 
@@ -201,6 +202,7 @@ dependencies = [
  "cc",
  "crossbeam-channel",
  "denotate-check",
+ "denotate-check-session",
  "denotate-editor",
  "denotate-ir",
  "denotate-normalize",

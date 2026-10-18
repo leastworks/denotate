@@ -35,6 +35,19 @@ fn compare(source: &str) {
         render(&local.checked.verification),
         "{source}"
     );
+    let mut cached_session = crate::Session::default();
+    for _ in 0..2 {
+        let LocalCheckOutcome::Complete(cached) =
+            cached_session.verify(&prepared, &(&l).into()).unwrap()
+        else {
+            panic!("cached exhausted")
+        };
+        assert_eq!(cached.checked.results, local.checked.results);
+        assert_eq!(
+            render(&cached.checked.verification),
+            render(&local.checked.verification)
+        );
+    }
     local.checked.results.receipts.total().unwrap();
     assert!(
         local

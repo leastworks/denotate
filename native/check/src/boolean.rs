@@ -51,6 +51,9 @@ pub struct Condition {
     bdd: Arc<Bdd>,
 }
 impl Condition {
+    pub(crate) fn accounting_graph(&self) -> Vec<u8> {
+        self.bdd.to_bytes()
+    }
     /// Raw Boolean falsity, without restricting to permitted input worlds.
     pub fn is_false(&self) -> bool {
         self.bdd.is_false()

@@ -71,7 +71,9 @@ pub struct LocalArtifact {
 #[derive(Debug, Default)]
 pub struct LocalMetrics {
     pub keys: Duration,
+    /// Local context setup and symbolic evaluation, excluding owned BDD export.
     pub evaluation: Duration,
+    pub export: Duration,
     pub conversion: Duration,
     pub completion: Duration,
     pub property: Duration,
@@ -256,6 +258,7 @@ impl PreparedCheck<'_> {
         completion: &CompletionOutcome,
         context: &ConditionContext,
         budget: &mut Budget<'_>,
+        export_time: &mut Duration,
     ) -> Result<LocalAnswer> {
         let atom =
             |a: &GroundAtom| AtomKey::from_atom(self.semantic_keys, a).map_err(CheckError::Keys);
@@ -281,13 +284,25 @@ impl PreparedCheck<'_> {
                 for (a, b) in &f.upstream {
                     boundary.insert(
                         atom(a)?,
-                        context.export(&b.condition, self.semantic_keys, budget)?,
+                        timed_export(
+                            context,
+                            &b.condition,
+                            self.semantic_keys,
+                            budget,
+                            export_time,
+                        )?,
                     );
                     if let CompletedProvider::Component(id) = b.provider {
                         evidence.providers.insert(self.keys.components[&id].clone());
                     }
                 }
-                bad_input = Some(context.export(&f.bad_input, self.semantic_keys, budget)?);
+                bad_input = Some(timed_export(
+                    context,
+                    &f.bad_input,
+                    self.semantic_keys,
+                    budget,
+                    export_time,
+                )?);
                 RegionCompletion::NoMeaning {
                     candidate: Candidate {
                         present: f
@@ -312,5 +327,165 @@ impl PreparedCheck<'_> {
             bad_input,
             boundary,
         })
+    }
+}
+
+/// Fully completed local query pair. Logical charges survive value eviction.
+/// Only owned semantic values cross this boundary; presentation remains current.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalMemo {
+    /// A proof that component-order changes preserve storage peaks, not just truth.
+    pub reorder_safe: bool,
+    pub evaluation: Option<LocalEvaluation>,
+    pub answer: Option<LocalAnswer>,
+    pub failure: Option<Inconclusive>,
+    pub evaluation_receipt: WorkReceipt,
+    pub answer_receipt: WorkReceipt,
+}
+/// The checker does not depend on a storage engine. A session validates structural
+/// inputs and supplies only fully completed query pairs from the same boundary.
+pub trait LocalMemoStore {
+    fn get(
+        &mut self,
+        input: &LocalInput,
+        work: &LocalWorkInput,
+    ) -> Option<std::sync::Arc<LocalMemo>>;
+    fn put(&mut self, input: &LocalInput, work: &LocalWorkInput, value: std::sync::Arc<LocalMemo>);
+}
+pub struct NoLocalMemo;
+impl LocalMemoStore for NoLocalMemo {
+    fn get(&mut self, _: &LocalInput, _: &LocalWorkInput) -> Option<std::sync::Arc<LocalMemo>> {
+        None
+    }
+    fn put(&mut self, _: &LocalInput, _: &LocalWorkInput, _: std::sync::Arc<LocalMemo>) {}
+}
+
+/// Execution order and fresh discovery charges are receipt dependencies, even
+/// when semantic inputs compare equal. No arena IDs are retained here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalWorkInput {
+    pub discovery: WorkCharges,
+    pub components: Vec<(ComponentKey, Vec<AtomKey>, Vec<InstanceKey>)>,
+    pub completion_rewrite_scan: usize,
+    pub fact_order: Vec<AtomKey>,
+    pub completion: Option<CompletionWorkInput>,
+}
+/// Completion's scoped replay still scans global rules/components and validates
+/// global W. These are accounting dependencies, separate from projected semantics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompletionWorkInput {
+    pub rules_scanned: usize,
+    pub component_gaps: Vec<usize>,
+    pub constraint_sizes: Vec<usize>,
+    pub discharge_context: Option<DischargeWorkInput>,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DischargeWorkInput {
+    pub inputs: Vec<AtomKey>,
+    pub groups: Vec<Vec<AtomKey>>,
+    pub proofs: Vec<(RewriteEvidenceKey, Vec<u8>, Vec<u8>)>,
+}
+impl PreparedCheck<'_> {
+    pub(super) fn local_work_input(
+        &self,
+        cone: &DependencyCone,
+        discovery: WorkCharges,
+        region: bool,
+    ) -> LocalWorkInput {
+        let fact_order = cone
+            .facts
+            .iter()
+            .map(|a| self.keys.atoms[a].clone())
+            .collect();
+        let completion = region.then(|| {
+            let mut last = 0;
+            let mut gaps = Vec::new();
+            for id in &cone.components {
+                gaps.push(id.index - last);
+                last = id.index + 1;
+            }
+            gaps.push(self.program.components.len() - last);
+            let proofs: Vec<_> = self
+                .program
+                .rewrite_proofs()
+                .filter(|p| {
+                    matches!(p.kind, RewriteKind::Discharge { .. })
+                        && cone.rules.contains(&p.candidate.rule.id)
+                })
+                .map(|p| {
+                    (
+                        self.keys.rewrites[&p.id].clone(),
+                        p.candidate.condition.accounting_graph(),
+                        p.coverage.accounting_graph(),
+                    )
+                })
+                .collect();
+            let discharge_context = (!proofs.is_empty()).then(|| DischargeWorkInput {
+                inputs: self
+                    .program
+                    .input_order
+                    .as_ref()
+                    .unwrap()
+                    .iter()
+                    .map(|a| self.keys.atoms[a].clone())
+                    .collect(),
+                groups: self
+                    .program
+                    .input_groups
+                    .iter()
+                    .map(|g| g.iter().map(|a| self.keys.atoms[a].clone()).collect())
+                    .collect(),
+                proofs,
+            });
+            CompletionWorkInput {
+                rules_scanned: self.program.rules.len(),
+                component_gaps: gaps,
+                constraint_sizes: self.program.input_groups.iter().map(Vec::len).collect(),
+                discharge_context,
+            }
+        });
+        LocalWorkInput {
+            discovery,
+            fact_order,
+            completion,
+            components: cone
+                .components
+                .iter()
+                .map(|id| &self.program.components[id.index])
+                .map(|c| {
+                    (
+                        self.keys.components[&c.id].clone(),
+                        c.atoms.iter().map(|a| self.keys.atoms[a].clone()).collect(),
+                        self.program.component_rules[c.id.index]
+                            .iter()
+                            .map(|r| self.keys.instances[&self.program.rules[*r].id].clone())
+                            .collect(),
+                    )
+                })
+                .collect(),
+            completion_rewrite_scan: if region {
+                self.program.rewrite_proofs().count()
+            } else {
+                0
+            },
+        }
+    }
+}
+
+impl LocalWorkInput {
+    pub fn same_component_work(&self, other: &Self) -> bool {
+        self.discovery == other.discovery
+            && self.completion == other.completion
+            && self.completion_rewrite_scan == other.completion_rewrite_scan
+            && self
+                .components
+                .iter()
+                .map(|(k, a, r)| (k, (a, r)))
+                .collect::<BTreeMap<_, _>>()
+                == other
+                    .components
+                    .iter()
+                    .map(|(k, a, r)| (k, (a, r)))
+                    .collect::<BTreeMap<_, _>>()
     }
 }

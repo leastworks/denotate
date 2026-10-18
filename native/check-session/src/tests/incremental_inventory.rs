@@ -713,3 +713,6 @@ mod planner_evidence;
 
 #[path = "local.rs"]
 mod local;
+
+#[path = "memo.rs"]
+mod memo;
