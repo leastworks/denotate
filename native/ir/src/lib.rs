@@ -6,9 +6,11 @@
 
 mod ids;
 pub mod installation;
+mod keys;
 mod model;
 mod provenance;
 
 pub use ids::*;
+pub use keys::*;
 pub use model::*;
 pub use provenance::*;

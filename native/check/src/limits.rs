@@ -11,6 +11,7 @@ use std::{
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckError {
+    Keys(denotate_ir::KeyError),
     /// Superseded work, not a resource limit or a semantic result.
     Cancelled,
     InvalidDomain {

@@ -425,3 +425,46 @@ fn additional_installed_cases_match_frozen_legacy_output() {
         );
     }
 }
+
+#[test]
+fn keyed_frontend_preparation_preserves_limits_and_routes_binding_failures_to_creator() {
+    use denotate_check::{CheckError, Limits};
+    let frozen: serde_json::Value =
+        serde_json::from_str(include_str!("../../check/fixtures/SLICE-6.0-BASELINE.json")).unwrap();
+    for observation in frozen["budgets"].as_array().unwrap() {
+        let (ast, sources) = parse(observation["source"].as_str().unwrap(), 1);
+        let p = lowered(lowering::lower(&ast, &sources).unwrap());
+        let limits = Limits {
+            max_work: observation["max_work"].as_u64().unwrap() as usize,
+            ..Limits::default()
+        };
+        match (p.prepare(&limits), p.prepare_keyed(&limits)) {
+            (Ok(old), Ok(new)) => {
+                assert_eq!(
+                    old.atoms().collect::<Vec<_>>(),
+                    new.program.atoms().collect::<Vec<_>>()
+                );
+                assert_eq!(old.rules().count(), new.keys.instances.len());
+                assert_eq!(old.components().count(), new.keys.components.len());
+            }
+            (Err(old), Err(new)) => assert_eq!(old, new),
+            _ => panic!("key computation changed preparation exhaustion"),
+        }
+    }
+    let (ast, sources) = parse("input i; slot a; a <- i;", 1);
+    let mut p = lowered(lowering::lower(&ast, &sources).unwrap());
+    p.keys = SemanticKeys::default();
+    let Err(error @ CheckError::Keys(_)) = p.prepare_keyed(&Limits::default()) else {
+        panic!("missing bindings accepted")
+    };
+    assert!(matches!(
+        denotate_test_dsl::analysis::Failure::from(error),
+        denotate_test_dsl::analysis::Failure::Creator(_)
+    ));
+    let limits = Limits::default();
+    limits.cancellation.cancel();
+    assert!(matches!(
+        p.prepare_keyed(&limits),
+        Err(CheckError::Cancelled)
+    ));
+}

@@ -11,6 +11,28 @@ use std::{
 mod equations;
 pub(crate) use equations::{EquationContext, Formula};
 
+// Diagnostic-only ordering experiment for 6a.1. Production still uses arena
+// order. Thread-local scope and RAII restoration isolate parallel tests/panics.
+#[cfg(test)]
+thread_local! {
+    static TEST_INPUT_ORDER: std::cell::RefCell<Option<BTreeMap<GroundAtom, usize>>> = const { std::cell::RefCell::new(None) };
+}
+#[cfg(test)]
+pub(crate) fn with_test_input_order<T>(order: Vec<GroundAtom>, run: impl FnOnce() -> T) -> T {
+    struct Restore(Option<BTreeMap<GroundAtom, usize>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            TEST_INPUT_ORDER.with(|v| *v.borrow_mut() = self.0.take());
+        }
+    }
+    let _restore = Restore(TEST_INPUT_ORDER.with(|v| {
+        v.replace(Some(
+            order.into_iter().enumerate().map(|(i, a)| (a, i)).collect(),
+        ))
+    }));
+    run()
+}
+
 /// A complete Boolean assignment: every ground input fact is present or absent.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Observation {
@@ -129,7 +151,20 @@ impl ConditionContext {
         budget.charge(count, "BDD inputs")?;
         let variables = BddVariableSet::new_anonymous(count as u16);
         let mut inputs = BTreeMap::new();
-        for (atom, variable) in program.inputs.iter().zip(variables.variables()) {
+        #[cfg(test)]
+        let ordered = TEST_INPUT_ORDER.with(|v| {
+            let mut inputs: Vec<_> = program.inputs.iter().collect();
+            if let Some(order) = v.borrow().as_ref() {
+                assert_eq!(inputs.len(), order.len());
+                inputs.sort_by_key(|a| order[*a]);
+            }
+            inputs
+        });
+        #[cfg(test)]
+        let input_order = ordered.into_iter();
+        #[cfg(not(test))]
+        let input_order = program.inputs.iter();
+        for (atom, variable) in input_order.zip(variables.variables()) {
             budget.tick("BDD inputs")?;
             inputs.insert(atom.clone(), variable);
         }

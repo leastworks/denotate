@@ -1,12 +1,12 @@
 //! 6.0 evidence, not production semantic identity or an incremental checker.
-//! Textual structural keys deliberately avoid arena IDs and global helper names.
+//! Production keys drive the inventory; legacy text rendering only preserves
+//! the unchanged frozen witness spelling.
 use crate::*;
 use denotate_editor::Document;
 use denotate_ir::*;
-use denotate_normalize::Instruction;
 use denotate_test_dsl::{
     ast::{Expr, ExprKind, Program},
-    lowering::{self, LoweredProgram, LoweringOutcome, projection, recipe::Recipe},
+    lowering::{self, LoweredProgram, LoweringOutcome},
     syntax,
 };
 use serde_json::{Value, json};
@@ -48,121 +48,56 @@ fn prepare(p: &LoweredProgram, limits: &Limits) -> std::result::Result<GroundPro
     GroundProgram::prepare_with_input_groups(&p.corpus, &p.domains(), &constraints(p), limits)
 }
 
-struct Names {
-    constants: BTreeMap<ConstantId, String>,
-    relations: BTreeMap<RelationId, String>,
-    rules: BTreeMap<RuleId, String>,
+struct Names<'a> {
+    keys: &'a SemanticKeys,
 }
-impl Names {
-    fn new(ast: &Program, sources: &Sources, p: &LoweredProgram) -> Self {
-        let c = &p.corpus;
-        let constants = c
-            .constants()
-            .map(|v| {
-                (
-                    v.id,
-                    format!("{:?}:{:?}", c.sort(v.sort).unwrap().name, v.name),
-                )
-            })
-            .collect();
-        let mut relations: BTreeMap<_, _> = c
-            .relations()
-            .filter(|r| !c.is_generated_relation(r.id))
-            .map(|r| (r.id, format!("named:{:?}", r.name)))
-            .collect();
-        let mut helpers = c.relations().filter(|r| c.is_generated_relation(r.id));
-        let mut installed = c.rules();
-        let mut rules = BTreeMap::new();
-        for head in [
-            p.library.supplies,
-            p.library.available,
-            p.library.present,
-            p.library.slot_value,
-        ] {
-            let rule = installed.next().unwrap();
-            assert_eq!(
-                rule.head.relation(),
-                head,
-                "library identity inventory needs review"
-            );
-            rules.insert(rule.id, format!("library:{}", relations[&head]));
-        }
-        for statement in projection::project(ast, sources).unwrap().statements {
-            let owner = format!(
-                "{:?}/duplicate:{}",
-                statement.key.form, statement.key.duplicate
-            );
-            let recipe = Recipe::lower(statement.key.form).unwrap();
-            if let Some(recipe) = recipe.normalized {
-                for instruction in recipe.instructions() {
-                    match instruction {
-                        Instruction::Helper { id } => {
-                            let r = helpers.next().unwrap();
-                            relations.insert(r.id, format!("{owner}/helper:{}", id.0));
-                        }
-                        Instruction::Rule { id, .. } => {
-                            rules.insert(
-                                installed.next().unwrap().id,
-                                format!("{owner}/rule:{}", id.0),
-                            );
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        }
-        assert!(helpers.next().is_none() && installed.next().is_none());
-        Self {
-            constants,
-            relations,
-            rules,
+impl<'a> Names<'a> {
+    fn new(_ast: &Program, _sources: &Sources, p: &'a LoweredProgram) -> Self {
+        Self { keys: &p.keys }
+    }
+    fn constant(c: &ConstantKey) -> String {
+        format!("{:?}:{:?}", c.sort.0.name, c.name)
+    }
+    fn relation(r: &RelationKey) -> String {
+        match r {
+            RelationKey::Named(k) => format!("named:{:?}", k.name),
+            RelationKey::Generated { owner, local } => format!(
+                "{}/helper:{local}",
+                std::str::from_utf8(owner.value()).unwrap()
+            ),
         }
     }
-    fn atom(&self, a: &Atom) -> String {
-        let args: Vec<_> = a
-            .arguments()
-            .iter()
-            .map(|v| match v.value() {
-                Term::Constant(c) => self.constants[c].clone(),
-                Term::Variable { name, .. } => format!("variable:{name}"),
-            })
-            .collect();
-        format!("{}({args:?})", self.relations[&a.relation()])
+    fn atom_key(a: &AtomKey) -> String {
+        let args: Vec<_> = a.arguments.iter().map(Self::constant).collect();
+        format!("{}({args:?})", Self::relation(&a.relation))
     }
     fn ground(&self, a: &GroundAtom) -> String {
-        let args: Vec<_> = a.arguments.iter().map(|c| &self.constants[c]).collect();
-        format!("{}({args:?})", self.relations[&a.relation])
-    }
-    fn rule(&self, r: &GroundRule) -> String {
-        let body: Vec<_> = r
-            .body
-            .iter()
-            .map(|l| (format!("{:?}", l.polarity), self.ground(&l.term.atom)))
-            .collect();
-        format!("{} :- {body:?}", self.ground(&r.head.atom))
-    }
-    fn ground_key(&self, r: &GroundRule) -> String {
-        // All grounded arguments include body-only substitutions. Rule/source
-        // form changes are removal+addition, never guessed identity matches.
-        format!("{} / {}", self.rules[&r.source], self.rule(r))
+        Self::atom_key(&AtomKey::from_atom(self.keys, a).unwrap())
     }
 }
 
 fn inventory(ast: &Program, sources: &Sources, p: &LoweredProgram, g: &GroundProgram) -> Inventory {
     let n = Names::new(ast, sources, p);
+    let index = GroundKeyIndex::build(&p.corpus, &p.keys, g).unwrap();
     let mut out = Inventory::new();
     out.insert(
         "sorts",
         p.corpus
             .sorts()
-            .map(|s| (s.name.clone(), s.name.clone()))
+            .map(|s| {
+                let key = format!("{:?}", p.keys.sort(s.id).unwrap());
+                (key.clone(), key)
+            })
             .collect(),
     );
     out.insert(
         "constants",
-        n.constants
-            .values()
-            .map(|c| (c.clone(), c.clone()))
+        p.corpus
+            .constants()
+            .map(|c| {
+                let key = format!("{:?}", p.keys.constant(c.id).unwrap());
+                (key.clone(), key)
+            })
             .collect(),
     );
     out.insert(
@@ -170,14 +105,9 @@ fn inventory(ast: &Program, sources: &Sources, p: &LoweredProgram, g: &GroundPro
         p.corpus
             .relations()
             .map(|r| {
-                let sorts: Vec<_> = r
-                    .parameters
-                    .iter()
-                    .map(|v| &p.corpus.sort(v.sort).unwrap().name)
-                    .collect();
                 (
-                    n.relations[&r.id].clone(),
-                    format!("{:?}:{sorts:?}", r.role),
+                    format!("{:?}", p.keys.relation(r.id).unwrap()),
+                    format!("{:?}", p.keys.relation_schema(r).unwrap()),
                 )
             })
             .collect(),
@@ -187,14 +117,9 @@ fn inventory(ast: &Program, sources: &Sources, p: &LoweredProgram, g: &GroundPro
         p.corpus
             .rules()
             .map(|r| {
-                let body: Vec<_> = r
-                    .body
-                    .iter()
-                    .map(|l| (matches!(l, Literal::Negative(_)), n.atom(l.atom())))
-                    .collect();
                 (
-                    n.rules[&r.id].clone(),
-                    format!("{} :- {body:?}", n.atom(&r.head)),
+                    format!("{:?}", p.keys.rule(r.id).unwrap()),
+                    format!("{:?}", p.keys.rule_schema(r).unwrap()),
                 )
             })
             .collect(),
@@ -203,36 +128,34 @@ fn inventory(ast: &Program, sources: &Sources, p: &LoweredProgram, g: &GroundPro
         "possible_atoms",
         g.atoms()
             .map(|a| {
-                let a = n.ground(a);
-                (a.clone(), a)
+                let key = format!("{:?}", index.atoms[a]);
+                (key.clone(), key)
             })
             .collect(),
     );
-    let instances: BTreeMap<_, _> = g.rules().map(|r| (r.id, n.ground_key(r))).collect();
     out.insert(
         "ground_instances",
-        g.rules()
-            .map(|r| (instances[&r.id].clone(), n.rule(r)))
+        index
+            .content
+            .iter()
+            .map(|(key, value)| (format!("{key:?}"), format!("{value:?}")))
             .collect(),
     );
-    let members: BTreeMap<_, _> = g
-        .components()
-        .map(|c| {
-            let atoms: BTreeSet<_> = c.atoms.iter().map(|a| n.ground(a)).collect();
-            (c.id, format!("{atoms:?}"))
-        })
-        .collect();
     out.insert(
         "components",
         g.components()
             .map(|c| {
                 let rules: BTreeSet<_> = g.component_rules[c.id.index]
                     .iter()
-                    .map(|i| &instances[&g.rules[*i].id])
+                    .map(|i| &index.instances[&g.rules[*i].id])
                     .collect();
-                let providers: BTreeSet<_> = c.dependencies.iter().map(|d| &members[d]).collect();
+                let providers: BTreeSet<_> = c
+                    .dependencies
+                    .iter()
+                    .map(|id| &index.components[id])
+                    .collect();
                 (
-                    members[&c.id].clone(),
+                    format!("{:?}", index.components[&c.id]),
                     format!(
                         "rules:{rules:?}; providers:{providers:?}; recursive:{}; negative:{}",
                         c.recursive,
@@ -244,38 +167,32 @@ fn inventory(ast: &Program, sources: &Sources, p: &LoweredProgram, g: &GroundPro
     );
     let mut groups = Entities::new();
     let mut cones = Entities::new();
-    // Include trivial and empty groups: the runtime intentionally stores only
-    // nontrivial groups. Empty roots still need producer/domain dependencies.
-    for obligation in p.corpus.obligations() {
-        let Requirement::AtMostOne { relation, group_by } = &obligation.requirement;
-        let mut tuples = BTreeMap::<Vec<ConstantId>, Vec<GroundAtom>>::new();
-        for a in g.atoms().filter(|a| a.relation == *relation) {
-            tuples
-                .entry(group_by.iter().map(|i| a.arguments[*i]).collect())
-                .or_default()
-                .push(a.clone());
-        }
-        // This inventory's one library obligation is grouped by Slot.
-        assert_eq!(
-            (*relation, group_by.as_slice()),
-            (p.library.supplies, &[1][..])
-        );
-        for slot in p.corpus.constants().filter(|c| c.sort == p.library.slot) {
-            tuples.entry(vec![slot.id]).or_default();
-        }
-        for (key, roots) in tuples {
-            let key = format!(
-                "{}:{:?}",
-                obligation.name,
-                key.iter().map(|c| &n.constants[c]).collect::<Vec<_>>()
-            );
+    let current_atoms: BTreeMap<_, _> = index.atoms.iter().map(|(id, key)| (key, id)).collect();
+    for (obligation, descriptor) in &index.groups {
+        // The frontend library has one grouping column (Slot); empty groups
+        // use the production domain descriptor, not corpus/name reconstruction.
+        assert_eq!(descriptor.domains.len(), 1);
+        for value in &descriptor.domains[0] {
+            let key = descriptor.key(obligation, vec![value.clone()]).unwrap();
+            let roots = descriptor
+                .members
+                .get(&key.tuple)
+                .cloned()
+                .unwrap_or_default();
             let cone = g
-                .dependency_cone(roots.clone(), &Limits::default())
+                .dependency_cone(
+                    roots.iter().map(|a| (*current_atoms[a]).clone()),
+                    &Limits::default(),
+                )
                 .unwrap();
-            let facts: BTreeSet<_> = cone.facts.iter().map(|a| n.ground(a)).collect();
-            let rules: BTreeSet<_> = cone.rules.iter().map(|r| &instances[r]).collect();
-            let comps: BTreeSet<_> = cone.components.iter().map(|c| &members[c]).collect();
-            let roots: BTreeSet<_> = roots.iter().map(|a| n.ground(a)).collect();
+            let facts: BTreeSet<_> = cone.facts.iter().map(|a| &index.atoms[a]).collect();
+            let rules: BTreeSet<_> = cone.rules.iter().map(|r| &index.instances[r]).collect();
+            let comps: BTreeSet<_> = cone
+                .components
+                .iter()
+                .map(|c| &index.components[c])
+                .collect();
+            let key = format!("{key:?}");
             groups.insert(key.clone(), format!("{roots:?}"));
             cones.insert(
                 key,
@@ -547,8 +464,11 @@ fn resource(c: Inconclusive) -> Value {
     json!({"phase":c.phase,"resource":c.resource})
 }
 fn budget_result(text: &str, max_work: usize) -> Value {
-    let (ast, sources, p) = lower(text);
-    let n = Names::new(&ast, &sources, &p);
+    let (_, _, p) = lower(text);
+    budget_result_lowered(&p, max_work)
+}
+fn budget_result_lowered(p: &LoweredProgram, max_work: usize) -> Value {
+    let n = Names { keys: &p.keys };
     let limits = Limits {
         max_work,
         timeout: Duration::from_secs(60),
@@ -773,3 +693,6 @@ fn measure_preparation_shapes() {
         json!({"note":"One warm-up + five measured samples on the normal public path with counters disabled; separate instrumented diagnostic run is not a latency sample. Test-only profile executes the same stage functions and is checked against the public preparation structurally. No optimization or caching. Default limits; every timing is local evidence, not a gate.","rows":rows})
     );
 }
+
+#[path = "key_evidence.rs"]
+mod key_evidence;

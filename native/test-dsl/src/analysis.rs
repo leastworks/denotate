@@ -187,13 +187,13 @@ impl Program {
     pub fn check(&self, limits: &Limits, after_prepare: impl FnOnce()) -> Result<Output, Failure> {
         limits.cancellation.check()?;
         let AnalysisOutcome::Complete(ground) =
-            AnalysisOutcome::from_result(self.lowered.prepare(limits))?
+            AnalysisOutcome::from_result(self.lowered.prepare_keyed(limits))?
         else {
             return Ok(inconclusive("preparation"));
         };
         after_prepare();
         limits.cancellation.check()?;
-        let ground = ground.admit(limits)?;
+        let ground = ground.program.admit(limits)?;
         let AnalysisOutcome::Complete(meaning) = ground.symbolic_checked(limits)? else {
             return Ok(inconclusive("symbolic evaluation"));
         };

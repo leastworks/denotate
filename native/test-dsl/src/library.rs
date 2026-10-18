@@ -1,9 +1,10 @@
 use denotate_ir::{
     ConstantId, ConstructionError, Corpus, Literal, ObligationId, Parameter, RelationId,
-    RelationRole, SortId, Term,
+    RelationRole, RuleId, SortId, Term,
 };
 
 pub struct MappingLibrary {
+    pub rules: std::collections::BTreeMap<&'static str, RuleId>,
     pub slot: SortId,
     pub input: SortId,
     pub mapped_to: RelationId,
@@ -73,7 +74,7 @@ pub fn build(corpus: &mut Corpus) -> Result<MappingLibrary, ConstructionError> {
     let mapping = corpus.atom(mapped_to, [i.clone(), d.clone()])?;
     let presence = corpus.atom(present, [i.clone()])?;
     let mask = corpus.atom(masked, [d.clone()])?;
-    corpus.add_rule(
+    let supplies_rule = corpus.add_rule(
         head,
         [
             Literal::Positive(mapping),
@@ -84,18 +85,18 @@ pub fn build(corpus: &mut Corpus) -> Result<MappingLibrary, ConstructionError> {
 
     let head = corpus.atom(available, [d.clone()])?;
     let supply = corpus.atom(supplies, [i, d])?;
-    corpus.add_rule(head, [Literal::Positive(supply)])?;
+    let available_rule = corpus.add_rule(head, [Literal::Positive(supply)])?;
 
     let i = Term::variable("I", input);
     let d = Term::variable("D", slot);
     let v = Term::variable("V", integer);
     let head = corpus.atom(present, [i.clone()])?;
     let body = corpus.atom(value, [i.clone(), v.clone()])?;
-    corpus.add_rule(head, [Literal::Positive(body)])?;
+    let present_rule = corpus.add_rule(head, [Literal::Positive(body)])?;
     let head = corpus.atom(slot_value, [d.clone(), v.clone()])?;
     let supply = corpus.atom(supplies, [i.clone(), d])?;
     let input_value = corpus.atom(value, [i, v])?;
-    corpus.add_rule(
+    let slot_value_rule = corpus.add_rule(
         head,
         [Literal::Positive(supply), Literal::Positive(input_value)],
     )?;
@@ -107,6 +108,13 @@ pub fn build(corpus: &mut Corpus) -> Result<MappingLibrary, ConstructionError> {
         "Slot {slot} has overlapping InputMappings from {inputs}.",
     )?;
     Ok(MappingLibrary {
+        rules: [
+            ("supplies", supplies_rule),
+            ("available", available_rule),
+            ("present", present_rule),
+            ("slot_value", slot_value_rule),
+        ]
+        .into(),
         slot,
         input,
         mapped_to,

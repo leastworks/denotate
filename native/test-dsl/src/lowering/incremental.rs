@@ -136,7 +136,9 @@ pub struct QueryCounts {
 pub struct Timings {
     pub projection_ns: u64,
     pub queries_ns: u64,
+    /// Assembly/attribution excluding the separately reported key phase.
     pub assembly_attribution_ns: u64,
+    pub key_computation_ns: u64,
 }
 
 #[derive(Debug, Default, Clone, Copy, Serialize)]
@@ -246,7 +248,13 @@ impl Session {
             self.stats.assemblies += 1;
         }
         let lowered = assembly::assemble(&projection, &recipes, sources)?;
-        self.stats.last.assembly_attribution_ns = elapsed(start);
+        self.stats.last.key_computation_ns = if start.is_some() {
+            lowered.key_computation.as_nanos().min(u64::MAX as u128) as u64
+        } else {
+            0
+        };
+        self.stats.last.assembly_attribution_ns =
+            elapsed(start).saturating_sub(self.stats.last.key_computation_ns);
         Ok(LoweringOutcome::Lowered(lowered))
     }
 

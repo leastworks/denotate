@@ -152,6 +152,10 @@ impl GroundProgram {
         Ok(p)
     }
 
+    pub fn domain(&self, sort: SortId) -> Option<&[ConstantId]> {
+        self.domains.get(&sort).map(Vec::as_slice)
+    }
+
     pub fn metrics(&self) -> &PreparationMetrics {
         &self.metrics
     }

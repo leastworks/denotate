@@ -27,6 +27,9 @@ pub fn assemble<R: std::borrow::Borrow<Recipe>>(
     }
     let mut corpus = Corpus::new();
     let library = library::build(&mut corpus)?;
+    let start = std::time::Instant::now();
+    let mut keys = keys::library(&corpus, &library)?;
+    let mut key_computation = start.elapsed();
     // K is snapshot-local. No cached recipe depends on this union.
     let mut integers = std::collections::BTreeSet::new();
     for recipe in recipes {
@@ -51,6 +54,11 @@ pub fn assemble<R: std::borrow::Borrow<Recipe>>(
         .into_iter()
         .map(|v| Ok((v, corpus.declare_constant(v.to_string(), library.integer)?)))
         .collect::<Result<BTreeMap<_, _>>>()?;
+    let start = std::time::Instant::now();
+    for id in integers.values() {
+        keys::constant(&mut keys, &corpus, *id)?;
+    }
+    key_computation += start.elapsed();
     let mut attribution = Attribution::default();
     for rule in corpus.rules() {
         attribution
@@ -71,6 +79,9 @@ pub fn assemble<R: std::borrow::Borrow<Recipe>>(
                     Kind::Slot => library.slot,
                 };
                 let constant = corpus.declare_constant(name, sort)?;
+                let start = std::time::Instant::now();
+                keys::constant(&mut keys, &corpus, constant)?;
+                key_computation += start.elapsed();
                 constants.insert((*kind, name.clone()), constant);
                 attribution.provenance.attach(
                     &corpus,
@@ -116,6 +127,9 @@ pub fn assemble<R: std::borrow::Borrow<Recipe>>(
         };
         let installed =
             installation::install(&mut corpus, normalized, binding, binding).map_err(failure)?;
+        let start = std::time::Instant::now();
+        keys::installed(&mut keys, &corpus, &source.key, recipe, &installed)?;
+        key_computation += start.elapsed();
         let origins = recipe
             .assignments
             .origins
@@ -165,7 +179,12 @@ pub fn assemble<R: std::borrow::Borrow<Recipe>>(
         }
     }
     attribution.validate(&corpus, sources)?;
+    let start = std::time::Instant::now();
+    keys.validate(&corpus)?;
+    key_computation += start.elapsed();
     Ok(LoweredProgram {
+        keys,
+        key_computation,
         corpus,
         library,
         attribution,

@@ -11,6 +11,7 @@ use std::fmt;
 
 pub mod assembly;
 pub mod incremental;
+pub mod keys;
 pub mod projection;
 pub mod recipe;
 pub mod semantic;
@@ -43,10 +44,17 @@ pub struct DslDiagnostic {
 #[derive(Debug)]
 pub enum LoweringFailure {
     Construction(ConstructionError),
+    Keys(KeyError),
     Provenance(ProvenanceError),
     InvalidAst(String),
     Attribution(AttributionError),
     Recipe(recipe::RecipeError),
+}
+
+impl From<KeyError> for LoweringFailure {
+    fn from(error: KeyError) -> Self {
+        Self::Keys(error)
+    }
 }
 
 impl From<recipe::RecipeError> for LoweringFailure {
@@ -79,6 +87,9 @@ impl fmt::Display for LoweringFailure {
 impl std::error::Error for LoweringFailure {}
 
 pub struct LoweredProgram {
+    pub keys: SemanticKeys,
+    /// Time spent constructing and validating the installation key side table.
+    pub key_computation: std::time::Duration,
     pub corpus: Corpus,
     pub library: MappingLibrary,
     pub attribution: Attribution,
@@ -113,6 +124,17 @@ impl LoweredProgram {
             }],
             limits,
         )
+    }
+    pub fn prepare_keyed(
+        &self,
+        limits: &denotate_check::Limits,
+    ) -> std::result::Result<denotate_check::KeyedPreparation, denotate_check::CheckError> {
+        let program = self.prepare(limits)?;
+        limits.cancellation.check()?;
+        let keys = denotate_check::GroundKeyIndex::build(&self.corpus, &self.keys, &program)
+            .map_err(denotate_check::CheckError::Keys)?;
+        limits.cancellation.check()?;
+        Ok(denotate_check::KeyedPreparation { program, keys })
     }
     pub fn has_value_tests(&self) -> bool {
         self.corpus

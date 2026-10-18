@@ -117,6 +117,10 @@ pub fn lower(program: &Program, sources: &Sources) -> Result<LoweringOutcome> {
     }
     lowerer.attribution.validate(&lowerer.corpus, sources)?;
     Ok(LoweringOutcome::Lowered(LoweredProgram {
+        // Historical oracle intentionally exercises unkeyed checking. It does
+        // not implement the new identity layer it is compared against.
+        keys: denotate_ir::SemanticKeys::default(),
+        key_computation: std::time::Duration::ZERO,
         corpus: lowerer.corpus,
         library: lowerer.library,
         attribution: lowerer.attribution,
