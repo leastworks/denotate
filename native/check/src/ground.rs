@@ -137,17 +137,26 @@ impl GroundProgram {
         constraints: &[InputAtMostOne],
         limits: &Limits,
     ) -> Result<Self> {
+        Self::prepare_with_budget(corpus, domains, constraints, &mut Budget::new(limits))
+    }
+
+    pub(crate) fn prepare_with_budget(
+        corpus: &Corpus,
+        domains: &Domains,
+        constraints: &[InputAtMostOne],
+        budget: &mut Budget<'_>,
+    ) -> Result<Self> {
+        let limits = budget.limits;
         limits.cancellation.check()?;
         let start = Instant::now();
-        let mut budget = Budget::new(limits);
-        let domains = validate_domains(corpus, domains, &mut budget)?;
+        let domains = validate_domains(corpus, domains, budget)?;
         let mut p = Self::empty(corpus, domains);
-        sparse::populate(corpus, &mut p, &mut budget)?;
-        p.build_groups(corpus, &mut budget)?;
-        p.build_input_groups(corpus, constraints, &mut budget)?;
+        sparse::populate(corpus, &mut p, budget)?;
+        p.build_groups(corpus, budget)?;
+        p.build_input_groups(corpus, constraints, budget)?;
         p.metrics.grounding = start.elapsed();
         let start = Instant::now();
-        graph::analyze(&mut p, &mut budget)?;
+        graph::analyze(&mut p, budget)?;
         p.metrics.admissibility = start.elapsed();
         limits.cancellation.check()?;
         Ok(p)

@@ -1,11 +1,12 @@
-//! Backend-neutral request/result boundary. The BDD implementation retains its
-//! existing phase budgets; per-query accounting is a separate increment.
+//! Backend-neutral request/result boundary with deterministic per-query receipts.
 use crate::*;
 use denotate_ir::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
     time::{Duration, Instant},
 };
+
+use crate::limits::Budget;
 
 type Result<T> = std::result::Result<T, CheckError>;
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -71,7 +72,7 @@ impl BackendIdentity {
     pub fn bdd() -> Self {
         Self {
             backend: "bdd".into(),
-            configuration: "atom-key-order-v1".into(),
+            configuration: "atom-key-order-v1/per-query-budgets-v1".into(),
         }
     }
 }
@@ -138,7 +139,7 @@ impl CheckRequest {
         corpus: &'s Corpus,
         keys: &'s SemanticKeys,
         operations: &OperationalLimits,
-    ) -> Result<AnalysisOutcome<PreparedCheck<'s>>> {
+    ) -> Result<RequestPreparation<'s>> {
         operations.cancellation.check()?;
         keys.validate(corpus).map_err(CheckError::Keys)?;
         if self.backend != BackendIdentity::bdd() {
@@ -197,23 +198,36 @@ impl CheckRequest {
             })
             .collect::<Result<Vec<_>>>()?;
         let limits = self.limits.with_operations(operations);
+        let mut budget = Budget::tracked(&limits);
         let result =
-            GroundProgram::prepare_with_input_groups(corpus, &domains, &constraints, &limits);
-        let program = match AnalysisOutcome::from_result(result)? {
-            AnalysisOutcome::Complete(p) => p,
-            AnalysisOutcome::Inconclusive(c) => return Ok(AnalysisOutcome::Inconclusive(c)),
+            GroundProgram::prepare_with_budget(corpus, &domains, &constraints, &mut budget);
+        let mut receipts = WorkReceipts::default();
+        if let Err(error) = &result {
+            Inconclusive::from_error(error.clone())?;
+            budget.failure(error);
+        }
+        budget.record(&mut receipts, QueryKey::Preparation, [])?;
+        let program = match result {
+            Ok(p) => p,
+            Err(error) => {
+                return Ok(RequestPreparation::Inconclusive {
+                    reason: Inconclusive::from_error(error)?,
+                    receipts,
+                });
+            }
         };
         let key_start = Instant::now();
         let program = program.with_atom_key_order(keys)?;
         let index = GroundKeyIndex::build(corpus, keys, &program).map_err(CheckError::Keys)?;
         operations.cancellation.check()?;
-        Ok(AnalysisOutcome::Complete(PreparedCheck {
+        Ok(RequestPreparation::Complete(PreparedCheck {
             request: self.clone(),
             program,
             keys: index,
             corpus,
             semantic_keys: keys,
             key_computation: key_start.elapsed(),
+            receipts,
         }))
     }
     pub fn exhausted(&self, reason: Inconclusive) -> ScopedResults {
@@ -330,6 +344,14 @@ pub struct PreparedCheck<'s> {
     corpus: &'s Corpus,
     semantic_keys: &'s SemanticKeys,
     key_computation: Duration,
+    receipts: WorkReceipts,
+}
+pub enum RequestPreparation<'s> {
+    Complete(PreparedCheck<'s>),
+    Inconclusive {
+        reason: Inconclusive,
+        receipts: WorkReceipts,
+    },
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CheckStage {
@@ -349,12 +371,13 @@ pub enum CheckOutcome<'p> {
     Inconclusive {
         stage: CheckStage,
         reason: Inconclusive,
+        receipts: WorkReceipts,
     },
 }
 pub struct CheckedReport<'p> {
     /// Fresh snapshot-owned presentation/replay detail; never memoized.
     pub verification: Verification<'p>,
-    pub results: ScopedResults,
+    pub results: Accounted<ScopedResults>,
 }
 impl PreparedCheck<'_> {
     pub fn request(&self) -> &CheckRequest {
@@ -372,9 +395,15 @@ impl PreparedCheck<'_> {
         self.key_computation
     }
     pub fn admit(mut self, operations: &OperationalLimits) -> Result<Self> {
-        self.program = self
-            .program
-            .admit(&self.request.limits.with_operations(operations))?;
+        let limits = self.request.limits.with_operations(operations);
+        let mut budget = Budget::tracked(&limits);
+        self.program = self.program.admit_with_budget(&mut budget)?;
+        self.receipts.invalidate(&QueryKey::Admission);
+        budget.record(
+            &mut self.receipts,
+            QueryKey::Admission,
+            [QueryKey::Preparation],
+        )?;
         self.keys = GroundKeyIndex::build(self.corpus, self.semantic_keys, &self.program)
             .map_err(CheckError::Keys)?;
         self.key_computation += self.keys.elapsed;
@@ -383,29 +412,58 @@ impl PreparedCheck<'_> {
     }
     pub fn verify(&self, operations: &OperationalLimits) -> Result<CheckOutcome<'_>> {
         let limits = self.request.limits.with_operations(operations);
-        let meaning = match self.program.symbolic_checked(&limits)? {
+        let mut receipts = self.receipts.clone();
+        let mut budget = Budget::tracked(&limits);
+        let meaning = self.program.symbolic_impl(&mut budget, true);
+        if let Err(error) = &meaning {
+            Inconclusive::from_error(error.clone())?;
+            budget.failure(error);
+        }
+        let dependency = if receipts.get(&QueryKey::Admission).is_some() {
+            QueryKey::Admission
+        } else {
+            QueryKey::Preparation
+        };
+        budget.record(&mut receipts, QueryKey::Symbolic, [dependency])?;
+        let meaning = match AnalysisOutcome::from_result(meaning)? {
             AnalysisOutcome::Complete(m) => m,
             AnalysisOutcome::Inconclusive(reason) => {
                 return Ok(CheckOutcome::Inconclusive {
                     stage: CheckStage::SymbolicEvaluation,
                     reason,
+                    receipts,
                 });
             }
         };
-        let verification = match meaning.verify_checked(&limits)? {
+        let mut queries = QueryRun {
+            keys: self.semantic_keys,
+            ground: &self.keys,
+            receipts: &mut receipts,
+        };
+        let verification = match AnalysisOutcome::from_result(meaning.verify_queries(
+            &limits,
+            &limits,
+            &limits,
+            Some(&mut queries),
+        ))? {
             AnalysisOutcome::Complete(r) => r,
             AnalysisOutcome::Inconclusive(reason) => {
                 return Ok(CheckOutcome::Inconclusive {
                     stage: CheckStage::Verification,
                     reason,
+                    receipts,
                 });
             }
         };
         let results = self.project(&verification, self.semantic_keys)?;
+        receipts.total().map_err(CheckError::Receipts)?;
         operations.cancellation.check()?;
         Ok(CheckOutcome::Complete(CheckedReport {
             verification,
-            results,
+            results: Accounted {
+                value: results,
+                receipts,
+            },
         }))
     }
     fn project(&self, report: &Verification<'_>, keys: &SemanticKeys) -> Result<ScopedResults> {

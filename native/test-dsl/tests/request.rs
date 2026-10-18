@@ -61,7 +61,7 @@ fn affected_fixtures_keep_status_and_diagnostic_summaries() {
             .verify_at_most_one(&limits)
             .unwrap();
         let request = p.lowered.request(&limits).unwrap();
-        let AnalysisOutcome::Complete(new) = request
+        let RequestPreparation::Complete(new) = request
             .prepare(&p.lowered.corpus, &p.lowered.keys, &(&limits).into())
             .unwrap()
         else {
@@ -107,5 +107,12 @@ fn interruption_never_returns_a_semantic_result() {
         timeout: Duration::from_secs(60),
         ..Limits::default()
     };
-    assert!(p.check(&ample, || {}).unwrap().results.unfinished.is_none());
+    assert!(
+        p.check(&ample, || {})
+            .unwrap()
+            .results
+            .value
+            .unfinished
+            .is_none()
+    );
 }

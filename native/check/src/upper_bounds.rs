@@ -47,7 +47,7 @@ pub(crate) fn compute(
             1 + summary.rule.body.len() + summary.settled.len(),
             "upper-bound certificate",
         )?;
-        *retained = crate::symbolic::retain(*retained, 0, summary.nodes(), budget.limits)?;
+        *retained = crate::symbolic::retain(*retained, 0, summary.nodes(), budget)?;
         producers.push(summary.clone());
     }
     let mut previous = BTreeMap::new();
@@ -56,7 +56,7 @@ pub(crate) fn compute(
         budget.tick("upper-bound initialization")?;
         let top = ctx.true_condition();
         previous_nodes += top.node_count();
-        *retained = crate::symbolic::retain(*retained, 0, top.node_count(), budget.limits)?;
+        *retained = crate::symbolic::retain(*retained, 0, top.node_count(), budget)?;
         previous.insert(atom.clone(), top);
     }
     loop {
@@ -68,7 +68,7 @@ pub(crate) fn compute(
             budget.tick("upper-bound iteration")?;
             let bottom = ctx.false_condition();
             next_nodes += bottom.node_count();
-            *retained = crate::symbolic::retain(*retained, 0, bottom.node_count(), budget.limits)?;
+            *retained = crate::symbolic::retain(*retained, 0, bottom.node_count(), budget)?;
             next.insert(atom.clone(), bottom);
         }
         for producer in &producers {
@@ -90,12 +90,8 @@ pub(crate) fn compute(
                     "upper-bound producer outside component",
                 ))?;
             let joined = ctx.apply(head, &body, or, budget)?;
-            *retained = crate::symbolic::retain(
-                *retained,
-                head.node_count(),
-                joined.node_count(),
-                budget.limits,
-            )?;
+            *retained =
+                crate::symbolic::retain(*retained, head.node_count(), joined.node_count(), budget)?;
             next_nodes = next_nodes - head.node_count() + joined.node_count();
             *head = joined;
         }

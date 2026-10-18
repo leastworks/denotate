@@ -23,7 +23,7 @@ pub struct Program {
 }
 pub struct Output {
     pub key_computation: std::time::Duration,
-    pub results: ScopedResults,
+    pub results: Accounted<ScopedResults>,
     pub diagnostics: Vec<Diagnostic>,
     pub creator_warnings: Vec<String>,
 }
@@ -203,11 +203,14 @@ impl Program {
         let request = self.lowered.request(limits)?;
         let operations = OperationalLimits::from(limits);
         let ground = match request.prepare(&self.lowered.corpus, &self.lowered.keys, &operations)? {
-            AnalysisOutcome::Complete(p) => p,
-            AnalysisOutcome::Inconclusive(c) => {
+            RequestPreparation::Complete(p) => p,
+            RequestPreparation::Inconclusive { reason, receipts } => {
                 return Ok(inconclusive(
                     "preparation",
-                    request.exhausted(c),
+                    Accounted {
+                        value: request.exhausted(reason),
+                        receipts,
+                    },
                     self.lowered.key_computation,
                 ));
             }
@@ -217,10 +220,17 @@ impl Program {
         let ground = ground.admit(&operations)?;
         let report = match ground.verify(&operations)? {
             CheckOutcome::Complete(r) => r,
-            CheckOutcome::Inconclusive { stage, reason } => {
+            CheckOutcome::Inconclusive {
+                stage,
+                reason,
+                receipts,
+            } => {
                 return Ok(inconclusive(
                     stage.label(),
-                    request.exhausted(reason),
+                    Accounted {
+                        value: request.exhausted(reason),
+                        receipts,
+                    },
                     self.lowered.key_computation + ground.key_computation(),
                 ));
             }
@@ -335,7 +345,7 @@ impl Program {
 
 fn inconclusive(
     phase: &str,
-    results: ScopedResults,
+    results: Accounted<ScopedResults>,
     key_computation: std::time::Duration,
 ) -> Output {
     Output {

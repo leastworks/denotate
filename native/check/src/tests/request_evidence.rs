@@ -1,12 +1,12 @@
 //! Migration acceptance against immutable 6.0/6a.1 captures.
 use super::*;
 
-fn request(p: &LoweredProgram, limits: &Limits) -> CheckRequest {
+pub(super) fn request(p: &LoweredProgram, limits: &Limits) -> CheckRequest {
     CheckRequest::all_obligations(&p.corpus, &p.keys, &p.domains(), &constraints(p), limits)
         .unwrap()
 }
-fn checked<'s>(p: &'s LoweredProgram, limits: &Limits) -> PreparedCheck<'s> {
-    let AnalysisOutcome::Complete(g) = request(p, limits)
+pub(super) fn checked<'s>(p: &'s LoweredProgram, limits: &Limits) -> PreparedCheck<'s> {
+    let RequestPreparation::Complete(g) = request(p, limits)
         .prepare(&p.corpus, &p.keys, &limits.into())
         .unwrap()
     else {
@@ -24,13 +24,13 @@ fn fresh_capture(p: &LoweredProgram, max_work: usize) -> Value {
     let exhausted =
         |c: Inconclusive| json!({"status":"inconclusive","phase":c.phase,"resource":c.resource});
     let g = match req.prepare(&p.corpus, &p.keys, &(&limits).into()).unwrap() {
-        AnalysisOutcome::Complete(g) => g,
-        AnalysisOutcome::Inconclusive(c) => return exhausted(c),
+        RequestPreparation::Complete(g) => g,
+        RequestPreparation::Inconclusive { reason, .. } => return exhausted(reason),
     };
     let g = g.admit(&(&limits).into()).unwrap();
     match g.verify(&(&limits).into()).unwrap() {
         CheckOutcome::Complete(r) => {
-            assert_eq!(r.results.context, req);
+            assert_eq!(r.results.value.context, req);
             for group in &r.verification.groups {
                 if let VerifiedOutcome::Counterexample(c) = &group.outcome {
                     assert!(c.tuples.len() >= 2);
@@ -116,25 +116,27 @@ fn request_context_and_scoped_results_are_owned_and_distinguish_reasons() {
     };
     assert!(
         r.results
+            .value
             .groups
             .values()
             .any(|r| matches!(r, ScopedResult::Counterexample(..)))
     );
-    assert!(r.results.groups.values().any(|r|matches!(r,ScopedResult::Unsupported(CapabilityReason::UnsettledDependencies(d)) if !d.is_empty())));
-    assert!(r.results.regions.values().any(|r| matches!(
+    assert!(r.results.value.groups.values().any(|r|matches!(r,ScopedResult::Unsupported(CapabilityReason::UnsettledDependencies(d)) if !d.is_empty())));
+    assert!(r.results.value.regions.values().any(|r| matches!(
         r.outcome,
         ScopedResult::Unsupported(CapabilityReason::NegativeCycle)
     ) && matches!(
         r.completion,
         RegionCompletion::NoMeaning { .. }
     )));
-    let (obligation, domain) = r.results.group_domains.first_key_value().unwrap();
+    let (obligation, domain) = r.results.value.group_domains.first_key_value().unwrap();
     let empty = domain.domains[0]
         .iter()
         .find(|v| v.name.as_ref() == "empty")
         .unwrap();
     assert_eq!(
         r.results
+            .value
             .group(&domain.key(obligation, vec![empty.clone()]).unwrap()),
         Some(ScopedResult::Proved)
     );
@@ -150,14 +152,14 @@ fn request_context_and_scoped_results_are_owned_and_distinguish_reasons() {
     for change in 0..6 {
         let mut altered = r.results.clone();
         match change {
-            0 => altered.context.constraints.clear(),
-            1 => altered.context.obligations.clear(),
-            2 => altered.context.domains.clear(),
-            3 => altered.context.backend.configuration.push('!'),
-            4 => altered.context.limits.max_work += 1,
+            0 => altered.value.context.constraints.clear(),
+            1 => altered.value.context.obligations.clear(),
+            2 => altered.value.context.domains.clear(),
+            3 => altered.value.context.backend.configuration.push('!'),
+            4 => altered.value.context.limits.max_work += 1,
             _ => {
-                altered.groups.insert(
-                    altered.groups.first_key_value().unwrap().0.clone(),
+                altered.value.groups.insert(
+                    altered.value.groups.first_key_value().unwrap().0.clone(),
                     ScopedResult::Inconclusive(ResourceReason {
                         phase: "test".into(),
                         resource: "work".into(),
@@ -191,7 +193,7 @@ fn request_context_and_scoped_results_are_owned_and_distinguish_reasons() {
     let CheckOutcome::Complete(limited) = limited.verify(&(&limits).into()).unwrap() else {
         panic!("expected scoped exhaustion")
     };
-    assert!(limited.results.groups.values().any(|r|matches!(r,ScopedResult::Inconclusive(ResourceReason {resource,..}) if resource=="condition nodes")));
+    assert!(limited.results.value.groups.values().any(|r|matches!(r,ScopedResult::Inconclusive(ResourceReason {resource,..}) if resource=="condition nodes")));
     let mut invalid = request(&p, &limits);
     invalid.obligations.clear();
     assert!(matches!(
@@ -255,7 +257,7 @@ fn committed_key_index_retains_original_bindings_and_indexes_rewrites() {
     let CheckOutcome::Complete(r) = g.verify(&(&Limits::default()).into()).unwrap() else {
         panic!()
     };
-    for result in r.results.groups.values() {
+    for result in r.results.value.groups.values() {
         if let ScopedResult::Counterexample(_, e) = result {
             for o in &e.occurrences {
                 p.keys.bindings().resolve(o).unwrap();
@@ -280,7 +282,7 @@ fn frozen_inventory_matches_request_preparation() {
                 .collect::<Vec<_>>()),
             LoweringOutcome::Lowered(p) => {
                 let limits = Limits::default();
-                let AnalysisOutcome::Complete(g) = request(&p, &limits)
+                let RequestPreparation::Complete(g) = request(&p, &limits)
                     .prepare(&p.corpus, &p.keys, &(&limits).into())
                     .unwrap()
                 else {
@@ -316,13 +318,14 @@ fn explicit_request_constraints_control_permitted_worlds_and_validate_keys() {
     assert!(
         constrained
             .results
+            .value
             .groups
             .values()
             .all(|r| matches!(r, ScopedResult::Proved))
     );
     let mut req = request(&p, &limits);
     req.constraints.clear();
-    let AnalysisOutcome::Complete(unrestricted) =
+    let RequestPreparation::Complete(unrestricted) =
         req.prepare(&p.corpus, &p.keys, &(&limits).into()).unwrap()
     else {
         panic!()
@@ -335,11 +338,15 @@ fn explicit_request_constraints_control_permitted_worlds_and_validate_keys() {
     assert!(
         unrestricted
             .results
+            .value
             .groups
             .values()
             .any(|r| matches!(r, ScopedResult::Counterexample(..)))
     );
-    assert_ne!(constrained.results.context, unrestricted.results.context);
+    assert_ne!(
+        constrained.results.value.context,
+        unrestricted.results.value.context
+    );
     let (_, _, other) = lower("input i, j; slot a;");
     assert!(matches!(
         req.prepare(&other.corpus, &p.keys, &(&limits).into()),
@@ -367,9 +374,14 @@ fn named_witness_and_context_survive_declaration_reordering() {
     };
     assert!(
         p.results
+            .value
             .groups
             .values()
             .any(|r| matches!(r, ScopedResult::Counterexample(..)))
     );
-    assert_eq!(p.results, q.results);
+    assert_eq!(p.results.value, q.results.value);
+    assert_eq!(
+        p.results, q.results,
+        "canonical tuple work survives declaration reordering"
+    );
 }

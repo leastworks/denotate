@@ -316,6 +316,7 @@ impl SymbolicMeaning<'_> {
             Ok(Some(replacement)) => *original = replacement,
             Ok(None) => original.certification = Some(CertificationOutcome::NotCertified),
             Err(error) => {
+                budget.failure(&error);
                 original.certification = Some(CertificationOutcome::Inconclusive(
                     Inconclusive::from_error(error)?,
                 ))

@@ -1,4 +1,6 @@
-use crate::GroundAtom;
+use crate::{
+    DeterministicLimits, GroundAtom, QueryKey, ResourceKey, WorkCharges, WorkReceipt, WorkReceipts,
+};
 use denotate_ir::{ConstantId, SortId};
 use std::{
     fmt,
@@ -18,6 +20,7 @@ pub enum CheckError {
         phase: &'static str,
     },
     InvalidRequest(&'static str),
+    Receipts(crate::ReceiptError),
     InvalidDomain {
         sort: SortId,
         reason: &'static str,
@@ -75,7 +78,8 @@ pub struct Limits {
     pub max_bdd_variables: usize,
     pub max_bdd_nodes: usize,
     pub max_bdd_tasks: usize,
-    /// Sum of BDD sizes retained in one symbolic meaning or property report.
+    /// Sum of BDD sizes retained in one query (or a whole property report in
+    /// the historical low-level API). Symbolic evaluation is one shared query.
     /// Counts shared conditions conservatively, not exact heap usage.
     pub max_condition_nodes: usize,
 }
@@ -100,6 +104,7 @@ pub(crate) struct Budget<'a> {
     pub limits: &'a Limits,
     start: Instant,
     work: usize,
+    charges: Option<WorkCharges>,
     #[cfg(test)]
     pub profile: Option<PreparationProfile>,
 }
@@ -119,9 +124,60 @@ impl<'a> Budget<'a> {
             limits,
             start: Instant::now(),
             work: 0,
+            charges: None,
             #[cfg(test)]
             profile: None,
         }
+    }
+    pub fn tracked(limits: &'a Limits) -> Self {
+        let mut budget = Self::new(limits);
+        budget.charges = Some(WorkCharges::default());
+        budget
+    }
+    pub fn observe(&mut self, phase: &str, resource: &str, count: usize) {
+        if let Some(charges) = &mut self.charges {
+            let peak = charges
+                .resource_peaks
+                .entry(ResourceKey {
+                    phase: phase.into(),
+                    resource: resource.into(),
+                })
+                .or_default();
+            *peak = (*peak).max(count);
+        }
+    }
+    pub fn failure(&mut self, error: &CheckError) {
+        if let (Some(charges), CheckError::LimitExceeded { phase, resource }) =
+            (&mut self.charges, error)
+        {
+            charges.exhausted.insert(ResourceKey {
+                phase: (*phase).into(),
+                resource: (*resource).into(),
+            });
+        }
+    }
+    pub fn record(
+        &mut self,
+        receipts: &mut WorkReceipts,
+        key: QueryKey,
+        dependencies: impl IntoIterator<Item = QueryKey>,
+    ) -> Result<()> {
+        #[cfg(test)]
+        crate::accounting::test_trace(&key);
+        let own = self
+            .charges
+            .take()
+            .ok_or(CheckError::Internal("untracked query receipt"))?;
+        receipts
+            .record(
+                key,
+                WorkReceipt {
+                    allowance: DeterministicLimits::from(self.limits),
+                    own,
+                    dependencies: dependencies.into_iter().collect(),
+                },
+            )
+            .map_err(CheckError::Receipts)
     }
     #[cfg(test)]
     pub fn enable_profile(&mut self) {
@@ -156,16 +212,45 @@ impl<'a> Budget<'a> {
             return Err(CheckError::Deadline { phase });
         }
         if amount > self.remaining() {
+            if let Some(charges) = &mut self.charges {
+                let rejected = charges.rejected_work.entry(phase.into()).or_default();
+                *rejected = rejected
+                    .checked_add(amount)
+                    .ok_or(CheckError::Receipts(crate::ReceiptError::Overflow))?;
+                charges.exhausted.insert(ResourceKey {
+                    phase: phase.into(),
+                    resource: "work".into(),
+                });
+            }
             return Err(CheckError::LimitExceeded {
                 phase,
                 resource: "work",
             });
         }
-        self.work += amount;
+        self.work = self
+            .work
+            .checked_add(amount)
+            .ok_or(CheckError::Receipts(crate::ReceiptError::Overflow))?;
+        if let Some(charges) = &mut self.charges {
+            charges.work = charges
+                .work
+                .checked_add(amount)
+                .ok_or(CheckError::Receipts(crate::ReceiptError::Overflow))?;
+            let phase_work = charges.by_phase.entry(phase.into()).or_default();
+            *phase_work = phase_work
+                .checked_add(amount)
+                .ok_or(CheckError::Receipts(crate::ReceiptError::Overflow))?;
+        }
         #[cfg(test)]
         if let Some(profile) = &mut self.profile {
-            *profile.work.entry(phase).or_default() += amount;
-            *profile.calls.entry(phase).or_default() += 1;
+            let work = profile.work.entry(phase).or_default();
+            *work = work
+                .checked_add(amount)
+                .ok_or(CheckError::Receipts(crate::ReceiptError::Overflow))?;
+            let calls = profile.calls.entry(phase).or_default();
+            *calls = calls
+                .checked_add(1)
+                .ok_or(CheckError::Receipts(crate::ReceiptError::Overflow))?;
         }
         Ok(())
     }
@@ -177,7 +262,9 @@ impl<'a> Budget<'a> {
         resource: &'static str,
     ) -> Result<()> {
         self.tick(phase)?;
+        self.observe(phase, resource, count.saturating_add(1));
         if count >= limit {
+            self.failure(&CheckError::LimitExceeded { phase, resource });
             return Err(CheckError::LimitExceeded { phase, resource });
         }
         Ok(())

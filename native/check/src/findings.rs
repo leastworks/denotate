@@ -137,13 +137,25 @@ impl<'p> SymbolicMeaning<'p> {
         completion_limits: &Limits,
         certification_limits: &Limits,
     ) -> Result<Verification<'p>> {
+        self.verify_queries(limits, completion_limits, certification_limits, None)
+    }
+    pub(crate) fn verify_queries(
+        &self,
+        limits: &Limits,
+        completion_limits: &Limits,
+        certification_limits: &Limits,
+        mut queries: Option<&mut QueryRun<'_>>,
+    ) -> Result<Verification<'p>> {
         limits.cancellation.check()?;
-        let report = self.check_at_most_one(limits)?;
+        let report = self.check_queries(limits, queries.as_deref_mut())?;
         let mut budget = Budget::new(limits);
         let mut metrics = FindingMetrics::default();
         let mut groups = Vec::new();
         let mut violations = Vec::new();
         for check in report.groups {
+            if queries.is_some() {
+                budget = Budget::tracked(limits);
+            }
             violations.push(match &check.outcome {
                 GroupOutcome::Overlap(c) => Some(c.clone()),
                 _ => None,
@@ -207,8 +219,19 @@ impl<'p> SymbolicMeaning<'p> {
             })();
             let outcome = match result {
                 Ok(value) => value,
-                Err(error) => VerifiedOutcome::Inconclusive(Inconclusive::from_error(error)?),
+                Err(error) => {
+                    budget.failure(&error);
+                    VerifiedOutcome::Inconclusive(Inconclusive::from_error(error)?)
+                }
             };
+            if let Some(q) = queries.as_mut() {
+                let key = q.group(&check.group)?;
+                budget.record(
+                    q.receipts,
+                    QueryKey::Witness(key.clone()),
+                    [QueryKey::Property(key)],
+                )?;
+            }
             groups.push(VerifiedGroup {
                 group: check.group,
                 cone: check.cone,
@@ -222,7 +245,23 @@ impl<'p> SymbolicMeaning<'p> {
         let mut completion_nodes = 0;
         // Copy already bounded, prepared cycle metadata even if witness work
         // exhausted its budget. Otherwise a limit would hide the blocked regions.
-        for id in report.unresolved_components {
+        let mut ordered: Vec<_> = report.unresolved_components.into_iter().collect();
+        if let Some(q) = queries.as_ref() {
+            let keyed = ordered
+                .into_iter()
+                .map(|id| Ok((q.component(id)?, id)))
+                .collect::<Result<BTreeMap<_, _>>>()?;
+            ordered = keyed.into_values().collect();
+        }
+        #[cfg(test)]
+        if queries.is_some() {
+            crate::accounting::test_schedule(&mut ordered);
+        }
+        for id in ordered {
+            if queries.is_some() {
+                completion_budget = Budget::tracked(completion_limits);
+                completion_nodes = 0;
+            }
             let component = self
                 .program
                 .component(id)
@@ -248,10 +287,20 @@ impl<'p> SymbolicMeaning<'p> {
                 &mut completion_budget,
             ) {
                 Ok(outcome) => outcome,
-                Err(error) => CompletionOutcome::Inconclusive(Inconclusive::from_error(error)?),
+                Err(error) => {
+                    completion_budget.failure(&error);
+                    CompletionOutcome::Inconclusive(Inconclusive::from_error(error)?)
+                }
             };
             if let CompletionOutcome::NoMeaning(finding) = &completion {
                 completion_nodes += finding.bad_input.node_count();
+            }
+            if let Some(q) = queries.as_mut() {
+                completion_budget.record(
+                    q.receipts,
+                    QueryKey::Completion(q.component(id)?),
+                    [QueryKey::Symbolic],
+                )?;
             }
             unresolved.push(UnresolvedRegion {
                 component: id,
@@ -264,11 +313,24 @@ impl<'p> SymbolicMeaning<'p> {
                     .map_or(RegionOutcome::Unsupported, RegionOutcome::Inconclusive),
             });
         }
+        if let Some(q) = queries.as_ref() {
+            // Completion tasks may arrive in any order. A certification query's
+            // dependency traversal remains canonical, including on exhaustion.
+            let keyed = unresolved
+                .into_iter()
+                .map(|r| Ok((q.component(r.component)?, r)))
+                .collect::<Result<BTreeMap<_, _>>>()?;
+            unresolved = keyed.into_values().collect();
+        }
         metrics.completion = completion_start.elapsed();
         let certification_start = Instant::now();
         certification_limits.cancellation.check()?;
         let mut certification_budget = Budget::new(certification_limits);
         for (group, condition) in groups.iter_mut().zip(violations) {
+            if queries.is_some() {
+                certification_budget = Budget::tracked(certification_limits);
+            }
+            let needs_completion = matches!(&group.outcome, VerifiedOutcome::Counterexample(c) if c.replay_scope == ReplayScope::ConeOnly);
             if let (VerifiedOutcome::Counterexample(example), Some(condition)) =
                 (&mut group.outcome, condition)
             {
@@ -295,7 +357,10 @@ impl<'p> SymbolicMeaning<'p> {
                             match outside {
                                 Ok(outside) if outside.is_false() => continue,
                                 Ok(_) => {}
-                                Err(CheckError::LimitExceeded { .. }) => break,
+                                Err(error @ CheckError::LimitExceeded { .. }) => {
+                                    certification_budget.failure(&error);
+                                    break;
+                                }
                                 Err(error) => return Err(error),
                             }
                             match self.context.apply(
@@ -308,18 +373,45 @@ impl<'p> SymbolicMeaning<'p> {
                                     example.confined_to_no_meaning.push(region.component)
                                 }
                                 Ok(_) => {}
-                                Err(CheckError::LimitExceeded { .. }) => break, // Optional wording only.
+                                Err(error @ CheckError::LimitExceeded { .. }) => {
+                                    certification_budget.failure(&error);
+                                    break;
+                                } // Optional wording only.
                                 Err(error) => return Err(error),
                             }
                         }
                     }
                 }
             }
+            if let Some(q) = queries.as_mut() {
+                let key = q.group(&group.group)?;
+                let mut dependencies = BTreeSet::from([QueryKey::Witness(key.clone())]);
+                if needs_completion {
+                    for region in &unresolved {
+                        dependencies.insert(QueryKey::Completion(q.component(region.component)?));
+                    }
+                }
+                certification_budget.record(
+                    q.receipts,
+                    QueryKey::Certification(key),
+                    dependencies,
+                )?;
+            }
         }
         metrics.certification = certification_start.elapsed();
         limits.cancellation.check()?;
         completion_limits.cancellation.check()?;
         certification_limits.cancellation.check()?;
+        if queries.is_some() {
+            let order: BTreeMap<_, _> = self
+                .program
+                .at_most_one_groups()
+                .enumerate()
+                .map(|(i, g)| ((g.obligation, g.key.clone()), i))
+                .collect();
+            groups.sort_by_key(|g| order[&(g.group.obligation, g.group.key.clone())]);
+            unresolved.sort_by_key(|r| r.component);
+        }
         Ok(Verification {
             program: self.program,
             groups,

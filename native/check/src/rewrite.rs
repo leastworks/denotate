@@ -151,12 +151,16 @@ impl GroundProgram {
     /// Consume one preparation, retaining source and ground-instance identities.
     /// A limit leaves the last fully committed rewrite batch intact, with an
     /// explicit inconclusive cause for remaining unresolved regions.
-    pub fn admit(mut self, limits: &Limits) -> Result<Self> {
+    pub fn admit(self, limits: &Limits) -> Result<Self> {
+        self.admit_with_budget(&mut Budget::new(limits))
+    }
+    pub(crate) fn admit_with_budget(mut self, budget: &mut Budget<'_>) -> Result<Self> {
+        let limits = budget.limits;
         limits.cancellation.check()?;
         self.rewrites.inconclusive = None;
-        let mut budget = Budget::new(limits);
-        let result = self.rewrite_loop(&mut budget);
+        let result = self.rewrite_loop(budget);
         if let Err(error) = result {
+            budget.failure(&error);
             self.rewrites.inconclusive = Some(Inconclusive::from_error(error)?);
         }
         limits.cancellation.check()?;
@@ -194,12 +198,8 @@ impl GroundProgram {
                                 value = ctx.complement(&value, budget)?;
                             }
                             condition = ctx.apply(&condition, &value, and, budget)?;
-                            retained = crate::symbolic::retain(
-                                retained,
-                                0,
-                                value.node_count(),
-                                budget.limits,
-                            )?;
+                            retained =
+                                crate::symbolic::retain(retained, 0, value.node_count(), budget)?;
                             settled.push(SettledPremise {
                                 literal: literal.clone(),
                                 condition: value,
@@ -207,8 +207,7 @@ impl GroundProgram {
                         }
                     }
                 }
-                retained =
-                    crate::symbolic::retain(retained, 0, condition.node_count(), budget.limits)?;
+                retained = crate::symbolic::retain(retained, 0, condition.node_count(), budget)?;
                 summaries.insert(
                     rule.id,
                     ProducerSummary {
@@ -400,7 +399,7 @@ impl GroundProgram {
             )?;
             nodes += summary.nodes();
         }
-        *retained = crate::symbolic::retain(*retained, 0, nodes, budget.limits)?;
+        *retained = crate::symbolic::retain(*retained, 0, nodes, budget)?;
         let proof = RewriteProof {
             id: RewriteProofId {
                 snapshot: self.graph_revision,

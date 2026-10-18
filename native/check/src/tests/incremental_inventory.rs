@@ -703,3 +703,6 @@ mod key_evidence;
 
 #[path = "request_evidence.rs"]
 mod request_evidence;
+
+#[path = "budget_evidence.rs"]
+mod budget_evidence;

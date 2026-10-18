@@ -41,6 +41,7 @@ impl<'a> EquationContext<'a> {
             .len()
             .checked_add(temporary)
             .ok_or_else(|| limit("completion universe", "BDD variables"))?;
+        budget.observe("completion universe", "BDD variables", count);
         if count > budget.limits.max_bdd_variables || count >= usize::from(u16::MAX - 1) {
             return Err(limit("completion universe", "BDD variables"));
         }
@@ -60,7 +61,7 @@ impl<'a> EquationContext<'a> {
             self.reserved,
             0,
             self.live.get().saturating_add(extra),
-            budget.limits,
+            budget,
         )?;
         Ok(())
     }
@@ -73,6 +74,7 @@ impl<'a> EquationContext<'a> {
     }
     fn own(&self, bdd: Bdd, budget: &mut Budget<'_>) -> Result<Formula> {
         self.room(bdd.size(), budget)?;
+        budget.observe("completion BDD", "BDD nodes", bdd.size());
         if bdd.size() > budget.limits.max_bdd_nodes {
             return Err(limit("completion BDD", "BDD nodes"));
         }
@@ -145,15 +147,28 @@ impl<'a> EquationContext<'a> {
             .max_bdd_tasks
             .min(budget.remaining() / 2)
             .min(available / 4);
-        let (_, tasks) = Bdd::check_binary_op(allowed, a.bdd(), b.bdd(), op)
-            .ok_or_else(|| limit("completion preflight", "BDD tasks"))?;
+        let Some((_, tasks)) = Bdd::check_binary_op(allowed, a.bdd(), b.bdd(), op) else {
+            budget.observe(
+                "completion preflight",
+                "BDD tasks",
+                allowed.saturating_add(1),
+            );
+            return Err(limit("completion preflight", "BDD tasks"));
+        };
+        budget.observe("completion apply", "BDD tasks", tasks);
         budget.charge(2 * tasks + 1, "completion apply")?;
         let node_limit = budget
             .limits
             .max_bdd_nodes
             .min(available.saturating_sub(3 * tasks));
-        let bdd = Bdd::binary_op_with_limit(node_limit, a.bdd(), b.bdd(), op)
-            .ok_or_else(|| limit("completion apply", "BDD nodes"))?;
+        let Some(bdd) = Bdd::binary_op_with_limit(node_limit, a.bdd(), b.bdd(), op) else {
+            budget.observe(
+                "completion apply",
+                "BDD nodes",
+                node_limit.saturating_add(1),
+            );
+            return Err(limit("completion apply", "BDD nodes"));
+        };
         self.own(bdd, budget)
     }
     fn restrict(

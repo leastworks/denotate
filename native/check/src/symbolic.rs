@@ -91,9 +91,12 @@ impl GroundProgram {
         AnalysisOutcome::from_result(self.symbolic_impl(&mut Budget::new(limits), true))
     }
 
-    fn symbolic_impl(&self, budget: &mut Budget<'_>, partial: bool) -> Result<SymbolicMeaning<'_>> {
+    pub(crate) fn symbolic_impl(
+        &self,
+        budget: &mut Budget<'_>,
+        partial: bool,
+    ) -> Result<SymbolicMeaning<'_>> {
         let start = Instant::now();
-        let limits = budget.limits;
         let context = ConditionContext::build(self, budget)?;
         let mut meaning = SymbolicMeaning {
             program: self,
@@ -109,7 +112,7 @@ impl GroundProgram {
         let mut retained = meaning.context.permitted_worlds().node_count();
         for input in &self.inputs {
             let condition = meaning.context.input_with_budget(input, budget)?;
-            retained = retain(retained, 0, condition.node_count(), limits)?;
+            retained = retain(retained, 0, condition.node_count(), budget)?;
             meaning.conditions.insert(input.clone(), condition);
         }
         for (index, component) in self.components.iter().enumerate() {
@@ -178,7 +181,7 @@ impl GroundProgram {
                             .conditions
                             .get(&rule.head.atom)
                             .map_or(0, Condition::node_count);
-                        retained = retain(retained, old_size, next.node_count(), limits)?;
+                        retained = retain(retained, old_size, next.node_count(), budget)?;
                         meaning.conditions.insert(rule.head.atom.clone(), next);
                         changed = true;
                     }
@@ -192,6 +195,7 @@ impl GroundProgram {
                 if !partial {
                     return Err(error);
                 }
+                budget.failure(&error);
                 let cause = Inconclusive::from_error(error)?;
                 for atom in &component.atoms {
                     if !self.inputs.contains(atom) {
@@ -214,12 +218,19 @@ impl GroundProgram {
     }
 }
 
-pub(crate) fn retain(total: usize, old: usize, new: usize, limits: &Limits) -> Result<usize> {
+pub(crate) fn retain(
+    total: usize,
+    old: usize,
+    new: usize,
+    budget: &mut Budget<'_>,
+) -> Result<usize> {
     let next = total
         .checked_sub(old)
         .and_then(|n| n.checked_add(new))
         .ok_or_else(|| limit("symbolic storage", "condition nodes"))?;
-    if next > limits.max_condition_nodes {
+    budget.observe("symbolic storage", "condition nodes", next);
+    if next > budget.limits.max_condition_nodes {
+        budget.failure(&limit("symbolic storage", "condition nodes"));
         return Err(limit("symbolic storage", "condition nodes"));
     }
     Ok(next)

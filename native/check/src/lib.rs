@@ -1,6 +1,7 @@
 //! Finite grounding, conservative rewrites, BDD checking and replayed findings.
 //! Observation certificates are scoped to one input snapshot. Frontends own presentation.
 
+mod accounting;
 mod boolean;
 mod certification;
 mod completion;
@@ -16,6 +17,7 @@ mod rewrite;
 mod symbolic;
 mod upper_bounds;
 
+pub use accounting::*;
 pub use boolean::*;
 pub use certification::*;
 pub use completion::*;

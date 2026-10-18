@@ -128,13 +128,66 @@ impl SymbolicMeaning<'_> {
     /// Budget exhaustion is explicit per group once indexing succeeds. Earlier
     /// completed groups are retained; internal failures still return an error.
     pub fn check_at_most_one(&self, limits: &Limits) -> Result<PropertyReport> {
+        self.check_queries(limits, None)
+    }
+    pub(crate) fn check_queries(
+        &self,
+        limits: &Limits,
+        mut queries: Option<&mut QueryRun<'_>>,
+    ) -> Result<PropertyReport> {
         limits.cancellation.check()?;
         let start = Instant::now();
-        let mut budget = Budget::new(limits);
-        let index = ConeIndex::new(self.program, &mut budget)?;
+        let mut budget = if queries.is_some() {
+            Budget::tracked(limits)
+        } else {
+            Budget::new(limits)
+        };
+        let index = ConeIndex::new(self.program, &mut budget);
+        if let Err(error) = &index {
+            budget.failure(error);
+        }
+        if let Some(q) = queries.as_mut() {
+            // Operational errors cannot commit a receipt.
+            if let Err(error) = &index {
+                Inconclusive::from_error(error.clone())?;
+            }
+            let dependency = if q.receipts.get(&QueryKey::Admission).is_some() {
+                QueryKey::Admission
+            } else {
+                QueryKey::Preparation
+            };
+            budget.record(q.receipts, QueryKey::ConeIndex, [dependency])?;
+        }
+        let index = index?;
+        let mut work = budget.used();
         let mut groups = Vec::new();
         let mut retained = 0;
-        for group in self.program.at_most_one_groups() {
+        let mut retained_nodes = 0;
+        let mut ordered: Vec<_> = self.program.at_most_one_groups().collect();
+        if let Some(q) = queries.as_ref() {
+            let keyed = ordered
+                .into_iter()
+                .map(|g| Ok((q.group(g)?, g)))
+                .collect::<Result<BTreeMap<_, _>>>()?;
+            ordered = keyed.into_values().collect();
+        }
+        #[cfg(test)]
+        if queries.is_some() {
+            crate::accounting::test_schedule(&mut ordered);
+        }
+        for group in ordered {
+            let mut tuples: Vec<_> = group.tuples.iter().collect();
+            if let Some(q) = queries.as_ref() {
+                let keyed = tuples
+                    .into_iter()
+                    .map(|a| Ok((AtomKey::from_atom(q.keys, a).map_err(CheckError::Keys)?, a)))
+                    .collect::<Result<BTreeMap<_, _>>>()?;
+                tuples = keyed.into_values().collect();
+            }
+            if queries.is_some() {
+                budget = Budget::tracked(limits);
+                retained = 0;
+            }
             let mut cone = DependencyCone {
                 roots: group.tuples.iter().cloned().collect(),
                 facts: BTreeSet::new(),
@@ -157,8 +210,8 @@ impl SymbolicMeaning<'_> {
                         .map_or(GroupOutcome::Unsupported, GroupOutcome::Inconclusive)
                 } else {
                     let mut violation = self.context.false_condition();
-                    for (i, left) in group.tuples.iter().enumerate() {
-                        for right in &group.tuples[i + 1..] {
+                    for (i, left) in tuples.iter().enumerate() {
+                        for right in &tuples[i + 1..] {
                             budget.tick("property checks")?;
                             let pair = self.context.apply(
                                 &self.known(left),
@@ -178,7 +231,7 @@ impl SymbolicMeaning<'_> {
                     if violation.is_false() {
                         GroupOutcome::Proved
                     } else {
-                        retained = retain(retained, 0, violation.node_count(), limits)?;
+                        retained = retain(retained, 0, violation.node_count(), &mut budget)?;
                         GroupOutcome::Overlap(violation)
                     }
                 };
@@ -186,8 +239,20 @@ impl SymbolicMeaning<'_> {
             })();
             let outcome = match result {
                 Ok(value) => value,
-                Err(error) => GroupOutcome::Inconclusive(Inconclusive::from_error(error)?),
+                Err(error) => {
+                    budget.failure(&error);
+                    GroupOutcome::Inconclusive(Inconclusive::from_error(error)?)
+                }
             };
+            if let Some(q) = queries.as_mut() {
+                work += budget.used();
+                retained_nodes += retained;
+                budget.record(
+                    q.receipts,
+                    QueryKey::Property(q.group(group)?),
+                    [QueryKey::Symbolic, QueryKey::ConeIndex],
+                )?;
+            }
             groups.push(GroupCheck {
                 group: group.clone(),
                 cone,
@@ -206,8 +271,16 @@ impl SymbolicMeaning<'_> {
             groups,
             metrics: SymbolicMetrics {
                 elapsed: start.elapsed(),
-                work: budget.used(),
-                retained_condition_nodes: retained,
+                work: if queries.is_some() {
+                    work
+                } else {
+                    budget.used()
+                },
+                retained_condition_nodes: if queries.is_some() {
+                    retained_nodes
+                } else {
+                    retained
+                },
             },
         })
     }

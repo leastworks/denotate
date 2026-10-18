@@ -155,6 +155,8 @@ impl ConditionContext {
         budget.tick("BDD inputs")?;
         let count = program.inputs.len();
         // new_anonymous rejects >= u16::MAX - 1. Check before its panicking API.
+        budget.observe("BDD inputs", "BDD variables", count);
+        budget.observe("BDD inputs", "BDD nodes", 2);
         if count > budget.limits.max_bdd_variables || count >= usize::from(u16::MAX - 1) {
             return Err(limit("BDD inputs", "BDD variables"));
         }
@@ -192,7 +194,7 @@ impl ConditionContext {
                 seen = context.apply(&seen, &value, op_function::or, budget)?;
             }
         }
-        crate::symbolic::retain(0, 0, context.permitted.node_count(), budget.limits)?;
+        crate::symbolic::retain(0, 0, context.permitted.node_count(), budget)?;
         Ok(context)
     }
 
@@ -236,6 +238,7 @@ impl ConditionContext {
             .inputs
             .get(atom)
             .ok_or_else(|| CheckError::InvalidObservation(atom.clone()))?;
+        budget.observe("BDD input", "BDD nodes", 3);
         if budget.limits.max_bdd_nodes < 3 {
             return Err(limit("BDD inputs", "BDD nodes"));
         }
@@ -413,6 +416,7 @@ impl ConditionContext {
         {
             return Err(CheckError::ForeignCondition);
         }
+        budget.observe("BDD operation", "BDD nodes", condition.node_count());
         if condition.node_count() > budget.limits.max_bdd_nodes {
             return Err(limit("BDD operation", "BDD nodes"));
         }
@@ -437,11 +441,22 @@ impl ConditionContext {
         // The library's result-node bound alone does not bound a large apply
         // cache for a small result. Preflight the task graph before building it.
         let allowed = budget.limits.max_bdd_tasks.min(budget.remaining() / 2);
-        let (_, tasks) = Bdd::check_binary_op(allowed, &a.bdd, &b.bdd, op)
-            .ok_or_else(|| limit("BDD preflight", "BDD tasks"))?;
+        let Some((_, tasks)) = Bdd::check_binary_op(allowed, &a.bdd, &b.bdd, op) else {
+            budget.observe("BDD preflight", "BDD tasks", allowed.saturating_add(1));
+            return Err(limit("BDD preflight", "BDD tasks"));
+        };
+        budget.observe("BDD operation", "BDD tasks", tasks);
         budget.charge(2 * tasks + 1, "BDD operation")?;
-        let bdd = Bdd::binary_op_with_limit(budget.limits.max_bdd_nodes, &a.bdd, &b.bdd, op)
-            .ok_or_else(|| limit("BDD operation", "BDD nodes"))?;
+        let Some(bdd) = Bdd::binary_op_with_limit(budget.limits.max_bdd_nodes, &a.bdd, &b.bdd, op)
+        else {
+            budget.observe(
+                "BDD operation",
+                "BDD nodes",
+                budget.limits.max_bdd_nodes.saturating_add(1),
+            );
+            return Err(limit("BDD operation", "BDD nodes"));
+        };
+        budget.observe("BDD operation", "BDD nodes", bdd.size());
         budget.charge(0, "BDD operation")?;
         Ok(self.wrap(bdd))
     }
