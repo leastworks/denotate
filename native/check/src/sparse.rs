@@ -3,6 +3,10 @@
 use super::*;
 use std::collections::VecDeque;
 
+#[cfg(test)]
+#[path = "tests/planner.rs"]
+mod planner_tests;
+
 type Binding<'a> = BTreeMap<&'a str, ConstantId>;
 type Buckets = BTreeMap<Vec<ConstantId>, Vec<usize>>;
 type Indexes = BTreeMap<RelationId, BTreeMap<Vec<usize>, Buckets>>;
@@ -104,18 +108,141 @@ fn bound_columns(
     Ok(columns)
 }
 
-fn bind_names<'a>(
-    atom: &'a Atom,
-    bound: &mut BTreeSet<&'a str>,
-    budget: &mut Budget<'_>,
-) -> Result<()> {
-    for term in atom.arguments() {
-        budget.tick("grounding plans")?;
-        if let Term::Variable { name, .. } = term.value() {
-            bound.insert(name.as_str());
+// Dense variable incidence is built once per rule. Each pivot binds each variable
+// once and visits each argument incidence once; score buckets avoid rescanning
+// remaining literals. At bounded arity, all n pivot plans take O(n²) work.
+struct JoinPlanner {
+    variables: Vec<Vec<Option<usize>>>,
+    readers: Vec<Vec<usize>>,
+    constants: Vec<usize>,
+    arity: usize,
+}
+impl JoinPlanner {
+    fn new(positives: &[&Atom], budget: &mut Budget<'_>) -> Result<Self> {
+        let mut names = BTreeMap::new();
+        let mut readers: Vec<Vec<usize>> = Vec::new();
+        let mut variables = Vec::new();
+        let mut constants = Vec::new();
+        let mut arity = 0;
+        for (index, atom) in positives.iter().enumerate() {
+            budget.tick("grounding plans")?;
+            let mut terms = Vec::new();
+            let mut fixed = 0;
+            for term in atom.arguments() {
+                budget.tick("grounding plans")?;
+                terms.push(match term.value() {
+                    Term::Constant(_) => {
+                        fixed += 1;
+                        None
+                    }
+                    Term::Variable { name, .. } => {
+                        let next = names.len();
+                        let id = *names.entry(name.as_str()).or_insert(next);
+                        if id == readers.len() {
+                            readers.push(Vec::new());
+                        }
+                        // Repeated variables count once per bound column.
+                        readers[id].push(index);
+                        Some(id)
+                    }
+                });
+            }
+            arity = arity.max(terms.len());
+            variables.push(terms);
+            constants.push(fixed);
+        }
+        Ok(Self {
+            variables,
+            readers,
+            constants,
+            arity,
+        })
+    }
+
+    fn steps(&self, pivot: usize, budget: &mut Budget<'_>) -> Result<Vec<(usize, Vec<usize>)>> {
+        let n = self.variables.len();
+        budget.charge(n + self.readers.len() + self.arity + 1, "grounding plans")?;
+        let mut bound = vec![false; self.readers.len()];
+        let mut buckets = ScoreBuckets {
+            heads: vec![None; self.arity + 1],
+            previous: vec![None; n],
+            next: vec![None; n],
+            scores: self.constants.clone(),
+            active: vec![true; n],
+        };
+        // Initial ties follow authored order; promotions go to the bucket head.
+        // This deterministic tie policy avoids an ordered-tree/logarithmic cost
+        // for each incidence update. It does not change the selectivity score.
+        for i in (0..n).rev() {
+            buckets.insert(i);
+        }
+        buckets.remove(pivot);
+        buckets.active[pivot] = false;
+        let mut selected = pivot;
+        let mut steps = Vec::with_capacity(n.saturating_sub(1));
+        loop {
+            for variable in &self.variables[selected] {
+                budget.tick("grounding plans")?;
+                let Some(variable) = *variable else { continue };
+                if std::mem::replace(&mut bound[variable], true) {
+                    continue;
+                }
+                for &reader in &self.readers[variable] {
+                    budget.tick("grounding plans")?;
+                    if buckets.active[reader] {
+                        buckets.remove(reader);
+                        buckets.scores[reader] += 1;
+                        buckets.insert(reader);
+                    }
+                }
+            }
+            budget.charge(self.arity + 1, "grounding plans")?;
+            let Some(best) = buckets.heads.iter().rev().find_map(|head| *head) else {
+                break;
+            };
+            buckets.remove(best);
+            buckets.active[best] = false;
+            let mut columns = Vec::new();
+            for (column, variable) in self.variables[best].iter().enumerate() {
+                budget.tick("grounding plans")?;
+                if variable.is_none_or(|v| bound[v]) {
+                    columns.push(column);
+                }
+            }
+            steps.push((best, columns));
+            selected = best;
+        }
+        Ok(steps)
+    }
+}
+
+struct ScoreBuckets {
+    heads: Vec<Option<usize>>,
+    previous: Vec<Option<usize>>,
+    next: Vec<Option<usize>>,
+    scores: Vec<usize>,
+    active: Vec<bool>,
+}
+impl ScoreBuckets {
+    fn insert(&mut self, index: usize) {
+        let head = &mut self.heads[self.scores[index]];
+        self.previous[index] = None;
+        self.next[index] = *head;
+        if let Some(old) = *head {
+            self.previous[old] = Some(index);
+        }
+        *head = Some(index);
+    }
+    fn remove(&mut self, index: usize) {
+        if let Some(previous) = self.previous[index] {
+            self.next[previous] = self.next[index];
+        } else {
+            self.heads[self.scores[index]] = self.next[index];
+        }
+        if let Some(next) = self.next[index] {
+            self.previous[next] = self.previous[index];
         }
     }
-    Ok(())
 }
 
 fn match_tuple<'a>(
@@ -282,6 +409,10 @@ fn populate_with_delta(
                 seeds.push(head);
             }
         }
+        let planner = JoinPlanner::new(&positives, budget)?;
+        // At most 2^arity shapes per occurrence. Register each shape once, so
+        // relation-map lookup is not repeated for all n² materialized steps.
+        let mut shapes: Vec<Vec<Vec<usize>>> = vec![Vec::new(); positives.len()];
         for (pivot_index, pivot) in positives.iter().enumerate() {
             budget.tick("grounding plans")?;
             let columns = bound_columns(pivot, &BTreeSet::new(), budget)?;
@@ -300,35 +431,19 @@ fn populate_with_delta(
                 .entry(key)
                 .or_default()
                 .push(plans.len());
-            let mut bound = BTreeSet::new();
-            bind_names(pivot, &mut bound, budget)?;
-            let mut remaining: Vec<_> = positives
-                .iter()
-                .enumerate()
-                .filter(|(i, _)| *i != pivot_index)
-                .map(|(_, a)| *a)
-                .collect();
             let mut steps = Vec::new();
-            while !remaining.is_empty() {
-                // Prefer constrained joins before genuinely independent products.
-                let mut best = 0;
-                let mut columns = bound_columns(remaining[0], &bound, budget)?;
-                for (index, atom) in remaining.iter().enumerate().skip(1) {
-                    budget.tick("grounding plans")?;
-                    let candidate = bound_columns(atom, &bound, budget)?;
-                    if candidate.len() > columns.len() {
-                        best = index;
-                        columns = candidate;
-                    }
+            for (index, columns) in planner.steps(pivot_index, budget)? {
+                let atom = positives[index];
+                budget.tick("grounding plans")?;
+                if !shapes[index].contains(&columns) {
+                    tuples
+                        .indexes
+                        .entry(atom.relation())
+                        .or_default()
+                        .entry(columns.clone())
+                        .or_default();
+                    shapes[index].push(columns.clone());
                 }
-                let atom = remaining.remove(best);
-                tuples
-                    .indexes
-                    .entry(atom.relation())
-                    .or_default()
-                    .entry(columns.clone())
-                    .or_default();
-                bind_names(atom, &mut bound, budget)?;
                 steps.push(Step { atom, columns });
             }
             plans.push(Plan { rule, pivot, steps });

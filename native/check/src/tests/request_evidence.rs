@@ -14,7 +14,7 @@ pub(super) fn checked<'s>(p: &'s LoweredProgram, limits: &Limits) -> PreparedChe
     };
     g.admit(&limits.into()).unwrap()
 }
-fn fresh_capture(p: &LoweredProgram, max_work: usize) -> Value {
+pub(super) fn fresh_capture(p: &LoweredProgram, max_work: usize) -> Value {
     let limits = Limits {
         max_work,
         timeout: Duration::from_secs(60),
@@ -49,6 +49,8 @@ fn frozen_witness_migration_is_exact() {
     let delta: Value = serde_json::from_str(include_str!("../../WITNESS-ORDER-6a.2.json")).unwrap();
     let baseline: Value =
         serde_json::from_str(include_str!("../../fixtures/SLICE-6.0-BASELINE.json")).unwrap();
+    let report = super::planner_evidence::adapted("identities", report);
+    let baseline = super::planner_evidence::adapted("baseline", baseline);
     let mut used = BTreeSet::new();
     let mut changed = 0;
     for row in report["witnesses"].as_array().unwrap() {
@@ -73,8 +75,9 @@ fn frozen_witness_migration_is_exact() {
             assert_eq!(row["source"], frozen[format!("{side}_source")]);
         }
         let (_, _, p) = lower(source);
-        // The unchanged low-level path independently replays/certifies the old
-        // witness; the request boundary replays/certifies the new one.
+        // The historical-order path independently replays/certifies the old
+        // witness; the request boundary replays/certifies the new one. Both
+        // use the current planner, with its explicit preparation-budget overlay.
         let old = budget_result_lowered(&p, max_work);
         let new = fresh_capture(&p, max_work);
         assert_eq!(old, row["current"], "old capture {case}");

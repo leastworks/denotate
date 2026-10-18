@@ -405,7 +405,7 @@ fn receipt_capture(receipts: &WorkReceipts) -> Value {
     let total = receipts.total().unwrap();
     json!({"queries":entries,"aggregate":{"work":total.work,"by_phase":total.by_phase,"resource_totals":resources(&total.resource_totals),"rejected_work":total.rejected_work}})
 }
-fn fresh_reference() -> Value {
+pub(super) fn fresh_reference() -> Value {
     let old: Value = serde_json::from_str(include_str!("../../IDENTITIES-6a.1.json")).unwrap();
     let mut cases = BTreeMap::<(String, usize), Vec<String>>::new();
     for row in old["witnesses"].as_array().unwrap() {
@@ -432,7 +432,10 @@ fn fresh_reference() -> Value {
 fn fresh_receipts_match_the_6a2b_reference() {
     let expected: Value =
         serde_json::from_str(include_str!("../../fixtures/BUDGETS-6a.2b-REFERENCE.json")).unwrap();
-    assert_eq!(fresh_reference(), expected);
+    assert_eq!(
+        fresh_reference(),
+        super::planner_evidence::adapted("fresh_reference", expected)
+    );
 }
 
 #[test]

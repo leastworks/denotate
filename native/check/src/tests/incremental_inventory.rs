@@ -515,7 +515,7 @@ fn baseline() -> Value {
 fn inventory_reference_matches_pre_slice_6_capture() {
     let expected: Value =
         serde_json::from_str(include_str!("../../fixtures/SLICE-6.0-BASELINE.json")).unwrap();
-    assert_eq!(baseline(), expected);
+    assert_eq!(baseline(), planner_evidence::adapted("baseline", expected));
 }
 
 #[test]
@@ -706,3 +706,6 @@ mod request_evidence;
 
 #[path = "budget_evidence.rs"]
 mod budget_evidence;
+
+#[path = "planner_evidence.rs"]
+mod planner_evidence;
