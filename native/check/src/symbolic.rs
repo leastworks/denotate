@@ -31,7 +31,7 @@ pub struct SymbolicMeaning<'p> {
     pub(crate) context: ConditionContext,
     pub(crate) conditions: BTreeMap<GroundAtom, Condition>,
     pub(crate) inconclusive: BTreeMap<ComponentId, Inconclusive>,
-    metrics: SymbolicMetrics,
+    pub(crate) metrics: SymbolicMetrics,
 }
 impl SymbolicMeaning<'_> {
     pub fn program(&self) -> &GroundProgram {
@@ -96,8 +96,16 @@ impl GroundProgram {
         budget: &mut Budget<'_>,
         partial: bool,
     ) -> Result<SymbolicMeaning<'_>> {
+        self.symbolic_selected(budget, partial, None)
+    }
+    pub(crate) fn symbolic_selected(
+        &self,
+        budget: &mut Budget<'_>,
+        partial: bool,
+        cone: Option<&DependencyCone>,
+    ) -> Result<SymbolicMeaning<'_>> {
         let start = Instant::now();
-        let context = ConditionContext::build(self, budget)?;
+        let context = ConditionContext::build_selected(self, cone.map(|c| &c.facts), budget)?;
         let mut meaning = SymbolicMeaning {
             program: self,
             context,
@@ -110,12 +118,30 @@ impl GroundProgram {
             },
         };
         let mut retained = meaning.context.permitted_worlds().node_count();
-        for input in &self.inputs {
+        for input in meaning.context.inputs().cloned().collect::<Vec<_>>() {
+            let input = &input;
             let condition = meaning.context.input_with_budget(input, budget)?;
             retained = retain(retained, 0, condition.node_count(), budget)?;
             meaning.conditions.insert(input.clone(), condition);
         }
         for (index, component) in self.components.iter().enumerate() {
+            if cone.is_some_and(|c| !c.components.contains(&component.id)) {
+                continue;
+            }
+            // Validate before short-circuiting or skipping blocked components:
+            // completion also reads their premises through `fact`/`known`.
+            // Missing conditions may mean false only inside the selected cone.
+            if let Some(cone) = cone {
+                for rule in &self.component_rules[index] {
+                    for literal in &self.rules[*rule].body {
+                        if !cone.facts.contains(&literal.term.atom) {
+                            return Err(CheckError::Internal(
+                                "local premise outside dependency cone",
+                            ));
+                        }
+                    }
+                }
+            }
             if !component.blocked_by.is_empty() {
                 continue;
             }

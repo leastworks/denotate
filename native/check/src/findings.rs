@@ -148,6 +148,24 @@ impl<'p> SymbolicMeaning<'p> {
     ) -> Result<Verification<'p>> {
         limits.cancellation.check()?;
         let report = self.check_queries(limits, queries.as_deref_mut())?;
+        self.verify_report(
+            limits,
+            completion_limits,
+            certification_limits,
+            queries,
+            report,
+            None,
+        )
+    }
+    pub(crate) fn verify_report(
+        &self,
+        limits: &Limits,
+        completion_limits: &Limits,
+        certification_limits: &Limits,
+        mut queries: Option<&mut QueryRun<'_>>,
+        report: PropertyReport,
+        mut local_completions: Option<BTreeMap<ComponentId, CompletionOutcome>>,
+    ) -> Result<Verification<'p>> {
         let mut budget = Budget::new(limits);
         let mut metrics = FindingMetrics::default();
         let mut groups = Vec::new();
@@ -229,7 +247,11 @@ impl<'p> SymbolicMeaning<'p> {
                 budget.record(
                     q.receipts,
                     QueryKey::Witness(key.clone()),
-                    [QueryKey::Property(key)],
+                    [if local_completions.is_some() {
+                        QueryKey::FindingConversion(key)
+                    } else {
+                        QueryKey::Property(key)
+                    }],
                 )?;
             }
             groups.push(VerifiedGroup {
@@ -281,11 +303,14 @@ impl<'p> SymbolicMeaning<'p> {
                     rules.push(rule.clone());
                 }
             }
-            let completion = match self.complete_component(
-                component,
-                completion_nodes,
-                &mut completion_budget,
-            ) {
+            let completion_result = if let Some(local) = local_completions.as_mut() {
+                local
+                    .remove(&id)
+                    .ok_or(CheckError::Internal("missing local completion"))
+            } else {
+                self.complete_component(component, completion_nodes, &mut completion_budget)
+            };
+            let completion = match completion_result {
                 Ok(outcome) => outcome,
                 Err(error) => {
                     completion_budget.failure(&error);
@@ -295,7 +320,7 @@ impl<'p> SymbolicMeaning<'p> {
             if let CompletionOutcome::NoMeaning(finding) = &completion {
                 completion_nodes += finding.bad_input.node_count();
             }
-            if let Some(q) = queries.as_mut() {
+            if let Some(q) = queries.as_mut().filter(|_| local_completions.is_none()) {
                 completion_budget.record(
                     q.receipts,
                     QueryKey::Completion(q.component(id)?),

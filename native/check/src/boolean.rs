@@ -9,7 +9,9 @@ use std::{
 };
 
 mod equations;
+mod portable;
 pub(crate) use equations::{EquationContext, Formula};
+pub use portable::OwnedCondition;
 
 // Historical-order probes. Thread-local scope and RAII restoration isolate
 // parallel tests/panics; production request preparation uses AtomKey order.
@@ -45,7 +47,7 @@ pub struct Observation {
 /// Compare meanings with ConditionContext::equivalent, not storage equality.
 #[derive(Debug, Clone)]
 pub struct Condition {
-    universe: u64,
+    universe: (u64, u64),
     bdd: Arc<Bdd>,
 }
 impl Condition {
@@ -75,7 +77,7 @@ impl Condition {
 /// derived facts come from SymbolicMeaning.
 #[derive(Debug)]
 pub struct ConditionContext {
-    universe: u64,
+    universe: (u64, u64),
     inputs: BTreeMap<GroundAtom, BddVariable>,
     variables: BddVariableSet,
     no: Condition,
@@ -112,7 +114,7 @@ impl GroundProgram {
     ) -> Result<Option<BTreeMap<GroundAtom, bool>>> {
         let mut budget = Budget::new(limits);
         budget.tick("condition summary")?;
-        if condition.universe != self.preparation
+        if condition.universe != (self.preparation, 0)
             || usize::from(condition.bdd.num_vars()) != self.inputs.len()
         {
             return Err(CheckError::ForeignCondition);
@@ -152,8 +154,30 @@ impl GroundProgram {
 
 impl ConditionContext {
     pub(crate) fn build(program: &GroundProgram, budget: &mut Budget<'_>) -> Result<Self> {
+        Self::build_selected(program, None, budget)
+    }
+    pub(crate) fn build_selected(
+        program: &GroundProgram,
+        selected: Option<&BTreeSet<GroundAtom>>,
+        budget: &mut Budget<'_>,
+    ) -> Result<Self> {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT_LOCAL: AtomicU64 = AtomicU64::new(1);
+        let universe = (
+            program.preparation,
+            if selected.is_some() {
+                NEXT_LOCAL.fetch_add(1, Ordering::Relaxed)
+            } else {
+                0
+            },
+        );
         budget.tick("BDD inputs")?;
-        let count = program.inputs.len();
+        let input_order: Vec<_> = program
+            .bdd_inputs()
+            .into_iter()
+            .filter(|a| selected.is_none_or(|s| s.contains(*a)))
+            .collect();
+        let count = input_order.len();
         // new_anonymous rejects >= u16::MAX - 1. Check before its panicking API.
         budget.observe("BDD inputs", "BDD variables", count);
         budget.observe("BDD inputs", "BDD nodes", 2);
@@ -166,17 +190,17 @@ impl ConditionContext {
         budget.charge(count, "BDD inputs")?;
         let variables = BddVariableSet::new_anonymous(count as u16);
         let mut inputs = BTreeMap::new();
-        let input_order = program.bdd_inputs().into_iter();
+        let input_order = input_order.into_iter();
         for (atom, variable) in input_order.zip(variables.variables()) {
             budget.tick("BDD inputs")?;
             inputs.insert(atom.clone(), variable);
         }
         let wrap = |bdd| Condition {
-            universe: program.preparation,
+            universe,
             bdd: Arc::new(bdd),
         };
         let mut context = Self {
-            universe: program.preparation,
+            universe,
             no: wrap(variables.mk_false()),
             yes: wrap(variables.mk_true()),
             permitted: wrap(variables.mk_true()),
@@ -187,6 +211,9 @@ impl ConditionContext {
         for group in &program.input_groups {
             let mut seen = context.false_condition();
             for atom in group {
+                if !context.inputs.contains_key(atom) {
+                    continue;
+                }
                 let value = context.input_with_budget(atom, budget)?;
                 let conflict = context.apply(&seen, &value, op_function::and, budget)?;
                 context.permitted =

@@ -352,7 +352,7 @@ fn interrupted_queries_return_no_accounted_result_and_recovery_is_fresh() {
     assert_eq!(before.results, after.results);
 }
 
-fn receipt_capture(receipts: &WorkReceipts) -> Value {
+pub(super) fn receipt_capture(receipts: &WorkReceipts) -> Value {
     let resources = |map: &BTreeMap<ResourceKey, usize>| {
         map.iter()
             .map(|(k, v)| (format!("{}/{}", k.phase, k.resource), *v))

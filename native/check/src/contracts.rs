@@ -20,12 +20,12 @@ pub struct DependencyCone {
     pub blocked_by: BTreeSet<ComponentId>,
 }
 
-struct ConeIndex<'p> {
+pub(crate) struct ConeIndex<'p> {
     program: &'p GroundProgram,
     producers: BTreeMap<&'p GroundAtom, Vec<&'p GroundRule>>,
 }
 impl<'p> ConeIndex<'p> {
-    fn new(program: &'p GroundProgram, budget: &mut Budget<'_>) -> Result<Self> {
+    pub(crate) fn new(program: &'p GroundProgram, budget: &mut Budget<'_>) -> Result<Self> {
         let mut producers = BTreeMap::<_, Vec<_>>::new();
         for rule in program.rules() {
             budget.tick("dependency cones")?;
@@ -33,7 +33,7 @@ impl<'p> ConeIndex<'p> {
         }
         Ok(Self { program, producers })
     }
-    fn build(
+    pub(crate) fn build(
         &self,
         roots: impl IntoIterator<Item = GroundAtom>,
         budget: &mut Budget<'_>,

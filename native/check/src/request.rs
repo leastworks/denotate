@@ -338,13 +338,13 @@ impl ScopedResults {
 }
 
 pub struct PreparedCheck<'s> {
-    request: CheckRequest,
-    program: GroundProgram,
-    keys: GroundKeyIndex,
+    pub(crate) request: CheckRequest,
+    pub(crate) program: GroundProgram,
+    pub(crate) keys: GroundKeyIndex,
     corpus: &'s Corpus,
-    semantic_keys: &'s SemanticKeys,
+    pub(crate) semantic_keys: &'s SemanticKeys,
     key_computation: Duration,
-    receipts: WorkReceipts,
+    pub(crate) receipts: WorkReceipts,
 }
 pub enum RequestPreparation<'s> {
     Complete(PreparedCheck<'s>),
@@ -466,7 +466,11 @@ impl PreparedCheck<'_> {
             },
         }))
     }
-    fn project(&self, report: &Verification<'_>, keys: &SemanticKeys) -> Result<ScopedResults> {
+    pub(crate) fn project(
+        &self,
+        report: &Verification<'_>,
+        keys: &SemanticKeys,
+    ) -> Result<ScopedResults> {
         let atom = |a: &GroundAtom| AtomKey::from_atom(keys, a).map_err(CheckError::Keys);
         let candidate = |o: &Observation| -> Result<Candidate> {
             Ok(Candidate {
@@ -660,7 +664,7 @@ impl PreparedCheck<'_> {
         }
         Ok(out)
     }
-    fn rule_evidence(
+    pub(crate) fn rule_evidence(
         &self,
         rule: &GroundRule,
         keys: &SemanticKeys,
