@@ -32,8 +32,6 @@ pub struct SymbolicMeaning<'p> {
     pub(crate) conditions: BTreeMap<GroundAtom, Condition>,
     pub(crate) inconclusive: BTreeMap<ComponentId, Inconclusive>,
     pub(crate) metrics: SymbolicMetrics,
-    // Input storage plus each component's maximum additional retained storage.
-    pub(crate) reorder_storage_bound: usize,
 }
 impl SymbolicMeaning<'_> {
     pub fn program(&self) -> &GroundProgram {
@@ -113,7 +111,6 @@ impl GroundProgram {
             context,
             conditions: BTreeMap::new(),
             inconclusive: BTreeMap::new(),
-            reorder_storage_bound: 0,
             metrics: SymbolicMetrics {
                 elapsed: Duration::ZERO,
                 work: 0,
@@ -127,7 +124,6 @@ impl GroundProgram {
             retained = retain(retained, 0, condition.node_count(), budget)?;
             meaning.conditions.insert(input.clone(), condition);
         }
-        meaning.reorder_storage_bound = retained;
         for (index, component) in self.components.iter().enumerate() {
             if cone.is_some_and(|c| !c.components.contains(&component.id)) {
                 continue;
@@ -159,7 +155,6 @@ impl GroundProgram {
                 continue;
             }
             let previous_retained = retained;
-            let mut component_peak = retained;
             let result = (|| -> Result<()> {
                 budget.tick("symbolic evaluation")?;
                 loop {
@@ -213,7 +208,6 @@ impl GroundProgram {
                             .get(&rule.head.atom)
                             .map_or(0, Condition::node_count);
                         retained = retain(retained, old_size, next.node_count(), budget)?;
-                        component_peak = component_peak.max(retained);
                         meaning.conditions.insert(rule.head.atom.clone(), next);
                         changed = true;
                     }
@@ -223,9 +217,6 @@ impl GroundProgram {
                 }
                 Ok(())
             })();
-            meaning.reorder_storage_bound = meaning
-                .reorder_storage_bound
-                .saturating_add(component_peak.saturating_sub(previous_retained));
             if let Err(error) = result {
                 if !partial {
                     return Err(error);

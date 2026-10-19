@@ -11,16 +11,6 @@ pub struct OwnedCondition {
     root: usize,
 }
 impl OwnedCondition {
-    pub(crate) fn source_node_count(&self) -> usize {
-        if self.root == 0 {
-            1
-        } else {
-            self.nodes.len() + 2
-        }
-    }
-    pub(crate) fn export_visits(&self) -> usize {
-        1 + 3 * self.nodes.len()
-    }
     pub(crate) fn value_in(&self, present: &BTreeSet<AtomKey>) -> Result<bool> {
         let mut node = self.root;
         while node > 1 {

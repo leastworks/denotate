@@ -21,6 +21,9 @@ pub struct LocalComponent {
 /// No full-snapshot key computation is required by an individual query lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalInput {
+    /// Only regions that replay discharge proofs need this context. Its BDD
+    /// universe is conservatively global, explicit and owned.
+    pub completion_context: Option<LocalCompletionContext>,
     pub scope: LocalScope,
     pub roots: BTreeSet<AtomKey>,
     pub obligation: Option<LocalObligation>,
@@ -37,13 +40,19 @@ pub struct LocalInput {
     pub request_scope: RequestScope,
     pub backend: BackendIdentity,
     pub limits: DeterministicLimits,
-    pub admission_limit: Option<ResourceReason>,
+    pub admission_limit: Option<Inconclusive>,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalCompletionContext {
+    pub inputs: BTreeSet<AtomKey>,
+    pub input_groups: BTreeSet<BTreeSet<AtomKey>>,
+    pub proofs: BTreeMap<RewriteEvidenceKey, (OwnedCondition, OwnedCondition)>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalEvaluation {
     pub permitted: OwnedCondition,
     pub conditions: BTreeMap<AtomKey, OwnedCondition>,
-    pub incomplete: BTreeMap<ComponentKey, ResourceReason>,
+    pub incomplete: BTreeMap<ComponentKey, Inconclusive>,
 }
 /// Overlap is a candidate condition, not a certified Counterexample. Replay stays fresh.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -110,6 +119,7 @@ impl PreparedCheck<'_> {
         &self,
         scope: LocalScope,
         cone: &DependencyCone,
+        context: &ConditionContext,
     ) -> Result<LocalInput> {
         let atom =
             |a: &GroundAtom| AtomKey::from_atom(self.semantic_keys, a).map_err(CheckError::Keys);
@@ -194,7 +204,64 @@ impl PreparedCheck<'_> {
             }
             LocalScope::Region(_) => None,
         };
+        let completion_context = if matches!(scope, LocalScope::Region(_)) {
+            let proofs = self
+                .program
+                .rewrite_proofs()
+                .filter(|p| {
+                    matches!(p.kind, RewriteKind::Discharge { .. })
+                        && cone.rules.contains(&p.candidate.rule.id)
+                })
+                .collect::<Vec<_>>();
+            if proofs.is_empty() {
+                None
+            } else {
+                // Projection is fresh, like key construction. It copies already
+                // certified formulas, not a new semantic check or hidden read.
+                let limits = Limits {
+                    max_work: usize::MAX,
+                    max_bdd_nodes: usize::MAX,
+                    max_bdd_variables: usize::MAX,
+                    timeout: Duration::MAX,
+                    ..Limits::default()
+                };
+                let mut budget = Budget::new(&limits);
+                Some(LocalCompletionContext {
+                    inputs: self
+                        .program
+                        .inputs
+                        .iter()
+                        .map(&atom)
+                        .collect::<Result<_>>()?,
+                    input_groups: self
+                        .program
+                        .input_groups
+                        .iter()
+                        .map(|g| g.iter().map(&atom).collect::<Result<_>>())
+                        .collect::<Result<_>>()?,
+                    proofs: proofs
+                        .into_iter()
+                        .map(|p| {
+                            Ok((
+                                self.keys.rewrites[&p.id].clone(),
+                                (
+                                    context.export(
+                                        &p.candidate.condition,
+                                        self.semantic_keys,
+                                        &mut budget,
+                                    )?,
+                                    context.export(&p.coverage, self.semantic_keys, &mut budget)?,
+                                ),
+                            ))
+                        })
+                        .collect::<Result<_>>()?,
+                })
+            }
+        } else {
+            None
+        };
         Ok(LocalInput {
+            completion_context,
             obligation,
             scope,
             roots: cone.roots.iter().map(&atom).collect::<Result<_>>()?,
@@ -253,239 +320,76 @@ impl PreparedCheck<'_> {
             admission_limit: self.program.admission_limit().map(Into::into),
         })
     }
-    pub(super) fn own_completion(
-        &self,
-        completion: &CompletionOutcome,
-        context: &ConditionContext,
-        budget: &mut Budget<'_>,
-        export_time: &mut Duration,
-    ) -> Result<LocalAnswer> {
-        let atom =
-            |a: &GroundAtom| AtomKey::from_atom(self.semantic_keys, a).map_err(CheckError::Keys);
-        let mut bad_input = None;
-        let mut boundary = BTreeMap::new();
-        let outcome = match completion {
-            CompletionOutcome::NoContradiction => RegionCompletion::NoContradiction,
-            CompletionOutcome::Inconclusive(c) => RegionCompletion::Inconclusive((*c).into()),
-            CompletionOutcome::Deferred { blocked_by } => RegionCompletion::Deferred(
-                blocked_by
-                    .iter()
-                    .map(|id| self.keys.components[id].clone())
-                    .collect(),
-            ),
-            CompletionOutcome::NoMeaning(f) => {
-                let mut evidence = EvidenceKeys::default();
-                for r in &f.rules {
-                    self.rule_evidence(r, self.semantic_keys, &mut evidence)?;
-                }
-                for id in &f.rewrites {
-                    evidence.rewrites.insert(self.keys.rewrites[id].clone());
-                }
-                for (a, b) in &f.upstream {
-                    boundary.insert(
-                        atom(a)?,
-                        timed_export(
-                            context,
-                            &b.condition,
-                            self.semantic_keys,
-                            budget,
-                            export_time,
-                        )?,
-                    );
-                    if let CompletedProvider::Component(id) = b.provider {
-                        evidence.providers.insert(self.keys.components[&id].clone());
-                    }
-                }
-                bad_input = Some(timed_export(
-                    context,
-                    &f.bad_input,
-                    self.semantic_keys,
-                    budget,
-                    export_time,
-                )?);
-                RegionCompletion::NoMeaning {
-                    candidate: Candidate {
-                        present: f
-                            .observation
-                            .present
-                            .iter()
-                            .map(&atom)
-                            .collect::<Result<_>>()?,
-                        absent: f
-                            .observation
-                            .absent
-                            .iter()
-                            .map(&atom)
-                            .collect::<Result<_>>()?,
-                    },
-                    evidence,
-                }
-            }
-        };
-        Ok(LocalAnswer::Completion {
-            outcome,
-            bad_input,
-            boundary,
-        })
-    }
 }
 
-/// Fully completed local query pair. Logical charges survive value eviction.
-/// Only owned semantic values cross this boundary; presentation remains current.
+/// Fully completed owned query pair. No physical execution metadata in equality.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalMemo {
-    /// A proof that component-order changes preserve storage peaks, not just truth.
-    pub reorder_safe: bool,
     pub evaluation: Option<LocalEvaluation>,
     pub answer: Option<LocalAnswer>,
     pub failure: Option<Inconclusive>,
     pub evaluation_receipt: WorkReceipt,
     pub answer_receipt: WorkReceipt,
 }
-/// The checker does not depend on a storage engine. A session validates structural
-/// inputs and supplies only fully completed query pairs from the same boundary.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedEvaluation {
+    pub value: Option<std::sync::Arc<LocalEvaluation>>,
+    pub failure: Option<Inconclusive>,
+    pub receipt: WorkReceipt,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OwnedAnswer {
+    pub value: Option<LocalAnswer>,
+    pub failure: Option<Inconclusive>,
+    pub receipt: WorkReceipt,
+}
+/// Storage-neutral executor. The session runs the same owned functions through
+/// tracked queries; the fresh driver executes them directly.
 pub trait LocalMemoStore {
-    fn get(
+    fn execute(
         &mut self,
         input: &LocalInput,
-        work: &LocalWorkInput,
-    ) -> Option<std::sync::Arc<LocalMemo>>;
-    fn put(&mut self, input: &LocalInput, work: &LocalWorkInput, value: std::sync::Arc<LocalMemo>);
+        operations: &OperationalLimits,
+        metrics: &mut LocalMetrics,
+    ) -> Result<std::sync::Arc<LocalMemo>>;
 }
 pub struct NoLocalMemo;
 impl LocalMemoStore for NoLocalMemo {
-    fn get(&mut self, _: &LocalInput, _: &LocalWorkInput) -> Option<std::sync::Arc<LocalMemo>> {
-        None
+    fn execute(
+        &mut self,
+        input: &LocalInput,
+        operations: &OperationalLimits,
+        metrics: &mut LocalMetrics,
+    ) -> Result<std::sync::Arc<LocalMemo>> {
+        let evaluation = evaluate_owned_local(input, operations, metrics)?;
+        let answer = answer_owned_local(
+            input,
+            evaluation.value.as_deref(),
+            evaluation.failure,
+            operations,
+            metrics,
+        )?;
+        Ok(std::sync::Arc::new(LocalMemo {
+            evaluation: evaluation.value.as_deref().cloned(),
+            answer: answer.value,
+            failure: answer.failure.or(evaluation.failure),
+            evaluation_receipt: evaluation.receipt,
+            answer_receipt: answer.receipt,
+        }))
     }
-    fn put(&mut self, _: &LocalInput, _: &LocalWorkInput, _: std::sync::Arc<LocalMemo>) {}
 }
 
-/// Execution order and fresh discovery charges are receipt dependencies, even
-/// when semantic inputs compare equal. No arena IDs are retained here.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LocalWorkInput {
-    pub discovery: WorkCharges,
-    pub components: Vec<(ComponentKey, Vec<AtomKey>, Vec<InstanceKey>)>,
-    pub completion_rewrite_scan: usize,
-    pub fact_order: Vec<AtomKey>,
-    pub completion: Option<CompletionWorkInput>,
-}
-/// Completion's scoped replay still scans global rules/components and validates
-/// global W. These are accounting dependencies, separate from projected semantics.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompletionWorkInput {
-    pub rules_scanned: usize,
-    pub component_gaps: Vec<usize>,
-    pub constraint_sizes: Vec<usize>,
-    pub discharge_context: Option<DischargeWorkInput>,
-}
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct DischargeWorkInput {
-    pub inputs: Vec<AtomKey>,
-    pub groups: Vec<Vec<AtomKey>>,
-    pub proofs: Vec<(RewriteEvidenceKey, Vec<u8>, Vec<u8>)>,
-}
-impl PreparedCheck<'_> {
-    pub(super) fn local_work_input(
-        &self,
-        cone: &DependencyCone,
-        discovery: WorkCharges,
-        region: bool,
-    ) -> LocalWorkInput {
-        let fact_order = cone
-            .facts
-            .iter()
-            .map(|a| self.keys.atoms[a].clone())
-            .collect();
-        let completion = region.then(|| {
-            let mut last = 0;
-            let mut gaps = Vec::new();
-            for id in &cone.components {
-                gaps.push(id.index - last);
-                last = id.index + 1;
-            }
-            gaps.push(self.program.components.len() - last);
-            let proofs: Vec<_> = self
-                .program
-                .rewrite_proofs()
-                .filter(|p| {
-                    matches!(p.kind, RewriteKind::Discharge { .. })
-                        && cone.rules.contains(&p.candidate.rule.id)
-                })
-                .map(|p| {
-                    (
-                        self.keys.rewrites[&p.id].clone(),
-                        p.candidate.condition.accounting_graph(),
-                        p.coverage.accounting_graph(),
-                    )
-                })
-                .collect();
-            let discharge_context = (!proofs.is_empty()).then(|| DischargeWorkInput {
-                inputs: self
-                    .program
-                    .input_order
-                    .as_ref()
-                    .unwrap()
-                    .iter()
-                    .map(|a| self.keys.atoms[a].clone())
-                    .collect(),
-                groups: self
-                    .program
-                    .input_groups
-                    .iter()
-                    .map(|g| g.iter().map(|a| self.keys.atoms[a].clone()).collect())
-                    .collect(),
-                proofs,
-            });
-            CompletionWorkInput {
-                rules_scanned: self.program.rules.len(),
-                component_gaps: gaps,
-                constraint_sizes: self.program.input_groups.iter().map(Vec::len).collect(),
-                discharge_context,
-            }
-        });
-        LocalWorkInput {
-            discovery,
-            fact_order,
-            completion,
-            components: cone
-                .components
-                .iter()
-                .map(|id| &self.program.components[id.index])
-                .map(|c| {
-                    (
-                        self.keys.components[&c.id].clone(),
-                        c.atoms.iter().map(|a| self.keys.atoms[a].clone()).collect(),
-                        self.program.component_rules[c.id.index]
-                            .iter()
-                            .map(|r| self.keys.instances[&self.program.rules[*r].id].clone())
-                            .collect(),
-                    )
-                })
-                .collect(),
-            completion_rewrite_scan: if region {
-                self.program.rewrite_proofs().count()
-            } else {
-                0
-            },
+impl LocalInput {
+    /// Group verdicts consume conditions and scope, not producer implementation
+    /// or attribution. Salsa can backdate this projection after equal evaluation.
+    pub fn for_answer(&self) -> Self {
+        let mut input = self.clone();
+        if matches!(input.scope, LocalScope::Group(_)) {
+            input.rules.clear();
+            input.original_dependencies.clear();
+            input.rewrites.clear();
+            input.completion_context = None;
         }
-    }
-}
-
-impl LocalWorkInput {
-    pub fn same_component_work(&self, other: &Self) -> bool {
-        self.discovery == other.discovery
-            && self.completion == other.completion
-            && self.completion_rewrite_scan == other.completion_rewrite_scan
-            && self
-                .components
-                .iter()
-                .map(|(k, a, r)| (k, (a, r)))
-                .collect::<BTreeMap<_, _>>()
-                == other
-                    .components
-                    .iter()
-                    .map(|(k, a, r)| (k, (a, r)))
-                    .collect::<BTreeMap<_, _>>()
+        input
     }
 }

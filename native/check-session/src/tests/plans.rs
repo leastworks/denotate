@@ -181,7 +181,9 @@ fn plans_share_retention_and_recover_after_interruption_and_reset() {
         );
         assert!(session.plan_stats().retained_entries <= 16);
         assert!(session.plan_stats().retained_bytes + session.stats().retained_bytes <= 128 * 1024);
-        assert!(session.plan_stats().retained_entries + session.stats().retained_entries <= 32);
+        // Separate per-type entry caps; only payload bytes are shared.
+        assert!(session.stats().retained_entries <= 32);
+        assert_eq!(session.local_retention_for_test().max_entries, 32);
     }
     let (_, _, p) = lower(source);
     let request = request_evidence::request(&p, &limits(20_000_000));

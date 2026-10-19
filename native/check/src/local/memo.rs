@@ -2,103 +2,6 @@
 use super::*;
 
 impl PreparedCheck<'_> {
-    pub(super) fn compute_local_region(
-        &self,
-        cone: &DependencyCone,
-        component: &Component,
-        key: &ComponentKey,
-        mut budget: Budget<'_>,
-        limits: &Limits,
-        metrics: &mut LocalMetrics,
-    ) -> Result<(LocalMemo, Option<(ConditionContext, CompletionOutcome)>)> {
-        let mut receipts = WorkReceipts::default();
-        let start = Instant::now();
-        let evaluation = self
-            .program
-            .symbolic_selected(&mut budget, true, Some(cone));
-        metrics.evaluation += start.elapsed();
-        let start = Instant::now();
-        let evaluation = evaluation
-            .and_then(|m| export_evaluation(m, self.semantic_keys, &self.keys, &mut budget));
-        metrics.export += start.elapsed();
-        if let Err(e) = &evaluation {
-            Inconclusive::from_error(e.clone())?;
-            budget.failure(e);
-        }
-        budget.record(
-            &mut receipts,
-            QueryKey::RegionEvaluation(key.clone()),
-            [QueryKey::ConeIndex],
-        )?;
-        let mut budget = Budget::tracked(limits);
-        let mut value = None;
-        let mut failure = None;
-        let mut raw = None;
-        let answer = match evaluation {
-            Ok((meaning, v)) => {
-                value = Some(v);
-                let start = Instant::now();
-                let completed = meaning.complete_component(component, 0, &mut budget);
-                metrics.completion += start.elapsed();
-                let start = Instant::now();
-                let exports_before = metrics.export;
-                let answer = completed.and_then(|c| {
-                    if let CompletionOutcome::Inconclusive(c) = &c {
-                        failure = Some(*c);
-                    }
-                    let owned = self.own_completion(
-                        &c,
-                        &meaning.context,
-                        &mut budget,
-                        &mut metrics.export,
-                    )?;
-                    raw = Some((meaning.context, c));
-                    Ok(owned)
-                });
-                metrics.completion += start
-                    .elapsed()
-                    .saturating_sub(metrics.export - exports_before);
-                answer
-            }
-            Err(e) => Err(e),
-        };
-        let answer = match answer {
-            Ok(a) => Some(a),
-            Err(e) => {
-                budget.failure(&e);
-                failure = Some(Inconclusive::from_error(e)?);
-                None
-            }
-        };
-        budget.record(
-            &mut receipts,
-            QueryKey::Completion(key.clone()),
-            [
-                QueryKey::RegionEvaluation(key.clone()),
-                QueryKey::FindingContext,
-            ],
-        )?;
-        Ok((
-            LocalMemo {
-                // Completion can exhaust during ordered upstream replay after
-                // evaluation has finished. Keep its full work order in the key.
-                reorder_safe: false,
-                evaluation: value,
-                answer,
-                failure,
-                evaluation_receipt: receipts
-                    .get(&QueryKey::RegionEvaluation(key.clone()))
-                    .unwrap()
-                    .clone(),
-                answer_receipt: receipts
-                    .get(&QueryKey::Completion(key.clone()))
-                    .unwrap()
-                    .clone(),
-            },
-            raw,
-        ))
-    }
-
     pub(super) fn restore_completion(
         &self,
         component: &Component,
@@ -146,7 +49,6 @@ impl PreparedCheck<'_> {
                 let owned_bad = bad_input
                     .as_ref()
                     .ok_or(CheckError::Internal("missing completion condition"))?;
-                replay_export(owned_bad, budget)?;
                 let bad_input = context.import(owned_bad, atoms, budget)?;
                 let present = candidate
                     .present
@@ -160,7 +62,6 @@ impl PreparedCheck<'_> {
                     .collect::<Result<BTreeMap<_, _>>>()?;
                 let mut upstream = BTreeMap::new();
                 for (atom, c) in ordered {
-                    replay_export(c, budget)?;
                     let condition = context.import(c, atoms, budget)?;
                     let provider = if !self.program.is_possible(&atom)? {
                         CompletedProvider::NoPossibleProducer
@@ -218,22 +119,4 @@ impl PreparedCheck<'_> {
             }
         }
     }
-}
-
-/// Conversion historically exported these same local BDDs a second time.
-/// Replay their logical charges while reusing the canonical owned graphs. One
-/// initial visit plus three visits per nonterminal exactly matches export's DFS,
-/// including already-seen children. Individual ticks preserve tight-limit reasons.
-fn replay_export(c: &OwnedCondition, budget: &mut Budget<'_>) -> Result<()> {
-    budget.tick("BDD operation")?;
-    let nodes = c.source_node_count();
-    budget.observe("BDD operation", "BDD nodes", nodes);
-    if nodes > budget.limits.max_bdd_nodes {
-        return Err(crate::boolean::limit("BDD operation", "BDD nodes"));
-    }
-    budget.charge(c.inputs().len(), "local condition export")?;
-    for _ in 0..c.export_visits() {
-        budget.tick("local condition export")?;
-    }
-    Ok(())
 }

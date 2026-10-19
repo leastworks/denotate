@@ -232,7 +232,7 @@ impl GroundProgram {
         &self.metrics
     }
 
-    fn empty(corpus: &Corpus, domains: Domains) -> Self {
+    pub(crate) fn empty(corpus: &Corpus, domains: Domains) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         Self {
             preparation: NEXT.fetch_add(1, Ordering::Relaxed),

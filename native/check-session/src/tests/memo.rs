@@ -218,6 +218,9 @@ fn memo_all_edit_transitions_reuse_and_invalidation() {
 fn memo_all_43_frozen_results_and_receipts_are_exact() {
     let reference: Value =
         serde_json::from_str(include_str!("../../fixtures/LOCAL-6b.1a-REFERENCE.json")).unwrap();
+    let reference = local::owned_outcomes(reference);
+    let fresh_reference: Value =
+        serde_json::from_str(include_str!("../../fixtures/OWNED-6b.2a-REFERENCE.json")).unwrap();
     let mut count = 0;
     for row in reference["cases"].as_array().unwrap() {
         let source = row["source"].as_str().unwrap();
@@ -226,6 +229,7 @@ fn memo_all_43_frozen_results_and_receipts_are_exact() {
             ..generous()
         };
         let mut session = Session::default();
+        let mut cold = None;
         for _ in 0..2 {
             let (_, _, p) = lower(source);
             let request = request_evidence::request(&p, &limits);
@@ -265,9 +269,17 @@ fn memo_all_43_frozen_results_and_receipts_are_exact() {
             );
             assert_eq!(
                 budget_evidence::receipt_capture(&result.receipts),
-                row["receipts"],
-                "{source}"
+                fresh_reference["cases"][count]["receipts"]
             );
+            local::assert_shared_receipts(
+                &budget_evidence::receipt_capture(&result.receipts),
+                &row["receipts"],
+            );
+            if let Some(cold) = &cold {
+                assert_eq!(&result, cold);
+            } else {
+                cold = Some(result);
+            }
         }
         count += 1;
     }
@@ -358,27 +370,20 @@ fn memo_interruption_retains_only_completed_queries() {
         after_put: bool,
     }
     impl LocalMemoStore for Interrupt<'_> {
-        fn get(
+        fn execute(
             &mut self,
             input: &LocalInput,
-            work: &LocalWorkInput,
-        ) -> Option<std::sync::Arc<LocalMemo>> {
-            let value = self.session.get(input, work);
+            operations: &OperationalLimits,
+            metrics: &mut LocalMetrics,
+        ) -> Result<std::sync::Arc<LocalMemo>, CheckError> {
             if !self.after_put {
                 self.cancel.cancel();
             }
-            value
-        }
-        fn put(
-            &mut self,
-            input: &LocalInput,
-            work: &LocalWorkInput,
-            value: std::sync::Arc<LocalMemo>,
-        ) {
-            self.session.put(input, work, value);
+            let value = self.session.execute(input, operations, metrics)?;
             if self.after_put {
                 self.cancel.cancel();
             }
+            Ok(value)
         }
     }
     let (_, wide, _) = edit_cases()
@@ -518,13 +523,14 @@ fn measure_memoized_workload_families() {
 fn memo_receipt_invalidation_survives_interruption_with_equal_outcomes() {
     struct StopAfterLookup<'a>(&'a mut Session, Cancellation);
     impl LocalMemoStore for StopAfterLookup<'_> {
-        fn get(&mut self, i: &LocalInput, w: &LocalWorkInput) -> Option<std::sync::Arc<LocalMemo>> {
-            let value = self.0.get(i, w);
+        fn execute(
+            &mut self,
+            i: &LocalInput,
+            operations: &OperationalLimits,
+            metrics: &mut LocalMetrics,
+        ) -> Result<std::sync::Arc<LocalMemo>, CheckError> {
             self.1.cancel();
-            value
-        }
-        fn put(&mut self, i: &LocalInput, w: &LocalWorkInput, v: std::sync::Arc<LocalMemo>) {
-            self.0.put(i, w, v);
+            self.0.execute(i, operations, metrics)
         }
     }
     let before = "input i,j,k; slot a; a <- i; a <- j;";
@@ -613,13 +619,16 @@ fn memo_completion_global_replay_charges_are_current_after_unrelated_edits() {
 #[test]
 fn memo_oversized_replacement_preserves_other_cones() {
     #[derive(Default)]
-    struct Capture(Vec<(LocalInput, LocalWorkInput, std::sync::Arc<LocalMemo>)>);
+    struct Capture(Vec<LocalInput>);
     impl LocalMemoStore for Capture {
-        fn get(&mut self, _: &LocalInput, _: &LocalWorkInput) -> Option<std::sync::Arc<LocalMemo>> {
-            None
-        }
-        fn put(&mut self, i: &LocalInput, w: &LocalWorkInput, v: std::sync::Arc<LocalMemo>) {
-            self.0.push((i.clone(), w.clone(), v));
+        fn execute(
+            &mut self,
+            i: &LocalInput,
+            operations: &OperationalLimits,
+            metrics: &mut LocalMetrics,
+        ) -> Result<std::sync::Arc<LocalMemo>, CheckError> {
+            self.0.push(i.clone());
+            NoLocalMemo.execute(i, operations, metrics)
         }
     }
     let (_, wide, _) = edit_cases()
@@ -631,15 +640,16 @@ fn memo_oversized_replacement_preserves_other_cones() {
     let mut capture = Capture::default();
     g.verify_local_with(&(&generous()).into(), &mut capture)
         .unwrap();
-    let (mut input, work, value) = capture.0.remove(0);
+    let mut input = capture.0.remove(0);
     let mut session = Session::new(Retention {
-        max_bytes: 1024 * 1024,
+        max_bytes: 8 * 1024 * 1024,
         ..Retention::default()
     });
     check(&mut session, &wide, &generous());
-    input.backend.configuration = "x".repeat(2 * 1024 * 1024);
-    assert!(session.get(&input, &work).is_none());
-    session.put(&input, &work, value);
+    input.backend.configuration = "x".repeat(16 * 1024 * 1024);
+    session
+        .execute(&input, &(&generous()).into(), &mut LocalMetrics::default())
+        .unwrap();
     assert!(session.retained_receipts(&input.scope).is_none());
     let (_, stats) = check(&mut session, &wide, &generous());
     assert_eq!(stats.evaluation_hits, 15);

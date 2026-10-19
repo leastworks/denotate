@@ -1,40 +1,129 @@
-//! Salsa owns completed local query publications. Execution uses the checker's
-//! borrowed snapshot outside the database; only fully completed owned values are
-//! published. Neither a cancelled thunk nor arena data can enter Salsa storage.
+//! Owned-input Salsa evaluation and answer queries, with bounded recycled slots.
 use denotate_check::*;
 use salsa::Setter;
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 
 #[salsa::input]
 struct Slot {
     #[returns(ref)]
-    input: Arc<LocalInput>,
-    #[returns(ref)]
-    work: Arc<LocalWorkInput>,
-    #[returns(ref)]
-    receipts: Option<Arc<(WorkReceipt, WorkReceipt)>>,
-    #[returns(ref)]
-    value: Option<Arc<LocalMemo>>,
+    input: Option<Arc<LocalInput>>,
 }
 #[salsa::db]
-#[derive(Clone, Default)]
+trait Db: salsa::Database {
+    fn operations(&self) -> OperationalLimits;
+    fn measured(&self, answer: bool, metrics: LocalMetrics);
+}
+#[derive(Default)]
+struct Executions {
+    evaluation: usize,
+    answer: usize,
+    metrics: LocalMetrics,
+}
+#[salsa::db]
+#[derive(Clone)]
 struct Database {
     storage: salsa::Storage<Self>,
+    operations: Arc<Mutex<OperationalLimits>>,
+    executed: Arc<Mutex<Executions>>,
+    #[cfg(test)]
+    interrupt_after_evaluation: Arc<std::sync::atomic::AtomicBool>,
+}
+impl Default for Database {
+    fn default() -> Self {
+        Self {
+            storage: Default::default(),
+            operations: Arc::new(Mutex::new(OperationalLimits::from(&Limits::default()))),
+            executed: Default::default(),
+            #[cfg(test)]
+            interrupt_after_evaluation: Default::default(),
+        }
+    }
 }
 #[salsa::db]
 impl salsa::Database for Database {}
-
-// Keeping publications and their receipts in Salsa permits independent value
-// eviction. Structural comparison precedes publication, never hash-only lookup.
-#[salsa::tracked]
-fn evaluation(db: &dyn salsa::Database, slot: Slot) -> Option<Arc<LocalMemo>> {
-    slot.value(db).clone()
+#[salsa::db]
+impl Db for Database {
+    fn operations(&self) -> OperationalLimits {
+        self.operations.lock().unwrap().clone()
+    }
+    fn measured(&self, answer: bool, m: LocalMetrics) {
+        let mut e = self.executed.lock().unwrap();
+        if answer {
+            e.answer += 1;
+        } else {
+            e.evaluation += 1;
+        }
+        e.metrics.evaluation += m.evaluation;
+        e.metrics.export += m.export;
+        e.metrics.property += m.property;
+        e.metrics.completion += m.completion;
+        #[cfg(test)]
+        if !answer
+            && self
+                .interrupt_after_evaluation
+                .swap(false, std::sync::atomic::Ordering::Relaxed)
+        {
+            self.operations.lock().unwrap().cancellation.cancel();
+        }
+    }
 }
 #[salsa::tracked]
-fn answer(db: &dyn salsa::Database, slot: Slot) -> Option<Arc<LocalMemo>> {
-    evaluation(db, slot).clone()
+fn query_input(db: &dyn Db, slot: Slot) -> Option<Arc<LocalInput>> {
+    slot.input(db).clone()
 }
-
+#[salsa::tracked]
+fn evaluation(db: &dyn Db, slot: Slot) -> Result<Option<Arc<OwnedEvaluation>>, CheckError> {
+    let Some(input) = query_input(db, slot) else {
+        return Ok(None);
+    };
+    let mut metrics = LocalMetrics::default();
+    let value = evaluate_owned_local(input, &db.operations(), &mut metrics);
+    db.measured(false, metrics);
+    value.map(|v| Some(Arc::new(v)))
+}
+// Receipt changes cannot invalidate this semantic projection by themselves.
+#[salsa::tracked]
+fn evaluation_value(
+    db: &dyn Db,
+    slot: Slot,
+) -> Result<Option<Arc<(Option<Arc<LocalEvaluation>>, Option<Inconclusive>)>>, CheckError> {
+    Ok(evaluation(db, slot)
+        .as_ref()
+        .map_err(Clone::clone)?
+        .as_ref()
+        .map(|e| Arc::new((e.value.clone(), e.failure))))
+}
+#[salsa::tracked]
+fn answer_input(db: &dyn Db, slot: Slot) -> Option<Arc<LocalInput>> {
+    query_input(db, slot)
+        .as_ref()
+        .map(|i| Arc::new(i.for_answer()))
+}
+#[salsa::tracked]
+fn answer(db: &dyn Db, slot: Slot) -> Result<Option<Arc<OwnedAnswer>>, CheckError> {
+    let Some(input) = answer_input(db, slot) else {
+        return Ok(None);
+    };
+    let value = evaluation_value(db, slot)
+        .as_ref()
+        .map_err(Clone::clone)?
+        .as_ref()
+        .ok_or(CheckError::Internal("missing owned evaluation"))?;
+    let mut metrics = LocalMetrics::default();
+    let result = answer_owned_local(
+        input,
+        value.0.as_deref(),
+        value.1,
+        &db.operations(),
+        &mut metrics,
+    );
+    db.measured(true, metrics);
+    result.map(|v| Some(Arc::new(v)))
+}
 #[derive(Debug, Clone, Copy)]
 pub struct Retention {
     pub max_entries: usize,
@@ -69,24 +158,26 @@ pub struct CacheStats {
     pub retained_bytes: usize,
     pub retained_condition_nodes: usize,
 }
+
 struct Entry {
     slot: Slot,
     touched: u64,
-    metadata_bytes: usize,
-    value_bytes: usize,
+    input: Arc<LocalInput>,
+    receipts: Option<(WorkReceipt, WorkReceipt)>,
+    bytes: usize,
     nodes: usize,
-    valid: bool,
 }
-
-/// One open document's session. Drop on close; no persistent/cross-document data.
+/// Per open document. Recycled slots bound stale inputs and their tracked memos.
 pub struct Session {
     db: Database,
     entries: BTreeMap<LocalScope, Entry>,
+    free: Vec<Slot>,
+    allocated: usize,
     retention: Retention,
+    total_retention: Retention,
     clock: u64,
     stats: CacheStats,
     plans: crate::plans::PlanCache,
-    total_retention: Retention,
     #[cfg(any(test, feature = "test-support"))]
     fresh_planning: bool,
 }
@@ -98,15 +189,17 @@ impl Default for Session {
 impl Session {
     pub fn new(retention: Retention) -> Self {
         Self {
-            db: Database::default(),
-            entries: BTreeMap::new(),
+            db: Default::default(),
+            entries: Default::default(),
+            free: vec![],
+            allocated: 0,
             retention,
             total_retention: retention,
+            clock: 0,
+            stats: Default::default(),
+            plans: Default::default(),
             #[cfg(any(test, feature = "test-support"))]
             fresh_planning: false,
-            plans: Default::default(),
-            clock: 0,
-            stats: CacheStats::default(),
         }
     }
     #[cfg(any(test, feature = "test-support"))]
@@ -119,9 +212,8 @@ impl Session {
     pub fn plan_stats(&self) -> crate::PlanStats {
         self.plans.stats
     }
-    /// Plan slots share the existing document cap. At most 1/8 of bytes and
-    /// 1/2 of entries are available to plans (8 MiB / 512 slots at defaults); unused
-    /// space returns to the local cache after preparation. No extra allowance.
+    /// Plans share bytes, but have a separate entry allowance. Local evaluation
+    /// and answer each retain up to max_entries/2 slots (512 each at defaults).
     pub fn prepare<'s>(
         &mut self,
         request: &CheckRequest,
@@ -152,7 +244,7 @@ impl Session {
         let plan_bytes = if reserve_entries == 0 { 0 } else { plan_bytes };
         self.trim_local(
             self.total_retention.max_bytes - plan_bytes,
-            self.total_retention.max_entries - reserve_entries,
+            self.total_retention.max_entries,
         );
         self.plans.begin(plan_entries, plan_bytes);
         let result = request.prepare_with_plans(corpus, keys, operations, &mut self.plans);
@@ -161,38 +253,36 @@ impl Session {
             self.total_retention
                 .max_bytes
                 .saturating_sub(stats.retained_bytes),
-            self.total_retention
-                .max_entries
-                .saturating_sub(stats.retained_entries),
+            self.total_retention.max_entries,
         );
         result
     }
+
     fn trim_local(&mut self, bytes: usize, entries: usize) {
         self.retention.max_bytes = bytes;
         self.retention.max_entries = entries;
         self.refresh();
-        while self.stats.retained_bytes > bytes {
-            let victim = self
-                .entries
-                .iter()
-                .filter(|(_, e)| e.value_bytes > 0)
-                .min_by_key(|(_, e)| e.touched)
-                .map(|(k, _)| k.clone());
-            if let Some(victim) = victim {
-                self.evict(&victim);
-                self.refresh();
-            } else {
-                self.reset_local();
-                break;
-            }
+        while (self.stats.retained_bytes > bytes || self.entries.len() * 2 > entries)
+            && !self.entries.is_empty()
+        {
+            let key = self.victim(None).unwrap();
+            self.remove(&key);
+            self.refresh();
         }
-        if self.stats.retained_entries > entries {
+        // Empty slot bookkeeping cannot fit in an arbitrarily tiny byte cap.
+        if self.stats.retained_bytes > bytes {
             self.reset_local();
         }
     }
     #[cfg(test)]
     pub(crate) fn local_retention_for_test(&self) -> Retention {
         self.retention
+    }
+    #[cfg(test)]
+    pub(crate) fn interrupt_after_evaluation(&self) {
+        self.db
+            .interrupt_after_evaluation
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
     pub fn stats(&self) -> CacheStats {
         self.stats
@@ -204,7 +294,10 @@ impl Session {
     }
     fn reset_local(&mut self) {
         self.entries.clear();
+        self.free.clear();
+        self.allocated = 0;
         self.db = Database::default();
+        self.clock = 0;
         self.stats.resets += 1;
         self.refresh();
     }
@@ -221,232 +314,243 @@ impl Session {
                 phase: "local cache lookup",
             });
         }
+        *self.db.operations.lock().unwrap() = operations.clone();
         let result = prepared.verify_local_with(operations, self);
         operations.cancellation.check()?;
         result
     }
     fn refresh(&mut self) {
-        self.stats.retained_entries = self.entries.len().saturating_mul(2);
-        self.stats.retained_bytes = self.entries.values().fold(0usize, |n, e| {
-            n.saturating_add(e.metadata_bytes)
-                .saturating_add(e.value_bytes)
-        });
-        self.stats.retained_condition_nodes = self
+        self.stats.retained_entries = self.entries.len() * 2;
+        self.stats.retained_bytes = self
             .entries
             .values()
-            .fold(0usize, |n, e| n.saturating_add(e.nodes));
+            .fold(self.allocated.saturating_mul(1024), |n, e| {
+                n.saturating_add(e.bytes)
+            });
+        self.stats.retained_condition_nodes = self.entries.values().map(|e| e.nodes).sum();
     }
-    fn touch(&mut self) -> u64 {
-        if self.clock == u64::MAX {
-            self.reset_local();
-            self.clock = 0;
-        }
-        self.clock += 1;
-        self.clock
+    fn clear_slot(&mut self, slot: Slot) {
+        slot.set_input(&mut self.db).to(None);
+        let _ = evaluation(&self.db, slot);
+        let _ = evaluation_value(&self.db, slot);
+        let _ = answer(&self.db, slot);
     }
-    /// Evict values while retaining validated keys and receipts. Once metadata
-    /// cannot fit, dropping the whole database also reclaims Salsa bookkeeping.
+    fn victim(&self, except: Option<&LocalScope>) -> Option<LocalScope> {
+        self.entries
+            .iter()
+            .filter(|(k, _)| Some(*k) != except)
+            .min_by_key(|(_, e)| e.touched)
+            .map(|(k, _)| k.clone())
+    }
+    fn remove(&mut self, key: &LocalScope) {
+        let e = self.entries.remove(key).unwrap();
+        self.clear_slot(e.slot);
+        self.free.push(e.slot);
+        self.stats.evicted += 2;
+    }
     pub fn evict_values(&mut self) {
-        let scopes = self.entries.keys().cloned().collect::<Vec<_>>();
-        for scope in scopes {
-            self.evict(&scope);
+        let keys = self.entries.keys().cloned().collect::<Vec<_>>();
+        for k in keys {
+            let slot = self.entries[&k].slot;
+            self.clear_slot(slot);
+            let e = self.entries.get_mut(&k).unwrap();
+            e.nodes = 0;
+            e.bytes = crate::retention::bytes(&(&k, &e.input, &e.receipts));
+            self.stats.evicted += 2;
         }
         self.refresh();
     }
-    fn evict(&mut self, scope: &LocalScope) {
-        let e = self.entries.get_mut(scope).unwrap();
-        if e.value_bytes == 0 {
-            return;
-        }
-        e.slot.set_value(&mut self.db).to(None);
-        // Validate both memos now, releasing the evicted Arc without waiting for
-        // a future lookup. No database snapshots are retained by this driver.
-        let _ = answer(&self.db, e.slot);
-        e.value_bytes = 0;
-        e.nodes = 0;
-        self.stats.evicted += 2;
-    }
     pub fn retained_receipts(&self, scope: &LocalScope) -> Option<(WorkReceipt, WorkReceipt)> {
-        self.entries.get(scope).filter(|e| e.valid).and_then(|e| {
-            e.slot
-                .receipts(&self.db)
-                .as_ref()
-                .map(|r| r.as_ref().clone())
-        })
+        self.entries.get(scope).and_then(|e| e.receipts.clone())
     }
 }
 impl LocalMemoStore for Session {
-    fn get(&mut self, input: &LocalInput, work: &LocalWorkInput) -> Option<Arc<LocalMemo>> {
-        let started = Instant::now();
-        let tick = self.touch();
-        let value = self.entries.get_mut(&input.scope).and_then(|e| {
-            e.touched = tick;
-            let same_work = e.slot.work(&self.db).as_ref() == work
-                || (e.slot.work(&self.db).same_component_work(work)
-                    && e.slot.value(&self.db).as_ref().is_some_and(|v| {
-                        v.reorder_safe && v.evaluation_receipt.own.exhausted.is_empty()
-                    }));
-            if !e.valid || e.slot.input(&self.db).as_ref() != input || !same_work {
-                if e.valid {
-                    self.stats.invalidated += 2;
-                }
-                e.valid = false;
-                // Changing any receipt dependency invalidates receipts even when
-                // the next semantic value happens to compare equal.
-                None
-            } else {
-                answer(&self.db, e.slot).clone()
+    fn execute(
+        &mut self,
+        input: &LocalInput,
+        operations: &OperationalLimits,
+        metrics: &mut LocalMetrics,
+    ) -> Result<Arc<LocalMemo>, CheckError> {
+        if let Some(e) = self.entries.get_mut(&input.scope) {
+            if e.input.as_ref() != input {
+                e.receipts = None;
             }
-        });
-        if self.entries.get(&input.scope).is_some_and(|e| !e.valid) {
-            self.evict(&input.scope);
-            let slot = self.entries[&input.scope].slot;
-            slot.set_receipts(&mut self.db).to(None);
-            self.refresh();
         }
-        if value.is_some() {
-            self.stats.evaluation_hits += 1;
-        } else {
+        operations.cancellation.check()?;
+        if operations.timeout.is_zero() {
+            return Err(CheckError::Deadline {
+                phase: "local cache lookup",
+            });
+        }
+        let start = Instant::now();
+        if self.clock == u64::MAX {
+            self.reset_local();
+        }
+        self.clock += 1;
+        // No room even for a slot: execute the same owned functions directly.
+        if self.retention.max_entries < 2 || self.retention.max_bytes < 1024 {
+            self.stats.bypassed += 2;
             self.stats.evaluation_misses += 1;
+            match input.scope {
+                LocalScope::Group(_) => self.stats.verdict_misses += 1,
+                LocalScope::Region(_) => self.stats.completion_misses += 1,
+            };
+            return NoLocalMemo.execute(input, operations, metrics);
         }
-        match (&input.scope, value.is_some()) {
-            (LocalScope::Group(_), true) => self.stats.verdict_hits += 1,
-            (LocalScope::Group(_), false) => self.stats.verdict_misses += 1,
-            (LocalScope::Region(_), true) => self.stats.completion_hits += 1,
-            (LocalScope::Region(_), false) => self.stats.completion_misses += 1,
+        let slot = if let Some(e) = self.entries.get(&input.scope) {
+            if e.input.as_ref() != input {
+                self.stats.invalidated += 2;
+            }
+            e.slot
+        } else if let Some(slot) = self.free.pop() {
+            slot
+        } else if self.allocated < self.retention.max_entries / 2
+            && (self.allocated + 1) * 1024 <= self.retention.max_bytes
+        {
+            self.allocated += 1;
+            Slot::new(&self.db, None)
+        } else if let Some(key) = self.victim(None) {
+            self.remove(&key);
+            self.free.pop().unwrap()
+        } else {
+            self.stats.bypassed += 2;
+            return NoLocalMemo.execute(input, operations, metrics);
+        };
+        *self.db.operations.lock().unwrap() = operations.clone();
+        *self.db.executed.lock().unwrap() = Executions::default();
+        let installed = Arc::new(input.clone());
+        slot.set_input(&mut self.db).to(Some(installed.clone()));
+        let computed = (|| {
+            let a = evaluation(&self.db, slot)
+                .clone()?
+                .ok_or(CheckError::Internal("missing owned evaluation"))?;
+            let b = answer(&self.db, slot)
+                .clone()?
+                .ok_or(CheckError::Internal("missing owned answer"))?;
+            operations.cancellation.check()?;
+            if start.elapsed() >= operations.timeout {
+                return Err(CheckError::Deadline {
+                    phase: "owned local query",
+                });
+            }
+            Ok::<_, CheckError>(Arc::new(LocalMemo {
+                evaluation: a.value.as_deref().cloned(),
+                answer: b.value.clone(),
+                failure: b.failure.or(a.failure),
+                evaluation_receipt: a.receipt.clone(),
+                answer_receipt: b.receipt.clone(),
+            }))
+        })();
+        let exec = std::mem::take(&mut *self.db.executed.lock().unwrap());
+        metrics.evaluation += exec.metrics.evaluation;
+        metrics.export += exec.metrics.export;
+        metrics.property += exec.metrics.property;
+        metrics.completion += exec.metrics.completion;
+        self.stats.evaluation_misses += exec.evaluation;
+        self.stats.evaluation_hits += usize::from(exec.evaluation == 0);
+        match input.scope {
+            LocalScope::Group(_) => {
+                self.stats.verdict_misses += exec.answer;
+                self.stats.verdict_hits += usize::from(exec.answer == 0)
+            }
+            LocalScope::Region(_) => {
+                self.stats.completion_misses += exec.answer;
+                self.stats.completion_hits += usize::from(exec.answer == 0)
+            }
         }
-        if let Some(value) = &value {
+        let value = match computed {
+            Ok(v) => v,
+            Err(e) => {
+                // Operational/internal failures never survive as reusable query memos.
+                self.entries.remove(&input.scope);
+                self.clear_slot(slot);
+                self.free.push(slot);
+                self.refresh();
+                return Err(e);
+            }
+        };
+        if exec.evaluation == 0 {
             self.stats.reused_query_work = self
                 .stats
                 .reused_query_work
-                .saturating_add(
-                    value
-                        .evaluation_receipt
-                        .own
-                        .work
-                        .saturating_sub(work.discovery.work),
-                )
-                .saturating_add(value.answer_receipt.own.work);
+                .saturating_add(value.evaluation_receipt.own.work)
+        }
+        if exec.answer == 0 {
+            self.stats.reused_query_work = self
+                .stats
+                .reused_query_work
+                .saturating_add(value.answer_receipt.own.work)
+        }
+        // Walk the actual retained allocations. Salsa may retain an older
+        // equal semantic projection alongside a changed evaluation receipt.
+        let evaluated = evaluation(&self.db, slot).as_ref().unwrap();
+        let semantic = evaluation_value(&self.db, slot).as_ref().unwrap();
+        let answered = answer(&self.db, slot).as_ref().unwrap();
+        let receipts = Some((
+            value.evaluation_receipt.clone(),
+            value.answer_receipt.clone(),
+        ));
+        let bytes = crate::retention::bytes(&(
+            (&input.scope, &installed, query_input(&self.db, slot)),
+            (answer_input(&self.db, slot), evaluated, semantic),
+            (answered, &receipts),
+        ));
+        let mut node_count = nodes(&value);
+        if let (Some(a), Some(b)) = (
+            evaluated.as_ref().and_then(|v| v.value.as_ref()),
+            semantic.as_ref().and_then(|v| v.0.as_ref()),
+        ) {
+            if !Arc::ptr_eq(a, b) {
+                node_count = node_count
+                    .saturating_add(a.permitted.node_count())
+                    .saturating_add(
+                        a.conditions
+                            .values()
+                            .map(OwnedCondition::node_count)
+                            .sum::<usize>(),
+                    );
+            }
+        }
+        self.entries.insert(
+            input.scope.clone(),
+            Entry {
+                slot,
+                touched: self.clock,
+                input: installed,
+                receipts,
+                bytes,
+                nodes: node_count,
+            },
+        );
+        self.refresh();
+        if bytes.saturating_add(self.allocated * 1024) > self.retention.max_bytes
+            || node_count > self.retention.max_condition_nodes
+        {
+            self.remove(&input.scope);
+            self.stats.bypassed += 2;
+            self.refresh();
+            return Ok(value);
+        }
+        while (self.stats.retained_bytes > self.retention.max_bytes
+            || self.stats.retained_condition_nodes > self.retention.max_condition_nodes)
+            && self.entries.len() > 1
+        {
+            let key = self.victim(Some(&input.scope)).unwrap();
+            self.remove(&key);
+            self.refresh();
+        }
+        if self.stats.retained_bytes > self.retention.max_bytes
+            || self.stats.retained_condition_nodes > self.retention.max_condition_nodes
+        {
+            self.remove(&input.scope);
+            self.stats.bypassed += 2;
+            self.refresh();
         }
         self.stats.lookup_ns = self
             .stats
             .lookup_ns
-            .saturating_add(started.elapsed().as_nanos().min(u64::MAX as u128) as u64);
-        value
-    }
-    fn put(&mut self, input: &LocalInput, work: &LocalWorkInput, value: Arc<LocalMemo>) {
-        let started = Instant::now();
-        self.publish(input, work, value);
-        self.stats.publication_ns = self
-            .stats
-            .publication_ns
-            .saturating_add(started.elapsed().as_nanos().min(u64::MAX as u128) as u64);
-    }
-}
-impl Session {
-    fn publish(&mut self, input: &LocalInput, work: &LocalWorkInput, value: Arc<LocalMemo>) {
-        let receipts = Arc::new((
-            value.evaluation_receipt.clone(),
-            value.answer_receipt.clone(),
-        ));
-        // Explicit structural payloads; allocation sharing is counted within
-        // each part, conservatively charged again across independently evictable entries.
-        let metadata_bytes = crate::retention::bytes(input)
-            .saturating_add(crate::retention::bytes(&input.scope))
-            .saturating_add(crate::retention::bytes(work))
-            .saturating_add(crate::retention::bytes(&receipts))
-            .saturating_add(512);
-        let value_bytes = crate::retention::bytes(&value).saturating_add(256);
-        let nodes = nodes(&value);
-        if self.retention.max_entries < 2
-            || metadata_bytes.saturating_add(value_bytes) > self.retention.max_bytes
-            || nodes > self.retention.max_condition_nodes
-        {
-            self.stats.bypassed += 2;
-            // Bypass this value without throwing away unrelated completed work.
-            // Keep any existing slot empty/invalid until it can be reused; its
-            // already-accounted metadata stays bounded and never supplies a receipt.
-            if let Some(e) = self.entries.get_mut(&input.scope) {
-                e.valid = false;
-                e.slot.set_receipts(&mut self.db).to(None);
-                self.evict(&input.scope);
-                self.refresh();
-            }
-            return;
-        }
-        if !self.entries.contains_key(&input.scope)
-            && self.entries.len().saturating_add(1).saturating_mul(2) > self.retention.max_entries
-        {
-            self.reset_local();
-        }
-        let old_bytes = self
-            .entries
-            .get(&input.scope)
-            .map_or(0, |e| e.metadata_bytes.saturating_add(e.value_bytes));
-        let old_nodes = self.entries.get(&input.scope).map_or(0, |e| e.nodes);
-        self.refresh();
-        while self
-            .stats
-            .retained_bytes
-            .saturating_sub(old_bytes)
-            .saturating_add(metadata_bytes)
-            .saturating_add(value_bytes)
-            > self.retention.max_bytes
-            || self
-                .stats
-                .retained_condition_nodes
-                .saturating_sub(old_nodes)
-                .saturating_add(nodes)
-                > self.retention.max_condition_nodes
-        {
-            let victim = self
-                .entries
-                .iter()
-                .filter(|(k, e)| **k != input.scope && e.value_bytes > 0)
-                .min_by_key(|(_, e)| e.touched)
-                .map(|(k, _)| k.clone());
-            if let Some(victim) = victim {
-                self.evict(&victim);
-                self.refresh();
-            } else {
-                self.reset_local();
-                break;
-            }
-        }
-        let tick = self.touch();
-        if let Some(e) = self.entries.get_mut(&input.scope) {
-            e.slot.set_input(&mut self.db).to(Arc::new(input.clone()));
-            e.slot.set_work(&mut self.db).to(Arc::new(work.clone()));
-            e.slot.set_receipts(&mut self.db).to(Some(receipts));
-            e.slot.set_value(&mut self.db).to(Some(value));
-            e.touched = tick;
-            e.metadata_bytes = metadata_bytes;
-            e.value_bytes = value_bytes;
-            e.nodes = nodes;
-            e.valid = true;
-            let _ = answer(&self.db, e.slot);
-        } else {
-            let slot = Slot::new(
-                &self.db,
-                Arc::new(input.clone()),
-                Arc::new(work.clone()),
-                Some(receipts),
-                Some(value),
-            );
-            let _ = answer(&self.db, slot);
-            self.entries.insert(
-                input.scope.clone(),
-                Entry {
-                    slot,
-                    touched: tick,
-                    metadata_bytes,
-                    value_bytes,
-                    nodes,
-                    valid: true,
-                },
-            );
-        }
-        self.refresh();
+            .saturating_add(start.elapsed().as_nanos().min(u64::MAX as u128) as u64);
+        Ok(value)
     }
 }
 fn nodes(value: &LocalMemo) -> usize {

@@ -109,6 +109,39 @@ pub(crate) struct Rewrites {
 }
 
 impl GroundProgram {
+    /// Private reconstructed query runtime: explicit owned discharge certificates.
+    pub(crate) fn install_local_discharge(
+        &mut self,
+        original: GroundRule,
+        occurrence: OccurrenceId,
+        condition: Condition,
+        coverage: Condition,
+    ) {
+        let id = RewriteProofId {
+            snapshot: self.preparation,
+            index: self.rewrites.proofs.len(),
+        };
+        self.rewrites
+            .originals
+            .insert(original.id, original.clone());
+        self.rewrites.proofs.push(RewriteProof {
+            id,
+            snapshot: self.preparation,
+            kind: RewriteKind::Discharge {
+                literal_occurrence: occurrence,
+            },
+            candidate: ProducerSummary {
+                rule: original,
+                settled: vec![],
+                condition,
+                exact: false,
+            },
+            producers: vec![],
+            coverage,
+            upper_bounds: None,
+        });
+    }
+
     pub fn prepare_checked(
         corpus: &denotate_ir::Corpus,
         domains: &Domains,

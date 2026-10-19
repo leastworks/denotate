@@ -271,6 +271,7 @@ fields!(LocalComponent {
     blocked_by
 });
 fields!(LocalInput {
+    completion_context,
     scope,
     roots,
     obligation,
@@ -289,22 +290,9 @@ fields!(LocalInput {
     limits,
     admission_limit
 });
-fields!(LocalWorkInput {
-    discovery,
-    components,
-    completion_rewrite_scan,
-    fact_order,
-    completion
-});
-fields!(CompletionWorkInput {
-    rules_scanned,
-    component_gaps,
-    constraint_sizes,
-    discharge_context
-});
-fields!(DischargeWorkInput {
+fields!(LocalCompletionContext {
     inputs,
-    groups,
+    input_groups,
     proofs
 });
 fields!(LocalEvaluation {
@@ -348,7 +336,6 @@ impl Retained for LocalAnswer {
     }
 }
 fields!(LocalMemo {
-    reorder_safe,
     evaluation,
     answer,
     failure,
@@ -376,12 +363,13 @@ impl Retained for QueryKey {
             | Self::Symbolic
             | Self::ConeIndex
             | Self::FindingContext => {}
-            Self::ConeEvaluation(k)
+            Self::ConeDiscovery(k)
+            | Self::ConeEvaluation(k)
             | Self::FindingConversion(k)
             | Self::Property(k)
             | Self::Witness(k)
             | Self::Certification(k) => k.heap(p),
-            Self::RegionEvaluation(k) | Self::Completion(k) => k.heap(p),
+            Self::RegionDiscovery(k) | Self::RegionEvaluation(k) | Self::Completion(k) => k.heap(p),
         }
     }
 }
@@ -416,4 +404,20 @@ fields!(OwnedJoinPlan {
     schema,
     initialization_work,
     pivots
+});
+
+impl<T: Retained> Retained for &T {
+    fn heap(&self, p: &mut Payload) {
+        T::heap(*self, p);
+    }
+}
+fields!(OwnedEvaluation {
+    value,
+    failure,
+    receipt
+});
+fields!(OwnedAnswer {
+    value,
+    failure,
+    receipt
 });

@@ -13,6 +13,8 @@ pub enum QueryKey {
     Admission,
     Symbolic,
     ConeIndex,
+    ConeDiscovery(GroupKey),
+    RegionDiscovery(ComponentKey),
     ConeEvaluation(GroupKey),
     RegionEvaluation(ComponentKey),
     FindingContext,

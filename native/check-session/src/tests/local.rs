@@ -179,7 +179,7 @@ fn local_execution_preserves_pre_mask_normalization_and_84_fingerprint_cases() {
         }
     }
 }
-fn local_reference() -> Value {
+pub(super) fn local_reference() -> Value {
     let old: Value =
         serde_json::from_str(include_str!("../../../check/IDENTITIES-6a.1.json")).unwrap();
     let mut cases = BTreeMap::<(String, usize), Vec<String>>::new();
@@ -395,7 +395,27 @@ fn local_condition_storage_allowances_have_an_explicit_tight_limit_delta() {
 fn frozen_local_reference_and_explicit_delta_are_exact() {
     let reference: Value =
         serde_json::from_str(include_str!("../../fixtures/LOCAL-6b.1a-REFERENCE.json")).unwrap();
-    assert_eq!(local_reference(), reference);
+    let expected = owned_outcomes(reference.clone());
+    let current = local_reference();
+    assert_eq!(
+        current,
+        serde_json::from_str::<Value>(include_str!("../../fixtures/OWNED-6b.2a-REFERENCE.json"))
+            .unwrap()
+    );
+    assert_eq!(current["cases"].as_array().unwrap().len(), 43);
+    for (actual, expected) in current["cases"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .zip(expected["cases"].as_array().unwrap())
+    {
+        assert_eq!(actual["source"], expected["source"]);
+        assert_eq!(actual["max_work"], expected["max_work"]);
+        assert_eq!(actual["fixtures"], expected["fixtures"]);
+        assert_eq!(actual["captured_result"], expected["captured_result"]);
+        assert_eq!(actual["neutral_result"], expected["neutral_result"]);
+        assert_shared_receipts(&actual["receipts"], &expected["receipts"]);
+    }
     let old: Value = serde_json::from_str(include_str!(
         "../../../check/fixtures/BUDGETS-6a.2b-REFERENCE.json"
     ))
@@ -476,4 +496,44 @@ fn local_exhaustion_preserves_independent_scopes_and_canonical_receipts() {
             .count(),
         1
     );
+}
+
+/// 6b.2a retires historical receipt fields only for migrated local execution and
+/// its conversion. Preparation/admission and unchanged global boundary work stay exact.
+pub(super) fn assert_shared_receipts(actual: &Value, expected: &Value) {
+    let retained = |v: &Value| {
+        v["queries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|r| {
+                let q = r["query"].as_str().unwrap();
+                q == "Preparation"
+                    || q == "Admission"
+                    || q == "ConeIndex"
+                    || q == "FindingContext"
+                    || q.starts_with("Witness(")
+                    || q.starts_with("Certification(")
+            })
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(retained(actual), retained(expected));
+}
+
+/// Proposed outcome changes are explicit and checked against every old value.
+/// The slice ends with user review; listing one is not implicit acceptance.
+pub(super) fn owned_outcomes(mut reference: Value) -> Value {
+    let delta: Value = serde_json::from_str(include_str!("../../OWNED-DELTA-6b.2a.json")).unwrap();
+    let mut seen = BTreeSet::new();
+    for entry in delta["entries"].as_array().unwrap() {
+        let pointer = entry["pointer"].as_str().unwrap();
+        assert!(seen.insert(pointer));
+        assert!(pointer.ends_with("/captured_result") || pointer.ends_with("/neutral_result"));
+        let slot = reference.pointer_mut(pointer).unwrap();
+        assert_eq!(*slot, entry["old"]);
+        assert_ne!(entry["old"], entry["new"]);
+        *slot = entry["new"].clone();
+    }
+    reference
 }
