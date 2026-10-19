@@ -85,6 +85,10 @@ pub struct Session {
     retention: Retention,
     clock: u64,
     stats: CacheStats,
+    plans: crate::plans::PlanCache,
+    total_retention: Retention,
+    #[cfg(any(test, feature = "test-support"))]
+    fresh_planning: bool,
 }
 impl Default for Session {
     fn default() -> Self {
@@ -97,14 +101,108 @@ impl Session {
             db: Database::default(),
             entries: BTreeMap::new(),
             retention,
+            total_retention: retention,
+            #[cfg(any(test, feature = "test-support"))]
+            fresh_planning: false,
+            plans: Default::default(),
             clock: 0,
             stats: CacheStats::default(),
         }
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_fresh_planning() -> Self {
+        Self {
+            fresh_planning: true,
+            ..Self::default()
+        }
+    }
+    pub fn plan_stats(&self) -> crate::PlanStats {
+        self.plans.stats
+    }
+    /// Plan slots share the existing document cap. At most 1/8 of bytes and
+    /// 1/2 of entries are available to plans (8 MiB / 512 slots at defaults); unused
+    /// space returns to the local cache after preparation. No extra allowance.
+    pub fn prepare<'s>(
+        &mut self,
+        request: &CheckRequest,
+        corpus: &'s denotate_ir::Corpus,
+        keys: &'s denotate_ir::SemanticKeys,
+        operations: &OperationalLimits,
+    ) -> Result<RequestPreparation<'s>, CheckError> {
+        #[cfg(any(test, feature = "test-support"))]
+        if self.fresh_planning {
+            return request.prepare(corpus, keys, operations);
+        }
+        let plan_bytes = self.total_retention.max_bytes / 8;
+        let plan_entries = self.total_retention.max_entries / 2;
+        operations.cancellation.check()?;
+        let rule_keys = corpus
+            .rules()
+            .filter(|r| {
+                r.body
+                    .iter()
+                    .filter(|l| matches!(l, denotate_ir::Literal::Positive(_)))
+                    .count()
+                    >= crate::plans::MIN_POSITIVE_LITERALS
+            })
+            .map(|r| keys.rule(r.id).cloned().map_err(CheckError::Keys))
+            .collect::<Result<Vec<_>, _>>()?;
+        let reserve_entries = self.plans.reserve_entries(&rule_keys, plan_entries);
+        // An all-small fresh snapshot allocates no plan slots or byte reserve.
+        let plan_bytes = if reserve_entries == 0 { 0 } else { plan_bytes };
+        self.trim_local(
+            self.total_retention.max_bytes - plan_bytes,
+            self.total_retention.max_entries - reserve_entries,
+        );
+        self.plans.begin(plan_entries, plan_bytes);
+        let result = request.prepare_with_plans(corpus, keys, operations, &mut self.plans);
+        let stats = self.plans.stats;
+        self.trim_local(
+            self.total_retention
+                .max_bytes
+                .saturating_sub(stats.retained_bytes),
+            self.total_retention
+                .max_entries
+                .saturating_sub(stats.retained_entries),
+        );
+        result
+    }
+    fn trim_local(&mut self, bytes: usize, entries: usize) {
+        self.retention.max_bytes = bytes;
+        self.retention.max_entries = entries;
+        self.refresh();
+        while self.stats.retained_bytes > bytes {
+            let victim = self
+                .entries
+                .iter()
+                .filter(|(_, e)| e.value_bytes > 0)
+                .min_by_key(|(_, e)| e.touched)
+                .map(|(k, _)| k.clone());
+            if let Some(victim) = victim {
+                self.evict(&victim);
+                self.refresh();
+            } else {
+                self.reset_local();
+                break;
+            }
+        }
+        if self.stats.retained_entries > entries {
+            self.reset_local();
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn local_retention_for_test(&self) -> Retention {
+        self.retention
     }
     pub fn stats(&self) -> CacheStats {
         self.stats
     }
     pub fn reset(&mut self) {
+        self.plans.clear();
+        self.retention = self.total_retention;
+        self.reset_local();
+    }
+    fn reset_local(&mut self) {
         self.entries.clear();
         self.db = Database::default();
         self.stats.resets += 1;
@@ -140,7 +238,7 @@ impl Session {
     }
     fn touch(&mut self) -> u64 {
         if self.clock == u64::MAX {
-            self.reset();
+            self.reset_local();
             self.clock = 0;
         }
         self.clock += 1;
@@ -279,7 +377,7 @@ impl Session {
         if !self.entries.contains_key(&input.scope)
             && self.entries.len().saturating_add(1).saturating_mul(2) > self.retention.max_entries
         {
-            self.reset();
+            self.reset_local();
         }
         let old_bytes = self
             .entries
@@ -311,7 +409,7 @@ impl Session {
                 self.evict(&victim);
                 self.refresh();
             } else {
-                self.reset();
+                self.reset_local();
                 break;
             }
         }

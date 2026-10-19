@@ -19,3 +19,6 @@ mod cache;
 pub use cache::*;
 
 mod retention;
+
+mod plans;
+pub use plans::PlanStats;

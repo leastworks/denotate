@@ -140,6 +140,24 @@ impl CheckRequest {
         keys: &'s SemanticKeys,
         operations: &OperationalLimits,
     ) -> Result<RequestPreparation<'s>> {
+        self.prepare_using(corpus, keys, operations, None)
+    }
+    pub fn prepare_with_plans<'s>(
+        &self,
+        corpus: &'s Corpus,
+        keys: &'s SemanticKeys,
+        operations: &OperationalLimits,
+        plans: &mut dyn JoinPlanStore,
+    ) -> Result<RequestPreparation<'s>> {
+        self.prepare_using(corpus, keys, operations, Some(plans))
+    }
+    fn prepare_using<'s>(
+        &self,
+        corpus: &'s Corpus,
+        keys: &'s SemanticKeys,
+        operations: &OperationalLimits,
+        plans: Option<&mut dyn JoinPlanStore>,
+    ) -> Result<RequestPreparation<'s>> {
         operations.cancellation.check()?;
         keys.validate(corpus).map_err(CheckError::Keys)?;
         if self.backend != BackendIdentity::bdd() {
@@ -199,8 +217,13 @@ impl CheckRequest {
             .collect::<Result<Vec<_>>>()?;
         let limits = self.limits.with_operations(operations);
         let mut budget = Budget::tracked(&limits);
-        let result =
-            GroundProgram::prepare_with_budget(corpus, &domains, &constraints, &mut budget);
+        let result = GroundProgram::prepare_using(
+            corpus,
+            &domains,
+            &constraints,
+            &mut budget,
+            plans.map(|store| (keys, store)),
+        );
         let mut receipts = WorkReceipts::default();
         if let Err(error) = &result {
             Inconclusive::from_error(error.clone())?;
@@ -382,6 +405,9 @@ pub struct CheckedReport<'p> {
 impl PreparedCheck<'_> {
     pub fn request(&self) -> &CheckRequest {
         &self.request
+    }
+    pub fn receipts(&self) -> &WorkReceipts {
+        &self.receipts
     }
     pub fn program(&self) -> &GroundProgram {
         &self.program

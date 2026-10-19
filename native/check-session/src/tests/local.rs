@@ -37,8 +37,17 @@ fn compare(source: &str) {
     );
     let mut cached_session = crate::Session::default();
     for _ in 0..2 {
-        let LocalCheckOutcome::Complete(cached) =
-            cached_session.verify(&prepared, &(&l).into()).unwrap()
+        let request = request_evidence::request(&p, &l);
+        let RequestPreparation::Complete(cached_prepared) = cached_session
+            .prepare(&request, &p.corpus, &p.keys, &(&l).into())
+            .unwrap()
+        else {
+            panic!("cached preparation exhausted")
+        };
+        let cached_prepared = cached_prepared.admit(&(&l).into()).unwrap();
+        let LocalCheckOutcome::Complete(cached) = cached_session
+            .verify(&cached_prepared, &(&l).into())
+            .unwrap()
         else {
             panic!("cached exhausted")
         };

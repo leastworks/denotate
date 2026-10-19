@@ -238,8 +238,8 @@ fn memo_all_43_frozen_results_and_receipts_are_exact() {
                     },
                 )
             };
-            let (capture, result) = match request
-                .prepare(&p.corpus, &p.keys, &(&limits).into())
+            let (capture, result) = match session
+                .prepare(&request, &p.corpus, &p.keys, &(&limits).into())
                 .unwrap()
             {
                 RequestPreparation::Inconclusive { reason, receipts } => {

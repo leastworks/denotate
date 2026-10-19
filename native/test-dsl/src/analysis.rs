@@ -25,6 +25,7 @@ pub struct Output {
     pub key_computation: std::time::Duration,
     pub local_metrics: Option<LocalMetrics>,
     pub cache: Option<denotate_check_session::CacheStats>,
+    pub plans: Option<denotate_check_session::PlanStats>,
     pub results: Accounted<ScopedResults>,
     pub diagnostics: Vec<Diagnostic>,
     pub creator_warnings: Vec<String>,
@@ -216,12 +217,22 @@ impl Program {
         &self,
         limits: &Limits,
         after_prepare: impl FnOnce(),
-        session: Option<&mut denotate_check_session::Session>,
+        mut session: Option<&mut denotate_check_session::Session>,
     ) -> Result<Output, Failure> {
         limits.cancellation.check()?;
         let request = self.lowered.request(limits)?;
         let operations = OperationalLimits::from(limits);
-        let ground = match request.prepare(&self.lowered.corpus, &self.lowered.keys, &operations)? {
+        let preparation = if let Some(session) = session.as_deref_mut() {
+            session.prepare(
+                &request,
+                &self.lowered.corpus,
+                &self.lowered.keys,
+                &operations,
+            )?
+        } else {
+            request.prepare(&self.lowered.corpus, &self.lowered.keys, &operations)?
+        };
+        let ground = match preparation {
             RequestPreparation::Complete(p) => p,
             RequestPreparation::Inconclusive { reason, receipts } => {
                 return Ok(inconclusive(
@@ -237,6 +248,7 @@ impl Program {
         after_prepare();
         limits.cancellation.check()?;
         let ground = ground.admit(&operations)?;
+        let plans = session.as_deref().map(|s| s.plan_stats());
         let mut local_metrics = None;
         let mut cache = None;
         let outcome = if let Some(session) = session {
@@ -299,6 +311,7 @@ impl Program {
                     .map_or(std::time::Duration::ZERO, |m| m.keys),
             local_metrics,
             cache,
+            plans,
             diagnostics: vec![],
             creator_warnings: vec![],
         };
@@ -399,6 +412,7 @@ fn inconclusive(
         key_computation,
         local_metrics: None,
         cache: None,
+        plans: None,
         diagnostics: vec![diagnostic(
             Range::default(),
             "inconclusive",

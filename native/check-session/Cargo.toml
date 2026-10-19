@@ -5,6 +5,9 @@ edition = "2024"
 rust-version = "1.93"
 publish = false
 
+[features]
+test-support = []
+
 [dependencies]
 salsa.workspace = true
 denotate-check = { path = "../check" }

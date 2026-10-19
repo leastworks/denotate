@@ -13,8 +13,11 @@ use std::{
 #[cfg(any(test, feature = "test-support"))]
 #[path = "cartesian_oracle.rs"]
 mod cartesian_oracle;
+#[path = "planning.rs"]
+mod planning;
 #[path = "sparse.rs"]
 mod sparse;
+pub use planning::*;
 
 #[cfg(any(test, feature = "test-support"))]
 #[path = "tests/preparation_profile.rs"]
@@ -25,6 +28,15 @@ pub type Domains = BTreeMap<SortId, Vec<ConstantId>>;
 
 #[derive(Debug, Default, Clone)]
 pub struct PreparationMetrics {
+    /// Planning, current plan installation/index definitions and seed instances.
+    pub plans_and_seeds: Duration,
+    /// Owned incidence/schema projection, within plans_and_seeds.
+    pub plan_keying: Duration,
+    /// Current consumer/index registration and positional plan-step installation.
+    pub plan_binding: Duration,
+    pub input_seeding: Duration,
+    pub closure_and_instances: Duration,
+    pub ordering: Duration,
     /// Domain validation, possible closure, instances and obligation grouping.
     pub grounding: Duration,
     /// Ground dependency graph and local stratification.
@@ -146,12 +158,25 @@ impl GroundProgram {
         constraints: &[InputAtMostOne],
         budget: &mut Budget<'_>,
     ) -> Result<Self> {
+        Self::prepare_using(corpus, domains, constraints, budget, None)
+    }
+    pub(crate) fn prepare_using(
+        corpus: &Corpus,
+        domains: &Domains,
+        constraints: &[InputAtMostOne],
+        budget: &mut Budget<'_>,
+        cache: Option<(&SemanticKeys, &mut dyn JoinPlanStore)>,
+    ) -> Result<Self> {
         let limits = budget.limits;
         limits.cancellation.check()?;
         let start = Instant::now();
         let domains = validate_domains(corpus, domains, budget)?;
         let mut p = Self::empty(corpus, domains);
-        sparse::populate(corpus, &mut p, budget)?;
+        if let Some((keys, store)) = cache {
+            sparse::populate_cached(corpus, &mut p, budget, keys, store)?;
+        } else {
+            sparse::populate(corpus, &mut p, budget)?;
+        }
         p.build_groups(corpus, budget)?;
         p.build_input_groups(corpus, constraints, budget)?;
         p.metrics.grounding = start.elapsed();

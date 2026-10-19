@@ -39,7 +39,20 @@ fn every_pivot_preserves_maximum_bound_column_score() {
         for mode in 0..5 {
             for n in [1, 2, 4, 7, 12] {
                 let (_, atoms) = atoms(n, arity, mode);
-                let positives: Vec<_> = atoms.iter().collect();
+                let positives: Vec<_> = atoms
+                    .iter()
+                    .map(|a| {
+                        a.arguments()
+                            .iter()
+                            .map(|t| match t.value() {
+                                Term::Constant(_) => None,
+                                Term::Variable { name, .. } => {
+                                    Some(std::sync::Arc::from(name.as_str()))
+                                }
+                            })
+                            .collect()
+                    })
+                    .collect();
                 let mut budget = Budget::new(&limits);
                 let planner = JoinPlanner::new(&positives, &mut budget).unwrap();
                 for pivot in 0..n {
@@ -96,7 +109,20 @@ fn all_pivots_have_quadratic_work_including_dense_incidence_updates() {
         let mut previous = None;
         for n in [16, 32, 64, 128, 256] {
             let (_, atoms) = atoms(n, 4, mode);
-            let positives: Vec<_> = atoms.iter().collect();
+            let positives: Vec<_> = atoms
+                .iter()
+                .map(|a| {
+                    a.arguments()
+                        .iter()
+                        .map(|t| match t.value() {
+                            Term::Constant(_) => None,
+                            Term::Variable { name, .. } => {
+                                Some(std::sync::Arc::from(name.as_str()))
+                            }
+                        })
+                        .collect()
+                })
+                .collect();
             let mut budget = Budget::new(&limits);
             let planner = JoinPlanner::new(&positives, &mut budget).unwrap();
             let count: usize = (0..n)
@@ -114,4 +140,48 @@ fn all_pivots_have_quadratic_work_including_dense_incidence_updates() {
             previous = Some(budget.used());
         }
     }
+}
+
+#[test]
+fn owned_plan_preflight_bounds_every_pivot_and_preserves_promotion_ties() {
+    for arity in [0, 1, 2, 4] {
+        for mode in 0..5 {
+            for n in [0, 1, 2, 8, 32] {
+                let (_, atoms) = atoms(n, arity, mode);
+                let shape = JoinPlanSchema {
+                    positions: (0..n).collect(),
+                    positives: atoms
+                        .iter()
+                        .map(|a| {
+                            a.arguments()
+                                .iter()
+                                .map(|t| match t.value() {
+                                    Term::Constant(_) => None,
+                                    Term::Variable { name, .. } => {
+                                        Some(std::sync::Arc::from(name.as_str()))
+                                    }
+                                })
+                                .collect()
+                        })
+                        .collect(),
+                };
+                let bound = shape.work_bound().unwrap();
+                let owned = OwnedJoinPlan::compute(shape).unwrap();
+                assert!(owned.work().unwrap() <= bound, "{n}/{arity}/{mode}");
+            }
+        }
+    }
+    let shape = JoinPlanSchema {
+        positions: vec![0, 1, 2],
+        positives: vec![
+            vec![Some("x".into())],
+            vec![Some("x".into()), Some("y".into())],
+            vec![Some("x".into()), Some("z".into())],
+        ],
+    };
+    let p = OwnedJoinPlan::compute(shape).unwrap();
+    assert_eq!(
+        p.pivots[0].steps[0].0, 2,
+        "most recently promoted r precedes q"
+    );
 }

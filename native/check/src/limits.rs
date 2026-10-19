@@ -216,11 +216,15 @@ impl<'a> Budget<'a> {
     pub fn used(&self) -> usize {
         self.work
     }
-    pub fn charge(&mut self, amount: usize, phase: &'static str) -> Result<()> {
+    pub fn check(&self, phase: &'static str) -> Result<()> {
         self.limits.cancellation.check()?;
         if self.start.elapsed() >= self.limits.timeout {
             return Err(CheckError::Deadline { phase });
         }
+        Ok(())
+    }
+    pub fn charge(&mut self, amount: usize, phase: &'static str) -> Result<()> {
+        self.check(phase)?;
         if amount > self.remaining() {
             if let Some(charges) = &mut self.charges {
                 let rejected = charges.rejected_work.entry(phase.into()).or_default();

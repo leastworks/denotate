@@ -401,3 +401,19 @@ mod tests {
         assert!(bytes(&shared) >= 10000 + 100 * size_of::<OwnerKey>());
     }
 }
+
+fields!(JoinPlanSchema {
+    positions,
+    positives
+});
+fields!(PivotPlan {
+    columns,
+    steps,
+    columns_work,
+    steps_work
+});
+fields!(OwnedJoinPlan {
+    schema,
+    initialization_work,
+    pivots
+});

@@ -1,5 +1,6 @@
 //! Positive closure with delta-driven, indexed joins. Negative premises are
 //! retained in instances but never restrict possibility.
+use super::planning::constant_columns;
 use super::*;
 use std::collections::VecDeque;
 
@@ -90,35 +91,20 @@ struct Plan<'a> {
     steps: Vec<Step<'a>>,
 }
 
-fn bound_columns(
-    atom: &Atom,
-    bound: &BTreeSet<&str>,
-    budget: &mut Budget<'_>,
-) -> Result<Vec<usize>> {
-    let mut columns = Vec::new();
-    for (i, term) in atom.arguments().iter().enumerate() {
-        budget.tick("grounding plans")?;
-        if match term.value() {
-            Term::Constant(_) => true,
-            Term::Variable { name, .. } => bound.contains(name.as_str()),
-        } {
-            columns.push(i);
-        }
-    }
-    Ok(columns)
-}
-
 // Dense variable incidence is built once per rule. Each pivot binds each variable
 // once and visits each argument incidence once; score buckets avoid rescanning
 // remaining literals. At bounded arity, all n pivot plans take O(n²) work.
-struct JoinPlanner {
+pub(super) struct JoinPlanner {
     variables: Vec<Vec<Option<usize>>>,
     readers: Vec<Vec<usize>>,
     constants: Vec<usize>,
     arity: usize,
 }
 impl JoinPlanner {
-    fn new(positives: &[&Atom], budget: &mut Budget<'_>) -> Result<Self> {
+    pub(super) fn new(
+        positives: &[Vec<Option<std::sync::Arc<str>>>],
+        budget: &mut Budget<'_>,
+    ) -> Result<Self> {
         let mut names = BTreeMap::new();
         let mut readers: Vec<Vec<usize>> = Vec::new();
         let mut variables = Vec::new();
@@ -128,16 +114,16 @@ impl JoinPlanner {
             budget.tick("grounding plans")?;
             let mut terms = Vec::new();
             let mut fixed = 0;
-            for term in atom.arguments() {
+            for term in atom {
                 budget.tick("grounding plans")?;
-                terms.push(match term.value() {
-                    Term::Constant(_) => {
+                terms.push(match term {
+                    None => {
                         fixed += 1;
                         None
                     }
-                    Term::Variable { name, .. } => {
+                    Some(name) => {
                         let next = names.len();
-                        let id = *names.entry(name.as_str()).or_insert(next);
+                        let id = *names.entry(name.as_ref()).or_insert(next);
                         if id == readers.len() {
                             readers.push(Vec::new());
                         }
@@ -159,7 +145,11 @@ impl JoinPlanner {
         })
     }
 
-    fn steps(&self, pivot: usize, budget: &mut Budget<'_>) -> Result<Vec<(usize, Vec<usize>)>> {
+    pub(super) fn steps(
+        &self,
+        pivot: usize,
+        budget: &mut Budget<'_>,
+    ) -> Result<Vec<(usize, Vec<usize>)>> {
         let n = self.variables.len();
         budget.charge(n + self.readers.len() + self.arity + 1, "grounding plans")?;
         let mut bound = vec![false; self.readers.len()];
@@ -388,6 +378,32 @@ fn populate_with_delta(
     budget: &mut Budget<'_>,
     mut next: impl FnMut(&mut VecDeque<usize>) -> Option<usize>,
 ) -> Result<()> {
+    populate_using(corpus, p, budget, &mut next, None)
+}
+
+pub(super) fn populate_cached(
+    corpus: &Corpus,
+    p: &mut GroundProgram,
+    budget: &mut Budget<'_>,
+    keys: &SemanticKeys,
+    store: &mut dyn JoinPlanStore,
+) -> Result<()> {
+    populate_using(
+        corpus,
+        p,
+        budget,
+        &mut VecDeque::pop_front,
+        Some((keys, store)),
+    )
+}
+
+fn populate_using(
+    corpus: &Corpus,
+    p: &mut GroundProgram,
+    budget: &mut Budget<'_>,
+    next: &mut impl FnMut(&mut VecDeque<usize>) -> Option<usize>,
+    mut cache: Option<(&SemanticKeys, &mut dyn JoinPlanStore)>,
+) -> Result<()> {
     let mut tuples = Tuples::default();
     let mut instances = Instances::default();
     let mut plans = Vec::new();
@@ -395,6 +411,7 @@ fn populate_with_delta(
     // Same index shape as tuple indexes, but bucket entries identify consumers.
     // Constants in authored guards must not cause a scan of all authored rules.
     let mut consumers = Indexes::new();
+    let plan_start = Instant::now();
     for rule in corpus.rules() {
         budget.tick("grounding plans")?;
         let mut positives = Vec::new();
@@ -409,13 +426,50 @@ fn populate_with_delta(
                 seeds.push(head);
             }
         }
-        let planner = JoinPlanner::new(&positives, budget)?;
+        let key_start = Instant::now();
+        let shape = JoinPlanSchema::from_rule(rule);
+        budget.check("grounding plans")?;
+        let cached = if let Some((keys, store)) = &mut cache
+            && store.should_cache(positives.len())
+        {
+            let key = keys.rule(rule.id).map_err(CheckError::Keys)?.clone();
+            let schema = keys.rule_schema(rule).map_err(CheckError::Keys)?;
+            p.metrics.plan_keying += key_start.elapsed();
+            store.plan(key, schema, budget.remaining())?
+        } else {
+            p.metrics.plan_keying += key_start.elapsed();
+            None
+        };
+        budget.check("grounding plans")?;
+        // Current positions and variable/constant incidence must match exactly.
+        // SemanticKeys::validate has already checked one-to-one source bindings.
+        if cached
+            .as_ref()
+            .is_some_and(|p| p.schema != shape || p.pivots.len() != positives.len())
+        {
+            return Err(CheckError::Internal("cached plan/current rule mismatch"));
+        }
+        // A provider cannot force lumped exhaustion: insufficient remaining
+        // allowance always executes the original rule planning charge sequence.
+        let cached = cached.filter(|p| p.required_work().is_some_and(|w| w <= budget.remaining()));
+        let planner = if let Some(plan) = &cached {
+            budget.charge(plan.initialization_work, "grounding plans")?;
+            None
+        } else {
+            Some(JoinPlanner::new(&shape.positives, budget)?)
+        };
         // At most 2^arity shapes per occurrence. Register each shape once, so
         // relation-map lookup is not repeated for all n² materialized steps.
         let mut shapes: Vec<Vec<Vec<usize>>> = vec![Vec::new(); positives.len()];
         for (pivot_index, pivot) in positives.iter().enumerate() {
             budget.tick("grounding plans")?;
-            let columns = bound_columns(pivot, &BTreeSet::new(), budget)?;
+            let columns = if let Some(plan) = &cached {
+                budget.charge(plan.pivots[pivot_index].columns_work, "grounding plans")?;
+                plan.pivots[pivot_index].columns.clone()
+            } else {
+                constant_columns(&shape.positives[pivot_index], budget)?
+            };
+            let binding_start = Instant::now();
             let mut key = Vec::new();
             for column in &columns {
                 budget.tick("grounding plans")?;
@@ -431,9 +485,19 @@ fn populate_with_delta(
                 .entry(key)
                 .or_default()
                 .push(plans.len());
+            p.metrics.plan_binding += binding_start.elapsed();
             let mut steps = Vec::new();
-            for (index, columns) in planner.steps(pivot_index, budget)? {
-                let atom = positives[index];
+            let ordered = if let Some(plan) = &cached {
+                budget.charge(plan.pivots[pivot_index].steps_work, "grounding plans")?;
+                plan.pivots[pivot_index].steps.clone()
+            } else {
+                planner.as_ref().unwrap().steps(pivot_index, budget)?
+            };
+            let binding_start = Instant::now();
+            for (index, columns) in ordered {
+                let atom = *positives
+                    .get(index)
+                    .ok_or(CheckError::Internal("cached plan literal position"))?;
                 budget.tick("grounding plans")?;
                 if !shapes[index].contains(&columns) {
                     tuples
@@ -447,8 +511,11 @@ fn populate_with_delta(
                 steps.push(Step { atom, columns });
             }
             plans.push(Plan { rule, pivot, steps });
+            p.metrics.plan_binding += binding_start.elapsed();
         }
     }
+    p.metrics.plans_and_seeds = plan_start.elapsed();
+    let seed_start = Instant::now();
     #[cfg(any(test, feature = "test-support"))]
     budget.mark("plans_and_seed_instances");
     // Index definitions must exist before any tuple is indexed.
@@ -471,6 +538,8 @@ fn populate_with_delta(
             tuples.insert(atom, budget)
         })?;
     }
+    p.metrics.input_seeding = seed_start.elapsed();
+    let closure_start = Instant::now();
     #[cfg(any(test, feature = "test-support"))]
     budget.mark("input_seeding_and_indexes");
     while let Some(delta) = next(&mut tuples.delta) {
@@ -505,6 +574,8 @@ fn populate_with_delta(
             tuples.insert(head, budget)?;
         }
     }
+    p.metrics.closure_and_instances = closure_start.elapsed();
+    let order_start = Instant::now();
     #[cfg(any(test, feature = "test-support"))]
     budget.mark("closure_and_instances");
     // Canonical IDs and traversal order, independent of delta discovery order.
@@ -518,6 +589,7 @@ fn populate_with_delta(
         rule.id.index = p.rules.len();
         p.rules.push(rule);
     }
+    p.metrics.ordering = order_start.elapsed();
     #[cfg(any(test, feature = "test-support"))]
     budget.mark("grounding_order");
     Ok(())

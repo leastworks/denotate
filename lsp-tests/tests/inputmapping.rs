@@ -758,18 +758,21 @@ fn values_copy_through_slots_masks_and_w_sensitive_cycles_in_the_server() {
 fn checker_cache_reuses_current_diagnostics_and_drops_on_close() {
     let mut c = Client::start("base/00-valid");
     let u = uri(&c, "checker-cache.inputmapping");
-    let source = "input i,j; slot a; a <- i; a <- j;";
+    let source = "input i,j,k,l,m; slot a; a <- i when present(j) and present(k) and present(l) and present(m); a <- j;";
     open(&mut c, &u, source);
     c.validated(&u, 1);
     let first = stats(&mut c);
     let cold = first["finished"].as_array().unwrap().last().unwrap();
     assert!(cold["cache"]["evaluation_misses"].as_u64().unwrap() > 0);
+    assert!(cold["plans"]["executed"].as_u64().unwrap() > 0);
     let original = codes(&c, &u, "OverlappingMappings");
     assert_eq!(original.len(), 2);
     change(&mut c, &u, 2, &format!("// moved\n{source}"));
     let second = stats(&mut c);
     let warm = second["finished"].as_array().unwrap().last().unwrap();
     assert_eq!(warm["cache"]["evaluation_misses"], 0);
+    assert_eq!(warm["plans"]["executed"], 0);
+    assert!(warm["plans"]["reused"].as_u64().unwrap() > 0);
     assert!(warm["cache"]["evaluation_hits"].as_u64().unwrap() > 0);
     assert_eq!(warm["local_evaluation_ns"], 0);
     assert_eq!(warm["bdd_export_ns"], 0);
@@ -787,5 +790,6 @@ fn checker_cache_reuses_current_diagnostics_and_drops_on_close() {
     let reopened = stats(&mut c);
     let last = reopened["finished"].as_array().unwrap().last().unwrap();
     assert_eq!(last["cache"]["evaluation_hits"], 0);
+    assert!(last["plans"]["executed"].as_u64().unwrap() > 0);
     assert!(last["cache"]["evaluation_misses"].as_u64().unwrap() > 0);
 }
