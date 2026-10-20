@@ -22,3 +22,6 @@ mod retention;
 
 mod plans;
 pub use plans::PlanStats;
+
+mod components;
+pub use components::ComponentStats;

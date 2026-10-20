@@ -39,3 +39,11 @@ pub fn component_rules(
         .iter()
         .map(|i| &program.rules[*i])
 }
+
+/// Test-only evaluation of the opaque portable graph against structural inputs.
+pub fn owned_condition_value(
+    condition: &OwnedCondition,
+    present: &std::collections::BTreeSet<AtomKey>,
+) -> bool {
+    condition.value_in(present).unwrap()
+}

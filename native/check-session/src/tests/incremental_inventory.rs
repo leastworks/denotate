@@ -722,3 +722,6 @@ mod plans;
 
 #[path = "owned.rs"]
 mod owned;
+
+#[path = "components.rs"]
+mod components;

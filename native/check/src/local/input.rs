@@ -325,6 +325,7 @@ impl PreparedCheck<'_> {
 /// Fully completed owned query pair. No physical execution metadata in equality.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalMemo {
+    pub dependencies: WorkReceipts,
     pub evaluation: Option<LocalEvaluation>,
     pub answer: Option<LocalAnswer>,
     pub failure: Option<Inconclusive>,
@@ -370,6 +371,7 @@ impl LocalMemoStore for NoLocalMemo {
             metrics,
         )?;
         Ok(std::sync::Arc::new(LocalMemo {
+            dependencies: WorkReceipts::default(),
             evaluation: evaluation.value.as_deref().cloned(),
             answer: answer.value,
             failure: answer.failure.or(evaluation.failure),
@@ -380,6 +382,17 @@ impl LocalMemoStore for NoLocalMemo {
 }
 
 impl LocalInput {
+    /// Assembly consumes provider meaning and context, never their equations or
+    /// source evidence. This projection can backdate independently of both.
+    pub fn for_component_assembly(&self) -> Self {
+        let mut input = self.clone();
+        input.rules.clear();
+        input.original_dependencies.clear();
+        input.rewrites.clear();
+        input.completion_context = None;
+        input
+    }
+
     /// Group verdicts consume conditions and scope, not producer implementation
     /// or attribution. Salsa can backdate this projection after equal evaluation.
     pub fn for_answer(&self) -> Self {

@@ -2,16 +2,16 @@
 //! from this query's inputs; no source snapshot or current arena ID enters here.
 use super::*;
 
-struct Runtime {
-    program: GroundProgram,
-    keys: SemanticKeys,
-    atoms: BTreeMap<AtomKey, GroundAtom>,
-    components: BTreeMap<ComponentId, ComponentKey>,
-    instances: BTreeMap<GroundRuleId, InstanceKey>,
-    cone: DependencyCone,
+pub(super) struct Runtime {
+    pub(super) program: GroundProgram,
+    pub(super) keys: SemanticKeys,
+    pub(super) atoms: BTreeMap<AtomKey, GroundAtom>,
+    pub(super) components: BTreeMap<ComponentId, ComponentKey>,
+    pub(super) instances: BTreeMap<GroundRuleId, InstanceKey>,
+    pub(super) cone: DependencyCone,
 }
 impl Runtime {
-    fn new(input: &LocalInput, budget: &mut Budget<'_>, graph: bool) -> Result<Self> {
+    pub(super) fn new(input: &LocalInput, budget: &mut Budget<'_>, graph: bool) -> Result<Self> {
         validate_local_constraints(&input.constraints)?;
         let mut all = input.facts.clone();
         if let Some(c) = &input.completion_context {
@@ -310,7 +310,7 @@ impl Runtime {
             .find_map(|(id, k)| (k == key).then(|| &self.program.components[id.index]))
             .ok_or(CheckError::Internal("missing owned region"))
     }
-    fn export_evaluation(
+    pub(super) fn export_evaluation(
         &self,
         meaning: &SymbolicMeaning<'_>,
         budget: &mut Budget<'_>,
@@ -345,7 +345,7 @@ impl Runtime {
         })
     }
 }
-fn receipt(input: &LocalInput, budget: &Budget<'_>, answer: bool) -> WorkReceipt {
+pub(super) fn receipt(input: &LocalInput, budget: &Budget<'_>, answer: bool) -> WorkReceipt {
     WorkReceipt {
         allowance: input.limits.clone(),
         own: budget.snapshot(),

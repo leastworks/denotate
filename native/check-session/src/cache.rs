@@ -11,24 +11,29 @@ use std::{
 struct Slot {
     #[returns(ref)]
     input: Option<Arc<LocalInput>>,
+    #[returns(ref)]
+    components: Option<Vec<(ComponentKey, crate::components::Slot)>>,
 }
 #[salsa::db]
-trait Db: salsa::Database {
+pub(crate) trait Db: salsa::Database {
     fn operations(&self) -> OperationalLimits;
     fn measured(&self, answer: bool, metrics: LocalMetrics);
+    fn component_measured(&self, provider: bool, metrics: LocalMetrics);
 }
 #[derive(Default)]
 struct Executions {
     evaluation: usize,
     answer: usize,
+    assembly_ns: u64,
     metrics: LocalMetrics,
 }
 #[salsa::db]
 #[derive(Clone)]
-struct Database {
+pub(crate) struct Database {
     storage: salsa::Storage<Self>,
     operations: Arc<Mutex<OperationalLimits>>,
     executed: Arc<Mutex<Executions>>,
+    pub(crate) component_executed: Arc<Mutex<crate::components::Executions>>,
     #[cfg(test)]
     interrupt_after_evaluation: Arc<std::sync::atomic::AtomicBool>,
 }
@@ -38,6 +43,7 @@ impl Default for Database {
             storage: Default::default(),
             operations: Arc::new(Mutex::new(OperationalLimits::from(&Limits::default()))),
             executed: Default::default(),
+            component_executed: Default::default(),
             #[cfg(test)]
             interrupt_after_evaluation: Default::default(),
         }
@@ -47,6 +53,16 @@ impl Default for Database {
 impl salsa::Database for Database {}
 #[salsa::db]
 impl Db for Database {
+    fn component_measured(&self, provider: bool, m: LocalMetrics) {
+        let mut e = self.component_executed.lock().unwrap();
+        if provider {
+            e.providers += 1;
+        } else {
+            e.evaluations += 1;
+        }
+        e.metrics.evaluation += m.evaluation;
+        e.metrics.export += m.export;
+    }
     fn operations(&self) -> OperationalLimits {
         self.operations.lock().unwrap().clone()
     }
@@ -56,6 +72,7 @@ impl Db for Database {
             e.answer += 1;
         } else {
             e.evaluation += 1;
+            e.assembly_ns += (m.evaluation + m.export).as_nanos().min(u64::MAX as u128) as u64;
         }
         e.metrics.evaluation += m.evaluation;
         e.metrics.export += m.export;
@@ -76,12 +93,34 @@ fn query_input(db: &dyn Db, slot: Slot) -> Option<Arc<LocalInput>> {
     slot.input(db).clone()
 }
 #[salsa::tracked]
+fn component_dependencies(
+    db: &dyn Db,
+    slot: Slot,
+) -> Option<Vec<(ComponentKey, crate::components::Slot)>> {
+    slot.components(db).clone()
+}
+#[salsa::tracked]
+fn evaluation_input(db: &dyn Db, slot: Slot) -> Option<Arc<LocalInput>> {
+    query_input(db, slot).as_ref().map(|input| {
+        if component_dependencies(db, slot).is_some() {
+            Arc::new(input.for_component_assembly())
+        } else {
+            input.clone()
+        }
+    })
+}
+#[salsa::tracked]
 fn evaluation(db: &dyn Db, slot: Slot) -> Result<Option<Arc<OwnedEvaluation>>, CheckError> {
-    let Some(input) = query_input(db, slot) else {
+    let Some(input) = evaluation_input(db, slot) else {
         return Ok(None);
     };
     let mut metrics = LocalMetrics::default();
-    let value = evaluate_owned_local(input, &db.operations(), &mut metrics);
+    let value = if let Some(dependencies) = component_dependencies(db, slot) {
+        let values = crate::components::values(db, dependencies)?;
+        assemble_owned_components(input, &values, &db.operations(), &mut metrics)
+    } else {
+        evaluate_owned_local(input, &db.operations(), &mut metrics)
+    };
     db.measured(false, metrics);
     value.map(|v| Some(Arc::new(v)))
 }
@@ -178,6 +217,7 @@ pub struct Session {
     clock: u64,
     stats: CacheStats,
     plans: crate::plans::PlanCache,
+    components: Option<crate::components::ComponentCache>,
     #[cfg(any(test, feature = "test-support"))]
     fresh_planning: bool,
 }
@@ -198,6 +238,7 @@ impl Session {
             clock: 0,
             stats: Default::default(),
             plans: Default::default(),
+            components: None,
             #[cfg(any(test, feature = "test-support"))]
             fresh_planning: false,
         }
@@ -208,6 +249,26 @@ impl Session {
             fresh_planning: true,
             ..Self::default()
         }
+    }
+    /// Opt-in 6b.2b graph experiment. Production editor policy stays unchanged
+    /// until the component performance/retention review is complete.
+    pub fn with_components() -> Self {
+        Self::new_components(Retention::default())
+    }
+    pub fn new_components(retention: Retention) -> Self {
+        Self {
+            components: Some(Default::default()),
+            ..Self::new(retention)
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn reverse_components_for_test(&mut self, reverse: bool) {
+        self.components.as_mut().unwrap().reverse_requests = reverse;
+    }
+    pub fn component_stats(&self) -> crate::ComponentStats {
+        self.components
+            .as_ref()
+            .map_or(crate::ComponentStats::default(), |c| c.stats)
     }
     pub fn plan_stats(&self) -> crate::PlanStats {
         self.plans.stats
@@ -243,7 +304,10 @@ impl Session {
         // An all-small fresh snapshot allocates no plan slots or byte reserve.
         let plan_bytes = if reserve_entries == 0 { 0 } else { plan_bytes };
         self.trim_local(
-            self.total_retention.max_bytes - plan_bytes,
+            self.total_retention
+                .max_bytes
+                .saturating_sub(plan_bytes)
+                .saturating_sub(self.component_stats().retained_bytes),
             self.total_retention.max_entries,
         );
         self.plans.begin(plan_entries, plan_bytes);
@@ -252,7 +316,8 @@ impl Session {
         self.trim_local(
             self.total_retention
                 .max_bytes
-                .saturating_sub(stats.retained_bytes),
+                .saturating_sub(stats.retained_bytes)
+                .saturating_sub(self.component_stats().retained_bytes),
             self.total_retention.max_entries,
         );
         result
@@ -289,6 +354,9 @@ impl Session {
     }
     pub fn reset(&mut self) {
         self.plans.clear();
+        if self.components.is_some() {
+            self.components = Some(Default::default());
+        }
         self.retention = self.total_retention;
         self.reset_local();
     }
@@ -297,6 +365,9 @@ impl Session {
         self.free.clear();
         self.allocated = 0;
         self.db = Database::default();
+        if self.components.is_some() {
+            self.components = Some(Default::default());
+        }
         self.clock = 0;
         self.stats.resets += 1;
         self.refresh();
@@ -307,6 +378,9 @@ impl Session {
         operations: &OperationalLimits,
     ) -> Result<LocalCheckOutcome<'p>, CheckError> {
         self.stats = CacheStats::default();
+        if let Some(components) = &mut self.components {
+            components.begin();
+        }
         self.refresh();
         operations.cancellation.check()?;
         if operations.timeout.is_zero() {
@@ -331,6 +405,8 @@ impl Session {
     }
     fn clear_slot(&mut self, slot: Slot) {
         slot.set_input(&mut self.db).to(None);
+        slot.set_components(&mut self.db).to(None);
+        let _ = component_dependencies(&self.db, slot);
         let _ = evaluation(&self.db, slot);
         let _ = evaluation_value(&self.db, slot);
         let _ = answer(&self.db, slot);
@@ -349,6 +425,9 @@ impl Session {
         self.stats.evicted += 2;
     }
     pub fn evict_values(&mut self) {
+        if let Some(components) = &mut self.components {
+            components.evict_values(&mut self.db);
+        }
         let keys = self.entries.keys().cloned().collect::<Vec<_>>();
         for k in keys {
             let slot = self.entries[&k].slot;
@@ -387,7 +466,9 @@ impl LocalMemoStore for Session {
             self.reset_local();
         }
         self.clock += 1;
-        // No room even for a slot: execute the same owned functions directly.
+        *self.db.operations.lock().unwrap() = operations.clone();
+        // Fresh bypasses use the same graph/allowances, never the old coarse
+        // evaluation contract just because retention is unavailable.
         if self.retention.max_entries < 2 || self.retention.max_bytes < 1024 {
             self.stats.bypassed += 2;
             self.stats.evaluation_misses += 1;
@@ -395,8 +476,25 @@ impl LocalMemoStore for Session {
                 LocalScope::Group(_) => self.stats.verdict_misses += 1,
                 LocalScope::Region(_) => self.stats.completion_misses += 1,
             };
-            return NoLocalMemo.execute(input, operations, metrics);
+            return uncached(input, operations, metrics, self.components.is_some());
         }
+        let (component_slots, dependencies) = if let Some(components) = &mut self.components {
+            match components.stage(
+                &mut self.db,
+                input,
+                operations,
+                metrics,
+                self.total_retention.max_bytes / 4,
+            )? {
+                Some((slots, receipts)) => (Some(slots), receipts),
+                None => {
+                    self.stats.bypassed += 2;
+                    return uncached(input, operations, metrics, true);
+                }
+            }
+        } else {
+            (None, WorkReceipts::default())
+        };
         let slot = if let Some(e) = self.entries.get(&input.scope) {
             if e.input.as_ref() != input {
                 self.stats.invalidated += 2;
@@ -408,18 +506,23 @@ impl LocalMemoStore for Session {
             && (self.allocated + 1) * 1024 <= self.retention.max_bytes
         {
             self.allocated += 1;
-            Slot::new(&self.db, None)
+            Slot::new(&self.db, None, None)
         } else if let Some(key) = self.victim(None) {
             self.remove(&key);
             self.free.pop().unwrap()
         } else {
             self.stats.bypassed += 2;
-            return NoLocalMemo.execute(input, operations, metrics);
+            if let Some(components) = &mut self.components {
+                components.evict_values(&mut self.db);
+            }
+            return uncached(input, operations, metrics, self.components.is_some());
         };
         *self.db.operations.lock().unwrap() = operations.clone();
         *self.db.executed.lock().unwrap() = Executions::default();
         let installed = Arc::new(input.clone());
         slot.set_input(&mut self.db).to(Some(installed.clone()));
+        slot.set_components(&mut self.db)
+            .to(component_slots.clone());
         let computed = (|| {
             let a = evaluation(&self.db, slot)
                 .clone()?
@@ -434,6 +537,7 @@ impl LocalMemoStore for Session {
                 });
             }
             Ok::<_, CheckError>(Arc::new(LocalMemo {
+                dependencies: dependencies.clone(),
                 evaluation: a.value.as_deref().cloned(),
                 answer: b.value.clone(),
                 failure: b.failure.or(a.failure),
@@ -442,6 +546,9 @@ impl LocalMemoStore for Session {
             }))
         })();
         let exec = std::mem::take(&mut *self.db.executed.lock().unwrap());
+        if let Some(components) = &mut self.components {
+            components.stats.assembly_ns += exec.assembly_ns;
+        }
         metrics.evaluation += exec.metrics.evaluation;
         metrics.export += exec.metrics.export;
         metrics.property += exec.metrics.property;
@@ -462,6 +569,9 @@ impl LocalMemoStore for Session {
             Ok(v) => v,
             Err(e) => {
                 // Operational/internal failures never survive as reusable query memos.
+                if let Some(components) = &mut self.components {
+                    components.evict_values(&mut self.db);
+                }
                 self.entries.remove(&input.scope);
                 self.clear_slot(slot);
                 self.free.push(slot);
@@ -492,8 +602,19 @@ impl LocalMemoStore for Session {
         ));
         let bytes = crate::retention::bytes(&(
             (&input.scope, &installed, query_input(&self.db, slot)),
-            (answer_input(&self.db, slot), evaluated, semantic),
-            (answered, &receipts),
+            (
+                (
+                    answer_input(&self.db, slot),
+                    evaluation_input(&self.db, slot),
+                ),
+                evaluated,
+                semantic,
+            ),
+            (
+                (answered, &receipts),
+                slot.components(&self.db),
+                component_dependencies(&self.db, slot),
+            ),
         ));
         let mut node_count = nodes(&value);
         if let (Some(a), Some(b)) = (
@@ -502,9 +623,9 @@ impl LocalMemoStore for Session {
         ) {
             if !Arc::ptr_eq(a, b) {
                 node_count = node_count
-                    .saturating_add(a.permitted.node_count())
+                    .saturating_add(b.permitted.node_count())
                     .saturating_add(
-                        a.conditions
+                        b.conditions
                             .values()
                             .map(OwnedCondition::node_count)
                             .sum::<usize>(),
@@ -522,6 +643,24 @@ impl LocalMemoStore for Session {
                 nodes: node_count,
             },
         );
+        if let (Some(components), Some(slots)) = (&mut self.components, &component_slots) {
+            components.finish(
+                &mut self.db,
+                slots,
+                self.total_retention.max_bytes / 4,
+                self.total_retention.max_condition_nodes,
+            );
+            let available = self
+                .total_retention
+                .max_bytes
+                .saturating_sub(self.plans.stats.retained_bytes)
+                .saturating_sub(components.stats.retained_bytes);
+            self.trim_local(available, self.total_retention.max_entries);
+            if !self.entries.contains_key(&input.scope) {
+                self.stats.bypassed += 2;
+                return Ok(value);
+            }
+        }
         self.refresh();
         if bytes.saturating_add(self.allocated * 1024) > self.retention.max_bytes
             || node_count > self.retention.max_condition_nodes
@@ -581,4 +720,17 @@ fn nodes(value: &LocalMemo) -> usize {
         _ => {}
     }
     n
+}
+
+fn uncached(
+    input: &LocalInput,
+    operations: &OperationalLimits,
+    metrics: &mut LocalMetrics,
+    components: bool,
+) -> Result<Arc<LocalMemo>, CheckError> {
+    if components {
+        NoComponentMemo.execute(input, operations, metrics)
+    } else {
+        NoLocalMemo.execute(input, operations, metrics)
+    }
 }
