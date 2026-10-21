@@ -378,7 +378,7 @@ fn populate_with_delta(
     budget: &mut Budget<'_>,
     mut next: impl FnMut(&mut VecDeque<usize>) -> Option<usize>,
 ) -> Result<()> {
-    populate_using(corpus, p, budget, &mut next, None)
+    populate_using(corpus, p, budget, &mut next, None, &[])
 }
 
 pub(super) fn populate_cached(
@@ -394,6 +394,25 @@ pub(super) fn populate_cached(
         budget,
         &mut VecDeque::pop_front,
         Some((keys, store)),
+        &[],
+    )
+}
+
+pub(super) fn populate_seeded(
+    corpus: &Corpus,
+    p: &mut GroundProgram,
+    budget: &mut Budget<'_>,
+    keys: &SemanticKeys,
+    store: &mut dyn JoinPlanStore,
+    external: &[GroundAtom],
+) -> Result<()> {
+    populate_using(
+        corpus,
+        p,
+        budget,
+        &mut VecDeque::pop_front,
+        Some((keys, store)),
+        external,
     )
 }
 
@@ -403,6 +422,7 @@ fn populate_using(
     budget: &mut Budget<'_>,
     next: &mut impl FnMut(&mut VecDeque<usize>) -> Option<usize>,
     mut cache: Option<(&SemanticKeys, &mut dyn JoinPlanStore)>,
+    external: &[GroundAtom],
 ) -> Result<()> {
     let mut tuples = Tuples::default();
     let mut instances = Instances::default();
@@ -519,7 +539,7 @@ fn populate_using(
     #[cfg(any(test, feature = "test-support"))]
     budget.mark("plans_and_seed_instances");
     // Index definitions must exist before any tuple is indexed.
-    for atom in seeds {
+    for atom in external.iter().cloned().chain(seeds) {
         tuples.insert(atom, budget)?;
     }
     for relation in corpus.relations() {

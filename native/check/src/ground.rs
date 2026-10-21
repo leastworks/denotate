@@ -18,6 +18,9 @@ mod planning;
 #[path = "sparse.rs"]
 mod sparse;
 pub use planning::*;
+#[path = "grounding.rs"]
+mod grounding;
+pub use grounding::*;
 
 #[cfg(any(test, feature = "test-support"))]
 #[path = "tests/preparation_profile.rs"]
@@ -28,6 +31,9 @@ pub type Domains = BTreeMap<SortId, Vec<ConstantId>>;
 
 #[derive(Debug, Default, Clone)]
 pub struct PreparationMetrics {
+    pub grounding_projection: Duration,
+    pub grounding_queries: Duration,
+    pub grounding_assembly: Duration,
     /// Planning, current plan installation/index definitions and seed instances.
     pub plans_and_seeds: Duration,
     /// Owned incidence/schema projection, within plans_and_seeds.

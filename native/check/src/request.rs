@@ -140,7 +140,7 @@ impl CheckRequest {
         keys: &'s SemanticKeys,
         operations: &OperationalLimits,
     ) -> Result<RequestPreparation<'s>> {
-        self.prepare_using(corpus, keys, operations, None)
+        self.prepare_using(corpus, keys, operations, None, None)
     }
     pub fn prepare_with_plans<'s>(
         &self,
@@ -149,7 +149,18 @@ impl CheckRequest {
         operations: &OperationalLimits,
         plans: &mut dyn JoinPlanStore,
     ) -> Result<RequestPreparation<'s>> {
-        self.prepare_using(corpus, keys, operations, Some(plans))
+        self.prepare_using(corpus, keys, operations, Some(plans), None)
+    }
+    /// Relation-SCC grounding with an independent allowance for each owned unit.
+    pub fn prepare_with_grounding<'s>(
+        &self,
+        corpus: &'s Corpus,
+        keys: &'s SemanticKeys,
+        operations: &OperationalLimits,
+        plans: &mut dyn JoinPlanStore,
+        grounding: &mut dyn GroundingStore,
+    ) -> Result<RequestPreparation<'s>> {
+        self.prepare_using(corpus, keys, operations, Some(plans), Some(grounding))
     }
     fn prepare_using<'s>(
         &self,
@@ -157,6 +168,7 @@ impl CheckRequest {
         keys: &'s SemanticKeys,
         operations: &OperationalLimits,
         plans: Option<&mut dyn JoinPlanStore>,
+        grounding: Option<&mut dyn GroundingStore>,
     ) -> Result<RequestPreparation<'s>> {
         operations.cancellation.check()?;
         keys.validate(corpus).map_err(CheckError::Keys)?;
@@ -217,19 +229,36 @@ impl CheckRequest {
             .collect::<Result<Vec<_>>>()?;
         let limits = self.limits.with_operations(operations);
         let mut budget = Budget::tracked(&limits);
-        let result = GroundProgram::prepare_using(
-            corpus,
-            &domains,
-            &constraints,
-            &mut budget,
-            plans.map(|store| (keys, store)),
-        );
         let mut receipts = WorkReceipts::default();
+        let result = if let Some(store) = grounding {
+            GroundProgram::prepare_grounding(
+                corpus,
+                keys,
+                &domains,
+                &constraints,
+                &mut budget,
+                plans.expect("grounding requires a plan provider"),
+                store,
+                &mut receipts,
+            )
+        } else {
+            GroundProgram::prepare_using(
+                corpus,
+                &domains,
+                &constraints,
+                &mut budget,
+                plans.map(|store| (keys, store)),
+            )
+        };
         if let Err(error) = &result {
             Inconclusive::from_error(error.clone())?;
             budget.failure(error);
         }
-        budget.record(&mut receipts, QueryKey::Preparation, [])?;
+        let dependencies = receipts
+            .entries()
+            .map(|(k, _)| k.clone())
+            .collect::<Vec<_>>();
+        budget.record(&mut receipts, QueryKey::Preparation, dependencies)?;
         let program = match result {
             Ok(p) => p,
             Err(error) => {

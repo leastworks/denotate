@@ -218,6 +218,9 @@ pub struct Session {
     stats: CacheStats,
     plans: crate::plans::PlanCache,
     components: Option<crate::components::ComponentCache>,
+    grounding: Option<crate::grounding::GroundingCache>,
+    #[cfg(any(test, feature = "test-support"))]
+    fresh_grounding: bool,
     #[cfg(any(test, feature = "test-support"))]
     fresh_planning: bool,
 }
@@ -239,9 +242,31 @@ impl Session {
             stats: Default::default(),
             plans: Default::default(),
             components: None,
+            grounding: None,
+            #[cfg(any(test, feature = "test-support"))]
+            fresh_grounding: false,
             #[cfg(any(test, feature = "test-support"))]
             fresh_planning: false,
         }
+    }
+    /// Measurement control: effectively unbounded retained bytes, entries and
+    /// condition nodes, including the experimental graph slot limits. Logical
+    /// work limits and plan admission policy are unchanged.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn without_retention_limits(mut self) -> Self {
+        self.total_retention = Retention {
+            max_entries: usize::MAX,
+            max_bytes: usize::MAX,
+            max_condition_nodes: usize::MAX,
+        };
+        self.retention = self.total_retention;
+        if let Some(c) = &mut self.components {
+            c.unconstrained_retention = true;
+        }
+        if let Some(g) = &mut self.grounding {
+            g.unconstrained_retention = true;
+        }
+        self
     }
     #[cfg(any(test, feature = "test-support"))]
     pub fn with_fresh_planning() -> Self {
@@ -269,6 +294,35 @@ impl Session {
         self.components
             .as_ref()
             .map_or(crate::ComponentStats::default(), |c| c.stats)
+    }
+    /// 6b.3b relation-SCC grounding, followed by the usual coarse local queries.
+    pub fn with_grounding() -> Self {
+        Self::new_grounding(Retention::default())
+    }
+    pub fn new_grounding(retention: Retention) -> Self {
+        Self {
+            grounding: Some(Default::default()),
+            ..Self::new(retention)
+        }
+    }
+    pub fn enable_grounding(&mut self) {
+        self.grounding = Some(Default::default());
+        #[cfg(any(test, feature = "test-support"))]
+        if self.total_retention.max_bytes == usize::MAX {
+            self.grounding.as_mut().unwrap().unconstrained_retention = true;
+        }
+    }
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_fresh_grounding() -> Self {
+        Self {
+            fresh_grounding: true,
+            ..Self::with_grounding()
+        }
+    }
+    pub fn grounding_stats(&self) -> crate::GroundingStats {
+        self.grounding
+            .as_ref()
+            .map_or(Default::default(), |g| g.stats)
     }
     pub fn plan_stats(&self) -> crate::PlanStats {
         self.plans.stats
@@ -307,17 +361,33 @@ impl Session {
             self.total_retention
                 .max_bytes
                 .saturating_sub(plan_bytes)
-                .saturating_sub(self.component_stats().retained_bytes),
+                .saturating_sub(self.component_stats().retained_bytes)
+                .saturating_sub(self.grounding_stats().retained_bytes),
             self.total_retention.max_entries,
         );
         self.plans.begin(plan_entries, plan_bytes);
-        let result = request.prepare_with_plans(corpus, keys, operations, &mut self.plans);
+        let result = if let Some(grounding) = &mut self.grounding {
+            grounding.begin(self.total_retention.max_bytes / 4);
+            #[cfg(any(test, feature = "test-support"))]
+            let fresh = self.fresh_grounding;
+            #[cfg(not(any(test, feature = "test-support")))]
+            let fresh = false;
+            let store: &mut dyn GroundingStore = if fresh {
+                &mut FreshGrounding
+            } else {
+                grounding
+            };
+            request.prepare_with_grounding(corpus, keys, operations, &mut self.plans, store)
+        } else {
+            request.prepare_with_plans(corpus, keys, operations, &mut self.plans)
+        };
         let stats = self.plans.stats;
         self.trim_local(
             self.total_retention
                 .max_bytes
                 .saturating_sub(stats.retained_bytes)
-                .saturating_sub(self.component_stats().retained_bytes),
+                .saturating_sub(self.component_stats().retained_bytes)
+                .saturating_sub(self.grounding_stats().retained_bytes),
             self.total_retention.max_entries,
         );
         result
@@ -354,8 +424,8 @@ impl Session {
     }
     pub fn reset(&mut self) {
         self.plans.clear();
-        if self.components.is_some() {
-            self.components = Some(Default::default());
+        if let Some(grounding) = &mut self.grounding {
+            grounding.clear();
         }
         self.retention = self.total_retention;
         self.reset_local();
@@ -367,6 +437,10 @@ impl Session {
         self.db = Database::default();
         if self.components.is_some() {
             self.components = Some(Default::default());
+            #[cfg(any(test, feature = "test-support"))]
+            if self.total_retention.max_bytes == usize::MAX {
+                self.components.as_mut().unwrap().unconstrained_retention = true;
+            }
         }
         self.clock = 0;
         self.stats.resets += 1;
@@ -425,6 +499,9 @@ impl Session {
         self.stats.evicted += 2;
     }
     pub fn evict_values(&mut self) {
+        if let Some(grounding) = &mut self.grounding {
+            grounding.evict_values();
+        }
         if let Some(components) = &mut self.components {
             components.evict_values(&mut self.db);
         }
@@ -654,7 +731,8 @@ impl LocalMemoStore for Session {
                 .total_retention
                 .max_bytes
                 .saturating_sub(self.plans.stats.retained_bytes)
-                .saturating_sub(components.stats.retained_bytes);
+                .saturating_sub(components.stats.retained_bytes)
+                .saturating_sub(self.grounding_stats().retained_bytes);
             self.trim_local(available, self.total_retention.max_entries);
             if !self.entries.contains_key(&input.scope) {
                 self.stats.bypassed += 2;

@@ -113,6 +113,8 @@ pub(crate) struct ComponentCache {
     allocated: usize,
     clock: u64,
     pub stats: ComponentStats,
+    #[cfg(any(test, feature = "test-support"))]
+    pub unconstrained_retention: bool,
     #[cfg(test)]
     pub reverse_requests: bool,
 }
@@ -176,7 +178,14 @@ impl ComponentCache {
         let start = Instant::now();
         let graph = ComponentGraph::project(input)?;
         self.stats.projection_ns += nanos(start);
-        if graph.inputs.len() > MAX_COMPONENTS
+        let max_components = MAX_COMPONENTS;
+        #[cfg(any(test, feature = "test-support"))]
+        let max_components = if self.unconstrained_retention {
+            usize::MAX
+        } else {
+            max_components
+        };
+        if graph.inputs.len() > max_components
             || graph.inputs.len().saturating_mul(SLOT_BYTES) > max_bytes
         {
             self.stats.bypassed_graphs += 1;
@@ -195,7 +204,7 @@ impl ComponentCache {
             }
             let slot = if let Some(slot) = self.free.pop() {
                 slot
-            } else if self.allocated < MAX_COMPONENTS
+            } else if self.allocated < max_components
                 && (self.allocated + 1) * SLOT_BYTES <= max_bytes
             {
                 self.allocated += 1;

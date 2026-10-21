@@ -125,7 +125,7 @@ fn slice<T: Retained>(s: &[T], p: &mut Payload) {
 }
 macro_rules! fields {($t:ty {$($f:ident),* $(,)?})=>{impl Retained for $t {fn heap(&self,p:&mut Payload){let Self{$($f),*}=self;$($f.heap(p);)*}}};}
 macro_rules! wrapped {($($t:ty),*)=>{$(impl Retained for $t {fn heap(&self,p:&mut Payload){self.0.heap(p);}})*};}
-wrapped!(SortKey, ObligationKey, ComponentKey);
+wrapped!(SortKey, ObligationKey, ComponentKey, GroundingKey);
 impl Retained for OwnerKey {
     fn heap(&self, p: &mut Payload) {
         p.allocation(self.namespace().as_ptr() as usize, self.namespace().len());
@@ -364,6 +364,7 @@ impl Retained for QueryKey {
             | Self::Symbolic
             | Self::ConeIndex
             | Self::FindingContext => {}
+            Self::Grounding(k) => k.heap(p),
             Self::ConeDiscovery(k)
             | Self::ConeEvaluation(k)
             | Self::FindingConversion(k)
@@ -440,3 +441,23 @@ impl Retained for WorkReceipts {
         }
     }
 }
+
+fields!(RelationSchema { input, parameters });
+fields!(GroundingInput {
+    key,
+    providers,
+    relations,
+    domains,
+    rules,
+    plans,
+    limits
+});
+fields!(GroundingValue {
+    possible,
+    instances
+});
+fields!(GroundingResult {
+    value,
+    failure,
+    receipt
+});

@@ -10,6 +10,7 @@ use std::{
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum QueryKey {
     Preparation,
+    Grounding(GroundingKey),
     Admission,
     Symbolic,
     ConeIndex,
