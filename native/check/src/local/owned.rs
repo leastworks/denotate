@@ -382,9 +382,25 @@ pub fn evaluate_owned_local(
     }
     let evaluated = (|| {
         let rt = Runtime::new(input, &mut budget, true)?;
-        let meaning = rt
-            .program
-            .symbolic_selected(&mut budget, true, Some(&rt.cone))?;
+        let meaning = if matches!(input.scope, LocalScope::Group(_)) {
+            let mut measured = |id, elapsed| {
+                let work = metrics
+                    .scc_work
+                    .entry(rt.components[&id].clone())
+                    .or_default();
+                work.cone_evaluations += 1;
+                work.elapsed += elapsed;
+            };
+            rt.program.symbolic_selected_measured(
+                &mut budget,
+                true,
+                Some(&rt.cone),
+                Some(&mut measured),
+            )?
+        } else {
+            rt.program
+                .symbolic_selected(&mut budget, true, Some(&rt.cone))?
+        };
         metrics.evaluation += start.elapsed();
         let start = Instant::now();
         let value = rt.export_evaluation(&meaning, &mut budget);

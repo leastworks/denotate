@@ -79,6 +79,13 @@ pub struct LocalArtifact {
     pub evaluation: Option<LocalEvaluation>,
     pub answer: Option<LocalAnswer>,
 }
+/// Physical work in coarse BDD obligation cones, never a semantic query result.
+#[derive(Debug, Default)]
+pub struct SccWork {
+    /// Includes attempted evaluations that exhaust a deterministic allowance.
+    pub cone_evaluations: usize,
+    pub elapsed: Duration,
+}
 #[derive(Debug, Default)]
 pub struct LocalMetrics {
     pub keys: Duration,
@@ -92,6 +99,18 @@ pub struct LocalMetrics {
     pub cone_atoms: usize,
     pub unique_atoms: usize,
     pub cone_inputs: usize,
+    /// Per-check physical work; cache hits and SAT group queries add nothing.
+    /// Timing covers SCC fixed-point evaluation, excluding context setup/export.
+    pub scc_work: BTreeMap<ComponentKey, SccWork>,
+}
+impl LocalMetrics {
+    pub fn merge_scc_work(&mut self, work: BTreeMap<ComponentKey, SccWork>) {
+        for (key, measured) in work {
+            let total = self.scc_work.entry(key).or_default();
+            total.cone_evaluations += measured.cone_evaluations;
+            total.elapsed += measured.elapsed;
+        }
+    }
 }
 pub struct LocalCheckedReport<'p> {
     pub checked: CheckedReport<'p>,
@@ -327,7 +346,6 @@ impl PreparedCheck<'_> {
 /// Fully completed owned query pair. No physical execution metadata in equality.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LocalMemo {
-    pub dependencies: WorkReceipts,
     pub evaluation: Option<LocalEvaluation>,
     pub answer: Option<LocalAnswer>,
     pub failure: Option<Inconclusive>,
@@ -373,7 +391,6 @@ impl LocalMemoStore for NoLocalMemo {
             metrics,
         )?;
         Ok(std::sync::Arc::new(LocalMemo {
-            dependencies: WorkReceipts::default(),
             evaluation: evaluation.value.as_deref().cloned(),
             answer: answer.value,
             failure: answer.failure.or(evaluation.failure),
@@ -386,16 +403,6 @@ impl LocalMemoStore for NoLocalMemo {
 impl LocalInput {
     pub fn uses_sat(&self) -> bool {
         self.backend == BackendIdentity::sat() && matches!(self.scope, LocalScope::Group(_))
-    }
-    /// Assembly consumes provider meaning and context, never their equations or
-    /// source evidence. This projection can backdate independently of both.
-    pub fn for_component_assembly(&self) -> Self {
-        let mut input = self.clone();
-        input.rules.clear();
-        input.original_dependencies.clear();
-        input.rewrites.clear();
-        input.completion_context = None;
-        input
     }
 
     /// Group verdicts consume conditions and scope, not producer implementation

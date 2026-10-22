@@ -10,8 +10,6 @@ use std::{
     time::{Duration, Instant},
 };
 
-mod components;
-pub use components::*;
 mod input;
 mod memo;
 mod owned;
@@ -159,7 +157,6 @@ impl PreparedCheck<'_> {
                 [QueryKey::ConeIndex],
             )?;
             let memo = cache.execute(&input, operations, &mut metrics)?;
-            merge_component_receipts(&mut receipts, &memo.dependencies)?;
             receipts
                 .record(
                     QueryKey::ConeEvaluation(key.clone()),
@@ -274,7 +271,6 @@ impl PreparedCheck<'_> {
                         [QueryKey::ConeIndex],
                     )?;
                     let memo = cache.execute(&input, operations, &mut metrics)?;
-                    merge_component_receipts(&mut receipts, &memo.dependencies)?;
                     artifacts.insert(
                         scope,
                         LocalArtifact {
@@ -305,7 +301,6 @@ impl PreparedCheck<'_> {
                         ],
                     )?;
                     std::sync::Arc::new(LocalMemo {
-                        dependencies: WorkReceipts::default(),
                         evaluation: None,
                         answer: None,
                         failure: Some(failure),
@@ -424,12 +419,4 @@ fn timed_export(
     let value = context.export(condition, keys, budget);
     *elapsed += start.elapsed();
     value
-}
-
-fn merge_component_receipts(into: &mut WorkReceipts, dependencies: &WorkReceipts) -> Result<()> {
-    for (key, receipt) in dependencies.entries() {
-        into.record(key.clone(), receipt.clone())
-            .map_err(CheckError::Receipts)?;
-    }
-    Ok(())
 }

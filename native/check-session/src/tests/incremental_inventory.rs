@@ -723,9 +723,6 @@ mod plans;
 #[path = "owned.rs"]
 mod owned;
 
-#[path = "components.rs"]
-mod components;
-
 #[path = "grounding.rs"]
 mod grounding;
 #[path = "sat.rs"]

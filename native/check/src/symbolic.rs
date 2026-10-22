@@ -104,6 +104,15 @@ impl GroundProgram {
         partial: bool,
         cone: Option<&DependencyCone>,
     ) -> Result<SymbolicMeaning<'_>> {
+        self.symbolic_selected_measured(budget, partial, cone, None)
+    }
+    pub(crate) fn symbolic_selected_measured(
+        &self,
+        budget: &mut Budget<'_>,
+        partial: bool,
+        cone: Option<&DependencyCone>,
+        mut measured: Option<&mut dyn FnMut(ComponentId, Duration)>,
+    ) -> Result<SymbolicMeaning<'_>> {
         let start = Instant::now();
         let context = ConditionContext::build_selected(self, cone.map(|c| &c.facts), budget)?;
         let mut meaning = SymbolicMeaning {
@@ -155,6 +164,7 @@ impl GroundProgram {
                 continue;
             }
             let previous_retained = retained;
+            let component_start = measured.as_ref().map(|_| Instant::now());
             let result = (|| -> Result<()> {
                 budget.tick("symbolic evaluation")?;
                 loop {
@@ -217,6 +227,9 @@ impl GroundProgram {
                 }
                 Ok(())
             })();
+            if let (Some(measured), Some(start)) = (&mut measured, component_start) {
+                measured(component.id, start.elapsed());
+            }
             if let Err(error) = result {
                 if !partial {
                     return Err(error);

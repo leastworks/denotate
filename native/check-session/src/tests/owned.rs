@@ -22,6 +22,82 @@ fn ops() -> OperationalLimits {
     })
 }
 #[test]
+fn coarse_scc_work_counts_executed_cones_not_cache_hits_or_sat_queries() {
+    let queries = inputs(
+        "input i,j,k; slot shared,a,b; shared <- i; \
+         a <- j when available(shared); a <- k when available(shared); \
+         b <- j when available(shared); b <- k when available(shared);",
+    );
+    let mut expected = BTreeMap::<ComponentKey, BTreeSet<GroupKey>>::new();
+    for input in &queries {
+        let LocalScope::Group(group) = &input.scope else {
+            panic!("fixture must have only admitted obligation cones")
+        };
+        for (key, component) in &input.components {
+            assert!(component.blocked_by.is_empty());
+            expected
+                .entry(key.clone())
+                .or_default()
+                .insert(group.clone());
+        }
+    }
+    assert!(expected.values().any(|cones| cones.len() > 1));
+    let check_metrics = |metrics: &LocalMetrics| {
+        assert_eq!(metrics.scc_work.len(), expected.len());
+        for (key, cones) in &expected {
+            let work = &metrics.scc_work[key];
+            assert_eq!(work.cone_evaluations, cones.len());
+        }
+        assert!(
+            metrics
+                .scc_work
+                .values()
+                .map(|w| w.elapsed)
+                .sum::<Duration>()
+                <= metrics.evaluation
+        );
+    };
+    let mut fresh_metrics = LocalMetrics::default();
+    let fresh = queries
+        .iter()
+        .map(|q| NoLocalMemo.execute(q, &ops(), &mut fresh_metrics).unwrap())
+        .collect::<Vec<_>>();
+    check_metrics(&fresh_metrics);
+    let mut session = Session::default();
+    for warm in [false, true] {
+        let mut metrics = LocalMetrics::default();
+        for (q, value) in queries.iter().zip(&fresh) {
+            assert_eq!(&session.execute(q, &ops(), &mut metrics).unwrap(), value);
+        }
+        if warm {
+            assert!(metrics.scc_work.is_empty());
+        } else {
+            check_metrics(&metrics);
+        }
+    }
+    session.evict_values();
+    let mut metrics = LocalMetrics::default();
+    for (q, value) in queries.iter().zip(&fresh) {
+        assert_eq!(&session.execute(q, &ops(), &mut metrics).unwrap(), value);
+    }
+    check_metrics(&metrics);
+    let mut bypass = Session::new(crate::Retention {
+        max_entries: 0,
+        ..Default::default()
+    });
+    let mut metrics = LocalMetrics::default();
+    for (q, value) in queries.iter().zip(&fresh) {
+        assert_eq!(&bypass.execute(q, &ops(), &mut metrics).unwrap(), value);
+    }
+    check_metrics(&metrics);
+    let mut metrics = LocalMetrics::default();
+    for mut q in queries {
+        q.backend = BackendIdentity::sat();
+        session.execute(&q, &ops(), &mut metrics).unwrap();
+    }
+    assert!(metrics.scc_work.is_empty());
+}
+#[test]
 fn owned_queries_survive_snapshot_drop_and_salsa_backdates_semantics_separately_from_receipts() {
     let mut input = inputs("input i,j; slot a; a <- i; a <- j;").remove(0);
     let mut session = Session::default();
@@ -202,7 +278,7 @@ fn measure_owned_query_paths() {
         assert_eq!(r.checked.results.value, global.results.value);
         let c = session.stats();
         let m = r.metrics;
-        let v = json!({"assembly_ns":assembly.as_nanos(),"preparation_ns":preparation.as_nanos(),"admission_ns":admission.as_nanos(),"checking_ns":checking.as_nanos(),"fresh_checking_ns":fresh_time.as_nanos(),"global_checking_ns":global_time.as_nanos(),"key_projection_ns":m.keys.as_nanos(),"evaluation_ns":m.evaluation.as_nanos(),"export_ns":m.export.as_nanos(),"property_ns":m.property.as_nanos(),"completion_ns":m.completion.as_nanos(),"conversion_ns":m.conversion.as_nanos(),"finding_context_ns":m.finding_context.as_nanos(),"evaluation_hits":c.evaluation_hits,"evaluation_misses":c.evaluation_misses,"verdict_hits":c.verdict_hits,"verdict_misses":c.verdict_misses,"completion_hits":c.completion_hits,"completion_misses":c.completion_misses,"evicted":c.evicted,"bypassed":c.bypassed,"resets":c.resets,"retained_entries":c.retained_entries,"retained_bytes":c.retained_bytes,"retained_condition_nodes":c.retained_condition_nodes,"reused_query_work":c.reused_query_work,"logical_work":r.checked.results.receipts.total().unwrap().work});
+        let v = json!({"assembly_ns":assembly.as_nanos(),"preparation_ns":preparation.as_nanos(),"admission_ns":admission.as_nanos(),"checking_ns":checking.as_nanos(),"fresh_checking_ns":fresh_time.as_nanos(),"global_checking_ns":global_time.as_nanos(),"key_projection_ns":m.keys.as_nanos(),"evaluation_ns":m.evaluation.as_nanos(),"scc_evaluation_ns":m.scc_work.values().map(|w|w.elapsed.as_nanos()).sum::<u128>(),"unique_evaluated_sccs":m.scc_work.len(),"scc_cone_evaluations":m.scc_work.values().map(|w|w.cone_evaluations).sum::<usize>(),"duplicate_scc_cone_evaluations":m.scc_work.values().map(|w|w.cone_evaluations.saturating_sub(1)).sum::<usize>(),"export_ns":m.export.as_nanos(),"property_ns":m.property.as_nanos(),"completion_ns":m.completion.as_nanos(),"conversion_ns":m.conversion.as_nanos(),"finding_context_ns":m.finding_context.as_nanos(),"evaluation_hits":c.evaluation_hits,"evaluation_misses":c.evaluation_misses,"verdict_hits":c.verdict_hits,"verdict_misses":c.verdict_misses,"completion_hits":c.completion_hits,"completion_misses":c.completion_misses,"evicted":c.evicted,"bypassed":c.bypassed,"resets":c.resets,"retained_entries":c.retained_entries,"retained_bytes":c.retained_bytes,"retained_condition_nodes":c.retained_condition_nodes,"reused_query_work":c.reused_query_work,"logical_work":r.checked.results.receipts.total().unwrap().work});
         (v, r.checked.results)
     }
     let data: Value = serde_json::from_str(include_str!("../../LOCAL-6b.1a.json")).unwrap();

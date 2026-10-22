@@ -282,7 +282,6 @@ fn grounding_cached_edits_undo_and_current_diagnostics() {
             assert!(session.grounding_stats().reused > 0);
             assert!(
                 session.stats().retained_bytes
-                    + session.component_stats().retained_bytes
                     + session.plan_stats().retained_bytes
                     + session.grounding_stats().retained_bytes
                     <= 64 * 1024 * 1024
@@ -624,12 +623,11 @@ fn grounding_limits_cancellation_and_all_pools_share_bytes() {
         }
     }
     let bytes = 4 * 1024 * 1024;
-    let mut s = crate::Session::new_components(crate::Retention {
+    let mut s = crate::Session::new_grounding(crate::Retention {
         max_bytes: bytes,
         max_entries: 1024,
         max_condition_nodes: 1_000_000,
     });
-    s.enable_grounding();
     let l = limits();
     let req = request_evidence::request(&p, &l);
     let ops = (&l).into();
@@ -640,14 +638,9 @@ fn grounding_limits_cancellation_and_all_pools_share_bytes() {
         };
         let g = g.admit(&ops).unwrap();
         s.verify(&g, &ops).unwrap();
-        assert!(
-            s.grounding_stats().allocated_slots > 0
-                && s.component_stats().allocated_slots > 0
-                && s.plan_stats().retained_bytes > 0
-        );
+        assert!(s.grounding_stats().allocated_slots > 0 && s.plan_stats().retained_bytes > 0);
         assert!(
             s.stats().retained_bytes
-                + s.component_stats().retained_bytes
                 + s.plan_stats().retained_bytes
                 + s.grounding_stats().retained_bytes
                 <= bytes
@@ -731,11 +724,10 @@ fn measure_grounding_paths() {
         let s = session.grounding_stats();
         let c = session.stats();
         let plans = session.plan_stats();
-        let comp = session.component_stats();
         let mut timing = json!({"lowering_ns":lowering,"preparation_ns":prep,"admission_ns":admission,"checking_ns":check,"global_prepare_admit_check_ns":global_ns,"keys_ns":keys,
             "graph_projection_ns":m.grounding_projection.as_nanos(),"grounding_queries_ns":m.grounding_queries.as_nanos(),"assembly_ns":m.grounding_assembly.as_nanos(),"signed_graph_ns":m.admissibility.as_nanos(),
             "units":s.units,"executed":s.executed,"reused":s.reused,"reused_work":s.reused_work,"bypassed_graphs":s.bypassed_graphs,"grounding_bytes":s.retained_bytes,"grounding_evicted":s.evicted,"installation_ns":s.install_ns,"equality_ns":s.equality_ns,"query_ns":s.query_ns,"receipt_collection_ns":s.receipts_ns,"retention_ns":s.retention_ns,"runtime_reconstruction_ns":s.reconstruction_ns,"closure_ns":s.closure_ns,"grounding_export_ns":s.export_ns,
-            "scope_hits":c.evaluation_hits,"scope_misses":c.evaluation_misses,"scope_bytes":c.retained_bytes,"component_bytes":comp.retained_bytes,"component_executions":comp.evaluations,"component_hits":comp.hits,"plan_bytes":plans.retained_bytes,"plan_queries":plans.queries,"plan_executed":plans.executed,"plan_ns":plans.execution_ns,
+            "scope_hits":c.evaluation_hits,"scope_misses":c.evaluation_misses,"scope_bytes":c.retained_bytes,"plan_bytes":plans.retained_bytes,"plan_queries":plans.queries,"plan_executed":plans.executed,"plan_ns":plans.execution_ns,
             "logical_work":r.checked.results.receipts.total().unwrap().work});
         timing.as_object_mut().unwrap().extend(json!({
             "answer_misses":c.verdict_misses+c.completion_misses,"scope_bypassed":c.bypassed,"scope_evicted_during_verify":c.evicted,"scope_condition_nodes":c.retained_condition_nodes,"plan_evicted":plans.evicted,"plan_bypassed":plans.bypassed

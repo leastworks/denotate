@@ -17,7 +17,6 @@ pub enum QueryKey {
     ConeDiscovery(GroupKey),
     RegionDiscovery(ComponentKey),
     ConeEvaluation(GroupKey),
-    ComponentEvaluation(ComponentKey),
     RegionEvaluation(ComponentKey),
     FindingContext,
     FindingConversion(GroupKey),

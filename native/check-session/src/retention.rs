@@ -338,7 +338,6 @@ impl Retained for LocalAnswer {
     }
 }
 fields!(LocalMemo {
-    dependencies,
     evaluation,
     answer,
     failure,
@@ -373,10 +372,7 @@ impl Retained for QueryKey {
             | Self::Property(k)
             | Self::Witness(k)
             | Self::Certification(k) => k.heap(p),
-            Self::RegionDiscovery(k)
-            | Self::RegionEvaluation(k)
-            | Self::ComponentEvaluation(k)
-            | Self::Completion(k) => k.heap(p),
+            Self::RegionDiscovery(k) | Self::RegionEvaluation(k) | Self::Completion(k) => k.heap(p),
         }
     }
 }
@@ -429,11 +425,6 @@ fields!(OwnedAnswer {
     receipt
 });
 
-fields!(ComponentInput {
-    local,
-    key,
-    providers
-});
 impl Retained for WorkReceipts {
     fn heap(&self, p: &mut Payload) {
         for (key, value) in self.entries() {

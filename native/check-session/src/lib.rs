@@ -23,8 +23,5 @@ mod retention;
 mod plans;
 pub use plans::PlanStats;
 
-mod components;
-pub use components::ComponentStats;
-
 mod grounding;
 pub use grounding::GroundingStats;
