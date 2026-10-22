@@ -256,40 +256,12 @@ impl SymbolicMeaning<'_> {
                         if tuples.len() < 2 {
                             return Err(CheckError::Internal("certified violation did not replay"));
                         }
-                        // Copy the conflict's grounded proof from THIS replay,
-                        // never from the absent-first candidate's old evidence.
-                        let mut evidence = BTreeMap::new();
-                        let mut pending: Vec<_> = tuples.iter().cloned().collect();
-                        while let Some(fact) = pending.pop() {
-                            budget.tick("certification finding evidence")?;
-                            if evidence.contains_key(&fact) {
-                                continue;
-                            }
-                            let step = certified
-                                .evidence
-                                .get(&fact)
-                                .ok_or(CheckError::Internal("missing certified evidence"))?;
-                            if let GroundEvidence::Derived { rule, premises } = &step.evidence {
-                                budget.charge(
-                                    1 + rule.body.len() + premises.len(),
-                                    "certification finding evidence",
-                                )?;
-                                for premise in premises {
-                                    if let PremiseEvidence::Positive { fact, .. } = premise {
-                                        pending.push(fact.clone());
-                                    }
-                                }
-                            }
-                            evidence.insert(fact, step.clone());
-                        }
-                        return Ok(Some(Counterexample {
+                        return Ok(Some(certified_finding(
                             observation,
-                            replay_scope: ReplayScope::WholeProgram,
                             tuples,
-                            evidence,
-                            certification: Some(CertificationOutcome::Certified(certified)),
-                            confined_to_no_meaning: vec![],
-                        }));
+                            certified,
+                            budget,
+                        )?));
                     }
                     CertificationOutcome::NotCertified => {}
                     CertificationOutcome::Inconclusive(_) => {
@@ -320,6 +292,102 @@ impl SymbolicMeaning<'_> {
                 original.certification = Some(CertificationOutcome::Inconclusive(
                     Inconclusive::from_error(error)?,
                 ))
+            }
+        }
+        Ok(())
+    }
+}
+
+fn certified_finding(
+    observation: Observation,
+    tuples: BTreeSet<GroundAtom>,
+    certified: Box<CertifiedObservation>,
+    budget: &mut Budget<'_>,
+) -> Result<Counterexample> {
+    // Copy the conflict's grounded proof from THIS replay,
+    // never from the absent-first candidate's old evidence.
+    let mut evidence = BTreeMap::new();
+    let mut pending: Vec<_> = tuples.iter().cloned().collect();
+    while let Some(fact) = pending.pop() {
+        budget.tick("certification finding evidence")?;
+        if evidence.contains_key(&fact) {
+            continue;
+        }
+        let step = certified
+            .evidence
+            .get(&fact)
+            .ok_or(CheckError::Internal("missing certified evidence"))?;
+        if let GroundEvidence::Derived { rule, premises } = &step.evidence {
+            budget.charge(
+                1 + rule.body.len() + premises.len(),
+                "certification finding evidence",
+            )?;
+            for premise in premises {
+                if let PremiseEvidence::Positive { fact, .. } = premise {
+                    pending.push(fact.clone());
+                }
+            }
+        }
+        evidence.insert(fact, step.clone());
+    }
+    Ok(Counterexample {
+        observation,
+        replay_scope: ReplayScope::WholeProgram,
+        tuples,
+        evidence,
+        certification: Some(CertificationOutcome::Certified(certified)),
+        confined_to_no_meaning: vec![],
+    })
+}
+
+impl GroundProgram {
+    /// Candidate was already validated and replayed in its cone. This optional
+    /// whole-program upgrade uses the shared concrete kernel, with no Boolean
+    /// support computation or alternate-world retry.
+    pub(crate) fn certify_replayed_candidate(
+        &self,
+        original: &mut Counterexample,
+        group: &AtMostOneGroup,
+        budget: &mut Budget<'_>,
+    ) -> Result<()> {
+        let attempt = (|| {
+            let outcome =
+                self.certify_with_budget(original.observation.present.iter().cloned(), budget)?;
+            match outcome {
+                CertificationOutcome::Certified(certified) => {
+                    let mut tuples = BTreeSet::new();
+                    for fact in &group.tuples {
+                        budget.tick("certification violation replay")?;
+                        if certified.facts.contains(fact) {
+                            tuples.insert(fact.clone());
+                        }
+                    }
+                    if tuples != original.tuples || tuples.len() < 2 {
+                        return Err(CheckError::Internal(
+                            "SAT certified replay disagrees with cone replay",
+                        ));
+                    }
+                    Ok(Some(certified_finding(
+                        original.observation.clone(),
+                        tuples,
+                        certified,
+                        budget,
+                    )?))
+                }
+                CertificationOutcome::NotCertified => Ok(None),
+                CertificationOutcome::Inconclusive(_) => Err(CheckError::Internal(
+                    "unexpected nested certification status",
+                )),
+            }
+        })();
+        match attempt {
+            Ok(Some(replacement)) => *original = replacement,
+            Ok(None) => original.certification = Some(CertificationOutcome::NotCertified),
+            Err(error) => {
+                budget.failure(&error);
+                original.certification = Some(CertificationOutcome::Inconclusive(
+                    Inconclusive::from_error(error)?,
+                ));
             }
         }
         Ok(())

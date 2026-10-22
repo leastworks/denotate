@@ -217,10 +217,28 @@ impl Program {
         &self,
         limits: &Limits,
         after_prepare: impl FnOnce(),
+        session: Option<&mut denotate_check_session::Session>,
+    ) -> Result<Output, Failure> {
+        self.check_with_backend(
+            limits,
+            after_prepare,
+            denotate_check::BackendIdentity::bdd(),
+            session,
+        )
+    }
+    /// Select a checker backend while preserving the editor's preparation and
+    /// presentation adapter. For SAT, None executes the same owned queries fresh;
+    /// BDD retains the existing global fresh reference.
+    pub fn check_with_backend(
+        &self,
+        limits: &Limits,
+        after_prepare: impl FnOnce(),
+        backend: denotate_check::BackendIdentity,
         mut session: Option<&mut denotate_check_session::Session>,
     ) -> Result<Output, Failure> {
         limits.cancellation.check()?;
-        let request = self.lowered.request(limits)?;
+        let mut request = self.lowered.request(limits)?;
+        request.backend = backend;
         let operations = OperationalLimits::from(limits);
         let preparation = if let Some(session) = session.as_deref_mut() {
             session.prepare(

@@ -59,7 +59,9 @@ pub struct LocalEvaluation {
 pub enum LocalVerdict {
     Proved,
     Overlap(OwnedCondition),
-    Unsupported(CapabilityReason),
+    /// Validated concrete observation; fresh current-snapshot replay is still required.
+    Candidate(Candidate),
+    Unsupported(UnsupportedReason),
     Inconclusive(ResourceReason),
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -382,6 +384,9 @@ impl LocalMemoStore for NoLocalMemo {
 }
 
 impl LocalInput {
+    pub fn uses_sat(&self) -> bool {
+        self.backend == BackendIdentity::sat() && matches!(self.scope, LocalScope::Group(_))
+    }
     /// Assembly consumes provider meaning and context, never their equations or
     /// source evidence. This projection can backdate independently of both.
     pub fn for_component_assembly(&self) -> Self {
@@ -397,7 +402,7 @@ impl LocalInput {
     /// or attribution. Salsa can backdate this projection after equal evaluation.
     pub fn for_answer(&self) -> Self {
         let mut input = self.clone();
-        if matches!(input.scope, LocalScope::Group(_)) {
+        if matches!(input.scope, LocalScope::Group(_)) && !input.uses_sat() {
             input.rules.clear();
             input.original_dependencies.clear();
             input.rewrites.clear();

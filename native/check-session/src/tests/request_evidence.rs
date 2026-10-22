@@ -128,10 +128,10 @@ fn request_context_and_scoped_results_are_owned_and_distinguish_reasons() {
             .values()
             .any(|r| matches!(r, ScopedResult::Counterexample(..)))
     );
-    assert!(r.results.value.groups.values().any(|r|matches!(r,ScopedResult::Unsupported(CapabilityReason::UnsettledDependencies(d)) if !d.is_empty())));
+    assert!(r.results.value.groups.values().any(|r|matches!(r,ScopedResult::Unsupported(UnsupportedReason::DependsOnUnsettled(d)) if !d.is_empty())));
     assert!(r.results.value.regions.values().any(|r| matches!(
         r.outcome,
-        ScopedResult::Unsupported(CapabilityReason::NegativeCycle)
+        ScopedResult::Unsupported(UnsupportedReason::UnsettledNegativeCycle)
     ) && matches!(
         r.completion,
         RegionCompletion::NoMeaning { .. }

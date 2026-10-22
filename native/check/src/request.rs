@@ -69,6 +69,12 @@ pub struct BackendIdentity {
     pub configuration: String,
 }
 impl BackendIdentity {
+    pub fn sat() -> Self {
+        Self {
+            backend: "sat".into(),
+            configuration: "batsat-0.6.0/completion-v1/absent-first-v1".into(),
+        }
+    }
     pub fn bdd() -> Self {
         Self {
             backend: "bdd".into(),
@@ -172,7 +178,7 @@ impl CheckRequest {
     ) -> Result<RequestPreparation<'s>> {
         operations.cancellation.check()?;
         keys.validate(corpus).map_err(CheckError::Keys)?;
-        if self.backend != BackendIdentity::bdd() {
+        if self.backend != BackendIdentity::bdd() && self.backend != BackendIdentity::sat() {
             return Err(CheckError::InvalidRequest("unknown backend/configuration"));
         }
         let all = corpus
@@ -294,12 +300,29 @@ impl CheckRequest {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CapabilityReason {
+#[derive(Clone, PartialEq, Eq)]
+pub enum UnsupportedReason {
+    /// The canonical completion witness fails concrete cone validation.
+    UnfoundedSupport(Candidate),
     /// The BDD fixed-point backend cannot settle this negative recursive SCC.
-    NegativeCycle,
+    UnsettledNegativeCycle,
     /// The group's closed dependency cone includes unsettled negative recursion.
-    UnsettledDependencies(BTreeSet<ComponentKey>),
+    DependsOnUnsettled(BTreeSet<ComponentKey>),
+}
+// Historical reference artifacts contain this diagnostic Debug spelling.
+// Preserve it while using clearer Rust variant names; no semantic capture changes.
+impl std::fmt::Debug for UnsupportedReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsettledNegativeCycle => f.write_str("NegativeCycle"),
+            Self::DependsOnUnsettled(keys) => {
+                f.debug_tuple("UnsettledDependencies").field(keys).finish()
+            }
+            Self::UnfoundedSupport(candidate) => {
+                f.debug_tuple("UnfoundedSupport").field(candidate).finish()
+            }
+        }
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResourceReason {
@@ -343,7 +366,7 @@ pub struct CertifiedCandidate {
 pub enum ScopedResult {
     Proved,
     Counterexample(CertifiedCandidate, EvidenceKeys),
-    Unsupported(CapabilityReason),
+    Unsupported(UnsupportedReason),
     Inconclusive(ResourceReason),
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -466,6 +489,18 @@ impl PreparedCheck<'_> {
         Ok(self)
     }
     pub fn verify(&self, operations: &OperationalLimits) -> Result<CheckOutcome<'_>> {
+        if self.request.backend == BackendIdentity::sat() {
+            return Ok(match self.verify_local(operations)? {
+                LocalCheckOutcome::Complete(r) => CheckOutcome::Complete(r.checked),
+                LocalCheckOutcome::Inconclusive { reason, receipts } => {
+                    CheckOutcome::Inconclusive {
+                        stage: CheckStage::Verification,
+                        reason,
+                        receipts,
+                    }
+                }
+            });
+        }
         let limits = self.request.limits.with_operations(operations);
         let mut receipts = self.receipts.clone();
         let mut budget = Budget::tracked(&limits);
@@ -565,7 +600,7 @@ impl PreparedCheck<'_> {
                 VerifiedOutcome::Proved => ScopedResult::Proved,
                 VerifiedOutcome::Inconclusive(c) => ScopedResult::Inconclusive((*c).into()),
                 VerifiedOutcome::Unsupported => {
-                    ScopedResult::Unsupported(CapabilityReason::UnsettledDependencies(
+                    ScopedResult::Unsupported(UnsupportedReason::DependsOnUnsettled(
                         g.cone
                             .blocked_by
                             .iter()
@@ -671,7 +706,7 @@ impl PreparedCheck<'_> {
         for r in &report.unresolved {
             let outcome = match r.outcome {
                 RegionOutcome::Unsupported => {
-                    ScopedResult::Unsupported(CapabilityReason::NegativeCycle)
+                    ScopedResult::Unsupported(UnsupportedReason::UnsettledNegativeCycle)
                 }
                 RegionOutcome::Inconclusive(c) => ScopedResult::Inconclusive(c.into()),
             };

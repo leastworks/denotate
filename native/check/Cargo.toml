@@ -8,6 +8,7 @@ publish = false
 [dependencies]
 denotate-ir = { path = "../ir" }
 biodivine-lib-bdd = "=0.6.3"
+batsat = "=0.6.0"
 
 [features]
 # Only enabled by external acceptance tests; never by a production driver.

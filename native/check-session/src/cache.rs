@@ -555,23 +555,24 @@ impl LocalMemoStore for Session {
             };
             return uncached(input, operations, metrics, self.components.is_some());
         }
-        let (component_slots, dependencies) = if let Some(components) = &mut self.components {
-            match components.stage(
-                &mut self.db,
-                input,
-                operations,
-                metrics,
-                self.total_retention.max_bytes / 4,
-            )? {
-                Some((slots, receipts)) => (Some(slots), receipts),
-                None => {
-                    self.stats.bypassed += 2;
-                    return uncached(input, operations, metrics, true);
+        let (component_slots, dependencies) =
+            if let Some(components) = self.components.as_mut().filter(|_| !input.uses_sat()) {
+                match components.stage(
+                    &mut self.db,
+                    input,
+                    operations,
+                    metrics,
+                    self.total_retention.max_bytes / 4,
+                )? {
+                    Some((slots, receipts)) => (Some(slots), receipts),
+                    None => {
+                        self.stats.bypassed += 2;
+                        return uncached(input, operations, metrics, true);
+                    }
                 }
-            }
-        } else {
-            (None, WorkReceipts::default())
-        };
+            } else {
+                (None, WorkReceipts::default())
+            };
         let slot = if let Some(e) = self.entries.get(&input.scope) {
             if e.input.as_ref() != input {
                 self.stats.invalidated += 2;
@@ -806,7 +807,7 @@ fn uncached(
     metrics: &mut LocalMetrics,
     components: bool,
 ) -> Result<Arc<LocalMemo>, CheckError> {
-    if components {
+    if components && !input.uses_sat() {
         NoComponentMemo.execute(input, operations, metrics)
     } else {
         NoLocalMemo.execute(input, operations, metrics)

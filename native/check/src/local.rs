@@ -15,6 +15,7 @@ pub use components::*;
 mod input;
 mod memo;
 mod owned;
+mod sat;
 pub use input::*;
 pub use owned::{answer_owned_local, evaluate_owned_local};
 #[cfg(test)]
@@ -175,6 +176,20 @@ impl PreparedCheck<'_> {
                 _ => None,
             };
             let mut outcome = match answer {
+                Some(LocalAnswer::Group(LocalVerdict::Candidate(candidate))) => {
+                    let present = candidate
+                        .present
+                        .iter()
+                        .map(|a| {
+                            atoms
+                                .get(a)
+                                .cloned()
+                                .ok_or(CheckError::Internal("missing SAT input binding"))
+                        })
+                        .collect::<Result<BTreeSet<_>>>()?;
+                    let absent = self.program.inputs.difference(&present).cloned().collect();
+                    GroupOutcome::Candidate(Observation { present, absent })
+                }
                 Some(LocalAnswer::Group(LocalVerdict::Proved)) => GroupOutcome::Proved,
                 Some(LocalAnswer::Group(LocalVerdict::Unsupported(_))) => GroupOutcome::Unsupported,
                 Some(LocalAnswer::Group(LocalVerdict::Overlap(_))) => GroupOutcome::Proved, // replaced by current-context import below
@@ -365,7 +380,18 @@ impl PreparedCheck<'_> {
             report,
             Some(completions),
         )?;
-        let value = self.project(&verification, self.semantic_keys)?;
+        let mut value = self.project(&verification, self.semantic_keys)?;
+        for (scope, artifact) in &artifacts {
+            if let (
+                LocalScope::Group(key),
+                Some(LocalAnswer::Group(LocalVerdict::Unsupported(reason))),
+            ) = (scope, &artifact.answer)
+            {
+                if let Some(result) = value.groups.get_mut(key) {
+                    *result = ScopedResult::Unsupported(reason.clone());
+                }
+            }
+        }
         receipts.total().map_err(CheckError::Receipts)?;
         operations.cancellation.check()?;
         Ok(LocalCheckOutcome::Complete(LocalCheckedReport {

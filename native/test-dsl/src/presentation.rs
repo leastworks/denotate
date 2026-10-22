@@ -166,12 +166,9 @@ pub fn present(
                 };
                 targets.insert(required(*target)?);
             }
-            if targets.is_empty()
-                || (group.cone.blocked_by.is_empty()
-                    && matches!(group.outcome, VerifiedOutcome::Unsupported))
-            {
+            if targets.is_empty() {
                 return Err(PresentationError::InvalidFinding(
-                    "unsupported group has no mappings or blocking cycles",
+                    "unsupported group has no mappings",
                 ));
             }
             let mut related = Vec::new();
@@ -210,6 +207,12 @@ pub fn present(
                 "Overlap check for slot {} was skipped: it depends on {cause}. See related locations.",
                 name(slot)?
             );
+            if group.cone.blocked_by.is_empty() {
+                message = format!(
+                    "Overlap check for slot {} is unsupported by the selected checker.",
+                    name(slot)?
+                );
+            }
             let kind = if let VerifiedOutcome::Inconclusive(cause) = group.outcome {
                 message = format!(
                     "Overlap check for slot {} is inconclusive: {} exhausted its {} budget.",
