@@ -382,6 +382,7 @@ pub fn evaluate_owned_local(
     }
     let evaluated = (|| {
         let rt = Runtime::new(input, &mut budget, true)?;
+        #[cfg(any(test, feature = "test-support"))]
         let meaning = if matches!(input.scope, LocalScope::Group(_)) {
             let mut measured = |id, elapsed| {
                 let work = metrics
@@ -395,12 +396,16 @@ pub fn evaluate_owned_local(
                 &mut budget,
                 true,
                 Some(&rt.cone),
-                Some(&mut measured),
+                &mut measured,
             )?
         } else {
             rt.program
                 .symbolic_selected(&mut budget, true, Some(&rt.cone))?
         };
+        #[cfg(not(any(test, feature = "test-support")))]
+        let meaning = rt
+            .program
+            .symbolic_selected(&mut budget, true, Some(&rt.cone))?;
         metrics.evaluation += start.elapsed();
         let start = Instant::now();
         let value = rt.export_evaluation(&meaning, &mut budget);

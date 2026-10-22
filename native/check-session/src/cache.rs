@@ -61,6 +61,7 @@ impl Db for Database {
         e.metrics.export += m.export;
         e.metrics.property += m.property;
         e.metrics.completion += m.completion;
+        #[cfg(any(test, feature = "test-support"))]
         e.metrics.merge_scc_work(m.scc_work);
         #[cfg(test)]
         if !answer
@@ -523,6 +524,7 @@ impl LocalMemoStore for Session {
         metrics.export += exec.metrics.export;
         metrics.property += exec.metrics.property;
         metrics.completion += exec.metrics.completion;
+        #[cfg(any(test, feature = "test-support"))]
         metrics.merge_scc_work(exec.metrics.scc_work);
         self.stats.evaluation_misses += exec.evaluation;
         self.stats.evaluation_hits += usize::from(exec.evaluation == 0);

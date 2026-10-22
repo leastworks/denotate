@@ -79,6 +79,7 @@ pub struct LocalArtifact {
     pub evaluation: Option<LocalEvaluation>,
     pub answer: Option<LocalAnswer>,
 }
+#[cfg(any(test, feature = "test-support"))]
 /// Physical work in coarse BDD obligation cones, never a semantic query result.
 #[derive(Debug, Default)]
 pub struct SccWork {
@@ -99,10 +100,12 @@ pub struct LocalMetrics {
     pub cone_atoms: usize,
     pub unique_atoms: usize,
     pub cone_inputs: usize,
+    #[cfg(any(test, feature = "test-support"))]
     /// Per-check physical work; cache hits and SAT group queries add nothing.
     /// Timing covers SCC fixed-point evaluation, excluding context setup/export.
     pub scc_work: BTreeMap<ComponentKey, SccWork>,
 }
+#[cfg(any(test, feature = "test-support"))]
 impl LocalMetrics {
     pub fn merge_scc_work(&mut self, work: BTreeMap<ComponentKey, SccWork>) {
         for (key, measured) in work {

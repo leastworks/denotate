@@ -104,14 +104,32 @@ impl GroundProgram {
         partial: bool,
         cone: Option<&DependencyCone>,
     ) -> Result<SymbolicMeaning<'_>> {
-        self.symbolic_selected_measured(budget, partial, cone, None)
+        self.symbolic_selected_impl(
+            budget,
+            partial,
+            cone,
+            #[cfg(any(test, feature = "test-support"))]
+            None,
+        )
     }
+    #[cfg(any(test, feature = "test-support"))]
     pub(crate) fn symbolic_selected_measured(
         &self,
         budget: &mut Budget<'_>,
         partial: bool,
         cone: Option<&DependencyCone>,
-        mut measured: Option<&mut dyn FnMut(ComponentId, Duration)>,
+        measured: &mut dyn FnMut(ComponentId, Duration),
+    ) -> Result<SymbolicMeaning<'_>> {
+        self.symbolic_selected_impl(budget, partial, cone, Some(measured))
+    }
+    fn symbolic_selected_impl(
+        &self,
+        budget: &mut Budget<'_>,
+        partial: bool,
+        cone: Option<&DependencyCone>,
+        #[cfg(any(test, feature = "test-support"))] mut measured: Option<
+            &mut dyn FnMut(ComponentId, Duration),
+        >,
     ) -> Result<SymbolicMeaning<'_>> {
         let start = Instant::now();
         let context = ConditionContext::build_selected(self, cone.map(|c| &c.facts), budget)?;
@@ -164,6 +182,7 @@ impl GroundProgram {
                 continue;
             }
             let previous_retained = retained;
+            #[cfg(any(test, feature = "test-support"))]
             let component_start = measured.as_ref().map(|_| Instant::now());
             let result = (|| -> Result<()> {
                 budget.tick("symbolic evaluation")?;
@@ -227,6 +246,7 @@ impl GroundProgram {
                 }
                 Ok(())
             })();
+            #[cfg(any(test, feature = "test-support"))]
             if let (Some(measured), Some(start)) = (&mut measured, component_start) {
                 measured(component.id, start.elapsed());
             }

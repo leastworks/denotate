@@ -6,7 +6,7 @@ rust-version = "1.93"
 publish = false
 
 [features]
-test-support = []
+test-support = ["denotate-check/test-support"]
 
 [dependencies]
 salsa.workspace = true
