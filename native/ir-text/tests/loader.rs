@@ -526,3 +526,36 @@ fn construction_diagnostics_name_sorts_instead_of_arena_handles() {
         }
     }
 }
+
+#[test]
+fn reserved_relation_diagnostic_survives_parser_recovery_contexts() {
+    for keyword in ["domain", "obligation", "assumption", "source"] {
+        for parameters in ["", "x:S", "x:S,y:S"] {
+            for suffix in [
+                "",
+                "relation other();",
+                "domain(a);",
+                "p(a);",
+                "// comment\nrelation other(x:S);",
+            ] {
+                let code = format!(
+                    "module m; sort S; const a:S; relation {keyword}({parameters}); {suffix}"
+                );
+                let errors = load("m", &[source("m", &code)]).unwrap_err();
+                let start = code.find(&format!("relation {keyword}")).unwrap() + "relation ".len();
+                assert!(
+                    errors
+                        .iter()
+                        .any(|d| d.range == (start..start + keyword.len())
+                            && d.message == "Reserved word must be quoted"),
+                    "{code}\n{errors:?}\n{}",
+                    denotate_ir_text::parser()
+                        .parse(&code, None)
+                        .unwrap()
+                        .root_node()
+                        .to_sexp()
+                );
+            }
+        }
+    }
+}

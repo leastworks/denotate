@@ -217,54 +217,72 @@ fn atom(source: &SourceFile, node: Node<'_>) -> Result<Atom> {
         span: node.byte_range(),
     })
 }
-fn syntax_errors(source: &SourceFile, node: Node<'_>, out: &mut Vec<crate::Diagnostic>) {
-    if node.is_error() || node.is_missing() {
-        // Recovery can turn a declaration with a reserved name into one ERROR
-        // node. Keep the useful name diagnostic instead of hiding it behind
-        // a generic syntax error. Use parser leaves, so comments and quoted
-        // strings cannot masquerade as declaration keywords.
-        fn leaves<'a>(node: Node<'a>, out: &mut Vec<Node<'a>>) {
-            if node.kind() == "comment" {
-                return;
-            }
-            if node.child_count() == 0 {
-                out.push(node);
-            } else {
-                for child in node.children(&mut node.walk()) {
-                    leaves(child, out);
-                }
-            }
-        }
-        let mut tokens = Vec::new();
-        leaves(node, &mut tokens);
-        if let Some(pair) = tokens.windows(2).find(|pair| {
-            matches!(
-                text(source, pair[0]),
-                "relation" | "input" | "sort" | "const" | "module" | "use"
-            ) && crate::reserved_word(text(source, pair[1]))
-        }) {
-            out.extend(error(
-                source,
-                pair[1].byte_range(),
-                "Reserved word must be quoted",
-            ));
+fn syntax_errors(source: &SourceFile, root: Node<'_>, out: &mut Vec<crate::Diagnostic>) {
+    // Recovery may keep the declaration keyword outside the ERROR node holding
+    // its invalid name. Inspect the whole token stream, not individual error
+    // subtrees. Comments and quoted names are leaves, never scanned as code.
+    fn leaves<'a>(node: Node<'a>, out: &mut Vec<Node<'a>>) {
+        if node.kind() == "comment" {
             return;
         }
-        out.extend(error(
-            source,
-            node.byte_range(),
-            if node.is_missing() {
-                format!("Expected {}", node.kind())
+        if node.child_count() == 0 {
+            if !node.is_missing() {
+                out.push(node);
+            }
+        } else {
+            for child in node.children(&mut node.walk()) {
+                leaves(child, out);
+            }
+        }
+    }
+    let mut tokens = Vec::new();
+    leaves(root, &mut tokens);
+    let reserved_names: Vec<_> = tokens
+        .windows(2)
+        .filter_map(|pair| {
+            (matches!(
+                text(source, pair[0]),
+                "relation" | "input" | "sort" | "const" | "module" | "use"
+            ) && crate::reserved_word(text(source, pair[1])))
+            .then(|| pair[1].byte_range())
+        })
+        .collect();
+
+    fn visit(
+        source: &SourceFile,
+        node: Node<'_>,
+        reserved_names: &[Range<usize>],
+        out: &mut Vec<crate::Diagnostic>,
+    ) {
+        if node.is_error() || node.is_missing() {
+            let names: Vec<_> = reserved_names
+                .iter()
+                .filter(|range| node.start_byte() <= range.start && range.end <= node.end_byte())
+                .collect();
+            if !names.is_empty() {
+                for range in names {
+                    out.extend(error(source, range.clone(), "Reserved word must be quoted"));
+                }
             } else {
-                "Invalid .den syntax".into()
-            },
-        ));
-        return;
+                out.extend(error(
+                    source,
+                    node.byte_range(),
+                    if node.is_missing() {
+                        format!("Expected {}", node.kind())
+                    } else {
+                        "Invalid .den syntax".into()
+                    },
+                ));
+            }
+            return;
+        }
+        for child in node.children(&mut node.walk()) {
+            visit(source, child, reserved_names, out);
+        }
     }
-    for child in node.children(&mut node.walk()) {
-        syntax_errors(source, child, out);
-    }
+    visit(source, root, &reserved_names, out);
 }
+
 fn semantic_atom(a: &Atom) -> String {
     format!(
         "{:?}:{:?}",
