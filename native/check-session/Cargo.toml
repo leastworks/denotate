@@ -19,3 +19,7 @@ denotate-test-dsl = { path = "../test-dsl" }
 denotate-editor = { path = "../editor" }
 denotate-normalize = { path = "../normalize" }
 serde_json.workspace = true
+
+[[example]]
+name = "scorecard"
+required-features = ["test-support"]

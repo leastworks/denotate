@@ -14,6 +14,11 @@ test-lsp: _check-node
 test-native:
     cargo +1.93.0 test --manifest-path frontend-prototype/native/Cargo.toml --locked --workspace --exclude denotate-tree-sitter
 
+# Re-score retained slice-6 paths on a program: FILE [--edit FILE] [--samples N] [--json FILE].
+[positional-arguments]
+score-inputmapping +args:
+    cargo +1.93.0 run --release --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-check-session --features test-support --example scorecard -- "$@"
+
 # Source-linked InputMapping findings; also try mixed, requires-c or fixed.
 demo-overlap mode="overlap":
     cargo +1.93.0 run --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --example overlap -- {{mode}}
