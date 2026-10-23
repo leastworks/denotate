@@ -295,7 +295,7 @@ fn qualified_declarations_preserve_display_names_and_reject_same_namespace_dupli
     assert_eq!(c.sort(a).unwrap().name, c.sort(b).unwrap().name);
     assert!(c.declare_sort_in("a", "S").is_err());
     let plain = c.declare_sort("S").unwrap();
-    assert_eq!(c.declaration_namespace(plain), Some(""));
+    assert_eq!(c.declaration_namespace(plain), Some(&Namespace::default()));
     assert!(c.declare_sort("S").is_err());
     let ca = c.declare_constant_in("a", "same", a).unwrap();
     let cb = c.declare_constant_in("b", "same", a).unwrap();

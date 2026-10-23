@@ -3,7 +3,7 @@ use denotate_check::{
     ScopedResult, ScopedResults,
 };
 use denotate_check_session::Session;
-use denotate_ir::{Literal, Term};
+use denotate_ir::{Literal, Namespace, Term};
 use denotate_ir_text::{ActiveRoot, LoadedProgram, SourceFile, load, roots};
 
 fn source(name: &str, text: &str) -> SourceFile {
@@ -138,6 +138,17 @@ fn whole_export_root_sees_cross_module_conflicts_and_shared_constants() {
     ];
     let p = load("root", &docs).unwrap();
     assert_eq!(p.corpus.rules().count(), 2);
+    for rule in p.corpus.rules() {
+        // A rule's lexical owner differs from the namespace of its head.
+        assert_eq!(
+            p.corpus.namespace(rule.id),
+            Some(&Namespace::from(&p.owners[&rule.id.into()]))
+        );
+        assert_eq!(
+            p.corpus.namespace(rule.head.relation()),
+            Some(&Namespace::from("lib"))
+        );
+    }
     assert_eq!(p.modules.len(), 5);
     assert_eq!(
         counterexamples(&check(&p, &mut Session::default(), BackendIdentity::bdd())),
@@ -232,6 +243,12 @@ fn generated_and_quoted_frontend_identity_do_not_alias() {
             "module m; {declarations} $condition_9(); '$condition_9'() :- !$condition_9();"
         ));
         let relations = p.corpus.relations().collect::<Vec<_>>();
+        for relation in &relations {
+            assert_eq!(p.corpus.namespace(relation.id), Some(&Namespace::from("m")));
+        }
+        for rule in p.corpus.rules() {
+            assert_eq!(p.corpus.namespace(rule.id), Some(&Namespace::from("m")));
+        }
         assert_eq!(relations[0].name, relations[1].name);
         assert_ne!(
             p.corpus.is_generated_relation(relations[0].id),

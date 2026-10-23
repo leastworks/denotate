@@ -125,8 +125,16 @@ pub fn assemble<R: std::borrow::Borrow<Recipe>>(
                 arguments,
             })
         };
-        let installed =
-            installation::install(&mut corpus, normalized, binding, binding).map_err(failure)?;
+        // InputMapping's IR currently belongs to global, independently of the
+        // source file. Bind context on installation, not in cached recipes.
+        let installed = installation::install_in(
+            &mut corpus,
+            Namespace::default(),
+            normalized,
+            binding,
+            binding,
+        )
+        .map_err(failure)?;
         let start = std::time::Instant::now();
         keys::installed(&mut keys, &corpus, &source.key, recipe, &installed)?;
         key_computation += start.elapsed();

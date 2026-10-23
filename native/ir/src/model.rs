@@ -1,4 +1,4 @@
-use crate::ids::*;
+use crate::{Namespace, ids::*};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
@@ -233,7 +233,7 @@ pub struct Corpus {
     rules: BTreeMap<RuleId, Rule>,
     obligations: BTreeMap<ObligationId, Obligation>,
     occurrences: BTreeSet<OccurrenceId>,
-    declaration_namespaces: BTreeMap<OccurrenceId, String>,
+    namespaces: BTreeMap<OccurrenceId, Namespace>,
 }
 
 impl Default for Corpus {
@@ -248,7 +248,7 @@ impl Default for Corpus {
             rules: BTreeMap::new(),
             obligations: BTreeMap::new(),
             occurrences: BTreeSet::new(),
-            declaration_namespaces: BTreeMap::new(),
+            namespaces: BTreeMap::new(),
         }
     }
 }
@@ -316,30 +316,40 @@ impl Corpus {
             .ok_or(ConstructionError::UnknownSort(sort))
     }
 
-    /// Frontend-supplied namespace for declarations. Legacy constructors use
-    /// the empty namespace; display names remain unchanged in either case.
-    pub fn declaration_namespace(&self, id: impl Into<OccurrenceId>) -> Option<&str> {
-        self.declaration_namespaces
-            .get(&id.into())
-            .map(String::as_str)
+    /// Explicit owning namespace of a declaration (including a generated helper)
+    /// or rule. Atoms/terms are occurrences within a rule, not namespace owners.
+    /// Foreign handles and non-owner occurrences return None.
+    pub fn namespace(&self, id: impl Into<OccurrenceId>) -> Option<&Namespace> {
+        self.namespaces.get(&id.into())
+    }
+
+    /// Declaration accessor retained alongside [`Self::namespace`]. Namespaces
+    /// are now decoded paths rather than opaque strings; use `segments()` to
+    /// inspect them. The common accessor also accepts rule IDs.
+    pub fn declaration_namespace(&self, id: impl Into<OccurrenceId>) -> Option<&Namespace> {
+        self.namespace(id)
     }
 
     pub fn declare_sort(&mut self, name: impl Into<String>) -> Result<SortId> {
         self.declare_sort_in("", name)
     }
-    pub fn declare_sort_in(&mut self, namespace: &str, name: impl Into<String>) -> Result<SortId> {
+    pub fn declare_sort_in(
+        &mut self,
+        namespace: impl Into<Namespace>,
+        name: impl Into<String>,
+    ) -> Result<SortId> {
+        let namespace = namespace.into();
         let name = name.into();
         named(&name, "sort")?;
         if self
             .sorts()
-            .any(|s| s.name == name && self.declaration_namespace(s.id) == Some(namespace))
+            .any(|s| s.name == name && self.namespace(s.id) == Some(&namespace))
         {
             return Err(ConstructionError::DuplicateName { kind: "sort", name });
         }
         let id = SortId(self.fresh());
         self.sorts.insert(id, Sort { id, name });
-        self.declaration_namespaces
-            .insert(id.into(), namespace.into());
+        self.namespaces.insert(id.into(), namespace);
         self.occurrences.insert(id.into());
         Ok(id)
     }
@@ -353,16 +363,18 @@ impl Corpus {
     }
     pub fn declare_constant_in(
         &mut self,
-        namespace: &str,
+        namespace: impl Into<Namespace>,
         name: impl Into<String>,
         sort: SortId,
     ) -> Result<ConstantId> {
+        let namespace = namespace.into();
         let name = name.into();
         self.require_sort(sort)?;
         named(&name, "constant")?;
-        if self.constants().any(|c| {
-            c.sort == sort && c.name == name && self.declaration_namespace(c.id) == Some(namespace)
-        }) {
+        if self
+            .constants()
+            .any(|c| c.sort == sort && c.name == name && self.namespace(c.id) == Some(&namespace))
+        {
             return Err(ConstructionError::DuplicateName {
                 kind: "constant in sort",
                 name,
@@ -370,8 +382,7 @@ impl Corpus {
         }
         let id = ConstantId(self.fresh());
         self.constants.insert(id, Constant { id, name, sort });
-        self.declaration_namespaces
-            .insert(id.into(), namespace.into());
+        self.namespaces.insert(id.into(), namespace);
         self.occurrences.insert(id.into());
         Ok(id)
     }
@@ -386,17 +397,18 @@ impl Corpus {
     }
     pub fn declare_relation_in(
         &mut self,
-        namespace: &str,
+        namespace: impl Into<Namespace>,
         name: impl Into<String>,
         role: RelationRole,
         parameters: impl IntoIterator<Item = Parameter>,
     ) -> Result<RelationId> {
+        let namespace = namespace.into();
         let name = name.into();
         named(&name, "relation")?;
         if self.relations().any(|r| {
             r.name == name
                 && !self.is_generated_relation(r.id)
-                && self.declaration_namespace(r.id) == Some(namespace)
+                && self.namespace(r.id) == Some(&namespace)
         }) {
             return Err(ConstructionError::DuplicateName {
                 kind: "relation",
@@ -426,8 +438,7 @@ impl Corpus {
             },
         );
         self.occurrences.insert(id.into());
-        self.declaration_namespaces
-            .insert(id.into(), namespace.into());
+        self.namespaces.insert(id.into(), namespace);
         Ok(id)
     }
 
@@ -436,8 +447,14 @@ impl Corpus {
     /// A frontend may declare the same display name before or after this call;
     /// consumers must resolve frontend names only among non-generated relations.
     pub fn declare_generated_relation(&mut self) -> RelationId {
+        self.declare_generated_relation_in(Namespace::default())
+    }
+
+    /// Generate a helper in the transformation's explicit owning namespace.
+    /// Numbering remains corpus-wide display text, not identity or ownership.
+    pub fn declare_generated_relation_in(&mut self, namespace: impl Into<Namespace>) -> RelationId {
         let name = format!("$condition_{}", self.generated_relations.len() + 1);
-        self.declare_generated_relation_named(name)
+        self.declare_generated_relation_named_in(namespace, name)
             .expect("generated label is nonempty")
     }
 
@@ -448,6 +465,18 @@ impl Corpus {
         &mut self,
         name: impl Into<String>,
     ) -> Result<RelationId> {
+        self.declare_generated_relation_named_in(Namespace::default(), name)
+    }
+
+    /// A generated label need not be unique, even within one namespace. Identity
+    /// remains the fresh handle plus the generated kind; frontend names cannot
+    /// alias it. The exporter may choose distinct display labels later.
+    pub fn declare_generated_relation_named_in(
+        &mut self,
+        namespace: impl Into<Namespace>,
+        name: impl Into<String>,
+    ) -> Result<RelationId> {
+        let namespace = namespace.into();
         let name = name.into();
         named(&name, "generated relation")?;
         let id = RelationId(self.fresh());
@@ -462,6 +491,7 @@ impl Corpus {
         );
         self.generated_relations.insert(id);
         self.occurrences.insert(id.into());
+        self.namespaces.insert(id.into(), namespace);
         Ok(id)
     }
 
@@ -525,11 +555,28 @@ impl Corpus {
         self.add_rule(head, [])
     }
 
+    pub fn add_fact_in(&mut self, namespace: impl Into<Namespace>, head: Atom) -> Result<RuleId> {
+        self.add_rule_in(namespace, head, [])
+    }
+
     pub fn add_rule(
         &mut self,
         head: Atom,
         body: impl IntoIterator<Item = Literal>,
     ) -> Result<RuleId> {
+        self.add_rule_in(Namespace::default(), head, body)
+    }
+
+    /// The rule belongs to the supplied namespace, independently of the head
+    /// and body declarations' namespaces. Transformations can read this owner
+    /// with [`Self::namespace`] and pass it to helper/recipe installation.
+    pub fn add_rule_in(
+        &mut self,
+        namespace: impl Into<Namespace>,
+        head: Atom,
+        body: impl IntoIterator<Item = Literal>,
+    ) -> Result<RuleId> {
+        let namespace = namespace.into();
         let body: Vec<_> = body.into_iter().collect();
         let atoms = || std::iter::once(&head).chain(body.iter().map(Literal::atom));
         // Atom constructors already checked signatures. Verify corpus ownership
@@ -593,6 +640,7 @@ impl Corpus {
         self.occurrences.extend(occurrences);
         self.occurrences.insert(id.into());
         self.rules.insert(id, Rule { id, head, body });
+        self.namespaces.insert(id.into(), namespace);
         Ok(id)
     }
 
@@ -607,17 +655,18 @@ impl Corpus {
     }
     pub fn at_most_one_in(
         &mut self,
-        namespace: &str,
+        namespace: impl Into<Namespace>,
         name: impl Into<String>,
         relation: RelationId,
         group_by: impl IntoIterator<Item = Column>,
         message_template: impl Into<String>,
     ) -> Result<ObligationId> {
+        let namespace = namespace.into();
         let name = name.into();
         named(&name, "obligation")?;
         if self
             .obligations()
-            .any(|o| o.name == name && self.declaration_namespace(o.id) == Some(namespace))
+            .any(|o| o.name == name && self.namespace(o.id) == Some(&namespace))
         {
             return Err(ConstructionError::DuplicateName {
                 kind: "obligation",
@@ -656,8 +705,7 @@ impl Corpus {
             },
         );
         self.occurrences.insert(id.into());
-        self.declaration_namespaces
-            .insert(id.into(), namespace.into());
+        self.namespaces.insert(id.into(), namespace);
         Ok(id)
     }
 }

@@ -170,9 +170,9 @@ fn ir_construction<T>(
 ) -> Result<T> {
     let qualified = |id: OccurrenceId, name: &str| match corpus
         .declaration_namespace(id)
-        .filter(|ns| !ns.is_empty())
+        .filter(|ns| !ns.is_global())
     {
-        Some(ns) => format!("{ns}::{name}"),
+        Some(ns) => format!("{}::{name}", ns.segments().join("::")),
         None => name.to_owned(),
     };
     let sort = |id| {
@@ -434,7 +434,7 @@ impl Builder {
         let id = ir_construction(
             m,
             statement.span.clone(),
-            self.program.corpus.add_rule(h, b),
+            self.program.corpus.add_rule_in(&m.name, h, b),
             &self.program.corpus,
         )?;
         let owner = OwnerKey::new(
@@ -607,7 +607,9 @@ pub fn load(root: &str, documents: &[SourceFile]) -> Result<LoadedProgram> {
                         ir_construction(
                             m,
                             n.span.clone(),
-                            b.program.corpus.declare_generated_relation_named(&n.text),
+                            b.program
+                                .corpus
+                                .declare_generated_relation_named_in(module, &n.text),
                             &b.program.corpus,
                         )?
                     } else {

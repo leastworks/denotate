@@ -72,9 +72,32 @@ impl Installation {
 pub fn install<H, L, K>(
     corpus: &mut Corpus,
     recipe: &Recipe<H, L, K>,
+    head_binding: impl FnMut(&H) -> Result<BoundAtom>,
+    leaf_binding: impl FnMut(&L) -> Result<BoundAtom>,
+) -> Result<Installation> {
+    install_in(
+        corpus,
+        Namespace::default(),
+        recipe,
+        head_binding,
+        leaf_binding,
+    )
+}
+
+/// Install into the transformation's owning namespace. All generated helpers
+/// and rules inherit this context, even when bindings reference declarations
+/// in other namespaces. The caller supplies the triggering IR construct's
+/// namespace, or chooses an explicit context for a shared transformation.
+/// Recipes remain independent of namespace, source snapshots and file placement.
+/// Errors have the same partial-construction behavior as [`install`].
+pub fn install_in<H, L, K>(
+    corpus: &mut Corpus,
+    namespace: impl Into<Namespace>,
+    recipe: &Recipe<H, L, K>,
     mut head_binding: impl FnMut(&H) -> Result<BoundAtom>,
     mut leaf_binding: impl FnMut(&L) -> Result<BoundAtom>,
 ) -> Result<Installation> {
+    let namespace = namespace.into();
     let mut result = Installation {
         occurrences: BTreeMap::new(),
         rules: BTreeMap::new(),
@@ -84,7 +107,7 @@ pub fn install<H, L, K>(
     for instruction in recipe.instructions() {
         match instruction {
             Instruction::Helper { id } => {
-                let relation = corpus.declare_generated_relation();
+                let relation = corpus.declare_generated_relation_in(&namespace);
                 helpers.insert(*id, relation);
                 result.occurrences.insert(*id, relation.into());
             }
@@ -134,7 +157,7 @@ pub fn install<H, L, K>(
                         })
                     })
                     .collect::<Result<Vec<_>>>()?;
-                let rule = corpus.add_rule(head, body)?;
+                let rule = corpus.add_rule_in(&namespace, head, body)?;
                 result.rules.insert(*id, rule);
                 result.occurrences.insert(*id, rule.into());
             }
