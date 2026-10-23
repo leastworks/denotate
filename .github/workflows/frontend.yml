@@ -53,6 +53,10 @@ jobs:
           cd frontend-prototype/native/test-dsl/grammar
           ../../../tree-sitter/node_modules/.bin/tree-sitter generate
           test -z "$(git status --porcelain --untracked-files=all -- src)"
+      - name: Shared Denotate generated parser is current
+        run: |
+          npm run generate --prefix frontend-prototype/tree-sitter
+          test -z "$(git status --porcelain --untracked-files=all -- frontend-prototype/tree-sitter/grammar/src)"
       - name: Tree-sitter syntax manifest and component tests
         run: npm test --prefix frontend-prototype/tree-sitter
       - name: B shared editor, lifecycle and extension scenarios

@@ -82,6 +82,25 @@ fn constant_sort(semantics: &Semantics, target: &Target) -> Option<denotate_anal
         .resolve_sort(target.uri.as_str(), name.clone())
 }
 
+/// Until step 3 projects every reference, even a rename initiated in a legacy
+/// file can miss uses in a different file. Gate the whole indexed workspace.
+fn has_unprojected_syntax(node: tree_sitter::Node<'_>) -> bool {
+    matches!(
+        node.kind(),
+        "integer"
+            | "quoted_identifier"
+            | "qualified_name"
+            | "generated_identifier"
+            | "domain"
+            | "obligation"
+            | "assumption"
+            | "source_location"
+            | "location_alias"
+            | "location"
+    ) || (node.kind() == "module" && node.child_by_field_name("ownership").is_some())
+        || node.children(&mut node.walk()).any(has_unprojected_syntax)
+}
+
 pub fn rename(
     semantics: &Semantics,
     documents: &HashMap<Url, Document>,
@@ -91,6 +110,12 @@ pub fn rename(
     position: Position,
     name: Option<&str>,
 ) -> Result<Value, String> {
+    if documents
+        .values()
+        .any(|doc| has_unprojected_syntax(doc.tree.root_node()))
+    {
+        return Err("Rename is unavailable while the workspace contains IR text syntax that the editor does not yet understand (authoring step 3).".into());
+    }
     let doc = documents.get(uri).ok_or("No document.")?;
     let byte = doc.offset(position).ok_or("No rename target here.")?;
     let reference = semantics
@@ -213,4 +238,89 @@ pub fn rename(
         }
     }
     Ok(json!({"documentChanges": changes}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_ir_syntax_blocks_prepare_and_rename_even_from_a_legacy_file() {
+        let library = Url::parse("file:///workspace/library.den").unwrap();
+        let usage = Url::parse("file:///workspace/usage.den").unwrap();
+        for suffix in [
+            "const 1:S; r(1);",
+            "relation 'other'(); 'other'();",
+            "library::r(a);",
+            "relation $condition_1(); $condition_1();",
+            "domain S=[a];",
+            "obligation unique: at_most_one(r, group_by: ());",
+            "input p(x:S); assumption unique: at_most_one(p, group_by: ());",
+            "r(a) loc(#origin);",
+            "source #s = \"file:///x\" view \"dsl\" hash \"pending\";",
+            "#origin = loc(range(#s,1,1,1,2));",
+        ] {
+            let mut parser = crate::syntax::parser();
+            let documents = HashMap::from([
+                (
+                    library.clone(),
+                    Document::new(
+                        &mut parser,
+                        "module library; sort S; const a:S; relation r(x:S);".into(),
+                        1,
+                        true,
+                    ),
+                ),
+                (
+                    usage.clone(),
+                    Document::new(
+                        &mut parser,
+                        format!("module usage; use library; {suffix}"),
+                        1,
+                        false,
+                    ),
+                ),
+            ]);
+            let mut semantics = Semantics::default();
+            for (uri, doc) in &documents {
+                assert!(
+                    doc.diagnostics().is_empty(),
+                    "{suffix}: {:?}",
+                    doc.diagnostics()
+                );
+                semantics.update(uri, doc);
+            }
+            for uri in [&library, &usage] {
+                for name in [None, Some("renamed")] {
+                    let error = rename(
+                        &semantics,
+                        &documents,
+                        &HashMap::new(),
+                        &[],
+                        uri,
+                        Position::new(0, 42),
+                        name,
+                    )
+                    .unwrap_err();
+                    assert!(
+                        error.contains("does not yet understand"),
+                        "{suffix}: {error}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn syntax_gate_handles_ownership_but_ignores_comments_and_legacy_programs() {
+        let mut parser = crate::syntax::parser();
+        for (text, blocked) in [
+            ("module m ownership library;", true),
+            ("module m; // domain obligation loc(1) 'quoted' module::name\n sort S; const a:S; relation source_value(x:S); source_value(X) :- source_value(X);", false),
+        ] {
+            let doc = Document::new(&mut parser, text.into(), 1, true);
+            assert!(doc.diagnostics().is_empty());
+            assert_eq!(has_unprojected_syntax(doc.tree.root_node()), blocked);
+        }
+    }
 }

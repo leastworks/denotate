@@ -19,6 +19,11 @@ test-native:
 score-inputmapping +args:
     cargo +1.93.0 run --release --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-check-session --features test-support --example scorecard -- "$@"
 
+# Load and check .den modules: ROOT FILE... [--sat].
+[positional-arguments]
+check-den +args:
+    cargo +1.93.0 run --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-ir-text --example check -- "$@"
+
 # Source-linked InputMapping findings; also try mixed, requires-c or fixed.
 demo-overlap mode="overlap":
     cargo +1.93.0 run --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --example overlap -- {{mode}}

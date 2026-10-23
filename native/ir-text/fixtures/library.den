@@ -1,0 +1,19 @@
+module library ownership library;
+sort Input;
+sort Slot;
+sort IntegerCase;
+const other_integer: IntegerCase;
+input value(input: Input, value: IntegerCase);
+relation present(input: Input);
+relation mapped_to(input: Input, slot: Slot);
+relation supplies(input: Input, slot: Slot);
+relation available(slot: Slot);
+relation masked(slot: Slot);
+relation slot_value(slot: Slot, value: IntegerCase);
+present(I) :- value(I, V);
+supplies(I, S) :- mapped_to(I, S), present(I), !masked(S);
+available(S) :- supplies(I, S);
+slot_value(S, V) :- supplies(I, S), value(I, V);
+assumption one_value_per_input: at_most_one(value, group_by: input);
+obligation one_input_per_slot: at_most_one(supplies, group_by: slot)
+    message "At most one input may supply each slot.";

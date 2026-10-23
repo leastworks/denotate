@@ -233,6 +233,7 @@ pub struct Corpus {
     rules: BTreeMap<RuleId, Rule>,
     obligations: BTreeMap<ObligationId, Obligation>,
     occurrences: BTreeSet<OccurrenceId>,
+    declaration_namespaces: BTreeMap<OccurrenceId, String>,
 }
 
 impl Default for Corpus {
@@ -247,6 +248,7 @@ impl Default for Corpus {
             rules: BTreeMap::new(),
             obligations: BTreeMap::new(),
             occurrences: BTreeSet::new(),
+            declaration_namespaces: BTreeMap::new(),
         }
     }
 }
@@ -314,14 +316,30 @@ impl Corpus {
             .ok_or(ConstructionError::UnknownSort(sort))
     }
 
+    /// Frontend-supplied namespace for declarations. Legacy constructors use
+    /// the empty namespace; display names remain unchanged in either case.
+    pub fn declaration_namespace(&self, id: impl Into<OccurrenceId>) -> Option<&str> {
+        self.declaration_namespaces
+            .get(&id.into())
+            .map(String::as_str)
+    }
+
     pub fn declare_sort(&mut self, name: impl Into<String>) -> Result<SortId> {
+        self.declare_sort_in("", name)
+    }
+    pub fn declare_sort_in(&mut self, namespace: &str, name: impl Into<String>) -> Result<SortId> {
         let name = name.into();
         named(&name, "sort")?;
-        if self.sorts().any(|s| s.name == name) {
+        if self
+            .sorts()
+            .any(|s| s.name == name && self.declaration_namespace(s.id) == Some(namespace))
+        {
             return Err(ConstructionError::DuplicateName { kind: "sort", name });
         }
         let id = SortId(self.fresh());
         self.sorts.insert(id, Sort { id, name });
+        self.declaration_namespaces
+            .insert(id.into(), namespace.into());
         self.occurrences.insert(id.into());
         Ok(id)
     }
@@ -331,10 +349,20 @@ impl Corpus {
         name: impl Into<String>,
         sort: SortId,
     ) -> Result<ConstantId> {
+        self.declare_constant_in("", name, sort)
+    }
+    pub fn declare_constant_in(
+        &mut self,
+        namespace: &str,
+        name: impl Into<String>,
+        sort: SortId,
+    ) -> Result<ConstantId> {
         let name = name.into();
         self.require_sort(sort)?;
         named(&name, "constant")?;
-        if self.constants().any(|c| c.sort == sort && c.name == name) {
+        if self.constants().any(|c| {
+            c.sort == sort && c.name == name && self.declaration_namespace(c.id) == Some(namespace)
+        }) {
             return Err(ConstructionError::DuplicateName {
                 kind: "constant in sort",
                 name,
@@ -342,6 +370,8 @@ impl Corpus {
         }
         let id = ConstantId(self.fresh());
         self.constants.insert(id, Constant { id, name, sort });
+        self.declaration_namespaces
+            .insert(id.into(), namespace.into());
         self.occurrences.insert(id.into());
         Ok(id)
     }
@@ -352,12 +382,22 @@ impl Corpus {
         role: RelationRole,
         parameters: impl IntoIterator<Item = Parameter>,
     ) -> Result<RelationId> {
+        self.declare_relation_in("", name, role, parameters)
+    }
+    pub fn declare_relation_in(
+        &mut self,
+        namespace: &str,
+        name: impl Into<String>,
+        role: RelationRole,
+        parameters: impl IntoIterator<Item = Parameter>,
+    ) -> Result<RelationId> {
         let name = name.into();
         named(&name, "relation")?;
-        if self
-            .relations()
-            .any(|r| r.name == name && !self.is_generated_relation(r.id))
-        {
+        if self.relations().any(|r| {
+            r.name == name
+                && !self.is_generated_relation(r.id)
+                && self.declaration_namespace(r.id) == Some(namespace)
+        }) {
             return Err(ConstructionError::DuplicateName {
                 kind: "relation",
                 name,
@@ -386,6 +426,8 @@ impl Corpus {
             },
         );
         self.occurrences.insert(id.into());
+        self.declaration_namespaces
+            .insert(id.into(), namespace.into());
         Ok(id)
     }
 
@@ -394,8 +436,21 @@ impl Corpus {
     /// A frontend may declare the same display name before or after this call;
     /// consumers must resolve frontend names only among non-generated relations.
     pub fn declare_generated_relation(&mut self) -> RelationId {
-        let id = RelationId(self.fresh());
         let name = format!("$condition_{}", self.generated_relations.len() + 1);
+        self.declare_generated_relation_named(name)
+            .expect("generated label is nonempty")
+    }
+
+    /// Restore an explicit generated display label when loading text. Identity
+    /// remains independent of the label and outside the frontend namespace.
+    /// Generated relations are zero-arity derived helpers, as in installation.
+    pub fn declare_generated_relation_named(
+        &mut self,
+        name: impl Into<String>,
+    ) -> Result<RelationId> {
+        let name = name.into();
+        named(&name, "generated relation")?;
+        let id = RelationId(self.fresh());
         self.relations.insert(
             id,
             Relation {
@@ -407,7 +462,7 @@ impl Corpus {
         );
         self.generated_relations.insert(id);
         self.occurrences.insert(id.into());
-        id
+        Ok(id)
     }
 
     pub fn is_generated_relation(&self, id: RelationId) -> bool {
@@ -548,9 +603,22 @@ impl Corpus {
         group_by: impl IntoIterator<Item = Column>,
         message_template: impl Into<String>,
     ) -> Result<ObligationId> {
+        self.at_most_one_in("", name, relation, group_by, message_template)
+    }
+    pub fn at_most_one_in(
+        &mut self,
+        namespace: &str,
+        name: impl Into<String>,
+        relation: RelationId,
+        group_by: impl IntoIterator<Item = Column>,
+        message_template: impl Into<String>,
+    ) -> Result<ObligationId> {
         let name = name.into();
         named(&name, "obligation")?;
-        if self.obligations().any(|o| o.name == name) {
+        if self
+            .obligations()
+            .any(|o| o.name == name && self.declaration_namespace(o.id) == Some(namespace))
+        {
             return Err(ConstructionError::DuplicateName {
                 kind: "obligation",
                 name,
@@ -588,6 +656,8 @@ impl Corpus {
             },
         );
         self.occurrences.insert(id.into());
+        self.declaration_namespaces
+            .insert(id.into(), namespace.into());
         Ok(id)
     }
 }

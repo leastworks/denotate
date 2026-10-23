@@ -435,10 +435,7 @@ impl Projection {
 }
 
 pub fn reserved(name: &str) -> bool {
-    matches!(
-        name,
-        "module" | "use" | "sort" | "const" | "relation" | "input"
-    )
+    denotate_ir_text::reserved_word(name)
 }
 
 #[cfg(test)]

@@ -197,6 +197,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "denotate-ir-text"
+version = "0.0.1"
+dependencies = [
+ "cc",
+ "denotate-check",
+ "denotate-check-session",
+ "denotate-ir",
+ "serde_json",
+ "tree-sitter",
+ "tree-sitter-language",
+]
+
+[[package]]
 name = "denotate-native"
 version = "0.0.1"
 dependencies = [
@@ -235,15 +248,14 @@ dependencies = [
 name = "denotate-tree-sitter"
 version = "0.0.1"
 dependencies = [
- "cc",
  "denotate-analysis",
  "denotate-editor",
+ "denotate-ir-text",
  "lsp-server",
  "lsp-types",
  "serde",
  "serde_json",
  "tree-sitter",
- "tree-sitter-language",
 ]
 
 [[package]]

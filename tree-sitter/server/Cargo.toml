@@ -6,14 +6,11 @@ publish = false
 workspace = "../../native"
 
 [dependencies]
+denotate-ir-text = { path = "../../native/ir-text" }
 denotate-analysis = { path = "../../native/analysis" }
 denotate-editor = { path = "../../native/editor" }
 tree-sitter = "=0.25.10"
-tree-sitter-language = "=0.1.5"
 lsp-server = "=0.7.9"
 lsp-types = "=0.95.1"
 serde.workspace = true
 serde_json.workspace = true
-
-[build-dependencies]
-cc = "=1.5.1"
