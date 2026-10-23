@@ -289,32 +289,51 @@ fn equal_fact_values_keep_distinct_occurrences_for_attribution() {
 #[test]
 fn qualified_declarations_preserve_display_names_and_reject_same_namespace_duplicates() {
     let mut c = Corpus::new();
-    let a = c.declare_sort_in("a", "S").unwrap();
-    let b = c.declare_sort_in("b", "S").unwrap();
+    let a = c
+        .declare_sort_in(Namespace::new(["a"]).unwrap(), "S")
+        .unwrap();
+    let b = c
+        .declare_sort_in(Namespace::new(["b"]).unwrap(), "S")
+        .unwrap();
     assert_ne!(a, b);
     assert_eq!(c.sort(a).unwrap().name, c.sort(b).unwrap().name);
-    assert!(c.declare_sort_in("a", "S").is_err());
+    assert!(
+        c.declare_sort_in(Namespace::new(["a"]).unwrap(), "S")
+            .is_err()
+    );
     let plain = c.declare_sort("S").unwrap();
-    assert_eq!(c.declaration_namespace(plain), Some(&Namespace::default()));
+    assert_eq!(c.namespace(plain), Some(&Namespace::default()));
     assert!(c.declare_sort("S").is_err());
-    let ca = c.declare_constant_in("a", "same", a).unwrap();
-    let cb = c.declare_constant_in("b", "same", a).unwrap();
+    let ca = c
+        .declare_constant_in(Namespace::new(["a"]).unwrap(), "same", a)
+        .unwrap();
+    let cb = c
+        .declare_constant_in(Namespace::new(["b"]).unwrap(), "same", a)
+        .unwrap();
     assert_ne!(ca, cb);
-    assert!(c.declare_constant_in("a", "same", a).is_err());
+    assert!(
+        c.declare_constant_in(Namespace::new(["a"]).unwrap(), "same", a)
+            .is_err()
+    );
     let ra = c
-        .declare_relation_in("a", "r", RelationRole::Input, [])
+        .declare_relation_in(Namespace::new(["a"]).unwrap(), "r", RelationRole::Input, [])
         .unwrap();
     let rb = c
-        .declare_relation_in("b", "r", RelationRole::Input, [])
+        .declare_relation_in(Namespace::new(["b"]).unwrap(), "r", RelationRole::Input, [])
         .unwrap();
     assert_ne!(ra, rb);
     assert!(
-        c.declare_relation_in("a", "r", RelationRole::Input, [])
+        c.declare_relation_in(Namespace::new(["a"]).unwrap(), "r", RelationRole::Input, [])
             .is_err()
     );
-    c.at_most_one_in("a", "unique", ra, [], "").unwrap();
-    c.at_most_one_in("b", "unique", rb, [], "").unwrap();
-    assert!(c.at_most_one_in("a", "unique", ra, [], "").is_err());
+    c.at_most_one_in(Namespace::new(["a"]).unwrap(), "unique", ra, [], "")
+        .unwrap();
+    c.at_most_one_in(Namespace::new(["b"]).unwrap(), "unique", rb, [], "")
+        .unwrap();
+    assert!(
+        c.at_most_one_in(Namespace::new(["a"]).unwrap(), "unique", ra, [], "")
+            .is_err()
+    );
     let generated = c.declare_generated_relation_named("$condition_42").unwrap();
     let frontend = c
         .declare_relation("$condition_42", RelationRole::Derived, [])

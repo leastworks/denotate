@@ -323,15 +323,8 @@ impl Corpus {
         self.namespaces.get(&id.into())
     }
 
-    /// Declaration accessor retained alongside [`Self::namespace`]. Namespaces
-    /// are now decoded paths rather than opaque strings; use `segments()` to
-    /// inspect them. The common accessor also accepts rule IDs.
-    pub fn declaration_namespace(&self, id: impl Into<OccurrenceId>) -> Option<&Namespace> {
-        self.namespace(id)
-    }
-
     pub fn declare_sort(&mut self, name: impl Into<String>) -> Result<SortId> {
-        self.declare_sort_in("", name)
+        self.declare_sort_in(Namespace::default(), name)
     }
     pub fn declare_sort_in(
         &mut self,
@@ -359,7 +352,7 @@ impl Corpus {
         name: impl Into<String>,
         sort: SortId,
     ) -> Result<ConstantId> {
-        self.declare_constant_in("", name, sort)
+        self.declare_constant_in(Namespace::default(), name, sort)
     }
     pub fn declare_constant_in(
         &mut self,
@@ -393,7 +386,7 @@ impl Corpus {
         role: RelationRole,
         parameters: impl IntoIterator<Item = Parameter>,
     ) -> Result<RelationId> {
-        self.declare_relation_in("", name, role, parameters)
+        self.declare_relation_in(Namespace::default(), name, role, parameters)
     }
     pub fn declare_relation_in(
         &mut self,
@@ -651,7 +644,13 @@ impl Corpus {
         group_by: impl IntoIterator<Item = Column>,
         message_template: impl Into<String>,
     ) -> Result<ObligationId> {
-        self.at_most_one_in("", name, relation, group_by, message_template)
+        self.at_most_one_in(
+            Namespace::default(),
+            name,
+            relation,
+            group_by,
+            message_template,
+        )
     }
     pub fn at_most_one_in(
         &mut self,

@@ -28,30 +28,6 @@ impl Namespace {
     }
 }
 
-/// Compatibility with the original single-namespace construction API: an empty
-/// string means global; any nonempty string is one decoded segment, not a path.
-impl From<String> for Namespace {
-    fn from(segment: String) -> Self {
-        if segment.is_empty() {
-            Self::default()
-        } else {
-            Self(vec![segment].into())
-        }
-    }
-}
-
-impl From<&str> for Namespace {
-    fn from(segment: &str) -> Self {
-        segment.to_owned().into()
-    }
-}
-
-impl From<&String> for Namespace {
-    fn from(segment: &String) -> Self {
-        segment.as_str().into()
-    }
-}
-
 impl From<&Namespace> for Namespace {
     fn from(namespace: &Namespace) -> Self {
         namespace.clone()

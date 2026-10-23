@@ -308,7 +308,9 @@ mod tests {
             // integers and reserves `obligation`, previously used as a bare
             // constant in the lexical-boundaries fixture (quote it now).
             let expected = match file {
-                "rejected/numeric-literal/example.den" => true,
+                "rejected/numeric-literal/example.den" | "rejected/missing-module/example.den" => {
+                    true
+                }
                 "base/14-lexical-boundaries/example.den" => false,
                 _ => case["extended"] == "accept",
             };

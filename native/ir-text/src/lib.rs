@@ -1,8 +1,11 @@
 //! `.den` text to an owned checked program. No filesystem access, LSP scheduling,
 //! cache policy, or diagnostic wording is hidden in the loader.
 mod ast;
+pub mod filesystem;
 mod load;
-pub use load::{ActiveRoot, Assumption, LoadedProgram, ModuleInfo, load, roots};
+mod membership;
+pub use load::{Assumption, DocumentInfo, LoadedProgram, load};
+pub use membership::{ActiveRoot, ProgramMembership, RootInfo, roots};
 
 use std::{ops::Range, sync::Arc};
 use tree_sitter::{Language, Parser};
@@ -52,6 +55,7 @@ pub fn reserved_word(name: &str) -> bool {
     matches!(
         name,
         "module"
+            | "namespace"
             | "use"
             | "sort"
             | "const"

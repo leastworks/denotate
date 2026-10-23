@@ -4,12 +4,21 @@ module.exports = grammar({
   name: 'denotate',
   extras: $ => [/[ \t\r\n]+/, $.comment],
   word: $ => $.identifier,
-  reserved: { global: $ => ['module', 'use', 'sort', 'const', 'relation', 'input', 'domain', 'obligation', 'assumption', 'source'], parameter_names: _ => [] },
+  reserved: { global: $ => ['module', 'namespace', 'use', 'sort', 'const', 'relation', 'input', 'domain', 'obligation', 'assumption', 'source'], parameter_names: _ => [] },
   rules: {
-    source_file: $ => seq(optional('\uFEFF'), $.module, repeat($._declaration)),
-    module: $ => seq('module', field('name', $._name), optional(seq('ownership', field('ownership', choice('library', 'user', 'shared', 'root')))), ';'),
-    _declaration: $ => choice($.import, $.sort, $.constants, $.relation, $.statement, $.domain, $.obligation, $.assumption, $.source_location, $.location_alias),
-    import: $ => seq('use', field('name', $._name), ';'),
+    // A file-scoped header may follow only imports (and whitespace/comments).
+    // Once a global declaration or namespace block starts, no header can follow.
+    source_file: $ => seq(optional('\uFEFF'), repeat($.import), optional(choice(
+      seq(choice($.module, alias($._namespace_file, $.namespace)), repeat($._declaration)),
+      seq(choice(alias($._namespace_block, $.namespace), $._non_import_declaration), repeat(choice(alias($._namespace_block, $.namespace), $._declaration)))
+    ))),
+    module: $ => seq('module', field('name', $._namespace_path), ';'),
+    _namespace_file: $ => seq('namespace', field('name', $._namespace_path), ';'),
+    _namespace_block: $ => seq('namespace', field('name', $._namespace_path), '{', repeat(choice(alias($._namespace_block, $.namespace), $._declaration)), '}'),
+    _namespace_path: $ => choice($._name, $.qualified_name),
+    _declaration: $ => choice($.import, $._non_import_declaration),
+    _non_import_declaration: $ => choice($.sort, $.constants, $.relation, $.statement, $.domain, $.obligation, $.assumption, $.source_location, $.location_alias),
+    import: $ => seq('use', field('name', $._namespace_path), ';'),
     sort: $ => seq('sort', field('name', $._name), optional($.location), ';'),
     constants: $ => seq('const', field('name', $._constant), repeat(seq(',', field('name', $._constant))), ':', field('sort', $._reference), optional($.location), ';'),
     relation: $ => seq(field('kind', choice('relation', 'input')), field('name', choice($._name, $.generated_identifier)), '(', optional(seq($.parameter, repeat(seq(',', $.parameter)))), ')', optional($.location), ';'),
@@ -26,7 +35,7 @@ module.exports = grammar({
     _name: $ => choice($.identifier, $.quoted_identifier),
     _parameter_name: $ => choice(reserved('parameter_names', $.identifier), $.quoted_identifier),
     _reference: $ => choice($._name, $.generated_identifier, $.qualified_name),
-    qualified_name: _ => token(/([A-Za-z][A-Za-z0-9_]*|'([^'\\\r\n]|\\[^\r\n])*')::(\$[A-Za-z][A-Za-z0-9_]*|[A-Za-z][A-Za-z0-9_]*|-?[0-9]+|'([^'\\\r\n]|\\[^\r\n])*')/),
+    qualified_name: _ => token(/(?:::)?(([A-Za-z][A-Za-z0-9_]*|'([^'\\\r\n]|\\[^\r\n])*')::)+(\$[A-Za-z][A-Za-z0-9_]*|[A-Za-z][A-Za-z0-9_]*|-?[0-9]+|'([^'\\\r\n]|\\[^\r\n])*')|::(\$[A-Za-z][A-Za-z0-9_]*|[A-Za-z][A-Za-z0-9_]*|-?[0-9]+|'([^'\\\r\n]|\\[^\r\n])*')/),
     domain: $ => seq('domain', field('sort', $._reference), '=', '[', optional(seq(field('value', $._constant_reference), repeat(seq(',', field('value', $._constant_reference))))), ']', ';'),
     obligation: $ => seq('obligation', field('name', $._name), ':', $.cardinality, optional(seq('message', field('message', $.string))), optional($.location), ';'),
     assumption: $ => seq('assumption', field('name', $._name), ':', $.cardinality, optional($.location), ';'),

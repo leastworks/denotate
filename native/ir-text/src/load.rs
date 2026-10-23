@@ -1,6 +1,6 @@
 use crate::{
-    Diagnostic, Result, SourceFile,
-    ast::{self, Atom as AstAtom, Decl, Module, Name, Statement},
+    Diagnostic, ProgramMembership, Result, SourceFile,
+    ast::{self, Atom as AstAtom, Decl, Name, Scope, Statement, namespace_key},
     error,
 };
 use denotate_check::{BackendIdentity, CheckRequest, Domains, InputAtMostOne, Limits};
@@ -11,12 +11,13 @@ use std::{
 };
 
 #[derive(Clone, Debug)]
-pub struct ModuleInfo {
-    pub name: String,
+pub struct DocumentInfo {
+    /// Explicit namespaces and namespaces containing declarations/location
+    /// entries. Empty implicit global scopes (including import-only files) are omitted.
+    pub namespaces: BTreeSet<Namespace>,
     pub uri: String,
     pub revision: u64,
     pub ownership: String,
-    pub imports: Vec<String>,
     pub snapshot: SnapshotId,
     /// Exact location syntax for step 2; it is not interpreted as DSL origins yet.
     pub location_syntax: Vec<SourceSpan>,
@@ -36,8 +37,10 @@ pub struct LoadedProgram {
     pub provenance: Provenance,
     pub domains: Domains,
     pub assumptions: Vec<Assumption>,
-    pub modules: Vec<ModuleInfo>,
-    /// Presentation ownership is separate from provenance and semantic keys.
+    pub documents: Vec<DocumentInfo>,
+    pub membership: ProgramMembership,
+    /// Occurrence -> owning document URI. Look up user/library classification
+    /// in `documents`; namespace identity and provenance are independent.
     pub owners: BTreeMap<OccurrenceId, String>,
 }
 impl LoadedProgram {
@@ -63,99 +66,18 @@ impl LoadedProgram {
     }
 }
 
-fn registry(documents: &[SourceFile]) -> BTreeMap<String, Vec<&SourceFile>> {
-    let mut map = BTreeMap::<String, Vec<&SourceFile>>::new();
-    for source in documents {
-        if let Some(name) = ast::header(source) {
-            map.entry(name).or_default().push(source);
-        }
-    }
-    map
-}
-fn closure(root: &str, documents: &[SourceFile]) -> Result<BTreeMap<String, Module>> {
-    let index = registry(documents);
-    let fallback = SourceFile::new("denotate:workspace", 0, "");
-    let mut pending = vec![(root.to_owned(), &fallback, 0..0)];
-    let mut result = BTreeMap::new();
-    // Pending sources must borrow the caller's immutable document list, not ASTs.
-    while let Some((name, importer, span)) = pending.pop() {
-        if result.contains_key(&name) {
-            continue;
-        }
-        let candidates = index
-            .get(&name)
-            .ok_or_else(|| error(importer, span.clone(), format!("Unknown module {name:?}")))?;
-        if candidates.len() != 1 {
-            return Err(error(importer, span, format!("Ambiguous module {name:?}")));
-        }
-        let source = candidates[0];
-        let module = ast::parse(source)?;
-        for import in &module.imports {
-            pending.push((import.text.clone(), source, import.span.clone()));
-        }
-        result.insert(name, module);
-    }
-    Ok(result)
-}
-
-/// Root discovery is a pure policy helper for the future LSP integration. Only
-/// ownership=root modules designate export entry points. With no containing
-/// export root the document is its own root; ambiguity requires explicit choice.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ActiveRoot {
-    Selected(String),
-    NeedsSelection(Vec<String>),
-}
-pub fn roots(documents: &[SourceFile]) -> Result<BTreeMap<String, ActiveRoot>> {
-    let mut parsed = BTreeMap::new();
-    for (name, candidates) in registry(documents) {
-        if candidates.len() != 1 {
-            return Err(error(
-                candidates[0],
-                0..0,
-                format!("Ambiguous module {name:?}"),
-            ));
-        }
-        parsed.insert(name, ast::parse(candidates[0])?);
-    }
-    let mut containing = BTreeMap::<String, Vec<String>>::new();
-    for (root, m) in &parsed {
-        if m.ownership != "root" {
-            continue;
-        }
-        for name in closure(root, documents)?.keys() {
-            containing
-                .entry(name.clone())
-                .or_default()
-                .push(root.clone());
-        }
-    }
-    Ok(parsed
-        .into_iter()
-        .map(|(name, m)| {
-            let candidates = containing.remove(&name).unwrap_or_else(|| vec![name]);
-            let choice = if candidates.len() == 1 {
-                ActiveRoot::Selected(candidates[0].clone())
-            } else {
-                ActiveRoot::NeedsSelection(candidates)
-            };
-            (m.source.uri, choice)
-        })
-        .collect())
-}
-
 struct Builder {
     program: LoadedProgram,
     snapshots: BTreeMap<String, SnapshotId>,
-    sorts: BTreeMap<(String, String), SortId>,
-    relations: BTreeMap<(String, String, bool), RelationId>,
-    constants: BTreeMap<(String, SortId, String), ConstantId>,
+    sorts: BTreeMap<(Namespace, String), SortId>,
+    relations: BTreeMap<(Namespace, String, bool), RelationId>,
+    constants: BTreeMap<(Namespace, SortId, String), ConstantId>,
 }
-fn diagnostic(m: &Module, span: Range<usize>, message: impl Into<String>) -> Vec<Diagnostic> {
+fn diagnostic(m: &Scope, span: Range<usize>, message: impl Into<String>) -> Vec<Diagnostic> {
     error(&m.source, span, message)
 }
 fn construction<T>(
-    m: &Module,
+    m: &Scope,
     span: Range<usize>,
     value: std::result::Result<T, impl std::fmt::Display>,
 ) -> Result<T> {
@@ -163,18 +85,16 @@ fn construction<T>(
 }
 
 fn ir_construction<T>(
-    m: &Module,
+    m: &Scope,
     span: Range<usize>,
     value: std::result::Result<T, ConstructionError>,
     corpus: &Corpus,
 ) -> Result<T> {
-    let qualified = |id: OccurrenceId, name: &str| match corpus
-        .declaration_namespace(id)
-        .filter(|ns| !ns.is_global())
-    {
-        Some(ns) => format!("{}::{name}", ns.segments().join("::")),
-        None => name.to_owned(),
-    };
+    let qualified =
+        |id: OccurrenceId, name: &str| match corpus.namespace(id).filter(|ns| !ns.is_global()) {
+            Some(ns) => format!("{}::{name}", namespace_key(ns)),
+            None => name.to_owned(),
+        };
     let sort = |id| {
         corpus
             .sort(id)
@@ -252,24 +172,22 @@ fn ir_construction<T>(
         diagnostic(m, span, message)
     })
 }
-fn visible<'a>(m: &'a Module, name: &Name) -> Result<Vec<&'a str>> {
-    let all = std::iter::once(m.name.as_str())
-        .chain(m.imports.iter().map(|n| n.text.as_str()))
-        .collect::<BTreeSet<_>>();
-    if let Some(module) = &name.module {
-        if let Some(found) = all.into_iter().find(|n| *n == module) {
-            return Ok(vec![found]);
-        }
-        return Err(diagnostic(
-            m,
-            name.span.clone(),
-            format!("Module {module:?} is not directly imported"),
-        ));
+fn visible(m: &Scope, name: &Name) -> Vec<Namespace> {
+    if let Some(namespace) = &name.namespace {
+        return vec![namespace.clone()];
     }
-    Ok(all.into_iter().collect())
+    let mut all = m
+        .imports
+        .iter()
+        .map(|(ns, _)| ns.clone())
+        .collect::<BTreeSet<_>>();
+    for length in 0..=m.namespace.segments().len() {
+        all.insert(Namespace::new(m.namespace.segments()[..length].iter().cloned()).unwrap());
+    }
+    all.into_iter().collect()
 }
 fn one<T: Copy>(
-    m: &Module,
+    m: &Scope,
     name: &Name,
     kind: &str,
     candidates: impl IntoIterator<Item = T>,
@@ -286,57 +204,57 @@ fn one<T: Copy>(
             m,
             name.span.clone(),
             format!(
-                "Ambiguous {kind} {:?}; qualify it with its module",
+                "Ambiguous {kind} {:?}; qualify it with its namespace",
                 name.text
             ),
         )),
     }
 }
 impl Builder {
-    fn sort(&self, m: &Module, n: &Name) -> Result<SortId> {
+    fn sort(&self, m: &Scope, n: &Name) -> Result<SortId> {
         one(
             m,
             n,
             "sort",
-            visible(m, n)?
+            visible(m, n)
                 .into_iter()
-                .filter_map(|module| self.sorts.get(&(module.into(), n.text.clone())).copied()),
+                .filter_map(|module| self.sorts.get(&(module, n.text.clone())).copied()),
         )
     }
-    fn relation(&self, m: &Module, n: &Name) -> Result<RelationId> {
+    fn relation(&self, m: &Scope, n: &Name) -> Result<RelationId> {
         one(
             m,
             n,
             "relation",
-            visible(m, n)?.into_iter().filter_map(|module| {
+            visible(m, n).into_iter().filter_map(|module| {
                 self.relations
-                    .get(&(module.into(), n.text.clone(), n.generated))
+                    .get(&(module, n.text.clone(), n.generated))
                     .copied()
             }),
         )
     }
-    fn constant(&self, m: &Module, n: &Name, sort: SortId) -> Result<ConstantId> {
+    fn constant(&self, m: &Scope, n: &Name, sort: SortId) -> Result<ConstantId> {
         one(
             m,
             n,
             "constant of the expected sort",
-            visible(m, n)?.into_iter().filter_map(|module| {
-                self.constants
-                    .get(&(module.into(), sort, n.text.clone()))
-                    .copied()
-            }),
+            visible(m, n)
+                .into_iter()
+                .filter_map(|module| self.constants.get(&(module, sort, n.text.clone())).copied()),
         )
     }
-    fn span(&self, m: &Module, range: Range<usize>) -> Result<SourceSpan> {
+    fn span(&self, m: &Scope, range: Range<usize>) -> Result<SourceSpan> {
         construction(
             m,
             range.clone(),
-            self.program.sources.span(self.snapshots[&m.name], range),
+            self.program
+                .sources
+                .span(self.snapshots[&m.source.uri], range),
         )
     }
     fn origin(
         &mut self,
-        m: &Module,
+        m: &Scope,
         id: impl Into<OccurrenceId>,
         range: Range<usize>,
     ) -> Result<()> {
@@ -352,12 +270,12 @@ impl Builder {
                 [Origin::new(span)],
             ),
         )?;
-        self.program.owners.insert(id, m.name.clone());
+        self.program.owners.insert(id, m.source.uri.clone());
         Ok(())
     }
     fn atom(
         &mut self,
-        m: &Module,
+        m: &Scope,
         a: &AstAtom,
         used: &mut BTreeSet<String>,
         anon: &mut usize,
@@ -408,11 +326,11 @@ impl Builder {
     }
     fn rule(
         &mut self,
-        m: &Module,
+        m: &Scope,
         statement: &Statement,
         head: &AstAtom,
         body: &[(bool, AstAtom)],
-        duplicate: usize,
+        duplicates: &mut BTreeMap<(Namespace, String), usize>,
     ) -> Result<()> {
         let mut used = std::iter::once(head)
             .chain(body.iter().map(|(_, a)| a))
@@ -431,16 +349,49 @@ impl Builder {
                 Literal::Positive(a)
             });
         }
+        let atom_key = |atom: &denotate_ir::Atom| {
+            let terms = atom
+                .arguments()
+                .iter()
+                .map(|term| match term.value() {
+                    Term::Constant(id) => {
+                        format!("constant:{:?}", self.program.keys.constant(*id).unwrap())
+                    }
+                    Term::Variable { name, sort } => format!(
+                        "variable:{name:?}:{:?}",
+                        self.program.keys.sort(*sort).unwrap()
+                    ),
+                })
+                .collect::<Vec<_>>();
+            format!(
+                "{:?}:{terms:?}",
+                self.program.keys.relation(atom.relation()).unwrap()
+            )
+        };
+        let signature = format!(
+            "{}:{:?}",
+            atom_key(&h),
+            b.iter()
+                .map(|literal| (
+                    matches!(literal, Literal::Negative(_)),
+                    atom_key(literal.atom())
+                ))
+                .collect::<Vec<_>>()
+        );
+        let duplicate = duplicates
+            .entry((m.namespace.clone(), signature.clone()))
+            .or_default();
+        let owner = OwnerKey::new(
+            format!("denotate/rule/{}", namespace_key(&m.namespace)),
+            format!("{signature}/{duplicate}").into_bytes(),
+        );
+        *duplicate += 1;
         let id = ir_construction(
             m,
             statement.span.clone(),
-            self.program.corpus.add_rule_in(&m.name, h, b),
+            self.program.corpus.add_rule_in(&m.namespace, h, b),
             &self.program.corpus,
         )?;
-        let owner = OwnerKey::new(
-            format!("denotate/rule/{}", m.name),
-            format!("{}/{duplicate}", statement.semantic).into_bytes(),
-        );
         construction(
             m,
             statement.span.clone(),
@@ -486,21 +437,63 @@ impl Builder {
     }
 }
 
-/// Load exactly one root's transitive closure. Declaration passes precede rule
-/// installation, so import cycles and declaration order are safe. Name visibility
-/// remains local + direct imports (matching B); qualify ambiguous references.
-pub fn load(root: &str, documents: &[SourceFile]) -> Result<LoadedProgram> {
-    let modules = closure(root, documents)?;
+/// Load the explicitly supplied program. `use` affects lookup only. All
+/// declaration passes precede rule installation, independently of file order.
+pub fn load(membership: &ProgramMembership, documents: &[SourceFile]) -> Result<LoadedProgram> {
+    let members = membership.members()?;
+    let mut sources = BTreeMap::<String, &SourceFile>::new();
+    for source in documents.iter().filter(|s| members.contains_key(&s.uri)) {
+        if let Some(previous) = sources.insert(source.uri.clone(), source) {
+            if previous.revision != source.revision || previous.text != source.text {
+                return Err(error(
+                    source,
+                    0..0,
+                    "Conflicting snapshots for the same file",
+                ));
+            }
+        }
+    }
+    let mut scopes = Vec::new();
+    for uri in members.keys() {
+        let source = sources.get(uri).ok_or_else(|| {
+            vec![Diagnostic {
+                uri: uri.clone(),
+                range: 0..0,
+                message: "Missing member snapshot".into(),
+            }]
+        })?;
+        scopes.extend(ast::parse(source)?);
+    }
+    // An enclosing namespace exists even when only a descendant is declared.
+    let mut namespaces = BTreeSet::new();
+    for m in &scopes {
+        for length in 0..=m.namespace.segments().len() {
+            namespaces
+                .insert(Namespace::new(m.namespace.segments()[..length].iter().cloned()).unwrap());
+        }
+    }
+    for m in &scopes {
+        for (import, span) in &m.imports {
+            if !namespaces.contains(import) {
+                return Err(diagnostic(
+                    m,
+                    span.clone(),
+                    format!("Unknown namespace {:?}", namespace_key(import)),
+                ));
+            }
+        }
+    }
     let mut b = Builder {
         program: LoadedProgram {
-            root: root.into(),
+            root: membership.root.clone(),
             corpus: Corpus::new(),
             keys: SemanticKeys::default(),
             sources: Sources::new(),
             provenance: Provenance::new(),
             domains: BTreeMap::new(),
             assumptions: Vec::new(),
-            modules: Vec::new(),
+            documents: Vec::new(),
+            membership: membership.clone(),
             owners: BTreeMap::new(),
         },
         snapshots: BTreeMap::new(),
@@ -508,32 +501,49 @@ pub fn load(root: &str, documents: &[SourceFile]) -> Result<LoadedProgram> {
         relations: BTreeMap::new(),
         constants: BTreeMap::new(),
     };
-    for (name, m) in &modules {
-        let snapshot = construction(
-            m,
-            0..0,
-            b.program.sources.add(
-                &m.source.uri,
-                m.source.revision,
+    for (uri, source) in &sources {
+        let snapshot = b
+            .program
+            .sources
+            .add(
+                uri.as_str(),
+                source.revision,
                 "denotate",
-                m.source.text.clone(),
-            ),
-        )?;
-        b.snapshots.insert(name.clone(), snapshot);
-        let locations = m
-            .locations
+                source.text.clone(),
+            )
+            .map_err(|e| error(source, 0..0, e.to_string()))?;
+        b.snapshots.insert(uri.clone(), snapshot);
+        let file_scopes = scopes
             .iter()
-            .map(|r| construction(m, r.clone(), b.program.sources.span(snapshot, r.clone())))
+            .filter(|m| m.source.uri == *uri)
+            .collect::<Vec<_>>();
+        let locations = file_scopes
+            .iter()
+            .flat_map(|m| m.locations.iter())
+            .map(|range| {
+                b.program
+                    .sources
+                    .span(snapshot, range.clone())
+                    .map_err(|e| error(source, range.clone(), e.to_string()))
+            })
             .collect::<Result<_>>()?;
-        b.program.modules.push(ModuleInfo {
-            name: name.clone(),
-            uri: m.source.uri.clone(),
-            revision: m.source.revision,
-            ownership: m.ownership.clone(),
-            imports: m.imports.iter().map(|n| n.text.clone()).collect(),
+        b.program.documents.push(DocumentInfo {
+            namespaces: file_scopes
+                .iter()
+                .filter(|m| {
+                    !m.namespace.is_global() || !m.statements.is_empty() || !m.locations.is_empty()
+                })
+                .map(|m| m.namespace.clone())
+                .collect(),
+            uri: uri.clone(),
+            revision: source.revision,
+            ownership: members[uri].clone(),
             snapshot,
             location_syntax: locations,
         });
+    }
+    for m in &scopes {
+        let name = &m.namespace;
         for s in &m.statements {
             if let Decl::Sort(n) = &s.decl {
                 let id = ir_construction(
@@ -549,15 +559,16 @@ pub fn load(root: &str, documents: &[SourceFile]) -> Result<LoadedProgram> {
                     b.program.keys.bind_sort(
                         &b.program.corpus,
                         id,
-                        SortKey(QualifiedKey::new(name.as_str(), n.text.as_str())),
+                        SortKey(QualifiedKey::new(namespace_key(name), n.text.as_str())),
                     ),
                 )?;
                 b.origin(m, id, n.span.clone())?;
             }
         }
     }
-    // Install all signatures/constants before resolving rules across modules.
-    for (module, m) in &modules {
+    // Install all signatures/constants before resolving rules across files.
+    for m in &scopes {
+        let module = &m.namespace;
         for s in &m.statements {
             match &s.decl {
                 Decl::Constants(names, sort) => {
@@ -573,7 +584,9 @@ pub fn load(root: &str, documents: &[SourceFile]) -> Result<LoadedProgram> {
                             .insert((module.clone(), sort, n.text.clone()), id);
                         let key = ConstantKey {
                             sort: b.program.keys.sort(sort).unwrap().clone(),
-                            name: format!("{:?}", (&module, &n.text)).into(),
+                            name: serde_json::to_string(&(namespace_key(module), &n.text))
+                                .expect("strings serialize to JSON")
+                                .into(),
                         };
                         construction(
                             m,
@@ -633,13 +646,16 @@ pub fn load(root: &str, documents: &[SourceFile]) -> Result<LoadedProgram> {
                     let key = if n.generated {
                         RelationKey::Generated {
                             owner: OwnerKey::new(
-                                format!("denotate/generated/{module}"),
+                                format!("denotate/generated/{}", namespace_key(module)),
                                 n.text.as_bytes(),
                             ),
                             local: 0,
                         }
                     } else {
-                        RelationKey::Named(QualifiedKey::new(module.as_str(), n.text.as_str()))
+                        RelationKey::Named(QualifiedKey::new(
+                            namespace_key(module),
+                            n.text.as_str(),
+                        ))
                     };
                     construction(
                         m,
@@ -664,15 +680,14 @@ pub fn load(root: &str, documents: &[SourceFile]) -> Result<LoadedProgram> {
         );
     }
     let mut explicit_domains = BTreeSet::new();
-    for (module, m) in &modules {
-        let mut duplicates = BTreeMap::<String, usize>::new();
-        let mut assumption_names = BTreeSet::new();
+    let mut duplicates = BTreeMap::new();
+    let mut assumption_names = BTreeSet::new();
+    for m in &scopes {
+        let module = &m.namespace;
         for s in &m.statements {
             match &s.decl {
                 Decl::Rule(head, body) => {
-                    let duplicate = duplicates.entry(s.semantic.clone()).or_default();
-                    b.rule(m, s, head, body, *duplicate)?;
-                    *duplicate += 1;
+                    b.rule(m, s, head, body, &mut duplicates)?;
                 }
                 Decl::Domain(sort, values) => {
                     let id = b.sort(m, sort)?;
@@ -731,7 +746,7 @@ pub fn load(root: &str, documents: &[SourceFile]) -> Result<LoadedProgram> {
                                 "Assumptions may constrain only input relations",
                             ));
                         }
-                        if !assumption_names.insert(name.text.clone()) {
+                        if !assumption_names.insert((module.clone(), name.text.clone())) {
                             return Err(diagnostic(
                                 m,
                                 name.span.clone(),
@@ -739,7 +754,7 @@ pub fn load(root: &str, documents: &[SourceFile]) -> Result<LoadedProgram> {
                             ));
                         }
                         b.program.assumptions.push(Assumption {
-                            name: QualifiedKey::new(module.as_str(), name.text.as_str()),
+                            name: QualifiedKey::new(namespace_key(module), name.text.as_str()),
                             constraint: InputAtMostOne {
                                 relation: id,
                                 group_by: grouping,
@@ -766,7 +781,7 @@ pub fn load(root: &str, documents: &[SourceFile]) -> Result<LoadedProgram> {
                                 &b.program.corpus,
                                 oid,
                                 ObligationKey(QualifiedKey::new(
-                                    module.as_str(),
+                                    namespace_key(module),
                                     name.text.as_str(),
                                 )),
                             ),
@@ -801,7 +816,12 @@ pub fn load(root: &str, documents: &[SourceFile]) -> Result<LoadedProgram> {
             }
         }
     }
-    let m = &modules[root];
-    construction(m, 0..0, b.program.keys.validate(&b.program.corpus))?;
+    b.program.keys.validate(&b.program.corpus).map_err(|e| {
+        vec![Diagnostic {
+            uri: membership.root.clone(),
+            range: 0..0,
+            message: e.to_string(),
+        }]
+    })?;
     Ok(b.program)
 }

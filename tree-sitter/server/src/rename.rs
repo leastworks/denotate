@@ -87,7 +87,8 @@ fn constant_sort(semantics: &Semantics, target: &Target) -> Option<denotate_anal
 fn has_unprojected_syntax(node: tree_sitter::Node<'_>) -> bool {
     matches!(
         node.kind(),
-        "integer"
+        "namespace"
+            | "integer"
             | "quoted_identifier"
             | "qualified_name"
             | "generated_identifier"
@@ -97,7 +98,12 @@ fn has_unprojected_syntax(node: tree_sitter::Node<'_>) -> bool {
             | "source_location"
             | "location_alias"
             | "location"
-    ) || (node.kind() == "module" && node.child_by_field_name("ownership").is_some())
+    ) || (node.kind() == "source_file"
+        && node
+            .named_children(&mut node.walk())
+            .filter(|n| n.kind() == "module")
+            .count()
+            != 1)
         || node.children(&mut node.walk()).any(has_unprojected_syntax)
 }
 
@@ -312,10 +318,12 @@ mod tests {
     }
 
     #[test]
-    fn syntax_gate_handles_ownership_but_ignores_comments_and_legacy_programs() {
+    fn syntax_gate_handles_namespaces_and_global_files_but_ignores_comments() {
         let mut parser = crate::syntax::parser();
         for (text, blocked) in [
-            ("module m ownership library;", true),
+            ("namespace m;", true),
+            ("namespace a { namespace b { relation r(); } }", true),
+            ("relation r(); r();", true),
             ("module m; // domain obligation loc(1) 'quoted' module::name\n sort S; const a:S; relation source_value(x:S); source_value(X) :- source_value(X);", false),
         ] {
             let doc = Document::new(&mut parser, text.into(), 1, true);

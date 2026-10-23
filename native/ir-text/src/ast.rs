@@ -1,18 +1,14 @@
 use crate::{Result, SourceFile, error, parser};
+use denotate_ir::Namespace;
 use std::{collections::BTreeMap, ops::Range};
 use tree_sitter::Node;
 
 #[derive(Clone, Debug)]
 pub(crate) struct Name {
-    pub module: Option<String>,
+    pub namespace: Option<Namespace>,
     pub text: String,
     pub generated: bool,
     pub span: Range<usize>,
-}
-impl Name {
-    pub fn identity(&self) -> (Option<&str>, &str, bool) {
-        (self.module.as_deref(), &self.text, self.generated)
-    }
 }
 #[derive(Clone, Debug)]
 pub(crate) struct Term {
@@ -45,14 +41,12 @@ pub(crate) enum Decl {
 pub(crate) struct Statement {
     pub decl: Decl,
     pub span: Range<usize>,
-    pub semantic: String,
 }
 #[derive(Clone, Debug)]
-pub(crate) struct Module {
+pub(crate) struct Scope {
     pub source: SourceFile,
-    pub name: String,
-    pub ownership: String,
-    pub imports: Vec<Name>,
+    pub namespace: Namespace,
+    pub imports: Vec<(Namespace, Range<usize>)>,
     pub statements: Vec<Statement>,
     /// Step 2 interprets these annotations; step 1 retains their exact syntax
     /// independently of semantic identities and current .den provenance.
@@ -106,56 +100,15 @@ fn name(source: &SourceFile, node: Node<'_>) -> Result<Name> {
 }
 fn name_in(source: &SourceFile, node: Node<'_>, parameter: bool) -> Result<Name> {
     if node.kind() == "qualified_name" {
-        let raw = text(source, node);
-        let mut in_quote = false;
-        let mut escaped = false;
-        let mut split = None;
-        for (i, c) in raw.char_indices() {
-            if escaped {
-                escaped = false;
-                continue;
-            }
-            if in_quote && c == '\\' {
-                escaped = true;
-                continue;
-            }
-            if c == '\'' {
-                in_quote = !in_quote;
-            }
-            if !in_quote && raw[i..].starts_with("::") {
-                split = Some(i);
-                break;
-            }
+        let mut parts = path_parts(text(source, node));
+        if parts.first() == Some(&"") {
+            parts.remove(0);
         }
-        let i =
-            split.ok_or_else(|| error(source, node.byte_range(), "Invalid qualified reference"))?;
-        let decode = |s: &str| -> Result<String> {
-            if s.starts_with('\'') {
-                quoted_text(source, s, node.byte_range())
-            } else if crate::reserved_word(s) {
-                Err(error(
-                    source,
-                    node.byte_range(),
-                    "Reserved word must be quoted",
-                ))
-            } else if s.starts_with('-') || s.as_bytes()[0].is_ascii_digit() {
-                Ok(s.parse::<i64>()
-                    .map_err(|_| {
-                        error(
-                            source,
-                            node.byte_range(),
-                            "Expected a signed 64-bit integer",
-                        )
-                    })?
-                    .to_string())
-            } else {
-                Ok(s.to_owned())
-            }
-        };
-        let member = &raw[i + 2..];
+        let member = parts.pop().unwrap();
+        let module = namespace_parts(source, &parts, node.byte_range())?;
         return Ok(Name {
-            module: Some(decode(&raw[..i])?),
-            text: decode(member)?,
+            namespace: Some(module),
+            text: decode(source, member, node.byte_range())?,
             generated: member.starts_with('$'),
             span: node.byte_range(),
         });
@@ -192,7 +145,7 @@ fn name_in(source: &SourceFile, node: Node<'_>, parameter: bool) -> Result<Name>
         ));
     }
     Ok(Name {
-        module: None,
+        namespace: None,
         text: spelling,
         generated: node.kind() == "generated_identifier",
         span: node.byte_range(),
@@ -242,7 +195,7 @@ fn syntax_errors(source: &SourceFile, root: Node<'_>, out: &mut Vec<crate::Diagn
         .filter_map(|pair| {
             (matches!(
                 text(source, pair[0]),
-                "relation" | "input" | "sort" | "const" | "module" | "use"
+                "relation" | "input" | "sort" | "const" | "module" | "namespace" | "use"
             ) && crate::reserved_word(text(source, pair[1])))
             .then(|| pair[1].byte_range())
         })
@@ -283,69 +236,89 @@ fn syntax_errors(source: &SourceFile, root: Node<'_>, out: &mut Vec<crate::Diagn
     visit(source, root, &reserved_names, out);
 }
 
-fn semantic_atom(a: &Atom) -> String {
-    format!(
-        "{:?}:{:?}",
-        a.name.identity(),
-        a.terms
-            .iter()
-            .map(|t| (t.name.identity(), t.variable, t.anonymous))
-            .collect::<Vec<_>>()
-    )
-}
-fn semantic(d: &Decl) -> String {
-    match d {
-        Decl::Rule(h, b) => format!(
-            "rule:{}:{:?}",
-            semantic_atom(h),
-            b.iter()
-                .map(|(neg, a)| (*neg, semantic_atom(a)))
-                .collect::<Vec<_>>()
-        ),
-        Decl::Sort(n) => format!("sort:{:?}", n.identity()),
-        Decl::Constants(ns, s) => format!(
-            "constants:{:?}:{:?}",
-            ns.iter().map(Name::identity).collect::<Vec<_>>(),
-            s.identity()
-        ),
-        Decl::Relation(n, input, ps) => format!(
-            "relation:{:?}:{input}:{:?}",
-            n.identity(),
-            ps.iter()
-                .map(|(n, s)| (n.identity(), s.identity()))
-                .collect::<Vec<_>>()
-        ),
-        Decl::Contract {
-            name,
-            assumption,
-            relation,
-            columns,
-            message,
-        } => format!(
-            "contract:{:?}:{assumption}:{:?}:{:?}:{message:?}",
-            name.identity(),
-            relation.identity(),
-            columns.iter().map(Name::identity).collect::<Vec<_>>()
-        ),
-        Decl::Domain(s, ns) => format!(
-            "domain:{:?}:{:?}",
-            s.identity(),
-            ns.iter().map(Name::identity).collect::<Vec<_>>()
-        ),
+// Delimit only outside quoted segments, retaining escaped quotes verbatim.
+fn path_parts(raw: &str) -> Vec<&str> {
+    let (mut quoted, mut escaped, mut start) = (false, false, 0);
+    let mut parts = Vec::new();
+    for (i, c) in raw.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if quoted && c == '\\' {
+            escaped = true;
+            continue;
+        }
+        if c == '\'' {
+            quoted = !quoted;
+        }
+        if !quoted && raw[i..].starts_with("::") {
+            parts.push(&raw[start..i]);
+            start = i + 2;
+        }
     }
+    parts.push(&raw[start..]);
+    parts
 }
-/// Extract the header even from an incomplete document, so unrelated broken
-/// files do not prevent loading a valid root and missing imports remain precise.
-pub(crate) fn header(source: &SourceFile) -> Option<String> {
-    let tree = parser().parse(source.text.as_ref(), None)?;
-    let m = children(tree.root_node())
-        .into_iter()
-        .find(|n| n.kind() == "module")?;
-    name(source, m.child_by_field_name("name")?)
-        .ok()
-        .map(|n| n.text)
+fn decode(source: &SourceFile, raw: &str, span: Range<usize>) -> Result<String> {
+    if raw.starts_with('\'') {
+        return quoted_text(source, raw, span);
+    }
+    if crate::reserved_word(raw) {
+        return Err(error(source, span, "Reserved word must be quoted"));
+    }
+    if raw.starts_with('-') || raw.as_bytes()[0].is_ascii_digit() {
+        return raw
+            .parse::<i64>()
+            .map(|n| n.to_string())
+            .map_err(|_| error(source, span, "Expected a signed 64-bit integer"));
+    }
+    Ok(raw.to_owned())
 }
-pub(crate) fn parse(source: &SourceFile) -> Result<Module> {
+fn namespace_parts(source: &SourceFile, parts: &[&str], span: Range<usize>) -> Result<Namespace> {
+    let mut decoded = Vec::new();
+    for raw in parts {
+        if raw.is_empty() || (!raw.starts_with('\'') && !raw.as_bytes()[0].is_ascii_alphabetic()) {
+            return Err(error(
+                source,
+                span,
+                "Namespace segments must be identifiers or quoted names",
+            ));
+        }
+        decoded.push(decode(source, raw, span.clone())?);
+    }
+    Ok(Namespace::new(decoded).expect("decoded names are nonempty"))
+}
+fn namespace_path(source: &SourceFile, node: Node<'_>) -> Result<Namespace> {
+    namespace_parts(source, &path_parts(text(source, node)), node.byte_range())
+}
+/// A collision-free, readable encoding for the existing semantic-key namespace field.
+/// Quoted `a::b` remains distinct from the two segments `a` and `b`.
+pub(crate) fn namespace_key(namespace: &Namespace) -> String {
+    namespace
+        .segments()
+        .iter()
+        .map(|s| {
+            if s.as_bytes()[0].is_ascii_alphabetic()
+                && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+                && !crate::reserved_word(s)
+            {
+                s.clone()
+            } else {
+                format!(
+                    "'{}'",
+                    s.replace('\\', "\\\\")
+                        .replace('\'', "\\'")
+                        .replace('\n', "\\n")
+                        .replace('\r', "\\r")
+                        .replace('\t', "\\t")
+                )
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("::")
+}
+pub(crate) fn parse(source: &SourceFile) -> Result<Vec<Scope>> {
     let tree = parser()
         .parse(source.text.as_ref(), None)
         .ok_or_else(|| error(source, 0..0, "Parser stopped"))?;
@@ -355,31 +328,86 @@ pub(crate) fn parse(source: &SourceFile) -> Result<Module> {
     if !errors.is_empty() {
         return Err(errors);
     }
-    let module = children(root)
+    let mut out = Vec::new();
+    let mut aliases = BTreeMap::new();
+    scope(
+        source,
+        root,
+        Namespace::default(),
+        &[],
+        true,
+        &mut aliases,
+        &mut out,
+    )?;
+    Ok(out)
+}
+
+// Each statement retains its lexical scope; this also preserves source order
+// when a file interleaves global declarations and nested namespace blocks.
+fn scope(
+    source: &SourceFile,
+    root: Node<'_>,
+    mut namespace: Namespace,
+    inherited: &[(Namespace, Range<usize>)],
+    top: bool,
+    aliases: &mut BTreeMap<String, Range<usize>>,
+    out: &mut Vec<Scope>,
+) -> Result<()> {
+    let nodes = children(root)
         .into_iter()
-        .find(|n| n.kind() == "module")
-        .ok_or_else(|| error(source, 0..0, "Missing module"))?;
-    let module_name = name(source, field(source, module, "name")?)?.text;
-    let ownership = module
-        .child_by_field_name("ownership")
-        .map(|n| text(source, n))
-        .unwrap_or("user")
-        .to_owned();
-    let mut out = Module {
+        .filter(|n| {
+            root.child_by_field_name("name")
+                .is_none_or(|name| n.id() != name.id())
+        })
+        .collect::<Vec<_>>();
+    let is_block = |n: &Node<'_>| {
+        n.kind() == "namespace" && n.children(&mut n.walk()).any(|child| child.kind() == "{")
+    };
+    let headers = nodes
+        .iter()
+        .filter(|n| n.kind() == "module" || (n.kind() == "namespace" && !is_block(n)))
+        .collect::<Vec<_>>();
+    if !headers.is_empty() && (!top || headers.len() > 1 || nodes.iter().any(is_block)) {
+        return Err(error(
+            source,
+            headers[0].byte_range(),
+            "A file-scoped namespace cannot be nested, repeated or mixed with top-level namespace blocks",
+        ));
+    }
+    let mut imports = inherited.to_vec();
+    for node in nodes.iter().filter(|n| n.kind() == "import") {
+        let n = field(source, *node, "name")?;
+        imports.push((namespace_path(source, n)?, n.byte_range()));
+    }
+    out.push(Scope {
         source: source.clone(),
-        name: module_name,
-        ownership,
-        imports: Vec::new(),
+        namespace: namespace.clone(),
+        imports: imports.clone(),
         statements: Vec::new(),
         locations: Vec::new(),
-    };
-    let mut aliases = BTreeMap::new();
-    for node in children(root) {
+    });
+    for node in nodes {
+        let mut item = Scope {
+            source: source.clone(),
+            namespace: namespace.clone(),
+            imports: imports.clone(),
+            statements: Vec::new(),
+            locations: Vec::new(),
+        };
         let decl = match node.kind() {
-            "module" | "comment" => continue,
-            "import" => {
-                out.imports
-                    .push(name(source, field(source, node, "name")?)?);
+            "comment" | "import" => continue,
+            "module" | "namespace" => {
+                let path = namespace_path(source, field(source, node, "name")?)?;
+                if is_block(&node) {
+                    let nested =
+                        Namespace::new(namespace.segments().iter().chain(path.segments()).cloned())
+                            .unwrap();
+                    scope(source, node, nested, &imports, false, aliases, out)?;
+                } else {
+                    namespace = path;
+                    item.namespace = namespace.clone();
+                    out.push(item);
+                }
                 continue;
             }
             "source_location" | "location_alias" => {
@@ -387,7 +415,8 @@ pub(crate) fn parse(source: &SourceFile) -> Result<Module> {
                 if aliases.insert(alias, node.byte_range()).is_some() {
                     return Err(error(source, node.byte_range(), "Duplicate location alias"));
                 }
-                out.locations.push(node.byte_range());
+                item.locations.push(node.byte_range());
+                out.push(item);
                 continue;
             }
             "sort" => Decl::Sort(name(source, field(source, node, "name")?)?),
@@ -476,14 +505,13 @@ pub(crate) fn parse(source: &SourceFile) -> Result<Module> {
             .into_iter()
             .filter(|n| n.kind() == "location")
         {
-            out.locations.push(loc.byte_range());
+            item.locations.push(loc.byte_range());
         }
-        let signature = semantic(&decl);
-        out.statements.push(Statement {
+        item.statements.push(Statement {
             decl,
             span: node.byte_range(),
-            semantic: signature,
         });
+        out.push(item);
     }
-    Ok(out)
+    Ok(())
 }

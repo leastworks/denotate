@@ -5,7 +5,7 @@ use std::collections::BTreeMap;
 #[test]
 fn decoded_paths_distinguish_nested_names_from_a_single_segment() {
     let nested = Namespace::new(["billing", "invoices"]).unwrap();
-    let quoted = Namespace::from("billing::invoices");
+    let quoted = Namespace::new(["billing::invoices"]).unwrap();
     assert_eq!(nested.segments(), &["billing", "invoices"]);
     assert_eq!(quoted.segments(), &["billing::invoices"]);
     assert_eq!(
@@ -13,7 +13,7 @@ fn decoded_paths_distinguish_nested_names_from_a_single_segment() {
         Err(ConstructionError::EmptyName("namespace segment"))
     );
     assert_eq!(
-        Namespace::from(""),
+        Namespace::default(),
         Namespace::new([] as [&str; 0]).unwrap()
     );
 
@@ -72,10 +72,20 @@ fn rules_own_a_namespace_independently_of_their_references_and_sources() {
     let mut c = Corpus::new();
     let owner = Namespace::new(["billing", "invoices"]).unwrap();
     let output = c
-        .declare_relation_in("reports", "r", RelationRole::Derived, [])
+        .declare_relation_in(
+            Namespace::new(["reports"]).unwrap(),
+            "r",
+            RelationRole::Derived,
+            [],
+        )
         .unwrap();
     let input = c
-        .declare_relation_in("catalog", "p", RelationRole::Input, [])
+        .declare_relation_in(
+            Namespace::new(["catalog"]).unwrap(),
+            "p",
+            RelationRole::Input,
+            [],
+        )
         .unwrap();
     let head = c.atom(output, []).unwrap();
     let body = c.atom(input, []).unwrap();
@@ -84,8 +94,14 @@ fn rules_own_a_namespace_independently_of_their_references_and_sources() {
         .add_rule_in(&owner, head, [Literal::Positive(body)])
         .unwrap();
     assert_eq!(c.namespace(rule), Some(&owner));
-    assert_eq!(c.namespace(output), Some(&Namespace::from("reports")));
-    assert_eq!(c.namespace(input), Some(&Namespace::from("catalog")));
+    assert_eq!(
+        c.namespace(output),
+        Some(&Namespace::new(["reports"]).unwrap())
+    );
+    assert_eq!(
+        c.namespace(input),
+        Some(&Namespace::new(["catalog"]).unwrap())
+    );
     assert_eq!(c.namespace(body_occurrence), None);
 
     let mut sources = Sources::new();
@@ -105,9 +121,14 @@ fn rules_own_a_namespace_independently_of_their_references_and_sources() {
     assert_eq!(c.namespace(rule), Some(&owner));
 
     let fact = c.atom(output, []).unwrap();
-    let fact = c.add_fact_in("shared", fact).unwrap();
+    let fact = c
+        .add_fact_in(Namespace::new(["shared"]).unwrap(), fact)
+        .unwrap();
     assert!(c.rule(fact).unwrap().is_fact());
-    assert_eq!(c.namespace(fact), Some(&Namespace::from("shared")));
+    assert_eq!(
+        c.namespace(fact),
+        Some(&Namespace::new(["shared"]).unwrap())
+    );
     let head = c.atom(input, []).unwrap();
     assert_eq!(
         c.add_fact_in(&owner, head),
@@ -152,7 +173,10 @@ fn helper_namespace_does_not_merge_equal_generated_or_frontend_labels() {
             .declare_generated_relation_named_in(&owner, "$condition_1")
             .unwrap();
         let other = c
-            .declare_generated_relation_named_in("elsewhere", "$condition_1")
+            .declare_generated_relation_named_in(
+                Namespace::new(["elsewhere"]).unwrap(),
+                "$condition_1",
+            )
             .unwrap();
         let arbitrary = c
             .declare_generated_relation_named_in(&owner, "a label with spaces")
@@ -163,7 +187,10 @@ fn helper_namespace_does_not_merge_equal_generated_or_frontend_labels() {
             assert!(c.is_generated_relation(id));
             assert_eq!(c.namespace(id), Some(&owner));
         }
-        assert_eq!(c.namespace(other), Some(&Namespace::from("elsewhere")));
+        assert_eq!(
+            c.namespace(other),
+            Some(&Namespace::new(["elsewhere"]).unwrap())
+        );
         assert!(
             c.declare_relation_in(&owner, "$condition_1", RelationRole::Derived, [])
                 .is_err()
@@ -219,13 +246,28 @@ fn installation_binds_one_recipe_to_explicit_ir_owners_without_using_references_
     let mut c = Corpus::new();
     let owner = Namespace::new(["billing", "invoices"]).unwrap();
     let left = c
-        .declare_relation_in("catalog", "p", RelationRole::Input, [])
+        .declare_relation_in(
+            Namespace::new(["catalog"]).unwrap(),
+            "p",
+            RelationRole::Input,
+            [],
+        )
         .unwrap();
     let right = c
-        .declare_relation_in("shipping", "q", RelationRole::Input, [])
+        .declare_relation_in(
+            Namespace::new(["shipping"]).unwrap(),
+            "q",
+            RelationRole::Input,
+            [],
+        )
         .unwrap();
     let output = c
-        .declare_relation_in("reports", "r", RelationRole::Derived, [])
+        .declare_relation_in(
+            Namespace::new(["reports"]).unwrap(),
+            "r",
+            RelationRole::Derived,
+            [],
+        )
         .unwrap();
     let bindings = |p: &u8| {
         Ok(BoundAtom {
@@ -247,9 +289,13 @@ fn installation_binds_one_recipe_to_explicit_ir_owners_without_using_references_
 
     // Reuse the exact cached recipe with an inherited owner, then a caller-chosen
     // shared owner, then the legacy global default. Binding relations never move.
-    for (index, ns) in [inherited, Namespace::from("shared"), Namespace::default()]
-        .into_iter()
-        .enumerate()
+    for (index, ns) in [
+        inherited,
+        Namespace::new(["shared"]).unwrap(),
+        Namespace::default(),
+    ]
+    .into_iter()
+    .enumerate()
     {
         let installed = if ns.is_global() {
             install(&mut c, &recipe, bindings, bindings).unwrap()
@@ -313,9 +359,18 @@ fn installation_binds_one_recipe_to_explicit_ir_owners_without_using_references_
         assert_eq!(c.namespace(helper), Some(&ns));
         assert_eq!(recipe, recipe_before);
     }
-    assert_eq!(c.namespace(left), Some(&Namespace::from("catalog")));
-    assert_eq!(c.namespace(right), Some(&Namespace::from("shipping")));
-    assert_eq!(c.namespace(output), Some(&Namespace::from("reports")));
+    assert_eq!(
+        c.namespace(left),
+        Some(&Namespace::new(["catalog"]).unwrap())
+    );
+    assert_eq!(
+        c.namespace(right),
+        Some(&Namespace::new(["shipping"]).unwrap())
+    );
+    assert_eq!(
+        c.namespace(output),
+        Some(&Namespace::new(["reports"]).unwrap())
+    );
 }
 
 #[test]
@@ -329,7 +384,12 @@ fn legacy_constructors_default_to_global_without_inferring_the_head_namespace() 
     let helper = c.declare_generated_relation();
     let named_helper = c.declare_generated_relation_named("arbitrary").unwrap();
     let external = c
-        .declare_relation_in("other", "r", RelationRole::Derived, [])
+        .declare_relation_in(
+            Namespace::new(["other"]).unwrap(),
+            "r",
+            RelationRole::Derived,
+            [],
+        )
         .unwrap();
     let atom = c.atom(external, []).unwrap();
     let fact = c.add_fact(atom).unwrap();
@@ -348,5 +408,8 @@ fn legacy_constructors_default_to_global_without_inferring_the_head_namespace() 
     ] {
         assert_eq!(c.namespace(id), Some(&global));
     }
-    assert_eq!(c.namespace(external), Some(&Namespace::from("other")));
+    assert_eq!(
+        c.namespace(external),
+        Some(&Namespace::new(["other"]).unwrap())
+    );
 }

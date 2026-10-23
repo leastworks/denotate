@@ -248,6 +248,10 @@
             "named": true
           },
           {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
             "type": "quoted_identifier",
             "named": true
           }
@@ -362,33 +366,89 @@
             "named": true
           },
           {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
             "type": "quoted_identifier",
             "named": true
           }
         ]
-      },
-      "ownership": {
+      }
+    }
+  },
+  {
+    "type": "namespace",
+    "named": true,
+    "fields": {
+      "name": {
         "multiple": false,
-        "required": false,
+        "required": true,
         "types": [
           {
-            "type": "library",
-            "named": false
+            "type": "identifier",
+            "named": true
           },
           {
-            "type": "root",
-            "named": false
+            "type": "qualified_name",
+            "named": true
           },
           {
-            "type": "shared",
-            "named": false
-          },
-          {
-            "type": "user",
-            "named": false
+            "type": "quoted_identifier",
+            "named": true
           }
         ]
       }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "assumption",
+          "named": true
+        },
+        {
+          "type": "constants",
+          "named": true
+        },
+        {
+          "type": "domain",
+          "named": true
+        },
+        {
+          "type": "import",
+          "named": true
+        },
+        {
+          "type": "location_alias",
+          "named": true
+        },
+        {
+          "type": "namespace",
+          "named": true
+        },
+        {
+          "type": "obligation",
+          "named": true
+        },
+        {
+          "type": "relation",
+          "named": true
+        },
+        {
+          "type": "sort",
+          "named": true
+        },
+        {
+          "type": "source_location",
+          "named": true
+        },
+        {
+          "type": "statement",
+          "named": true
+        }
+      ]
     }
   },
   {
@@ -639,7 +699,7 @@
     "fields": {},
     "children": {
       "multiple": true,
-      "required": true,
+      "required": false,
       "types": [
         {
           "type": "assumption",
@@ -663,6 +723,10 @@
         },
         {
           "type": "module",
+          "named": true
+        },
+        {
+          "type": "namespace",
           "named": true
         },
         {
@@ -889,10 +953,6 @@
     "named": true
   },
   {
-    "type": "library",
-    "named": false
-  },
-  {
     "type": "loc",
     "named": false
   },
@@ -902,6 +962,10 @@
   },
   {
     "type": "module",
+    "named": false
+  },
+  {
+    "type": "namespace",
     "named": false
   },
   {
@@ -915,10 +979,6 @@
   {
     "type": "occurrence_position",
     "named": true
-  },
-  {
-    "type": "ownership",
-    "named": false
   },
   {
     "type": "qualified_name",
@@ -937,14 +997,6 @@
     "named": false
   },
   {
-    "type": "root",
-    "named": false
-  },
-  {
-    "type": "shared",
-    "named": false
-  },
-  {
     "type": "sort",
     "named": false
   },
@@ -958,10 +1010,6 @@
   },
   {
     "type": "use",
-    "named": false
-  },
-  {
-    "type": "user",
     "named": false
   },
   {

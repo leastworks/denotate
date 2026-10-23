@@ -1,4 +1,4 @@
-module library ownership library;
+namespace library;
 sort Input;
 sort Slot;
 sort IntegerCase;

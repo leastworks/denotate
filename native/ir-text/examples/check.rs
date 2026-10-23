@@ -1,37 +1,25 @@
-//! Load and check supplied .den modules. The LSP presenter is a later increment.
+//! Load and check a den.root program. The LSP presenter is a later increment.
 use denotate_check::{
     BackendIdentity, Limits, LocalCheckOutcome, OperationalLimits, RequestPreparation,
 };
 use denotate_check_session::Session;
-use denotate_ir_text::{SourceFile, load};
+use denotate_ir_text::{filesystem, load};
 
 fn run() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
-    let root = args.next().ok_or("Usage: check ROOT FILE... [--sat]")?;
-    let mut sources = Vec::new();
+    let root = args
+        .next()
+        .ok_or("Usage: check ROOT_FOLDER_OR_DEN.ROOT [--sat]")?;
     let mut backend = BackendIdentity::bdd();
-    for file in args {
-        if file == "--sat" {
-            backend = BackendIdentity::sat();
-            continue;
+    for option in args {
+        if option != "--sat" {
+            return Err(format!(
+                "Unknown argument {option:?}; usage: check ROOT_FOLDER_OR_DEN.ROOT [--sat]"
+            ));
         }
-        let path = std::fs::canonicalize(&file).map_err(|e| format!("{file}: {e}"))?;
-        let text = std::fs::read_to_string(&path).map_err(|e| format!("{file}: {e}"))?;
-        let escaped = path
-            .to_string_lossy()
-            .as_bytes()
-            .iter()
-            .map(|b| {
-                if b.is_ascii_alphanumeric() || b"/._~-:".contains(b) {
-                    (*b as char).to_string()
-                } else {
-                    format!("%{b:02X}")
-                }
-            })
-            .collect::<String>();
-        sources.push(SourceFile::new(format!("file://{escaped}"), 1, text));
+        backend = BackendIdentity::sat();
     }
-    let p = load(&root, &sources).map_err(|ds| {
+    let format_errors = |ds: Vec<denotate_ir_text::Diagnostic>| {
         ds.iter()
             .map(|d| {
                 format!(
@@ -41,14 +29,17 @@ fn run() -> Result<(), String> {
             })
             .collect::<Vec<_>>()
             .join("\n")
-    })?;
+    };
+    let (membership, sources) =
+        filesystem::discover(std::path::Path::new(&root)).map_err(format_errors)?;
+    let p = load(&membership, &sources).map_err(format_errors)?;
     println!(
-        "Root: {}. Backend: {}. Modules: {}.",
+        "Root: {}. Backend: {}. Files: {}.",
         p.root,
         backend.backend,
-        p.modules.len()
+        p.documents.len()
     );
-    if p.modules.iter().any(|m| !m.location_syntax.is_empty()) {
+    if p.documents.iter().any(|m| !m.location_syntax.is_empty()) {
         println!("Provenance: .den only; embedded DSL origins are not restored yet.");
     }
     println!(

@@ -1,0 +1,149 @@
+//! Disk adapter for commands. The core loader only consumes caller-supplied
+//! membership and snapshots; editor integrations need not use this adapter.
+use crate::{Diagnostic, ProgramMembership, Result, RootInfo, SourceFile};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fs,
+    path::{Path, PathBuf},
+};
+
+fn uri(path: &Path) -> String {
+    let escaped = path
+        .as_os_str()
+        .as_encoded_bytes()
+        .iter()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b"/._~-:".contains(b) {
+                (*b as char).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect::<String>();
+    format!("file://{escaped}")
+}
+fn failure(path: &Path, message: impl ToString) -> Vec<Diagnostic> {
+    vec![Diagnostic {
+        uri: uri(path),
+        range: 0..0,
+        message: message.to_string(),
+    }]
+}
+fn io<T>(path: &Path, result: std::io::Result<T>) -> Result<T> {
+    result.map_err(|e| failure(path, e))
+}
+fn manifest(path: &Path) -> Result<PathBuf> {
+    let path = if path.is_dir() {
+        path.join("den.root")
+    } else {
+        path.to_owned()
+    };
+    if path.file_name().is_none_or(|n| n != "den.root") {
+        return Err(failure(
+            &path,
+            "Expected a den.root manifest or its containing folder",
+        ));
+    }
+    io(&path, fs::canonicalize(&path))
+}
+fn members(folder: &Path, out: &mut BTreeMap<String, PathBuf>) -> Result<()> {
+    let entries = io(folder, fs::read_dir(folder))?;
+    for entry in entries {
+        let entry = io(folder, entry)?;
+        let path = entry.path();
+        let kind = io(&path, entry.file_type())?;
+        // Do not follow directory symlinks: membership follows folder boundaries.
+        if kind.is_dir() {
+            if !path
+                .join("den.root")
+                .try_exists()
+                .map_err(|e| failure(&path, e))?
+            {
+                members(&path, out)?;
+            }
+        } else if path.extension().is_some_and(|e| e == "den") && path.is_file() {
+            let canonical = io(&path, fs::canonicalize(&path))?;
+            out.insert(uri(&canonical), canonical);
+        }
+    }
+    Ok(())
+}
+
+/// Discover the selected root and reachable library roots. Directory traversal
+/// stops at nested `den.root` files. Repeated paths and cycles are canonicalized
+/// and visited once; the returned graph retains every dependency edge.
+pub fn discover(root: &Path) -> Result<(ProgramMembership, Vec<SourceFile>)> {
+    let selected = manifest(root)?;
+    let mut pending = vec![selected.clone()];
+    let mut roots = BTreeMap::new();
+    let mut files = BTreeMap::new();
+    while let Some(path) = pending.pop() {
+        let identity = uri(&path);
+        if roots.contains_key(&identity) {
+            continue;
+        }
+        let text = io(&path, fs::read_to_string(&path))?;
+        let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| failure(&path, e))?;
+        let object = json
+            .as_object()
+            .ok_or_else(|| failure(&path, "den.root must be a JSON object"))?;
+        if object.keys().any(|k| k != "libraries") {
+            return Err(failure(
+                &path,
+                "Unknown den.root field; only libraries is supported",
+            ));
+        }
+        let folder = path.parent().expect("a canonical file has a parent");
+        let mut libraries = BTreeSet::new();
+        if let Some(value) = object.get("libraries") {
+            let values = value.as_array().ok_or_else(|| {
+                failure(
+                    &path,
+                    "libraries must be an array of relative den.root paths",
+                )
+            })?;
+            for value in values {
+                let relative = value
+                    .as_str()
+                    .map(Path::new)
+                    .ok_or_else(|| failure(&path, "A library path must be a string"))?;
+                if relative.is_absolute() || relative.file_name().is_none_or(|n| n != "den.root") {
+                    return Err(failure(
+                        &path,
+                        "A library path must be relative and end in den.root",
+                    ));
+                }
+                let target = manifest(&folder.join(relative))?;
+                libraries.insert(uri(&target));
+                pending.push(target);
+            }
+        }
+        let mut own_files = BTreeMap::new();
+        members(folder, &mut own_files)?;
+        roots.insert(
+            identity,
+            RootInfo {
+                files: own_files.keys().cloned().collect(),
+                libraries,
+            },
+        );
+        files.extend(own_files);
+    }
+    let sources = files
+        .into_iter()
+        .map(|(uri, path)| {
+            Ok(SourceFile::new(
+                uri,
+                1,
+                io(&path, fs::read_to_string(&path))?,
+            ))
+        })
+        .collect::<Result<_>>()?;
+    Ok((
+        ProgramMembership {
+            root: uri(&selected),
+            roots,
+        },
+        sources,
+    ))
+}

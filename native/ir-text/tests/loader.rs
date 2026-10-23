@@ -4,10 +4,16 @@ use denotate_check::{
 };
 use denotate_check_session::Session;
 use denotate_ir::{Literal, Namespace, Term};
-use denotate_ir_text::{ActiveRoot, LoadedProgram, SourceFile, load, roots};
+use denotate_ir_text::{ActiveRoot, LoadedProgram, ProgramMembership, SourceFile, roots};
 
 fn source(name: &str, text: &str) -> SourceFile {
     SourceFile::new(format!("file:///{name}.den"), 1, text.to_owned())
+}
+fn membership(root: &str, documents: &[SourceFile]) -> ProgramMembership {
+    ProgramMembership::single(root, documents.iter().map(|s| s.uri.clone()))
+}
+fn load(root: &str, documents: &[SourceFile]) -> denotate_ir_text::Result<LoadedProgram> {
+    denotate_ir_text::load(&membership(root, documents), documents)
 }
 fn single(text: &str) -> LoadedProgram {
     load("m", &[source("m", text)]).unwrap()
@@ -75,23 +81,23 @@ fn explicit_domains_preserve_worlds_and_unused_declarations() {
 fn imported_assumptions_are_explicit_and_active() {
     let lib = source(
         "lib",
-        "module lib ownership library; sort S; const a,b:S; input p(x:S); assumption one: at_most_one(p, group_by: ());",
+        "module lib; sort S; const a,b:S; input p(x:S); assumption one: at_most_one(p, group_by: ());",
     );
     let root = source(
         "root",
-        "module root ownership root; use lib; obligation unique: at_most_one(lib::p, group_by: ());",
+        "module root; use lib; obligation unique: at_most_one(lib::p, group_by: ());",
     );
     let docs = [root, lib];
     let p = load("root", &docs).unwrap();
     assert_eq!(p.assumptions.len(), 1);
     assert_eq!(p.assumptions[0].name.namespace.as_ref(), "lib");
     assert_eq!(
-        p.modules
+        p.documents
             .iter()
-            .find(|m| m.name == "lib")
+            .find(|m| m.uri == "file:///lib.den")
             .unwrap()
             .ownership,
-        "library"
+        "user"
     );
     for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
         let mut session = Session::default();
@@ -123,18 +129,12 @@ fn whole_export_root_sees_cross_module_conflicts_and_shared_constants() {
     let docs = vec![
         source(
             "lib",
-            "module lib ownership library; sort S; relation r(x:S); obligation unique: at_most_one(r, group_by: ());",
+            "module lib; sort S; relation r(x:S); obligation unique: at_most_one(r, group_by: ());",
         ),
-        source(
-            "shared",
-            "module shared ownership shared; use lib; const a,b:lib::S;",
-        ),
+        source("shared", "module shared; use lib; const a,b:lib::S;"),
         source("a", "module a; use lib; use shared; lib::r(shared::a);"),
         source("b", "module b; use lib; use shared; lib::r(shared::b);"),
-        source(
-            "root",
-            "module root ownership root; use a; use b; use shared;",
-        ),
+        source("root", "module root; use a; use b; use shared;"),
     ];
     let p = load("root", &docs).unwrap();
     assert_eq!(p.corpus.rules().count(), 2);
@@ -142,19 +142,25 @@ fn whole_export_root_sees_cross_module_conflicts_and_shared_constants() {
         // A rule's lexical owner differs from the namespace of its head.
         assert_eq!(
             p.corpus.namespace(rule.id),
-            Some(&Namespace::from(&p.owners[&rule.id.into()]))
+            Some(
+                &Namespace::new([p.owners[&rule.id.into()]
+                    .trim_start_matches("file:///")
+                    .trim_end_matches(".den")])
+                .unwrap()
+            )
         );
         assert_eq!(
             p.corpus.namespace(rule.head.relation()),
-            Some(&Namespace::from("lib"))
+            Some(&Namespace::new(["lib"]).unwrap())
         );
     }
-    assert_eq!(p.modules.len(), 5);
+    assert_eq!(p.documents.len(), 5);
     assert_eq!(
         counterexamples(&check(&p, &mut Session::default(), BackendIdentity::bdd())),
         1
     );
-    let constituent = load("a", &docs).unwrap();
+    let subset = [docs[0].clone(), docs[1].clone(), docs[2].clone()];
+    let constituent = load("a", &subset).unwrap();
     assert_eq!(
         counterexamples(&check(
             &constituent,
@@ -163,15 +169,19 @@ fn whole_export_root_sees_cross_module_conflicts_and_shared_constants() {
         )),
         0
     );
-    let index = roots(&docs).unwrap();
+    let index = roots(&[membership("root", &docs)]).unwrap();
     assert_eq!(index["file:///a.den"], ActiveRoot::Selected("root".into()));
     let mut reordered = docs.clone();
     reordered.reverse();
     assert_eq!(keys(&p), keys(&load("root", &reordered).unwrap()));
     let mut two_roots = docs;
-    two_roots.push(source("second", "module second ownership root; use a;"));
+    two_roots.push(source("second", "module second; use a;"));
     assert_eq!(
-        roots(&two_roots).unwrap()["file:///a.den"],
+        roots(&[
+            membership("root", &reordered),
+            membership("second", &two_roots)
+        ])
+        .unwrap()["file:///a.den"],
         ActiveRoot::NeedsSelection(vec!["root".into(), "second".into()])
     );
 }
@@ -193,7 +203,7 @@ fn cyclic_imports_install_once_and_visibility_stays_direct() {
     assert!(
         load("root", &docs).unwrap_err()[0]
             .message
-            .contains("not directly imported")
+            .contains("Unknown sort")
     );
 }
 
@@ -244,10 +254,16 @@ fn generated_and_quoted_frontend_identity_do_not_alias() {
         ));
         let relations = p.corpus.relations().collect::<Vec<_>>();
         for relation in &relations {
-            assert_eq!(p.corpus.namespace(relation.id), Some(&Namespace::from("m")));
+            assert_eq!(
+                p.corpus.namespace(relation.id),
+                Some(&Namespace::new(["m"]).unwrap())
+            );
         }
         for rule in p.corpus.rules() {
-            assert_eq!(p.corpus.namespace(rule.id), Some(&Namespace::from("m")));
+            assert_eq!(
+                p.corpus.namespace(rule.id),
+                Some(&Namespace::new(["m"]).unwrap())
+            );
         }
         assert_eq!(relations[0].name, relations[1].name);
         assert_ne!(
@@ -302,7 +318,7 @@ fn stable_keys_and_warm_answers_ignore_trivia_and_location_syntax() {
     let b = check(&warm, &mut session, BackendIdentity::bdd());
     assert_eq!(a, b);
     assert!(session.stats().evaluation_hits > 0);
-    assert_eq!(warm.modules[0].location_syntax.len(), 3);
+    assert_eq!(warm.documents[0].location_syntax.len(), 3);
     for (id, origins) in warm.provenance.entries() {
         assert_eq!(origins.len(), 1, "{id:?}");
         assert_eq!(
@@ -373,7 +389,7 @@ fn invalid_programs_return_current_source_diagnostics_without_partial_ir() {
         ("sort S; const 9223372036854775808:S;", "64-bit"),
         ("sort S; const module:S;", "Reserved word"),
         ("relation r(); r( ;", "Expected"),
-        ("use missing;", "Unknown module"),
+        ("use missing;", "Unknown namespace"),
     ] {
         let errors = load("m", &[source("m", &format!("module m; {code}"))]).unwrap_err();
         assert!(
@@ -385,18 +401,29 @@ fn invalid_programs_return_current_source_diagnostics_without_partial_ir() {
 }
 
 #[test]
-fn unrelated_invalid_files_do_not_block_root_and_duplicate_modules_are_rejected() {
+fn unrelated_invalid_files_do_not_block_root_and_namespaces_can_span_files() {
     let docs = [
         source("m", "module m; relation r(); r();"),
         source("bad", "module bad; relation r(;"),
         source("broken", "not even a module"),
     ];
-    assert_eq!(load("m", &docs).unwrap().corpus.rules().count(), 1);
-    let duplicate = source("elsewhere", "module m;");
-    assert!(
-        load("m", &[docs[0].clone(), duplicate]).unwrap_err()[0]
-            .message
-            .contains("Ambiguous module")
+    let selected = membership("root", &docs[..1]);
+    assert_eq!(
+        denotate_ir_text::load(&selected, &docs)
+            .unwrap()
+            .corpus
+            .rules()
+            .count(),
+        1
+    );
+    let reopened = source("elsewhere", "module m; r();");
+    assert_eq!(
+        load("m", &[docs[0].clone(), reopened])
+            .unwrap()
+            .corpus
+            .rules()
+            .count(),
+        2
     );
 }
 
@@ -425,7 +452,7 @@ fn quoted_qualified_references_and_generated_references_decode_without_aliasing(
 #[test]
 fn value_encoding_fixture_checks_and_rule_edits_refresh_answers() {
     let docs = [
-        source("library", include_str!("../fixtures/library.den")),
+        source("library", include_str!("../fixtures/library/library.den")),
         source("mappings", include_str!("../fixtures/mappings.den")),
         source("root", include_str!("../fixtures/root.den")),
     ];
@@ -447,7 +474,7 @@ fn value_encoding_fixture_checks_and_rule_edits_refresh_answers() {
 
 #[test]
 fn declaration_keywords_require_quoting_and_quoted_names_are_usable() {
-    for keyword in ["domain", "obligation", "assumption", "source"] {
+    for keyword in ["domain", "obligation", "assumption", "source", "namespace"] {
         let code = format!("module m; sort S; const a:S; relation {keyword}(x:S);");
         let errors = load("m", &[source("m", &code)]).unwrap_err();
         assert!(
@@ -546,7 +573,7 @@ fn construction_diagnostics_name_sorts_instead_of_arena_handles() {
 
 #[test]
 fn reserved_relation_diagnostic_survives_parser_recovery_contexts() {
-    for keyword in ["domain", "obligation", "assumption", "source"] {
+    for keyword in ["domain", "obligation", "assumption", "source", "namespace"] {
         for parameters in ["", "x:S", "x:S,y:S"] {
             for suffix in [
                 "",
@@ -574,5 +601,321 @@ fn reserved_relation_diagnostic_survives_parser_recovery_contexts() {
                 );
             }
         }
+    }
+}
+
+#[test]
+fn hierarchical_namespaces_reopen_across_files_and_keep_exact_origins() {
+    let docs = [
+        source(
+            "one",
+            "namespace billing { sort S; const a:S; namespace invoices { relation r(x:S); } }",
+        ),
+        source(
+            "two",
+            "namespace billing::invoices; r(a); relation $condition_1(); $condition_1();",
+        ),
+        source(
+            "three",
+            "namespace reports { billing::invoices::r(billing::a) :- billing::invoices::$condition_1(); }",
+        ),
+    ];
+    let p = load("root", &docs).unwrap();
+    let rules = p.corpus.rules().collect::<Vec<_>>();
+    assert_eq!(rules.len(), 3);
+    for rule in &rules {
+        let uri = &p.owners[&rule.id.into()];
+        let expected = if uri.ends_with("three.den") {
+            vec!["reports"]
+        } else {
+            vec!["billing", "invoices"]
+        };
+        assert_eq!(
+            p.corpus.namespace(rule.id),
+            Some(&Namespace::new(expected).unwrap())
+        );
+        let span = p.provenance.origins(rule.id)[0].span;
+        assert_eq!(&p.sources.snapshot(span.snapshot()).unwrap().uri, uri);
+        assert!(p.sources.text(span).unwrap().ends_with(';'));
+    }
+    let helper = p
+        .corpus
+        .relations()
+        .find(|r| p.corpus.is_generated_relation(r.id))
+        .unwrap();
+    assert_eq!(
+        p.corpus.namespace(helper.id),
+        Some(&Namespace::new(["billing", "invoices"]).unwrap())
+    );
+}
+
+#[test]
+fn quoted_namespace_segments_are_not_nested_paths() {
+    let p = single(
+        "namespace a::b { relation r(); r(); } namespace 'a::b' { relation r(); r(); } namespace 'a\\'::b'::'3' { relation r(); r(); } namespace caller { a::b::r(); 'a::b'::r(); 'a\\'::b'::'3'::r(); }",
+    );
+    let namespaces = p
+        .corpus
+        .relations()
+        .map(|r| p.corpus.namespace(r.id).unwrap().clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        namespaces,
+        vec![
+            Namespace::new(["a", "b"]).unwrap(),
+            Namespace::new(["a::b"]).unwrap(),
+            Namespace::new(["a'::b", "3"]).unwrap()
+        ]
+    );
+    assert_eq!(p.corpus.rules().count(), 6);
+    assert_eq!(p.keys.bindings().entries().count(), keys(&p).len());
+}
+
+#[test]
+fn visibility_is_lexical_includes_ancestors_and_deduplicates_paths() {
+    let p = single(
+        "namespace library { relation p(); } namespace a { use library; sort S; const x:S; namespace b { use library; use a; relation r(x:S); r(x) :- p(); } } namespace c { library::p(); }",
+    );
+    assert_eq!(p.corpus.rules().count(), 2);
+    for (code, expected) in [
+        (
+            "namespace lib { relation p(); } namespace a { use lib; } namespace b { p(); }",
+            "Unknown relation",
+        ),
+        (
+            "namespace lib { relation p(); } namespace a { use lib; } namespace b { use a; p(); }",
+            "Unknown relation",
+        ),
+        (
+            "namespace a { namespace b { relation p(); } } namespace c { use a; p(); }",
+            "Unknown relation",
+        ),
+        (
+            "relation p(); namespace a { relation p(); p(); }",
+            "Ambiguous relation",
+        ),
+        (
+            "namespace a { relation p(); namespace b { relation p(); p(); } }",
+            "Ambiguous relation",
+        ),
+        (
+            "namespace a { relation p(); } namespace b { relation p(); } namespace c { use a; use b; p(); }",
+            "Ambiguous relation",
+        ),
+        ("namespace a::b; use missing;", "Unknown namespace"),
+    ] {
+        let errors = load("root", &[source("case", code)]).unwrap_err();
+        assert!(errors[0].message.contains(expected), "{code}: {errors:?}");
+    }
+    let global = single("relation p(); namespace a { relation p(); ::p(); a::p(); }");
+    let rules = global.corpus.rules().collect::<Vec<_>>();
+    assert_ne!(rules[0].head.relation(), rules[1].head.relation());
+}
+
+#[test]
+fn imports_are_file_local_and_do_not_supply_membership() {
+    let docs = [
+        source("a", "namespace shared; use lib; relation r(); r() :- p();"),
+        source("b", "namespace shared; r() :- p();"),
+        source("library", "namespace lib; relation p();"),
+    ];
+    assert!(
+        load("root", &docs).unwrap_err()[0]
+            .message
+            .contains("Unknown relation")
+    );
+    let only_a = membership("root", &docs[..1]);
+    assert!(
+        denotate_ir_text::load(&only_a, &docs).unwrap_err()[0]
+            .message
+            .contains("Unknown namespace")
+    );
+    let valid = [
+        docs[0].clone(),
+        source("b", "namespace shared; r() :- lib::p();"),
+        docs[2].clone(),
+    ];
+    assert_eq!(load("root", &valid).unwrap().corpus.rules().count(), 2);
+}
+
+#[test]
+fn constant_keys_encode_namespaces_without_debug_text_or_separator_collisions() {
+    let p = single(
+        "sort S; const 'a::b::same':S; namespace a::b { const same:S; } namespace 'a::b' { const same:S; } namespace a { const 'b::same':S; }",
+    );
+    let names = p
+        .corpus
+        .constants()
+        .map(|c| p.keys.constant(c.id).unwrap().name.as_ref())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(
+        names,
+        std::collections::BTreeSet::from([
+            r#"["","a::b::same"]"#,
+            r#"["a::b","same"]"#,
+            r#"["'a::b'","same"]"#,
+            r#"["a","b::same"]"#,
+        ])
+    );
+}
+
+#[test]
+fn document_namespaces_omit_empty_implicit_scopes_and_retain_authored_ones() {
+    for (code, paths) in [
+        ("namespace a;", vec![vec!["a"]]),
+        ("use lib; namespace a::b; sort S;", vec![vec!["a", "b"]]),
+        ("module a; relation p(); p();", vec![vec!["a"]]),
+        (
+            "namespace a { namespace b {} } // trailing comment }",
+            vec![vec!["a"], vec!["a", "b"]],
+        ),
+        ("sort S; namespace a {}", vec![vec![], vec!["a"]]),
+        ("sort S;", vec![vec![]]),
+        ("use lib;", vec![]),
+        ("// empty document", vec![]),
+        ("namespace 'a{' // not a block\n;", vec![vec!["a{"]]),
+    ] {
+        let p = load(
+            "root",
+            &[source("main", code), source("library", "namespace lib;")],
+        )
+        .unwrap();
+        let document = p
+            .documents
+            .iter()
+            .find(|d| d.uri == "file:///main.den")
+            .unwrap();
+        let expected = paths
+            .into_iter()
+            .map(|p| Namespace::new(p).unwrap())
+            .collect();
+        assert_eq!(document.namespaces, expected, "{code}");
+    }
+    let p = single("namespace 'ends}' { relation p(); p(); } // }");
+    assert_eq!(
+        p.corpus.namespace(p.corpus.rules().next().unwrap().id),
+        Some(&Namespace::new(["ends}"]).unwrap())
+    );
+}
+
+#[test]
+fn file_scoped_namespaces_allow_only_imports_before_the_header_and_aliases_agree() {
+    for header in ["namespace a::b;", "module a::b;"] {
+        let code = format!(
+            "\u{feff}// leading comment\nuse lib; // before header\n{header}\nrelation local(x:S); local(a);"
+        );
+        let file = load(
+            "root",
+            &[
+                source("main", &code),
+                source("library", "namespace lib; sort S; const a:S;"),
+            ],
+        )
+        .unwrap();
+        let rule = file.corpus.rules().next().unwrap();
+        assert_eq!(
+            file.corpus.namespace(rule.id),
+            Some(&Namespace::new(["a", "b"]).unwrap())
+        );
+        for prefix in [
+            "sort S;",
+            "const a:S;",
+            "relation p();",
+            "input p();",
+            "p();",
+            "domain S=[];",
+            "obligation w: at_most_one(p, group_by: ());",
+            "assumption w: at_most_one(p, group_by: ());",
+            "source #s = \"file:///source\" view \"dsl\" hash \"pending\";",
+            "#origin = loc(range(#s,1,1,1,2));",
+        ] {
+            let code = format!("use lib; {prefix} // before header\n{header} relation local();");
+            // The shared grammar rejects it too, so B reports a syntax error.
+            assert!(
+                denotate_ir_text::parser()
+                    .parse(&code, None)
+                    .unwrap()
+                    .root_node()
+                    .has_error(),
+                "{code}"
+            );
+            assert!(load("root", &[source("main", &code)]).is_err(), "{code}");
+        }
+    }
+    let modern = single("namespace a::b; relation p(); p();");
+    let legacy = single("module a::b; relation p(); p();");
+    assert_eq!(keys(&modern), keys(&legacy));
+    for code in [
+        "namespace a; namespace b;",
+        "namespace a; namespace b {}",
+        "namespace a {} namespace b;",
+        "namespace a { namespace b; }",
+        "module a; namespace b {}",
+        "module a ownership user;",
+        "namespace a::1;",
+        "namespace a::$helper;",
+        "namespace ::a;",
+    ] {
+        assert!(load("root", &[source("case", code)]).is_err(), "{code}");
+    }
+}
+
+#[test]
+fn moving_constructs_between_files_preserves_resolved_keys_and_warm_answers() {
+    let before = [
+        source("a", "namespace lib; sort S; const a,b:S; input p(x:S);"),
+        source(
+            "b",
+            "namespace n; use lib; relation r(x:S); r(X) :- p(X); r(X) :- p(X); obligation unique: at_most_one(r, group_by: ());",
+        ),
+    ];
+    let after = [
+        source(
+            "x",
+            "namespace lib { sort S; const a,b:S; input p(x:S); } namespace n { relation r(x:lib::S); r(X) :- lib::p(X); }",
+        ),
+        source(
+            "y",
+            "namespace n; r(X) :- lib::p(X); obligation unique: at_most_one(n::r, group_by: ());",
+        ),
+    ];
+    let original = load("root", &before).unwrap();
+    let moved = load("root", &after).unwrap();
+    assert_eq!(keys(&original), keys(&moved));
+    assert_eq!(moved.corpus.rules().count(), 2);
+    assert_ne!(
+        moved.corpus.rules().next().unwrap().id,
+        moved.corpus.rules().last().unwrap().id
+    );
+    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+        let mut session = Session::default();
+        let first = check(&original, &mut session, backend.clone());
+        let warm = check(&moved, &mut session, backend.clone());
+        assert_eq!(first.value, warm.value);
+        assert_eq!(warm, check(&moved, &mut Session::default(), backend));
+    }
+}
+
+#[test]
+fn duplicate_declarations_and_contracts_are_checked_across_a_namespace() {
+    for declaration in [
+        "sort S;",
+        "const a:shared::S;",
+        "relation r();",
+        "relation $helper();",
+        "assumption w: at_most_one(shared::p, group_by: ());",
+        "obligation w: at_most_one(shared::p, group_by: ());",
+    ] {
+        let docs = [
+            source("types", "namespace shared; sort S; input p();"),
+            source("a", &format!("namespace shared; {declaration}")),
+            source("b", &format!("namespace shared; {declaration}")),
+        ];
+        assert!(
+            load("root", &docs).unwrap_err()[0]
+                .message
+                .contains("Duplicate"),
+            "{declaration}"
+        );
     }
 }
