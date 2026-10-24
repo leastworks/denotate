@@ -100,28 +100,11 @@ pub fn present_rewrites(
     use crate::presentation::PresentationError;
     let view = SourceView::try_from(view)?;
     lowered.attribution.validate(&lowered.corpus, sources)?;
-    let mut grouped = BTreeMap::<_, Vec<_>>::new();
-    for proof in program.rewrite_proofs() {
-        let rule = proof.candidate.rule.source;
-        let literal = match proof.kind {
-            RewriteKind::RedundantProducer => None,
-            RewriteKind::Discharge { literal_occurrence } => {
-                // Prefer whole-rule warnings if a later batch removed this instance.
-                if !program.rules().any(|r| r.id == proof.candidate.rule.id) {
-                    continue;
-                }
-                Some(literal_occurrence)
-            }
-        };
-        grouped.entry((rule, literal)).or_default().push(proof);
-    }
     let mut result = Vec::new();
-    for ((rule, literal), proofs) in grouped {
-        if lowered.corpus.rule(rule).is_none() {
-            return Err(PresentationError::InvalidFinding(
-                "rewrite belongs to another corpus",
-            ));
-        }
+    for warning in denotate_presentation::rewrites(&lowered.corpus, program)? {
+        let rule = warning.rule;
+        let literal = warning.literal;
+        let proofs = &warning.proofs;
         // The DSL coverage warning already explains this whole statement.
         // Keep the checker's proof in the report, without publishing it twice.
         if view == SourceView::TestDsl
@@ -156,26 +139,25 @@ pub fn present_rewrites(
                 )
             })
             .collect();
-        let all_justified = program
-            .original_rules()
-            .filter(|r| r.source == rule)
-            .all(|r| proofs.iter().any(|p| p.candidate.rule.id == r.id));
+        let all_justified = warning.covers_all_instances;
         let edit = literal.and_then(|literal| {
             let edit = lowered.attribution.rewrites.removals.get(&literal)?;
             (all_justified && sources.snapshot(edit.span.snapshot()).ok()?.view == view.as_str())
                 .then(|| edit.clone())
         });
         result.push(RewriteWarning {
-            owner, rule, literal, proofs: proofs.iter().map(|p| p.id).collect(), primary, related, edit,
+            owner,
+            rule,
+            literal,
+            proofs: proofs.iter().map(|p| p.id).collect(),
+            primary,
+            related,
+            edit,
             covers_all_instances: all_justified,
-            message: if !all_justified {
-                "This condition or definition is redundant in some checked cases, but not all its uses are justified for removal.".into()
-            } else if let Some(message) = value_exclusion_message(lowered, &proofs) {
-                message
-            } else if literal.is_some() {
-                "This negated condition is redundant: whenever its settled guard holds, the excluded condition cannot hold.".into()
+            message: if all_justified {
+                value_exclusion_message(lowered, proofs).unwrap_or_else(|| warning.message.into())
             } else {
-                "This definition adds no result: other definitions already cover every case where it could apply.".into()
+                warning.message.into()
             },
         });
     }

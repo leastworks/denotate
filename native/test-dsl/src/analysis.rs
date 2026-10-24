@@ -195,10 +195,7 @@ impl Program {
                 "Diagnostic refers to a different source snapshot.".into(),
             ));
         }
-        self.sources
-            .text(span)
-            .map_err(|e| Failure::Creator(e.to_string()))?;
-        Ok(Location::new(self.uri.clone(), range(&self.document, span)))
+        denotate_editor::presentation::location(&self.sources, span).map_err(Failure::Creator)
     }
 
     /// Global compatibility oracle. The editor uses `check_cached`.
@@ -306,9 +303,9 @@ impl Program {
             }
         };
         limits.cancellation.check()?;
-        let findings = presentation::present(
+        let findings = presentation::present_checked(
             &self.lowered,
-            &report.verification,
+            &report,
             &self.sources,
             SourceView::TestDsl.as_str(),
         )
@@ -350,6 +347,13 @@ impl Program {
                 message,
                 severity,
             );
+            d.data = Some(serde_json::json!({
+                "program":self.uri.as_str(),
+                "finding":finding.identity.data(&self.lowered.keys).map_err(|e|Failure::Creator(e.to_string()))?,
+                "kind":finding.kind.semantic_kind().code(),
+                "evidence":finding.evidence,
+                "fallback":false,
+            }));
             d.related_information = Some(
                 finding
                     .related

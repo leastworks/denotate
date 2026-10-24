@@ -175,16 +175,4 @@ impl Attribution {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RelatedLocation {
-    pub span: SourceSpan,
-    pub label: String,
-}
-impl RelatedLocation {
-    pub fn new(span: SourceSpan, label: impl Into<String>) -> Self {
-        Self {
-            span,
-            label: label.into(),
-        }
-    }
-}
+pub use denotate_presentation::RelatedLocation;

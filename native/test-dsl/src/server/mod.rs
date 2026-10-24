@@ -380,6 +380,7 @@ impl Server {
             self.hooks
                 .finished
                 .push(json!({"snapshot": identity(&id), "status": status, "check_ns": check_ns, "key_computation_ns": result.as_ref().ok().map(|o| o.key_computation.as_nanos()),
+                    "summary": result.as_ref().ok().map(|o|denotate_presentation::summary(&o.results.value)),
                     "plans": result.as_ref().ok().and_then(|o| o.plans).map(|p| json!({"executed":p.executed,"reused":p.reused,"fallback":p.fallback,"retained_entries":p.retained_entries,"retained_bytes":p.retained_bytes})),
                     "cache": result.as_ref().ok().and_then(|o| o.cache).map(|c| json!({"evaluation_hits":c.evaluation_hits,"evaluation_misses":c.evaluation_misses,"verdict_hits":c.verdict_hits,"verdict_misses":c.verdict_misses,"completion_hits":c.completion_hits,"completion_misses":c.completion_misses,"retained_entries":c.retained_entries})),
                     "local_evaluation_ns": result.as_ref().ok().and_then(|o| o.local_metrics.as_ref()).map(|m| m.evaluation.as_nanos()),

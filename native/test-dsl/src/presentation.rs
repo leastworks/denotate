@@ -1,6 +1,5 @@
-//! InputMapping wording and source-view selection. The checker knows neither
-//! this vocabulary nor the source-selection policy; a different DSL supplies its own
-//! presenter. Missing attribution is a creator failure, never a user error.
+//! InputMapping wording, guards and source-view selection over shared checked
+//! findings. Missing attribution is a creator failure, never a user error.
 
 use crate::{
     attribution::{AttributionError, RelatedLocation, SourceView},
@@ -21,23 +20,26 @@ pub enum DiagnosticKind {
     UnsupportedGroup,
     Inconclusive,
 }
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DiagnosticSeverity {
-    Error,
-    Warning,
-    Information,
-}
+pub use denotate_presentation::Severity as DiagnosticSeverity;
 impl DiagnosticKind {
-    pub fn severity(self) -> DiagnosticSeverity {
+    pub fn semantic_kind(self) -> denotate_presentation::Kind {
+        use denotate_presentation::Kind;
         match self {
-            Self::OverlappingMappings | Self::NoMeaning => DiagnosticSeverity::Error,
-            Self::UnsupportedCycle => DiagnosticSeverity::Warning,
-            Self::UnsupportedGroup | Self::Inconclusive => DiagnosticSeverity::Information,
+            Self::OverlappingMappings => Kind::Counterexample,
+            Self::UnsupportedCycle => Kind::UnsupportedRegion,
+            Self::NoMeaning => Kind::NoMeaning,
+            Self::UnsupportedGroup => Kind::UnsupportedGroup,
+            Self::Inconclusive => Kind::Inconclusive,
         }
+    }
+    pub fn severity(self) -> DiagnosticSeverity {
+        self.semantic_kind().severity()
     }
 }
 #[derive(Debug)]
 pub struct Diagnostic {
+    pub identity: denotate_presentation::Identity,
+    pub evidence: serde_json::Value,
     pub kind: DiagnosticKind,
     pub message: String,
     pub primary: SourceSpan,
@@ -50,6 +52,7 @@ pub struct Diagnostic {
 
 #[derive(Debug)]
 pub enum PresentationError {
+    Shared(denotate_presentation::Error),
     Provenance(ProvenanceError),
     Attribution(AttributionError),
     MissingOrigin {
@@ -57,6 +60,15 @@ pub enum PresentationError {
         view: SourceView,
     },
     InvalidFinding(&'static str),
+}
+impl From<denotate_presentation::Error> for PresentationError {
+    fn from(error: denotate_presentation::Error) -> Self {
+        match error {
+            denotate_presentation::Error::InvalidFinding(message) => Self::InvalidFinding(message),
+            denotate_presentation::Error::Provenance(error) => Self::Provenance(error),
+            other => Self::Shared(other),
+        }
+    }
 }
 impl From<AttributionError> for PresentationError {
     fn from(error: AttributionError) -> Self {
@@ -85,6 +97,35 @@ pub fn present(
     sources: &Sources,
     view: &str,
 ) -> Result<Vec<Diagnostic>> {
+    present_using(lowered, report, sources, view, None)
+}
+/// Editor entry point adds backend-specific explanations from checked results.
+pub fn present_checked(
+    lowered: &LoweredProgram,
+    report: &CheckedReport<'_>,
+    sources: &Sources,
+    view: &str,
+) -> Result<Vec<Diagnostic>> {
+    present_using(
+        lowered,
+        &report.verification,
+        sources,
+        view,
+        Some(&report.results.value),
+    )
+}
+fn present_using(
+    lowered: &LoweredProgram,
+    report: &Verification<'_>,
+    sources: &Sources,
+    view: &str,
+    results: Option<&ScopedResults>,
+) -> Result<Vec<Diagnostic>> {
+    let shared = denotate_presentation::interpret(
+        &lowered.corpus,
+        report,
+        results.map(|r| (&lowered.keys, r)),
+    )?;
     let view = SourceView::try_from(view)?;
     lowered.attribution.validate(&lowered.corpus, sources)?;
     let origins = |id: OccurrenceId| -> Result<Vec<RelatedLocation>> {
@@ -122,10 +163,15 @@ pub fn present(
             .ok_or(PresentationError::InvalidFinding("unknown constant"))
     };
     let mut diagnostics = Vec::new();
-    for group in &report.groups {
-        if matches!(group.outcome, VerifiedOutcome::Proved) {
+    for finding in &shared {
+        let denotate_presentation::Evidence::Group(group) = finding.evidence else {
             continue;
-        }
+        };
+        let evidence = if results.is_some() {
+            denotate_presentation::evidence_data(finding, &lowered.keys)?
+        } else {
+            serde_json::Value::Null
+        };
         if group.group.obligation != lowered.library.unique_input || group.group.key.len() != 1 {
             return Err(PresentationError::InvalidFinding(
                 "unexpected InputMapping obligation",
@@ -172,7 +218,6 @@ pub fn present(
                 ));
             }
             let mut related = Vec::new();
-            let mut cycle_rules = BTreeSet::new();
             let mut has_no_meaning = false;
             for component in &group.cone.blocked_by {
                 let region = report
@@ -194,7 +239,6 @@ pub fn present(
                         },
                     )
                 }));
-                cycle_rules.extend(region.rules.iter().map(|r| r.source));
             }
             let cause = if has_no_meaning {
                 "a region with a no-consistent-result finding"
@@ -213,25 +257,33 @@ pub fn present(
                     name(slot)?
                 );
             }
-            let kind = if let VerifiedOutcome::Inconclusive(cause) = group.outcome {
+            if let VerifiedOutcome::Inconclusive(cause) = group.outcome {
                 message = format!(
                     "Overlap check for slot {} is inconclusive: {} exhausted its {} budget.",
                     name(slot)?,
                     cause.phase,
                     cause.resource
                 );
+            }
+            let kind = if finding.kind == denotate_presentation::Kind::Inconclusive {
                 DiagnosticKind::Inconclusive
             } else {
                 DiagnosticKind::UnsupportedGroup
             };
             for primary in targets {
                 diagnostics.push(Diagnostic {
+                    identity: finding.identity.clone(),
+                    evidence: evidence.clone(),
                     kind,
                     message: message.clone(),
                     primary,
                     related: unique_locations(related.iter().cloned()),
-                    notes: vec!["No proof or counterexample is available for this slot.".into()],
-                    cycle_rules: cycle_rules.iter().copied().collect(),
+                    notes: finding
+                        .notes
+                        .iter()
+                        .map(|n| n.replace("for this group.", "for this slot."))
+                        .collect(),
+                    cycle_rules: finding.cycle_rules.clone(),
                 });
             }
             continue;
@@ -307,18 +359,9 @@ pub fn present(
                     .join("; ")
             ));
         }
-        let mut notes = vec![match example.replay_scope {
-            ReplayScope::WholeProgram if !report.whole_program_admitted() => "Counterexample replayed on the whole program for this observation only; whole-program admissibility across all inputs remains incomplete.".into(),
-            ReplayScope::WholeProgram => "Counterexample replayed on the whole program.".into(),
-            ReplayScope::ConeOnly => "Counterexample replayed on this obligation's dependency cone only; whole-program admissibility is incomplete.".into(),
-        }];
+        let mut notes = finding.notes.clone();
         if lowered.has_value_tests() {
-            notes.push(observation_note(lowered, &example.observation)?);
-        }
-        match &example.certification {
-            Some(CertificationOutcome::NotCertified) => notes.push("Whole-program replay was not certified for the attempted observations. Failure to certify alone is not proof of no meaning.".into()),
-            Some(CertificationOutcome::Inconclusive(cause)) => notes.push(format!("Whole-program replay certification is inconclusive: {} exhausted its {} budget. The cone counterexample is unchanged.", cause.phase, cause.resource)),
-            _ => {}
+            notes.insert(1, observation_note(lowered, &example.observation)?);
         }
         for component in &example.confined_to_no_meaning {
             let region = report
@@ -337,14 +380,10 @@ pub fn present(
                 }),
             );
         }
-        if !example.confined_to_no_meaning.is_empty() {
-            notes.push("This conflict only occurs in observations where the rules at the related no-meaning locations have no consistent result. It remains a cone-only conflict, not a whole-program execution.".into());
-        }
-        notes.push(
-            "Locations follow the retained grounded derivation for each conflicting tuple.".into(),
-        );
         for primary in targets {
             diagnostics.push(Diagnostic {
+                identity: finding.identity.clone(),
+                evidence: evidence.clone(),
                 kind: DiagnosticKind::OverlappingMappings,
                 primary,
                 message: message.clone(),
@@ -354,7 +393,15 @@ pub fn present(
             });
         }
     }
-    for region in &report.unresolved {
+    for finding in &shared {
+        let denotate_presentation::Evidence::Region(region) = finding.evidence else {
+            continue;
+        };
+        let evidence = if results.is_some() {
+            denotate_presentation::evidence_data(finding, &lowered.keys)?
+        } else {
+            serde_json::Value::Null
+        };
         let (targets, mut related) =
             cycle_locations(lowered, report.program(), region, &origins, view)?;
         let masks = mask_cycle(lowered, region, view);
@@ -384,54 +431,67 @@ pub fn present(
                 slots.join(" and ")
             )),
         };
-        let mut rules = region
-            .rules
-            .iter()
-            .map(|r| r.source)
-            .collect::<BTreeSet<_>>();
-        let mut notes = vec!["This is not a proof that the program has no meaning. Independent obligation results remain available.".into()];
-        let (kind, message) = match &region.completion {
-            CompletionOutcome::NoMeaning(finding) => {
-                rules = finding.rules.iter().map(|r|r.source).collect();
-                for rule in &finding.rules { related.extend(origins(rule.source.into())?); }
-                notes = vec![
-                    observation_note(lowered, &finding.observation)?,
-                    "Other observations remain unsupported unless separately certified; a consistent equation solution does not establish meaning.".into(),
-                    "Independent obligation results remain available.".into(),
-                ];
-                let message = no_meaning_message(lowered, report.program(), &finding.bad_input, mask_dependency.as_deref())?;
-                (DiagnosticKind::NoMeaning, message)
+        let mut notes = finding.notes.clone();
+        let kind = match finding.kind {
+            denotate_presentation::Kind::NoMeaning => DiagnosticKind::NoMeaning,
+            denotate_presentation::Kind::Inconclusive => DiagnosticKind::Inconclusive,
+            denotate_presentation::Kind::UnsupportedRegion => DiagnosticKind::UnsupportedCycle,
+            _ => {
+                return Err(PresentationError::InvalidFinding(
+                    "unexpected region classification",
+                ));
             }
-            CompletionOutcome::Inconclusive(cause) => (DiagnosticKind::Inconclusive, format!("Consistency checking for this dependency cycle is inconclusive: {} exhausted its {} budget.",cause.phase,cause.resource)),
+        };
+        let message = match &region.completion {
+            CompletionOutcome::NoMeaning(failure) => {
+                for rule in &failure.rules {
+                    related.extend(origins(rule.source.into())?);
+                }
+                notes.insert(0, observation_note(lowered, &failure.observation)?);
+                no_meaning_message(
+                    lowered,
+                    report.program(),
+                    &failure.bad_input,
+                    mask_dependency.as_deref(),
+                )?
+            }
             CompletionOutcome::Deferred { blocked_by } => {
                 for id in blocked_by {
-                    if let Some(upstream) = report.unresolved.iter().find(|r|r.component==*id) {
-                        let (locations, _) = cycle_locations(lowered, report.program(), upstream, &origins, view)?;
-                        related.extend(locations.into_iter().map(|span| RelatedLocation::new(span,
-                            if matches!(upstream.completion,CompletionOutcome::NoMeaning(_)) { "upstream no-meaning finding" }
-                            else { "unsettled upstream component" })));
+                    if let Some(upstream) = report.unresolved.iter().find(|r| r.component == *id) {
+                        let (locations, _) =
+                            cycle_locations(lowered, report.program(), upstream, &origins, view)?;
+                        related.extend(locations.into_iter().map(|span| {
+                            RelatedLocation::new(
+                                span,
+                                if matches!(upstream.completion, CompletionOutcome::NoMeaning(_)) {
+                                    "upstream no-meaning finding"
+                                } else {
+                                    "unsettled upstream component"
+                                },
+                            )
+                        }));
                     }
                 }
-                (DiagnosticKind::UnsupportedCycle, "Consistency checking for this cycle was deferred: an upstream component is not settled. See related locations.".into())
+                finding.message.clone()
             }
-            CompletionOutcome::NoContradiction => match region.outcome {
-                RegionOutcome::Unsupported => (DiagnosticKind::UnsupportedCycle, mask_dependency.as_ref().map(|d| format!("{d}. The checker could not establish a single result.")).unwrap_or_else(|| "This dependency cycle contains negation and is unsupported by the current checker. Its equations have a solution for every input observation, but that does not establish meaning.".into())),
-                RegionOutcome::Inconclusive(cause) => (DiagnosticKind::Inconclusive, format!("Admission of this dependency cycle is inconclusive: {} exhausted its {} budget.", cause.phase, cause.resource)),
-            },
+            CompletionOutcome::NoContradiction if kind == DiagnosticKind::UnsupportedCycle => {
+                mask_dependency
+                    .as_ref()
+                    .map(|d| format!("{d}. The checker could not establish a single result."))
+                    .unwrap_or_else(|| finding.message.clone())
+            }
+            _ => finding.message.clone(),
         };
-        if kind == DiagnosticKind::NoMeaning {
-            if let RegionOutcome::Inconclusive(cause) = region.outcome {
-                notes.push(format!("Admission remains inconclusive: {} exhausted its {} budget. The separate consistency check established this failure.",cause.phase,cause.resource));
-            }
-        }
         for primary in targets {
             diagnostics.push(Diagnostic {
+                identity: finding.identity.clone(),
+                evidence: evidence.clone(),
                 kind,
                 message: message.clone(),
                 primary,
                 related: unique_locations(related.iter().filter(|o| o.span != primary).cloned()),
                 notes: notes.clone(),
-                cycle_rules: rules.iter().copied().collect(),
+                cycle_rules: finding.cycle_rules.clone(),
             });
         }
     }

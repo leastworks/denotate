@@ -275,6 +275,9 @@ fn gate(id: &str, program: LoweredProgram, sources: Sources) {
         .iter()
         .map(|a| a.constraint.clone())
         .collect::<Vec<_>>();
+    if !id.starts_with("api/") && !id.starts_with("multi-file/") {
+        presentation_gate(id, &program, &sources, &loaded, &left, &right);
+    }
     let mut previous: Option<Outcomes> = None;
     for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
         let mut direct_session = Session::default();
@@ -423,6 +426,8 @@ fn named_128_program_gate() {
             )],
         ));
     }
+    // Named parser-backed single-file parity catalog. Never filter failures.
+    assert_eq!(cases.len(), 119);
     cases.push((
         "multi-file/overlap".into(),
         vec![
@@ -711,4 +716,166 @@ fn unambiguous_witness_keeps_exact_primary_and_related_generic_origins() {
             assert_eq!(actual, expected);
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum FindingIdentity {
+    Group(usize, Vec<usize>),
+    Region(Vec<AtomIdentity>),
+}
+fn finding_identity(
+    index: &Index,
+    keys: &SemanticKeys,
+    id: &denotate_presentation::Identity,
+) -> FindingIdentity {
+    use denotate_presentation::Identity;
+    match id {
+        Identity::Group { obligation, tuple } => FindingIdentity::Group(
+            index.obligations[keys.obligation(*obligation).unwrap()],
+            tuple
+                .iter()
+                .map(|c| index.constants[keys.constant(*c).unwrap()])
+                .collect(),
+        ),
+        Identity::Region(atoms) => {
+            let mut atoms = atoms
+                .iter()
+                .map(|a| index.atom(&AtomKey::from_atom(keys, a).unwrap()))
+                .collect::<Vec<_>>();
+            atoms.sort();
+            FindingIdentity::Region(atoms)
+        }
+        Identity::Rewrite { .. } => {
+            panic!("rewrite is tested separately from semantic finding parity")
+        }
+    }
+}
+/// Presenter boundary gate; actual B publications await stage 4. No wording or
+/// diagnostic-count comparison: each frontend may highlight several occurrences.
+fn presentation_gate(
+    id: &str,
+    p: &LoweredProgram,
+    sources: &Sources,
+    q: &LoadedProgram,
+    left: &Index,
+    right: &Index,
+) {
+    use denotate_presentation::Kind;
+    use denotate_test_dsl::presentation as dsl;
+    let limits = Limits::default();
+    let ops = OperationalLimits::from(&limits);
+    let domains = p.domains();
+    let w = export::assumptions(p)
+        .into_iter()
+        .map(|a| a.constraint)
+        .collect::<Vec<_>>();
+    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+        let mut direct_session = Session::default();
+        let mut text_session = Session::default();
+        let mut previous = None;
+        for _ in 0..2 {
+            let mut request =
+                CheckRequest::all_obligations(&p.corpus, &p.keys, &domains, &w, &limits).unwrap();
+            request.backend = backend.clone();
+            let RequestPreparation::Complete(prepared) = direct_session
+                .prepare(&request, &p.corpus, &p.keys, &ops)
+                .unwrap()
+            else {
+                panic!("{id}: direct preparation incomplete")
+            };
+            let prepared = prepared.admit(&ops).unwrap();
+            let LocalCheckOutcome::Complete(direct) =
+                direct_session.verify(&prepared, &ops).unwrap()
+            else {
+                panic!("{id}: direct checking incomplete")
+            };
+            let findings = dsl::present_checked(p, &direct.checked, sources, "test-dsl")
+                .unwrap_or_else(|e| panic!("{id}: {e}"));
+            let direct_set = findings
+                .iter()
+                .map(|f| {
+                    (
+                        f.kind.semantic_kind(),
+                        finding_identity(left, &p.keys, &f.identity),
+                    )
+                })
+                .collect::<BTreeSet<_>>();
+            let request = q.request(&limits, backend.clone()).unwrap();
+            let RequestPreparation::Complete(prepared) = text_session
+                .prepare(&request, &q.corpus, &q.keys, &ops)
+                .unwrap()
+            else {
+                panic!("{id}: text preparation incomplete")
+            };
+            let prepared = prepared.admit(&ops).unwrap();
+            let LocalCheckOutcome::Complete(text) = text_session.verify(&prepared, &ops).unwrap()
+            else {
+                panic!("{id}: text checking incomplete")
+            };
+            let output = denotate_ir_text::presentation::present(q, &text.checked).unwrap();
+            let text_set = output
+                .diagnostics
+                .iter()
+                .filter(|d| d.kind != Kind::Rewrite)
+                .map(|d| (d.kind, finding_identity(right, &q.keys, &d.identity)))
+                .collect::<BTreeSet<_>>();
+            assert_eq!(direct_set, text_set, "{id}: presenter parity ({backend:?})");
+            if let Some(previous) = &previous {
+                assert_eq!(previous, &direct_set, "{id}: presenter cold/warm");
+            }
+            previous = Some(direct_set);
+            // Both sides expose their own replayed witness; generic origins come
+            // from its producing occurrences, not a second solver's chosen path.
+            for d in &output.diagnostics {
+                if d.kind == Kind::Counterexample {
+                    assert_eq!(d.evidence["kind"], "replayed-counterexample");
+                    assert!(d.evidence["tuples"].as_array().unwrap().len() >= 2);
+                    assert!(!d.evidence["producers"].as_array().unwrap().is_empty());
+                }
+            }
+            if id == "text/unambiguous-presentation" {
+                use denotate_ir_text::origins::OriginDescriptor;
+                let expected = findings
+                    .iter()
+                    .filter(|d| d.kind == dsl::DiagnosticKind::OverlappingMappings)
+                    .map(|d| OriginDescriptor::of(sources, &Origin::new(d.primary)).unwrap())
+                    .collect::<BTreeSet<_>>();
+                assert_eq!(expected.len(), 2);
+                let actual = output
+                    .diagnostics
+                    .iter()
+                    .filter(|d| d.kind == Kind::Counterexample)
+                    .flat_map(|d| &d.related)
+                    .map(|r| OriginDescriptor::of(&q.sources, &Origin::new(r.span)).unwrap())
+                    .collect::<BTreeSet<_>>();
+                assert!(
+                    expected.is_subset(&actual),
+                    "every highlighted DSL span must be related in .den"
+                );
+                for d in output
+                    .diagnostics
+                    .iter()
+                    .filter(|d| d.kind == Kind::Counterexample)
+                {
+                    assert!(q.sources.text(d.primary).unwrap().contains("mapped_to"));
+                    assert!(!d.fallback);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn unambiguous_presenters_preserve_every_primary_dsl_span() {
+    let assembled = export::assemble(&[SourceFile::new(
+        "file:///witness.inputmapping",
+        1,
+        "input i, j; slot a; a <- i; a <- j;",
+    )])
+    .unwrap();
+    gate(
+        "text/unambiguous-presentation",
+        assembled.program,
+        assembled.sources,
+    );
 }

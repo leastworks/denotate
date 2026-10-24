@@ -202,7 +202,12 @@ fn capture(uncached: bool) -> Value {
                 .collect();
             worlds.push(json!({"inputs": replay.present_inputs().map(&atom).collect::<Vec<_>>(), "facts": facts, "evidence": evidence, "complete": replay.is_complete()}));
         }
-        let output = program.check(&limits, || {}).unwrap();
+        let mut output = program.check(&limits, || {}).unwrap();
+        // This frozen capture predates structured finding identities. Keep every
+        // visible diagnostic field exact; stage-3 parity tests exercise data.
+        for diagnostic in &mut output.diagnostics {
+            diagnostic.data = None;
+        }
         cases.push(json!({"text": text, "structure": fingerprint::fingerprint(p, &program.sources), "rules": ground_rules, "dependencies": dependencies, "groups": groups, "worlds": worlds, "diagnostics": output.diagnostics, "creator_warnings": output.creator_warnings}));
     }
     json!({"revision": "c84005847bb62dad7b8fd6fa2a69dffe9a3486be", "cases": cases})

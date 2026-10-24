@@ -793,3 +793,40 @@ fn checker_cache_reuses_current_diagnostics_and_drops_on_close() {
     assert!(last["plans"]["executed"].as_u64().unwrap() > 0);
     assert!(last["cache"]["evaluation_misses"].as_u64().unwrap() > 0);
 }
+
+#[test]
+fn published_findings_have_shared_identity_witness_and_current_outcome_summary() {
+    let mut c = Client::start("base/00-valid");
+    let u = uri(&c, "presenter.inputmapping");
+    let source = "input i, j; slot a; a <- i; a <- j;";
+    open(&mut c, &u, source);
+    c.validated(&u, 1);
+    let cold = codes(&c, &u, "OverlappingMappings");
+    assert_eq!(cold.len(), 2);
+    let data = &cold[0]["data"];
+    assert_eq!(data["program"], u);
+    assert_eq!(data["kind"], "counterexample");
+    assert_eq!(data["finding"], cold[1]["data"]["finding"]);
+    assert_eq!(data["evidence"]["kind"], "replayed-counterexample");
+    assert_eq!(data["evidence"]["tuples"].as_array().unwrap().len(), 2);
+    assert!(!data["evidence"]["producers"].as_array().unwrap().is_empty());
+    change(&mut c, &u, 2, &format!("// 😀\r\n{source}"));
+    let warm = codes(&c, &u, "OverlappingMappings");
+    assert_eq!(warm.len(), 2);
+    for d in &warm {
+        assert_eq!(d["data"], *data);
+        assert_eq!(d["range"]["start"]["line"], 1);
+    }
+    let status = stats(&mut c);
+    let last = status["finished"].as_array().unwrap().last().unwrap();
+    assert_eq!(last["snapshot"]["version"], 2);
+    assert_eq!(last["summary"]["state"], "findings");
+    assert_eq!(last["summary"]["backend"]["backend"], "bdd");
+    assert_eq!(
+        last["summary"]["activeAssumptions"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+}

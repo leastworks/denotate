@@ -243,7 +243,12 @@ fn capture() -> Value {
                 .collect();
             worlds.push(json!({"inputs": replay.present_inputs().map(&atom).collect::<Vec<_>>(), "facts": facts, "evidence": evidence, "complete": replay.is_complete()}));
         }
-        let output = program.check(&limits, || {}).unwrap();
+        let mut output = program.check(&limits, || {}).unwrap();
+        // This frozen capture predates structured finding identities. Keep every
+        // visible diagnostic field exact; stage-3 parity tests exercise data.
+        for diagnostic in &mut output.diagnostics {
+            diagnostic.data = None;
+        }
         cases.push(json!({"text": text, "rules": ground_rules, "dependencies": dependencies, "groups": groups, "worlds": worlds, "diagnostics": output.diagnostics, "creator_warnings": output.creator_warnings}));
     }
     json!({"revision": "85fac25ae5c2bff8479e2b942c3b71d526fb9e9d", "cases": cases})
