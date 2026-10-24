@@ -21,7 +21,7 @@ pub struct Target {
 pub struct Semantics {
     pub core: Index,
     pub files: HashMap<Url, Arc<Projection>>,
-    selected: HashMap<Url, Option<String>>,
+    contexts: HashMap<Url, Option<String>>,
 }
 impl Semantics {
     pub fn update(&mut self, uri: &Url, doc: &Document) {
@@ -37,31 +37,30 @@ impl Semantics {
             .set_membership(&ProgramMembership::single(uri.as_str(), [uri.to_string()]))
             .unwrap();
     }
-    /// Stage 1 consumes explicit memberships. Stage 2 owns the active-root
-    /// catalog and selection protocol; ambiguous contexts already fail closed.
+    /// Install every program; direct user membership defines each file's home.
     pub fn memberships(&mut self, programs: &[ProgramMembership]) {
-        self.selected.clear();
+        self.contexts.clear();
         for program in programs {
-            if let Ok(members) = program.members() {
-                self.core.set_membership(program).unwrap();
-                for uri in members.keys().filter_map(|u| Url::parse(u).ok()) {
-                    self.selected
-                        .entry(uri)
-                        .and_modify(|selected| {
-                            if selected.as_ref() != Some(&program.root) {
-                                *selected = None;
-                            }
-                        })
-                        .or_insert(Some(program.root.clone()));
-                }
+            if self.core.set_membership(program).is_err() {
+                continue;
+            }
+            for uri in program.roots[&program.root]
+                .files
+                .iter()
+                .filter_map(|u| Url::parse(u).ok())
+            {
+                self.contexts
+                    .entry(uri)
+                    .and_modify(|context| *context = None)
+                    .or_insert(Some(program.root.clone()));
             }
         }
     }
-    pub fn block_context(&mut self, uri: &Url) {
-        self.selected.insert(uri.clone(), None);
+    pub fn set_context(&mut self, uri: &Url, root: Option<String>) {
+        self.contexts.insert(uri.clone(), root);
     }
     pub fn root<'a>(&'a self, uri: &'a Url) -> Option<&'a str> {
-        self.selected
+        self.contexts
             .get(uri)
             .map_or(Some(uri.as_str()), |s| s.as_deref())
     }
@@ -384,18 +383,7 @@ impl Semantics {
         self.core
             .diagnostics(root, uri.as_str())
             .into_iter()
-            .map(|d| Diagnostic {
-                range: range(doc, &d.span),
-                severity: Some(if d.warning {
-                    DiagnosticSeverity::WARNING
-                } else {
-                    DiagnosticSeverity::ERROR
-                }),
-                source: Some("denotate".into()),
-                code: Some(NumberOrString::String(d.code)),
-                message: d.message,
-                ..Default::default()
-            })
+            .map(|d| diagnostic(doc, &d))
             .collect()
     }
     pub fn definition(
@@ -580,4 +568,20 @@ fn denotate_ir_text_namespace(ns: &denotate_ir::Namespace) -> String {
         .map(|s| index::quote(s))
         .collect::<Vec<_>>()
         .join("::")
+}
+
+/// Current-text presentation; checked-evidence presentation arrives in stage 3.
+pub fn diagnostic(doc: &Document, issue: &index::Issue) -> Diagnostic {
+    Diagnostic {
+        range: range(doc, &issue.span),
+        severity: Some(if issue.warning {
+            DiagnosticSeverity::WARNING
+        } else {
+            DiagnosticSeverity::ERROR
+        }),
+        source: Some("denotate".into()),
+        code: Some(NumberOrString::String(issue.code.clone())),
+        message: issue.message.clone(),
+        ..Default::default()
+    }
 }

@@ -69,6 +69,31 @@ fn members(folder: &Path, out: &mut BTreeMap<String, PathBuf>) -> Result<()> {
     Ok(())
 }
 
+/// Shared manifest validation for disk commands and authoritative editor snapshots.
+pub fn manifest_libraries(text: &str) -> std::result::Result<Vec<PathBuf>, String> {
+    let json: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let object = json.as_object().ok_or("den.root must be a JSON object")?;
+    if object.keys().any(|k| k != "libraries") {
+        return Err("Unknown den.root field; only libraries is supported".into());
+    }
+    let Some(value) = object.get("libraries") else {
+        return Ok(vec![]);
+    };
+    let values = value
+        .as_array()
+        .ok_or("libraries must be an array of relative den.root paths")?;
+    values
+        .iter()
+        .map(|value| {
+            let relative = PathBuf::from(value.as_str().ok_or("A library path must be a string")?);
+            if relative.is_absolute() || relative.file_name().is_none_or(|n| n != "den.root") {
+                return Err("A library path must be relative and end in den.root".into());
+            }
+            Ok(relative)
+        })
+        .collect()
+}
+
 /// Discover the selected root and reachable library roots. Directory traversal
 /// stops at nested `den.root` files. Repeated paths and cycles are canonicalized
 /// and visited once; the returned graph retains every dependency edge.
@@ -83,40 +108,12 @@ pub fn discover(root: &Path) -> Result<(ProgramMembership, Vec<SourceFile>)> {
             continue;
         }
         let text = io(&path, fs::read_to_string(&path))?;
-        let json: serde_json::Value = serde_json::from_str(&text).map_err(|e| failure(&path, e))?;
-        let object = json
-            .as_object()
-            .ok_or_else(|| failure(&path, "den.root must be a JSON object"))?;
-        if object.keys().any(|k| k != "libraries") {
-            return Err(failure(
-                &path,
-                "Unknown den.root field; only libraries is supported",
-            ));
-        }
         let folder = path.parent().expect("a canonical file has a parent");
         let mut libraries = BTreeSet::new();
-        if let Some(value) = object.get("libraries") {
-            let values = value.as_array().ok_or_else(|| {
-                failure(
-                    &path,
-                    "libraries must be an array of relative den.root paths",
-                )
-            })?;
-            for value in values {
-                let relative = value
-                    .as_str()
-                    .map(Path::new)
-                    .ok_or_else(|| failure(&path, "A library path must be a string"))?;
-                if relative.is_absolute() || relative.file_name().is_none_or(|n| n != "den.root") {
-                    return Err(failure(
-                        &path,
-                        "A library path must be relative and end in den.root",
-                    ));
-                }
-                let target = manifest(&folder.join(relative))?;
-                libraries.insert(uri(&target));
-                pending.push(target);
-            }
+        for relative in manifest_libraries(&text).map_err(|e| failure(&path, e))? {
+            let target = manifest(&folder.join(relative))?;
+            libraries.insert(uri(&target));
+            pending.push(target);
         }
         let mut own_files = BTreeMap::new();
         members(folder, &mut own_files)?;

@@ -614,7 +614,12 @@ impl Index {
             } else {
                 let mut modules = matches
                     .iter()
-                    .map(|s| s.module.as_deref().unwrap_or("<unnamed>"))
+                    .map(|s| {
+                        s.module
+                            .as_deref()
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or("::")
+                    })
                     .collect::<Vec<_>>();
                 modules.sort();
                 format!(
@@ -705,7 +710,11 @@ impl Index {
             .any(|s| s != &expected && s.name == expected.name);
         let label = |s: &Symbol| {
             if qualify {
-                format!("{}.{}", s.module.as_deref().unwrap_or("?"), s.name)
+                format!(
+                    "{}::{}",
+                    s.module.as_deref().unwrap_or("?"),
+                    super::quote(&s.name)
+                )
             } else {
                 s.name.clone()
             }

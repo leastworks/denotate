@@ -183,10 +183,13 @@ fn imports_are_direct_and_signatures_keep_their_declaring_sort_identity() {
         .ends_with("library.den"));
     let different_sort = "module example;\nuse library;\nsort Slot;\nconst a: Slot;\nknown(a);\n";
     client.change(&uri, 2, different_sort);
-    assert!(client
-        .diagnostics(&uri)
-        .to_string()
-        .contains("No constant 'a' of sort types.Slot (found: example.Slot)."));
+    assert!(client.diagnostics(&uri).to_string().contains(
+        if std::env::var("DENOTATE_BACKEND").as_deref() == Ok("tree-sitter") {
+            "No constant 'a' of sort types::Slot (found: example::Slot)."
+        } else {
+            "No constant 'a' of sort types.Slot (found: example.Slot)."
+        }
+    ));
     assert_unresolved(&definition(
         &mut client,
         &uri,

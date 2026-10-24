@@ -112,10 +112,18 @@ pub struct Client {
     next_id: u64,
     pub workspace: TempDir,
     pub capabilities: Value,
+    pub origin_snapshots: std::collections::HashMap<String, Value>,
 }
 
 impl Client {
     pub fn start(fixture: &str) -> Self {
+        Self::start_options(fixture, false)
+    }
+    #[allow(dead_code)] // Opt-in bridge scenarios live in ir_text.rs.
+    pub fn start_with_bridge(fixture: &str) -> Self {
+        Self::start_options(fixture, true)
+    }
+    fn start_options(fixture: &str, bridge: bool) -> Self {
         let workspace = tempfile::Builder::new()
             .prefix("denotate lsp ")
             .tempdir()
@@ -223,10 +231,12 @@ impl Client {
             next_id: 1,
             workspace,
             capabilities: Value::Null,
+            origin_snapshots: Default::default(),
         };
         let uri = file_uri(client.workspace.path());
         let initialized = client.request("initialize", json!({
             "processId": std::process::id(), "rootUri": uri,
+            "initializationOptions": {"originSnapshotBridge": bridge},
             "workspaceFolders": [{"uri": uri, "name": "fixture"}],
             "capabilities": {
                 "general": {"positionEncodings": ["utf-16"]},
@@ -296,6 +306,10 @@ impl Client {
                                 .clone(),
                         );
                         Value::Null
+                    }
+                    "denotate/originSnapshot" => {
+                        let uri = message["params"]["uri"].as_str().unwrap();
+                        self.origin_snapshots.get(uri).cloned().unwrap_or_else(|| json!({"uri":uri,"unavailable":"No authoritative fake-client snapshot"}))
                     }
                     "client/unregisterCapability" | "window/workDoneProgress/create" => Value::Null,
                     other => panic!("Unhandled server request: {other}"),

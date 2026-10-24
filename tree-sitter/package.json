@@ -8,10 +8,13 @@
   "engines": {"node": ">=22.0.0", "vscode": "^1.141.0"},
   "categories": ["Programming Languages"],
   "main": "./dist/extension.cjs",
-  "activationEvents": ["onLanguage:denotate"],
+  "activationEvents": ["onLanguage:denotate", "workspaceContains:**/den.root"],
   "contributes": {
     "languages": [{"id": "denotate", "aliases": ["Denotate IR"], "extensions": [".den"], "configuration": "./dist/language-configuration.json"}],
-    "grammars": [{"language": "denotate", "scopeName": "source.denotate", "path": "./dist/denotate.tmLanguage.json"}]
+    "grammars": [{"language": "denotate", "scopeName": "source.denotate", "path": "./dist/denotate.tmLanguage.json"}],
+    "commands": [
+      {"command": "denotate.createRoot", "title": "Denotate: Create den.root here"}
+    ]
   },
   "scripts": {
     "generate": "cd grammar && tree-sitter generate",

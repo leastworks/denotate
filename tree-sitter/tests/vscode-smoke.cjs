@@ -82,5 +82,76 @@ exports.run = async function () {
     // VS Code can normalize a provider's empty edit list to undefined.
     const secondFormat = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', uri, options);
     assert.equal(secondFormat?.length ?? 0, 0);
-    console.log('Denotate B3 smoke passed: syntax/repair, outline, definition/completion, references, hover/signatures, applied cross-file rename round trip and idempotent formatting.');
+    const api = extension.exports;
+    async function eventually(probe, accept, label) {
+        const until = Date.now() + 10000;
+        while (Date.now() < until) {
+            const value = await probe(); if (accept(value)) return value;
+            await new Promise(resolve => setTimeout(resolve, 30));
+        }
+        throw new Error(`Timed out: ${label}`);
+    }
+    const rootUri = vscode.Uri.joinPath(folder, 'den.root');
+    const rootDoc = await vscode.workspace.openTextDocument(rootUri);
+    const rootText = rootDoc.getText();
+    const replace = async (doc, text) => {
+        const edit = new vscode.WorkspaceEdit();
+        edit.replace(doc.uri, new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length)), text);
+        assert.ok(await vscode.workspace.applyEdit(edit));
+    };
+    await replace(rootDoc, '{unfinished');
+    await eventually(() => api.request('denotate/roots', { uri: exampleUri.toString() }), r => r.state === 'invalid', 'dirty manifest blocks root');
+    await replace(rootDoc, rootText);
+    await eventually(() => api.request('denotate/roots', { uri: exampleUri.toString() }), r => r.state === 'ready', 'manifest repair restores root');
+
+    const originUri = vscode.Uri.joinPath(folder, 'origin.inputmapping');
+    await vscode.workspace.fs.writeFile(originUri, Buffer.from('saved source'));
+    const origin = await vscode.workspace.openTextDocument(originUri);
+    const hash = 'sha256:' + require('node:crypto').createHash('sha256').update('saved source').digest('hex');
+    const denUri = vscode.Uri.joinPath(folder, 'origin-test.den');
+    await vscode.workspace.fs.writeFile(denUri, Buffer.from(`relation origin_test(); #s=source(${JSON.stringify(originUri.toString())},view:"dsl",hash:"${hash}"); origin_test() loc(#s 1:1 to 1:6);`));
+    await vscode.workspace.openTextDocument(denUri);
+    await eventually(() => api.request('denotate/originStatus', { uri: originUri.toString() }), r => r.state === 'matching', 'open DSL source matches');
+    await replace(origin, 'dirty source');
+    const dirty = await eventually(() => api.request('denotate/originStatus', { uri: originUri.toString() }), r => r.state === 'hash-mismatch', 'dirty DSL source wins over disk');
+    assert.equal(dirty.snapshot.open, true); assert.equal(dirty.snapshot.dirty, true);
+    await replace(origin, 'saved source');
+    await eventually(() => api.request('denotate/originStatus', { uri: originUri.toString() }), r => r.state === 'matching', 'matching dirty buffer is accepted');
+
+    // No implicit workspace root: create a standalone document outside the
+    // existing root, then exercise both default and explicit destination creation.
+    const temp = await require('node:fs/promises').mkdtemp(require('node:path').join(require('node:os').tmpdir(), 'denotate-root-smoke-'));
+    const standaloneUri = vscode.Uri.file(require('node:path').join(temp, 'standalone.den'));
+    await vscode.workspace.fs.writeFile(standaloneUri, Buffer.from('relation standalone(); standalone();'));
+    const standalone = await vscode.workspace.openTextDocument(standaloneUri);
+    await vscode.window.showTextDocument(standalone);
+    await eventually(() => api.request('denotate/roots', { uri: standaloneUri.toString() }), r => r.state === 'standalone', 'no containing manifest');
+    const fixes = await vscode.commands.executeCommand('vscode.executeCodeActionProvider', standaloneUri, new vscode.Range(0,0,0,0));
+    assert.ok(fixes.some(f => f.title === 'Create den.root here'));
+    await vscode.commands.executeCommand('denotate.createRoot', standaloneUri);
+    const created = await eventually(() => api.request('denotate/roots', { uri: standaloneUri.toString() }), r => r.state === 'ready', 'create root in document folder');
+    assert.equal(JSON.parse(Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.file(require('node:path').join(temp,'den.root')))).toString()).libraries, undefined);
+    await vscode.commands.executeCommand('denotate.createRoot', standaloneUri);
+    assert.equal(Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.file(require('node:path').join(temp,'den.root')))).toString(), '{}\n', 'existing manifest is not overwritten');
+    const chosen = vscode.Uri.file(require('node:path').join(temp,'chosen'));
+    await vscode.workspace.fs.createDirectory(chosen);
+    await vscode.commands.executeCommand('denotate.createRoot', standaloneUri, chosen);
+    assert.equal(Buffer.from(await vscode.workspace.fs.readFile(vscode.Uri.joinPath(chosen,'den.root'))).toString(), '{}\n');
+    assert.ok(created.homeProgram.endsWith('/den.root'));
+    // Referenced libraries outside the workspace receive real file watchers.
+    const externalUri = vscode.Uri.joinPath(chosen, 'external.den');
+    await vscode.workspace.fs.writeFile(externalUri, Buffer.from('namespace external; relation r();'));
+    const libraryRelative = require('node:path').relative(folder.fsPath, vscode.Uri.joinPath(chosen,'den.root').fsPath);
+    await replace(rootDoc, JSON.stringify({ libraries: [libraryRelative] }));
+    const consumerUri = vscode.Uri.joinPath(folder, 'external-consumer.den');
+    await vscode.workspace.fs.writeFile(consumerUri, Buffer.from('external::r();'));
+    const consumer = await vscode.workspace.openTextDocument(consumerUri);
+    await vscode.window.showTextDocument(consumer);
+    await eventually(() => vscode.commands.executeCommand('vscode.executeDefinitionProvider', consumerUri, new vscode.Position(0,1)), refs => refs?.length === 1, 'external library loaded from dirty manifest');
+    await vscode.workspace.fs.writeFile(externalUri, Buffer.from('namespace external; relation changed();'));
+    await eventually(() => vscode.commands.executeCommand('vscode.executeDefinitionProvider', consumerUri, new vscode.Position(0,1)), refs => refs?.length === 0, 'external library watcher invalidates declarations');
+    await vscode.workspace.fs.writeFile(externalUri, Buffer.from('namespace external; relation r();'));
+    await eventually(() => vscode.commands.executeCommand('vscode.executeDefinitionProvider', consumerUri, new vscode.Position(0,1)), refs => refs?.length === 1, 'external library watcher repairs declarations');
+    await replace(rootDoc, rootText);
+    console.log('Denotate stage-2 smoke passed: roots, dirty manifests, authoritative DSL buffers, quick fixes;  syntax/repair, outline, definition/completion, references, hover/signatures, applied cross-file rename round trip and idempotent formatting.');
 };

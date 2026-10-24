@@ -21,6 +21,9 @@ pub trait Handler {
     fn supports_request(&self, method: &str) -> bool;
     fn request(&mut self, request: &Request) -> std::result::Result<Value, ResponseError>;
     fn notification(&mut self, connection: &Connection, notification: Notification) -> Result<()>;
+    fn response(&mut self, _connection: &Connection, _response: Response) -> Result<()> {
+        Ok(())
+    }
 }
 
 // Bounded draining prevents an endless stream from monopolizing dispatch.
@@ -103,7 +106,7 @@ pub fn run(connection: &Connection, handler: &mut impl Handler) -> Result<()> {
                     eprintln!("notification rejected: {error}");
                 }
             }
-            Message::Response(_) => {} // Registration acknowledgment.
+            Message::Response(response) => handler.response(connection, response)?,
         }
     }
     Ok(())

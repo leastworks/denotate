@@ -1,3 +1,5 @@
+mod bridge;
+mod catalog;
 mod formatting;
 mod rename;
 mod semantic;
@@ -27,90 +29,161 @@ struct Server {
     semantics: semantic::Semantics,
     diagnostics: HashMap<Url, Vec<Diagnostic>>,
     diagnostics_dirty: bool,
+    catalog: catalog::Catalog,
+    bridge: bridge::Bridge,
 }
 
 impl Server {
-    // Transitional disk membership adapter for the stage-1 resolver migration.
-    // Stage 2 replaces discovery with the authoritative manifest-buffer catalog.
+    fn canonical_document(uri: &Url) -> String {
+        uri.to_file_path()
+            .ok()
+            .map(|p| catalog::uri(&p))
+            .unwrap_or_else(|| uri.to_string())
+    }
     fn refresh_memberships(&mut self) {
-        let mut manifests = self
-            .roots
+        self.catalog.refresh(
+            &self.roots,
+            self.documents
+                .iter()
+                .filter(|(_, d)| d.open)
+                .filter_map(|(u, _)| u.to_file_path().ok()),
+        );
+        let removed = self
+            .documents
             .iter()
-            .map(|root| root.join("den.root"))
-            .filter(|path| path.is_file())
-            .collect::<std::collections::BTreeSet<_>>();
-        for uri in self.documents.keys() {
-            if let Ok(path) = uri.to_file_path() {
-                for folder in path.ancestors().skip(1) {
-                    if folder.join("den.root").is_file() {
-                        manifests.insert(folder.join("den.root"));
-                        break;
-                    }
+            .filter(|(u, d)| {
+                !d.open
+                    && u.to_file_path()
+                        .is_ok_and(|p| !self.catalog.files.contains(&catalog::identity(&p)))
+            })
+            .map(|(u, _)| u.clone())
+            .collect::<Vec<_>>();
+        for uri in removed {
+            self.remove(&uri);
+        }
+        let files = self.catalog.files.clone();
+        for path in files {
+            let canonical = catalog::uri(&path);
+            let known = self
+                .documents
+                .keys()
+                .any(|u| Self::canonical_document(u) == canonical);
+            if !known {
+                // Keep client workspace spelling for all positions and edits.
+                let path = self
+                    .roots
+                    .iter()
+                    .find_map(|root| {
+                        path.strip_prefix(catalog::identity(root))
+                            .ok()
+                            .map(|rel| root.join(rel))
+                    })
+                    .unwrap_or(path);
+                if let Ok(uri) = Url::from_file_path(path) {
+                    let _ = self.read_disk(&uri);
                 }
             }
         }
-        let aliases = self
+        self.refresh_contexts();
+    }
+    fn refresh_contexts(&mut self) {
+        let aliases: HashMap<_, _> = self
             .documents
             .keys()
-            .filter_map(|uri| Some((uri.to_file_path().ok()?.canonicalize().ok()?, uri.clone())))
-            .collect::<HashMap<_, _>>();
+            .map(|u| (Self::canonical_document(u), u.to_string()))
+            .collect();
         let mut programs = vec![];
-        let mut broken = vec![];
-        for manifest in manifests {
-            match denotate_ir_text::filesystem::discover(&manifest) {
-                Ok((mut membership, sources)) => {
-                    let mut remap = HashMap::new();
-                    for source in sources {
-                        let Ok(canonical_uri) = Url::parse(&source.uri) else {
-                            continue;
-                        };
-                        let uri = canonical_uri
-                            .to_file_path()
-                            .ok()
-                            .and_then(|p| {
-                                aliases.get(&p).cloned().or_else(|| {
-                                    self.roots.iter().find_map(|root| {
-                                        let canonical = root.canonicalize().ok()?;
-                                        let relative = p.strip_prefix(canonical).ok()?;
-                                        Url::from_file_path(root.join(relative)).ok()
-                                    })
-                                })
-                            })
-                            .unwrap_or(canonical_uri);
-                        remap.insert(source.uri, uri.to_string());
-                        if !self.documents.contains_key(&uri) {
-                            let doc =
-                                Document::new(&mut self.parser, source.text.to_string(), 0, false);
-                            self.store(uri, doc);
-                        }
+        // Reset member failures from the retained manifest graph on every edit.
+        for (root, program) in &self.catalog.programs {
+            let mut syntax_errors = vec![];
+            let mut errors = program
+                .roots
+                .keys()
+                .flat_map(|r| self.catalog.nodes[r].errors.clone())
+                .collect::<Vec<_>>();
+            for canonical in program.roots.values().flat_map(|r| &r.files) {
+                let actual = aliases.get(canonical).unwrap_or(canonical);
+                let uri = Url::parse(actual).unwrap();
+                match self.documents.get(&uri) {
+                    None => errors.push(format!("{canonical}: member unavailable")),
+                    Some(_) if self.documents.rejected_version(&uri).is_some() => {
+                        errors.push(format!("{canonical}: document out of sync"))
                     }
-                    for root in membership.roots.values_mut() {
-                        root.files = root
-                            .files
-                            .iter()
-                            .map(|uri| remap.get(uri).cloned().unwrap_or(uri.clone()))
-                            .collect();
+                    Some(doc) if !doc.diagnostics().is_empty() => {
+                        syntax_errors.push(format!("{canonical}: invalid member syntax"))
                     }
-                    programs.push(membership);
-                }
-                Err(errors) => {
-                    eprintln!("root membership: {errors:?}");
-                    if let Some(folder) = manifest.parent() {
-                        broken.push(folder.to_owned());
-                    }
+                    _ => {}
                 }
             }
+            self.catalog.errors.insert(root.clone(), errors);
+            self.catalog
+                .syntax_errors
+                .insert(root.clone(), syntax_errors);
+            let mut program = program.clone();
+            for node in program.roots.values_mut() {
+                node.files = node
+                    .files
+                    .iter()
+                    .map(|u| aliases.get(u).cloned().unwrap_or_else(|| u.clone()))
+                    .collect();
+            }
+            programs.push(program);
         }
         self.semantics.memberships(&programs);
         for uri in self.documents.keys() {
-            if uri
-                .to_file_path()
-                .is_ok_and(|path| broken.iter().any(|folder| path.starts_with(folder)))
-            {
-                self.semantics.block_context(uri);
+            let canonical = Self::canonical_document(uri);
+            let status = self.catalog.status(&canonical);
+            if status["state"] == "standalone" {
+                self.semantics.set_context(uri, Some(uri.to_string()));
+            } else {
+                self.semantics
+                    .set_context(uri, self.catalog.context(&canonical));
             }
         }
         self.diagnostics_dirty = true;
+    }
+    fn root_status(&self, uri: &Url) -> Value {
+        let mut status = self.catalog.status(&Self::canonical_document(uri));
+        status["uri"] = json!(uri);
+        if status["state"] == "standalone" {
+            let mut errors = self
+                .diagnostics
+                .get(uri)
+                .into_iter()
+                .flatten()
+                .filter(|d| d.severity == Some(lsp_types::DiagnosticSeverity::ERROR))
+                .map(|d| d.message.clone())
+                .collect::<Vec<_>>();
+            if self.documents.rejected_version(uri).is_some() {
+                errors = vec!["Document out of sync; reopen or send full text".into()];
+            }
+            status["errors"] = json!(errors);
+        }
+        status
+    }
+    fn announce(&mut self, connection: &Connection) -> Result<()> {
+        let watch = self
+            .catalog
+            .nodes
+            .keys()
+            .filter_map(|s| {
+                Url::parse(s)
+                    .ok()?
+                    .to_file_path()
+                    .ok()?
+                    .parent()
+                    .map(|p| catalog::uri(p))
+            })
+            .collect::<Vec<_>>();
+        if self.bridge.enabled {
+            send(
+                connection,
+                "denotate/rootsChanged",
+                json!({"watchFolders":watch}),
+            )?;
+        }
+        self.bridge.update(connection)?;
+        Ok(())
     }
 
     fn refresh_diagnostics(&mut self) {
@@ -126,11 +199,109 @@ impl Server {
                 (uri.clone(), diagnostics)
             })
             .collect();
+        self.catalog.resolution_errors.clear();
+        let aliases: HashMap<_, _> = self
+            .documents
+            .keys()
+            .map(|u| (Self::canonical_document(u), u.clone()))
+            .collect();
+        // Every root is a program, including library roots. Inspect its entire
+        // membership, while keeping normal publication in user-owned files.
+        for (root, program) in &self.catalog.programs {
+            if !self.catalog.errors[root].is_empty() {
+                continue;
+            }
+            let own = &program.roots[root].files;
+            let mut failures = vec![];
+            let members = program
+                .roots
+                .values()
+                .flat_map(|r| r.files.iter())
+                .collect::<std::collections::BTreeSet<_>>();
+            for canonical in members {
+                let Some(uri) = aliases.get(canonical) else {
+                    continue;
+                };
+                let Some(doc) = self.documents.get(uri) else {
+                    continue;
+                };
+                for issue in self.semantics.core.diagnostics(root, uri.as_str()) {
+                    if issue.warning {
+                        continue;
+                    }
+                    failures.push(format!("{canonical}: {}", issue.message));
+                    if own.contains(canonical) || issue.code != "resolution" {
+                        continue;
+                    }
+                    // A consumer can introduce ambiguity in a library's namespace.
+                    // Attribute that failure to its conflicting user declarations,
+                    // never to the library's otherwise unaffected home view.
+                    let Some(reference) = self.semantics.reference_at(uri, issue.span.start) else {
+                        continue;
+                    };
+                    let candidates = self.semantics.core.candidates(
+                        root,
+                        uri.as_str(),
+                        &reference.scope,
+                        &reference.lookup,
+                        Some(&reference.name),
+                    );
+                    if candidates.len() < 2 {
+                        continue;
+                    }
+                    for candidate in candidates {
+                        let Ok(target_uri) = Url::parse(&candidate.uri) else {
+                            continue;
+                        };
+                        let target_canonical = Self::canonical_document(&target_uri);
+                        if !own.contains(&target_canonical)
+                            || self.catalog.home(&target_canonical).as_ref() != Some(root)
+                        {
+                            continue;
+                        }
+                        let target = semantic::Target {
+                            uri: target_uri.clone(),
+                            rule: None,
+                            id: candidate.id,
+                        };
+                        let Some(span) = self.semantics.target_span(&target) else {
+                            continue;
+                        };
+                        let Some(target_doc) = self.documents.get(&target_uri) else {
+                            continue;
+                        };
+                        let mut diagnostic = semantic::diagnostic(doc, &issue);
+                        let related = lsp_types::DiagnosticRelatedInformation {
+                            location: lsp_types::Location {
+                                uri: uri.clone(),
+                                range: diagnostic.range,
+                            },
+                            message: "Library reference fails in this consumer program".into(),
+                        };
+                        diagnostic.range = lsp_types::Range::new(
+                            target_doc.position(span.start),
+                            target_doc.position(span.end),
+                        );
+                        diagnostic.message = format!("In {root}: {}", issue.message);
+                        diagnostic.related_information = Some(vec![related]);
+                        self.diagnostics
+                            .entry(target_uri)
+                            .or_default()
+                            .push(diagnostic);
+                    }
+                }
+            }
+            failures.sort();
+            failures.dedup();
+            self.catalog
+                .resolution_errors
+                .insert(root.clone(), failures);
+        }
         self.diagnostics_dirty = false;
     }
 
     fn publish(&mut self, connection: &Connection, uri: &Url) -> Result<()> {
-        if self.documents.has_out_of_sync() {
+        if self.documents.rejected_version(uri).is_some() {
             return Ok(());
         }
         self.refresh_diagnostics();
@@ -153,14 +324,15 @@ impl Server {
     }
 
     fn publish_all(&mut self, connection: &Connection) -> Result<()> {
-        // A missing observation can affect every importer. Pause the whole
-        // small prototype workspace rather than publishing guessed dependents.
-        if self.documents.has_out_of_sync() {
-            return Ok(());
-        }
+        self.refresh_contexts();
         // Refresh all indexed dependents. Salsa reuses unchanged semantics;
         // selective publication/scheduling is not claimed by this prototype.
-        let mut uris: Vec<_> = self.documents.keys().cloned().collect();
+        let mut uris: Vec<_> = self
+            .documents
+            .keys()
+            .filter(|u| self.documents.rejected_version(u).is_none())
+            .cloned()
+            .collect();
         uris.sort();
         for uri in &uris {
             self.publish(connection, uri)?;
@@ -173,19 +345,32 @@ impl Server {
                 test_support::validated(connection, &uri, self.documents[&uri].version)?;
             }
         }
+        self.announce(connection)?;
         Ok(())
     }
 
     fn store(&mut self, uri: Url, doc: Document) {
+        let canonical = Self::canonical_document(&uri);
+        let aliases = self
+            .documents
+            .keys()
+            .filter(|old| *old != &uri && Self::canonical_document(old) == canonical)
+            .cloned()
+            .collect::<Vec<_>>();
+        for alias in aliases {
+            self.remove(&alias);
+        }
         // A declaration change can invalidate diagnostics in any importer.
         self.diagnostics_dirty = true;
         self.semantics.update(&uri, &doc);
+        self.bridge.observe(uri.as_str(), &doc);
         self.documents.insert(uri, doc);
     }
 
     fn remove(&mut self, uri: &Url) {
         self.documents.remove(uri);
         self.semantics.remove(uri);
+        self.bridge.remove(uri.as_str());
         self.diagnostics.remove(uri);
         self.diagnostics_dirty = true;
     }
@@ -193,6 +378,7 @@ impl Server {
     fn lose_sync(&mut self, connection: &Connection, uri: &Url, version: i32) -> Result<()> {
         let newly_lost = self.documents.lose_sync(uri, version);
         self.semantics.remove(uri);
+        self.bridge.remove(uri.as_str());
         self.diagnostics.clear();
         self.diagnostics_dirty = true;
         if newly_lost {
@@ -204,21 +390,31 @@ impl Server {
                 json!({"uri": uri, "diagnostics": []}),
             )?;
         }
+        self.refresh_contexts();
+        for other in self
+            .documents
+            .keys()
+            .filter(|u| *u != uri)
+            .cloned()
+            .collect::<Vec<_>>()
+        {
+            self.publish(connection, &other)?;
+        }
+        self.announce(connection)?;
         Ok(())
     }
 
     fn read_disk(&mut self, uri: &Url) -> Result<()> {
-        // Flat workspaces only. No parent-directory discovery, recursion, or
-        // filesystem reads for arbitrary LSP URIs (including symlink escapes).
         let path = uri.to_file_path().map_err(|_| "Expected a file URI")?;
         let path = path.canonicalize()?;
-        if !self
+        if (!self
             .roots
             .iter()
-            .any(|root| root.canonicalize().ok().as_deref() == path.parent())
+            .any(|root| path.starts_with(catalog::identity(root)))
+            && !self.catalog.files.contains(&path))
             || path.extension().is_none_or(|ext| ext != "den")
         {
-            return Err("File is outside the flat Denotate workspace".into());
+            return Err("File is outside known Denotate roots".into());
         }
         let text = fs::read_to_string(path)?;
         // Match VS Code's disk-to-editor coordinate space without altering disk.
@@ -233,10 +429,41 @@ impl Server {
             .method
             .starts_with("textDocument/")
             .then(|| timing::interval("editorRequest"));
-        if request.method.starts_with("textDocument/") && self.documents.has_out_of_sync() {
-            return Err("Workspace is out of sync; reopen the affected document or send a full-text change.".into());
+        if request.method.starts_with("textDocument/")
+            && request.params["textDocument"]["uri"]
+                .as_str()
+                .and_then(|u| Url::parse(u).ok())
+                .is_some_and(|u| self.documents.rejected_version(&u).is_some())
+        {
+            return Err("Document is out of sync; reopen it or send a full-text change.".into());
         }
         match request.method.as_str() {
+            "denotate/roots" => {
+                self.refresh_diagnostics();
+                if let Some(uri) = request.params["uri"].as_str() {
+                    Ok(self.root_status(&Url::parse(uri)?))
+                } else {
+                    Ok(
+                        json!({"programs":self.catalog.programs.keys().map(|r|self.catalog.program_status(r)).collect::<Vec<_>>()}),
+                    )
+                }
+            }
+            "denotate/originStatus" => Ok(self
+                .bridge
+                .status(request.params["uri"].as_str().ok_or("Missing uri")?)),
+            "textDocument/codeAction" => {
+                let uri = Url::parse(
+                    request.params["textDocument"]["uri"]
+                        .as_str()
+                        .ok_or("Missing uri")?,
+                )?;
+                Ok(if self.root_status(&uri)["state"] == "standalone" {
+                    json!([{"title":"Create den.root here","kind":"quickfix","command":{"title":"Create den.root here","command":"denotate.createRoot","arguments":[uri]}},{"title":"Create den.root in another folder…","kind":"quickfix","command":{"title":"Choose root folder","command":"denotate.createRoot","arguments":[uri,null,true]}}])
+                } else {
+                    json!([])
+                })
+            }
+
             "textDocument/formatting" | "textDocument/rangeFormatting" => {
                 let params: DocumentSymbolParams = serde_json::from_value(request.params.clone())?;
                 let uri = params.text_document.uri;
@@ -339,7 +566,52 @@ impl Server {
     }
 
     fn notification(&mut self, connection: &Connection, notification: Notification) -> Result<()> {
+        // Manifest snapshots use the filename-based full-text bridge, even if
+        // the user has assigned the denotate language ID to a JSON manifest.
+        if notification.method.starts_with("textDocument/")
+            && notification.params["textDocument"]["uri"]
+                .as_str()
+                .and_then(|s| Url::parse(s).ok())
+                .and_then(|u| u.to_file_path().ok())
+                .is_some_and(|p| p.file_name().is_some_and(|n| n == "den.root"))
+        {
+            return Ok(());
+        }
         match notification.method.as_str() {
+            "denotate/manifest" => {
+                let p = notification.params;
+                let uri = Url::parse(p["uri"].as_str().ok_or("Missing manifest uri")?)?;
+                let path = catalog::identity(&uri.to_file_path().map_err(|_| "Expected file URI")?);
+                if path.file_name().is_none_or(|n| n != "den.root") {
+                    return Err("Expected den.root".into());
+                }
+                if p["closed"] == true {
+                    self.catalog.open.remove(&path);
+                } else {
+                    let version = p["version"].as_i64().ok_or("Missing manifest version")?;
+                    if self
+                        .catalog
+                        .open
+                        .get(&path)
+                        .is_some_and(|m| m.version >= version)
+                    {
+                        return Ok(());
+                    }
+                    self.catalog.open.insert(
+                        path,
+                        catalog::Manifest {
+                            text: p["text"].as_str().ok_or("Missing manifest text")?.into(),
+                            version,
+                        },
+                    );
+                }
+                self.refresh_memberships();
+                self.publish_all(connection)?;
+            }
+            "denotate/originChanged" => {
+                self.bridge.invalidate(connection, &notification.params)?;
+            }
+
             "textDocument/didOpen" => {
                 let params: DidOpenTextDocumentParams =
                     serde_json::from_value(notification.params)?;
@@ -401,13 +673,63 @@ impl Server {
                 self.publish(connection, &params.text_document.uri)?;
                 // Closing an unsaved buffer restores disk facts, not stale edits.
                 let _ = self.read_disk(&params.text_document.uri);
+                self.refresh_memberships();
+                self.publish_all(connection)?;
+            }
+            "workspace/didChangeWorkspaceFolders" => {
+                let event = &notification.params["event"];
+                if let Some(removed) = event["removed"].as_array() {
+                    for folder in removed {
+                        if let Some(path) = folder["uri"]
+                            .as_str()
+                            .and_then(|u| Url::parse(u).ok())
+                            .and_then(|u| u.to_file_path().ok())
+                        {
+                            self.roots
+                                .retain(|r| catalog::identity(r) != catalog::identity(&path));
+                        }
+                    }
+                }
+                if let Some(added) = event["added"].as_array() {
+                    for folder in added {
+                        if let Some(path) = folder["uri"]
+                            .as_str()
+                            .and_then(|u| Url::parse(u).ok())
+                            .and_then(|u| u.to_file_path().ok())
+                        {
+                            if !self
+                                .roots
+                                .iter()
+                                .any(|r| catalog::identity(r) == catalog::identity(&path))
+                            {
+                                self.roots.push(path);
+                            }
+                        }
+                    }
+                }
+                self.refresh_memberships();
                 self.publish_all(connection)?;
             }
             "workspace/didChangeWatchedFiles" => {
                 let params: DidChangeWatchedFilesParams =
                     serde_json::from_value(notification.params)?;
                 let mut removed = vec![];
-                for event in params.changes {
+                for mut event in params.changes {
+                    if event
+                        .uri
+                        .to_file_path()
+                        .is_ok_and(|p| p.file_name().is_some_and(|n| n == "den.root"))
+                    {
+                        continue;
+                    }
+                    let canonical = Self::canonical_document(&event.uri);
+                    if let Some(existing) = self
+                        .documents
+                        .keys()
+                        .find(|u| Self::canonical_document(u) == canonical)
+                    {
+                        event.uri = existing.clone();
+                    }
                     // Unsaved open buffers remain authoritative over disk events.
                     if self.documents.get(&event.uri).is_some_and(|doc| doc.open) {
                         continue;
@@ -437,8 +759,9 @@ impl Server {
 
 fn run(connection: &Connection) -> Result<()> {
     let params = connection.initialize(json!({
+        "workspace": {"workspaceFolders": {"supported": true,"changeNotifications": true}},
         "positionEncoding": "utf-16", "textDocumentSync": {"openClose": true, "change": 2},
-        "documentSymbolProvider": true, "definitionProvider": true,
+        "documentSymbolProvider": true, "definitionProvider": true, "codeActionProvider": true,
         "completionProvider": {"triggerCharacters": ["(", ",", ":"]},
         "referencesProvider": true, "hoverProvider": true, "renameProvider": {"prepareProvider": true},
         "documentFormattingProvider": true, "documentRangeFormattingProvider": true,
@@ -464,42 +787,38 @@ fn run(connection: &Connection) -> Result<()> {
         semantics: semantic::Semantics::default(),
         diagnostics: HashMap::new(),
         diagnostics_dirty: true,
+        catalog: catalog::Catalog::default(),
+        bridge: bridge::Bridge::default(),
     };
-    // Only direct .den children of explicitly opened roots; never walk ancestors
-    // or dependencies outside the workspace. Stable order also stabilizes catalog.
-    let mut files = vec![];
-    for root in &server.roots {
-        for entry in fs::read_dir(root)? {
-            let path = entry?.path();
-            if path.extension().is_some_and(|ext| ext == "den") {
-                if let Ok(uri) = Url::from_file_path(path) {
-                    files.push(uri);
-                }
-            }
-        }
-    }
-    files.sort();
-    files.dedup();
-    for uri in files {
-        if let Err(error) = server.read_disk(&uri) {
-            eprintln!("workspace read: {error}");
-        }
-    }
+    server.bridge.enabled = params["initializationOptions"]["originSnapshotBridge"] == true;
     server.refresh_memberships();
-    if params["capabilities"]["workspace"]["didChangeWatchedFiles"]["dynamicRegistration"] == true {
+    // Bridge clients own workspace and external-root watchers. Other clients can
+    // opt into standard registration; origin authority is never inferred from it.
+    if !server.bridge.enabled
+        && params["capabilities"]["workspace"]["didChangeWatchedFiles"]["dynamicRegistration"]
+            == true
+    {
         connection.sender.send(Message::Request(Request::new(1.into(), "client/registerCapability".into(), json!({
             "registrations": [{"id": "denotate-files", "method": "workspace/didChangeWatchedFiles",
-                "registerOptions": {"watchers": [{"globPattern": "**/*.den", "kind": 7}]}}]
+                "registerOptions": {"watchers": [{"globPattern": "**/*.den", "kind": 7},{"globPattern":"**/den.root","kind":7}]}}]
         }))))?;
     }
+    server.announce(connection)?;
     transport::run(connection, &mut server)
 }
 
 impl transport::Handler for Server {
+    fn response(&mut self, _connection: &Connection, response: lsp_server::Response) -> Result<()> {
+        self.bridge.response(response);
+        Ok(())
+    }
     fn supports_request(&self, method: &str) -> bool {
         matches!(
             method,
-            "textDocument/documentSymbol"
+            "denotate/roots"
+                | "denotate/originStatus"
+                | "textDocument/codeAction"
+                | "textDocument/documentSymbol"
                 | "textDocument/semanticTokens/full"
                 | "textDocument/definition"
                 | "textDocument/completion"
@@ -554,6 +873,8 @@ mod tests {
             semantics: semantic::Semantics::default(),
             diagnostics: HashMap::new(),
             diagnostics_dirty: true,
+            catalog: catalog::Catalog::default(),
+            bridge: bridge::Bridge::default(),
         };
         let uri = Url::parse("file:///example.den").unwrap();
         let doc = Document::new(&mut server.parser, "module example; sort S".into(), 4, true);
@@ -704,6 +1025,8 @@ mod tests {
             semantics: semantic::Semantics::default(),
             diagnostics: HashMap::new(),
             diagnostics_dirty: true,
+            catalog: catalog::Catalog::default(),
+            bridge: bridge::Bridge::default(),
         };
         // Exercise the real dispatch path with cancellation already queued:
         // even malformed params must not reach request execution.

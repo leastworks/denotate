@@ -111,13 +111,13 @@ pub(crate) fn quote(s: &str) -> String {
 }
 
 #[derive(Clone, Copy)]
-enum NameKind {
+pub enum NameKind {
     Identifier,
     Constant,
     Parameter,
     Variable,
 }
-fn spelling(name: &str, kind: NameKind) -> String {
+pub fn spelling(name: &str, kind: NameKind) -> String {
     let first = name.as_bytes().first().copied();
     let start = match kind {
         NameKind::Constant => first.is_some_and(|c| c.is_ascii_lowercase()),

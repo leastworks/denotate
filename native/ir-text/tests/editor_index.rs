@@ -360,3 +360,30 @@ fn aliases_are_file_local_and_invalid_names_do_not_become_guessed_references() {
     assert!(issues.iter().any(|d| d.message.contains("escape")));
     assert_eq!(targets(&index, "root", "a", "good();").len(), 1);
 }
+
+#[test]
+fn diagnostic_namespace_labels_use_den_spelling_and_name_spelling_preserves_kind() {
+    let mut index = Index::default();
+    let uri = "file:///labels.den";
+    update(
+        &mut index,
+        uri,
+        "sort S; const g:S; relation q(x:S); namespace a { sort S; const a:a::S; relation q(x:a::S); } namespace b { use a; q(g); a::q(g); }",
+    );
+    index
+        .set_membership(&ProgramMembership::single("root", [uri.into()]))
+        .unwrap();
+    let messages = index
+        .diagnostics("root", uri)
+        .iter()
+        .map(|i| i.message.clone())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(messages.contains("(::, a)"), "{messages}");
+    assert!(messages.contains("a::S"), "{messages}");
+    assert!(!messages.contains("a.S"));
+    use denotate_ir_text::{NameKind, spelling};
+    assert_eq!(spelling("I", NameKind::Constant), "'I'");
+    assert_eq!(spelling("I", NameKind::Variable), "I");
+    assert_eq!(spelling("i", NameKind::Variable), "?'i'");
+}
