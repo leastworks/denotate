@@ -9,14 +9,13 @@ mod syntax;
 mod timing;
 
 use denotate_editor::{
-    test_support,
+    lifecycle, publication, test_support,
     transport::{self, send, Result},
     Documents,
 };
 use lsp_server::{Connection, Message, Notification, Request, ResponseError};
 use lsp_types::{
-    Diagnostic, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
-    DidCloseTextDocumentParams, DidOpenTextDocumentParams, DocumentSymbolParams, FileChangeType,
+    Diagnostic, DidChangeWatchedFilesParams, DocumentSymbolParams, FileChangeType,
     InitializeParams, TextDocumentPositionParams, Url,
 };
 use serde_json::{json, Value};
@@ -165,7 +164,7 @@ impl Server {
                 .map(|d| d.message.clone())
                 .collect::<Vec<_>>();
             if self.documents.rejected_version(uri).is_some() {
-                errors = vec!["Document out of sync; reopen or send full text".into()];
+                errors = vec![publication::OUT_OF_SYNC.into()];
             }
             status["errors"] = json!(errors);
         }
@@ -326,19 +325,18 @@ impl Server {
         }
         self.refresh_diagnostics();
         if let Some(doc) = self.documents.get(uri) {
-            send(
+            publication::publish(
                 connection,
-                "textDocument/publishDiagnostics",
-                json!({
-                    "uri": uri, "version": doc.version, "diagnostics": self.diagnostics[uri].iter().cloned().chain(self.checking.diagnostics(uri)).collect::<Vec<_>>()
-                }),
+                uri,
+                Some(doc.version),
+                self.diagnostics[uri]
+                    .iter()
+                    .cloned()
+                    .chain(self.checking.diagnostics(uri))
+                    .collect(),
             )?;
         } else {
-            send(
-                connection,
-                "textDocument/publishDiagnostics",
-                json!({"uri": uri, "diagnostics": []}),
-            )?;
+            publication::withdraw(connection, uri)?;
         }
         Ok(())
     }
@@ -401,20 +399,11 @@ impl Server {
     }
 
     fn lose_sync(&mut self, connection: &Connection, uri: &Url, version: i32) -> Result<()> {
-        let newly_lost = self.documents.lose_sync(uri, version);
+        publication::lose_sync(connection, &mut self.documents, uri, version)?;
         self.semantics.remove(uri);
         self.bridge.remove(uri.as_str());
         self.diagnostics.clear();
         self.diagnostics_dirty = true;
-        if newly_lost {
-            // Withdraw stale diagnostics, without claiming to have analyzed a
-            // version of the now-unknown text or emitting a validation barrier.
-            send(
-                connection,
-                "textDocument/publishDiagnostics",
-                json!({"uri": uri, "diagnostics": []}),
-            )?;
-        }
         self.refresh_contexts();
         self.sync_checks()?;
         for other in self
@@ -614,6 +603,9 @@ impl Server {
         {
             return Ok(());
         }
+        if lifecycle::handles(&notification.method) {
+            return lifecycle::notification(self, connection, notification);
+        }
         match notification.method.as_str() {
             "denotate/manifest" => {
                 let p = notification.params;
@@ -655,70 +647,6 @@ impl Server {
                 self.publish_all(connection)?;
             }
 
-            "textDocument/didOpen" => {
-                let params: DidOpenTextDocumentParams =
-                    serde_json::from_value(notification.params)?;
-                let text = params.text_document;
-                let new_document = !self.documents.contains_key(&text.uri);
-                let doc = Document::new(&mut self.parser, text.text, text.version, true);
-                self.store(text.uri, doc);
-                if new_document {
-                    self.refresh_memberships();
-                }
-                self.publish_all(connection)?;
-            }
-            "textDocument/didChange" => {
-                // Keep only identity/version for recovery if decoding fails;
-                // do not clone the potentially large full-text change payload.
-                let metadata = notification.params["textDocument"].clone();
-                let params: DidChangeTextDocumentParams =
-                    match serde_json::from_value(notification.params) {
-                        Ok(params) => params,
-                        Err(error) => {
-                            if let Some((uri, version)) = self.documents.malformed_change(&metadata)
-                            {
-                                self.lose_sync(connection, &uri, version)?;
-                            }
-                            return Err(error.into());
-                        }
-                    };
-                let uri = params.text_document.uri;
-                let previous = self.documents.get(&uri).ok_or("Change before open")?;
-                let changes = match self.documents.changes(
-                    &uri,
-                    params.text_document.version,
-                    &params.content_changes,
-                ) {
-                    Ok(changes) => changes,
-                    Err(error) => {
-                        self.lose_sync(connection, &uri, params.text_document.version)?;
-                        return Err(error.into());
-                    }
-                };
-                if let Some(changes) = changes {
-                    let changed =
-                        previous.changed(&mut self.parser, changes, params.text_document.version);
-                    let doc = match changed {
-                        Ok(doc) => doc,
-                        Err(error) => {
-                            self.lose_sync(connection, &uri, params.text_document.version)?;
-                            return Err(error.into());
-                        }
-                    };
-                    self.store(uri, doc);
-                    self.publish_all(connection)?;
-                }
-            }
-            "textDocument/didClose" => {
-                let params: DidCloseTextDocumentParams =
-                    serde_json::from_value(notification.params)?;
-                self.remove(&params.text_document.uri);
-                self.publish(connection, &params.text_document.uri)?;
-                // Closing an unsaved buffer restores disk facts, not stale edits.
-                let _ = self.read_disk(&params.text_document.uri);
-                self.refresh_memberships();
-                self.publish_all(connection)?;
-            }
             "workspace/didChangeWorkspaceFolders" => {
                 let event = &notification.params["event"];
                 if let Some(removed) = event["removed"].as_array() {
@@ -861,10 +789,54 @@ fn run_with_mode(connection: &Connection, test_mode: bool) -> Result<()> {
     server.serve_checks(connection)
 }
 
+impl lifecycle::Lifecycle for Server {
+    type Stored = Document;
+    type Parsed = Document;
+    fn documents_and_parser(&mut self) -> (&Documents<Document>, &mut tree_sitter::Parser) {
+        (&self.documents, &mut self.parser)
+    }
+    fn parse_open(parser: &mut tree_sitter::Parser, text: String, version: i32) -> Document {
+        Document::new(parser, text, version, true)
+    }
+    fn parse_change(
+        previous: &Document,
+        parser: &mut tree_sitter::Parser,
+        changes: &[lsp_types::TextDocumentContentChangeEvent],
+        version: i32,
+    ) -> std::result::Result<Document, &'static str> {
+        previous.changed(parser, changes, version)
+    }
+    fn stored(
+        &mut self,
+        connection: &Connection,
+        uri: Url,
+        document: Document,
+        _opened: bool,
+        new_document: bool,
+    ) -> Result<()> {
+        self.store(uri, document);
+        if new_document {
+            self.refresh_memberships();
+        }
+        self.publish_all(connection)
+    }
+    fn removed(&mut self, connection: &Connection, uri: &Url) -> Result<()> {
+        self.remove(uri);
+        self.publish(connection, uri)?;
+        // Closing an unsaved buffer restores disk facts, not stale edits.
+        let _ = self.read_disk(uri);
+        self.refresh_memberships();
+        self.publish_all(connection)
+    }
+    fn sync_lost(&mut self, connection: &Connection, uri: &Url, version: i32) -> Result<()> {
+        self.lose_sync(connection, uri, version)
+    }
+}
+
 impl transport::Handler for Server {
-    fn response(&mut self, _connection: &Connection, response: lsp_server::Response) -> Result<()> {
+    fn response(&mut self, connection: &Connection, response: lsp_server::Response) -> Result<()> {
         self.bridge.response(response);
-        Ok(())
+        self.publish_all(connection)
     }
     fn supports_request(&self, method: &str) -> bool {
         matches!(

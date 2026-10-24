@@ -7,13 +7,17 @@ use crate::{
     Server,
 };
 use denotate_check::*;
-use denotate_editor::checking::{self, HoldStage, Job, Scheduler};
-use denotate_editor::transport::{self, send, Result};
+use denotate_editor::checking::{self, Job, Scheduler, Ticket};
+use denotate_editor::transport::{send, Result};
+use denotate_editor::{
+    checking_server::{self, CheckingHandler},
+    test_support::{self, CheckingHooks},
+};
 use denotate_ir_text::{ProgramMembership, SourceFile};
-use lsp_server::{Connection, Message, RequestId, Response};
+use lsp_server::Connection;
 use lsp_types::{Diagnostic, Url};
 use serde_json::{json, Value};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::BTreeMap;
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Config {
@@ -57,7 +61,7 @@ struct Snapshot {
     config: Config,
     label: String,
 }
-struct Payload {
+pub(crate) struct Payload {
     snapshot: Snapshot,
     measure: bool,
 }
@@ -150,24 +154,26 @@ pub struct Checking {
     states: BTreeMap<String, State>,
     tests: bool,
     pub config: Config,
-    idle: Vec<RequestId>,
-    started: Vec<Value>,
-    finished: Vec<Value>,
+    hooks: CheckingHooks,
 }
 impl Checking {
     pub fn enable(&mut self, tests: bool) -> Result<()> {
         self.tests = tests;
-        self.worker = Some(Worker::spawn("denotate-check", |job, session, _| {
-            let result = check(job, session);
-            let cache = if job.payload.measure {
-                let c = session.stats();
-                json!({"evaluationHits":c.evaluation_hits,"evaluationMisses":c.evaluation_misses,
+        self.worker = Some(Worker::spawn(
+            "denotate-check",
+            |job, session, checkpoint| {
+                checkpoint();
+                let result = check(job, session);
+                let cache = if job.payload.measure {
+                    let c = session.stats();
+                    json!({"evaluationHits":c.evaluation_hits,"evaluationMisses":c.evaluation_misses,
                     "verdictHits":c.verdict_hits,"verdictMisses":c.verdict_misses})
-            } else {
-                Value::Null
-            };
-            (result, cache)
-        })?);
+                } else {
+                    Value::Null
+                };
+                (result, cache)
+            },
+        )?);
         Ok(())
     }
     pub fn status(&self, root: &str, status: &mut Value) {
@@ -266,20 +272,17 @@ impl Checking {
         }
         Ok(())
     }
+    #[cfg(test)]
     fn start(&mut self) -> Result<()> {
         if let Some(ticket) = self.worker.as_mut().unwrap().start()? {
             if self.tests {
-                self.started
+                self.hooks
+                    .started
                     .push(json!({"program":ticket.key,"revision":ticket.revision}));
             }
             self.states.get_mut(&ticket.key).unwrap().checking = "checking";
         }
         Ok(())
-    }
-    fn stop(&mut self) {
-        if let Some(mut worker) = self.worker.take() {
-            worker.stop();
-        }
     }
 }
 
@@ -433,7 +436,7 @@ impl Server {
             Event::Checkpoint(ticket) => {
                 send(
                     connection,
-                    "denotate/test/checkpoint",
+                    test_support::CHECKPOINT,
                     json!({"program":ticket.key,"revision":ticket.revision}),
                 )?;
                 return Ok(());
@@ -464,7 +467,7 @@ impl Server {
             "published"
         };
         if self.test_mode {
-            self.checking.finished.push(json!({"program":root,"revision":revision,"status":disposition,"cache":cache,"summary":result.as_ref().ok().map(|p|&p.status)}));
+            self.checking.hooks.finished.push(json!({"program":root,"revision":revision,"status":disposition,"cache":cache,"summary":result.as_ref().ok().map(|p|&p.status)}));
         }
         if !current {
             return Ok(());
@@ -538,7 +541,7 @@ impl Server {
         if self.test_mode {
             send(
                 connection,
-                "denotate/test/checked",
+                test_support::CHECKED,
                 json!({"program":root,"revision":revision}),
             )?;
         }
@@ -546,114 +549,41 @@ impl Server {
         Ok(())
     }
     pub fn serve_checks(&mut self, connection: &Connection) -> Result<()> {
-        let events = self.checking.worker.as_ref().unwrap().events().clone();
-        let mut pending = VecDeque::new();
-        self.sync_checks()?;
-        loop {
-            // Bounded batches keep edits ahead of old results without starving
-            // the worker event queue under a continuous stream of editor requests.
-            transport::receive_ready(connection, &mut pending);
-            if pending.is_empty() {
-                crossbeam_channel::select_biased! {
-                    recv(connection.receiver) -> m => match m { Ok(m) => pending.push_back(m), Err(_) => break },
-                    recv(events) -> e => self.check_finished(connection, e.map_err(|_|"Checking worker stopped")?)?,
-                }
-            }
-            for _ in 0..256 {
-                let Some(message) = pending.pop_front() else {
-                    break;
-                };
-                match message {
-                    Message::Request(r) => {
-                        if r.method == "shutdown" {
-                            self.checking.stop();
-                        }
-                        if connection.handle_shutdown(&r)? {
-                            return Ok(());
-                        }
-                        if self.test_mode && r.method == "denotate/test/checkingIdle" {
-                            self.checking.idle.push(r.id);
-                        } else if self.test_mode && r.method == "denotate/test/hold" {
-                            self.checking
-                                .worker
-                                .as_mut()
-                                .unwrap()
-                                .hold_next(HoldStage::BeforeResult);
-                            connection
-                                .sender
-                                .send(Message::Response(Response::new_ok(r.id, Value::Null)))?;
-                        } else if self.test_mode && r.method == "denotate/test/release" {
-                            let result = r.params["revision"]
-                                .as_u64()
-                                .is_some_and(|v| self.checking.worker.as_mut().unwrap().release(v));
-                            let response = if result {
-                                Response::new_ok(r.id, Value::Null)
-                            } else {
-                                Response::new_err(r.id, -32602, "No held result".into())
-                            };
-                            connection.sender.send(Message::Response(response))?;
-                        } else if self.test_mode && r.method == "denotate/test/resetChecks" {
-                            if !self.checking.worker.as_ref().unwrap().is_idle() {
-                                connection.sender.send(Message::Response(Response::new_err(
-                                    r.id,
-                                    -32602,
-                                    "Wait for checkingIdle before resetting sessions".into(),
-                                )))?;
-                            } else {
-                                self.checking.worker.as_mut().unwrap().reset_sessions()?;
-                                self.checking.states.clear();
-                                self.publish_all(connection)?;
-                                connection
-                                    .sender
-                                    .send(Message::Response(Response::new_ok(r.id, Value::Null)))?;
-                            }
-                        } else if self.test_mode && r.method == "denotate/test/checkingStats" {
-                            connection.sender.send(Message::Response(Response::new_ok(r.id,json!({"started":self.checking.started,"finished":self.checking.finished,"pending":self.checking.worker.as_ref().unwrap().pending().map(|j|json!({"program":j.ticket.key,"revision":j.ticket.revision})).collect::<Vec<_>>()}))))?;
-                        } else {
-                            transport::dispatch_request(self, r, connection, &mut pending)?;
-                        }
-                    }
-                    Message::Notification(n) if n.method == "exit" => return Ok(()),
-                    Message::Notification(n) => {
-                        if n.method == "$/cancelRequest" {
-                            if let Some(i) = self
-                                .checking
-                                .idle
-                                .iter()
-                                .position(|id| json!(id) == n.params["id"])
-                            {
-                                connection.sender.send(Message::Response(Response::new_err(
-                                    self.checking.idle.remove(i),
-                                    -32800,
-                                    "Request cancelled".into(),
-                                )))?;
-                            }
-                        }
-                        if let Err(e) = self.notification(connection, n) {
-                            eprintln!("notification rejected: {e}");
-                        }
-                    }
-                    Message::Response(r) => {
-                        self.bridge.response(r);
-                        self.publish_all(connection)?;
-                    }
-                }
-            }
-            // Queued edits have already invalidated their jobs before this gate.
-            if let Ok(event) = events.try_recv() {
-                self.check_finished(connection, event)?;
-            }
-            self.sync_checks()?;
-            self.checking.start()?;
-            if self.checking.worker.as_ref().unwrap().is_idle() && self.bridge.settled() {
-                for id in self.checking.idle.drain(..) {
-                    connection
-                        .sender
-                        .send(Message::Response(Response::new_ok(id, Value::Null)))?;
-                }
-            }
-        }
-        Ok(())
+        checking_server::run(self, connection)
+    }
+}
+impl CheckingHandler for Server {
+    type Key = String;
+    type Payload = Payload;
+    type Output = Output;
+    type Metadata = ();
+    fn scheduler(&mut self) -> &mut Worker {
+        self.checking.worker.as_mut().unwrap()
+    }
+    fn hooks(&mut self) -> &mut CheckingHooks {
+        &mut self.checking.hooks
+    }
+    fn test_mode(&self) -> bool {
+        self.test_mode
+    }
+    fn identity(ticket: &Ticket<String>) -> Value {
+        json!({"program": ticket.key, "revision": ticket.revision})
+    }
+    fn completed(&mut self, connection: &Connection, event: Event) -> Result<()> {
+        self.check_finished(connection, event)
+    }
+    fn before_start(&mut self, _: &Connection) -> Result<()> {
+        self.sync_checks()
+    }
+    fn started(&mut self, ticket: &Ticket<String>) {
+        self.checking.states.get_mut(&ticket.key).unwrap().checking = "checking";
+    }
+    fn settled(&self) -> bool {
+        self.bridge.settled()
+    }
+    fn reset_checks(&mut self, connection: &Connection) -> Result<()> {
+        self.checking.states.clear();
+        self.publish_all(connection)
     }
 }
 

@@ -1,11 +1,56 @@
 //! Test-only wire protocol shared by frontend servers. Call only in test mode.
 //! The caller owns readiness: validated follows a fresh full publication (even
-//! when unchanged), and idle is answered only after prior work is handled. B is
-//! serial; a future worker-based frontend must wait without blocking its loop.
+//! when unchanged). Checking-idle additionally waits for the scheduler and any
+//! frontend readiness gate, without blocking incoming messages.
 use crate::transport::{send, Result};
 use lsp_server::Connection;
 use lsp_types::Url;
 use serde_json::json;
+
+pub const CHECKING_IDLE: &str = "denotate/test/checkingIdle";
+pub const HOLD: &str = "denotate/test/hold";
+pub const RELEASE: &str = "denotate/test/release";
+pub const RESET_CHECKS: &str = "denotate/test/resetChecks";
+pub const CHECKING_STATS: &str = "denotate/test/checkingStats";
+pub const CHECKPOINT: &str = "denotate/test/checkpoint";
+pub const CHECKED: &str = "denotate/test/checked";
+
+/// Only populated in test mode. Record payloads belong to the frontend.
+#[derive(Default)]
+pub struct CheckingHooks {
+    pub started: Vec<serde_json::Value>,
+    pub finished: Vec<serde_json::Value>,
+    pub(crate) idle: Vec<lsp_server::RequestId>,
+}
+impl CheckingHooks {
+    pub(crate) fn cancel_idle(
+        &mut self,
+        connection: &Connection,
+        id: &serde_json::Value,
+    ) -> Result<()> {
+        if let Some(i) = self.idle.iter().position(|pending| json!(pending) == *id) {
+            connection.sender.send(lsp_server::Message::Response(
+                lsp_server::Response::new_err(
+                    self.idle.remove(i),
+                    -32800,
+                    "Request cancelled".into(),
+                ),
+            ))?;
+        }
+        Ok(())
+    }
+    pub(crate) fn answer_idle(&mut self, connection: &Connection) -> Result<()> {
+        for id in self.idle.drain(..) {
+            connection
+                .sender
+                .send(lsp_server::Message::Response(lsp_server::Response::new_ok(
+                    id,
+                    serde_json::Value::Null,
+                )))?;
+        }
+        Ok(())
+    }
+}
 
 pub const IDLE: &str = "denotate/test/idle";
 pub const VALIDATED: &str = "denotate/test/validated";
