@@ -120,12 +120,21 @@ impl Client {
             .prefix("denotate lsp ")
             .tempdir()
             .unwrap();
-        for entry in fs::read_dir(root().join("fixtures").join(fixture)).unwrap() {
-            let entry = entry.unwrap();
-            if entry.path().extension().is_some_and(|ext| ext == "den") {
-                fs::copy(entry.path(), workspace.path().join(entry.file_name())).unwrap();
+        fn copy_members(from: &std::path::Path, to: &std::path::Path) {
+            for entry in fs::read_dir(from).unwrap() {
+                let entry = entry.unwrap();
+                if entry.file_type().unwrap().is_dir() {
+                    let target = to.join(entry.file_name());
+                    fs::create_dir(&target).unwrap();
+                    copy_members(&entry.path(), &target);
+                } else if entry.path().extension().is_some_and(|ext| ext == "den")
+                    || entry.file_name() == "den.root"
+                {
+                    fs::copy(entry.path(), to.join(entry.file_name())).unwrap();
+                }
             }
         }
+        copy_members(&root().join("fixtures").join(fixture), workspace.path());
         let server = root().join("langium/dist/server.mjs");
         let executable = std::env::var("DENOTATE_LSP_COMMAND").unwrap_or_else(|_| "node".into());
         let args: Vec<String> = match std::env::var("DENOTATE_LSP_ARGS") {

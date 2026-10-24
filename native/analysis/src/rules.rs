@@ -63,45 +63,76 @@ pub(super) fn analyze_rule(
 ) -> RuleAnalysis {
     db.record_query(QueryKind::Rules);
     let syntax = rule.syntax(db);
+    let facts = syntax
+        .atoms
+        .iter()
+        .map(|atom| {
+            let arity_error =
+                arguments::arity_error(db, catalog, file, &atom.relation, atom.variables.len());
+            let input = syntax.complete && atom.role == Role::Head && {
+                let matches: Vec<_> = visible_relations(db, catalog, file)
+                    .iter()
+                    .filter(|target| target.name == atom.relation)
+                    .collect();
+                if let [target] = matches.as_slice() {
+                    visible_files(db, catalog, file).iter().any(|owner| {
+                        owner.uri(db) == &target.uri
+                            && owner.input_relations(db).contains(&target.id)
+                    })
+                } else {
+                    false
+                }
+            };
+            AtomEvidence {
+                arity_error,
+                input,
+                sorts: (0..atom.variables.len())
+                    .map(|index| {
+                        atom.variables[index].as_ref().and_then(|_| {
+                            expected_argument_sort(db, catalog, file, atom.relation.clone(), index)
+                                .clone()
+                        })
+                    })
+                    .collect(),
+            }
+        })
+        .collect::<Vec<_>>();
+    analyze_resolved_rule(&syntax, &facts)
+}
+
+/// Resolver-independent evidence. Frontends supply only uniquely established
+/// argument sorts and signatures; recovery never guesses missing evidence.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct AtomEvidence {
+    pub arity_error: Option<String>,
+    pub input: bool,
+    pub sorts: Vec<Option<Symbol>>,
+}
+
+pub fn analyze_resolved_rule(syntax: &RuleSyntax, facts: &[AtomEvidence]) -> RuleAnalysis {
+    assert_eq!(syntax.atoms.len(), facts.len());
     let mut result = RuleAnalysis::default();
     let mut positive = std::collections::HashSet::new();
     let mut requiring = std::collections::HashSet::new();
-    for atom in &syntax.atoms {
-        // Arity needs a reliable declaration, independent of rule completeness.
-        // Preserve the editor's existing check on recovered argument lists.
-        if let Some(message) =
-            arguments::arity_error(db, catalog, file, &atom.relation, atom.variables.len())
-        {
+    for (atom, fact) in syntax.atoms.iter().zip(facts) {
+        if let Some(message) = &fact.arity_error {
             result.diagnostics.push(RuleDiagnostic {
                 id: atom.id.clone(),
                 code: "arity".into(),
                 warning: false,
-                message,
+                message: message.clone(),
             });
         }
-        if syntax.complete && atom.role == Role::Head {
-            let matches: Vec<_> = visible_relations(db, catalog, file)
-                .iter()
-                .filter(|target| target.name == atom.relation)
-                .collect();
-            if let [target] = matches.as_slice() {
-                if let Some(&owner) = visible_files(db, catalog, file)
-                    .iter()
-                    .find(|owner| owner.uri(db) == &target.uri)
-                {
-                    if owner.input_relations(db).contains(&target.id) {
-                        result.diagnostics.push(RuleDiagnostic {
-                            id: atom.id.clone(),
-                            code: "input-definition".into(),
-                            warning: false,
-                            message: format!(
-                                "Input relation '{}' cannot be defined by a fact or rule head.",
-                                atom.relation
-                            ),
-                        });
-                    }
-                }
-            }
+        if syntax.complete && atom.role == Role::Head && fact.input {
+            result.diagnostics.push(RuleDiagnostic {
+                id: atom.id.clone(),
+                code: "input-definition".into(),
+                warning: false,
+                message: format!(
+                    "Input relation '{}' cannot be defined by a fact or rule head.",
+                    atom.relation
+                ),
+            });
         }
         for (index, term) in atom.variables.iter().enumerate() {
             let Some(term) = term else { continue };
@@ -125,7 +156,7 @@ pub(super) fn analyze_rule(
                 });
             let variable = &mut result.variables[variable_index];
             variable.occurrences.push(term.id.clone());
-            match expected_argument_sort(db, catalog, file, atom.relation.clone(), index) {
+            match fact.sorts.get(index).and_then(Option::as_ref) {
                 Some(sort) => {
                     if !variable.sorts.contains(sort) {
                         variable.sorts.push(sort.clone());

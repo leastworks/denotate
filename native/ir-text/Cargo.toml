@@ -6,6 +6,8 @@ rust-version = "1.93"
 publish = false
 
 [dependencies]
+denotate-analysis = { path = "../analysis" }
+salsa.workspace = true
 denotate-ir = { path = "../ir" }
 denotate-check = { path = "../check" }
 tree-sitter = "=0.25.10"

@@ -95,10 +95,10 @@ fn quoted_text(source: &SourceFile, raw: &str, span: Range<usize>) -> Result<Str
     }
     Ok(out)
 }
-fn name(source: &SourceFile, node: Node<'_>) -> Result<Name> {
+pub(crate) fn name(source: &SourceFile, node: Node<'_>) -> Result<Name> {
     name_in(source, node, false)
 }
-fn name_in(source: &SourceFile, node: Node<'_>, parameter: bool) -> Result<Name> {
+pub(crate) fn name_in(source: &SourceFile, node: Node<'_>, parameter: bool) -> Result<Name> {
     if node.kind() == "qualified_name" {
         let mut parts = path_parts(text(source, node));
         if parts.first() == Some(&"") {
@@ -289,7 +289,7 @@ fn namespace_parts(source: &SourceFile, parts: &[&str], span: Range<usize>) -> R
     }
     Ok(Namespace::new(decoded).expect("decoded names are nonempty"))
 }
-fn namespace_path(source: &SourceFile, node: Node<'_>) -> Result<Namespace> {
+pub(crate) fn namespace_path(source: &SourceFile, node: Node<'_>) -> Result<Namespace> {
     namespace_parts(source, &path_parts(text(source, node)), node.byte_range())
 }
 /// A collision-free, readable encoding for the existing semantic-key namespace field.

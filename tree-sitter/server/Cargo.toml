@@ -6,8 +6,8 @@ publish = false
 workspace = "../../native"
 
 [dependencies]
+denotate-ir = { path = "../../native/ir" }
 denotate-ir-text = { path = "../../native/ir-text" }
-denotate-analysis = { path = "../../native/analysis" }
 denotate-editor = { path = "../../native/editor" }
 tree-sitter = "=0.25.10"
 lsp-server = "=0.7.9"

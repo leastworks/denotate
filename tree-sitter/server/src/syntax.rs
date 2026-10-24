@@ -54,8 +54,8 @@ impl Document {
         // Tree-sitter's reserved set applies to its `identifier` word token,
         // not the separate lowercase `constant` token. Enforce the same lexical
         // restriction here, before semantic analysis (including declarations).
-        let reserved_constant =
-            node.kind() == "constant" && crate::projection::reserved(&self.text[node.byte_range()]);
+        let reserved_constant = node.kind() == "constant"
+            && denotate_ir_text::reserved_word(&self.text[node.byte_range()]);
         if node.is_error() || node.is_missing() || reserved_constant {
             result.push(Diagnostic {
                 range: self.range(node),
@@ -90,7 +90,10 @@ impl Document {
     fn collect_symbols(&self, parent: Node<'_>, result: &mut Vec<DocumentSymbol>) {
         for node in parent.named_children(&mut parent.walk()) {
             let kind = match node.kind() {
-                "module" | "import" => SymbolKind::MODULE,
+                "module" | "namespace" | "import" => SymbolKind::MODULE,
+                "domain" => SymbolKind::ARRAY,
+                "obligation" | "assumption" => SymbolKind::EVENT,
+                "source_location" | "location_alias" => SymbolKind::CONSTANT,
                 "sort" => SymbolKind::CLASS,
                 "constants" => SymbolKind::CONSTANT,
                 "relation" => SymbolKind::FUNCTION,
@@ -104,6 +107,8 @@ impl Document {
             let selection = if node.kind() == "statement" {
                 node.child_by_field_name("head")
                     .and_then(|head| head.child_by_field_name("name"))
+            } else if node.kind() == "domain" {
+                node.child_by_field_name("sort")
             } else {
                 node.child_by_field_name("name")
             };
@@ -127,6 +132,11 @@ impl Document {
             if body.is_some() {
                 label.push_str(" :- …");
             }
+            let mut children = vec![];
+            if node.kind() == "namespace" {
+                self.collect_symbols(node, &mut children);
+                label = format!("namespace {}", &self.text[selection.byte_range()]);
+            }
             #[allow(deprecated)]
             result.push(DocumentSymbol {
                 name: label,
@@ -140,7 +150,7 @@ impl Document {
                     self.range(node)
                 },
                 selection_range: self.range(selection),
-                children: None,
+                children: (!children.is_empty()).then_some(children),
             });
         }
     }
@@ -199,9 +209,19 @@ mod tests {
         assert_eq!(incremental.diagnostics(), fresh.diagnostics());
         assert_eq!(incremental.symbols(), fresh.symbols());
         let uri = lsp_types::Url::parse("file:///example.den").unwrap();
-        let a = crate::projection::Projection::new(incremental, &uri);
-        let b = crate::projection::Projection::new(&fresh, &uri);
-        assert_eq!(a.input, b.input);
+        let a = denotate_ir_text::index::Projection::new(
+            denotate_ir_text::SourceFile::new(uri.as_str(), 1, incremental.text.as_str()),
+            incremental.tree.clone(),
+            None,
+        );
+        let b = denotate_ir_text::index::Projection::new(
+            denotate_ir_text::SourceFile::new(uri.as_str(), 1, fresh.text.as_str()),
+            fresh.tree.clone(),
+            None,
+        );
+        assert_eq!(a.declarations, b.declarations);
+        assert_eq!(a.references, b.references);
+        assert_eq!(a.rules, b.rules);
         assert_eq!(a.anchors, b.anchors);
         assert_eq!(a.rule_anchors, b.rule_anchors);
     }

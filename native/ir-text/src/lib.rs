@@ -2,6 +2,7 @@
 //! cache policy, or diagnostic wording is hidden in the loader.
 mod ast;
 pub mod filesystem;
+pub mod index;
 mod load;
 mod locations;
 mod membership;

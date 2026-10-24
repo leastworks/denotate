@@ -6,7 +6,7 @@ const env = { ...process.env, DENOTATE_BACKEND: 'tree-sitter', DENOTATE_LSP_COMM
 // Shared editor and B4 ranged/lifecycle scenarios. A's held-build tests depend
 // on its asynchronous phases; B exercises its serial checkpoints in components.
 for (const [binary, filter] of [
-    ['b1'], ['b2'], ['editor'], ['resolution'], ['rename'], ['formatting'],
+    ['ir_text'], ['b1'], ['b2'], ['editor'], ['resolution'], ['rename'], ['formatting'],
     ['deferred'], ['rules'], ['acceptance'], ['a2'], ['b4'],
     ['lifecycle', 'rapid_edits_converge_to_latest_diagnostics_navigation_and_completion'], ['b5'], ['zero_arity']
 ]) {

@@ -1,5 +1,4 @@
 mod formatting;
-mod projection;
 mod rename;
 mod semantic;
 mod syntax;
@@ -31,6 +30,89 @@ struct Server {
 }
 
 impl Server {
+    // Transitional disk membership adapter for the stage-1 resolver migration.
+    // Stage 2 replaces discovery with the authoritative manifest-buffer catalog.
+    fn refresh_memberships(&mut self) {
+        let mut manifests = self
+            .roots
+            .iter()
+            .map(|root| root.join("den.root"))
+            .filter(|path| path.is_file())
+            .collect::<std::collections::BTreeSet<_>>();
+        for uri in self.documents.keys() {
+            if let Ok(path) = uri.to_file_path() {
+                for folder in path.ancestors().skip(1) {
+                    if folder.join("den.root").is_file() {
+                        manifests.insert(folder.join("den.root"));
+                        break;
+                    }
+                }
+            }
+        }
+        let aliases = self
+            .documents
+            .keys()
+            .filter_map(|uri| Some((uri.to_file_path().ok()?.canonicalize().ok()?, uri.clone())))
+            .collect::<HashMap<_, _>>();
+        let mut programs = vec![];
+        let mut broken = vec![];
+        for manifest in manifests {
+            match denotate_ir_text::filesystem::discover(&manifest) {
+                Ok((mut membership, sources)) => {
+                    let mut remap = HashMap::new();
+                    for source in sources {
+                        let Ok(canonical_uri) = Url::parse(&source.uri) else {
+                            continue;
+                        };
+                        let uri = canonical_uri
+                            .to_file_path()
+                            .ok()
+                            .and_then(|p| {
+                                aliases.get(&p).cloned().or_else(|| {
+                                    self.roots.iter().find_map(|root| {
+                                        let canonical = root.canonicalize().ok()?;
+                                        let relative = p.strip_prefix(canonical).ok()?;
+                                        Url::from_file_path(root.join(relative)).ok()
+                                    })
+                                })
+                            })
+                            .unwrap_or(canonical_uri);
+                        remap.insert(source.uri, uri.to_string());
+                        if !self.documents.contains_key(&uri) {
+                            let doc =
+                                Document::new(&mut self.parser, source.text.to_string(), 0, false);
+                            self.store(uri, doc);
+                        }
+                    }
+                    for root in membership.roots.values_mut() {
+                        root.files = root
+                            .files
+                            .iter()
+                            .map(|uri| remap.get(uri).cloned().unwrap_or(uri.clone()))
+                            .collect();
+                    }
+                    programs.push(membership);
+                }
+                Err(errors) => {
+                    eprintln!("root membership: {errors:?}");
+                    if let Some(folder) = manifest.parent() {
+                        broken.push(folder.to_owned());
+                    }
+                }
+            }
+        }
+        self.semantics.memberships(&programs);
+        for uri in self.documents.keys() {
+            if uri
+                .to_file_path()
+                .is_ok_and(|path| broken.iter().any(|folder| path.starts_with(folder)))
+            {
+                self.semantics.block_context(uri);
+            }
+        }
+        self.diagnostics_dirty = true;
+    }
+
     fn refresh_diagnostics(&mut self) {
         if !self.diagnostics_dirty {
             return;
@@ -262,8 +344,12 @@ impl Server {
                 let params: DidOpenTextDocumentParams =
                     serde_json::from_value(notification.params)?;
                 let text = params.text_document;
+                let new_document = !self.documents.contains_key(&text.uri);
                 let doc = Document::new(&mut self.parser, text.text, text.version, true);
                 self.store(text.uri, doc);
+                if new_document {
+                    self.refresh_memberships();
+                }
                 self.publish_all(connection)?;
             }
             "textDocument/didChange" => {
@@ -336,6 +422,7 @@ impl Server {
                         removed.push(event.uri);
                     }
                 }
+                self.refresh_memberships();
                 // Publish after the entire batch, never an intermediate corpus.
                 for uri in removed {
                     self.publish(connection, &uri)?;
@@ -398,6 +485,7 @@ fn run(connection: &Connection) -> Result<()> {
             eprintln!("workspace read: {error}");
         }
     }
+    server.refresh_memberships();
     if params["capabilities"]["workspace"]["didChangeWatchedFiles"]["dynamicRegistration"] == true {
         connection.sender.send(Message::Request(Request::new(1.into(), "client/registerCapability".into(), json!({
             "registrations": [{"id": "denotate-files", "method": "workspace/didChangeWatchedFiles",
@@ -694,6 +782,12 @@ mod tests {
             false,
         );
         server.store(library.clone(), doc);
+        server
+            .semantics
+            .memberships(&[denotate_ir_text::ProgramMembership::single(
+                "explicit-test-root",
+                [program.to_string(), library.to_string()],
+            )]);
         assert!(server.diagnostics_dirty);
         server.refresh_diagnostics();
         assert!(server.diagnostics[&program].is_empty());

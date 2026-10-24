@@ -1,0 +1,3 @@
+use library;
+relation q();
+q() :- library::r();

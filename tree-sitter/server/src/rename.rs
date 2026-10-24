@@ -1,8 +1,11 @@
 //! Conservative refactoring over resolved identities, never text substitution.
 use crate::{
-    projection::{reserved, Lookup},
     semantic::{Semantics, Target},
     syntax::Document,
+};
+use denotate_ir_text::{
+    index::{Kind, Lookup},
+    reserved_word as reserved,
 };
 use lsp_types::{Position, Range, Url};
 use serde_json::{json, Value};
@@ -67,23 +70,15 @@ fn editable(uri: &Url, roots: &[PathBuf]) -> Result<(), String> {
     Ok(())
 }
 
-fn constant_sort(semantics: &Semantics, target: &Target) -> Option<denotate_analysis::Symbol> {
-    let name = semantics
-        .files
-        .get(&target.uri)?
-        .input
-        .constants
-        .iter()
-        .find(|c| c.id == target.id)?
-        .sort
-        .as_ref()?;
-    semantics
-        .core
-        .resolve_sort(target.uri.as_str(), name.clone())
+fn constant_sort(
+    semantics: &Semantics,
+    target: &Target,
+) -> Option<denotate_ir_text::index::Symbol> {
+    semantics.constant_sort(&target.uri, target)
 }
 
-/// Until step 3 projects every reference, even a rename initiated in a legacy
-/// file can miss uses in a different file. Gate the whole indexed workspace.
+/// Retain the syntax guard until stage 6 validates proposed edits against every
+/// affected root. The shared index can now project these references.
 fn has_unprojected_syntax(node: tree_sitter::Node<'_>) -> bool {
     matches!(
         node.kind(),
@@ -120,7 +115,7 @@ pub fn rename(
         .values()
         .any(|doc| has_unprojected_syntax(doc.tree.root_node()))
     {
-        return Err("Rename is unavailable while the workspace contains IR text syntax that the editor does not yet understand (authoring step 3).".into());
+        return Err("Rename is unavailable for this syntax until root-wide edit validation is implemented (authoring step 3, stage 6).".into());
     }
     let doc = documents.get(uri).ok_or("No document.")?;
     let byte = doc.offset(position).ok_or("No rename target here.")?;
@@ -128,13 +123,19 @@ pub fn rename(
         .reference_at(uri, byte)
         .ok_or("Rename requires one resolved, unambiguous target.")?;
     match &reference.lookup {
-        Lookup::Anonymous { .. } => return Err("_ has no rename target.".into()),
-        Lookup::Parameter => return Err("Parameter rename is not supported.".into()),
+        Lookup::Anonymous(_) => return Err("_ has no rename target.".into()),
+        Lookup::Parameter(_) => return Err("Parameter rename is not supported.".into()),
         _ => {}
     }
     let target = semantics
         .target(uri, reference)
         .ok_or("Rename requires one resolved, unambiguous target.")?;
+    if semantics
+        .declaration(&target)
+        .is_some_and(|d| d.kind == Kind::Parameter)
+    {
+        return Err("Parameter rename is not supported.".into());
+    }
     let kind = if target.rule.is_some() {
         "variable"
     } else {
@@ -142,7 +143,12 @@ pub fn rename(
             .files
             .get(&target.uri)
             .and_then(|f| f.declarations.get(&target.id))
-            .map(|d| d.kind.as_str())
+            .map(|d| match d.kind {
+                Kind::Constant => "constants",
+                Kind::Relation => "relation",
+                Kind::Sort => "sort",
+                _ => "other",
+            })
             .ok_or("Unknown declaration.")?
     };
     if !matches!(
@@ -193,8 +199,7 @@ pub fn rename(
     }
     let collision = if let Some(rule) = &target.rule {
         semantics
-            .core
-            .rule_analysis(target.uri.as_str(), rule)
+            .rule_analysis(&target.uri, rule)
             .variables
             .iter()
             .any(|v| v.name == name && v.occurrences.first() != Some(&target.id))
@@ -206,13 +211,15 @@ pub fn rename(
                     return false;
                 }
                 let same_kind = match kind {
-                    "relation" | "input" => {
-                        matches!(declaration.kind.as_str(), "relation" | "input")
-                    }
-                    _ => declaration.kind == kind,
+                    "relation" | "input" => declaration.kind == Kind::Relation,
+                    _ => match kind {
+                        "sort" => declaration.kind == Kind::Sort,
+                        "constants" => declaration.kind == Kind::Constant,
+                        _ => false,
+                    },
                 };
                 same_kind
-                    && declaration.name == name
+                    && declaration.name.text == name
                     && (kind != "constants"
                         || constant_sort(
                             semantics,
@@ -309,7 +316,7 @@ mod tests {
                     )
                     .unwrap_err();
                     assert!(
-                        error.contains("does not yet understand"),
+                        error.contains("root-wide edit validation"),
                         "{suffix}: {error}"
                     );
                 }

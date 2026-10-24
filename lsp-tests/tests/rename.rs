@@ -276,7 +276,16 @@ fn unrelated_validation_errors_do_not_block_rename() {
         "Duplicate declaration",
         "must match filename",
     ] {
-        assert!(diagnostics.contains(message), "{diagnostics}");
+        if message == "must match filename"
+            && std::env::var("DENOTATE_BACKEND").as_deref() == Ok("tree-sitter")
+        {
+            assert!(
+                !diagnostics.contains(message),
+                "B namespaces are independent of filenames"
+            );
+        } else {
+            assert!(diagnostics.contains(message), "{diagnostics}");
+        }
     }
     let args = params(&uri, &source, "mapped_to(input_a", "mapping");
     client.request("textDocument/prepareRename", args.clone());

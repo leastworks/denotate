@@ -240,6 +240,26 @@ fn gate(id: &str, program: LoweredProgram, sources: Sources) {
         assert_eq!(program.corpus.sorts().count(), 3);
     }
     let (membership, documents) = bundle.documents("file:///export");
+    let mut editor = denotate_ir_text::index::Index::default();
+    for source in &documents {
+        let tree = denotate_ir_text::parser()
+            .parse(source.text.as_ref(), None)
+            .unwrap();
+        editor.update(source.clone(), tree);
+    }
+    editor.set_membership(&membership).unwrap();
+    for source in &documents {
+        let errors = editor
+            .diagnostics(&membership.root, &source.uri)
+            .into_iter()
+            .filter(|d| !d.warning)
+            .collect::<Vec<_>>();
+        assert!(
+            errors.is_empty(),
+            "{id}: exported editor resolution: {errors:?}"
+        );
+    }
+
     let loaded = load_with_resolver(&membership, &documents, Some(&mut &sources))
         .unwrap_or_else(|e| panic!("{id}: {e:?}\n{:?}", bundle.files));
     assert!(loaded.embedded.notices.is_empty());

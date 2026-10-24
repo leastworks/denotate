@@ -212,7 +212,13 @@ fn unknown_imports_module_mismatches_and_duplicate_declarations_are_diagnosed() 
     assert!(!client.diagnostics(&uri).as_array().unwrap().is_empty());
     client.change(&uri, 2, "module wrong;\nsort Slot;\nsort Slot;\n");
     let diagnostics = client.diagnostics(&uri).to_string();
-    assert!(diagnostics.contains("must match filename"), "{diagnostics}");
+    // B now resolves namespaces independently of filenames; A retains its
+    // original module/file contract.
+    assert_eq!(
+        diagnostics.contains("must match filename"),
+        std::env::var("DENOTATE_BACKEND").as_deref() != Ok("tree-sitter"),
+        "{diagnostics}"
+    );
     assert!(
         diagnostics.contains("Duplicate declaration 'Slot'"),
         "{diagnostics}"
@@ -603,10 +609,13 @@ fn watched_creation_introduces_ambiguity_module_edits_break_imports_and_deletion
     client.watched_change("right.den", 2, &uri, 2);
     assert_unresolved(&definition(&mut client, &uri, source, "use right", 4));
     assert!(client.diagnostics(&uri).to_string().contains("right"));
-    assert!(client
-        .diagnostics(&right_uri)
-        .to_string()
-        .contains("must match filename"));
+    assert_eq!(
+        client
+            .diagnostics(&right_uri)
+            .to_string()
+            .contains("must match filename"),
+        std::env::var("DENOTATE_BACKEND").as_deref() != Ok("tree-sitter")
+    );
     assert_target(
         &definition(&mut client, &uri, source, "masked_extra(a)", 0),
         "left.den",
@@ -757,7 +766,15 @@ fn declaration_and_typed_constant_hovers_show_the_resolved_signature_or_sort() {
         ),
         ("mapped_to(shared, shared)", 10, "const shared: Source"),
         ("mapped_to(shared, shared)", 18, "const shared: Slot"),
-        ("use computation", 4, "module computation"),
+        (
+            "use computation",
+            4,
+            if std::env::var("DENOTATE_BACKEND").as_deref() == Ok("tree-sitter") {
+                "namespace computation"
+            } else {
+                "module computation"
+            },
+        ),
         (": Slot", 2, "sort Slot"),
     ] {
         assert_eq!(

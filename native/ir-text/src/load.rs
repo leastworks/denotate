@@ -175,19 +175,16 @@ fn ir_construction<T>(
         diagnostic(m, span, message)
     })
 }
-fn visible(m: &Scope, name: &Name) -> Vec<Namespace> {
-    if let Some(namespace) = &name.namespace {
-        return vec![namespace.clone()];
-    }
-    let mut all = m
-        .imports
-        .iter()
-        .map(|(ns, _)| ns.clone())
-        .collect::<BTreeSet<_>>();
-    for length in 0..=m.namespace.segments().len() {
-        all.insert(Namespace::new(m.namespace.segments()[..length].iter().cloned()).unwrap());
-    }
-    all.into_iter().collect()
+fn candidate_keys(m: &Scope, name: &Name) -> Vec<(Namespace, String, bool)> {
+    crate::index::candidate_keys(
+        crate::index::visible_namespaces(
+            &m.namespace,
+            m.imports.iter().map(|(ns, _)| ns),
+            name.namespace.as_ref(),
+        ),
+        &name.text,
+        name.generated,
+    )
 }
 fn one<T: Copy>(
     m: &Scope,
@@ -219,9 +216,9 @@ impl Builder {
             m,
             n,
             "sort",
-            visible(m, n)
+            candidate_keys(m, n)
                 .into_iter()
-                .filter_map(|module| self.sorts.get(&(module, n.text.clone())).copied()),
+                .filter_map(|(namespace, text, _)| self.sorts.get(&(namespace, text)).copied()),
         )
     }
     fn relation(&self, m: &Scope, n: &Name) -> Result<RelationId> {
@@ -229,11 +226,9 @@ impl Builder {
             m,
             n,
             "relation",
-            visible(m, n).into_iter().filter_map(|module| {
-                self.relations
-                    .get(&(module, n.text.clone(), n.generated))
-                    .copied()
-            }),
+            candidate_keys(m, n)
+                .into_iter()
+                .filter_map(|key| self.relations.get(&key).copied()),
         )
     }
     fn constant(&self, m: &Scope, n: &Name, sort: SortId) -> Result<ConstantId> {
@@ -241,9 +236,11 @@ impl Builder {
             m,
             n,
             "constant of the expected sort",
-            visible(m, n)
+            candidate_keys(m, n)
                 .into_iter()
-                .filter_map(|module| self.constants.get(&(module, sort, n.text.clone())).copied()),
+                .filter_map(|(namespace, text, _)| {
+                    self.constants.get(&(namespace, sort, text)).copied()
+                }),
         )
     }
     fn span(&self, m: &Scope, range: Range<usize>) -> Result<SourceSpan> {

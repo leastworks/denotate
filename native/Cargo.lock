@@ -229,9 +229,11 @@ name = "denotate-ir-text"
 version = "0.0.1"
 dependencies = [
  "cc",
+ "denotate-analysis",
  "denotate-check",
  "denotate-check-session",
  "denotate-ir",
+ "salsa",
  "serde_json",
  "sha2",
  "tree-sitter",
@@ -278,8 +280,8 @@ dependencies = [
 name = "denotate-tree-sitter"
 version = "0.0.1"
 dependencies = [
- "denotate-analysis",
  "denotate-editor",
+ "denotate-ir",
  "denotate-ir-text",
  "lsp-server",
  "lsp-types",
