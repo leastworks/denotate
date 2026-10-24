@@ -1,5 +1,5 @@
 //! Single-document programs, two-speed diagnostics and a revision-gated worker.
-//! B's serial transport loop stays unchanged; this frontend owns scheduling.
+//! The shared editor scheduler owns work; this frontend owns document policy.
 #[cfg(test)]
 mod deadline;
 #[cfg(test)]
@@ -10,10 +10,11 @@ mod worker;
 
 use crate::analysis::{self, Failure};
 use crate::{lowering::incremental::Session, syntax};
-use crossbeam_channel::{Sender, bounded};
-use denotate_check::{Cancellation, Limits};
+use denotate_check::Limits;
 use denotate_editor::{
-    Document, Documents, test_support,
+    Document, Documents,
+    checking::{HoldStage, Job},
+    test_support,
     transport::{Result, send},
 };
 use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
@@ -22,11 +23,8 @@ use lsp_types::{
     Url,
 };
 use serde_json::{Value, json};
-use std::{
-    collections::{BTreeMap, VecDeque},
-    sync::Arc,
-};
-use worker::{Event, Hold, HoldStage, Identity, Job, Worker};
+use std::{collections::BTreeMap, sync::Arc};
+use worker::{Event, Identity, Payload, Worker};
 
 struct OpenDocument {
     document: Arc<Document>,
@@ -38,17 +36,10 @@ impl AsRef<Document> for OpenDocument {
         &self.document
     }
 }
-struct Active {
-    id: Identity,
-    cancellation: Cancellation,
-}
-
 /// Only populated in DENOTATE_TEST_MODE. Hooks hold a worker at explicit phase
 /// boundaries; they neither impose sleeps nor alter checker truth/limits.
 #[derive(Default)]
 struct TestHooks {
-    next_hold: Option<HoldStage>,
-    releases: BTreeMap<u64, Sender<()>>,
     started: Vec<Value>,
     finished: Vec<Value>,
 }
@@ -56,10 +47,7 @@ struct Server {
     documents: Documents<OpenDocument>,
     lowering: BTreeMap<Url, Session>,
     parser: tree_sitter::Parser,
-    revision: u64,
     worker: Worker,
-    active: Option<Active>,
-    pending: VecDeque<Job>,
     idle: Vec<RequestId>,
     tests: bool,
     hooks: TestHooks,
@@ -83,10 +71,7 @@ pub fn run_with_mode(connection: &Connection, tests: bool) -> Result<()> {
         documents: Documents::default(),
         lowering: BTreeMap::new(),
         parser: syntax::parser()?,
-        revision: 0,
-        worker: Worker::spawn()?,
-        active: None,
-        pending: VecDeque::new(),
+        worker: worker::spawn()?,
         idle: vec![],
         tests,
         hooks: TestHooks::default(),
@@ -95,13 +80,18 @@ pub fn run_with_mode(connection: &Connection, tests: bool) -> Result<()> {
     };
     let result = server.serve(connection);
     server.stop();
-    server.worker.join();
     result
 }
 
 impl Server {
     fn serve(&mut self, connection: &Connection) -> Result<()> {
         loop {
+            // Shutdown has joined the worker; wait only for the client's exit.
+            let events = if self.shutdown {
+                crossbeam_channel::never()
+            } else {
+                self.worker.events().clone()
+            };
             // Prefer already queued source edits over a completed old result.
             crossbeam_channel::select_biased! {
                 recv(connection.receiver) -> message => {
@@ -117,12 +107,12 @@ impl Server {
                         _ => (),
                     }
                 }
-                recv(self.worker.events) -> event => self.completed(connection, event.map_err(|_| "Checking worker stopped unexpectedly")?)?,
+                recv(events) -> event => self.completed(connection, event.map_err(|_| "Checking worker stopped unexpectedly")?)?,
             }
             if !self.shutdown {
                 self.start_next()?;
             }
-            if self.active.is_none() && self.pending.is_empty() {
+            if self.worker.is_idle() {
                 for id in self.idle.drain(..) {
                     connection
                         .sender
@@ -134,39 +124,16 @@ impl Server {
     }
 
     fn stop(&mut self) {
-        if let Some(active) = &self.active {
-            active.cancellation.cancel();
-        }
-        self.pending.clear();
-        // Disconnection releases test checkpoints too, including on shutdown.
-        self.hooks.releases.clear();
+        self.worker.stop();
     }
     fn cancel(&mut self, uri: &Url) {
-        if let Some(active) = &self.active {
-            if &active.id.uri == uri {
-                active.cancellation.cancel();
-            }
-        }
-        self.pending.retain(|job| &job.id.uri != uri);
+        self.worker.cancel(uri);
     }
     fn start_next(&mut self) -> Result<()> {
-        if self.active.is_some() {
-            return Ok(());
-        }
-        if let Some(mut job) = self.pending.pop_front() {
+        if let Some(ticket) = self.worker.start()? {
             if self.tests {
-                self.hooks.started.push(identity(&job.id));
-                if let Some(stage) = self.hooks.next_hold.take() {
-                    let (send, release) = bounded(1);
-                    self.hooks.releases.insert(job.id.revision, send);
-                    job.hold = Some(Hold { stage, release });
-                }
+                self.hooks.started.push(identity(&ticket));
             }
-            self.active = Some(Active {
-                id: job.id.clone(),
-                cancellation: job.limits.cancellation.clone(),
-            });
-            self.worker.jobs.send(worker::Command::Check(job))?;
         }
         Ok(())
     }
@@ -184,11 +151,11 @@ impl Server {
         } else if self.tests && request.method == "inputmapping/test/hold" {
             match request.params["phase"].as_str() {
                 Some("afterPrepare") => {
-                    self.hooks.next_hold = Some(HoldStage::AfterPrepare);
+                    self.worker.hold_next(HoldStage::DuringCheck);
                     Ok(Value::Null)
                 }
                 Some("beforeResult") => {
-                    self.hooks.next_hold = Some(HoldStage::BeforeResult);
+                    self.worker.hold_next(HoldStage::BeforeResult);
                     Ok(Value::Null)
                 }
                 _ => Err((-32602, "Expected afterPrepare or beforeResult")),
@@ -196,13 +163,10 @@ impl Server {
         } else if self.tests && request.method == "inputmapping/test/release" {
             match request.params["revision"]
                 .as_u64()
-                .and_then(|r| self.hooks.releases.remove(&r))
+                .is_some_and(|r| self.worker.release(r))
             {
-                Some(release) => {
-                    let _ = release.send(());
-                    Ok(Value::Null)
-                }
-                None => Err((-32602, "No held worker at that revision")),
+                true => Ok(Value::Null),
+                false => Err((-32602, "No held worker at that revision")),
             }
         } else if self.tests && request.method == "inputmapping/test/stats" {
             let lowering: BTreeMap<_, _> = self
@@ -211,7 +175,7 @@ impl Server {
                 .map(|(uri, session)| (uri.as_str(), session.stats()))
                 .collect();
             Ok(
-                json!({"started": self.hooks.started, "finished": self.hooks.finished, "pending": self.pending.iter().map(|j| identity(&j.id)).collect::<Vec<_>>(), "lowering": lowering }),
+                json!({"started": self.hooks.started, "finished": self.hooks.finished, "pending": self.worker.pending().map(|j| identity(&j.ticket)).collect::<Vec<_>>(), "lowering": lowering }),
             )
         } else {
             Err((-32601, "Unsupported request"))
@@ -300,7 +264,7 @@ impl Server {
                 self.cancel(&uri);
                 self.documents.remove(&uri);
                 self.lowering.remove(&uri);
-                self.worker.jobs.send(worker::Command::Close(uri.clone()))?;
+                self.worker.close(&uri)?;
                 publish(connection, &uri, None, vec![])?;
             }
             "$/cancelRequest" => {
@@ -328,12 +292,8 @@ impl Server {
     }
 
     fn install(&mut self, connection: &Connection, uri: Url, document: Document) -> Result<()> {
-        self.cancel(&uri);
-        self.revision = self
-            .revision
-            .checked_add(1)
-            .ok_or("Snapshot revision overflow")?;
-        let revision = self.revision;
+        let ticket = self.worker.ticket(uri.clone(), document.version);
+        let revision = ticket.revision;
         let version = document.version;
         let document = Arc::new(document);
         let lowering = self
@@ -364,20 +324,20 @@ impl Server {
             test_support::frontend_ready(connection, &uri, version)?;
         }
         if let Some(program) = program {
-            self.pending.push_back(Job {
-                id: Identity {
-                    uri,
-                    revision,
-                    version,
+            self.worker.enqueue(Job {
+                ticket,
+                payload: Payload {
+                    program,
+                    backend: self.backend.clone(),
+                    measure: self.tests,
                 },
-                program,
                 limits: Limits::default(),
-                backend: self.backend.clone(),
-                hold: None,
-                measure: self.tests,
             });
-        } else if self.tests {
-            test_support::validated(connection, &uri, version)?;
+        } else {
+            self.cancel(&uri);
+            if self.tests {
+                test_support::validated(connection, &uri, version)?;
+            }
         }
         Ok(())
     }
@@ -390,16 +350,16 @@ impl Server {
                 }
                 return Ok(());
             }
-            Event::Finished(id, result, check_ns) => (id, result, check_ns),
+            Event::Finished(id, (result, check_ns)) => (id, result, check_ns),
         };
-        self.active = None;
-        self.hooks.releases.remove(&id.revision);
-        let current = !self.shutdown
-            && self.documents.rejected_version(&id.uri).is_none()
-            && self
-                .documents
-                .get(&id.uri)
-                .is_some_and(|d| d.revision == id.revision && d.document.version == id.version);
+        let documents = &self.documents;
+        let current = self.worker.complete(&id, || {
+            !self.shutdown
+                && documents.rejected_version(&id.key).is_none()
+                && documents
+                    .get(&id.key)
+                    .is_some_and(|d| d.revision == id.revision && d.document.version == id.metadata)
+        });
         let status = if matches!(result, Err(Failure::Cancelled)) {
             "cancelled"
         } else if !current {
@@ -422,7 +382,7 @@ impl Server {
         if !current || matches!(result, Err(Failure::Cancelled)) {
             return Ok(());
         }
-        let mut diagnostics = self.documents[&id.uri].fast.clone();
+        let mut diagnostics = self.documents[&id.key].fast.clone();
         match result {
             Ok(output) => {
                 diagnostics.extend(output.diagnostics);
@@ -448,16 +408,16 @@ impl Server {
             }
             Err(Failure::Cancelled) => return Ok(()),
         }
-        publish(connection, &id.uri, Some(id.version), diagnostics)?;
+        publish(connection, &id.key, Some(id.metadata), diagnostics)?;
         if self.tests {
-            test_support::validated(connection, &id.uri, id.version)?;
+            test_support::validated(connection, &id.key, id.metadata)?;
         }
         Ok(())
     }
 }
 
 fn identity(id: &Identity) -> Value {
-    json!({"uri": id.uri, "revision": id.revision, "version": id.version})
+    json!({"uri": id.key, "revision": id.revision, "version": id.metadata})
 }
 fn publish(
     connection: &Connection,

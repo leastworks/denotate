@@ -582,6 +582,60 @@ fn completed_old_result_cannot_publish_into_a_newer_valid_or_broken_snapshot() {
 }
 
 #[test]
+fn queued_document_edits_keep_fifo_position_and_active_edits_join_the_tail() {
+    let mut c = Client::start("base/00-valid");
+    let a = uri(&c, "a.inputmapping");
+    let b = uri(&c, "b.inputmapping");
+    let d = uri(&c, "c.inputmapping");
+    hold(&mut c, "afterPrepare");
+    open(&mut c, &a, SOURCE);
+    let held = checkpoint(&mut c, &a, 1);
+    open(&mut c, &b, SOURCE);
+    open(&mut c, &d, SOURCE);
+    for u in [&b, &a] {
+        c.change_without_waiting(u, 2, SOURCE);
+        ready(&mut c, u, 2);
+    }
+    let pending = c.request("inputmapping/test/stats", Value::Null)["pending"].clone();
+    assert_eq!(
+        pending
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|j| (&j["uri"], &j["version"]))
+            .collect::<Vec<_>>(),
+        vec![
+            (&json!(b), &json!(2)),
+            (&json!(d), &json!(1)),
+            (&json!(a), &json!(2))
+        ]
+    );
+    release(&mut c, &held);
+    let finished = stats(&mut c);
+    let started = finished["started"].as_array().unwrap();
+    assert_eq!(started.len(), 4);
+    assert_eq!(started[1..], pending.as_array().unwrap()[..]);
+    for u in [&a, &b, &d] {
+        assert_eq!(codes(&c, u, "OverlappingMappings").len(), 2);
+    }
+    c.shutdown();
+}
+
+#[test]
+fn shutdown_releases_held_checks_without_a_client_release() {
+    for phase in ["afterPrepare", "beforeResult"] {
+        let mut c = Client::start("base/00-valid");
+        let a = uri(&c, "a.inputmapping");
+        let b = uri(&c, "b.inputmapping");
+        hold(&mut c, phase);
+        open(&mut c, &a, SOURCE);
+        checkpoint(&mut c, &a, 1);
+        open(&mut c, &b, SOURCE);
+        c.shutdown();
+    }
+}
+
+#[test]
 fn cancellation_after_preparation_and_pending_coalescing_are_per_document() {
     let mut c = Client::start("base/00-valid");
     let a = uri(&c, "a.inputmapping");

@@ -8,10 +8,7 @@ fn server() -> Server {
         documents: Documents::default(),
         lowering: BTreeMap::new(),
         parser: syntax::parser().unwrap(),
-        revision: 0,
-        worker: Worker::spawn().unwrap(),
-        active: None,
-        pending: VecDeque::new(),
+        worker: worker::spawn().unwrap(),
         idle: vec![],
         tests: true,
         hooks: TestHooks::default(),
@@ -32,7 +29,7 @@ fn completed(server: &mut Server) -> Event {
     server.start_next().unwrap();
     server
         .worker
-        .events
+        .events()
         .recv_timeout(Duration::from_secs(5))
         .unwrap()
 }
@@ -50,7 +47,6 @@ fn publications(client: &Connection) -> Vec<PublishDiagnosticsParams> {
 }
 fn stop(mut server: Server) {
     server.stop();
-    server.worker.join();
 }
 
 #[test]
@@ -60,11 +56,11 @@ fn deadline_publishes_an_operational_notice_and_success_clears_it() {
     let uri = Url::parse("file:///deadline.inputmapping").unwrap();
     install(&mut server, &connection, &uri, 1);
     publications(&client);
-    server.pending.back_mut().unwrap().limits.timeout = Duration::ZERO;
+    server.worker.pending_limits_mut(&uri).unwrap().timeout = Duration::ZERO;
     let event = completed(&mut server);
     assert!(matches!(
         &event,
-        Event::Finished(_, Err(Failure::Deadline), _)
+        Event::Finished(_, (Err(Failure::Deadline), _))
     ));
     server.completed(&connection, event).unwrap();
     let published = publications(&client);
@@ -86,9 +82,9 @@ fn deadline_publishes_an_operational_notice_and_success_clears_it() {
 
     install(&mut server, &connection, &uri, 2);
     publications(&client);
-    server.pending.back_mut().unwrap().limits.timeout = Duration::from_secs(60);
+    server.worker.pending_limits_mut(&uri).unwrap().timeout = Duration::from_secs(60);
     let event = completed(&mut server);
-    assert!(matches!(&event, Event::Finished(_, Ok(_), _)));
+    assert!(matches!(&event, Event::Finished(_, (Ok(_), _))));
     server.completed(&connection, event).unwrap();
     let published = publications(&client);
     assert_eq!(published.len(), 1);
@@ -107,11 +103,11 @@ fn stale_deadline_never_publishes_over_a_newer_document() {
     let mut server = server();
     let uri = Url::parse("file:///deadline.inputmapping").unwrap();
     install(&mut server, &connection, &uri, 1);
-    server.pending.back_mut().unwrap().limits.timeout = Duration::ZERO;
+    server.worker.pending_limits_mut(&uri).unwrap().timeout = Duration::ZERO;
     let event = completed(&mut server);
     assert!(matches!(
         &event,
-        Event::Finished(_, Err(Failure::Deadline), _)
+        Event::Finished(_, (Err(Failure::Deadline), _))
     ));
     install(&mut server, &connection, &uri, 2);
     publications(&client);
