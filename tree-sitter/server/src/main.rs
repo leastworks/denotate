@@ -846,7 +846,7 @@ fn run_with_mode(connection: &Connection, test_mode: bool) -> Result<()> {
     };
     server.bridge.enabled = params["initializationOptions"]["originSnapshotBridge"] == true;
     server.checking.config = checking::Config::read(&params["initializationOptions"]["denotate"])?;
-    server.checking.enable()?;
+    server.checking.enable(test_mode)?;
     server.refresh_memberships();
     // Bridge clients own workspace and external-root watchers. Other clients can
     // opt into standard registration; origin authority is never inferred from it.

@@ -1,5 +1,6 @@
 //! Language-independent editor mechanisms. Frontends own grammars, semantics,
-//! workspace policy, scheduling and presentation.
+//! workspace policy and presentation.
+pub mod checking;
 mod document;
 pub mod presentation;
 mod synchronization;

@@ -211,6 +211,9 @@ dependencies = [
 name = "denotate-editor"
 version = "0.0.1"
 dependencies = [
+ "crossbeam-channel",
+ "denotate-check",
+ "denotate-check-session",
  "denotate-ir",
  "denotate-presentation",
  "lsp-server",

@@ -6,17 +6,14 @@ use crate::{
     presentation::{self, Publication},
     Server,
 };
-use crossbeam_channel::{bounded, unbounded, Receiver, Sender};
 use denotate_check::*;
+use denotate_editor::checking::{self, HoldStage, Job, Scheduler};
 use denotate_editor::transport::{self, send, Result};
 use denotate_ir_text::{ProgramMembership, SourceFile};
 use lsp_server::{Connection, Message, RequestId, Response};
 use lsp_types::{Diagnostic, Url};
 use serde_json::{json, Value};
-use std::{
-    collections::{BTreeMap, VecDeque},
-    thread::JoinHandle,
-};
+use std::collections::{BTreeMap, VecDeque};
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Config {
@@ -60,27 +57,13 @@ struct Snapshot {
     config: Config,
     label: String,
 }
-struct Job {
-    root: String,
-    revision: u64,
+struct Payload {
     snapshot: Snapshot,
-    limits: Limits,
-    hold: Option<Receiver<()>>,
     measure: bool,
 }
-enum Command {
-    Check(Job),
-    Close(String),
-}
-pub enum Event {
-    Checkpoint(String, u64),
-    Finished(
-        String,
-        u64,
-        std::result::Result<Publication, Failure>,
-        Value,
-    ),
-}
+type Output = (std::result::Result<Publication, Failure>, Value);
+type Worker = Scheduler<String, Payload, Output>;
+pub type Event = checking::Event<String, Output>;
 #[derive(Debug)]
 pub enum Failure {
     Cancelled,
@@ -97,61 +80,12 @@ impl From<CheckError> for Failure {
         }
     }
 }
-struct Worker {
-    jobs: Sender<Command>,
-    events: Receiver<Event>,
-    thread: JoinHandle<()>,
-}
-impl Worker {
-    fn spawn() -> std::io::Result<Self> {
-        let (jobs, pending) = unbounded();
-        let (send, events) = unbounded();
-        let thread = std::thread::Builder::new()
-            .name("denotate-check".into())
-            .spawn(move || {
-                let mut sessions = BTreeMap::<String, denotate_check_session::Session>::new();
-                for command in pending {
-                    let job = match command {
-                        Command::Close(root) => {
-                            sessions.remove(&root);
-                            continue;
-                        }
-                        Command::Check(job) => job,
-                    };
-                    let session = sessions.entry(job.root.clone()).or_default();
-                    let result = check(&job, session);
-                    let cache = if job.measure {
-                        let c = session.stats();
-                        json!({"evaluationHits":c.evaluation_hits,"evaluationMisses":c.evaluation_misses,
-                            "verdictHits":c.verdict_hits,"verdictMisses":c.verdict_misses})
-                    } else {
-                        Value::Null
-                    };
-                    if let Some(hold) = job.hold {
-                        let _ = send.send(Event::Checkpoint(job.root.clone(), job.revision));
-                        let _ = hold.recv();
-                    }
-                    if send
-                        .send(Event::Finished(job.root, job.revision, result, cache))
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-            })?;
-        Ok(Self {
-            jobs,
-            events,
-            thread,
-        })
-    }
-}
 fn check(
-    job: &Job,
+    job: &Job<String, Payload>,
     session: &mut denotate_check_session::Session,
 ) -> std::result::Result<Publication, Failure> {
     job.limits.cancellation.check()?;
-    let s = &job.snapshot;
+    let s = &job.payload.snapshot;
     let program =
         denotate_ir_text::load_with_resolver(&s.membership, &s.files, Some(&mut &s.bridge))
             .map_err(Failure::Invalid)?;
@@ -196,28 +130,30 @@ struct State {
     publication: Option<Publication>,
     errors: Vec<String>,
 }
-struct Active {
-    root: String,
-    revision: u64,
-    cancellation: Cancellation,
-}
 #[derive(Default)]
 pub struct Checking {
     worker: Option<Worker>,
     states: BTreeMap<String, State>,
-    pending: VecDeque<Job>,
-    active: Option<Active>,
-    revision: u64,
+    tests: bool,
     pub config: Config,
     idle: Vec<RequestId>,
-    hold_next: bool,
-    releases: BTreeMap<u64, Sender<()>>,
     started: Vec<Value>,
     finished: Vec<Value>,
 }
 impl Checking {
-    pub fn enable(&mut self) -> Result<()> {
-        self.worker = Some(Worker::spawn()?);
+    pub fn enable(&mut self, tests: bool) -> Result<()> {
+        self.tests = tests;
+        self.worker = Some(Worker::spawn("denotate-check", |job, session, _| {
+            let result = check(job, session);
+            let cache = if job.payload.measure {
+                let c = session.stats();
+                json!({"evaluationHits":c.evaluation_hits,"evaluationMisses":c.evaluation_misses,
+                    "verdictHits":c.verdict_hits,"verdictMisses":c.verdict_misses})
+            } else {
+                Value::Null
+            };
+            (result, cache)
+        })?);
         Ok(())
     }
     pub fn status(&self, root: &str, status: &mut Value) {
@@ -256,7 +192,7 @@ impl Checking {
             .collect()
     }
     fn reconcile(&mut self, snapshots: BTreeMap<String, Option<Snapshot>>) -> Result<()> {
-        let Some(worker) = &self.worker else {
+        let Some(worker) = &mut self.worker else {
             return Ok(());
         };
         let removed = self
@@ -267,13 +203,7 @@ impl Checking {
             .collect::<Vec<_>>();
         for root in removed {
             self.states.remove(&root);
-            self.pending.retain(|j| j.root != root);
-            if let Some(a) = &self.active {
-                if a.root == root {
-                    a.cancellation.cancel();
-                }
-            }
-            worker.jobs.send(Command::Close(root))?;
+            worker.close(&root)?;
         }
         for (root, snapshot) in snapshots {
             if self.states.get(&root).is_some_and(|s| {
@@ -281,19 +211,15 @@ impl Checking {
             }) {
                 continue;
             }
-            if let Some(a) = &self.active {
-                if a.root == root {
-                    a.cancellation.cancel();
-                }
-            }
-            self.revision += 1;
+            let ticket = worker.ticket(root.clone(), ());
+            let revision = ticket.revision;
             let Some(snapshot) = snapshot else {
-                self.pending.retain(|j| j.root != root);
+                worker.cancel(&root);
                 self.states.insert(
                     root,
                     State {
                         snapshot: None,
-                        revision: self.revision,
+                        revision,
                         checking: "blocked",
                         publication: None,
                         errors: vec![],
@@ -305,26 +231,19 @@ impl Checking {
                 timeout: std::time::Duration::from_millis(snapshot.config.timeout_ms),
                 ..Limits::default()
             };
-            let job = Job {
-                root: root.clone(),
-                revision: self.revision,
-                snapshot: snapshot.clone(),
+            worker.enqueue(Job {
+                ticket,
+                payload: Payload {
+                    snapshot: snapshot.clone(),
+                    measure: self.tests,
+                },
                 limits,
-                hold: None,
-                measure: false,
-            };
-            // Replacement keeps the root's FIFO position. An active root's new
-            // job joins the tail, behind all roots that are already waiting.
-            if let Some(pending) = self.pending.iter_mut().find(|j| j.root == root) {
-                *pending = job;
-            } else {
-                self.pending.push_back(job);
-            }
+            });
             self.states.insert(
                 root,
                 State {
                     snapshot: Some(snapshot),
-                    revision: self.revision,
+                    revision,
                     checking: "pending",
                     publication: None,
                     errors: vec![],
@@ -333,53 +252,20 @@ impl Checking {
         }
         Ok(())
     }
-    fn start(&mut self, tests: bool) -> Result<()> {
-        if self.active.is_some() {
-            return Ok(());
-        }
-        let Some(mut job) = self.pending.pop_front() else {
-            return Ok(());
-        };
-        job.measure = tests;
-        if tests {
-            self.started
-                .push(json!({"program":job.root,"revision":job.revision}));
-            if std::mem::take(&mut self.hold_next) {
-                let (send, release) = bounded(1);
-                self.releases.insert(job.revision, send);
-                job.hold = Some(release);
+    fn start(&mut self) -> Result<()> {
+        if let Some(ticket) = self.worker.as_mut().unwrap().start()? {
+            if self.tests {
+                self.started
+                    .push(json!({"program":ticket.key,"revision":ticket.revision}));
             }
+            self.states.get_mut(&ticket.key).unwrap().checking = "checking";
         }
-        self.states.get_mut(&job.root).unwrap().checking = "checking";
-        self.active = Some(Active {
-            root: job.root.clone(),
-            revision: job.revision,
-            cancellation: job.limits.cancellation.clone(),
-        });
-        self.worker
-            .as_ref()
-            .unwrap()
-            .jobs
-            .send(Command::Check(job))?;
         Ok(())
     }
     fn stop(&mut self) {
-        if let Some(a) = &self.active {
-            a.cancellation.cancel();
+        if let Some(mut worker) = self.worker.take() {
+            worker.stop();
         }
-        self.pending.clear();
-        self.releases.clear();
-        if let Some(w) = self.worker.take() {
-            drop(w.jobs);
-            if w.thread.join().is_err() {
-                eprintln!("Denotate checking worker panicked");
-            }
-        }
-    }
-}
-impl Drop for Checking {
-    fn drop(&mut self) {
-        self.stop();
     }
 }
 
@@ -488,32 +374,33 @@ impl Server {
         self.checking.reconcile(self.check_snapshots())
     }
     fn check_finished(&mut self, connection: &Connection, event: Event) -> Result<()> {
-        let (root, revision, result, cache) = match event {
-            Event::Checkpoint(root, revision) => {
+        let (ticket, (result, cache)) = match event {
+            Event::Checkpoint(ticket) => {
                 send(
                     connection,
                     "denotate/test/checkpoint",
-                    json!({"program":root,"revision":revision}),
+                    json!({"program":ticket.key,"revision":ticket.revision}),
                 )?;
                 return Ok(());
             }
-            Event::Finished(r, v, o, c) => (r, v, o, c),
+            Event::Finished(ticket, output) => (ticket, output),
         };
         // Rebuild the entire observation at the publication boundary. This also
         // validates every destination's home, including labeled library fallbacks.
         self.sync_checks()?;
+        let states = &self.checking.states;
         let current = self
             .checking
-            .states
-            .get(&root)
-            .is_some_and(|s| s.revision == revision && s.snapshot.is_some());
-        let active = self
-            .checking
-            .active
-            .take()
-            .expect("worker result without active job");
-        debug_assert_eq!((&active.root, active.revision), (&root, revision));
-        self.checking.releases.remove(&revision);
+            .worker
+            .as_mut()
+            .unwrap()
+            .complete(&ticket, || {
+                states
+                    .get(&ticket.key)
+                    .is_some_and(|s| s.revision == ticket.revision && s.snapshot.is_some())
+            });
+        let root = ticket.key;
+        let revision = ticket.revision;
         let disposition = if !current {
             "discarded"
         } else if matches!(result, Err(Failure::Cancelled)) {
@@ -604,7 +491,7 @@ impl Server {
         Ok(())
     }
     pub fn serve_checks(&mut self, connection: &Connection) -> Result<()> {
-        let events = self.checking.worker.as_ref().unwrap().events.clone();
+        let events = self.checking.worker.as_ref().unwrap().events().clone();
         let mut pending = VecDeque::new();
         self.sync_checks()?;
         loop {
@@ -632,37 +519,33 @@ impl Server {
                         if self.test_mode && r.method == "denotate/test/checkingIdle" {
                             self.checking.idle.push(r.id);
                         } else if self.test_mode && r.method == "denotate/test/hold" {
-                            self.checking.hold_next = true;
+                            self.checking
+                                .worker
+                                .as_mut()
+                                .unwrap()
+                                .hold_next(HoldStage::BeforeResult);
                             connection
                                 .sender
                                 .send(Message::Response(Response::new_ok(r.id, Value::Null)))?;
                         } else if self.test_mode && r.method == "denotate/test/release" {
                             let result = r.params["revision"]
                                 .as_u64()
-                                .and_then(|v| self.checking.releases.remove(&v));
-                            let response = if let Some(send) = result {
-                                let _ = send.send(());
+                                .is_some_and(|v| self.checking.worker.as_mut().unwrap().release(v));
+                            let response = if result {
                                 Response::new_ok(r.id, Value::Null)
                             } else {
                                 Response::new_err(r.id, -32602, "No held result".into())
                             };
                             connection.sender.send(Message::Response(response))?;
                         } else if self.test_mode && r.method == "denotate/test/resetChecks" {
-                            if self.checking.active.is_some() || !self.checking.pending.is_empty() {
+                            if !self.checking.worker.as_ref().unwrap().is_idle() {
                                 connection.sender.send(Message::Response(Response::new_err(
                                     r.id,
                                     -32602,
                                     "Wait for checkingIdle before resetting sessions".into(),
                                 )))?;
                             } else {
-                                for root in self.checking.states.keys() {
-                                    self.checking
-                                        .worker
-                                        .as_ref()
-                                        .unwrap()
-                                        .jobs
-                                        .send(Command::Close(root.clone()))?;
-                                }
+                                self.checking.worker.as_mut().unwrap().reset_sessions()?;
                                 self.checking.states.clear();
                                 self.publish_all(connection)?;
                                 connection
@@ -670,7 +553,7 @@ impl Server {
                                     .send(Message::Response(Response::new_ok(r.id, Value::Null)))?;
                             }
                         } else if self.test_mode && r.method == "denotate/test/checkingStats" {
-                            connection.sender.send(Message::Response(Response::new_ok(r.id,json!({"started":self.checking.started,"finished":self.checking.finished,"pending":self.checking.pending.iter().map(|j|json!({"program":j.root,"revision":j.revision})).collect::<Vec<_>>()}))))?;
+                            connection.sender.send(Message::Response(Response::new_ok(r.id,json!({"started":self.checking.started,"finished":self.checking.finished,"pending":self.checking.worker.as_ref().unwrap().pending().map(|j|json!({"program":j.ticket.key,"revision":j.ticket.revision})).collect::<Vec<_>>()}))))?;
                         } else {
                             transport::dispatch_request(self, r, connection, &mut pending)?;
                         }
@@ -706,11 +589,8 @@ impl Server {
                 self.check_finished(connection, event)?;
             }
             self.sync_checks()?;
-            self.checking.start(self.test_mode)?;
-            if self.checking.active.is_none()
-                && self.checking.pending.is_empty()
-                && self.bridge.settled()
-            {
+            self.checking.start()?;
+            if self.checking.worker.as_ref().unwrap().is_idle() && self.bridge.settled() {
                 for id in self.checking.idle.drain(..) {
                     connection
                         .sender
@@ -740,28 +620,38 @@ mod tests {
             label: root.into(),
         };
         let mut checking = Checking::default();
-        checking.enable().unwrap();
+        checking.enable(false).unwrap();
         checking
             .reconcile(BTreeMap::from([
                 ("a".into(), Some(snapshot("a"))),
                 ("b".into(), Some(snapshot("b"))),
             ]))
             .unwrap();
-        checking.pending.front_mut().unwrap().limits.timeout = std::time::Duration::ZERO;
-        checking.start(false).unwrap();
-        let events = checking.worker.as_ref().unwrap().events.clone();
-        assert!(
-            matches!(events.recv_timeout(std::time::Duration::from_secs(5)).unwrap(),Event::Finished(root,_,Err(Failure::Deadline),_) if root=="a")
-        );
-        checking.active = None;
-        checking.start(false).unwrap();
-        let Event::Finished(root, _, Ok(publication), _) = events
+        checking
+            .worker
+            .as_mut()
+            .unwrap()
+            .pending_limits_mut(&"a".into())
+            .unwrap()
+            .timeout = std::time::Duration::ZERO;
+        checking.start().unwrap();
+        let events = checking.worker.as_ref().unwrap().events().clone();
+        let Event::Finished(ticket, (Err(Failure::Deadline), _)) = events
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .unwrap()
+        else {
+            panic!("expected deadline");
+        };
+        assert_eq!(ticket.key, "a");
+        checking.worker.as_mut().unwrap().complete(&ticket, || true);
+        checking.start().unwrap();
+        let Event::Finished(ticket, (Ok(publication), _)) = events
             .recv_timeout(std::time::Duration::from_secs(5))
             .unwrap()
         else {
             panic!("waiting root did not finish");
         };
-        assert_eq!(root, "b");
+        assert_eq!(ticket.key, "b");
         assert_eq!(publication.status["state"], "proved");
     }
 }

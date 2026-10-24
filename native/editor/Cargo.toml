@@ -5,6 +5,9 @@ edition = "2021"
 publish = false
 
 [dependencies]
+crossbeam-channel = "=0.5.17"
+denotate-check = { path = "../check" }
+denotate-check-session = { path = "../check-session" }
 denotate-ir = { path = "../ir" }
 denotate-presentation = { path = "../presentation" }
 tree-sitter = "=0.25.10"
