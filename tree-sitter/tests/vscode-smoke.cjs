@@ -143,6 +143,70 @@ obligation unique: at_most_one(p, group_by: ());`;
     await replace(checkedDoc, checkedText);
     await eventually(conflicts, ds => ds.length === 2, 'dirty den member restores conflict');
 
+    // The installed command follows a matching dirty non-.den buffer and
+    // refuses a changed one even while its saved bytes still match the origin.
+    const navigate = async () => {
+        const editor = await vscode.window.showTextDocument(checkedDoc);
+        const at = checkedDoc.positionAt(checkedDoc.getText().indexOf('p(b)'));
+        editor.selection = new vscode.Selection(at, at);
+        await vscode.commands.executeCommand('denotate.goToOrigin');
+    };
+    await navigate();
+    assert.equal(vscode.window.activeTextEditor.document.uri.toString(), originUri.toString());
+    assert.equal(vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection), 'source');
+    await replace(origin, 'dirty source');
+    await navigate();
+    assert.equal(vscode.window.activeTextEditor.document.uri.toString(), checkedUri.toString(), 'changed open origin must never navigate to matching disk');
+    await replace(origin, 'saved source');
+
+    // Scalar columns are interpreted against the exact CRLF/astral snapshot,
+    // then converted to the target editor's UTF-16 positions.
+    const unicodeUri = vscode.Uri.joinPath(checkedFolder, 'unicode.dsl');
+    const unicodeText = 'é😀x\r\nZ';
+    await vscode.workspace.fs.writeFile(unicodeUri, Buffer.from(unicodeText));
+    const unicodeHash = 'sha256:' + require('node:crypto').createHash('sha256').update(unicodeText).digest('hex');
+    const unicodeDen = `relation unicode_origin(); unicode_origin() loc(#u 1:2 to 2:2); #u = source(${JSON.stringify(unicodeUri.toString())}, view: "dsl", hash: "${unicodeHash}");`;
+    await replace(checkedDoc, unicodeDen);
+    const unicodeEditor = await vscode.window.showTextDocument(checkedDoc);
+    const unicodeAt = checkedDoc.positionAt(unicodeDen.indexOf('unicode_origin() loc'));
+    unicodeEditor.selection = new vscode.Selection(unicodeAt, unicodeAt);
+    await vscode.commands.executeCommand('denotate.goToOrigin');
+    assert.equal(vscode.window.activeTextEditor.document.uri.toString(), unicodeUri.toString());
+    assert.equal(vscode.window.activeTextEditor.document.getText(vscode.window.activeTextEditor.selection), '😀x\r\nZ');
+    await replace(checkedDoc, checkedText);
+
+    // Real VS Code decoding removes the UTF-8 signature from getText().
+    const bomUri = vscode.Uri.joinPath(checkedFolder, 'bom.inputmapping');
+    const bomText = '\ufeffA😀x\r\nZ';
+    await vscode.workspace.fs.writeFile(bomUri, Buffer.from(bomText));
+    const bomHash = 'sha256:' + require('node:crypto').createHash('sha256').update(bomText).digest('hex');
+    const bomDen = checkedText.replace(originUri.toString(), bomUri.toString()).replace(hash, bomHash)
+        .replace('1:1 to 1:6', '1:2 to 1:3').replace('1:7 to 1:13', '1:3 to 1:5');
+    await replace(checkedDoc, bomDen);
+    await eventually(() => api.request('denotate/originStatus', { uri: bomUri.toString() }), r => r.state === 'matching' && r.snapshot.open === false, 'closed BOM source matches exact disk bytes');
+    await navigate();
+    assert.equal(vscode.window.activeTextEditor.document.uri.toString(), bomUri.toString(), 'closed BOM source opens at its origin');
+    const bomDoc = vscode.window.activeTextEditor.document;
+    assert.equal(bomDoc.encoding, 'utf8bom');
+    assert.equal(bomDoc.getText(), 'A😀x\r\nZ');
+    console.log('BOM reproduction: encoding=' + bomDoc.encoding + ', getText=' + JSON.stringify(bomDoc.getText()));
+    await eventually(() => api.request('denotate/originStatus', { uri: bomUri.toString() }), r => r.state === 'matching' && r.snapshot.open, 'open BOM source retains exact signature identity');
+    const bomLinks = ds => ds.flatMap(d => d.relatedInformation ?? []).filter(r => r.location.uri.toString() === bomUri.toString());
+    const bomFindings = await eventually(conflicts, ds => ds.length === 2 && bomLinks(ds).length >= 2, 'BOM source retains both related links');
+    assert.deepEqual([...new Set(bomLinks(bomFindings).map(r => bomDoc.getText(r.location.range)))].sort(), ['A', '😀x'].sort());
+    await navigate();
+    assert.equal(vscode.window.activeTextEditor.document.uri.toString(), bomUri.toString());
+    assert.equal(bomDoc.getText(vscode.window.activeTextEditor.selection), '😀x');
+    await replace(bomDoc, 'B😀x\r\nZ');
+    await eventually(() => api.request('denotate/originStatus', { uri: bomUri.toString() }), r => r.state === 'hash-mismatch', 'changed BOM buffer still wins over matching disk');
+    await navigate();
+    assert.equal(vscode.window.activeTextEditor.document.uri.toString(), checkedUri.toString());
+    await replace(bomDoc, 'A😀x\r\nZ');
+    await eventually(() => api.request('denotate/originStatus', { uri: bomUri.toString() }), r => r.state === 'matching' && r.snapshot.dirty, 'restored dirty BOM source matches again');
+    await navigate();
+    assert.equal(bomDoc.getText(vscode.window.activeTextEditor.selection), '😀x');
+    await replace(checkedDoc, checkedText);
+
     // No implicit workspace root: create a standalone document outside the
     // existing root, then exercise both default and explicit destination creation.
     const temp = await require('node:fs/promises').mkdtemp(require('node:path').join(require('node:os').tmpdir(), 'denotate-root-smoke-'));
@@ -178,5 +242,5 @@ obligation unique: at_most_one(p, group_by: ());`;
     await vscode.workspace.fs.writeFile(externalUri, Buffer.from('namespace external; relation r();'));
     await eventually(() => vscode.commands.executeCommand('vscode.executeDefinitionProvider', consumerUri, new vscode.Position(0,1)), refs => refs?.length === 1, 'external library watcher repairs declarations');
     await replace(rootDoc, rootText);
-    console.log('Denotate stage-4 smoke passed: checked dirty buffers and origin links; roots, dirty manifests, authoritative DSL buffers, quick fixes;  syntax/repair, outline, definition/completion, references, hover/signatures, applied cross-file rename round trip and idempotent formatting.');
+    console.log('Denotate stage-5 smoke passed: Go to Origin on matching dirty buffers, changed-buffer refusal and Unicode/CRLF selections; checked dirty buffers and origin links; roots, dirty manifests, authoritative DSL buffers, quick fixes;  syntax/repair, outline, definition/completion, references, hover/signatures, applied cross-file rename round trip and idempotent formatting.');
 };

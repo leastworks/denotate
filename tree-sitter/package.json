@@ -13,7 +13,9 @@
     "configuration": {"title": "Denotate", "properties": {"denotate.backend": {"type": "string", "enum": ["bdd", "sat"], "default": "bdd", "description": "Checker backend for every Denotate program."}}},
     "languages": [{"id": "denotate", "aliases": ["Denotate IR"], "extensions": [".den"], "configuration": "./dist/language-configuration.json"}],
     "grammars": [{"language": "denotate", "scopeName": "source.denotate", "path": "./dist/denotate.tmLanguage.json"}],
+    "menus": {"editor/context": [{"command": "denotate.goToOrigin", "when": "editorLangId == denotate", "group": "navigation"}]},
     "commands": [
+      {"command": "denotate.goToOrigin", "title": "Denotate: Go to Origin", "enablement": "editorLangId == denotate"},
       {"command": "denotate.createRoot", "title": "Denotate: Create den.root here"}
     ]
   },
@@ -21,6 +23,7 @@
     "generate": "cd grammar && tree-sitter generate",
     "build": "npm run generate && cargo +1.93.0 build --manifest-path ../native/Cargo.toml --locked -p denotate-tree-sitter --release && node build.mjs",
     "test": "npm run generate && cargo +1.93.0 test --manifest-path ../native/Cargo.toml --locked -p denotate-tree-sitter",
+    "test:origins": "node --test tests/origin-navigation.cjs",
     "test:lsp": "npm run build && node scripts/test-lsp.mjs",
     "test:vscode": "npm run build && node scripts/run-vscode-smoke.mjs"
   },

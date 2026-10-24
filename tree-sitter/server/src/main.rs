@@ -464,6 +464,7 @@ impl Server {
             return Err("Document is out of sync; reopen it or send a full-text change.".into());
         }
         match request.method.as_str() {
+            "denotate/origins" => self.origin_candidates(&request.params),
             "denotate/roots" => {
                 self.refresh_diagnostics();
                 if let Some(uri) = request.params["uri"].as_str() {
@@ -872,6 +873,7 @@ impl transport::Handler for Server {
         matches!(
             method,
             "denotate/roots"
+                | "denotate/origins"
                 | "denotate/originStatus"
                 | "textDocument/codeAction"
                 | "textDocument/documentSymbol"

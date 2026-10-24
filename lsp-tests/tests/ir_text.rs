@@ -926,3 +926,117 @@ fn ambiguous_canonical_home_blocks_only_affected_programs() {
     }
     c.shutdown();
 }
+
+#[test]
+fn go_to_origin_preserves_occurrence_maps_fused_identities_and_definition_navigation() {
+    if !b_only() {
+        return;
+    }
+    let mut c = Client::start("base/00-valid");
+    let (uri, _) = c.open("example.den");
+    let text = r#"sort OriginSort; const origin_a:OriginSort;
+input origin_input(x:OriginSort); relation origin_output(x:OriginSort);
+#s = source("file:///library/source.dsl", view: "dsl", hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000");
+#v = source("file:///library/source.dsl", view: "other", hash: "sha256:1111111111111111111111111111111111111111111111111111111111111111");
+origin_output(origin_a) loc(#map);
+#map = {self: loc(fused[#s 1:1 to 1:4, #v 2:1 to 2:3, #s 1:1 to 1:4]), head.0: loc(#s 3:2 to 3:4)};
+assumption origin_constraint: at_most_one(origin_input, group_by: ()) loc(#v 4:1 to 4:5);
+"#;
+    c.change(&uri, 2, text);
+    let result = query(
+        &mut c,
+        "denotate/origins",
+        &uri,
+        text,
+        "origin_output(origin_a)",
+        0,
+    );
+    assert_eq!(result["version"], 2);
+    let origins = result["origins"].as_array().unwrap();
+    assert_eq!(origins.len(), 2, "{result}");
+    assert!(origins
+        .iter()
+        .all(|o| o["uri"] == "file:///library/source.dsl"));
+    assert!(origins
+        .iter()
+        .any(|o| o["view"] == "other" && o["start"]["line"] == 2));
+    let term = query(
+        &mut c,
+        "denotate/origins",
+        &uri,
+        text,
+        "origin_output(origin_a)",
+        14,
+    );
+    assert_eq!(term["origins"].as_array().unwrap().len(), 1, "{term}");
+    assert_eq!(term["origins"][0]["start"], json!({"line":3,"column":2}));
+    let term_end = query(
+        &mut c,
+        "denotate/origins",
+        &uri,
+        text,
+        "origin_output(origin_a)",
+        "origin_output(origin_a".len(),
+    );
+    assert_eq!(
+        term_end["origins"], term["origins"],
+        "caret after the term must retain its specific origin"
+    );
+
+    let assumption = query(
+        &mut c,
+        "denotate/origins",
+        &uri,
+        text,
+        "assumption origin_constraint",
+        12,
+    );
+    assert_eq!(assumption["origins"][0]["start"]["line"], 4);
+    let none = query(&mut c, "denotate/origins", &uri, text, "sort OriginSort", 0);
+    assert_eq!(none["origins"], json!([]));
+    let definition = query(
+        &mut c,
+        "textDocument/definition",
+        &uri,
+        text,
+        "origin_output(origin_a)",
+        0,
+    );
+    assert_eq!(definition.as_array().unwrap().len(), 1);
+    assert_eq!(definition[0]["targetUri"], uri);
+    assert_eq!(definition[0]["targetRange"]["start"]["line"], 1);
+    // Candidate associations come from the current authoring snapshot, even
+    // without an origin resolver or a completed semantic check.
+    let changed = text.replace("#s 3:2 to 3:4", "#s 5:1 to 5:2");
+    c.change(&uri, 3, &changed);
+    let term = query(
+        &mut c,
+        "denotate/origins",
+        &uri,
+        &changed,
+        "origin_output(origin_a)",
+        14,
+    );
+    assert_eq!(term["origins"][0]["start"]["line"], 5);
+    let stale = c.request_reply(
+        "denotate/origins",
+        json!({"textDocument":{"uri":uri,"version":2},"position":{"line":4,"character":0}}),
+    );
+    assert!(stale["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("changed"));
+    c.change(
+        &uri,
+        4,
+        &changed.replace("origin_output(origin_a)", "origin_output(origin_a"),
+    );
+    let invalid = c.request_reply(
+        "denotate/origins",
+        json!({"textDocument":{"uri":uri,"version":4},"position":{"line":4,"character":0}}),
+    );
+    assert!(invalid["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("invalid"));
+}

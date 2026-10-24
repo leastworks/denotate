@@ -110,6 +110,20 @@ fn check(
     publication.status["originNotices"] = json!(program.embedded.notices.iter().map(|n|json!({"uri":n.source.uri,"view":n.source.view,"hash":n.source.hash,"reason":format!("{:?}",n.reason)})).collect::<Vec<_>>());
     for diagnostics in publication.diagnostics.values_mut() {
         for d in diagnostics {
+            if let (Some(related), Some(locations)) = (
+                d.related_information.as_mut(),
+                d.data
+                    .as_ref()
+                    .and_then(|data| data["locations"]["related"].as_array()),
+            ) {
+                for (r, identity) in related.iter_mut().zip(locations) {
+                    if let Some(hash) = identity["hash"].as_str() {
+                        r.location.range =
+                            s.bridge
+                                .editor_range(r.location.uri.as_str(), hash, r.location.range);
+                    }
+                }
+            }
             if d.data.as_ref().is_some_and(|v| v["fallback"] == true) {
                 let prefix = format!("in {}: ", program.root);
                 if let Some(message) = d.message.strip_prefix(&prefix) {
@@ -270,6 +284,47 @@ impl Checking {
 }
 
 impl Server {
+    pub fn origin_candidates(&mut self, params: &Value) -> Result<Value> {
+        let uri = Url::parse(
+            params["textDocument"]["uri"]
+                .as_str()
+                .ok_or("Missing uri")?,
+        )?;
+        if self.documents.rejected_version(&uri).is_some() {
+            return Err("Document is out of sync; reopen it or send a full-text change.".into());
+        }
+        self.refresh_diagnostics();
+        let doc = self.documents.get(&uri).ok_or("Document is not loaded")?;
+        if params["textDocument"]["version"]
+            .as_i64()
+            .is_some_and(|v| v != i64::from(doc.version))
+        {
+            return Err("Document changed; request origins again.".into());
+        }
+        let byte = doc
+            .offset(serde_json::from_value(params["position"].clone())?)
+            .ok_or("Invalid position")?;
+        let root = self
+            .catalog
+            .home(&Self::canonical_document(&uri))
+            .unwrap_or_else(|| uri.to_string());
+        let snapshot = self
+            .check_snapshots()
+            .remove(&root)
+            .flatten()
+            .ok_or("Origins unavailable while the home program is invalid or out of sync.")?;
+        // Resolve associations from current authoring text, without using cached
+        // checker output or resolving source content on the server's authority.
+        let program = denotate_ir_text::load(&snapshot.membership, &snapshot.files)
+            .map_err(|_| "Origins unavailable while the home program cannot be loaded.")?;
+        Ok(
+            json!({"version":doc.version,"origins":program.origins_at(uri.as_str(), byte).iter().map(|o| json!({
+            "uri":o.source.uri,"view":o.source.view,"hash":o.source.hash,
+            "start":{"line":o.start.line,"column":o.start.column},
+            "end":{"line":o.end.line,"column":o.end.column}
+        })).collect::<Vec<_>>()}),
+        )
+    }
     fn check_snapshots(&self) -> BTreeMap<String, Option<Snapshot>> {
         let aliases = self
             .documents

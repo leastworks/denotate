@@ -16,6 +16,30 @@ pub struct Bridge {
     serial: u64,
 }
 impl Bridge {
+    /// The source hash and byte spans retain a UTF-8 signature, but VS Code's
+    /// visible buffer omits it. Only translate a matching authoritative snapshot;
+    /// other clients that retain the character omit `bom` and keep their ranges.
+    pub fn editor_range(
+        &self,
+        uri: &str,
+        hash: &str,
+        mut range: lsp_types::Range,
+    ) -> lsp_types::Range {
+        if self.snapshots.get(uri).is_some_and(|s| {
+            s["hash"] == hash
+                && s["bom"] == true
+                && s["text"]
+                    .as_str()
+                    .is_some_and(|t| t.starts_with('\u{feff}'))
+        }) {
+            for p in [&mut range.start, &mut range.end] {
+                if p.line == 0 {
+                    p.character = p.character.saturating_sub(1);
+                }
+            }
+        }
+        range
+    }
     pub fn observe(&mut self, uri: &str, doc: &Document) {
         fn visit(
             node: tree_sitter::Node,
@@ -169,6 +193,28 @@ impl denotate_ir_text::origins::OriginResolver for &Bridge {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hidden_bom_projects_only_the_matching_snapshots_first_line() {
+        use lsp_types::{Position, Range};
+        let mut bridge = Bridge::default();
+        let uri = "file:///bom.dsl";
+        let text = "\u{feff}A😀x\r\nZ";
+        let hash = content_hash(text);
+        bridge
+            .snapshots
+            .insert(uri.into(), json!({"text":text,"hash":hash,"bom":true}));
+        let raw = Range::new(Position::new(0, 2), Position::new(1, 1));
+        assert_eq!(
+            bridge.editor_range(uri, &hash, raw),
+            Range::new(Position::new(0, 1), Position::new(1, 1))
+        );
+        assert_eq!(bridge.editor_range(uri, "old hash", raw), raw);
+        assert_eq!(bridge.editor_range("file:///other.dsl", &hash, raw), raw);
+        let signature = Range::new(Position::new(0, 0), Position::new(0, 1));
+        assert_eq!(bridge.editor_range(uri, &hash, signature), Range::default());
+        bridge.snapshots.get_mut(uri).unwrap()["bom"] = json!(false);
+        assert_eq!(bridge.editor_range(uri, &hash, raw), raw);
+    }
     #[test]
     fn stale_responses_and_failed_lookups_never_restore_disk_authority() {
         let (server, client) = Connection::memory();

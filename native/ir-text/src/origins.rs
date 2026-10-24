@@ -98,6 +98,46 @@ pub struct EmbeddedOrigins {
     pub provenance: Provenance,
     pub assumptions: BTreeMap<usize, Vec<Origin>>,
 }
+impl crate::LoadedProgram {
+    /// Origins of the smallest annotated occurrence containing the cursor.
+    /// More specific occurrence maps take precedence over an enclosing rule's
+    /// `self` map. Equal spans retain every distinct identity and range.
+    /// Nonempty ranges include their end for a caret just after a token.
+    pub fn origins_at(&self, uri: &str, byte: usize) -> Vec<OriginDescriptor> {
+        let mut smallest = usize::MAX;
+        let mut found = std::collections::BTreeSet::new();
+        for (target, descriptors) in &self.embedded.associations {
+            let spans = match target {
+                OriginTarget::Occurrence(id) => self
+                    .provenance
+                    .origins(*id)
+                    .iter()
+                    .map(|o| o.span)
+                    .collect::<Vec<_>>(),
+                OriginTarget::Assumption(i) => vec![self.assumptions[*i].location],
+            };
+            for span in spans {
+                let range = span.byte_range();
+                if !(range.contains(&byte) || !range.is_empty() && byte == range.end)
+                    || !self
+                        .sources
+                        .snapshot(span.snapshot())
+                        .is_ok_and(|s| s.uri == uri)
+                {
+                    continue;
+                }
+                if range.len() < smallest {
+                    smallest = range.len();
+                    found.clear();
+                }
+                if range.len() == smallest {
+                    found.extend(descriptors.iter().cloned());
+                }
+            }
+        }
+        found.into_iter().collect()
+    }
+}
 pub trait OriginResolver {
     fn resolve(&mut self, source: &SourceIdentity) -> Result<Arc<str>, Unavailable>;
 }

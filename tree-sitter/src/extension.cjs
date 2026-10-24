@@ -1,6 +1,7 @@
 const vscode = require('vscode');
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const { snapshotResolver, goToOrigin } = require('./origin-navigation.cjs');
 const { LanguageClient } = require('vscode-languageclient/node');
 let client;
 
@@ -76,18 +77,8 @@ exports.activate = async (context) => {
       status.show();
     } catch (error) { if (ticket === statusGeneration) { status.text = 'Denotate: Root unavailable'; status.tooltip = String(error); status.show(); } }
   };
-  client.onRequest('denotate/originSnapshot', async ({ uri }) => {
-    // A lookup that races an open/change/close transition must never return disk
-    // text as authoritative. The server also rejects older request epochs.
-    const key = canonical(vscode.Uri.parse(uri)), start = sourceGenerations.get(key) ?? 0;
-    const open = vscode.workspace.textDocuments.find(d => sameFile(d.uri, vscode.Uri.parse(uri)));
-    if (open) return { uri, text: open.getText(), open: true, dirty: open.isDirty, version: open.version, generation: start };
-    try {
-      const bytes = await vscode.workspace.fs.readFile(vscode.Uri.parse(uri));
-      if (start !== (sourceGenerations.get(key) ?? 0) || vscode.workspace.textDocuments.some(d => sameFile(d.uri, vscode.Uri.parse(uri)))) return { uri, unavailable: 'Snapshot changed during lookup' };
-      return { uri, text: new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes), open: false, dirty: false, generation: start };
-    } catch (error) { return { uri, unavailable: String(error) }; }
-  });
+  const resolveOrigin = snapshotResolver(vscode, canonical, sourceGenerations);
+  client.onRequest('denotate/originSnapshot', resolveOrigin);
   client.onNotification('denotate/originSubscriptions', ({ uris }) => { origins = new Set(uris); refreshOriginWatchers(); });
   client.onNotification('denotate/rootsChanged', ({ watchFolders }) => { refreshRootWatchers(watchFolders); void refreshStatus(); });
   context.subscriptions.push(
@@ -101,6 +92,7 @@ exports.activate = async (context) => {
     vscode.window.onDidChangeActiveTextEditor(() => { void refreshStatus(); }),
     vscode.workspace.onDidChangeWorkspaceFolders(() => { refreshRootWatchers(); }),
     { dispose: () => { for (const watcher of [...rootWatchers.values(), ...originWatchers.values()]) watcher.dispose(); } },
+    vscode.commands.registerCommand('denotate.goToOrigin', () => goToOrigin(vscode, (method, params) => client.sendRequest(method, params), resolveOrigin)),
     vscode.commands.registerCommand('denotate.createRoot', async (value, selectedFolder, chooseFolder = false) => {
       const uri = value ? vscode.Uri.parse(value.toString()) : activeDocument()?.uri; if (!uri) return;
       let folder = selectedFolder ? vscode.Uri.parse(selectedFolder.toString()) : vscode.Uri.file(path.dirname(uri.fsPath));
