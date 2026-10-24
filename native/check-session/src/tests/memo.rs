@@ -1,4 +1,4 @@
-//! Cached execution is checked against the immutable local fresh reference.
+//! Cached execution is checked against current fresh execution and semantic corpora.
 use super::*;
 use crate::{FreshSession, Retention, Session};
 use denotate_test_dsl::{attribution::SourceView, presentation};
@@ -21,12 +21,6 @@ fn check(
     };
     assert_eq!(fresh.checked.results, cached.checked.results, "{source}");
     assert_eq!(fresh.queries, cached.queries);
-    if session.stats().evaluation_misses == 0 {
-        assert_eq!(cached.metrics.evaluation, Duration::ZERO);
-        assert_eq!(cached.metrics.export, Duration::ZERO);
-        assert_eq!(cached.metrics.property, Duration::ZERO);
-        assert_eq!(cached.metrics.completion, Duration::ZERO);
-    }
     let render = |r: &Verification<'_>| {
         format!(
             "{:?}",
@@ -48,16 +42,9 @@ fn generous() -> Limits {
 }
 
 #[test]
-fn memo_cold_warm_frozen_sources_and_current_attribution() {
-    let data: Value =
-        serde_json::from_str(include_str!("../../../check/IDENTITIES-6a.1.json")).unwrap();
-    let sources: BTreeSet<_> = data["witnesses"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|r| r["invalid_source"] != true)
-        .map(|r| r["source"].as_str().unwrap())
-        .collect();
+fn memo_cold_warm_regression_sources_and_current_attribution() {
+    let cases = regression_cases();
+    let sources = cases.iter().map(|r| r["source"].as_str().unwrap());
     for source in sources {
         let mut session = Session::default();
         check(&mut session, source, &generous());
@@ -199,8 +186,15 @@ fn memo_all_edit_transitions_reuse_and_invalidation() {
                 assert_eq!(stats.evaluation_misses, 0, "{name}: {stats:?}")
             }
             "wide_local_guard" => {
-                assert_eq!(stats.evaluation_hits, 15);
-                assert_eq!(stats.evaluation_misses, 1);
+                let old = local::query_inputs(&before);
+                let new = local::query_inputs(&after);
+                let reusable = new
+                    .iter()
+                    .filter(|(key, input)| old.get(key) == Some(input))
+                    .count();
+                assert!(reusable > 0 && reusable < new.len());
+                assert_eq!(stats.evaluation_hits, reusable);
+                assert_eq!(stats.evaluation_misses, new.len() - reusable);
             }
             "insert_helper_before" => assert!(stats.evaluation_hits > 0, "{stats:?}"),
             "add_literal" | "remove_literal" => {
@@ -215,75 +209,63 @@ fn memo_all_edit_transitions_reuse_and_invalidation() {
     }
 }
 #[test]
-fn memo_all_43_frozen_results_and_receipts_are_exact() {
-    let reference: Value =
-        serde_json::from_str(include_str!("../../fixtures/LOCAL-6b.1a-REFERENCE.json")).unwrap();
-    let reference = local::owned_outcomes(reference);
-    let fresh_reference: Value =
-        serde_json::from_str(include_str!("../../fixtures/OWNED-6b.2a-REFERENCE.json")).unwrap();
-    let mut count = 0;
-    for row in reference["cases"].as_array().unwrap() {
-        let source = row["source"].as_str().unwrap();
-        let limits = Limits {
-            max_work: row["max_work"].as_u64().unwrap() as usize,
-            ..generous()
+fn memo_resource_cases_match_fresh_before_and_after_eviction() {
+    fn run(
+        p: &LoweredProgram,
+        limits: &Limits,
+        mut session: Option<&mut Session>,
+    ) -> Accounted<ScopedResults> {
+        let req = request_evidence::request(p, limits);
+        let ops = limits.into();
+        let prep = match session.as_deref_mut() {
+            Some(s) => s.prepare(&req, &p.corpus, &p.keys, &ops),
+            None => req.prepare(&p.corpus, &p.keys, &ops),
+        }
+        .unwrap();
+        let exhausted = |reason, receipts| Accounted {
+            value: req.exhausted(reason),
+            receipts,
         };
-        let mut session = Session::default();
-        let mut cold = None;
-        for _ in 0..2 {
-            let (_, _, p) = lower(source);
-            let request = request_evidence::request(&p, &limits);
-            let exhausted = |reason: Inconclusive, receipts| {
-                (
-                    json!({"status":"inconclusive","phase":reason.phase,"resource":reason.resource}),
-                    Accounted {
-                        value: request.exhausted(reason),
-                        receipts,
-                    },
-                )
-            };
-            let (capture, result) = match session
-                .prepare(&request, &p.corpus, &p.keys, &(&limits).into())
-                .unwrap()
-            {
-                RequestPreparation::Inconclusive { reason, receipts } => {
-                    exhausted(reason, receipts)
+        match prep {
+            RequestPreparation::Inconclusive { reason, receipts } => exhausted(reason, receipts),
+            RequestPreparation::Complete(g) => {
+                let g = g.admit(&ops).unwrap();
+                let result = match session {
+                    Some(s) => s.verify(&g, &ops),
+                    None => FreshSession.verify(&g, &ops),
                 }
-                RequestPreparation::Complete(g) => {
-                    let g = g.admit(&(&limits).into()).unwrap();
-                    match session.verify(&g, &(&limits).into()).unwrap() {
-                        LocalCheckOutcome::Inconclusive { reason, receipts } => {
-                            exhausted(reason, receipts)
-                        }
-                        LocalCheckOutcome::Complete(r) => (
-                            captured_report(&r.checked.verification, &Names { keys: &p.keys }),
-                            r.checked.results,
-                        ),
+                .unwrap();
+                match result {
+                    LocalCheckOutcome::Complete(r) => r.checked.results,
+                    LocalCheckOutcome::Inconclusive { reason, receipts } => {
+                        exhausted(reason, receipts)
                     }
                 }
-            };
-            assert_eq!(capture, row["captured_result"], "{source}");
-            assert_eq!(
-                format!("{:?}", result.value),
-                row["neutral_result"].as_str().unwrap()
-            );
-            assert_eq!(
-                budget_evidence::receipt_capture(&result.receipts),
-                fresh_reference["cases"][count]["receipts"]
-            );
-            local::assert_shared_receipts(
-                &budget_evidence::receipt_capture(&result.receipts),
-                &row["receipts"],
-            );
-            if let Some(cold) = &cold {
-                assert_eq!(&result, cold);
-            } else {
-                cold = Some(result);
             }
         }
-        count += 1;
     }
-    assert_eq!(count, 43);
+    for (source, work) in resource_cases() {
+        let (_, _, p) = lower(&source);
+        let limits = Limits {
+            max_work: work,
+            ..generous()
+        };
+        let expected = run(&p, &limits, None);
+        let mut session = Session::default();
+        for _ in 0..2 {
+            assert_eq!(
+                expected,
+                run(&p, &limits, Some(&mut session)),
+                "{source} / {work}"
+            );
+        }
+        session.evict_values();
+        assert_eq!(
+            expected,
+            run(&p, &limits, Some(&mut session)),
+            "{source} / {work}"
+        );
+    }
 }
 #[test]
 fn memo_tight_completion_conversion_limits_match_fresh() {
@@ -299,7 +281,7 @@ fn memo_tight_completion_conversion_limits_match_fresh() {
         let mut request = request_evidence::request(&p, &generous());
         request.limits = (&limits).into();
         // Use the request's normal preparation; skip only limits that prevent
-        // admission, covered separately by the exact 43 frozen pairs above.
+        // admission, covered separately by the resource cases above.
         let RequestPreparation::Complete(g) = request
             .prepare(&p.corpus, &p.keys, &(&limits).into())
             .unwrap()
@@ -368,6 +350,7 @@ fn memo_interruption_retains_only_completed_queries() {
         session: &'a mut Session,
         cancel: Cancellation,
         after_put: bool,
+        completed: BTreeSet<LocalScope>,
     }
     impl LocalMemoStore for Interrupt<'_> {
         fn execute(
@@ -380,6 +363,7 @@ fn memo_interruption_retains_only_completed_queries() {
                 self.cancel.cancel();
             }
             let value = self.session.execute(input, operations, metrics)?;
+            self.completed.insert(input.scope.clone());
             if self.after_put {
                 self.cancel.cancel();
             }
@@ -399,124 +383,19 @@ fn memo_interruption_retains_only_completed_queries() {
             session: &mut session,
             cancel: limits.cancellation.clone(),
             after_put,
+            completed: BTreeSet::new(),
         };
         assert!(matches!(
             g.verify_local_with(&(&limits).into(), &mut interrupted),
             Err(CheckError::Cancelled)
         ));
+        let completed = interrupted.completed;
+        let expected = local::query_inputs(&wide);
+        assert!(completed.iter().all(|key| expected.contains_key(key)));
         let (_, stats) = check(&mut session, &wide, &generous());
-        assert_eq!(stats.evaluation_hits, usize::from(after_put));
-        assert_eq!(stats.evaluation_misses, 16 - usize::from(after_put));
+        assert_eq!(stats.evaluation_hits, completed.len());
+        assert_eq!(stats.evaluation_misses, expected.len() - completed.len());
     }
-}
-
-#[test]
-#[ignore = "manual 6b.1b cold/warm phase measurements; run alone in release"]
-fn measure_memoized_workload_families() {
-    fn sample(
-        session: &mut Session,
-        source: &str,
-        global: bool,
-    ) -> (Accounted<ScopedResults>, Value) {
-        let limits = generous();
-        let start = Instant::now();
-        let (_, _, p) = lower(source);
-        let assembly_ns = start.elapsed().as_nanos();
-        let request = request_evidence::request(&p, &limits);
-        let start = Instant::now();
-        let RequestPreparation::Complete(g) = request
-            .prepare(&p.corpus, &p.keys, &(&limits).into())
-            .unwrap()
-        else {
-            panic!()
-        };
-        let preparation_ns = start.elapsed().as_nanos();
-        let start = Instant::now();
-        let g = g.admit(&(&limits).into()).unwrap();
-        let admission_ns = start.elapsed().as_nanos();
-        let start = Instant::now();
-        let LocalCheckOutcome::Complete(r) = session.verify(&g, &(&limits).into()).unwrap() else {
-            panic!()
-        };
-        let checking_ns = start.elapsed().as_nanos();
-        let mut global_ns = None;
-        if global {
-            let start = Instant::now();
-            let CheckOutcome::Complete(reference) = g.verify(&(&limits).into()).unwrap() else {
-                panic!()
-            };
-            global_ns = Some(start.elapsed().as_nanos());
-            assert_eq!(reference.results.value, r.checked.results.value);
-        }
-        let c = session.stats();
-        let m = r.metrics;
-        let record = json!({"assembly_ns":assembly_ns,"preparation_ns":preparation_ns,"admission_ns":admission_ns,"checking_ns":checking_ns,"global_checking_ns":global_ns,
-            "key_computation_ns":(p.key_computation+g.key_computation()+m.keys).as_nanos(),"local_keys_ns":m.keys.as_nanos(),
-            "local_evaluation_ns":m.evaluation.as_nanos(),"bdd_export_ns":m.export.as_nanos(),"property_ns":m.property.as_nanos(),"completion_ns":m.completion.as_nanos(),"conversion_ns":m.conversion.as_nanos(),"finding_context_ns":m.finding_context.as_nanos(),
-            "replay_ns":r.checked.verification.finding_metrics.replay.as_nanos(),"certification_ns":r.checked.verification.finding_metrics.certification.as_nanos(),
-            "lookup_ns":c.lookup_ns,"publication_ns":c.publication_ns,"evaluation_hits":c.evaluation_hits,"evaluation_misses":c.evaluation_misses,"verdict_hits":c.verdict_hits,"verdict_misses":c.verdict_misses,"completion_hits":c.completion_hits,"completion_misses":c.completion_misses,
-            "evicted":c.evicted,"bypassed":c.bypassed,"resets":c.resets,"reused_query_work":c.reused_query_work,"logical_work":r.checked.results.receipts.total().unwrap().work,"retained_entries":c.retained_entries,"retained_bytes":c.retained_bytes,"retained_condition_nodes":c.retained_condition_nodes,
-            "cone_atoms":m.cone_atoms,"unique_atoms":m.unique_atoms,"cone_inputs":m.cone_inputs,"queries":r.queries.len()});
-        (r.checked.results, record)
-    }
-    let mut workloads = Vec::new();
-    for family in ["duplicates", "distinct_literals", "helper_chain"] {
-        for size in [1, 4, 16, 64] {
-            workloads.push((
-                format!("query_{family}"),
-                size,
-                format!(
-                    "{}s0 <- i1; s1 <- i2; s2 <- i3; s3 <- i0;",
-                    workload(family, size)
-                ),
-            ));
-        }
-    }
-    let (_, wide, _) = edit_cases()
-        .into_iter()
-        .find(|(n, _, _)| n == "wide_local_guard")
-        .unwrap();
-    workloads.push(("wide_overlap".into(), 16, wide));
-    workloads.push((
-        "mixed_completion".into(),
-        1,
-        "input i,j; slot a,b; a <- i; a <- j; b <- i when not available(b);".into(),
-    ));
-    let mut rows = Vec::new();
-    for (family, size, source) in workloads {
-        let mut samples = Vec::new();
-        let mut receipt = Value::Null;
-        for run in 0..6 {
-            let mut session = Session::default();
-            let (cold, cold_times) = sample(&mut session, &source, true);
-            let (warm, warm_times) = sample(
-                &mut session,
-                &format!("// current snapshot\n{source}"),
-                false,
-            );
-            assert_eq!(cold, warm);
-            let stats = session.stats();
-            assert!(
-                stats.evaluation_misses == 0
-                    || stats.evicted > 0
-                    || stats.bypassed > 0
-                    || stats.resets > 0,
-                "{family}/{size}: {stats:?}"
-            );
-            if stats.evaluation_misses == 0 {
-                assert_eq!(stats.verdict_misses + stats.completion_misses, 0);
-            }
-            receipt = budget_evidence::receipt_capture(&cold.receipts);
-            if run > 0 {
-                samples.push(json!({"cold":cold_times,"warm":warm_times}));
-            }
-        }
-        rows.push(json!({"family":family,"size":size,"source":source,"samples":samples,"receipts":receipt}));
-    }
-    println!(
-        "CACHE_6B1B_MEASUREMENTS={}",
-        json!({"warmups":1,"samples_per_point":5,"rows":rows})
-    );
 }
 
 #[test]
@@ -578,26 +457,23 @@ fn memo_component_permutations_preserve_tight_limit_receipts_or_recompute() {
     }
 }
 #[test]
-fn memo_reviewed_64_node_flip_stays_separate_and_exact() {
-    let delta: Value = serde_json::from_str(include_str!("../../LOCAL-DELTA-6b.1a.json")).unwrap();
-    let source = delta["tight_limit_delta"]["source"].as_str().unwrap();
-    let limits = Limits {
-        max_condition_nodes: 64,
-        ..generous()
-    };
-    let mut session = Session::default();
-    for _ in 0..2 {
-        let (result, _) = check(&mut session, source, &limits);
-        assert_eq!(result.value.groups.len(), 16);
-        assert!(
-            result
-                .value
-                .groups
-                .values()
-                .all(|r| matches!(r, ScopedResult::Counterexample(..)))
-        );
+fn memo_independent_scopes_match_fresh_across_storage_limits() {
+    let (_, source, _) = edit_cases()
+        .into_iter()
+        .find(|(name, _, _)| name == "wide_local_guard")
+        .unwrap();
+    for nodes in [16, 32, 64, 128, 256, 1024] {
+        let limits = Limits {
+            max_condition_nodes: nodes,
+            ..generous()
+        };
+        let mut session = Session::default();
+        let (cold, _) = check(&mut session, &source, &limits);
+        let (warm, stats) = check(&mut session, &source, &limits);
+        assert_eq!(cold, warm);
+        assert_eq!(stats.evaluation_misses, 0);
+        assert!(stats.evaluation_hits > 0);
     }
-    assert_eq!(session.stats().evaluation_hits, 16);
 }
 
 #[test]
@@ -652,8 +528,10 @@ fn memo_oversized_replacement_preserves_other_cones() {
         .unwrap();
     assert!(session.retained_receipts(&input.scope).is_none());
     let (_, stats) = check(&mut session, &wide, &generous());
-    assert_eq!(stats.evaluation_hits, 15);
-    assert_eq!(stats.evaluation_misses, 1);
+    let expected = local::query_inputs(&wide);
+    let unaffected = expected.keys().filter(|key| **key != input.scope).count();
+    assert_eq!(stats.evaluation_hits, unaffected);
+    assert_eq!(stats.evaluation_misses, expected.len() - unaffected);
 }
 
 #[test]

@@ -327,69 +327,6 @@ fn variable_library_definition_equals_hand_written_conjunctive_rule() {
     }
 }
 
-#[test]
-#[ignore = "manual integrated release phase measurement; not a speedup claim"]
-fn measure_shared_normalization_phases() {
-    use denotate_check::{GroundProgram, Limits};
-    use std::time::Instant;
-    assert!(!cfg!(debug_assertions), "run this probe with --release");
-    let mut rows = vec![];
-    for size in [10, 100, 1000] {
-        let slots = (0..size)
-            .map(|i| format!("s{i}"))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let mappings = (0..size)
-            .map(|i| format!("s{i} <- i when (present(i) or present(j)) and present(i);\n"))
-            .collect::<String>();
-        let text = format!("input i, j;\nslot {slots};\n{mappings}");
-        let mut session = lowering::incremental::Session::new(true);
-        let (ast, sources) = parse(&text, 1);
-        session.lower(&ast, &sources).unwrap();
-        let before = session.stats().queries;
-        let mut samples = vec![];
-        for sample in 0..5 {
-            let (ast, sources) = parse(&format!("// sample {sample}\n{text}"), sample + 2);
-            let start = Instant::now();
-            let projection = projection::project(&ast, &sources).unwrap();
-            let projection_ns = start.elapsed().as_nanos();
-            let keys = projection.keys();
-            assert!(validate(&keys).unwrap().is_empty());
-            let start = Instant::now();
-            let recipes = keys
-                .iter()
-                .map(|s| recipe::Recipe::lower(s.form.clone()).unwrap())
-                .collect::<Vec<_>>();
-            let normalization_assignment_ns = start.elapsed().as_nanos();
-            let start = Instant::now();
-            let program = assembly::assemble(&projection, &recipes, &sources).unwrap();
-            let assembly_attribution_ns = start.elapsed().as_nanos();
-            let start = Instant::now();
-            let limits = Limits::default();
-            let ground =
-                GroundProgram::prepare(&program.corpus, &support::domains(&program), &limits)
-                    .unwrap()
-                    .admit(&limits)
-                    .unwrap();
-            let report = ground
-                .symbolic(&limits)
-                .unwrap()
-                .verify_at_most_one(&limits)
-                .unwrap();
-            assert!(report.whole_program_admitted());
-            let checking_ns = start.elapsed().as_nanos();
-            session.lower(&ast, &sources).unwrap();
-            assert_eq!(before, session.stats().queries);
-            samples.push(serde_json::json!({"projection_ns":projection_ns,"normalization_assignment_ns":normalization_assignment_ns,"assembly_attribution_ns":assembly_attribution_ns,"checking_ns":checking_ns,"cached_query_access_ns":session.stats().last.queries_ns,"cached_projection_ns":session.stats().last.projection_ns,"cached_assembly_attribution_ns":session.stats().last.assembly_attribution_ns}));
-        }
-        rows.push(serde_json::json!({"mappings":size,"helpers":size,"inputs":2,"source":text,"queries_before":before,"queries_after":session.stats().queries,"samples":samples}));
-    }
-    println!(
-        "NORMALIZATION_PHASES={}",
-        serde_json::json!({"rows":rows,"note":"Shared normalization plus frontend assignment is uncached. Query access is measured separately on the integrated Salsa path with unchanged-form reuse asserted; no speedup claim. Parsing, name validation, diagnostics and serialization are outside the timed phases."})
-    );
-}
-
 fn frozen_installed(text: &str, revision: u64) -> serde_json::Value {
     let capture: serde_json::Value = serde_json::from_str(include_str!(
         "../fixtures/pre-integration-fingerprints.json"
@@ -429,26 +366,30 @@ fn additional_installed_cases_match_frozen_legacy_output() {
 #[test]
 fn keyed_frontend_preparation_preserves_limits_and_routes_binding_failures_to_creator() {
     use denotate_check::{CheckError, Limits};
-    let frozen: serde_json::Value =
-        serde_json::from_str(include_str!("../../check/fixtures/SLICE-6.0-BASELINE.json")).unwrap();
-    for observation in frozen["budgets"].as_array().unwrap() {
-        let (ast, sources) = parse(observation["source"].as_str().unwrap(), 1);
-        let p = lowered(lowering::lower(&ast, &sources).unwrap());
-        let limits = Limits {
-            max_work: observation["max_work"].as_u64().unwrap() as usize,
-            ..Limits::default()
-        };
-        match (p.prepare(&limits), p.prepare_keyed(&limits)) {
-            (Ok(old), Ok(new)) => {
-                assert_eq!(
-                    old.atoms().collect::<Vec<_>>(),
-                    new.program.atoms().collect::<Vec<_>>()
-                );
-                assert_eq!(old.rules().count(), new.keys.instances.len());
-                assert_eq!(old.components().count(), new.keys.components.len());
+    let corpus: serde_json::Value = serde_json::from_str(include_str!(
+        "../../check-session/fixtures/regression/outcomes.json"
+    ))
+    .unwrap();
+    for row in corpus["cases"].as_array().unwrap() {
+        for work in [0, 100, 500, 2000, 20000, Limits::default().max_work] {
+            let (ast, sources) = parse(row["source"].as_str().unwrap(), 1);
+            let p = lowered(lowering::lower(&ast, &sources).unwrap());
+            let limits = Limits {
+                max_work: work,
+                ..Limits::default()
+            };
+            match (p.prepare(&limits), p.prepare_keyed(&limits)) {
+                (Ok(old), Ok(new)) => {
+                    assert_eq!(
+                        old.atoms().collect::<Vec<_>>(),
+                        new.program.atoms().collect::<Vec<_>>()
+                    );
+                    assert_eq!(old.rules().count(), new.keys.instances.len());
+                    assert_eq!(old.components().count(), new.keys.components.len());
+                }
+                (Err(old), Err(new)) => assert_eq!(old, new),
+                _ => panic!("key computation changed preparation exhaustion"),
             }
-            (Err(old), Err(new)) => assert_eq!(old, new),
-            _ => panic!("key computation changed preparation exhaustion"),
         }
     }
     let (ast, sources) = parse("input i; slot a; a <- i;", 1);

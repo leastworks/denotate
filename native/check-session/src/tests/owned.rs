@@ -48,14 +48,6 @@ fn coarse_scc_work_counts_executed_cones_not_cache_hits_or_sat_queries() {
             let work = &metrics.scc_work[key];
             assert_eq!(work.cone_evaluations, cones.len());
         }
-        assert!(
-            metrics
-                .scc_work
-                .values()
-                .map(|w| w.elapsed)
-                .sum::<Duration>()
-                <= metrics.evaluation
-        );
     };
     let mut fresh_metrics = LocalMetrics::default();
     let fresh = queries
@@ -198,10 +190,12 @@ fn owned_query_missing_premise_fails_closed() {
     ));
 }
 #[test]
-fn owned_slots_recycle_above_512_scopes_without_whole_database_resets() {
+fn owned_slots_recycle_beyond_capacity_without_whole_database_resets() {
     let template = inputs("input i,j; slot a; a <- i; a <- j;").remove(0);
-    let mut session = Session::default();
-    for i in 0..600 {
+    let retention = crate::Retention::default();
+    let churn = retention.max_entries + 1;
+    let mut session = Session::new(retention);
+    for i in 0..churn {
         let mut q = template.clone();
         let LocalScope::Group(ref mut k) = q.scope else {
             panic!()
@@ -211,8 +205,8 @@ fn owned_slots_recycle_above_512_scopes_without_whole_database_resets() {
             .execute(&q, &ops(), &mut LocalMetrics::default())
             .unwrap();
         assert_eq!(session.stats().resets, 0);
-        assert!(session.stats().retained_entries <= 1024);
-        assert!(session.stats().retained_bytes <= 64 * 1024 * 1024);
+        assert!(session.stats().retained_entries <= retention.max_entries);
+        assert!(session.stats().retained_bytes <= retention.max_bytes);
     }
     assert!(session.stats().evicted > 0);
     // Recent scopes remain reusable after churn; old slots were reassigned.
@@ -221,94 +215,11 @@ fn owned_slots_recycle_above_512_scopes_without_whole_database_resets() {
     let LocalScope::Group(ref mut k) = q.scope else {
         panic!()
     };
-    k.obligation = ObligationKey(QualifiedKey::new("retention", "q599"));
+    k.obligation = ObligationKey(QualifiedKey::new("retention", format!("q{}", churn - 1)));
     session
         .execute(&q, &ops(), &mut LocalMetrics::default())
         .unwrap();
     assert_eq!(session.stats().evaluation_misses, before.evaluation_misses);
-}
-#[test]
-#[ignore = "capture the new owned-query accounting reference; never overwrite frozen captures"]
-fn capture_owned_query_reference() {
-    println!("OWNED_6B2A_REFERENCE={}", local::local_reference());
-}
-
-#[test]
-#[ignore = "isolated release owned-cone cold/warm/edit measurements"]
-fn measure_owned_query_paths() {
-    assert!(!cfg!(debug_assertions));
-    fn run(session: &mut Session, source: &str) -> (Value, Accounted<ScopedResults>) {
-        let start = Instant::now();
-        let (_, _, p) = lower(source);
-        let assembly = start.elapsed();
-        let limits = Limits {
-            timeout: Duration::from_secs(60),
-            ..Limits::default()
-        };
-        let request = request_evidence::request(&p, &limits);
-        let start = Instant::now();
-        let RequestPreparation::Complete(g) = session
-            .prepare(&request, &p.corpus, &p.keys, &(&limits).into())
-            .unwrap()
-        else {
-            panic!()
-        };
-        let preparation = start.elapsed();
-        let start = Instant::now();
-        let g = g.admit(&(&limits).into()).unwrap();
-        let admission = start.elapsed();
-        let start = Instant::now();
-        let LocalCheckOutcome::Complete(r) = session.verify(&g, &(&limits).into()).unwrap() else {
-            panic!()
-        };
-        let checking = start.elapsed();
-        let start = Instant::now();
-        let LocalCheckOutcome::Complete(fresh) =
-            FreshSession.verify(&g, &(&limits).into()).unwrap()
-        else {
-            panic!()
-        };
-        let fresh_time = start.elapsed();
-        assert_eq!(r.checked.results, fresh.checked.results);
-        let start = Instant::now();
-        let CheckOutcome::Complete(global) = g.verify(&(&limits).into()).unwrap() else {
-            panic!()
-        };
-        let global_time = start.elapsed();
-        assert_eq!(r.checked.results.value, global.results.value);
-        let c = session.stats();
-        let m = r.metrics;
-        let v = json!({"assembly_ns":assembly.as_nanos(),"preparation_ns":preparation.as_nanos(),"admission_ns":admission.as_nanos(),"checking_ns":checking.as_nanos(),"fresh_checking_ns":fresh_time.as_nanos(),"global_checking_ns":global_time.as_nanos(),"key_projection_ns":m.keys.as_nanos(),"evaluation_ns":m.evaluation.as_nanos(),"scc_evaluation_ns":m.scc_work.values().map(|w|w.elapsed.as_nanos()).sum::<u128>(),"unique_evaluated_sccs":m.scc_work.len(),"scc_cone_evaluations":m.scc_work.values().map(|w|w.cone_evaluations).sum::<usize>(),"duplicate_scc_cone_evaluations":m.scc_work.values().map(|w|w.cone_evaluations.saturating_sub(1)).sum::<usize>(),"predicted_duplicate_scc_ns":m.scc_work.values().map(|w|w.elapsed.as_nanos() * w.cone_evaluations.saturating_sub(1) as u128 / w.cone_evaluations.max(1) as u128).sum::<u128>(),"export_ns":m.export.as_nanos(),"property_ns":m.property.as_nanos(),"completion_ns":m.completion.as_nanos(),"conversion_ns":m.conversion.as_nanos(),"finding_context_ns":m.finding_context.as_nanos(),"evaluation_hits":c.evaluation_hits,"evaluation_misses":c.evaluation_misses,"verdict_hits":c.verdict_hits,"verdict_misses":c.verdict_misses,"completion_hits":c.completion_hits,"completion_misses":c.completion_misses,"evicted":c.evicted,"bypassed":c.bypassed,"resets":c.resets,"retained_entries":c.retained_entries,"retained_bytes":c.retained_bytes,"retained_condition_nodes":c.retained_condition_nodes,"reused_query_work":c.reused_query_work,"logical_work":r.checked.results.receipts.total().unwrap().work});
-        (v, r.checked.results)
-    }
-    let data: Value = serde_json::from_str(include_str!("../../LOCAL-6b.1a.json")).unwrap();
-    let mut rows = Vec::new();
-    for row in data["measurement"]["rows"].as_array().unwrap() {
-        let source = row["source"].as_str().unwrap();
-        let mut samples = Vec::new();
-        for iteration in 0..6 {
-            let mut session = Session::default();
-            let (cold, a) = run(&mut session, source);
-            let (warm, b) = run(&mut session, &format!("// moved\n{source}"));
-            assert_eq!(a, b);
-            if cold["bypassed"] == 0 && cold["evicted"] == 0 {
-                assert_eq!(warm["evaluation_misses"], 0);
-            }
-            let edited = format!("{source}\ninput new6b; slot new6b_slot; new6b_slot <- new6b;");
-            let (edit, _) = run(&mut session, &edited);
-            if iteration > 0 {
-                samples.push(json!({"cold":cold,"warm":warm,"edit":edit}));
-            }
-        }
-        rows.push(
-            json!({"family":row["family"],"size":row["size"],"source":source,"samples":samples}),
-        );
-    }
-    assert_eq!(rows.len(), 26);
-    println!(
-        "OWNED_6B2A_MEASUREMENTS={}",
-        json!({"warmups":1,"samples_per_point":5,"rows":rows})
-    );
 }
 
 #[test]

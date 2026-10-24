@@ -138,7 +138,7 @@ pub(crate) struct GroundingCache {
     #[cfg(test)]
     pub reverse_requests: bool,
 }
-const MAX_UNITS: usize = 512;
+pub(crate) const MAX_UNITS: usize = 512;
 const SLOT_BYTES: usize = 2048;
 fn ns(t: Instant) -> u64 {
     t.elapsed().as_nanos().min(u64::MAX as u128) as u64

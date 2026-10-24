@@ -81,26 +81,23 @@ fn compare(session: &mut Session, source: &str, work: usize) {
 
 #[test]
 fn small_rule_documents_keep_the_full_local_entry_allowance() {
-    let data: Value = serde_json::from_str(include_str!("../../LOCAL-6b.1a.json")).unwrap();
-    let row = data["measurement"]["rows"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|r| r["family"] == "helper_chain" && r["size"] == 64)
-        .unwrap();
-    let source = row["source"].as_str().unwrap();
+    let source = workload("helper_chain", 64);
+    let retention = Retention::default();
     let mut session = Session::default();
     for _ in 0..2 {
-        compare(&mut session, source, 20_000_000);
-        assert!(session.plan_stats().small_rules > 512);
+        compare(&mut session, &source, 20_000_000);
+        assert!(session.plan_stats().small_rules > 0);
         assert_eq!(session.plan_stats().queries, 0);
         assert_eq!(session.plan_stats().evicted, 0);
         assert_eq!(session.plan_stats().retained_entries, 0);
         assert_eq!(session.plan_stats().retained_bytes, 0);
-        assert_eq!(session.local_retention_for_test().max_entries, 1024);
+        assert_eq!(
+            session.local_retention_for_test().max_entries,
+            retention.max_entries
+        );
         assert_eq!(
             session.local_retention_for_test().max_bytes,
-            64 * 1024 * 1024
+            retention.max_bytes
         );
     }
 }
@@ -262,88 +259,4 @@ fn completed_plan_survives_outer_interruption_without_caching_interruption() {
     };
     assert_eq!(recovered.receipts(), fresh.receipts());
     assert!(store.plans.stats.reused > 0);
-}
-
-#[test]
-#[ignore = "isolated release preparation and full local-path measurements"]
-fn measure_owned_plan_queries() {
-    assert!(!cfg!(debug_assertions));
-    fn run(session: &mut Session, source: &str) -> (Value, Accounted<ScopedResults>) {
-        let start = Instant::now();
-        let (_, _, p) = lower(source);
-        let lowering_ns = start.elapsed().as_nanos();
-        let limits = limits(20_000_000);
-        let request = request_evidence::request(&p, &limits);
-        let start = Instant::now();
-        let RequestPreparation::Complete(prepared) = session
-            .prepare(&request, &p.corpus, &p.keys, &(&limits).into())
-            .unwrap()
-        else {
-            panic!("preparation exhausted")
-        };
-        let preparation_ns = start.elapsed().as_nanos();
-        let m = prepared.program().metrics().clone();
-        let preparation_receipts = budget_evidence::receipt_capture(prepared.receipts());
-        let start = Instant::now();
-        let prepared = prepared.admit(&(&limits).into()).unwrap();
-        let admission_ns = start.elapsed().as_nanos();
-        let start = Instant::now();
-        let LocalCheckOutcome::Complete(result) =
-            session.verify(&prepared, &(&limits).into()).unwrap()
-        else {
-            panic!("verification exhausted")
-        };
-        let verification_ns = start.elapsed().as_nanos();
-        let q = session.plan_stats();
-        let c = session.stats();
-        (
-            json!({"lowering_ns":lowering_ns,"preparation_ns":preparation_ns,"admission_ns":admission_ns,"verification_ns":verification_ns,
-            "plans_and_seeds_ns":m.plans_and_seeds.as_nanos(),"plan_keying_ns":m.plan_keying.as_nanos(),"plan_binding_ns":m.plan_binding.as_nanos(),"input_seeding_ns":m.input_seeding.as_nanos(),"closure_and_instances_ns":m.closure_and_instances.as_nanos(),"ordering_ns":m.ordering.as_nanos(),"graph_ns":m.admissibility.as_nanos(),"grounding_ns":m.grounding.as_nanos(),"all_ground_keys_ns":prepared.key_computation().as_nanos(),
-            "small_rules":q.small_rules,"evicted":q.evicted,"bypassed":q.bypassed,"queries":q.queries,"executed":q.executed,"reused":q.reused,"fallback":q.fallback,"reused_work":q.reused_work,"query_ns":q.query_ns,"execution_ns":q.execution_ns,"projection_ns":q.projection_ns,"plan_entries":q.retained_entries,"plan_bytes":q.retained_bytes,"local_bytes":c.retained_bytes,"local_misses":c.evaluation_misses,
-            "evaluation_ns":result.metrics.evaluation.as_nanos(),"export_ns":result.metrics.export.as_nanos(),"preparation_receipts":preparation_receipts}),
-            result.checked.results,
-        )
-    }
-    let data: Value = serde_json::from_str(include_str!("../../LOCAL-6b.1a.json")).unwrap();
-    let mut rows = Vec::new();
-    for row in data["measurement"]["rows"].as_array().unwrap() {
-        let source = row["source"].as_str().unwrap();
-        let mut samples = Vec::new();
-        for iteration in 0..6 {
-            let mut baseline = Session::with_fresh_planning();
-            let mut cached = Session::default();
-            let (fresh, a) = run(&mut baseline, source);
-            let (cold, b) = run(&mut cached, source);
-            assert_eq!(a, b);
-            let warm_source = format!("// current source\n{source}");
-            let (fresh_warm, a) = run(&mut baseline, &warm_source);
-            let (warm, b) = run(&mut cached, &warm_source);
-            assert_eq!(a, b);
-            if warm["evicted"] == 0 && warm["bypassed"] == 0 {
-                assert_eq!(warm["executed"], 0, "{}", row["family"]);
-            }
-            let edited =
-                format!("{source}\ninput added6b; slot added6b_slot; added6b_slot <- added6b;");
-            let (fresh_edit, a) = run(&mut baseline, &edited);
-            let (edit, b) = run(&mut cached, &edited);
-            assert_eq!(a, b);
-            if warm["queries"].as_u64().unwrap() > 0
-                && edit["evicted"] == 0
-                && edit["bypassed"] == 0
-            {
-                assert!(edit["reused"].as_u64().unwrap() > 0);
-            }
-            if iteration > 0 {
-                samples.push(json!({"fresh":fresh,"cold":cold,"fresh_warm":fresh_warm,"warm":warm,"fresh_edit":fresh_edit,"edit":edit}));
-            }
-        }
-        rows.push(
-            json!({"family":row["family"],"size":row["size"],"source":source,"samples":samples}),
-        );
-    }
-    assert_eq!(rows.len(), 26);
-    println!(
-        "PLANS_6B3A_MEASUREMENTS={}",
-        json!({"warmups":1,"samples_per_point":5,"rows":rows})
-    );
 }

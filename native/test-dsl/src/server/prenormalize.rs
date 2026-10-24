@@ -220,9 +220,3 @@ fn completed_masking_matches_pre_normalization_capture() {
     assert_eq!(value_compatibility::capture(capture(false)), expected);
     assert_eq!(value_compatibility::capture(capture(true)), expected);
 }
-
-#[test]
-#[ignore = "historical capture only; never refresh to accept a regression"]
-fn capture_pre_normalization() {
-    println!("PRENORMALIZE_JSON={}", capture(false));
-}

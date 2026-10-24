@@ -1,0 +1,16 @@
+{
+  "name": "Denotate IR",
+  "scopeName": "source.denotate",
+  "patterns": [
+    { "name": "comment.line.double-slash.denotate", "begin": "//", "end": "$" },
+    { "name": "keyword.control.denotate", "match": "\\b(module|use|sort|const|relation|input)\\b" },
+    { "match": "(:)([ \\t]*)([A-Za-z][A-Za-z0-9_]*)", "captures": {
+      "1": { "name": "punctuation.separator.denotate" },
+      "3": { "name": "entity.name.type.denotate" }
+    } },
+    { "name": "keyword.operator.denotate", "match": ":-|!" },
+    { "name": "punctuation.separator.denotate", "match": "[(),;:]" },
+    { "name": "variable.other.anonymous.denotate", "match": "(?<![A-Za-z0-9_])_(?![A-Za-z0-9_])" },
+    { "name": "entity.name.function.denotate", "match": "\\b[A-Za-z][A-Za-z0-9_]*(?=[ \\t]*\\()" }
+  ]
+}

@@ -14,7 +14,7 @@ pub(crate) use equations::{EquationContext, Formula};
 pub use portable::OwnedCondition;
 
 #[cfg(test)]
-mod numbering_experiment;
+mod portable_tests;
 
 // Historical-order probes. Thread-local scope and RAII restoration isolate
 // parallel tests/panics; production request preparation uses AtomKey order.

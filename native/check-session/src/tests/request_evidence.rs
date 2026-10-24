@@ -1,4 +1,4 @@
-//! Migration acceptance against immutable 6.0/6a.1 captures.
+//! Request ownership, semantic outcomes, and preparation equivalence.
 use super::*;
 
 pub(super) fn request(p: &LoweredProgram, limits: &Limits) -> CheckRequest {
@@ -44,72 +44,17 @@ pub(super) fn fresh_capture(p: &LoweredProgram, max_work: usize) -> Value {
 }
 
 #[test]
-fn frozen_witness_migration_is_exact() {
-    let report: Value =
-        serde_json::from_str(include_str!("../../../check/IDENTITIES-6a.1.json")).unwrap();
-    let delta: Value =
-        serde_json::from_str(include_str!("../../../check/WITNESS-ORDER-6a.2.json")).unwrap();
-    let baseline: Value = serde_json::from_str(include_str!(
-        "../../../check/fixtures/SLICE-6.0-BASELINE.json"
-    ))
-    .unwrap();
-    let report = super::planner_evidence::adapted("identities", report);
-    let baseline = super::planner_evidence::adapted("baseline", baseline);
-    let mut used = BTreeSet::new();
-    let mut changed = 0;
-    for row in report["witnesses"].as_array().unwrap() {
-        if row["invalid_source"] == true {
-            continue;
-        }
-        let case = row["fixture"].as_str().unwrap();
-        let max_work = row["max_work"].as_u64().unwrap() as usize;
+fn request_and_raw_execution_preserve_semantic_outcomes() {
+    for row in regression_cases() {
         let source = row["source"].as_str().unwrap();
-        if let Some(index) = case.strip_prefix("budget/") {
-            let frozen = &baseline["budgets"][index.parse::<usize>().unwrap()];
-            assert_eq!(row["source"], frozen["source"]);
-            assert_eq!(row["current"], frozen["result"]);
-        } else {
-            let (name, side) = case.rsplit_once('/').unwrap();
-            let frozen = baseline["edits"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|r| r["edit"] == name)
-                .unwrap();
-            assert_eq!(row["source"], frozen[format!("{side}_source")]);
-        }
         let (_, _, p) = lower(source);
-        // The historical-order path independently replays/certifies the old
-        // witness; the request boundary replays/certifies the new one. Both
-        // use the current planner, with its explicit preparation-budget overlay.
-        let old = budget_result_lowered(&p, max_work);
-        let new = fresh_capture(&p, max_work);
-        assert_eq!(old, row["current"], "old capture {case}");
-        assert_eq!(new, row["proposed"], "6a.1 prediction {case}");
-        assert_eq!(old != new, row["witness_differs"] == true);
-        changed += usize::from(old != new);
-        let mut adapted = old.clone();
-        for (i, entry) in delta["entries"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| e["case"] == case)
-        {
-            assert!(used.insert(i));
-            let finding = entry["finding"].as_str().unwrap();
-            let target = adapted.pointer_mut(finding).unwrap();
-            assert_eq!(target["status"], entry["status"]);
-            for field in ["present", "absent"] {
-                assert_eq!(target[field], entry["old_witness"][field]);
-                target[field] = entry["new_witness"][field].clone();
-            }
+        for report in [
+            budget_result_lowered(&p, Limits::default().max_work),
+            fresh_capture(&p, Limits::default().max_work),
+        ] {
+            assert_eq!(semantic_outcomes(report), row["expected"], "{source}");
         }
-        assert_eq!(new, adapted, "unlisted difference in {case}");
     }
-    assert_eq!(changed, 38);
-    assert_eq!(used.len(), 41);
-    assert_eq!(used.len(), delta["entries"].as_array().unwrap().len());
 }
 
 #[test]
@@ -192,15 +137,23 @@ fn request_context_and_scoped_results_are_owned_and_distinguish_reasons() {
             .resource,
         "BDD variables"
     );
-    let limited = Limits {
-        max_condition_nodes: 11,
-        ..limits.clone()
-    };
-    let limited = checked(&p, &limited);
-    let CheckOutcome::Complete(limited) = limited.verify(&(&limits).into()).unwrap() else {
-        panic!("expected scoped exhaustion")
-    };
-    assert!(limited.results.value.groups.values().any(|r|matches!(r,ScopedResult::Inconclusive(ResourceReason {resource,..}) if resource=="condition nodes")));
+    // Find a scoped exhaustion boundary in the current implementation;
+    // no particular historical node allowance is part of the contract.
+    let mut scoped_exhaustion = false;
+    for nodes in 0..=condition_storage_peak(&r.results.receipts) {
+        let bounded = Limits {
+            max_condition_nodes: nodes,
+            ..limits.clone()
+        };
+        let bounded = checked(&p, &bounded);
+        if let CheckOutcome::Complete(result) = bounded.verify(&(&limits).into()).unwrap() {
+            if result.results.value.groups.values().any(|r| matches!(r, ScopedResult::Inconclusive(ResourceReason { resource, .. }) if resource == "condition nodes")) {
+                scoped_exhaustion = true;
+                break;
+            }
+        }
+    }
+    assert!(scoped_exhaustion);
     let mut invalid = request(&p, &limits);
     invalid.obligations.clear();
     assert!(matches!(
@@ -277,40 +230,38 @@ fn committed_key_index_retains_original_bindings_and_indexes_rewrites() {
 }
 
 #[test]
-fn frozen_inventory_matches_request_preparation() {
-    let frozen: Value = serde_json::from_str(include_str!(
-        "../../../check/fixtures/SLICE-6.0-BASELINE.json"
-    ))
-    .unwrap();
-    let snapshot = |text: &str| {
-        let (ast, sources) = parse(text);
-        match lowering::lower(&ast, &sources).unwrap() {
-            LoweringOutcome::UserErrors(errors) => Err(errors
-                .iter()
-                .map(|e| format!("{:?}", e.kind))
-                .collect::<Vec<_>>()),
-            LoweringOutcome::Lowered(p) => {
-                let limits = Limits::default();
-                let RequestPreparation::Complete(g) = request(&p, &limits)
-                    .prepare(&p.corpus, &p.keys, &(&limits).into())
-                    .unwrap()
-                else {
-                    panic!()
-                };
-                Ok(inventory(&ast, &sources, &p, g.program()))
+fn request_preparation_preserves_current_inventory_and_errors() {
+    for row in edit_regressions() {
+        for side in ["before", "after"] {
+            let text = row[format!("{side}_source")].as_str().unwrap();
+            let (ast, sources) = parse(text);
+            match lowering::lower(&ast, &sources).unwrap() {
+                LoweringOutcome::UserErrors(errors) => assert_eq!(
+                    json!(
+                        errors
+                            .iter()
+                            .map(|e| format!("{:?}", e.kind))
+                            .collect::<Vec<_>>()
+                    ),
+                    row[format!("{side}_errors")]
+                ),
+                LoweringOutcome::Lowered(p) => {
+                    assert!(row[format!("{side}_errors")].is_null());
+                    let limits = Limits::default();
+                    let RequestPreparation::Complete(g) = request(&p, &limits)
+                        .prepare(&p.corpus, &p.keys, &(&limits).into())
+                        .unwrap()
+                    else {
+                        panic!()
+                    };
+                    let raw = prepare(&p, &limits).unwrap();
+                    assert_eq!(
+                        inventory(&ast, &sources, &p, &raw),
+                        inventory(&ast, &sources, &p, g.program())
+                    );
+                }
             }
         }
-    };
-    for row in frozen["edits"].as_array().unwrap() {
-        let a = snapshot(row["before_source"].as_str().unwrap());
-        let b = snapshot(row["after_source"].as_str().unwrap());
-        let changes = match (&a, &b) {
-            (Ok(a), Ok(b)) => delta(a, b),
-            _ => Value::Null,
-        };
-        assert_eq!(json!(a.err()), row["before_errors"]);
-        assert_eq!(json!(b.err()), row["after_errors"]);
-        assert_eq!(changes, row["changes"], "{}", row["edit"]);
     }
 }
 

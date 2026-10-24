@@ -46,16 +46,6 @@ test-inputmapping-lsp:
     cargo +1.93.0 build --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp
     DENOTATE_LSP_COMMAND="{{justfile_directory()}}/frontend-prototype/native/target/debug/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --features inputmapping --test inputmapping
 
-# Measure cold/comment-edit lowering phases and full checking through LSP.
-bench-inputmapping-lowering:
-    cargo +1.93.0 build --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp --release
-    DENOTATE_LSP_COMMAND="{{justfile_directory()}}/frontend-prototype/native/target/release/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --features inputmapping --test inputmapping measure_cached_lowering_phases -- --ignored --nocapture --test-threads=1
-
-# Compare cold/comment-edit phases with zero masks or conditional masks on half the Slots.
-bench-inputmapping-masking:
-    cargo +1.93.0 build --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp --release
-    DENOTATE_LSP_COMMAND="{{justfile_directory()}}/frontend-prototype/native/target/release/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --features inputmapping --test inputmapping measure_masking_phases -- --ignored --nocapture --test-threads=1
-
 # Build the InputMapping VS Code extension and check its package/example (no GUI).
 test-inputmapping-extension: _check-node
     npm test --prefix frontend-prototype/native/test-dsl/vscode
@@ -85,15 +75,6 @@ test-a1: _check-node
 bench-lsp: _check-node
     npm run build --prefix frontend-prototype/langium
     cargo test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --test latency -- --ignored --nocapture --test-threads=1
-
-# Profile projection, boundary and Rust costs for cold/comment/semantic edits.
-profile-lsp: _check-node
-    npm run build --prefix frontend-prototype/langium
-    cargo test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --test profiling -- --ignored --nocapture --test-threads=1
-
-# Rebuild and compare A2/B latency and pipeline costs in three alternating runs.
-compare-frontends: _check-node
-    node frontend-prototype/measure/compare.mjs
 
 # Launch an isolated VS Code, smoke-test the extension, then close it.
 test-vscode: _check-node

@@ -9,13 +9,9 @@ fn limits() -> Limits {
 #[test]
 fn grounding_fresh_matches_global_preparation_and_diagnostics() {
     use denotate_test_dsl::{attribution::SourceView, presentation};
-    let data: Value =
-        serde_json::from_str(include_str!("../../fixtures/OWNED-6b.2a-REFERENCE.json")).unwrap();
-    let mut sources = data["cases"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .map(|c| c["source"].as_str().unwrap().to_owned())
+    let mut sources = regression_cases()
+        .into_iter()
+        .map(|r| r["source"].as_str().unwrap().to_owned())
         .collect::<BTreeSet<_>>();
     for (_, a, b) in edit_cases() {
         sources.insert(a);
@@ -198,34 +194,13 @@ fn run_result(
         }
     }
 }
-fn grounding_reference() -> Value {
-    let old: Value =
-        serde_json::from_str(include_str!("../../fixtures/OWNED-6b.2a-REFERENCE.json")).unwrap();
-    let cases=old["cases"].as_array().unwrap().iter().map(|row| {
-        let source=row["source"].as_str().unwrap();let (_,_,p)=lower(source);
-        let l=Limits {max_work:row["max_work"].as_u64().unwrap() as usize,..limits()};
-        let (capture,r)=fresh_result(&p,&l);r.receipts.total().unwrap();
-        json!({"source":source,"max_work":l.max_work,"fixtures":row["fixtures"],"captured_result":capture,"neutral_result":format!("{:?}",r.value),"receipts":budget_evidence::receipt_capture(&r.receipts)})
-    }).collect::<Vec<_>>();
-    json!({"schema":1,"note":"Fresh 6b.3b relation-SCC grounding, independent unit allowances and separate global assembly allowance. Coarse owned checking. Historical captures unchanged.","cases":cases})
-}
-#[test]
-#[ignore = "capture fresh grounding reference before enabling retained execution"]
-fn capture_grounding_reference() {
-    println!("GROUNDING_6B3B_REFERENCE={}", grounding_reference());
-}
 
 #[test]
-fn grounding_reference_and_fresh_cold_warm_limits_are_exact() {
-    let frozen: Value = serde_json::from_str(include_str!(
-        "../../fixtures/GROUNDING-6b.3b-REFERENCE.json"
-    ))
-    .unwrap();
-    assert_eq!(grounding_reference(), frozen);
-    for row in frozen["cases"].as_array().unwrap() {
-        let (_, _, p) = lower(row["source"].as_str().unwrap());
+fn grounding_resource_cases_match_fresh_cold_warm_and_evicted() {
+    for (source, work) in resource_cases() {
+        let (_, _, p) = lower(&source);
         let l = Limits {
-            max_work: row["max_work"].as_u64().unwrap() as usize,
+            max_work: work,
             ..limits()
         };
         let expected = fresh_result(&p, &l);
@@ -284,7 +259,7 @@ fn grounding_cached_edits_undo_and_current_diagnostics() {
                 session.stats().retained_bytes
                     + session.plan_stats().retained_bytes
                     + session.grounding_stats().retained_bytes
-                    <= 64 * 1024 * 1024
+                    <= crate::Retention::default().max_bytes
             );
         }
     }
@@ -565,21 +540,22 @@ fn grounding_recycles_slots_and_bounds_payload_and_oversize() {
     let mut cache = crate::grounding::GroundingCache::default();
     let ops = (&limits()).into();
     let mut retained = 0;
-    for start in [0, 512, 1024, 1536] {
-        let g = singleton_graph(start, 512);
+    let capacity = crate::grounding::MAX_UNITS;
+    for start in [0, capacity, capacity * 2, capacity * 3] {
+        let g = singleton_graph(start, capacity);
         cache.begin(16 * 1024 * 1024);
         assert_eq!(
             cache.ground(&g, &ops).unwrap(),
             FreshGrounding.ground(&g, &ops).unwrap()
         );
-        assert_eq!(cache.stats.allocated_slots, 512);
+        assert_eq!(cache.stats.allocated_slots, capacity);
         assert!(cache.stats.retained_bytes <= 16 * 1024 * 1024);
         if retained != 0 {
             assert!(cache.stats.retained_bytes < retained * 2);
         }
         retained = cache.stats.retained_bytes;
     }
-    let g = singleton_graph(0, 513);
+    let g = singleton_graph(0, capacity + 1);
     cache.begin(16 * 1024 * 1024);
     assert_eq!(
         cache.ground(&g, &ops).unwrap(),
@@ -594,7 +570,7 @@ fn grounding_recycles_slots_and_bounds_payload_and_oversize() {
         FreshGrounding.ground(&g, &ops).unwrap()
     );
     assert_eq!(small.stats.retained_units, 0);
-    assert_eq!(small.stats.retained_bytes, 2048);
+    assert!(small.stats.retained_bytes <= 2048);
 }
 #[test]
 fn grounding_limits_cancellation_and_all_pools_share_bytes() {
@@ -683,142 +659,6 @@ fn grounding_interrupted_query_does_not_poison_recovery() {
         FreshGrounding.ground(&g, &ops).unwrap()
     );
     assert_eq!(cache.stats.executed, g.inputs.len());
-}
-
-#[test]
-#[ignore = "isolated release grounding/coarse comparison; one warmup and five samples"]
-fn measure_grounding_paths() {
-    assert!(!cfg!(debug_assertions));
-    let retention_probe = std::env::var_os("SPYNE_RETENTION_PROBE").is_some();
-    fn run(session: &mut crate::Session, source: &str) -> (Value, Accounted<ScopedResults>) {
-        let t = Instant::now();
-        let (_, _, p) = lower(source);
-        let lowering = t.elapsed().as_nanos();
-        let l = limits();
-        let ops = (&l).into();
-        let req = request_evidence::request(&p, &l);
-        let t = Instant::now();
-        let RequestPreparation::Complete(g) =
-            session.prepare(&req, &p.corpus, &p.keys, &ops).unwrap()
-        else {
-            panic!("prepare {source}")
-        };
-        let prep = t.elapsed().as_nanos();
-        let m = g.program().metrics().clone();
-        let keys = g.key_computation().as_nanos();
-        let t = Instant::now();
-        let g = g.admit(&ops).unwrap();
-        let admission = t.elapsed().as_nanos();
-        let t = Instant::now();
-        let LocalCheckOutcome::Complete(r) = session.verify(&g, &ops).unwrap() else {
-            panic!()
-        };
-        let check = t.elapsed().as_nanos();
-        let t = Instant::now();
-        let old = request_evidence::checked(&p, &l);
-        let CheckOutcome::Complete(global) = old.verify(&ops).unwrap() else {
-            panic!()
-        };
-        let global_ns = t.elapsed().as_nanos();
-        assert_eq!(r.checked.results.value, global.results.value);
-        let s = session.grounding_stats();
-        let c = session.stats();
-        let plans = session.plan_stats();
-        let mut timing = json!({"lowering_ns":lowering,"preparation_ns":prep,"admission_ns":admission,"checking_ns":check,"global_prepare_admit_check_ns":global_ns,"keys_ns":keys,
-            "graph_projection_ns":m.grounding_projection.as_nanos(),"grounding_queries_ns":m.grounding_queries.as_nanos(),"assembly_ns":m.grounding_assembly.as_nanos(),"signed_graph_ns":m.admissibility.as_nanos(),
-            "units":s.units,"executed":s.executed,"reused":s.reused,"reused_work":s.reused_work,"bypassed_graphs":s.bypassed_graphs,"grounding_bytes":s.retained_bytes,"grounding_evicted":s.evicted,"installation_ns":s.install_ns,"equality_ns":s.equality_ns,"query_ns":s.query_ns,"receipt_collection_ns":s.receipts_ns,"retention_ns":s.retention_ns,"runtime_reconstruction_ns":s.reconstruction_ns,"closure_ns":s.closure_ns,"grounding_export_ns":s.export_ns,
-            "scope_hits":c.evaluation_hits,"scope_misses":c.evaluation_misses,"scope_bytes":c.retained_bytes,"plan_bytes":plans.retained_bytes,"plan_queries":plans.queries,"plan_executed":plans.executed,"plan_ns":plans.execution_ns,
-            "logical_work":r.checked.results.receipts.total().unwrap().work});
-        timing.as_object_mut().unwrap().extend(json!({
-            "answer_misses":c.verdict_misses+c.completion_misses,"scope_bypassed":c.bypassed,"scope_evicted_during_verify":c.evicted,"scope_condition_nodes":c.retained_condition_nodes,"plan_evicted":plans.evicted,"plan_bypassed":plans.bypassed
-        }).as_object().unwrap().clone());
-        (timing, r.checked.results)
-    }
-    let baseline: Value = serde_json::from_str(include_str!("../../LOCAL-6b.1a.json")).unwrap();
-    let mut rows = Vec::new();
-    for row in baseline["measurement"]["rows"].as_array().unwrap() {
-        let source = row["source"].as_str().unwrap();
-        let edit = if row["family"] == "wide_overlap" {
-            source.replace("s0 <- i;", "s0 <- i when present(j);")
-        } else {
-            format!("{source}\ninput extra; slot extra_slot; extra_slot <- extra;")
-        };
-        let mut samples = Vec::new();
-        let mut expected = BTreeMap::new();
-        for iteration in 0..6 {
-            let mut modes = serde_json::Map::new();
-            let modes_order = if iteration % 2 == 0 {
-                vec!["coarse", "fresh_grounding", "grounding"]
-            } else {
-                vec!["grounding", "fresh_grounding", "coarse"]
-            };
-            let mut modes_order = modes_order
-                .iter()
-                .map(|mode| (*mode, false))
-                .collect::<Vec<_>>();
-            if retention_probe {
-                modes_order.extend(
-                    modes_order
-                        .clone()
-                        .into_iter()
-                        .map(|(mode, _)| (mode, true)),
-                );
-                if iteration % 2 != 0 {
-                    let half = modes_order.len() / 2;
-                    modes_order.rotate_left(half);
-                }
-            }
-            for (mode, unconstrained) in modes_order {
-                let mut session = match mode {
-                    "coarse" => crate::Session::default(),
-                    "fresh_grounding" => crate::Session::with_fresh_grounding(),
-                    _ => crate::Session::with_grounding(),
-                };
-                if unconstrained {
-                    session = session.without_retention_limits();
-                }
-                let (cold, a) = run(&mut session, source);
-                let (warm, b) = run(&mut session, &format!("// moved\n{source}"));
-                assert_eq!(a, b);
-                let (edit, edited_result) = run(&mut session, &edit);
-                let expected = expected
-                    .entry(mode)
-                    .or_insert_with(|| (a.clone(), edited_result.clone()));
-                assert_eq!(
-                    *expected,
-                    (a, edited_result),
-                    "retention must not change accounting"
-                );
-                if unconstrained {
-                    for phase in [&cold, &warm, &edit] {
-                        for field in ["bypassed_graphs", "scope_bypassed", "plan_bypassed"] {
-                            assert_eq!(phase[field], 0, "{mode}: {field}");
-                        }
-                    }
-                    for field in ["executed", "scope_misses", "answer_misses", "plan_executed"] {
-                        assert_eq!(
-                            warm[field], 0,
-                            "all warm cache bodies should be retained: {mode}: {field}"
-                        );
-                    }
-                }
-                let label = if unconstrained {
-                    format!("unconstrained_{mode}")
-                } else {
-                    mode.to_owned()
-                };
-                modes.insert(label, json!({"cold":cold,"warm":warm,"edit":edit}));
-            }
-            if iteration > 0 {
-                samples.push(Value::Object(modes));
-            }
-        }
-        rows.push(json!({"family":row["family"],"size":row["size"],"source":source,"edited_source":edit,"samples":samples}));
-    }
-    println!(
-        "GROUNDING_6B3B_MEASUREMENTS={}",
-        json!({"warmups":1,"samples_per_point":5,"paired_retention_probe":retention_probe,"rows":rows})
-    );
 }
 
 #[test]

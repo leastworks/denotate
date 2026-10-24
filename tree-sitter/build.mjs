@@ -7,11 +7,11 @@ await build({ entryPoints: [`${root}src/extension.cjs`], outfile: `${root}dist/e
     bundle: true, platform: 'node', format: 'cjs', target: 'node22', external: ['vscode'] });
 await build({ entryPoints: [`${root}tests/vscode-smoke.cjs`], outfile: `${root}dist/vscode-smoke.cjs`,
     bundle: true, platform: 'node', format: 'cjs', target: 'node22', external: ['vscode'] });
-// Shared TextMate/config assets are editor registration, not a second grammar
-// implementation. Keep one source; don't let the A and B copies drift.
+// B owns its editor registration assets so it builds after A is removed.
+// A retains its original copies for the SPyNE archive.
 for (const [from, to] of [
-    ['../langium/language-configuration.json', 'dist/language-configuration.json'],
-    ['../langium/syntaxes/denotate.tmLanguage.json', 'dist/denotate.tmLanguage.json']
+    ['language-configuration.json', 'dist/language-configuration.json'],
+    ['syntaxes/denotate.tmLanguage.json', 'dist/denotate.tmLanguage.json']
 ]) await copyFile(new URL(from, import.meta.url), new URL(to, import.meta.url));
 const suffix = process.platform === 'win32' ? '.exe' : '';
 const target = new URL(`dist/denotate-lsp${suffix}`, import.meta.url);

@@ -260,15 +260,3 @@ fn unmasked_programs_match_recorded_pre_mask_meaning_and_lsp_diagnostics() {
         serde_json::from_str(include_str!("../../fixtures/pre-mask.json")).unwrap();
     assert_eq!(value_compatibility::capture(capture()), expected);
 }
-
-#[test]
-#[ignore = "capture only on the pinned pre-mask implementation; never refresh to accept a regression"]
-fn capture_pre_mask_baseline() {
-    let mut corpus = denotate_ir::Corpus::new();
-    denotate_test_dsl::library::build(&mut corpus).unwrap();
-    assert!(
-        !corpus.relations().any(|r| r.name == "masked"),
-        "capture requires the pre-mask library"
-    );
-    println!("PREMASK_JSON={}", capture());
-}

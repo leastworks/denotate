@@ -38,12 +38,8 @@ fn run(
 
 #[test]
 fn sat_frozen_edits_fresh_cold_warm_evicted_and_backend_switch() {
-    let data: Value =
-        serde_json::from_str(include_str!("../../fixtures/OWNED-6b.2a-REFERENCE.json")).unwrap();
-    let mut sources = data["cases"]
-        .as_array()
-        .unwrap()
-        .iter()
+    let mut sources = regression_cases()
+        .into_iter()
         .map(|r| r["source"].as_str().unwrap().to_owned())
         .collect::<BTreeSet<_>>();
     for (_, a, b) in edit_cases() {
@@ -52,8 +48,6 @@ fn sat_frozen_edits_fresh_cold_warm_evicted_and_backend_switch() {
     }
     let mut session = crate::Session::default();
     let mut groups = 0;
-    let mut recursive = 0;
-    let mut rejected = 0;
     for source in sources {
         let (ast, src) = parse(&source);
         let LoweringOutcome::Lowered(p) = lowering::lower(&ast, &src).unwrap() else {
@@ -72,17 +66,10 @@ fn sat_frozen_edits_fresh_cold_warm_evicted_and_backend_switch() {
         assert_eq!(fresh, run(&p, BackendIdentity::sat(), Some(&mut session)));
         let bdd = run(&p, BackendIdentity::bdd(), Some(&mut session));
         assert_eq!(fresh, run(&p, BackendIdentity::sat(), Some(&mut session)));
-        let l = limits();
-        let prepared = request_evidence::checked(&p, &l);
-        recursive += prepared
-            .program()
-            .components()
-            .filter(|c| c.recursive && c.blocked_by.is_empty())
-            .count();
         for (k, result) in &fresh.value.groups {
             groups += 1;
             match result {
-                ScopedResult::Unsupported(UnsupportedReason::UnfoundedSupport(_)) => rejected += 1,
+                ScopedResult::Unsupported(UnsupportedReason::UnfoundedSupport(_)) => {}
                 ScopedResult::Counterexample(c, _) => {
                     let ScopedResult::Counterexample(b, _) = &bdd.value.groups[k] else {
                         panic!("SAT unsound: {source}")
@@ -95,9 +82,6 @@ fn sat_frozen_edits_fresh_cold_warm_evicted_and_backend_switch() {
             }
         }
     }
-    println!(
-        "SAT_FROZEN_INVENTORY groups={groups} admitted_recursive_sccs={recursive} spurious_candidates={rejected}"
-    );
     assert!(groups > 0);
 }
 

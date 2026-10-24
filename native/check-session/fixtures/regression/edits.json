@@ -1,0 +1,190 @@
+{
+  "cases": [
+    {
+      "edit": "comment",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "// moved source\ninput i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "numeric_alias",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 01 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "insert_helper_before",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input i, j, k; slot a, b, c;\nb <- i when present(j) and (present(i) or present(k));\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "delete_statement",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\nb <- k;\nc <- i when available(b);\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "change_guard",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) and present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "add_literal",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\nmask b when input_value(k) is 2;\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "remove_literal",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\nmask b when input_value(k) is 2;\n",
+      "after_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "first_literal",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when present(i) and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "unused_input",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input i, j, k, z; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "unused_slot",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input i, j, k; slot a, b, c, z;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "rename_input",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input ii, j, k; slot a, b, c;\na <- ii when input_value(ii) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- ii when available(b);\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "reorder_statements",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input i, j, k; slot a, b, c;\na <- j;\nb <- k;\nc <- i when available(b);\na <- i when input_value(i) is 1 and (present(j) or present(k));\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "reorder_declarations",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input k, j, i; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "duplicate_insert",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\na <- i when input_value(i) is 1 and (present(j) or present(k));\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "duplicate_delete",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\na <- i when input_value(i) is 1 and (present(j) or present(k));\n",
+      "after_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "mask",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\nmask b when present(j);\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "name_error",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(missing) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "before_errors": null,
+      "after_errors": [
+        "UnknownName { name: \"missing\", expected: Input }"
+      ]
+    },
+    {
+      "edit": "repair",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(missing) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "before_errors": [
+        "UnknownName { name: \"missing\", expected: Input }"
+      ],
+      "after_errors": null
+    },
+    {
+      "edit": "undo",
+      "before_source": "input i, j, k; slot a, b, c;\nb <- i when present(j) and (present(i) or present(k));\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "redo",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input i, j, k; slot a, b, c;\nb <- i when present(j) and (present(i) or present(k));\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "scc_merge",
+      "before_source": "input i, j; slot a, b; a <- i when available(b); b <- j; a <- i;",
+      "after_source": "input i, j; slot a, b; a <- i when available(b); b <- j when available(a); a <- i;",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "scc_split",
+      "before_source": "input i, j; slot a, b; a <- i when available(b); b <- j when available(a); a <- i;",
+      "after_source": "input i, j; slot a, b; a <- i when available(b); b <- j; a <- i;",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "remove_last_support",
+      "before_source": "input i, j; slot a, b; a <- i when available(b); b <- j when available(a); a <- i;",
+      "after_source": "input i, j; slot a, b; a <- i when available(b); b <- j when available(a);",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "unchanged_provider_meaning",
+      "before_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k;\nc <- i when available(b);\n",
+      "after_source": "input i, j, k; slot a, b, c;\na <- i when input_value(i) is 1 and (present(j) or present(k));\na <- j;\nb <- k when present(k);\nc <- i when available(b);\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "wide_local_guard",
+      "before_source": "input i, j;\nslot s0; s0 <- i; s0 <- j;\nslot s1; s1 <- i; s1 <- j;\nslot s2; s2 <- i; s2 <- j;\nslot s3; s3 <- i; s3 <- j;\nslot s4; s4 <- i; s4 <- j;\nslot s5; s5 <- i; s5 <- j;\nslot s6; s6 <- i; s6 <- j;\nslot s7; s7 <- i; s7 <- j;\nslot s8; s8 <- i; s8 <- j;\nslot s9; s9 <- i; s9 <- j;\nslot s10; s10 <- i; s10 <- j;\nslot s11; s11 <- i; s11 <- j;\nslot s12; s12 <- i; s12 <- j;\nslot s13; s13 <- i; s13 <- j;\nslot s14; s14 <- i; s14 <- j;\nslot s15; s15 <- i; s15 <- j;\n",
+      "after_source": "input i, j;\nslot s0; s0 <- i when present(j); s0 <- j;\nslot s1; s1 <- i; s1 <- j;\nslot s2; s2 <- i; s2 <- j;\nslot s3; s3 <- i; s3 <- j;\nslot s4; s4 <- i; s4 <- j;\nslot s5; s5 <- i; s5 <- j;\nslot s6; s6 <- i; s6 <- j;\nslot s7; s7 <- i; s7 <- j;\nslot s8; s8 <- i; s8 <- j;\nslot s9; s9 <- i; s9 <- j;\nslot s10; s10 <- i; s10 <- j;\nslot s11; s11 <- i; s11 <- j;\nslot s12; s12 <- i; s12 <- j;\nslot s13; s13 <- i; s13 <- j;\nslot s14; s14 <- i; s14 <- j;\nslot s15; s15 <- i; s15 <- j;\n",
+      "before_errors": null,
+      "after_errors": null
+    },
+    {
+      "edit": "nested_local_guard",
+      "before_source": "input i0, i1, i2, i3;\nslot s0, s1, s2, s3;\ns0 <- i0 when present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (input_value(i0) is 0 or input_value(i0) is 1))))))))))))))))))))))))))))));\ns1 <- i1 when present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (input_value(i1) is 0 or input_value(i1) is 1))))))))))))))))))))))))))))));\ns2 <- i2 when present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (input_value(i2) is 0 or input_value(i2) is 1))))))))))))))))))))))))))))));\ns3 <- i3 when present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (input_value(i3) is 0 or input_value(i3) is 1))))))))))))))))))))))))))))));\n",
+      "after_source": "input i0, i1, i2, i3;\nslot s0, s1, s2, s3;\ns0 <- i0 when present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (present(i0) or not (present(i0) and (input_value(i0) is 0 or input_value(i0) is 0))))))))))))))))))))))))))))));\ns1 <- i1 when present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (present(i1) or not (present(i1) and (input_value(i1) is 0 or input_value(i1) is 1))))))))))))))))))))))))))))));\ns2 <- i2 when present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (present(i2) or not (present(i2) and (input_value(i2) is 0 or input_value(i2) is 1))))))))))))))))))))))))))))));\ns3 <- i3 when present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (present(i3) or not (present(i3) and (input_value(i3) is 0 or input_value(i3) is 1))))))))))))))))))))))))))))));\n",
+      "before_errors": null,
+      "after_errors": null
+    }
+  ]
+}

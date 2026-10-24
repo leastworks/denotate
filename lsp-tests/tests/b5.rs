@@ -1,7 +1,6 @@
 #[allow(dead_code)]
 mod support;
 use serde_json::{json, Value};
-use std::time::Instant;
 use support::Client;
 
 fn stats(c: &mut Client) -> Value {
@@ -18,7 +17,6 @@ fn edit(
 ) -> Value {
     c.request("denotate/test/profiling", json!(profiled));
     let before = stats(c);
-    let start = Instant::now();
     if let Some(range) = range {
         c.notify(
             "textDocument/didChange",
@@ -29,7 +27,6 @@ fn edit(
     } else {
         c.change(uri, version, text);
     }
-    let wall = start.elapsed().as_secs_f64() * 1000.0;
     let after = stats(c);
     let executions: serde_json::Map<String, Value> = after
         .as_object()
@@ -45,17 +42,12 @@ fn edit(
         .collect();
     assert_eq!(stats(c).get("timings"), after.get("timings"));
     assert_eq!(after.get("timings").is_some(), profiled);
-    json!({"wall_ms":wall,"executions":executions,"timings":after.get("timings")})
+    json!({"executions":executions,"timings":after.get("timings")})
 }
 
-fn observation(pairs: usize, profiled: bool) -> Value {
+fn check_edits(profiled: bool) {
     let mut c = Client::start("base/00-valid");
     let (uri, mut source) = c.open("example.den");
-    for i in 0..pairs {
-        source.push_str(&format!(
-            "\nconst extra_{i}: Slot;\navailable(extra_{i});\n"
-        ));
-    }
     source.push_str("\nrelation probe(slot: Slot);\nprobe(D) :- available(D);\n");
     let cold = edit(&mut c, &uri, 2, &source, None, profiled);
     if profiled && std::env::var("DENOTATE_BACKEND").as_deref() == Ok("tree-sitter") {
@@ -87,8 +79,7 @@ fn observation(pairs: usize, profiled: bool) -> Value {
         .all(|(k, v)| k == "ruleQueryExecutions" || v == 0));
     assert_eq!(c.diagnostics(&uri).as_array().unwrap().len(), 2);
     c.change(&uri, 5, &commented);
-    let mut ranged = vec![];
-    for i in 0..25 {
+    for i in 0..2 {
         let result = edit(
             &mut c,
             &uri,
@@ -103,9 +94,6 @@ fn observation(pairs: usize, profiled: bool) -> Value {
             .unwrap()
             .values()
             .all(|n| n == 0));
-        if i >= 5 {
-            ranged.push(result);
-        }
     }
     // Use a current, resolved relation reference. Include both source mapping
     // and reference collection costs, not just parsing and database calls.
@@ -113,50 +101,22 @@ fn observation(pairs: usize, profiled: bool) -> Value {
         .lines()
         .position(|line| line.starts_with("mapped_to(input_a"))
         .unwrap();
-    let mut queries = vec![];
     for method in ["textDocument/prepareRename", "textDocument/references"] {
         c.request("denotate/test/profiling", json!(profiled));
-        let mut samples = vec![];
-        for i in 0..25 {
-            let start = Instant::now();
-            let value = c.request(
-                method,
-                json!({"textDocument":{"uri":uri},"position":{"line":line,"character":1},
-                "context":{"includeDeclaration":true}}),
-            );
-            let wall = start.elapsed().as_secs_f64() * 1000.0;
-            if method.ends_with("references") {
-                assert!(value.as_array().unwrap().len() >= 4);
-            } else {
-                assert!(!value.is_null());
-            }
-            if i >= 5 {
-                samples.push(wall);
-            }
+        let value = c.request(method, json!({"textDocument":{"uri":uri},"position":{"line":line,"character":1}, "context":{"includeDeclaration":true}}));
+        if method.ends_with("references") {
+            assert!(value.as_array().unwrap().len() >= 4);
+        } else {
+            assert!(!value.is_null());
         }
-        queries.push(
-            json!({"method":method,"samples_ms":samples,"timings":stats(&mut c).get("timings")}),
-        );
     }
     c.shutdown();
-    json!({"pairs":pairs,"profiled":profiled,"cold_workload":cold,"comment_edit":comment,
-        "semantic_edit":semantic,"ranged_edits":ranged,"queries":queries})
-}
-
-#[test]
-#[ignore = "manual shared comparison; run just compare-frontends"]
-fn comparison_pipeline() {
-    for pairs in [0, 100, 1000] {
-        for profiled in [false, true] {
-            println!("DENOTATE_COMPARISON {}", observation(pairs, profiled));
-        }
-    }
 }
 
 #[test]
 fn comparison_instrumentation_preserves_answers_and_reuse() {
     assert_ne!(std::env::var("DENOTATE_BACKEND").as_deref(), Ok("langium"),
         "A1 has no profiling API; exclude this binary rather than counting a skipped test as passed");
-    observation(0, false);
-    observation(0, true);
+    check_edits(false);
+    check_edits(true);
 }

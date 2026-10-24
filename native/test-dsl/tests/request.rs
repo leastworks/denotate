@@ -26,13 +26,12 @@ fn program(text: &str) -> analysis::Program {
 }
 #[test]
 fn affected_fixtures_keep_status_and_diagnostic_summaries() {
-    let report: Value =
-        serde_json::from_str(include_str!("../../check/IDENTITIES-6a.1.json")).unwrap();
+    let report: Value = serde_json::from_str(include_str!(
+        "../../check-session/fixtures/regression/outcomes.json"
+    ))
+    .unwrap();
     let mut sources = BTreeSet::new();
-    for row in report["witnesses"].as_array().unwrap() {
-        if row["invalid_source"] == true {
-            continue;
-        }
+    for row in report["cases"].as_array().unwrap() {
         sources.insert(row["source"].as_str().unwrap());
     }
     // Nonalphabetical declarations exercise summary decoding as well as witnesses.

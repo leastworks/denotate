@@ -1,4 +1,4 @@
-//! 6a.1 acceptance and diagnostic probes. Uses the unchanged 6.0 corpus.
+//! Semantic keys, snapshot rebinding, and canonical input-order behavior.
 use super::*;
 
 // The checker unit-test crate is distinct from the dependency linked through
@@ -97,7 +97,7 @@ fn ground_keys_keep_body_only_variables_empty_groups_and_negative_absence() {
 }
 
 #[test]
-fn reordered_declarations_change_proposed_witness_but_keep_current_execution() {
+fn input_order_override_preserves_outcomes_and_restores_execution() {
     // Three competing inputs make the choice observable; two inputs force the
     // same conflict even when variable order differs.
     let (_, _, p) = lower("input z, a, m; slot s; s <- z; s <- a; s <- m;");
@@ -106,7 +106,10 @@ fn reordered_declarations_change_proposed_witness_but_keep_current_execution() {
     let proposed = denotate_check::test_support::with_test_input_order(input_order(&p, &g), || {
         budget_result_lowered(&p, 20_000_000)
     });
-    assert_ne!(current, proposed);
+    assert_eq!(
+        semantic_outcomes(current.clone()),
+        semantic_outcomes(proposed.clone())
+    );
     assert_eq!(
         current,
         budget_result_lowered(&p, 20_000_000),
@@ -115,89 +118,4 @@ fn reordered_declarations_change_proposed_witness_but_keep_current_execution() {
     for result in [&current, &proposed] {
         assert_eq!(result["groups"][0]["status"], "counterexample");
     }
-}
-
-fn witness_row(name: String, source: &str, max_work: usize) -> Value {
-    let (ast, sources) = parse(source);
-    let LoweringOutcome::Lowered(p) = lowering::lower(&ast, &sources).unwrap() else {
-        return json!({"fixture":name,"source":source,"max_work":max_work,"invalid_source":true});
-    };
-    let g = prepare(&p, &Limits::default()).unwrap();
-    let order = input_order(&p, &g);
-    let current_order: Vec<_> = g.input_atoms().cloned().collect();
-    let current_atoms: Vec<_> = g
-        .atoms()
-        .map(|a| AtomKey::from_atom(&p.keys, a).unwrap())
-        .collect();
-    let mut sorted = current_atoms.clone();
-    sorted.sort();
-    let current = budget_result_lowered(&p, max_work);
-    let proposed = denotate_check::test_support::with_test_input_order(order.clone(), || {
-        budget_result_lowered(&p, max_work)
-    });
-    let witness = |result: &Value| {
-        result["groups"]
-            .as_array()
-            .map(|groups| {
-                groups
-                    .iter()
-                    .filter(|g| g["status"] == "counterexample")
-                    .cloned()
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
-    };
-    json!({"fixture":name,"source":source,"max_work":max_work,
-        "atom_order_differs":current_atoms!=sorted,"input_order_differs":current_order!=order,
-        "current_input_order":current_order.iter().map(|a| Names::atom_key(&AtomKey::from_atom(&p.keys,a).unwrap())).collect::<Vec<_>>(),
-        "proposed_input_order":order.iter().map(|a| Names::atom_key(&AtomKey::from_atom(&p.keys,a).unwrap())).collect::<Vec<_>>(),
-        "result_differs":current!=proposed,"witness_differs":witness(&current)!=witness(&proposed),"current":current,"proposed":proposed})
-}
-
-#[test]
-#[ignore = "manual release 6a.1 witness delta and key phase evidence"]
-fn measure_key_boundary() {
-    assert!(!cfg!(debug_assertions));
-    let baseline: Value = serde_json::from_str(include_str!(
-        "../../../check/fixtures/SLICE-6.0-BASELINE.json"
-    ))
-    .unwrap();
-    let mut witnesses = Vec::new();
-    for edit in baseline["edits"].as_array().unwrap() {
-        for side in ["before", "after"] {
-            witnesses.push(witness_row(
-                format!("{}/{}", edit["edit"].as_str().unwrap(), side),
-                edit[format!("{side}_source")].as_str().unwrap(),
-                20_000_000,
-            ));
-        }
-    }
-    for (i, observation) in baseline["budgets"].as_array().unwrap().iter().enumerate() {
-        let row = witness_row(
-            format!("budget/{i}"),
-            observation["source"].as_str().unwrap(),
-            observation["max_work"].as_u64().unwrap() as usize,
-        );
-        assert_eq!(row["current"], observation["result"]);
-        witnesses.push(row);
-    }
-    let mut timing = Vec::new();
-    for family in ["duplicates", "distinct_literals", "helper_chain"] {
-        for size in [1, 4, 16, 64] {
-            let text = workload(family, size);
-            let mut samples = Vec::new();
-            for iteration in 0..6 {
-                let (_, _, p) = lower(&text);
-                let g = prepare_keyed(&p).unwrap();
-                if iteration > 0 {
-                    samples.push(json!({"installation_keys_ns":p.key_computation.as_nanos(),"ground_keys_ns":g.keys.elapsed.as_nanos(),"key_total_ns":(p.key_computation+g.keys.elapsed).as_nanos(),"preparation_ns":(g.program.metrics().grounding+g.program.metrics().admissibility).as_nanos(),"occurrences":p.keys.bindings().entries().count(),"instances":g.keys.instances.len(),"components":g.keys.components.len()}));
-                }
-            }
-            timing.push(json!({"family":family,"parameter":size,"samples":samples}));
-        }
-    }
-    println!(
-        "SLICE_6A1_EVIDENCE={}",
-        json!({"witnesses":witnesses,"key_timings":timing})
-    );
 }

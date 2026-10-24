@@ -1,18 +1,16 @@
-//! 6.0 evidence, not production semantic identity or an incremental checker.
-//! Production keys drive the inventory; legacy text rendering only preserves
-//! the unchanged frozen witness spelling.
+//! Shared regression corpora, key invariants, and current execution comparisons.
 use denotate_check::*;
 use denotate_editor::Document;
 use denotate_ir::*;
 use denotate_test_dsl::{
-    ast::{Expr, ExprKind, Program},
+    ast::Program,
     lowering::{self, LoweredProgram, LoweringOutcome},
     syntax,
 };
 use serde_json::{Value, json};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 type Entities = BTreeMap<String, String>;
@@ -212,18 +210,6 @@ fn inventory(ast: &Program, sources: &Sources, p: &LoweredProgram, g: &GroundPro
     out
 }
 
-fn delta(before: &Inventory, after: &Inventory) -> Value {
-    before.iter().map(|(kind, old)| {
-        let new = &after[kind];
-        let added = new.keys().filter(|k| !old.contains_key(*k)).count();
-        let removed = old.keys().filter(|k| !new.contains_key(*k)).count();
-        let modified = old.iter().filter(|(k,v)| new.get(*k).is_some_and(|n| n != *v)).count();
-        let unchanged = old.len() - removed - modified;
-        let union = old.len() + added;
-        ((*kind).into(), json!({"before":old.len(),"after":new.len(),"added":added,"removed":removed,"modified":modified,"unchanged":unchanged,"changed_over_union":[added+removed+modified,union]}))
-    }).collect::<serde_json::Map<String, Value>>().into()
-}
-
 fn snapshot(text: &str) -> std::result::Result<Inventory, Vec<String>> {
     let (ast, sources) = parse(text);
     match lowering::lower(&ast, &sources).unwrap() {
@@ -238,126 +224,75 @@ fn snapshot(text: &str) -> std::result::Result<Inventory, Vec<String>> {
 }
 
 fn edit_cases() -> Vec<(String, String, String)> {
-    let decl = "input i, j, k; slot a, b, c;\n";
-    let a = "a <- i when input_value(i) is 1 and (present(j) or present(k));\n";
-    let b = "a <- j;\nb <- k;\nc <- i when available(b);\n";
-    let base = format!("{decl}{a}{b}");
-    let inserted = "b <- i when present(j) and (present(i) or present(k));\n";
-    let mut cases = vec![];
-    let mut push = |name: &str, from: String, to: String| cases.push((name.into(), from, to));
-    push("comment", base.clone(), format!("// moved source\n{base}"));
-    push("numeric_alias", base.clone(), base.replace("is 1", "is 01"));
-    push(
-        "insert_helper_before",
-        base.clone(),
-        format!("{decl}{inserted}{a}{b}"),
-    );
-    push(
-        "delete_statement",
-        base.clone(),
-        format!("{decl}{a}b <- k;\nc <- i when available(b);\n"),
-    );
-    push(
-        "change_guard",
-        base.clone(),
-        base.replace("present(j) or present(k)", "present(j) and present(k)"),
-    );
-    push(
-        "add_literal",
-        base.clone(),
-        format!("{base}mask b when input_value(k) is 2;\n"),
-    );
-    push(
-        "remove_literal",
-        format!("{base}mask b when input_value(k) is 2;\n"),
-        base.clone(),
-    );
-    let no_value = base.replace("input_value(i) is 1", "present(i)");
-    push("first_literal", no_value, base.clone());
-    push(
-        "unused_input",
-        base.clone(),
-        base.replace("input i, j, k;", "input i, j, k, z;"),
-    );
-    push(
-        "unused_slot",
-        base.clone(),
-        base.replace("slot a, b, c;", "slot a, b, c, z;"),
-    );
-    push(
-        "rename_input",
-        base.clone(),
-        base.replace("i, j", "ii, j")
-            .replace("<- i ", "<- ii ")
-            .replace("(i)", "(ii)"),
-    );
-    push("reorder_statements", base.clone(), format!("{decl}{b}{a}"));
-    push(
-        "reorder_declarations",
-        base.clone(),
-        base.replace("input i, j, k;", "input k, j, i;"),
-    );
-    push("duplicate_insert", base.clone(), format!("{base}{a}"));
-    push("duplicate_delete", format!("{base}{a}"), base.clone());
-    push(
-        "mask",
-        base.clone(),
-        format!("{base}mask b when present(j);\n"),
-    );
-    let broken = base.replace("(j)", "(missing)");
-    push("name_error", base.clone(), broken.clone());
-    push("repair", broken, base.clone());
-    push("undo", format!("{decl}{inserted}{a}{b}"), base.clone());
-    push("redo", base.clone(), format!("{decl}{inserted}{a}{b}"));
-    let open = "input i, j; slot a, b; a <- i when available(b); b <- j;";
-    let closed = "input i, j; slot a, b; a <- i when available(b); b <- j when available(a);";
-    push(
-        "scc_merge",
-        format!("{open} a <- i;"),
-        format!("{closed} a <- i;"),
-    );
-    push(
-        "scc_split",
-        format!("{closed} a <- i;"),
-        format!("{open} a <- i;"),
-    );
-    push(
-        "remove_last_support",
-        format!("{closed} a <- i;"),
-        closed.into(),
-    );
-    push(
-        "unchanged_provider_meaning",
-        base.clone(),
-        base.replace("b <- k;", "b <- k when present(k);"),
-    );
-    let wide = (0..16)
-        .map(|i| format!("slot s{i}; s{i} <- i; s{i} <- j;\n"))
-        .collect::<String>();
-    push(
-        "wide_local_guard",
-        format!("input i, j;\n{wide}"),
-        format!(
-            "input i, j;\n{}",
-            wide.replace("s0 <- i;", "s0 <- i when present(j);")
-        ),
-    );
-    let deep = workload("helper_chain", 16);
-    push(
-        "nested_local_guard",
-        deep.clone(),
-        deep.replacen("is 1", "is 0", 1),
-    );
+    edit_regressions()
+        .into_iter()
+        .map(|row| {
+            (
+                row["edit"].as_str().unwrap().into(),
+                row["before_source"].as_str().unwrap().into(),
+                row["after_source"].as_str().unwrap().into(),
+            )
+        })
+        .collect()
+}
+
+fn edit_regressions() -> Vec<Value> {
+    let data: Value =
+        serde_json::from_str(include_str!("../../fixtures/regression/edits.json")).unwrap();
+    data["cases"].as_array().unwrap().clone()
+}
+
+fn regression_cases() -> Vec<Value> {
+    let data: Value =
+        serde_json::from_str(include_str!("../../fixtures/regression/outcomes.json")).unwrap();
+    data["cases"].as_array().unwrap().clone()
+}
+
+// Resource limits are test inputs, never expected historical costs or outcomes.
+// These four programs and limits preserve the old source/limit matrix; every
+// semantic corpus case also runs with ample resources.
+fn resource_cases() -> Vec<(String, usize)> {
+    let mut cases: Vec<_> = regression_cases()
+        .into_iter()
+        .map(|r| {
+            (
+                r["source"].as_str().unwrap().to_owned(),
+                Limits::default().max_work,
+            )
+        })
+        .collect();
+    for source in [
+        "input i, j; slot a; a <- i; a <- j;",
+        "input i, j; slot a; a <- i when input_value(i) is 1; a <- j when input_value(i) is 2;",
+        "input i, j; slot a, b; a <- i when not available(b); b <- j when not available(a); a <- j;",
+        "input i; slot a; a <- i when not available(a);",
+    ] {
+        for work in [0, 100, 500, 2000, 20000] {
+            cases.push((source.into(), work));
+        }
+    }
     cases
 }
 
-fn capture_edits() -> Value {
-    Value::Array(edit_cases().into_iter().map(|(name,before,after)| {
-        let old = snapshot(&before);
-        let new = snapshot(&after);
-        let changes = match (&old,&new) { (Ok(a),Ok(b)) => delta(a,b), _ => Value::Null };
-        json!({"edit":name,"before_source":before,"after_source":after,"before_errors":old.err(),"after_errors":new.err(),"changes":changes})
-    }).collect())
+// Derive search bounds from this execution, not a historical storage threshold.
+fn condition_storage_peak(receipts: &WorkReceipts) -> usize {
+    receipts
+        .entries()
+        .flat_map(|(_, r)| &r.own.resource_peaks)
+        .filter(|(key, _)| key.resource == "condition nodes")
+        .map(|(_, peak)| *peak)
+        .max()
+        .expect("fixture must retain conditions")
+}
+
+fn semantic_outcomes(mut report: Value) -> Value {
+    if let Some(groups) = report["groups"].as_array_mut() {
+        for group in groups {
+            group.as_object_mut().unwrap().remove("present");
+            group.as_object_mut().unwrap().remove("absent");
+        }
+    }
+    report
 }
 
 fn workload(family: &str, size: usize) -> String {
@@ -382,90 +317,10 @@ fn workload(family: &str, size: usize) -> String {
     text
 }
 
-fn depth(e: &Expr) -> usize {
-    1 + match &e.kind {
-        ExprKind::And(a, b) | ExprKind::Or(a, b) => depth(a).max(depth(b)),
-        ExprKind::Group(a) | ExprKind::Not { operand: a, .. } => depth(a),
-        _ => 0,
-    }
-}
-fn shape(ast: &Program, p: &LoweredProgram) -> Value {
-    fn chain(
-        id: RelationId,
-        edges: &BTreeMap<RelationId, BTreeSet<RelationId>>,
-        memo: &mut BTreeMap<RelationId, usize>,
-    ) -> usize {
-        if let Some(n) = memo.get(&id) {
-            return *n;
-        }
-        let n = 1 + edges[&id]
-            .iter()
-            .map(|next| chain(*next, edges, memo))
-            .max()
-            .unwrap_or(0);
-        memo.insert(id, n);
-        n
-    }
-    let mut max_body = 0;
-    let mut distinct = 0;
-    let mut repeated = 0;
-    let mut positive_pivots = 0;
-    let mut edges: BTreeMap<_, BTreeSet<_>> = p
-        .corpus
-        .relations()
-        .filter(|r| p.corpus.is_generated_relation(r.id))
-        .map(|r| (r.id, BTreeSet::new()))
-        .collect();
-    for r in p.corpus.rules().skip(4) {
-        max_body = max_body.max(r.body.len());
-        let values: BTreeSet<_> = r
-            .body
-            .iter()
-            .map(|l| {
-                format!(
-                    "{}:{:?}:{:?}",
-                    matches!(l, Literal::Negative(_)),
-                    l.atom().relation(),
-                    l.atom()
-                        .arguments()
-                        .iter()
-                        .map(|a| a.value())
-                        .collect::<Vec<_>>()
-                )
-            })
-            .collect();
-        distinct += values.len();
-        repeated += r.body.len() - values.len();
-        positive_pivots += r
-            .body
-            .iter()
-            .filter(|l| matches!(l, Literal::Positive(_)))
-            .count();
-        if let Some(deps) = edges.get_mut(&r.head.relation()) {
-            deps.extend(
-                r.body
-                    .iter()
-                    .map(|l| l.atom().relation())
-                    .filter(|id| p.corpus.is_generated_relation(*id)),
-            );
-        }
-    }
-    let mut memo = BTreeMap::new();
-    let helper_depth = edges
-        .keys()
-        .map(|id| chain(*id, &edges, &mut memo))
-        .max()
-        .unwrap_or(0);
-    json!({"authored_depth_including_groups":ast.mappings.iter().filter_map(|m|m.condition.as_ref()).map(depth).max().unwrap_or(0),"max_normalized_body":max_body,"distinct_literals_summed_per_rule":distinct,"duplicate_literals_summed_per_rule":repeated,"program_positive_pivots":positive_pivots,"helpers":edges.len(),"helper_chain_depth":helper_depth,"inputs":ast.declarations.iter().filter(|d|d.kind==denotate_test_dsl::ast::Kind::Input).map(|d|d.names.len()).sum::<usize>()})
-}
-
 fn resource(c: Inconclusive) -> Value {
     json!({"phase":c.phase,"resource":c.resource})
 }
-fn budget_result(text: &str, max_work: usize) -> Value {
-    let (_, _, p) = lower(text);
-    budget_result_lowered(&p, max_work)
-}
+
 fn budget_result_lowered(p: &LoweredProgram, max_work: usize) -> Value {
     let n = Names { keys: &p.keys };
     let limits = Limits {
@@ -499,28 +354,23 @@ fn captured_report(report: &Verification<'_>, n: &Names<'_>) -> Value {
     json!({"groups":groups,"regions":regions})
 }
 
-fn baseline() -> Value {
-    let programs = [
-        "input i, j; slot a; a <- i; a <- j;",
-        "input i, j; slot a; a <- i when input_value(i) is 1; a <- j when input_value(i) is 2;",
-        "input i, j; slot a, b; a <- i when not available(b); b <- j when not available(a); a <- j;",
-        "input i; slot a; a <- i when not available(a);",
-    ];
-    let budgets:Vec<_>=programs.iter().flat_map(|text|[0,100,500,2000,20000].into_iter().map(move |max_work|json!({"source":text,"max_work":max_work,"result":budget_result(text,max_work)}))).collect();
-    json!({"schema":1,"note":"Pre-6a frozen outputs. Structural inventory is test-only and does not establish production cache soundness. A changed statement form is removed+added. Components match by membership; groups/cones match by obligation and grouping key. Invalid snapshots have no semantic inventory. Input context is separate from structural cones. Resource fixtures use generous deadlines; no timings are frozen.","edits":capture_edits(),"budgets":budgets})
+#[test]
+fn edit_sources_preserve_validation_errors() {
+    for row in edit_regressions() {
+        for side in ["before", "after"] {
+            let source = row[format!("{side}_source")].as_str().unwrap();
+            assert_eq!(
+                json!(snapshot(source).err()),
+                row[format!("{side}_errors")],
+                "{} / {side}",
+                row["edit"]
+            );
+        }
+    }
 }
 
 #[test]
-fn inventory_reference_matches_pre_slice_6_capture() {
-    let expected: Value = serde_json::from_str(include_str!(
-        "../../../check/fixtures/SLICE-6.0-BASELINE.json"
-    ))
-    .unwrap();
-    assert_eq!(baseline(), planner_evidence::adapted("baseline", expected));
-}
-
-#[test]
-fn inventory_keys_and_workload_shapes_are_checked() {
+fn inventory_keys_and_preparation_paths_agree() {
     let cases = edit_cases();
     for name in [
         "comment",
@@ -562,21 +412,6 @@ fn inventory_keys_and_workload_shapes_are_checked() {
     );
     for family in ["duplicates", "distinct_literals", "helper_chain"] {
         let (ast, sources, p) = lower(&workload(family, 16));
-        let shape = shape(&ast, &p);
-        if family == "helper_chain" {
-            assert!(shape["helper_chain_depth"].as_u64().unwrap() > 4);
-            assert!(shape["max_normalized_body"].as_u64().unwrap() <= 3);
-        } else {
-            assert_eq!(shape["helper_chain_depth"], 1);
-            assert_eq!(shape["max_normalized_body"], 16);
-            assert_eq!(
-                shape["duplicate_literals_summed_per_rule"]
-                    .as_u64()
-                    .unwrap()
-                    > 0,
-                family == "duplicates"
-            );
-        }
         let g = prepare(&p, &Limits::default()).unwrap();
         let (profiled, _) = GroundProgram::profile_preparation(
             &p.corpus,
@@ -640,65 +475,6 @@ fn unchanged_provider_fixture_preserves_available_meaning() {
     assert_eq!(valid, 27);
 }
 
-#[test]
-#[ignore = "manual pre-6a baseline capture; do not regenerate after changing contracts"]
-fn capture_incremental_inventory() {
-    println!("SLICE_60_BASELINE={}", baseline());
-}
-
-#[test]
-#[ignore = "manual release 6.0 preparation probe"]
-fn measure_preparation_shapes() {
-    assert!(!cfg!(debug_assertions));
-    let mut rows = vec![];
-    for family in ["duplicates", "distinct_literals", "helper_chain"] {
-        for size in [1, 4, 16, 64] {
-            let source = workload(family, size);
-            let (ast, sources, p) = lower(&source);
-            let limits = Limits::default();
-            let mut samples = vec![];
-            let mut outcome = Value::Null;
-            for iteration in 0..6 {
-                let start = Instant::now();
-                let g = prepare(&p, &limits).unwrap();
-                let preparation_ns = start.elapsed().as_nanos();
-                let grounding_ns = g.metrics().grounding.as_nanos();
-                let graph_ns = g.metrics().admissibility.as_nanos();
-                let start = Instant::now();
-                let g = g.admit(&limits).unwrap();
-                let admission_ns = start.elapsed().as_nanos();
-                let start = Instant::now();
-                let m = g.symbolic(&limits).unwrap();
-                let symbolic_ns = start.elapsed().as_nanos();
-                let start = Instant::now();
-                let report = m.verify_at_most_one(&limits).unwrap();
-                let verification_ns = start.elapsed().as_nanos();
-                outcome = json!({"proved":report.all_obligations_proved(),"input_tuples":g.input_atoms().count(),"possible_atoms":g.atoms().count(),"ground_rules":g.rules().count(),"components":g.components().count(),"dependencies":g.dependencies().count(),"w_nodes":m.context().permitted_worlds().node_count()});
-                if iteration > 0 {
-                    samples.push(json!({"preparation_ns":preparation_ns,"grounding_ns":grounding_ns,"graph_ns":graph_ns,"admission_ns":admission_ns,"symbolic_ns":symbolic_ns,"verification_ns":verification_ns}));
-                }
-            }
-            let (profiled, profile) = GroundProgram::profile_preparation(
-                &p.corpus,
-                &p.domains(),
-                &constraints(&p),
-                &limits,
-            )
-            .unwrap();
-            let fresh = prepare(&p, &limits).unwrap();
-            assert_eq!(
-                inventory(&ast, &sources, &p, &fresh),
-                inventory(&ast, &sources, &p, &profiled)
-            );
-            rows.push(json!({"family":family,"parameter":size,"source":source,"shape":shape(&ast,&p),"samples":samples,"outcome":outcome,"diagnostic_profile":{"work":profile.work,"calls":profile.calls,"segments_ns":profile.segments_ns}}));
-        }
-    }
-    println!(
-        "SLICE_60_GROWTH={}",
-        json!({"note":"One warm-up + five measured samples on the normal public path with counters disabled; separate instrumented diagnostic run is not a latency sample. Test-only profile executes the same stage functions and is checked against the public preparation structurally. No optimization or caching. Default limits; every timing is local evidence, not a gate.","rows":rows})
-    );
-}
-
 #[path = "key_evidence.rs"]
 mod key_evidence;
 
@@ -707,9 +483,6 @@ mod request_evidence;
 
 #[path = "budget_evidence.rs"]
 mod budget_evidence;
-
-#[path = "planner_evidence.rs"]
-mod planner_evidence;
 
 #[path = "local.rs"]
 mod local;

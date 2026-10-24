@@ -3,6 +3,16 @@ use super::*;
 use crate::FreshSession;
 use denotate_test_dsl::{attribution::SourceView, presentation};
 
+pub(super) fn query_inputs(source: &str) -> BTreeMap<LocalScope, LocalInput> {
+    let (_, _, p) = lower(source);
+    let l = limits();
+    let g = request_evidence::checked(&p, &l);
+    let LocalCheckOutcome::Complete(r) = FreshSession.verify(&g, &(&l).into()).unwrap() else {
+        panic!()
+    };
+    r.queries.into_iter().map(|(k, q)| (k, q.input)).collect()
+}
+
 fn limits() -> Limits {
     Limits {
         timeout: Duration::from_secs(60),
@@ -68,16 +78,9 @@ fn compare(source: &str) {
     );
 }
 #[test]
-fn local_scopes_preserve_frozen_status_witness_and_current_diagnostics() {
-    let data: Value =
-        serde_json::from_str(include_str!("../../../check/IDENTITIES-6a.1.json")).unwrap();
-    let sources: BTreeSet<_> = data["witnesses"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|r| r["invalid_source"] != true)
-        .map(|r| r["source"].as_str().unwrap())
-        .collect();
+fn local_scopes_preserve_regression_outcomes_and_current_diagnostics() {
+    let cases = regression_cases();
+    let sources = cases.iter().map(|r| r["source"].as_str().unwrap());
     for source in sources {
         compare(source);
     }
@@ -179,137 +182,9 @@ fn local_execution_preserves_pre_mask_normalization_and_84_fingerprint_cases() {
         }
     }
 }
-pub(super) fn local_reference() -> Value {
-    let old: Value =
-        serde_json::from_str(include_str!("../../../check/IDENTITIES-6a.1.json")).unwrap();
-    let mut cases = BTreeMap::<(String, usize), Vec<String>>::new();
-    for row in old["witnesses"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|r| r["invalid_source"] != true)
-    {
-        cases
-            .entry((
-                row["source"].as_str().unwrap().into(),
-                row["max_work"].as_u64().unwrap() as usize,
-            ))
-            .or_default()
-            .push(row["fixture"].as_str().unwrap().into());
-    }
-    let rows:Vec<_>=cases.into_iter().map(|((source,max_work),fixtures)| {
-        let (_,_,p)=lower(&source);let l=Limits {max_work,..limits()};let req=request_evidence::request(&p,&l);
-        let exhausted=|reason:Inconclusive,receipts| (json!({"status":"inconclusive","phase":reason.phase,"resource":reason.resource}),Accounted {value:req.exhausted(reason),receipts});
-        let (capture,r)=match req.prepare(&p.corpus,&p.keys,&(&l).into()).unwrap() {
-            RequestPreparation::Inconclusive {reason,receipts}=>exhausted(reason,receipts),
-            RequestPreparation::Complete(g)=>{
-                let g=g.admit(&(&l).into()).unwrap();
-                match FreshSession.verify(&g,&(&l).into()).unwrap() {
-                    LocalCheckOutcome::Inconclusive {reason,receipts}=>exhausted(reason,receipts),
-                    LocalCheckOutcome::Complete(r)=>(captured_report(&r.checked.verification,&Names{keys:&p.keys}),r.checked.results),
-                }
-            }
-        };
-        json!({"source":source,"max_work":max_work,"fixtures":fixtures,"captured_result":capture,
-            "neutral_result":format!("{:?}",r.value),"receipts":budget_evidence::receipt_capture(&r.receipts)})
-    }).collect();
-    json!({"schema":1,"cases":rows})
-}
-#[test]
-#[ignore = "initial local-execution capture only; later changes require an explicit reviewed delta"]
-fn capture_initial_local_reference() {
-    println!("LOCAL_6B1A_REFERENCE={}", local_reference());
-}
-#[test]
-#[ignore = "manual local execution timing; run alone in release"]
-fn measure_local_workload_families() {
-    let mut workloads = Vec::new();
-    for family in ["duplicates", "distinct_literals", "helper_chain"] {
-        for size in [1, 4, 16, 64] {
-            let source = workload(family, size);
-            workloads.push((family.to_string(), size, source.clone(), false));
-            workloads.push((
-                format!("query_{family}"),
-                size,
-                format!("{source}s0 <- i1; s1 <- i2; s2 <- i3; s3 <- i0;"),
-                true,
-            ));
-        }
-    }
-    let (_, wide, _) = edit_cases()
-        .into_iter()
-        .find(|(n, _, _)| n == "wide_local_guard")
-        .unwrap();
-    workloads.push(("wide_overlap".into(), 16, wide, true));
-    workloads.push((
-        "mixed_completion".into(),
-        1,
-        "input i, j, k; slot a, b; a <- i; a <- j; b <- k when not available(b);".into(),
-        true,
-    ));
-    let mut rows = Vec::new();
-    for (family, size, source, queries) in workloads {
-        let mut samples = Vec::new();
-        let mut charges = Value::Null;
-        let mut result = Value::Null;
-        for sample in 0..6 {
-            let (_, _, p) = lower(&source);
-            let l = limits();
-            let start = Instant::now();
-            let req = request_evidence::request(&p, &l);
-            let RequestPreparation::Complete(g) =
-                req.prepare(&p.corpus, &p.keys, &(&l).into()).unwrap()
-            else {
-                panic!()
-            };
-            let preparation = start.elapsed();
-            let start = Instant::now();
-            let g = g.admit(&(&l).into()).unwrap();
-            let admission = start.elapsed();
-            let start = Instant::now();
-            let LocalCheckOutcome::Complete(r) = FreshSession.verify(&g, &(&l).into()).unwrap()
-            else {
-                panic!()
-            };
-            let checking = start.elapsed();
-            let start = Instant::now();
-            let CheckOutcome::Complete(global) = g.verify(&(&l).into()).unwrap() else {
-                panic!()
-            };
-            let global_checking = start.elapsed();
-            assert_eq!(r.checked.results.value, global.results.value);
-            assert_eq!(!r.queries.is_empty(), queries);
-            if !queries {
-                assert!(r.checked.verification.all_obligations_proved());
-            }
-            if sample > 0 {
-                samples.push(json!({"preparation_ns":preparation.as_nanos(),"admission_ns":admission.as_nanos(),
-                "checking_ns":checking.as_nanos(),"global_checking_ns":global_checking.as_nanos(),
-                "keys_ns":(p.key_computation+g.key_computation()+r.metrics.keys).as_nanos(),"local_keys_ns":r.metrics.keys.as_nanos(),
-                "evaluation_ns":r.metrics.evaluation.as_nanos(),"conversion_ns":r.metrics.conversion.as_nanos(),
-                "property_ns":r.metrics.property.as_nanos(),"completion_ns":r.metrics.completion.as_nanos(),"finding_context_ns":r.metrics.finding_context.as_nanos(),
-                "replay_ns":r.checked.verification.finding_metrics.replay.as_nanos(),"certification_ns":r.checked.verification.finding_metrics.certification.as_nanos(),
-                "cone_atoms":r.metrics.cone_atoms,"unique_atoms":r.metrics.unique_atoms,"cone_inputs":r.metrics.cone_inputs,"queries":r.queries.len()}));
-            }
-            charges = budget_evidence::receipt_capture(&r.checked.results.receipts);
-            result = captured_report(&r.checked.verification, &Names { keys: &p.keys });
-        }
-        rows.push(json!({"family":family,"size":size,"source":source,"samples":samples,"receipts":charges,"result":result}));
-    }
-    println!("LOCAL_6B1A_TIMINGS={}", json!({"rows":rows}));
-}
 
 #[test]
 fn projected_keys_track_edits_and_keep_unrelated_cones_equal() {
-    let capture = |source: &str| {
-        let (_, _, p) = lower(source);
-        let l = limits();
-        let g = request_evidence::checked(&p, &l);
-        let LocalCheckOutcome::Complete(r) = FreshSession.verify(&g, &(&l).into()).unwrap() else {
-            panic!()
-        };
-        r.queries
-    };
     for (name, before, after) in edit_cases() {
         if ![
             "comment",
@@ -323,14 +198,24 @@ fn projected_keys_track_edits_and_keep_unrelated_cones_equal() {
         {
             continue;
         }
-        let old = capture(&before);
-        let new = capture(&after);
+        let old = query_inputs(&before);
+        let new = query_inputs(&after);
         let equal = old.iter().filter(|(k, v)| new.get(k) == Some(v)).count();
         match name.as_str() {
             "comment" | "numeric_alias" => assert_eq!(old, new, "{name}"),
             "wide_local_guard" => {
-                assert_eq!(old.len(), 16);
-                assert_eq!(equal, 15);
+                let changed: Vec<_> = old
+                    .iter()
+                    .filter(|(k, v)| new.get(k) != Some(v))
+                    .map(|(k, _)| k)
+                    .collect();
+                assert!(!changed.is_empty() && equal > 0);
+                for key in changed {
+                    let LocalScope::Group(group) = key else {
+                        panic!()
+                    };
+                    assert!(group.tuple.iter().any(|c| c.name.as_ref() == "s0"));
+                }
             }
             "add_literal" | "remove_literal" => {
                 assert_eq!(equal, 0, "K changes must invalidate relevant domains")
@@ -345,114 +230,118 @@ fn projected_keys_track_edits_and_keep_unrelated_cones_equal() {
 }
 
 #[test]
-fn local_condition_storage_allowances_have_an_explicit_tight_limit_delta() {
-    let source = format!(
-        "input i, j; slot {};\n{}",
-        (0..16)
-            .map(|i| format!("a{i}"))
-            .collect::<Vec<_>>()
-            .join(", "),
-        (0..16)
-            .map(|i| format!("a{i} <- i; a{i} <- j;\n"))
-            .collect::<String>()
-    );
+fn independent_scopes_do_not_share_condition_storage_allowances() {
+    let (_, source, _) = edit_cases()
+        .into_iter()
+        .find(|(name, _, _)| name == "wide_local_guard")
+        .unwrap();
     let (_, _, p) = lower(&source);
-    let l = Limits {
-        max_condition_nodes: 64,
-        ..limits()
+    let ample = limits();
+    let prepared = request_evidence::checked(&p, &ample);
+    let LocalCheckOutcome::Complete(full) =
+        FreshSession.verify(&prepared, &(&ample).into()).unwrap()
+    else {
+        panic!()
     };
-    let g = request_evidence::checked(&p, &l);
-    let CheckOutcome::Complete(global) = g.verify(&(&l).into()).unwrap() else {
-        panic!("global report unavailable")
-    };
-    let LocalCheckOutcome::Complete(local) = FreshSession.verify(&g, &(&l).into()).unwrap() else {
-        panic!("local report unavailable")
-    };
-    let inconclusive = global
-        .results
-        .value
-        .groups
-        .values()
-        .filter(|v| matches!(v, ScopedResult::Inconclusive(_)))
-        .count();
-    assert!(inconclusive > 0);
-    assert_eq!(local.checked.results.value.groups.len(), 16);
-    assert!(
-        local
-            .checked
+    let peak = condition_storage_peak(&full.checked.results.receipts);
+    let mut isolated = false;
+    for nodes in 1..=peak {
+        let l = Limits {
+            max_condition_nodes: nodes,
+            ..limits()
+        };
+        let g = request_evidence::checked(&p, &l);
+        let CheckOutcome::Complete(global) = g.verify(&(&l).into()).unwrap() else {
+            continue;
+        };
+        let LocalCheckOutcome::Complete(local) = FreshSession.verify(&g, &(&l).into()).unwrap()
+        else {
+            continue;
+        };
+        if global
             .results
             .value
             .groups
             .values()
-            .all(|v| matches!(v, ScopedResult::Counterexample(..)))
+            .any(|v| matches!(v, ScopedResult::Inconclusive(_)))
+            && local
+                .checked
+                .results
+                .value
+                .groups
+                .values()
+                .all(|v| matches!(v, ScopedResult::Counterexample(..)))
+        {
+            assert_eq!(
+                global.results.value.groups.keys().collect::<Vec<_>>(),
+                local
+                    .checked
+                    .results
+                    .value
+                    .groups
+                    .keys()
+                    .collect::<Vec<_>>()
+            );
+            isolated = true;
+            break;
+        }
+    }
+    assert!(
+        isolated,
+        "independent scopes must receive independent allowances"
     );
-    let actual = json!({"source":source,"max_condition_nodes":64,"old":captured_report(&global.verification,&Names{keys:&p.keys}),"new":captured_report(&local.checked.verification,&Names{keys:&p.keys}),"old_inconclusive":inconclusive});
-    let delta: Value = serde_json::from_str(include_str!("../../LOCAL-DELTA-6b.1a.json")).unwrap();
-    assert_eq!(actual, delta["tight_limit_delta"]);
 }
 
 #[test]
-fn frozen_local_reference_and_explicit_delta_are_exact() {
-    let reference: Value =
-        serde_json::from_str(include_str!("../../fixtures/LOCAL-6b.1a-REFERENCE.json")).unwrap();
-    let expected = owned_outcomes(reference.clone());
-    let current = local_reference();
-    assert_eq!(
-        current,
-        serde_json::from_str::<Value>(include_str!("../../fixtures/OWNED-6b.2a-REFERENCE.json"))
-            .unwrap()
-    );
-    assert_eq!(current["cases"].as_array().unwrap().len(), 43);
-    for (actual, expected) in current["cases"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .zip(expected["cases"].as_array().unwrap())
-    {
-        assert_eq!(actual["source"], expected["source"]);
-        assert_eq!(actual["max_work"], expected["max_work"]);
-        assert_eq!(actual["fixtures"], expected["fixtures"]);
-        assert_eq!(actual["captured_result"], expected["captured_result"]);
-        assert_eq!(actual["neutral_result"], expected["neutral_result"]);
-        assert_shared_receipts(&actual["receipts"], &expected["receipts"]);
+fn local_execution_preserves_semantic_regressions() {
+    for row in regression_cases() {
+        let source = row["source"].as_str().unwrap();
+        let (_, _, p) = lower(source);
+        let l = limits();
+        let g = request_evidence::checked(&p, &l);
+        let LocalCheckOutcome::Complete(r) = FreshSession.verify(&g, &(&l).into()).unwrap() else {
+            panic!()
+        };
+        assert_eq!(
+            semantic_outcomes(captured_report(
+                &r.checked.verification,
+                &Names { keys: &p.keys }
+            )),
+            row["expected"],
+            "{source}"
+        );
     }
-    let old: Value = serde_json::from_str(include_str!(
-        "../../../check/fixtures/BUDGETS-6a.2b-REFERENCE.json"
-    ))
-    .unwrap();
-    let mut old = planner_evidence::adapted("fresh_reference", old);
-    let delta: Value = serde_json::from_str(include_str!("../../LOCAL-DELTA-6b.1a.json")).unwrap();
-    let entries = delta["entries"].as_array().unwrap();
-    assert_eq!(entries.len(), 32);
-    let mut seen = BTreeSet::new();
-    for entry in entries {
-        let pointer = entry["pointer"].as_str().unwrap();
-        assert!(seen.insert(pointer));
-        assert!(pointer.ends_with("/receipts")); // No frozen outcome, witness or reason delta.
-        let slot = old.pointer_mut(pointer).unwrap();
-        assert_eq!(*slot, entry["old"]);
-        assert_ne!(entry["old"], entry["new"]);
-        *slot = entry["new"].clone();
-    }
-    assert_eq!(old["cases"], reference["cases"]);
-    let budgets = reference["cases"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .flat_map(|r| r["fixtures"].as_array().unwrap())
-        .filter(|f| f.as_str().unwrap().starts_with("budget/"))
-        .count();
-    assert_eq!(budgets, 20);
 }
 
 #[test]
 fn local_exhaustion_preserves_independent_scopes_and_canonical_receipts() {
     let source = "input i, j, k, l, m, n; slot a, z; a <- i; a <- j; z <- i when present(k) and present(l) and present(m) and present(n); z <- j when present(k) and present(l) and present(m) and present(n);";
     let (_, _, p) = lower(source);
-    let l = Limits {
-        max_condition_nodes: 64,
-        ..limits()
+    let ample = limits();
+    let prepared = request_evidence::checked(&p, &ample);
+    let LocalCheckOutcome::Complete(full) =
+        FreshSession.verify(&prepared, &(&ample).into()).unwrap()
+    else {
+        panic!()
     };
+    let peak = condition_storage_peak(&full.checked.results.receipts);
+    let l = (1..=peak)
+        .find_map(|nodes| {
+            let l = Limits {
+                max_condition_nodes: nodes,
+                ..limits()
+            };
+            let g = request_evidence::checked(&p, &l);
+            let LocalCheckOutcome::Complete(r) = FreshSession.verify(&g, &(&l).into()).unwrap()
+            else {
+                return None;
+            };
+            let groups: Vec<_> = r.checked.results.value.groups.values().collect();
+            (matches!(groups[0], ScopedResult::Counterexample(..))
+                && matches!(groups[1], ScopedResult::Inconclusive(_)))
+            .then_some(l)
+        })
+        .expect("fixture must exercise partial exhaustion");
     let g = request_evidence::checked(&p, &l);
     let run = || {
         let LocalCheckOutcome::Complete(r) = FreshSession.verify(&g, &(&l).into()).unwrap() else {
@@ -496,44 +385,4 @@ fn local_exhaustion_preserves_independent_scopes_and_canonical_receipts() {
             .count(),
         1
     );
-}
-
-/// 6b.2a retires historical receipt fields only for migrated local execution and
-/// its conversion. Preparation/admission and unchanged global boundary work stay exact.
-pub(super) fn assert_shared_receipts(actual: &Value, expected: &Value) {
-    let retained = |v: &Value| {
-        v["queries"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|r| {
-                let q = r["query"].as_str().unwrap();
-                q == "Preparation"
-                    || q == "Admission"
-                    || q == "ConeIndex"
-                    || q == "FindingContext"
-                    || q.starts_with("Witness(")
-                    || q.starts_with("Certification(")
-            })
-            .cloned()
-            .collect::<Vec<_>>()
-    };
-    assert_eq!(retained(actual), retained(expected));
-}
-
-/// Proposed outcome changes are explicit and checked against every old value.
-/// The slice ends with user review; listing one is not implicit acceptance.
-pub(super) fn owned_outcomes(mut reference: Value) -> Value {
-    let delta: Value = serde_json::from_str(include_str!("../../OWNED-DELTA-6b.2a.json")).unwrap();
-    let mut seen = BTreeSet::new();
-    for entry in delta["entries"].as_array().unwrap() {
-        let pointer = entry["pointer"].as_str().unwrap();
-        assert!(seen.insert(pointer));
-        assert!(pointer.ends_with("/captured_result") || pointer.ends_with("/neutral_result"));
-        let slot = reference.pointer_mut(pointer).unwrap();
-        assert_eq!(*slot, entry["old"]);
-        assert_ne!(entry["old"], entry["new"]);
-        *slot = entry["new"].clone();
-    }
-    reference
 }

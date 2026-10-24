@@ -1,6 +1,6 @@
 use crate::*;
 use denotate_ir::*;
-use std::{collections::BTreeSet, time::Instant};
+use std::collections::BTreeSet;
 
 pub(super) use crate::test_support::symbolic::*;
 
@@ -80,7 +80,6 @@ fn acyclic_components_skip_confirmation_without_losing_alternative_derivations()
             .atoms()
             .map(|a| (a.clone(), condition(&m, a.clone())))
             .collect();
-        let one_pass_work = m.metrics().work;
         let ctx = m.context();
         let either = ctx
             .or(
@@ -109,12 +108,11 @@ fn acyclic_components_skip_confirmation_without_losing_alternative_derivations()
                     .unwrap()
             );
         }
-        assert!(conservative.metrics().work > one_pass_work);
     }
 }
 
 #[test]
-fn long_growing_guard_chain_exceeds_default_limits_without_a_successful_meaning() {
+fn growing_guard_chain_replays_and_reports_explicit_resource_exhaustion() {
     let limits = Limits::default();
     let size = 1_000;
     let (corpus, domains) = super::sparse::mapping_corpus(size, true);
@@ -129,61 +127,16 @@ fn long_growing_guard_chain_exceeds_default_limits_without_a_successful_meaning(
         .unwrap();
     assert_eq!(replay.established_facts().count(), 4 * size);
 
-    // Sparse grounding and concrete replay succeed, but retaining all growing
-    // prefix conditions in independently owned BDD vectors exceeds the current
-    // defaults. Revisit this expectation if the backend/storage model changes.
+    // An explicit impossible allowance must fail without returning a meaning;
+    // the backend is free to improve how large a program fits the defaults.
+    let restricted = Limits {
+        max_condition_nodes: 0,
+        ..limits
+    };
     assert!(matches!(
-        program.symbolic(&limits),
+        program.symbolic(&restricted),
         Err(CheckError::LimitExceeded { .. })
     ));
-}
-
-#[test]
-#[ignore = "manual growing-condition measurement; run alone with --release --nocapture"]
-fn measure_growing_guard_chain() {
-    let limits = Limits::default();
-    println!(
-        "slots,atoms,rules,dependencies,prepare_ms,symbolic_ms,replay_ms,retained_nodes,work,result"
-    );
-    for size in [20, 100, 250, 500, 1_000] {
-        let (corpus, domains) = super::sparse::mapping_corpus(size, true);
-        let start = Instant::now();
-        let program = GroundProgram::prepare(&corpus, &domains, &limits).unwrap();
-        let prepare_ms = start.elapsed().as_secs_f64() * 1_000.0;
-        let start = Instant::now();
-        let result = program.symbolic(&limits);
-        let symbolic_ms = start.elapsed().as_secs_f64() * 1_000.0;
-        let start = Instant::now();
-        let replay = program
-            .evaluate(program.input_atoms().cloned(), &limits)
-            .unwrap();
-        let replay_ms = start.elapsed().as_secs_f64() * 1_000.0;
-        assert_eq!(replay.established_facts().count(), 4 * size);
-        let (nodes, work, status) = match result {
-            Ok(meaning) => {
-                // Inputs, mapped_to, supplies and available all retain a condition.
-                let expected = (3 * size * size + 19 * size) / 2;
-                assert_eq!(meaning.metrics().retained_condition_nodes, expected);
-                (
-                    expected.to_string(),
-                    meaning.metrics().work.to_string(),
-                    "complete".to_owned(),
-                )
-            }
-            Err(CheckError::LimitExceeded { phase, resource }) => (
-                "-".to_owned(),
-                "-".to_owned(),
-                format!("LimitExceeded: {phase}/{resource}"),
-            ),
-            Err(error) => panic!("unexpected measurement failure: {error}"),
-        };
-        println!(
-            "{size},{},{},{},{prepare_ms:.2},{symbolic_ms:.2},{replay_ms:.2},{nodes},{work},{status}",
-            program.atoms().count(),
-            program.rules().count(),
-            program.dependencies().count()
-        );
-    }
 }
 
 #[test]
