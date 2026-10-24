@@ -1,0 +1,19 @@
+// Shared declarations and contracts. This library's own program is clean:
+// it has no mappings. The app adds the facts in a separate home program.
+namespace library;
+
+sort Input;
+sort Slot;
+input present(input: Input);
+relation mapped_to(input: Input, slot: Slot);
+relation supplies(input: Input, slot: Slot);
+relation available(slot: Slot);
+
+supplies(I, S) :- mapped_to(I, S), present(I);
+available(S) :- supplies(_, S);
+
+// Comment out the next line to allow both inputs to be present together.
+assumption one_present_input: at_most_one(present, group_by: ());
+
+obligation one_input_per_slot: at_most_one(supplies, group_by: slot)
+    message "At most one input may supply each slot.";

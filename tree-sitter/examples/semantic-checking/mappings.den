@@ -1,0 +1,14 @@
+// Two sources mapped to one slot violate the contract below.
+// Comment out either mapped_to fact to clear the semantic findings.
+namespace demo;
+
+sort Source;
+sort Slot;
+const i, j: Source;
+const a: Slot;
+relation mapped_to(source: Source, slot: Slot);
+
+mapped_to(i, a);
+mapped_to(j, a);
+
+obligation one_source_per_slot: at_most_one(mapped_to, group_by: slot);

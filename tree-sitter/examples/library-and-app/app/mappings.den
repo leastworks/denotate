@@ -1,0 +1,10 @@
+// These two mappings can overlap when the library's one_present_input
+// assumption is commented out. Toggle that assumption in lib/library.den.
+namespace mappings;
+use library;
+
+const i, j: Input;
+const a: Slot;
+
+mapped_to(i, a);
+mapped_to(j, a);

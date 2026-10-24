@@ -1,6 +1,14 @@
 {
   "version": "0.2.0",
   "configurations": [{
+    "name": "Run Denotate semantic checking", "type": "extensionHost", "request": "launch",
+    "args": ["--extensionDevelopmentPath=${workspaceFolder}", "${workspaceFolder}/examples/semantic-checking"],
+    "outFiles": ["${workspaceFolder}/dist/**/*.cjs"], "preLaunchTask": "build"
+  }, {
+    "name": "Run Denotate library and app", "type": "extensionHost", "request": "launch",
+    "args": ["--extensionDevelopmentPath=${workspaceFolder}", "${workspaceFolder}/examples/library-and-app"],
+    "outFiles": ["${workspaceFolder}/dist/**/*.cjs"], "preLaunchTask": "build"
+  }, {
     "name": "Run Denotate (Tree-sitter)", "type": "extensionHost", "request": "launch",
     "args": ["--extensionDevelopmentPath=${workspaceFolder}", "${workspaceFolder}/../fixtures/base/00-valid"],
     "outFiles": ["${workspaceFolder}/dist/**/*.cjs"], "preLaunchTask": "build"
