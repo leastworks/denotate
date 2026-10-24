@@ -9,7 +9,7 @@
     "args": ["--extensionDevelopmentPath=${workspaceFolder}", "${workspaceFolder}/examples/library-and-app"],
     "outFiles": ["${workspaceFolder}/dist/**/*.cjs"], "preLaunchTask": "build"
   }, {
-    "name": "Run Denotate (Tree-sitter)", "type": "extensionHost", "request": "launch",
+    "name": "Run Denotate (language services)", "type": "extensionHost", "request": "launch",
     "args": ["--extensionDevelopmentPath=${workspaceFolder}", "${workspaceFolder}/../../fixtures/base/00-valid"],
     "outFiles": ["${workspaceFolder}/dist/**/*.cjs"], "preLaunchTask": "build"
   }]
