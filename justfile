@@ -2,83 +2,63 @@
 default:
     @just --list
 
-# Build and run the Denotate parser + fixture checks (no editor window).
-test-parser: _check-node
-    npm test --prefix frontend-prototype/langium
-
-# Build the server and run the Rust tests against it over LSP.
-test-lsp: _check-node
-    cargo run --manifest-path frontend-prototype/Cargo.toml --locked -p xtask -- test-lsp
-
 # Test Rust/Salsa analysis, IR, concrete checking, the test DSL and instrumentation.
 test-native:
-    cargo +1.93.0 test --manifest-path frontend-prototype/native/Cargo.toml --locked --workspace --exclude denotate-tree-sitter
+    cargo +1.93.0 test --manifest-path native/Cargo.toml --locked --workspace --exclude denotate-tree-sitter
 
 # Re-score retained slice-6 paths on a program: FILE [--edit FILE] [--samples N] [--json FILE].
 [positional-arguments]
 score-inputmapping +args:
-    cargo +1.93.0 run --release --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-check-session --features test-support --example scorecard -- "$@"
+    cargo +1.93.0 run --release --manifest-path native/Cargo.toml --locked -p denotate-check-session --features test-support --example scorecard -- "$@"
 
 # Export one combined InputMapping program: OUT_DIR FILE... [--without-origins].
 [positional-arguments]
 export-inputmapping +args:
-    cargo +1.93.0 run --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --example export -- "$@"
+    cargo +1.93.0 run --manifest-path native/Cargo.toml --locked -p denotate-test-dsl --example export -- "$@"
 
 # Load and check a folder-rooted .den program: ROOT_FOLDER_OR_DEN.ROOT [--sat].
 [positional-arguments]
 check-den +args:
-    cargo +1.93.0 run --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-ir-text --example check -- "$@"
+    cargo +1.93.0 run --manifest-path native/Cargo.toml --locked -p denotate-ir-text --example check -- "$@"
 
 # Source-linked InputMapping findings; also try mixed, requires-c or fixed.
 demo-overlap mode="overlap":
-    cargo +1.93.0 run --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --example overlap -- {{mode}}
+    cargo +1.93.0 run --manifest-path native/Cargo.toml --locked -p denotate-test-dsl --example overlap -- {{mode}}
 
 # Parse actual InputMapping text and lower it to IR; no semantic checking or editor.
-parse-inputmapping file="frontend-prototype/native/test-dsl/fixtures/overlapping-mappings.txt":
-    cargo +1.93.0 run --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --example parse -- '{{file}}'
+parse-inputmapping file="native/test-dsl/fixtures/overlapping-mappings.txt":
+    cargo +1.93.0 run --manifest-path native/Cargo.toml --locked -p denotate-test-dsl --example parse -- '{{file}}'
 
-# Regenerate the committed DSL parser with B's pinned CLI (npm ci there first).
+# Regenerate the committed DSL parser with the .den editor's pinned CLI (npm ci there first).
 generate-inputmapping: _check-node
-    cd frontend-prototype/native/test-dsl/grammar && ../../../tree-sitter/node_modules/.bin/tree-sitter generate
+    cd native/test-dsl/grammar && ../../../tree-sitter/node_modules/.bin/tree-sitter generate
 
 # Build the InputMapping diagnostics server and exercise it over real LSP (no GUI).
 test-inputmapping-lsp:
-    cargo +1.93.0 build --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp
-    DENOTATE_LSP_COMMAND="{{justfile_directory()}}/frontend-prototype/native/target/debug/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.78.0 test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --features inputmapping --test inputmapping
+    cargo +1.93.0 build --manifest-path native/Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp
+    DENOTATE_LSP_COMMAND="{{justfile_directory()}}/native/target/debug/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.78.0 test --manifest-path Cargo.toml --locked -p denotate-lsp-tests --features inputmapping --test inputmapping
 
 # Build the InputMapping VS Code extension and check its package/example (no GUI).
 test-inputmapping-extension: _check-node
-    npm test --prefix frontend-prototype/native/test-dsl/vscode
+    npm test --prefix native/test-dsl/vscode
 
 # Launch an isolated VS Code and test source-linked InputMapping diagnostics.
 test-inputmapping-vscode: _check-node
-    DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix frontend-prototype/native/test-dsl/vscode
+    DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix native/test-dsl/vscode
 
-# Optional independent Python/Z3 check of four Rust fixture corpora (needs z3-solver).
-test-check-z3:
-    python3 semantics/check_rust_findings.py
-
-# Build B, check the shared syntax manifest and run its supported LSP scenarios.
+# Build the .den editor, check the shared syntax manifest and run every shared LSP scenario.
 test-b: _check-node
-    npm test --prefix frontend-prototype/tree-sitter
-    npm run test:lsp --prefix frontend-prototype/tree-sitter
+    npm test --prefix tree-sitter
+    npm run test:lsp --prefix tree-sitter
 
-# Launch an isolated VS Code with only the Tree-sitter prototype under test.
+# Launch an isolated VS Code with the .den editor extension under test.
 test-b-vscode: _check-node
-    DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix frontend-prototype/tree-sitter
+    DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix tree-sitter
 
-# Run the retained A1 frontend without loading or building the native extension.
-test-a1: _check-node
-    DENOTATE_BACKEND=langium cargo run --manifest-path frontend-prototype/Cargo.toml --locked -p xtask -- test-lsp
-
-# Measure real LSP round trips at three sizes; no timing pass/fail threshold.
+# Measure real .den LSP round trips at three sizes; no timing pass/fail threshold.
 bench-lsp: _check-node
-    npm run build --prefix frontend-prototype/langium
-    cargo test --manifest-path frontend-prototype/Cargo.toml --locked -p denotate-lsp-tests --test latency -- --ignored --nocapture --test-threads=1
-
-# Launch an isolated VS Code, smoke-test the extension, then close it.
-test-vscode: _check-node
-    DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix frontend-prototype/langium
+    npm run build --prefix tree-sitter
+    cargo test --manifest-path Cargo.toml --locked -p denotate-lsp-tests --test latency -- --ignored --nocapture --test-threads=1
 
 [private]
 _check-node:

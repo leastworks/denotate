@@ -10,15 +10,8 @@ fn position(text: &str, needle: &str, delta: usize) -> Value {
 fn query(c: &mut Client, method: &str, uri: &str, text: &str, needle: &str, delta: usize) -> Value {
     c.request(method,json!({"textDocument":{"uri":uri},"position":position(text,needle,delta),"context":{"includeDeclaration":true}}))
 }
-/// Only B implements the full text format; A's shared runs skip these scenarios.
-fn b_only() -> bool {
-    std::env::var("DENOTATE_BACKEND").as_deref() == Ok("tree-sitter")
-}
 #[test]
 fn namespaces_quoted_names_helpers_domains_contracts_and_locations_use_one_index() {
-    if !b_only() {
-        return;
-    }
     let mut c = Client::start("base/00-valid");
     let (uri, _) = c.open("example.den");
     let text = r#"namespace a {
@@ -146,9 +139,6 @@ namespace b {
 }
 #[test]
 fn no_manifest_means_standalone_even_when_use_names_a_workspace_file() {
-    if !b_only() {
-        return;
-    }
     let mut c = Client::start("ir-text/standalone");
     let (uri, text) = c.open("example.den");
     let diagnostics = c.diagnostics(&uri).to_string();
@@ -172,9 +162,6 @@ fn no_manifest_means_standalone_even_when_use_names_a_workspace_file() {
 
 #[test]
 fn export_folder_without_direct_den_children_loads_sources_and_library() {
-    if !b_only() {
-        return;
-    }
     let mut c = Client::start("ir-text/export-layout");
     let (uri, text) = c.open("sources/example.den");
     assert_eq!(c.diagnostics(&uri), json!([]));
@@ -208,9 +195,6 @@ fn manifest(c: &mut Client, uri: &str, text: &str, version: i64) {
 }
 #[test]
 fn home_programs_unsaved_manifests_cycles_nested_boundaries_and_independent_failures() {
-    if !b_only() {
-        return;
-    }
     let mut c = Client::start("ir-text/standalone");
     let base = c.workspace.path().to_owned();
     for (path, text) in [
@@ -344,9 +328,6 @@ fn home_programs_unsaved_manifests_cycles_nested_boundaries_and_independent_fail
 }
 #[test]
 fn standalone_quick_fix_and_origin_bridge_never_guess_disk_authority() {
-    if !b_only() {
-        return;
-    }
     for bridge in [false, true] {
         let mut c = if bridge {
             Client::start_with_bridge("ir-text/standalone")
@@ -407,9 +388,6 @@ fn standalone_quick_fix_and_origin_bridge_never_guess_disk_authority() {
 
 #[test]
 fn consumer_ambiguity_is_attributed_to_the_app_and_library_home_stays_clean() {
-    if !b_only() {
-        return;
-    }
     let mut c = Client::start("ir-text/standalone");
     let base = c.workspace.path().to_owned();
     for (file, text) in [
@@ -484,9 +462,6 @@ fn semantic_findings(c: &Client, uri: &str) -> Vec<Value> {
 }
 #[test]
 fn damage_and_repair_preserve_warm_library_and_consumer_sessions() {
-    if !b_only() {
-        return;
-    }
     let mut c = Client::start("base/00-valid");
     let base = c.workspace.path().to_owned();
     for folder in ["lib", "app", "other"] {
@@ -607,9 +582,6 @@ fn damage_and_repair_preserve_warm_library_and_consumer_sessions() {
 
 #[test]
 fn background_checks_publish_all_roots_and_preserve_labeled_library_fallbacks() {
-    if !b_only() {
-        return;
-    }
     let mut c = Client::start("base/00-valid");
     let base = c.workspace.path().to_owned();
     for folder in ["lib", "app", "other"] {
@@ -675,9 +647,6 @@ fn background_checks_publish_all_roots_and_preserve_labeled_library_fallbacks() 
 }
 #[test]
 fn completed_results_cannot_publish_after_member_manifest_config_dependency_or_home_changes() {
-    if !b_only() {
-        return;
-    }
     for scenario in [
         "member",
         "manifest",
@@ -779,9 +748,6 @@ fn completed_results_cannot_publish_after_member_manifest_config_dependency_or_h
 }
 #[test]
 fn queued_roots_keep_their_place_and_progress_after_cancellation_and_deadline() {
-    if !b_only() {
-        return;
-    }
     let mut c = Client::start("base/00-valid");
     checking_idle(&mut c);
     c.request("denotate/test/hold", json!({}));
@@ -839,9 +805,6 @@ fn queued_roots_keep_their_place_and_progress_after_cancellation_and_deadline() 
 
 #[test]
 fn empty_roots_and_standalones_have_current_check_status() {
-    if !b_only() {
-        return;
-    }
     let mut c = Client::start("base/00-valid");
     let base = c.workspace.path().to_owned();
     std::fs::create_dir(base.join("empty")).unwrap();
@@ -881,9 +844,6 @@ fn empty_roots_and_standalones_have_current_check_status() {
 #[cfg(unix)]
 #[test]
 fn ambiguous_canonical_home_blocks_only_affected_programs() {
-    if !b_only() {
-        return;
-    }
     let mut c = Client::start("base/00-valid");
     let base = c.workspace.path().to_owned();
     for folder in ["a", "b", "independent"] {
@@ -926,9 +886,6 @@ fn ambiguous_canonical_home_blocks_only_affected_programs() {
 
 #[test]
 fn go_to_origin_preserves_occurrence_maps_fused_identities_and_definition_navigation() {
-    if !b_only() {
-        return;
-    }
     let mut c = Client::start("base/00-valid");
     let (uri, _) = c.open("example.den");
     let text = r#"sort OriginSort; const origin_a:OriginSort;

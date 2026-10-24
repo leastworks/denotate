@@ -183,13 +183,10 @@ fn imports_are_direct_and_signatures_keep_their_declaring_sort_identity() {
         .ends_with("library.den"));
     let different_sort = "module example;\nuse library;\nsort Slot;\nconst a: Slot;\nknown(a);\n";
     client.change(&uri, 2, different_sort);
-    assert!(client.diagnostics(&uri).to_string().contains(
-        if std::env::var("DENOTATE_BACKEND").as_deref() == Ok("tree-sitter") {
-            "No constant 'a' of sort types::Slot (found: example::Slot)."
-        } else {
-            "No constant 'a' of sort types.Slot (found: example.Slot)."
-        }
-    ));
+    assert!(client
+        .diagnostics(&uri)
+        .to_string()
+        .contains("No constant 'a' of sort types::Slot (found: example::Slot)."));
     assert_unresolved(&definition(
         &mut client,
         &uri,
@@ -215,11 +212,9 @@ fn unknown_imports_module_mismatches_and_duplicate_declarations_are_diagnosed() 
     assert!(!client.diagnostics(&uri).as_array().unwrap().is_empty());
     client.change(&uri, 2, "module wrong;\nsort Slot;\nsort Slot;\n");
     let diagnostics = client.diagnostics(&uri).to_string();
-    // B now resolves namespaces independently of filenames; A retains its
-    // original module/file contract.
-    assert_eq!(
-        diagnostics.contains("must match filename"),
-        std::env::var("DENOTATE_BACKEND").as_deref() != Ok("tree-sitter"),
+    // Namespaces are independent of filenames.
+    assert!(
+        !diagnostics.contains("must match filename"),
         "{diagnostics}"
     );
     assert!(
@@ -612,13 +607,10 @@ fn watched_creation_introduces_ambiguity_module_edits_break_imports_and_deletion
     client.watched_change("right.den", 2, &uri, 2);
     assert_unresolved(&definition(&mut client, &uri, source, "use right", 4));
     assert!(client.diagnostics(&uri).to_string().contains("right"));
-    assert_eq!(
-        client
-            .diagnostics(&right_uri)
-            .to_string()
-            .contains("must match filename"),
-        std::env::var("DENOTATE_BACKEND").as_deref() != Ok("tree-sitter")
-    );
+    assert!(!client
+        .diagnostics(&right_uri)
+        .to_string()
+        .contains("must match filename"));
     assert_target(
         &definition(&mut client, &uri, source, "masked_extra(a)", 0),
         "left.den",
@@ -769,15 +761,7 @@ fn declaration_and_typed_constant_hovers_show_the_resolved_signature_or_sort() {
         ),
         ("mapped_to(shared, shared)", 10, "const shared: Source"),
         ("mapped_to(shared, shared)", 18, "const shared: Slot"),
-        (
-            "use computation",
-            4,
-            if std::env::var("DENOTATE_BACKEND").as_deref() == Ok("tree-sitter") {
-                "namespace computation"
-            } else {
-                "module computation"
-            },
-        ),
+        ("use computation", 4, "namespace computation"),
         (": Slot", 2, "sort Slot"),
     ] {
         assert_eq!(

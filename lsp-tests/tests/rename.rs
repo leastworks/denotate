@@ -1,9 +1,6 @@
 mod support;
 use serde_json::{json, Value};
 use support::{apply_edits, Client};
-fn b_only() -> bool {
-    std::env::var("DENOTATE_BACKEND").as_deref() == Ok("tree-sitter")
-}
 
 fn params(uri: &str, source: &str, needle: &str, name: &str) -> Value {
     let prefix = &source[..source.find(needle).unwrap()];
@@ -154,34 +151,16 @@ fn constants_keep_sort_identity_and_variables_stay_rule_local() {
         "supplies(S, D) :-\n    mapped_to(S, D),\n    present(S),\n    !masked(D);",
         "supplies(S, SlotValue) :-\n    mapped_to(S, SlotValue),\n    present(S),\n    !masked(SlotValue);"));
     for name in ["a", "_", "use", "bad-name"] {
-        if b_only() {
-            client.request(
-                "textDocument/rename",
-                params(&lib_uri, &library, "D) :-\n    mapped_to", name),
-            );
-        } else {
-            rejected(
-                &mut client,
-                "textDocument/rename",
-                params(&lib_uri, &library, "D) :-\n    mapped_to", name),
-                "lexical class",
-            );
-        }
+        client.request(
+            "textDocument/rename",
+            params(&lib_uri, &library, "D) :-\n    mapped_to", name),
+        );
     }
     for name in ["D", "_", "module"] {
-        if b_only() {
-            client.request(
-                "textDocument/rename",
-                params(&uri, &source, "shared, shared", name),
-            );
-        } else {
-            rejected(
-                &mut client,
-                "textDocument/rename",
-                params(&uri, &source, "shared, shared", name),
-                "lexical class",
-            );
-        }
+        client.request(
+            "textDocument/rename",
+            params(&uri, &source, "shared, shared", name),
+        );
     }
     rejected(
         &mut client,
@@ -219,16 +198,8 @@ fn sort_and_input_rename_work_but_capture_and_module_rename_are_rejected() {
     let mut client = Client::start("base/00-valid");
     let (uri, source) = client.open("computation.den");
     for method in ["textDocument/prepareRename", "textDocument/rename"] {
-        if b_only() {
-            client.request(method, params(&uri, &source, "source: Source", "origin"));
-        } else {
-            rejected(
-                &mut client,
-                method,
-                params(&uri, &source, "source: Source", "origin"),
-                "Parameter rename is not supported",
-            );
-        }
+        client.request(method, params(&uri, &source, "source: Source", "origin"));
+
         rejected(
             &mut client,
             method,
@@ -266,19 +237,11 @@ fn sort_and_input_rename_work_but_capture_and_module_rename_are_rejected() {
         params(&uri, &source, "mapped_to(source", "available"),
         "collide",
     );
-    if b_only() {
-        client.request(
-            "textDocument/prepareRename",
-            params(&uri, &source, "computation;", "other"),
-        );
-    } else {
-        rejected(
-            &mut client,
-            "textDocument/prepareRename",
-            params(&uri, &source, "computation;", "other"),
-            "module rename",
-        );
-    }
+    client.request(
+        "textDocument/prepareRename",
+        params(&uri, &source, "computation;", "other"),
+    );
+
     client.shutdown();
 }
 
@@ -304,9 +267,7 @@ fn unrelated_validation_errors_do_not_block_rename() {
         "Duplicate declaration",
         "must match filename",
     ] {
-        if message == "must match filename"
-            && std::env::var("DENOTATE_BACKEND").as_deref() == Ok("tree-sitter")
-        {
+        if message == "must match filename" {
             assert!(
                 !diagnostics.contains(message),
                 "B namespaces are independent of filenames"
@@ -397,9 +358,6 @@ fn generated_and_external_files_are_not_rename_targets() {
 
 #[test]
 fn full_ir_rename_quotes_by_kind_and_covers_contracts_domains_helpers_and_aliases() {
-    if !b_only() {
-        return;
-    }
     let mut c = Client::start("base/00-valid");
     let (uri, _) = c.open("example.den");
     let text = r#"namespace 'a::b' {
@@ -474,9 +432,6 @@ fn root_files(c: &mut Client, files: &[(&str, &str)]) {
 
 #[test]
 fn shared_library_rename_includes_all_consumers_and_rejects_untouched_reference_capture() {
-    if !b_only() {
-        return;
-    }
     let mut c = Client::start("base/00-valid");
     let lib = "namespace shared; relation r(); r();";
     let a = "namespace a; shared::r();";
@@ -551,9 +506,6 @@ fn shared_library_rename_includes_all_consumers_and_rejects_untouched_reference_
 
 #[test]
 fn namespace_segment_rename_covers_split_nested_reopened_and_qualified_paths() {
-    if !b_only() {
-        return;
-    }
     let mut c = Client::start("base/00-valid");
     let first = "namespace alpha { namespace child { relation r(); r(); } } namespace alpha::child { relation q(); }";
     let second = "namespace user; use alpha::child; alpha::child::r(); ::alpha::child::q();";
@@ -615,9 +567,6 @@ fn namespace_segment_rename_covers_split_nested_reopened_and_qualified_paths() {
 
 #[test]
 fn aliases_are_file_local_and_parameters_follow_their_relations_grouping_references() {
-    if !b_only() {
-        return;
-    }
     let mut c = Client::start("base/00-valid");
     let file = r#"namespace n;
 sort S; const a:S; relation r(x:S, y:S); input p(x:S, y:S);
@@ -663,9 +612,6 @@ assumption w: at_most_one(p, group_by: (x));
 
 #[test]
 fn damaged_manifests_and_read_only_consumers_prevent_partial_renames() {
-    if !b_only() {
-        return;
-    }
     let mut c = Client::start("base/00-valid");
     let lib = "namespace shared; relation r();";
     root_files(

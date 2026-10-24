@@ -2,16 +2,9 @@ mod support;
 use serde_json::{json, Value};
 use support::Client;
 
-fn is_b() -> bool {
-    std::env::var("DENOTATE_BACKEND").as_deref() == Ok("tree-sitter")
-}
-
 // Step-3 B tracks resolution dependencies, not separate presentation queries.
 // A's existing query instrumentation and resolver contract remain unchanged.
 fn query_key(key: &str) -> &str {
-    if !is_b() {
-        return key;
-    }
     match key {
         "constantDiagnosticQueryExecutions" => "constantQueryExecutions",
         "sortLabelQueryExecutions" => "sortQueryExecutions",
@@ -24,8 +17,8 @@ fn stats(client: &mut Client) -> Value {
 }
 
 fn assert_unknown_module(diagnostics: &Value, name: &str) {
-    // The frontend supplies not-found wording; do not require B to reproduce
-    // Langium's AST type names. The missing name and error remain mandatory.
+    // Accept either historical not-found wording; the missing name and the
+    // error remain mandatory.
     let messages = [
         format!("Could not resolve reference to Module named '{name}'."),
         format!("Unknown module '{name}'."),
@@ -41,9 +34,6 @@ fn assert_unknown_module(diagnostics: &Value, name: &str) {
 
 #[test]
 fn module_and_declaration_diagnostics_are_native_reused_and_repairable() {
-    if std::env::var("DENOTATE_BACKEND").as_deref() == Ok("langium") {
-        return;
-    }
     let mut client = Client::start("base/00-valid");
     let (uri, _) = client.open("example.den");
     let source = "module wrong;\nuse computation;\nuse missing;\nconst a, a: Slot;\n";
@@ -55,7 +45,7 @@ fn module_and_declaration_diagnostics_are_native_reused_and_repairable() {
         "one owner per diagnostic"
     );
     for code in ["module-filename", "duplicate-declaration"] {
-        if is_b() && code == "module-filename" {
+        if code == "module-filename" {
             assert!(!initial.to_string().contains("module-filename"));
             continue;
         }
@@ -163,10 +153,6 @@ fn definition(client: &mut Client, uri: &str, source: &str) -> Value {
 
 #[test]
 fn native_relation_queries_reuse_semantics_and_refresh_source_ranges() {
-    // A1 still runs the frozen suite, but has no native-counter contract.
-    if std::env::var("DENOTATE_BACKEND").as_deref() == Ok("langium") {
-        return;
-    }
     let mut client = Client::start("base/00-valid");
     let (uri, source) = client.open("example.den");
     let (lib_uri, library) = client.open("computation.den");
@@ -229,9 +215,6 @@ fn native_relation_queries_reuse_semantics_and_refresh_source_ranges() {
 
 #[test]
 fn signature_edits_refresh_editor_help_without_invalidating_relation_visibility() {
-    if std::env::var("DENOTATE_BACKEND").as_deref() == Ok("langium") {
-        return;
-    }
     let mut client = Client::start("base/00-valid");
     let (uri, source) = client.open("example.den");
     let (lib_uri, library) = client.open("computation.den");
@@ -415,9 +398,6 @@ fn parameter_sort_changes_constant_targets_and_completion_but_not_visibility() {
 
 #[test]
 fn argument_diagnostics_and_sort_labels_are_native_cached_and_follow_signature_edits() {
-    if std::env::var("DENOTATE_BACKEND").as_deref() == Ok("langium") {
-        return;
-    }
     let mut client = Client::start("base/00-valid");
     let (uri, _) = client.open("example.den");
     let (lib_uri, library) = client.open("computation.den");

@@ -50,7 +50,7 @@ fn check_edits(profiled: bool) {
     let (uri, mut source) = c.open("example.den");
     source.push_str("\nrelation probe(slot: Slot);\nprobe(D) :- available(D);\n");
     let cold = edit(&mut c, &uri, 2, &source, None, profiled);
-    if profiled && std::env::var("DENOTATE_BACKEND").as_deref() == Ok("tree-sitter") {
+    if profiled {
         for phase in [
             "parseAndText",
             "projection",
@@ -115,8 +115,6 @@ fn check_edits(profiled: bool) {
 
 #[test]
 fn comparison_instrumentation_preserves_answers_and_reuse() {
-    assert_ne!(std::env::var("DENOTATE_BACKEND").as_deref(), Ok("langium"),
-        "A1 has no profiling API; exclude this binary rather than counting a skipped test as passed");
     check_edits(false);
     check_edits(true);
 }

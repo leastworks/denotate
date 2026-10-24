@@ -2,9 +2,6 @@ mod support;
 use serde_json::{json, Value};
 use support::Client;
 
-fn native() -> bool {
-    std::env::var("DENOTATE_BACKEND").as_deref() != Ok("langium")
-}
 fn count(client: &mut Client) -> u64 {
     client.request("denotate/test/analysis", json!({}))["ruleQueryExecutions"]
         .as_u64()
@@ -41,9 +38,6 @@ fn issues(client: &Client, uri: &str, code: &str) -> Vec<Value> {
 
 #[test]
 fn rule_edit_reuses_other_rules_and_comments_only_move_ranges() {
-    if !native() {
-        return;
-    }
     let mut client = Client::start("base/08-singleton-variable");
     let (uri, source) = client.open("computation.den");
     assert_eq!(issues(&client, &uri, "singleton-variable").len(), 1);
@@ -139,9 +133,6 @@ fn rule_edit_reuses_other_rules_and_comments_only_move_ranges() {
 
 #[test]
 fn variable_sort_conflicts_follow_signature_edits_and_recovery() {
-    if !native() {
-        return;
-    }
     let mut client = Client::start("base/00-valid");
     let (uri, _) = client.open("example.den");
     let source =
@@ -179,9 +170,6 @@ fn variable_sort_conflicts_follow_signature_edits_and_recovery() {
 
 #[test]
 fn incomplete_rules_suppress_lints_and_missing_binding_claims() {
-    if !native() {
-        return;
-    }
     let mut client = Client::start("base/00-valid");
     let (uri, _) = client.open("example.den");
     let prefix = "module example; use computation;\n";
@@ -215,9 +203,6 @@ fn incomplete_rules_suppress_lints_and_missing_binding_claims() {
 
 #[test]
 fn imported_input_kind_change_updates_head_diagnostics() {
-    if !native() {
-        return;
-    }
     let mut client = Client::start("base/00-valid");
     let (uri, _) = client.open("example.den");
     client.change(

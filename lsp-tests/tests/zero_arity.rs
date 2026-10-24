@@ -107,18 +107,17 @@ fn zero_arity_still_checks_excess_arguments_and_forbids_input_definitions() {
     let source = source.replace("enabled(a)", "enabled()");
     c.change(&uri, 2, &source);
     assert_eq!(c.diagnostics(&uri), json!([]));
-    if std::env::var("DENOTATE_BACKEND").as_deref() != Ok("langium") {
-        c.change(
-            &uri,
-            3,
-            &source.replace("relation enabled", "input enabled"),
-        );
-        assert!(c
-            .diagnostics(&uri)
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|d| d["code"] == "input-definition"));
-    }
+    c.change(
+        &uri,
+        3,
+        &source.replace("relation enabled", "input enabled"),
+    );
+    assert!(c
+        .diagnostics(&uri)
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "input-definition"));
+
     c.shutdown();
 }

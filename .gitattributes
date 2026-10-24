@@ -1,2 +1,2 @@
 # Parser fixtures include intentional CR and BOM bytes; never normalize them.
-frontend-prototype/fixtures/**/*.den -text
+fixtures/**/*.den -text

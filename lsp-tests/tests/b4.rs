@@ -99,11 +99,7 @@ fn ranged_edits_preserve_utf16_positions_semantic_reuse_and_recovery() {
     client.change(&uri, 2, &text);
     assert_eq!(client.diagnostics(&uri), json!([]));
     client.request("textDocument/definition", at(&uri, &text, "mapped_to"));
-    let before = if std::env::var("DENOTATE_BACKEND").as_deref() != Ok("langium") {
-        Some(client.request("denotate/test/analysis", json!({})))
-    } else {
-        None
-    };
+    let before = Some(client.request("denotate/test/analysis", json!({})));
     // The second edit is in coordinates produced by the first, not the original.
     let first = replacement(&text, "🦀", "🦀🦀");
     let intermediate = apply_edits(&text, &[first.clone()]);
@@ -200,17 +196,11 @@ fn library_edit_burst_refreshes_unchanged_importer_without_version_regression() 
     client.request("denotate/test/idle", json!({}));
     let closed_target = client.request("textDocument/definition", json!({"textDocument": {"uri": uri}, "position": position(source, source.find("mapped_to(shared").unwrap()+10)}));
     let restored_position = position(source, source.find("const shared: Source").unwrap() + 6);
-    if std::env::var("DENOTATE_BACKEND").as_deref() == Ok("tree-sitter") {
-        assert_eq!(
-            closed_target[0]["targetSelectionRange"]["start"],
-            restored_position
-        );
-    } else {
-        eprintln!(
-            "A close-before-reopen restored disk target: {}",
-            closed_target[0]["targetSelectionRange"]["start"] == restored_position
-        );
-    }
+    assert_eq!(
+        closed_target[0]["targetSelectionRange"]["start"],
+        restored_position
+    );
+
     client.open("computation.den");
     let restored = client.request("textDocument/definition", json!({"textDocument": {"uri": uri}, "position": position(source, source.find("mapped_to(shared").unwrap()+10)}));
     assert_eq!(

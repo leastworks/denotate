@@ -1,5 +1,5 @@
 [workspace]
-members = ["analysis", "bridge", "normalize", "ir", "ir-text", "check", "check-session", "presentation", "test-dsl", "editor", "../tree-sitter/server"]
+members = ["analysis", "normalize", "ir", "ir-text", "check", "check-session", "presentation", "test-dsl", "editor", "../tree-sitter/server"]
 resolver = "2"
 
 [workspace.dependencies]

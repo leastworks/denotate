@@ -143,19 +143,28 @@ impl Client {
             }
         }
         copy_members(&root().join("fixtures").join(fixture), workspace.path());
-        let server = root().join("langium/dist/server.mjs");
-        let executable = std::env::var("DENOTATE_LSP_COMMAND").unwrap_or_else(|_| "node".into());
+        // The .den language server by default; DENOTATE_LSP_COMMAND selects another
+        // server (the InputMapping scenarios use it).
+        let server = root().join(if cfg!(windows) {
+            "tree-sitter/dist/denotate-lsp.exe"
+        } else {
+            "tree-sitter/dist/denotate-lsp"
+        });
+        let executable = match std::env::var("DENOTATE_LSP_COMMAND") {
+            Ok(command) => command,
+            Err(_) => {
+                assert!(
+                    server.exists(),
+                    "Run npm run build --prefix tree-sitter first"
+                );
+                server.to_string_lossy().into_owned()
+            }
+        };
         let args: Vec<String> = match std::env::var("DENOTATE_LSP_ARGS") {
             Ok(args) => {
                 serde_json::from_str(&args).expect("DENOTATE_LSP_ARGS must be a JSON string array")
             }
-            Err(_) => {
-                assert!(
-                    server.exists(),
-                    "Run npm run build in frontend-prototype/langium first"
-                );
-                vec![server.to_string_lossy().into_owned(), "--stdio".into()]
-            }
+            Err(_) => vec![],
         };
         let mut child = Command::new(executable)
             .args(args)

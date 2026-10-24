@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: tree-sitter/package-lock.json
+      - name: Install Rust toolchains
+        run: |
+          rustup toolchain install 1.93.0 --profile minimal
+          rustup toolchain install 1.78.0 --profile minimal
+      - name: Native workspace (IR, checker, sessions, presentation, editor, ir-text, test DSL)
+        run: cargo +1.93.0 test --manifest-path native/Cargo.toml --locked --workspace --exclude denotate-tree-sitter
+      - name: Install .den editor dependencies
+        run: npm ci --prefix tree-sitter
+      - name: Shared .den generated parser is current
+        run: |
+          npm run generate --prefix tree-sitter
+          test -z "$(git status --porcelain --untracked-files=all -- tree-sitter/grammar/src)"
+      - name: InputMapping generated parser is current
+        run: |
+          cd native/test-dsl/grammar
+          ../../../tree-sitter/node_modules/.bin/tree-sitter generate
+          test -z "$(git status --porcelain --untracked-files=all -- src)"
+      - name: .den editor syntax manifest and component tests
+        run: npm test --prefix tree-sitter
+      - name: .den editor LSP scenarios
+        run: npm run test:lsp --prefix tree-sitter
+      - name: InputMapping worker and diagnostics over LSP
+        run: |
+          cargo +1.93.0 build --manifest-path native/Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp
+          DENOTATE_LSP_COMMAND="$GITHUB_WORKSPACE/native/target/debug/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.78.0 test --manifest-path Cargo.toml --locked -p denotate-lsp-tests --features inputmapping --test inputmapping
+      - name: InputMapping editor package and example
+        run: |
+          npm ci --prefix native/test-dsl/vscode
+          npm test --prefix native/test-dsl/vscode
