@@ -13,15 +13,15 @@ use crate::{lowering::incremental::Session, syntax};
 use denotate_check::Limits;
 use denotate_editor::{
     Document, Documents,
-    checking::{HoldStage, Job},
-    test_support,
-    transport::{Result, send},
+    checking::Job,
+    checking_server::{self, CheckingHandler},
+    lifecycle, publication,
+    publication::publish,
+    test_support::{self, CheckingHooks},
+    transport::{self, Result, send},
 };
-use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
-use lsp_types::{
-    Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
-    Url,
-};
+use lsp_server::{Connection, Notification, Request, ResponseError};
+use lsp_types::{Diagnostic, Url};
 use serde_json::{Value, json};
 use std::{collections::BTreeMap, sync::Arc};
 use worker::{Event, Identity, Payload, Worker};
@@ -36,22 +36,14 @@ impl AsRef<Document> for OpenDocument {
         &self.document
     }
 }
-/// Only populated in DENOTATE_TEST_MODE. Hooks hold a worker at explicit phase
-/// boundaries; they neither impose sleeps nor alter checker truth/limits.
-#[derive(Default)]
-struct TestHooks {
-    started: Vec<Value>,
-    finished: Vec<Value>,
-}
 struct Server {
     documents: Documents<OpenDocument>,
     lowering: BTreeMap<Url, Session>,
+    published: BTreeMap<Url, Vec<Diagnostic>>,
     parser: tree_sitter::Parser,
     worker: Worker,
-    idle: Vec<RequestId>,
     tests: bool,
-    hooks: TestHooks,
-    shutdown: bool,
+    hooks: CheckingHooks,
     backend: denotate_check::BackendIdentity,
 }
 
@@ -70,125 +62,24 @@ pub fn run_with_mode(connection: &Connection, tests: bool) -> Result<()> {
     let mut server = Server {
         documents: Documents::default(),
         lowering: BTreeMap::new(),
+        published: BTreeMap::new(),
         parser: syntax::parser()?,
         worker: worker::spawn()?,
-        idle: vec![],
         tests,
-        hooks: TestHooks::default(),
-        shutdown: false,
+        hooks: CheckingHooks::default(),
         backend: denotate_check::BackendIdentity::bdd(),
     };
-    let result = server.serve(connection);
-    server.stop();
-    result
+    checking_server::run(&mut server, connection)
 }
 
 impl Server {
-    fn serve(&mut self, connection: &Connection) -> Result<()> {
-        loop {
-            // Shutdown has joined the worker; wait only for the client's exit.
-            let events = if self.shutdown {
-                crossbeam_channel::never()
-            } else {
-                self.worker.events().clone()
-            };
-            // Prefer already queued source edits over a completed old result.
-            crossbeam_channel::select_biased! {
-                recv(connection.receiver) -> message => {
-                    let Ok(message) = message else { break };
-                    match message {
-                        Message::Request(request) => self.request(connection, request)?,
-                        Message::Notification(n) if n.method == "exit" => break,
-                        Message::Notification(n) if !self.shutdown => {
-                            if let Err(error) = self.notification(connection, n) {
-                                log(connection, 1, format!("InputMapping notification rejected: {error}"))?;
-                            }
-                        }
-                        _ => (),
-                    }
-                }
-                recv(events) -> event => self.completed(connection, event.map_err(|_| "Checking worker stopped unexpectedly")?)?,
-            }
-            if !self.shutdown {
-                self.start_next()?;
-            }
-            if self.worker.is_idle() {
-                for id in self.idle.drain(..) {
-                    connection
-                        .sender
-                        .send(Message::Response(Response::new_ok(id, Value::Null)))?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    fn stop(&mut self) {
-        self.worker.stop();
-    }
     fn cancel(&mut self, uri: &Url) {
         self.worker.cancel(uri);
     }
-    fn start_next(&mut self) -> Result<()> {
-        if let Some(ticket) = self.worker.start()? {
-            if self.tests {
-                self.hooks.started.push(identity(&ticket));
-            }
-        }
-        Ok(())
-    }
-
-    fn request(&mut self, connection: &Connection, request: Request) -> Result<()> {
-        let result = if request.method == "shutdown" {
-            self.shutdown = true;
-            self.stop();
-            Ok(Value::Null)
-        } else if self.shutdown {
-            Err((-32600, "Server is shutting down"))
-        } else if self.tests && request.method == test_support::IDLE {
-            self.idle.push(request.id);
-            return Ok(());
-        } else if self.tests && request.method == "inputmapping/test/hold" {
-            match request.params["phase"].as_str() {
-                Some("afterPrepare") => {
-                    self.worker.hold_next(HoldStage::DuringCheck);
-                    Ok(Value::Null)
-                }
-                Some("beforeResult") => {
-                    self.worker.hold_next(HoldStage::BeforeResult);
-                    Ok(Value::Null)
-                }
-                _ => Err((-32602, "Expected afterPrepare or beforeResult")),
-            }
-        } else if self.tests && request.method == "inputmapping/test/release" {
-            match request.params["revision"]
-                .as_u64()
-                .is_some_and(|r| self.worker.release(r))
-            {
-                true => Ok(Value::Null),
-                false => Err((-32602, "No held worker at that revision")),
-            }
-        } else if self.tests && request.method == "inputmapping/test/stats" {
-            let lowering: BTreeMap<_, _> = self
-                .lowering
-                .iter()
-                .map(|(uri, session)| (uri.as_str(), session.stats()))
-                .collect();
-            Ok(
-                json!({"started": self.hooks.started, "finished": self.hooks.finished, "pending": self.worker.pending().map(|j| identity(&j.ticket)).collect::<Vec<_>>(), "lowering": lowering }),
-            )
-        } else {
-            Err((-32601, "Unsupported request"))
-        };
-        let response = match result {
-            Ok(value) => Response::new_ok(request.id, value),
-            Err((code, message)) => Response::new_err(request.id, code, message.into()),
-        };
-        connection.sender.send(Message::Response(response))?;
-        Ok(())
-    }
-
     fn notification(&mut self, connection: &Connection, n: Notification) -> Result<()> {
+        if lifecycle::handles(&n.method) {
+            return lifecycle::notification(self, connection, n);
+        }
         match n.method.as_str() {
             "workspace/didChangeConfiguration" => {
                 let backend = match n.params["settings"]["inputmapping"]["backend"]
@@ -213,71 +104,6 @@ impl Server {
                     }
                 }
             }
-            "textDocument/didOpen" => {
-                let p: DidOpenTextDocumentParams = serde_json::from_value(n.params)?;
-                let t = p.text_document;
-                let document = Document::new(&mut self.parser, t.text, t.version, true);
-                // An explicit open starts a fresh session, even for a reused URI.
-                self.lowering.remove(&t.uri);
-                self.install(connection, t.uri, document)?;
-            }
-            "textDocument/didChange" => {
-                let p =
-                    match serde_json::from_value::<DidChangeTextDocumentParams>(n.params.clone()) {
-                        Ok(p) => p,
-                        Err(error) => {
-                            if let Some((uri, version)) =
-                                self.documents.malformed_change(&n.params["textDocument"])
-                            {
-                                self.lose_sync(connection, &uri, version)?;
-                            }
-                            return Err(error.into());
-                        }
-                    };
-                let uri = p.text_document.uri;
-                let version = p.text_document.version;
-                let updated = (|| -> std::result::Result<Option<Document>, &'static str> {
-                    let Some(changes) =
-                        self.documents.changes(&uri, version, &p.content_changes)?
-                    else {
-                        return Ok(None);
-                    };
-                    self.documents[&uri]
-                        .document
-                        .changed(&mut self.parser, changes, version)
-                        .map(Some)
-                })();
-                match updated {
-                    Ok(Some(document)) => self.install(connection, uri, document)?,
-                    Ok(None) => (),
-                    Err(error) => {
-                        if self.documents.contains_key(&uri) {
-                            self.lose_sync(connection, &uri, version)?;
-                        }
-                        return Err(error.into());
-                    }
-                }
-            }
-            "textDocument/didClose" => {
-                let p: DidCloseTextDocumentParams = serde_json::from_value(n.params)?;
-                let uri = p.text_document.uri;
-                self.cancel(&uri);
-                self.documents.remove(&uri);
-                self.lowering.remove(&uri);
-                self.worker.close(&uri)?;
-                publish(connection, &uri, None, vec![])?;
-            }
-            "$/cancelRequest" => {
-                // Only idle can be pending as a request. Analysis is cancelled
-                // by source revisions, not by an unrelated request's ID.
-                if let Some(index) = self.idle.iter().position(|id| json!(id) == n.params["id"]) {
-                    connection.sender.send(Message::Response(Response::new_err(
-                        self.idle.remove(index),
-                        -32800,
-                        "Request cancelled".into(),
-                    )))?;
-                }
-            }
             _ => (), // No disk indexing, workspace mutation or language-service requests.
         }
         Ok(())
@@ -285,8 +111,20 @@ impl Server {
 
     fn lose_sync(&mut self, connection: &Connection, uri: &Url, version: i32) -> Result<()> {
         self.cancel(uri);
-        if self.documents.lose_sync(uri, version) {
-            publish(connection, uri, None, vec![])?;
+        publication::lose_sync(connection, &mut self.documents, uri, version)?;
+        // Like B, republish the still-current diagnostics of other synchronized
+        // documents. Keep their semantic findings, not just the fast diagnostics.
+        for (other, document) in self
+            .documents
+            .iter()
+            .filter(|(u, _)| *u != uri && self.documents.rejected_version(u).is_none())
+        {
+            publish(
+                connection,
+                other,
+                Some(document.document.version),
+                self.published.get(other).cloned().unwrap_or_default(),
+            )?;
         }
         Ok(())
     }
@@ -319,6 +157,7 @@ impl Server {
                 fast: fast.clone(),
             },
         );
+        self.published.insert(uri.clone(), fast.clone());
         publish(connection, &uri, Some(version), fast)?;
         if self.tests {
             test_support::frontend_ready(connection, &uri, version)?;
@@ -346,7 +185,7 @@ impl Server {
         let (id, result, check_ns) = match event {
             Event::Checkpoint(id) => {
                 if self.tests {
-                    send(connection, "inputmapping/test/checkpoint", identity(&id))?;
+                    send(connection, test_support::CHECKPOINT, identity(&id))?;
                 }
                 return Ok(());
             }
@@ -354,8 +193,7 @@ impl Server {
         };
         let documents = &self.documents;
         let current = self.worker.complete(&id, || {
-            !self.shutdown
-                && documents.rejected_version(&id.key).is_none()
+            documents.rejected_version(&id.key).is_none()
                 && documents
                     .get(&id.key)
                     .is_some_and(|d| d.revision == id.revision && d.document.version == id.metadata)
@@ -408,28 +246,133 @@ impl Server {
             }
             Err(Failure::Cancelled) => return Ok(()),
         }
+        self.published.insert(id.key.clone(), diagnostics.clone());
         publish(connection, &id.key, Some(id.metadata), diagnostics)?;
         if self.tests {
             test_support::validated(connection, &id.key, id.metadata)?;
+            send(connection, test_support::CHECKED, identity(&id))?;
         }
         Ok(())
     }
 }
 
+impl transport::Handler for Server {
+    fn supports_request(&self, method: &str) -> bool {
+        self.tests && method == test_support::IDLE
+    }
+    fn request(&mut self, _: &Request) -> std::result::Result<Value, ResponseError> {
+        Ok(Value::Null)
+    }
+    fn unsupported_request(&self, _: &Request) -> ResponseError {
+        ResponseError {
+            code: -32601,
+            message: "Unsupported request".into(),
+            data: None,
+        }
+    }
+    fn notification(&mut self, connection: &Connection, n: Notification) -> Result<()> {
+        Server::notification(self, connection, n)
+    }
+}
+impl CheckingHandler for Server {
+    type Key = Url;
+    type Payload = Payload;
+    type Output = worker::Checked;
+    type Metadata = i32;
+    fn scheduler(&mut self) -> &mut Worker {
+        &mut self.worker
+    }
+    fn hooks(&mut self) -> &mut CheckingHooks {
+        &mut self.hooks
+    }
+    fn test_mode(&self) -> bool {
+        self.tests
+    }
+    fn identity(ticket: &Identity) -> Value {
+        identity(ticket)
+    }
+    fn completed(&mut self, connection: &Connection, event: Event) -> Result<()> {
+        Server::completed(self, connection, event)
+    }
+    fn reset_checks(&mut self, connection: &Connection) -> Result<()> {
+        let docs = self
+            .documents
+            .iter()
+            .filter(|(u, _)| self.documents.rejected_version(u).is_none())
+            .map(|(u, d)| (u.clone(), d.document.text.clone(), d.document.version))
+            .collect::<Vec<_>>();
+        for (uri, text, version) in docs {
+            let document = Document::new(&mut self.parser, text, version, true);
+            self.install(connection, uri, document)?;
+        }
+        Ok(())
+    }
+    fn extra_stats(&self) -> Value {
+        let lowering: BTreeMap<_, _> = self
+            .lowering
+            .iter()
+            .map(|(uri, session)| (uri.as_str(), session.stats()))
+            .collect();
+        json!({"lowering":lowering})
+    }
+    fn notification_error(
+        &mut self,
+        connection: &Connection,
+        error: Box<dyn std::error::Error>,
+    ) -> Result<()> {
+        log(
+            connection,
+            1,
+            format!("InputMapping notification rejected: {error}"),
+        )
+    }
+}
+impl lifecycle::Lifecycle for Server {
+    type Stored = OpenDocument;
+    type Parsed = Document;
+    fn documents_and_parser(&mut self) -> (&Documents<OpenDocument>, &mut tree_sitter::Parser) {
+        (&self.documents, &mut self.parser)
+    }
+    fn parse_open(parser: &mut tree_sitter::Parser, text: String, version: i32) -> Document {
+        Document::new(parser, text, version, true)
+    }
+    fn parse_change(
+        previous: &OpenDocument,
+        parser: &mut tree_sitter::Parser,
+        changes: &[lsp_types::TextDocumentContentChangeEvent],
+        version: i32,
+    ) -> std::result::Result<Document, &'static str> {
+        previous.document.changed(parser, changes, version)
+    }
+    fn stored(
+        &mut self,
+        connection: &Connection,
+        uri: Url,
+        document: Document,
+        opened: bool,
+        _: bool,
+    ) -> Result<()> {
+        // An explicit open starts fresh lowering, even for a reused URI.
+        if opened {
+            self.lowering.remove(&uri);
+        }
+        self.install(connection, uri, document)
+    }
+    fn removed(&mut self, connection: &Connection, uri: &Url) -> Result<()> {
+        self.cancel(uri);
+        self.documents.remove(uri);
+        self.lowering.remove(uri);
+        self.published.remove(uri);
+        self.worker.close(uri)?;
+        publication::withdraw(connection, uri)
+    }
+    fn sync_lost(&mut self, connection: &Connection, uri: &Url, version: i32) -> Result<()> {
+        self.lose_sync(connection, uri, version)
+    }
+}
+
 fn identity(id: &Identity) -> Value {
     json!({"uri": id.key, "revision": id.revision, "version": id.metadata})
-}
-fn publish(
-    connection: &Connection,
-    uri: &Url,
-    version: Option<i32>,
-    diagnostics: Vec<Diagnostic>,
-) -> Result<()> {
-    send(
-        connection,
-        "textDocument/publishDiagnostics",
-        json!({"uri": uri, "version": version, "diagnostics": diagnostics}),
-    )
 }
 fn log(connection: &Connection, kind: u32, message: String) -> Result<()> {
     send(

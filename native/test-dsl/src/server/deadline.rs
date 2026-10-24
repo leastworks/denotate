@@ -1,5 +1,6 @@
 //! Exercise real worker interruption and editor publication without waiting 10 s.
 use super::*;
+use lsp_server::Message;
 use lsp_types::{DiagnosticSeverity, PublishDiagnosticsParams};
 use std::time::Duration;
 
@@ -7,12 +8,11 @@ fn server() -> Server {
     Server {
         documents: Documents::default(),
         lowering: BTreeMap::new(),
+        published: BTreeMap::new(),
         parser: syntax::parser().unwrap(),
         worker: worker::spawn().unwrap(),
-        idle: vec![],
         tests: true,
-        hooks: TestHooks::default(),
-        shutdown: false,
+        hooks: CheckingHooks::default(),
         backend: denotate_check::BackendIdentity::bdd(),
     }
 }
@@ -26,7 +26,7 @@ fn install(server: &mut Server, connection: &Connection, uri: &Url, version: i32
     server.install(connection, uri.clone(), document).unwrap();
 }
 fn completed(server: &mut Server) -> Event {
-    server.start_next().unwrap();
+    checking_server::start_next(server).unwrap();
     server
         .worker
         .events()
@@ -46,7 +46,7 @@ fn publications(client: &Connection) -> Vec<PublishDiagnosticsParams> {
         .collect()
 }
 fn stop(mut server: Server) {
-    server.stop();
+    server.worker.stop();
 }
 
 #[test]

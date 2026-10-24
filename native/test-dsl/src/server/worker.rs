@@ -10,7 +10,7 @@ pub struct Payload {
     pub backend: denotate_check::BackendIdentity,
     pub measure: bool,
 }
-type Checked = (Result<Output, Failure>, Option<u64>);
+pub(super) type Checked = (Result<Output, Failure>, Option<u64>);
 pub type Event = checking::Event<Url, Checked, i32>;
 pub type Worker = Scheduler<Url, Payload, Checked, i32>;
 

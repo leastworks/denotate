@@ -380,7 +380,7 @@ fn published_parity_119_programs_bdd_sat_cold_warm_and_exact_origins() {
                         den.change(&file.uri, &file.text, version);
                     }
                 }
-                dsl.call("denotate/test/idle", json!({}));
+                dsl.call("denotate/test/checkingIdle", json!({}));
                 den.call("denotate/test/checkingIdle", json!({}));
                 if warm == 0 {
                     // Workspace discovery may check disk snapshots before opens.
@@ -395,7 +395,7 @@ fn published_parity_119_programs_bdd_sat_cold_warm_and_exact_origins() {
                 let left = findings(&dsl.published, &source.uri, &BTreeMap::new());
                 let right = findings(&den.published, &membership.root, &keys);
                 assert_eq!(left, right, "{id} {backend} warm={warm}");
-                let stats = dsl.call("inputmapping/test/stats", json!({}));
+                let stats = dsl.call("denotate/test/checkingStats", json!({}));
                 let ds = summary(
                     stats["finished"].as_array().unwrap().last().unwrap()["summary"].clone(),
                     &BTreeMap::new(),

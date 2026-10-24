@@ -21,20 +21,20 @@ fn change(client: &mut Client, uri: &str, version: i64, text: &str) {
     client.validated(uri, version);
 }
 fn idle(client: &mut Client) {
-    client.request("denotate/test/idle", Value::Null);
+    client.request("denotate/test/checkingIdle", Value::Null);
 }
 fn hold(client: &mut Client, phase: &str) {
-    client.request("inputmapping/test/hold", json!({"phase": phase}));
+    client.request("denotate/test/hold", json!({"phase": phase}));
 }
 fn checkpoint(client: &mut Client, uri: &str, version: i64) -> Value {
-    let event = client.notification("inputmapping/test/checkpoint");
+    let event = client.notification("denotate/test/checkpoint");
     assert_eq!(event["uri"], uri);
     assert_eq!(event["version"], version);
     event
 }
 fn release(client: &mut Client, event: &Value) {
     client.request(
-        "inputmapping/test/release",
+        "denotate/test/release",
         json!({"revision": event["revision"]}),
     );
 }
@@ -62,7 +62,7 @@ fn assert_paused(client: &Client, uri: &str, error_code: &str) {
 
 fn stats(client: &mut Client) -> Value {
     idle(client);
-    client.request("inputmapping/test/stats", Value::Null)
+    client.request("denotate/test/checkingStats", Value::Null)
 }
 
 fn queries(stats: &Value, uri: &str) -> [u64; 4] {
@@ -552,14 +552,14 @@ fn completed_old_result_cannot_publish_into_a_newer_valid_or_broken_snapshot() {
     ready(&mut c, &u, 2);
     assert_eq!(c.diagnostics(&u), json!([])); // Withdraw before the slow result.
     let held = checkpoint(&mut c, &u, 2);
-    let idle_request = c.begin_request("denotate/test/idle", Value::Null);
+    let idle_request = c.begin_request("denotate/test/checkingIdle", Value::Null);
     c.change_without_waiting(&u, 3, &SOURCE.replace("input_bb when", "when"));
     ready(&mut c, &u, 3);
     c.validated(&u, 3);
     assert_paused(&c, &u, "syntax");
     // Idle is pending, but another request and a paused diagnostic still work.
     assert_eq!(
-        c.request("inputmapping/test/stats", Value::Null)["finished"]
+        c.request("denotate/test/checkingStats", Value::Null)["finished"]
             .as_array()
             .unwrap()
             .len(),
@@ -568,7 +568,7 @@ fn completed_old_result_cannot_publish_into_a_newer_valid_or_broken_snapshot() {
     release(&mut c, &held);
     c.await_reply(idle_request);
     assert_paused(&c, &u, "syntax");
-    let stats = c.request("inputmapping/test/stats", Value::Null);
+    let stats = c.request("denotate/test/checkingStats", Value::Null);
     assert_eq!(
         stats["finished"].as_array().unwrap().last().unwrap()["status"],
         "discarded"
@@ -587,7 +587,7 @@ fn queued_document_edits_keep_fifo_position_and_active_edits_join_the_tail() {
     let a = uri(&c, "a.inputmapping");
     let b = uri(&c, "b.inputmapping");
     let d = uri(&c, "c.inputmapping");
-    hold(&mut c, "afterPrepare");
+    hold(&mut c, "duringCheck");
     open(&mut c, &a, SOURCE);
     let held = checkpoint(&mut c, &a, 1);
     open(&mut c, &b, SOURCE);
@@ -596,7 +596,7 @@ fn queued_document_edits_keep_fifo_position_and_active_edits_join_the_tail() {
         c.change_without_waiting(u, 2, SOURCE);
         ready(&mut c, u, 2);
     }
-    let pending = c.request("inputmapping/test/stats", Value::Null)["pending"].clone();
+    let pending = c.request("denotate/test/checkingStats", Value::Null)["pending"].clone();
     assert_eq!(
         pending
             .as_array()
@@ -623,7 +623,7 @@ fn queued_document_edits_keep_fifo_position_and_active_edits_join_the_tail() {
 
 #[test]
 fn shutdown_releases_held_checks_without_a_client_release() {
-    for phase in ["afterPrepare", "beforeResult"] {
+    for phase in ["duringCheck", "beforeResult"] {
         let mut c = Client::start("base/00-valid");
         let a = uri(&c, "a.inputmapping");
         let b = uri(&c, "b.inputmapping");
@@ -640,7 +640,7 @@ fn cancellation_after_preparation_and_pending_coalescing_are_per_document() {
     let mut c = Client::start("base/00-valid");
     let a = uri(&c, "a.inputmapping");
     let b = uri(&c, "b.inputmapping");
-    hold(&mut c, "afterPrepare");
+    hold(&mut c, "duringCheck");
     open(&mut c, &a, SOURCE);
     let held = checkpoint(&mut c, &a, 1);
     open(&mut c, &b, SOURCE); // Queued, not cancelled by edits to a.
@@ -648,7 +648,7 @@ fn cancellation_after_preparation_and_pending_coalescing_are_per_document() {
         c.change_without_waiting(&a, version, SOURCE);
         ready(&mut c, &a, version);
     }
-    let stats = c.request("inputmapping/test/stats", Value::Null);
+    let stats = c.request("denotate/test/checkingStats", Value::Null);
     assert_eq!(stats["started"].as_array().unwrap().len(), 1);
     assert_eq!(stats["pending"].as_array().unwrap().len(), 2);
     assert!(!stats["pending"]
@@ -660,7 +660,7 @@ fn cancellation_after_preparation_and_pending_coalescing_are_per_document() {
     c.validated(&b, 1);
     c.validated(&a, 3);
     idle(&mut c);
-    let stats = c.request("inputmapping/test/stats", Value::Null);
+    let stats = c.request("denotate/test/checkingStats", Value::Null);
     assert_eq!(stats["finished"][0]["status"], "cancelled");
     assert!(!stats["started"]
         .as_array()
@@ -689,7 +689,7 @@ fn close_reopen_with_reused_editor_version_rejects_the_old_snapshot() {
     c.validated(&u, 1);
     idle(&mut c);
     assert_eq!(c.diagnostics(&u), json!([]));
-    let stats = c.request("inputmapping/test/stats", Value::Null);
+    let stats = c.request("denotate/test/checkingStats", Value::Null);
     assert_eq!(stats["finished"][0]["status"], "discarded");
     assert_ne!(
         stats["started"][0]["revision"],
@@ -883,4 +883,82 @@ fn published_findings_have_shared_identity_witness_and_current_outcome_summary()
             .len(),
         1
     );
+}
+
+#[test]
+fn shared_checking_barriers_and_cold_reset_keep_document_identity_and_findings() {
+    let mut c = Client::start("base/00-valid");
+    let u = uri(&c, "shared-hooks.inputmapping");
+    hold(&mut c, "beforeResult");
+    open(&mut c, &u, SOURCE);
+    let held = checkpoint(&mut c, &u, 1);
+    // The fast barrier must answer even while a completed result is held.
+    c.request("denotate/test/idle", Value::Null);
+    let waiting = c.begin_request("denotate/test/checkingIdle", Value::Null);
+    let reset = c.request_reply("denotate/test/resetChecks", Value::Null);
+    assert_eq!(reset["error"]["code"], -32602);
+    release(&mut c, &held);
+    c.await_reply(waiting);
+    let first = c.notification("denotate/test/checked");
+    assert_eq!(first, held);
+    let diagnostics = c.diagnostics(&u);
+    assert_eq!(codes(&c, &u, "OverlappingMappings").len(), 2);
+    c.request("denotate/test/resetChecks", Value::Null);
+    idle(&mut c);
+    let cold = c.notification("denotate/test/checked");
+    assert_eq!(cold["uri"], first["uri"]);
+    assert_eq!(cold["version"], first["version"]);
+    assert_ne!(cold["revision"], first["revision"]);
+    assert_eq!(c.diagnostics(&u), diagnostics);
+    let records = stats(&mut c);
+    assert_eq!(records["started"].as_array().unwrap().len(), 2);
+    assert_eq!(records["finished"].as_array().unwrap().len(), 2);
+    c.shutdown();
+}
+
+#[test]
+fn sync_loss_withdraws_once_and_republishes_other_documents_full_findings() {
+    let mut c = Client::start("base/00-valid");
+    let a = uri(&c, "lost.inputmapping");
+    let b = uri(&c, "unaffected.inputmapping");
+    for u in [&a, &b] {
+        open(&mut c, u, SOURCE);
+        c.validated(u, 1);
+    }
+    idle(&mut c);
+    let other = c.diagnostics(&b);
+    assert_eq!(codes(&c, &b, "OverlappingMappings").len(), 2);
+    let before = c.publications().len();
+    // Malformed range decoding must use document metadata to lose sync.
+    for version in [2, 3] {
+        c.notify("textDocument/didChange", json!({"textDocument":{"uri":a,"version":version},"contentChanges":[{"range":"malformed","text":""}]}));
+        c.request("denotate/test/idle", Value::Null);
+    }
+    let publications = &c.publications()[before..];
+    let cleared = publications
+        .iter()
+        .filter(|p| p["uri"] == a)
+        .collect::<Vec<_>>();
+    assert_eq!(cleared.len(), 1);
+    assert_eq!(cleared[0]["diagnostics"], json!([]));
+    assert!(cleared[0].get("version").is_none());
+    let republished = publications
+        .iter()
+        .filter(|p| p["uri"] == b)
+        .collect::<Vec<_>>();
+    assert_eq!(republished.len(), 2);
+    assert!(republished
+        .iter()
+        .all(|p| p["version"] == 1 && p["diagnostics"] == other));
+    // Recovery must exceed the latest rejected version and use full text.
+    c.notify(
+        "textDocument/didChange",
+        json!({"textDocument":{"uri":a,"version":3},"contentChanges":[{"text":SOURCE}]}),
+    );
+    c.request("denotate/test/idle", Value::Null);
+    assert_eq!(c.diagnostics(&a), json!([]));
+    change(&mut c, &a, 4, SOURCE);
+    assert_eq!(codes(&c, &a, "OverlappingMappings").len(), 2);
+    assert_eq!(c.diagnostics(&b), other);
+    c.shutdown();
 }

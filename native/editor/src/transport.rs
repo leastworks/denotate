@@ -19,6 +19,13 @@ pub fn send(connection: &Connection, method: &str, params: Value) -> Result<()> 
 /// Frontends retain request routing, error policy and notification side effects.
 pub trait Handler {
     fn supports_request(&self, method: &str) -> bool;
+    fn unsupported_request(&self, request: &Request) -> ResponseError {
+        ResponseError {
+            code: -32601,
+            message: format!("Unsupported request: {}", request.method),
+            data: None,
+        }
+    }
     fn request(&mut self, request: &Request) -> std::result::Result<Value, ResponseError>;
     fn notification(&mut self, connection: &Connection, notification: Notification) -> Result<()>;
     fn response(&mut self, _connection: &Connection, _response: Response) -> Result<()> {
@@ -53,11 +60,11 @@ pub fn dispatch_request(
     let mut response = if take_cancellation(pending, &request.id) {
         Response::new_err(request.id.clone(), -32800, "Request cancelled".into())
     } else if !supported {
-        Response::new_err(
-            request.id.clone(),
-            -32601,
-            format!("Unsupported request: {}", request.method),
-        )
+        Response {
+            id: request.id.clone(),
+            result: None,
+            error: Some(handler.unsupported_request(&request)),
+        }
     } else {
         match handler.request(&request) {
             Ok(value) => Response::new_ok(request.id.clone(), value),

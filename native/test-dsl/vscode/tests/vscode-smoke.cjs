@@ -36,10 +36,10 @@ exports.run = async function () {
     async function validUpdate(action) {
         // Force fast withdrawal and final checking to be separately observable.
         // In particular, an empty *fast* publication must not pass the repair test.
-        await client.sendRequest('inputmapping/test/hold', { phase: 'afterPrepare' });
+        await client.sendRequest('denotate/test/hold', { phase: 'duringCheck' });
         const fast = publication();
         const ready = notification('denotate/test/frontendReady');
-        const held = notification('inputmapping/test/checkpoint');
+        const held = notification('denotate/test/checkpoint');
         await action();
         const [initial, parsed, checkpoint] = await Promise.all([fast, ready, held]);
         assert.deepEqual(initial.diagnostics, []);
@@ -47,10 +47,10 @@ exports.run = async function () {
         assert.equal(checkpoint.version, document.version);
         const final = publication();
         const validated = notification('denotate/test/validated');
-        await client.sendRequest('inputmapping/test/release', { revision: checkpoint.revision });
+        await client.sendRequest('denotate/test/release', { revision: checkpoint.revision });
         const [result, checked] = await Promise.all([final, validated]);
         assert.equal(checked.version, document.version);
-        await client.sendRequest('denotate/test/idle');
+        await client.sendRequest('denotate/test/checkingIdle');
         return result.diagnostics;
     }
     async function replace(text) {
