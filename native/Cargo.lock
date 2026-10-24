@@ -211,6 +211,8 @@ dependencies = [
 name = "denotate-editor"
 version = "0.0.1"
 dependencies = [
+ "denotate-ir",
+ "denotate-presentation",
  "lsp-server",
  "lsp-types",
  "serde_json",
@@ -233,6 +235,7 @@ dependencies = [
  "denotate-check",
  "denotate-check-session",
  "denotate-ir",
+ "denotate-presentation",
  "salsa",
  "serde_json",
  "sha2",
@@ -254,6 +257,15 @@ dependencies = [
 [[package]]
 name = "denotate-normalize"
 version = "0.0.1"
+
+[[package]]
+name = "denotate-presentation"
+version = "0.0.1"
+dependencies = [
+ "denotate-check",
+ "denotate-ir",
+ "serde_json",
+]
 
 [[package]]
 name = "denotate-test-dsl"
@@ -280,6 +292,7 @@ dependencies = [
 name = "denotate-tree-sitter"
 version = "0.0.1"
 dependencies = [
+ "denotate-check",
  "denotate-editor",
  "denotate-ir",
  "denotate-ir-text",

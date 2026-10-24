@@ -7,6 +7,7 @@ mod load;
 mod locations;
 mod membership;
 pub mod origins;
+pub mod presentation;
 mod print;
 pub use load::{Assumption, DocumentInfo, LoadedProgram, load, load_with_resolver};
 pub use membership::{ActiveRoot, ProgramMembership, RootInfo, roots};

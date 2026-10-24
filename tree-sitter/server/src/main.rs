@@ -1,6 +1,7 @@
 mod bridge;
 mod catalog;
 mod formatting;
+mod presentation;
 mod rename;
 mod semantic;
 mod syntax;

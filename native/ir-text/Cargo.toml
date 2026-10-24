@@ -6,6 +6,7 @@ rust-version = "1.93"
 publish = false
 
 [dependencies]
+denotate-presentation = { path = "../presentation" }
 denotate-analysis = { path = "../analysis" }
 salsa.workspace = true
 denotate-ir = { path = "../ir" }

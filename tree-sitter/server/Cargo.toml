@@ -6,6 +6,7 @@ publish = false
 workspace = "../../native"
 
 [dependencies]
+denotate-check = { path = "../../native/check" }
 denotate-ir = { path = "../../native/ir" }
 denotate-ir-text = { path = "../../native/ir-text" }
 denotate-editor = { path = "../../native/editor" }
