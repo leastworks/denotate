@@ -1,4 +1,4 @@
-#[path = "../../ir-text/tests/support/mod.rs"]
+#[path = "../../native/ir-text/tests/support/mod.rs"]
 mod correspondence;
 mod support;
 use denotate_check::*;

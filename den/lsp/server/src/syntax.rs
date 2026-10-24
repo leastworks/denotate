@@ -241,7 +241,7 @@ mod tests {
 
     #[test]
     fn incremental_and_fresh_agree_through_damage_and_repair_for_every_fixture() {
-        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures");
         let manifest: Value =
             serde_json::from_str(&fs::read_to_string(root.join("syntax.json")).unwrap()).unwrap();
         let mut parser = parser();
@@ -314,7 +314,7 @@ mod tests {
 
     #[test]
     fn shared_syntax_manifest() {
-        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
+        let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures");
         let manifest: Value =
             serde_json::from_str(&fs::read_to_string(fixtures.join("syntax.json")).unwrap())
                 .unwrap();

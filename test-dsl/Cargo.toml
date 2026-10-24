@@ -1,0 +1,27 @@
+[package]
+name = "denotate-test-dsl"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.93"
+publish = false
+workspace = "../native"
+
+[dependencies]
+denotate-presentation = { path = "../native/presentation" }
+denotate-ir-text = { path = "../native/ir-text" }
+denotate-ir = { path = "../native/ir" }
+denotate-normalize = { path = "../native/normalize" }
+denotate-check = { path = "../native/check" }
+denotate-check-session = { path = "../native/check-session" }
+denotate-editor = { path = "../native/editor" }
+tree-sitter = "=0.25.10"
+tree-sitter-language = "=0.1.5"
+lsp-types = "=0.95.1"
+lsp-server = "=0.7.9"
+crossbeam-channel = "=0.5.17"
+serde_json.workspace = true
+serde.workspace = true
+salsa.workspace = true
+
+[build-dependencies]
+cc = "=1.5.1"

@@ -4,7 +4,7 @@ default:
 
 # Test Rust/Salsa analysis, IR, concrete checking, the test DSL and instrumentation.
 test-native:
-    cargo +1.93.0 test --manifest-path native/Cargo.toml --locked --workspace --exclude denotate-tree-sitter
+    cargo +1.93.0 test --manifest-path native/Cargo.toml --locked --workspace --exclude denotate-lsp
 
 # Re-score retained slice-6 paths on a program: FILE [--edit FILE] [--samples N] [--json FILE].
 [positional-arguments]
@@ -26,12 +26,12 @@ demo-overlap mode="overlap":
     cargo +1.93.0 run --manifest-path native/Cargo.toml --locked -p denotate-test-dsl --example overlap -- {{mode}}
 
 # Parse actual InputMapping text and lower it to IR; no semantic checking or editor.
-parse-inputmapping file="native/test-dsl/fixtures/overlapping-mappings.txt":
+parse-inputmapping file="test-dsl/fixtures/overlapping-mappings.txt":
     cargo +1.93.0 run --manifest-path native/Cargo.toml --locked -p denotate-test-dsl --example parse -- '{{file}}'
 
 # Regenerate the committed DSL parser with the .den editor's pinned CLI (npm ci there first).
 generate-inputmapping: _check-node
-    cd native/test-dsl/grammar && ../../../tree-sitter/node_modules/.bin/tree-sitter generate
+    cd test-dsl/grammar && ../../den/lsp/node_modules/.bin/tree-sitter generate
 
 # Build the InputMapping diagnostics server and exercise it over real LSP (no GUI).
 test-inputmapping-lsp:
@@ -40,24 +40,24 @@ test-inputmapping-lsp:
 
 # Build the InputMapping VS Code extension and check its package/example (no GUI).
 test-inputmapping-extension: _check-node
-    npm test --prefix native/test-dsl/vscode
+    npm test --prefix test-dsl/vscode
 
 # Launch an isolated VS Code and test source-linked InputMapping diagnostics.
 test-inputmapping-vscode: _check-node
-    DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix native/test-dsl/vscode
+    DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix test-dsl/vscode
 
 # Build the .den editor, check the shared syntax manifest and run every shared LSP scenario.
 test-b: _check-node
-    npm test --prefix tree-sitter
-    npm run test:lsp --prefix tree-sitter
+    npm test --prefix den/lsp
+    npm run test:lsp --prefix den/lsp
 
 # Launch an isolated VS Code with the .den editor extension under test.
 test-b-vscode: _check-node
-    DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix tree-sitter
+    DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix den/lsp
 
 # Measure real .den LSP round trips at three sizes; no timing pass/fail threshold.
 bench-lsp: _check-node
-    npm run build --prefix tree-sitter
+    npm run build --prefix den/lsp
     cargo test --manifest-path Cargo.toml --locked -p denotate-lsp-tests --test latency -- --ignored --nocapture --test-threads=1
 
 [private]

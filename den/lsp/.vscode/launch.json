@@ -10,7 +10,7 @@
     "outFiles": ["${workspaceFolder}/dist/**/*.cjs"], "preLaunchTask": "build"
   }, {
     "name": "Run Denotate (Tree-sitter)", "type": "extensionHost", "request": "launch",
-    "args": ["--extensionDevelopmentPath=${workspaceFolder}", "${workspaceFolder}/../fixtures/base/00-valid"],
+    "args": ["--extensionDevelopmentPath=${workspaceFolder}", "${workspaceFolder}/../../fixtures/base/00-valid"],
     "outFiles": ["${workspaceFolder}/dist/**/*.cjs"], "preLaunchTask": "build"
   }]
 }

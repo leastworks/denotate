@@ -146,17 +146,14 @@ impl Client {
         // The .den language server by default; DENOTATE_LSP_COMMAND selects another
         // server (the InputMapping scenarios use it).
         let server = root().join(if cfg!(windows) {
-            "tree-sitter/dist/denotate-lsp.exe"
+            "den/lsp/dist/denotate-lsp.exe"
         } else {
-            "tree-sitter/dist/denotate-lsp"
+            "den/lsp/dist/denotate-lsp"
         });
         let executable = match std::env::var("DENOTATE_LSP_COMMAND") {
             Ok(command) => command,
             Err(_) => {
-                assert!(
-                    server.exists(),
-                    "Run npm run build --prefix tree-sitter first"
-                );
+                assert!(server.exists(), "Run npm run build --prefix den/lsp first");
                 server.to_string_lossy().into_owned()
             }
         };

@@ -6,7 +6,7 @@ const { LanguageClient } = require('vscode-languageclient/node');
 let client;
 
 exports.activate = async (context) => {
-  client = new LanguageClient('denotate-tree-sitter', 'Denotate IR (Tree-sitter)',
+  client = new LanguageClient('denotate', 'Denotate',
     { command: context.asAbsolutePath(process.platform === 'win32' ? 'dist/denotate-lsp.exe' : 'dist/denotate-lsp'), args: [] },
     { documentSelector: [{ scheme: 'file', language: 'denotate' }], initializationOptions: { originSnapshotBridge: true, denotate: { backend: vscode.workspace.getConfiguration('denotate').get('backend', 'bdd') } } });
   context.subscriptions.push(client);

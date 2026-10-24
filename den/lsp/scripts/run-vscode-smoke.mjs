@@ -12,7 +12,7 @@ const extensionDevelopmentPath = fileURLToPath(new URL('..', import.meta.url));
 const temporary = await mkdtemp(path.join(tmpdir(), 'denotate-b-vscode-'));
 try {
     const workspace = path.join(temporary, 'workspace');
-    await cp(fileURLToPath(new URL('../../fixtures/base/00-valid/', import.meta.url)), workspace, { recursive: true });
+    await cp(fileURLToPath(new URL('../../../fixtures/base/00-valid/', import.meta.url)), workspace, { recursive: true });
     await runTests({ vscodeExecutablePath, extensionDevelopmentPath,
         extensionTestsPath: path.join(extensionDevelopmentPath, 'dist/vscode-smoke.cjs'),
         extensionTestsEnv: { ELECTRON_RUN_AS_NODE: undefined, VSCODE_IPC_HOOK_CLI: undefined },

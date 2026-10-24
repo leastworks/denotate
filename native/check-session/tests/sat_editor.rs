@@ -53,9 +53,9 @@ fn sat_editor_frozen_sources_fresh_cached_and_current_diagnostics() {
     let mut unfounded = 0;
     let mut diagnostic_differences = 0;
     for text in [
-        include_str!("../../test-dsl/fixtures/pre-mask.json"),
-        include_str!("../../test-dsl/fixtures/pre-normalize.json"),
-        include_str!("../../test-dsl/fixtures/pre-integration-fingerprints.json"),
+        include_str!("../../../test-dsl/fixtures/pre-mask.json"),
+        include_str!("../../../test-dsl/fixtures/pre-normalize.json"),
+        include_str!("../../../test-dsl/fixtures/pre-integration-fingerprints.json"),
     ] {
         let data: Value = serde_json::from_str(text).unwrap();
         for row in data["cases"].as_array().unwrap() {

@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const vscode = require('vscode');
 
 exports.run = async function () {
-    const extension = vscode.extensions.getExtension('denotate.denotate-tree-sitter-prototype');
+    const extension = vscode.extensions.getExtension('denotate.denotate');
     assert.ok(extension);
     await extension.activate();
     const folder = vscode.workspace.workspaceFolders[0].uri;

@@ -27,7 +27,7 @@ fn program(text: &str) -> analysis::Program {
 #[test]
 fn affected_fixtures_keep_status_and_diagnostic_summaries() {
     let report: Value = serde_json::from_str(include_str!(
-        "../../check-session/fixtures/regression/outcomes.json"
+        "../../native/check-session/fixtures/regression/outcomes.json"
     ))
     .unwrap();
     let mut sources = BTreeSet::new();

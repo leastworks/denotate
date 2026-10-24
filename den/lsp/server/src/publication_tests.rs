@@ -11,7 +11,7 @@ use std::{
     thread::JoinHandle,
     time::Duration,
 };
-#[path = "../../../native/ir-text/tests/support/mod.rs"]
+#[path = "../../../../native/ir-text/tests/support/mod.rs"]
 mod correspondence;
 
 struct Client {
@@ -136,7 +136,7 @@ impl Drop for Directory {
     }
 }
 fn cases() -> Vec<(String, SourceFile)> {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../native/test-dsl");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../test-dsl");
     let mut cases = vec![];
     for (id, path) in [
         ("text/overlap", "fixtures/overlapping-mappings.txt"),

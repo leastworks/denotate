@@ -3,7 +3,7 @@ mod support;
 use serde_json::{json, Value};
 use support::{file_uri, Client};
 
-const SOURCE: &str = include_str!("../../native/test-dsl/fixtures/overlapping-mappings.txt");
+const SOURCE: &str = include_str!("../../test-dsl/fixtures/overlapping-mappings.txt");
 fn uri(client: &Client, name: &str) -> String {
     file_uri(&client.workspace.path().join(name))
 }

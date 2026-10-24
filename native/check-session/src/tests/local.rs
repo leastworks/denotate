@@ -141,13 +141,16 @@ fn local_interruption_never_returns_a_semantic_value_and_recovers() {
 #[test]
 fn local_execution_preserves_pre_mask_normalization_and_84_fingerprint_cases() {
     for (text, count) in [
-        (include_str!("../../../test-dsl/fixtures/pre-mask.json"), 22),
         (
-            include_str!("../../../test-dsl/fixtures/pre-normalize.json"),
+            include_str!("../../../../test-dsl/fixtures/pre-mask.json"),
+            22,
+        ),
+        (
+            include_str!("../../../../test-dsl/fixtures/pre-normalize.json"),
             38,
         ),
         (
-            include_str!("../../../test-dsl/fixtures/pre-integration-fingerprints.json"),
+            include_str!("../../../../test-dsl/fixtures/pre-integration-fingerprints.json"),
             84,
         ),
     ] {

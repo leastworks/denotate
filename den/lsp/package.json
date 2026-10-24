@@ -1,7 +1,7 @@
 {
-  "name": "denotate-tree-sitter-prototype",
-  "displayName": "Denotate IR (Tree-sitter prototype)",
-  "description": "Experimental Denotate IR editor — Rust/Tree-sitter frontend",
+  "name": "denotate",
+  "displayName": "Denotate",
+  "description": "Denotate .den editor: checking, navigation and origins",
   "version": "0.0.1",
   "publisher": "denotate",
   "private": true,
@@ -20,9 +20,9 @@
     ]
   },
   "scripts": {
-    "generate": "cd grammar && tree-sitter generate",
-    "build": "npm run generate && cargo +1.93.0 build --manifest-path ../native/Cargo.toml --locked -p denotate-tree-sitter --release && node build.mjs",
-    "test": "npm run generate && cargo +1.93.0 test --manifest-path ../native/Cargo.toml --locked -p denotate-tree-sitter",
+    "generate": "cd ../grammar && tree-sitter generate",
+    "build": "npm run generate && cargo +1.93.0 build --manifest-path ../../native/Cargo.toml --locked -p denotate-lsp --release && node build.mjs",
+    "test": "npm run generate && cargo +1.93.0 test --manifest-path ../../native/Cargo.toml --locked -p denotate-lsp",
     "test:origins": "node --test tests/origin-navigation.cjs",
     "test:lsp": "npm run build && node scripts/test-lsp.mjs",
     "test:vscode": "npm run build && node scripts/run-vscode-smoke.mjs"
