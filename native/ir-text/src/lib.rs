@@ -3,9 +3,16 @@
 mod ast;
 pub mod filesystem;
 mod load;
+mod locations;
 mod membership;
-pub use load::{Assumption, DocumentInfo, LoadedProgram, load};
+pub mod origins;
+mod print;
+pub use load::{Assumption, DocumentInfo, LoadedProgram, load, load_with_resolver};
 pub use membership::{ActiveRoot, ProgramMembership, RootInfo, roots};
+pub use print::{
+    ExportAssumption, ExportBundle, ExportError, ExportFile, ExportLayout, ExportProgram,
+    Ownership, PrintOptions, print,
+};
 
 use std::{ops::Range, sync::Arc};
 use tree_sitter::{Language, Parser};

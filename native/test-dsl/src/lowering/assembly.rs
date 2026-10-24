@@ -27,6 +27,10 @@ pub fn assemble<R: std::borrow::Borrow<Recipe>>(
     }
     let mut corpus = Corpus::new();
     let library = library::build(&mut corpus)?;
+    let mut placements = denotate_ir::top_level(&corpus)
+        .into_iter()
+        .map(|id| (id, FilePlacement::Library))
+        .collect::<BTreeMap<_, _>>();
     let start = std::time::Instant::now();
     let mut keys = keys::library(&corpus, &library)?;
     let mut key_computation = start.elapsed();
@@ -56,6 +60,7 @@ pub fn assemble<R: std::borrow::Borrow<Recipe>>(
         .collect::<Result<BTreeMap<_, _>>>()?;
     let start = std::time::Instant::now();
     for id in integers.values() {
+        placements.insert((*id).into(), FilePlacement::Shared);
         keys::constant(&mut keys, &corpus, *id)?;
     }
     key_computation += start.elapsed();
@@ -83,6 +88,10 @@ pub fn assemble<R: std::borrow::Borrow<Recipe>>(
                 keys::constant(&mut keys, &corpus, constant)?;
                 key_computation += start.elapsed();
                 constants.insert((*kind, name.clone()), constant);
+                placements.insert(
+                    constant.into(),
+                    FilePlacement::Source(source.span(&AstPath::DeclaredName(index))?.snapshot()),
+                );
                 attribution.provenance.attach(
                     &corpus,
                     sources,
@@ -135,6 +144,16 @@ pub fn assemble<R: std::borrow::Borrow<Recipe>>(
             binding,
         )
         .map_err(failure)?;
+        for id in installed
+            .occurrences()
+            .values()
+            .filter(|id| corpus.namespace(**id).is_some())
+        {
+            placements.insert(
+                *id,
+                FilePlacement::Source(source.span(&AstPath::Statement)?.snapshot()),
+            );
+        }
         let start = std::time::Instant::now();
         keys::installed(&mut keys, &corpus, &source.key, recipe, &installed)?;
         key_computation += start.elapsed();
@@ -191,6 +210,7 @@ pub fn assemble<R: std::borrow::Borrow<Recipe>>(
     keys.validate(&corpus)?;
     key_computation += start.elapsed();
     Ok(LoweredProgram {
+        placements,
         keys,
         key_computation,
         corpus,

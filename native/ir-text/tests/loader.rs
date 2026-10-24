@@ -304,7 +304,7 @@ fn stable_keys_and_warm_answers_ignore_trivia_and_location_syntax() {
         "module m; sort S; const a,b:S; input p(x:S); relation r(x:S); r(X) :- p(X); r(X) :- p(X); obligation u: at_most_one(r, group_by: ());",
     );
     let warm = single(
-        "// shifted\nmodule m; sort S; const a,b:S; input p(x:S); relation r(x:S); r( X ) :- p(X) loc(#map);\nr(X) :- p( X ); obligation u: at_most_one(r, group_by: ()); #map = {head.0: loc(range(#dsl,1,1,1,2))}; source #dsl = \"file:///original.dsl\" view \"dsl\" hash \"sha256:pending\";",
+        "// shifted\nmodule m; sort S; const a,b:S; input p(x:S); relation r(x:S); r( X ) :- p(X) loc(#map);\nr(X) :- p( X ); obligation u: at_most_one(r, group_by: ()); #map = {head.0: loc(#dsl 1:1 to 1:2)}; #dsl = source(\"file:///original.dsl\", view: \"dsl\", hash: \"sha256:0000000000000000000000000000000000000000000000000000000000000000\");",
     );
     assert_eq!(keys(&cold), keys(&warm));
     let rules = cold
@@ -826,8 +826,8 @@ fn file_scoped_namespaces_allow_only_imports_before_the_header_and_aliases_agree
             "domain S=[];",
             "obligation w: at_most_one(p, group_by: ());",
             "assumption w: at_most_one(p, group_by: ());",
-            "source #s = \"file:///source\" view \"dsl\" hash \"pending\";",
-            "#origin = loc(range(#s,1,1,1,2));",
+            "#s = source(\"file:///source\", view: \"dsl\", hash: \"sha256:0000000000000000000000000000000000000000000000000000000000000000\");",
+            "#origin = loc(#s 1:1 to 1:2);",
         ] {
             let code = format!("use lib; {prefix} // before header\n{header} relation local();");
             // The shared grammar rejects it too, so B reports a syntax error.

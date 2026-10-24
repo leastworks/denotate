@@ -236,6 +236,17 @@ pub struct Corpus {
     namespaces: BTreeMap<OccurrenceId, Namespace>,
 }
 
+/// Top-level declarations, rules and obligations, excluding atom/term occurrences.
+/// Each kind retains corpus order; this does not impose a semantic global order.
+pub fn top_level(c: &Corpus) -> Vec<OccurrenceId> {
+    c.sorts()
+        .map(|x| x.id.into())
+        .chain(c.constants().map(|x| x.id.into()))
+        .chain(c.relations().map(|x| x.id.into()))
+        .chain(c.rules().map(|x| x.id.into()))
+        .chain(c.obligations().map(|x| x.id.into()))
+        .collect()
+}
 impl Default for Corpus {
     fn default() -> Self {
         Self {

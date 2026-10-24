@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-fn uri(path: &Path) -> String {
+pub fn uri(path: &Path) -> String {
     let escaped = path
         .as_os_str()
         .as_encoded_bytes()
@@ -146,4 +146,59 @@ pub fn discover(root: &Path) -> Result<(ProgramMembership, Vec<SourceFile>)> {
         },
         sources,
     ))
+}
+
+/// Command-only resolver. Editors supply their own authoritative-buffer resolver.
+pub struct FileOriginResolver;
+impl crate::origins::OriginResolver for FileOriginResolver {
+    fn resolve(
+        &mut self,
+        source: &crate::origins::SourceIdentity,
+    ) -> std::result::Result<std::sync::Arc<str>, crate::origins::Unavailable> {
+        use crate::origins::Unavailable;
+        let path = source.uri.strip_prefix("file://").ok_or_else(|| {
+            Unavailable::Inaccessible("Non-file URI; supply a caller resolver".into())
+        })?;
+        let path = path
+            .strip_prefix("localhost/")
+            .map(|p| format!("/{p}"))
+            .unwrap_or_else(|| path.to_owned());
+        if !path.starts_with('/') {
+            return Err(Unavailable::Inaccessible("Nonlocal file URI".into()));
+        }
+        let mut bytes = Vec::new();
+        let mut i = 0;
+        while i < path.len() {
+            if path.as_bytes()[i] == b'%' {
+                let pair = path
+                    .get(i + 1..i + 3)
+                    .ok_or_else(|| Unavailable::Inaccessible("Invalid URI escape".into()))?;
+                bytes.push(
+                    u8::from_str_radix(pair, 16)
+                        .map_err(|_| Unavailable::Inaccessible("Invalid URI escape".into()))?,
+                );
+                i += 3;
+            } else {
+                bytes.push(path.as_bytes()[i]);
+                i += 1;
+            }
+        }
+        #[cfg(unix)]
+        let path = {
+            use std::os::unix::ffi::OsStringExt;
+            PathBuf::from(std::ffi::OsString::from_vec(bytes))
+        };
+        #[cfg(not(unix))]
+        let path = PathBuf::from(
+            String::from_utf8(bytes)
+                .map_err(|_| Unavailable::Inaccessible("Invalid UTF-8 path".into()))?,
+        );
+        fs::read_to_string(path).map(Into::into).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                Unavailable::Missing
+            } else {
+                Unavailable::Inaccessible(e.to_string())
+            }
+        })
+    }
 }

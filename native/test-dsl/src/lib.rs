@@ -10,3 +10,5 @@ pub mod lowering;
 pub mod presentation;
 pub mod syntax;
 pub mod warnings;
+
+pub mod export;

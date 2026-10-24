@@ -3,7 +3,7 @@ use denotate_check::{
     BackendIdentity, Limits, LocalCheckOutcome, OperationalLimits, RequestPreparation,
 };
 use denotate_check_session::Session;
-use denotate_ir_text::{filesystem, load};
+use denotate_ir_text::{filesystem, load_with_resolver};
 
 fn run() -> Result<(), String> {
     let mut args = std::env::args().skip(1);
@@ -32,15 +32,23 @@ fn run() -> Result<(), String> {
     };
     let (membership, sources) =
         filesystem::discover(std::path::Path::new(&root)).map_err(format_errors)?;
-    let p = load(&membership, &sources).map_err(format_errors)?;
+    let p = load_with_resolver(
+        &membership,
+        &sources,
+        Some(&mut filesystem::FileOriginResolver),
+    )
+    .map_err(format_errors)?;
     println!(
         "Root: {}. Backend: {}. Files: {}.",
         p.root,
         backend.backend,
         p.documents.len()
     );
-    if p.documents.iter().any(|m| !m.location_syntax.is_empty()) {
-        println!("Provenance: .den only; embedded DSL origins are not restored yet.");
+    for notice in &p.embedded.notices {
+        println!(
+            "Origin unavailable: {} [{} {}]: {:?}",
+            notice.source.uri, notice.source.view, notice.source.hash, notice.reason
+        );
     }
     println!(
         "Active assumptions: {:?}",

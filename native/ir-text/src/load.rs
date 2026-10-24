@@ -24,6 +24,7 @@ pub struct DocumentInfo {
 }
 #[derive(Clone, Debug)]
 pub struct Assumption {
+    pub namespace: Namespace,
     pub name: QualifiedKey,
     pub constraint: InputAtMostOne,
     pub location: SourceSpan,
@@ -34,7 +35,9 @@ pub struct LoadedProgram {
     pub corpus: Corpus,
     pub keys: SemanticKeys,
     pub sources: Sources,
+    /// Exact current .den origins; upstream associations remain separate.
     pub provenance: Provenance,
+    pub embedded: crate::origins::EmbeddedOrigins,
     pub domains: Domains,
     pub assumptions: Vec<Assumption>,
     pub documents: Vec<DocumentInfo>,
@@ -440,6 +443,14 @@ impl Builder {
 /// Load the explicitly supplied program. `use` affects lookup only. All
 /// declaration passes precede rule installation, independently of file order.
 pub fn load(membership: &ProgramMembership, documents: &[SourceFile]) -> Result<LoadedProgram> {
+    load_with_resolver(membership, documents, None)
+}
+
+pub fn load_with_resolver(
+    membership: &ProgramMembership,
+    documents: &[SourceFile],
+    resolver: Option<&mut dyn crate::origins::OriginResolver>,
+) -> Result<LoadedProgram> {
     let members = membership.members()?;
     let mut sources = BTreeMap::<String, &SourceFile>::new();
     for source in documents.iter().filter(|s| members.contains_key(&s.uri)) {
@@ -490,6 +501,7 @@ pub fn load(membership: &ProgramMembership, documents: &[SourceFile]) -> Result<
             keys: SemanticKeys::default(),
             sources: Sources::new(),
             provenance: Provenance::new(),
+            embedded: Default::default(),
             domains: BTreeMap::new(),
             assumptions: Vec::new(),
             documents: Vec::new(),
@@ -754,6 +766,7 @@ pub fn load(membership: &ProgramMembership, documents: &[SourceFile]) -> Result<
                             ));
                         }
                         b.program.assumptions.push(Assumption {
+                            namespace: module.clone(),
                             name: QualifiedKey::new(namespace_key(module), name.text.as_str()),
                             constraint: InputAtMostOne {
                                 relation: id,
@@ -823,5 +836,6 @@ pub fn load(membership: &ProgramMembership, documents: &[SourceFile]) -> Result<
             message: e.to_string(),
         }]
     })?;
+    crate::locations::restore(&mut b.program, documents, resolver)?;
     Ok(b.program)
 }

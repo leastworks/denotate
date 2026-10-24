@@ -86,7 +86,16 @@ impl fmt::Display for LoweringFailure {
 }
 impl std::error::Error for LoweringFailure {}
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FilePlacement {
+    Library,
+    Shared,
+    Source(SnapshotId),
+}
+
 pub struct LoweredProgram {
+    /// Explicit installation placement, independent of namespace and provenance.
+    pub placements: std::collections::BTreeMap<OccurrenceId, FilePlacement>,
     pub keys: SemanticKeys,
     /// Time spent constructing and validating the installation key side table.
     pub key_computation: std::time::Duration,

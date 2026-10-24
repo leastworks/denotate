@@ -6,6 +6,7 @@ rust-version = "1.93"
 publish = false
 
 [dependencies]
+denotate-ir-text = { path = "../ir-text" }
 denotate-ir = { path = "../ir" }
 denotate-normalize = { path = "../normalize" }
 denotate-check = { path = "../check" }

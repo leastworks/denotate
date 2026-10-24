@@ -19,6 +19,11 @@ test-native:
 score-inputmapping +args:
     cargo +1.93.0 run --release --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-check-session --features test-support --example scorecard -- "$@"
 
+# Export one combined InputMapping program: OUT_DIR FILE... [--without-origins].
+[positional-arguments]
+export-inputmapping +args:
+    cargo +1.93.0 run --manifest-path frontend-prototype/native/Cargo.toml --locked -p denotate-test-dsl --example export -- "$@"
+
 # Load and check a folder-rooted .den program: ROOT_FOLDER_OR_DEN.ROOT [--sat].
 [positional-arguments]
 check-den +args:

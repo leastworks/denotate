@@ -123,6 +123,10 @@ impl Sources {
             .ok_or(ProvenanceError::UnknownSnapshot(id))
     }
 
+    pub fn snapshots(&self) -> impl Iterator<Item = &SourceSnapshot> {
+        self.snapshots.iter()
+    }
+
     pub fn span(&self, snapshot: SnapshotId, bytes: Range<usize>) -> Result<SourceSpan> {
         let source = self.snapshot(snapshot)?;
         if source.text.get(bytes.clone()).is_none() {

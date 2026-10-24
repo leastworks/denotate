@@ -121,6 +121,8 @@ pub fn lower(program: &Program, sources: &Sources) -> Result<LoweringOutcome> {
         // not implement the new identity layer it is compared against.
         keys: denotate_ir::SemanticKeys::default(),
         key_computation: std::time::Duration::ZERO,
+        // This historical oracle predates export and is never printed.
+        placements: Default::default(),
         corpus: lowerer.corpus,
         library: lowerer.library,
         attribution: lowerer.attribution,

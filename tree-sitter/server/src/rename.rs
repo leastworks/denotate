@@ -263,8 +263,8 @@ mod tests {
             "obligation unique: at_most_one(r, group_by: ());",
             "input p(x:S); assumption unique: at_most_one(p, group_by: ());",
             "r(a) loc(#origin);",
-            "source #s = \"file:///x\" view \"dsl\" hash \"pending\";",
-            "#origin = loc(range(#s,1,1,1,2));",
+            "#s = source(\"file:///x\", view: \"dsl\", hash: \"sha256:0000000000000000000000000000000000000000000000000000000000000000\");",
+            "#origin = loc(#s 1:1 to 1:2);",
         ] {
             let mut parser = crate::syntax::parser();
             let documents = HashMap::from([

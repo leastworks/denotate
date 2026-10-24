@@ -130,6 +130,58 @@
     }
   },
   {
+    "type": "compact_entry",
+    "named": true,
+    "fields": {
+      "position": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "occurrence_position",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "coordinate_range",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "compact_map",
+    "named": true,
+    "fields": {
+      "source": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "alias",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "compact_entry",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "constants",
     "named": true,
     "fields": {
@@ -183,6 +235,58 @@
           "named": true
         }
       ]
+    }
+  },
+  {
+    "type": "coordinate",
+    "named": true,
+    "fields": {
+      "column": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "natural",
+            "named": true
+          }
+        ]
+      },
+      "line": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "natural",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
+    "type": "coordinate_range",
+    "named": true,
+    "fields": {
+      "end": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "coordinate",
+            "named": true
+          }
+        ]
+      },
+      "start": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "coordinate",
+            "named": true
+          }
+        ]
+      }
     }
   },
   {
@@ -268,6 +372,10 @@
       "required": true,
       "types": [
         {
+          "type": "compact_map",
+          "named": true
+        },
+        {
           "type": "location_value",
           "named": true
         }
@@ -290,15 +398,15 @@
       }
     },
     "children": {
-      "multiple": true,
-      "required": false,
+      "multiple": false,
+      "required": true,
       "types": [
         {
           "type": "location",
           "named": true
         },
         {
-          "type": "location_entry",
+          "type": "occurrence_map",
           "named": true
         }
       ]
@@ -347,7 +455,7 @@
           "named": true
         },
         {
-          "type": "natural",
+          "type": "source_range",
           "named": true
         }
       ]
@@ -505,6 +613,21 @@
         },
         {
           "type": "location",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "occurrence_map",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": false,
+      "types": [
+        {
+          "type": "location_entry",
           "named": true
         }
       ]
@@ -799,6 +922,32 @@
     }
   },
   {
+    "type": "source_range",
+    "named": true,
+    "fields": {
+      "source": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "alias",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": true,
+      "types": [
+        {
+          "type": "coordinate_range",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "statement",
     "named": true,
     "fields": {
@@ -989,10 +1138,6 @@
     "named": true
   },
   {
-    "type": "range",
-    "named": false
-  },
-  {
     "type": "relation",
     "named": false
   },
@@ -1007,6 +1152,10 @@
   {
     "type": "string",
     "named": true
+  },
+  {
+    "type": "to",
+    "named": false
   },
   {
     "type": "use",
