@@ -137,14 +137,11 @@ namespace b {
     );
     assert_eq!(symbols.as_array().unwrap().len(), 4);
     assert!(!symbols[0]["children"].as_array().unwrap().is_empty());
-    let guarded = c.request_reply(
+    let prepared = c.request(
         "textDocument/prepareRename",
         json!({"textDocument":{"uri":uri},"position":position(text,"relation r",9)}),
     );
-    assert!(guarded["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("stage 6"));
+    assert_eq!(prepared["start"], position(text, "relation r", 9));
     c.shutdown();
 }
 #[test]

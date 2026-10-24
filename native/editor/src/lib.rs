@@ -6,6 +6,7 @@ pub mod presentation;
 mod synchronization;
 pub mod test_support;
 pub mod transport;
+pub mod workspace_edit;
 
 pub use document::{parser, Document};
 pub use synchronization::Documents;

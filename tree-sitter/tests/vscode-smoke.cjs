@@ -207,6 +207,28 @@ obligation unique: at_most_one(p, group_by: ());`;
     assert.equal(bomDoc.getText(vscode.window.activeTextEditor.selection), '😀x');
     await replace(checkedDoc, checkedText);
 
+    // Stage 6 uses the actual rename provider and applies its versioned edits
+    // over global syntax, contracts and origins. Uppercase constants stay quoted.
+    await replace(checkedDoc, checkedText);
+    const constantAt = checkedDoc.positionAt(checkedDoc.getText().indexOf('a,b:S'));
+    const quotedRename = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', checkedUri, constantAt, 'I');
+    assert.ok(await vscode.workspace.applyEdit(quotedRename));
+    assert.ok(checkedDoc.getText().includes("const 'I',b:S"));
+    assert.ok(checkedDoc.getText().includes("p('I') loc(#s 1:1 to 1:6)"));
+    assert.ok(checkedDoc.getText().includes(`hash:"${hash}"`));
+    await eventually(conflicts, ds => ds.length === 2, 'quoted constant rename preserves checked conflict');
+    const quotedAt = checkedDoc.positionAt(checkedDoc.getText().indexOf("'I',b:S"));
+    const preparedQuoted = await api.request('textDocument/prepareRename', { textDocument: { uri: checkedUri.toString() }, position: quotedAt });
+    assert.equal(preparedQuoted.placeholder, 'I');
+    const quotedUndo = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', checkedUri, quotedAt, 'a');
+    assert.ok(await vscode.workspace.applyEdit(quotedUndo));
+    assert.equal(checkedDoc.getText(), checkedText);
+    const parameterAt = checkedDoc.positionAt(checkedText.indexOf('x:S'));
+    const parameterRename = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', checkedUri, parameterAt, 'column name');
+    assert.ok(await vscode.workspace.applyEdit(parameterRename));
+    assert.ok(checkedDoc.getText().includes("p('column name':S)"));
+    await replace(checkedDoc, checkedText);
+
     // No implicit workspace root: create a standalone document outside the
     // existing root, then exercise both default and explicit destination creation.
     const temp = await require('node:fs/promises').mkdtemp(require('node:path').join(require('node:os').tmpdir(), 'denotate-root-smoke-'));
@@ -242,5 +264,5 @@ obligation unique: at_most_one(p, group_by: ());`;
     await vscode.workspace.fs.writeFile(externalUri, Buffer.from('namespace external; relation r();'));
     await eventually(() => vscode.commands.executeCommand('vscode.executeDefinitionProvider', consumerUri, new vscode.Position(0,1)), refs => refs?.length === 1, 'external library watcher repairs declarations');
     await replace(rootDoc, rootText);
-    console.log('Denotate stage-5 smoke passed: Go to Origin on matching dirty buffers, changed-buffer refusal and Unicode/CRLF selections; checked dirty buffers and origin links; roots, dirty manifests, authoritative DSL buffers, quick fixes;  syntax/repair, outline, definition/completion, references, hover/signatures, applied cross-file rename round trip and idempotent formatting.');
+    console.log('Denotate stage-6 smoke passed: validated quoted constant/parameter rename and checked round trip; Go to Origin on matching dirty buffers, changed-buffer refusal and Unicode/CRLF selections; checked dirty buffers and origin links; roots, dirty manifests, authoritative DSL buffers, quick fixes;  syntax/repair, outline, definition/completion, references, hover/signatures, applied cross-file rename round trip and idempotent formatting.');
 };

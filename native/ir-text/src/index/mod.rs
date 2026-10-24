@@ -8,6 +8,28 @@ pub use projection::{Projection, Token};
 pub use queries::Index;
 use std::{collections::BTreeSet, ops::Range};
 
+/// Exact name segments, excluding a leading global `::`. Quoted separators and
+/// escapes use the loader's path tokenizer, not display-string splitting.
+pub fn name_segments(raw: &str) -> Vec<Range<usize>> {
+    let mut offset = 0;
+    crate::ast::path_parts(raw)
+        .into_iter()
+        .filter_map(|part| {
+            let span = offset..offset + part.len();
+            offset += part.len() + 2;
+            (!part.is_empty()).then_some(span)
+        })
+        .collect()
+}
+
+/// Decode a namespace path using the same rules as strict loading.
+pub fn namespace_path(
+    source: &crate::SourceFile,
+    node: tree_sitter::Node<'_>,
+) -> crate::Result<Namespace> {
+    crate::ast::namespace_path(source, node)
+}
+
 /// The same visibility rule is used by strict loading and editor queries.
 /// Enclosing scopes are candidates, not shadowing layers.
 pub(crate) fn visible_namespaces<'a>(

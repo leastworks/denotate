@@ -237,7 +237,7 @@ fn syntax_errors(source: &SourceFile, root: Node<'_>, out: &mut Vec<crate::Diagn
 }
 
 // Delimit only outside quoted segments, retaining escaped quotes verbatim.
-fn path_parts(raw: &str) -> Vec<&str> {
+pub(crate) fn path_parts(raw: &str) -> Vec<&str> {
     let (mut quoted, mut escaped, mut start) = (false, false, 0);
     let mut parts = Vec::new();
     for (i, c) in raw.char_indices() {

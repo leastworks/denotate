@@ -567,24 +567,21 @@ impl Server {
                     "textDocument/signatureHelp" => {
                         self.semantics.signature_help(&uri, doc, params.position)
                     }
-                    "textDocument/prepareRename" | "textDocument/rename" => rename::rename(
-                        &self.semantics,
-                        &self.documents,
-                        &self.diagnostics,
-                        &self.roots,
-                        &uri,
-                        params.position,
-                        if request.method == "textDocument/rename" {
-                            Some(
-                                request.params["newName"]
-                                    .as_str()
-                                    .ok_or("Missing newName")?,
-                            )
-                        } else {
-                            None
-                        },
-                    )
-                    .map_err(|e| -> Box<dyn Error> { e.into() })?,
+                    "textDocument/prepareRename" | "textDocument/rename" => self
+                        .rename_at(
+                            &uri,
+                            params.position,
+                            if request.method == "textDocument/rename" {
+                                Some(
+                                    request.params["newName"]
+                                        .as_str()
+                                        .ok_or("Missing newName")?,
+                                )
+                            } else {
+                                None
+                            },
+                        )
+                        .map_err(|e| -> Box<dyn Error> { e.into() })?,
                     _ => self.semantics.completion(&uri, doc, params.position),
                 })
             }

@@ -1,6 +1,9 @@
 mod support;
 use serde_json::{json, Value};
 use support::{apply_edits, Client};
+fn b_only() -> bool {
+    std::env::var("DENOTATE_BACKEND").as_deref() == Ok("tree-sitter")
+}
 
 fn params(uri: &str, source: &str, needle: &str, name: &str) -> Value {
     let prefix = &source[..source.find(needle).unwrap()];
@@ -151,20 +154,34 @@ fn constants_keep_sort_identity_and_variables_stay_rule_local() {
         "supplies(S, D) :-\n    mapped_to(S, D),\n    present(S),\n    !masked(D);",
         "supplies(S, SlotValue) :-\n    mapped_to(S, SlotValue),\n    present(S),\n    !masked(SlotValue);"));
     for name in ["a", "_", "use", "bad-name"] {
-        rejected(
-            &mut client,
-            "textDocument/rename",
-            params(&lib_uri, &library, "D) :-\n    mapped_to", name),
-            "lexical class",
-        );
+        if b_only() {
+            client.request(
+                "textDocument/rename",
+                params(&lib_uri, &library, "D) :-\n    mapped_to", name),
+            );
+        } else {
+            rejected(
+                &mut client,
+                "textDocument/rename",
+                params(&lib_uri, &library, "D) :-\n    mapped_to", name),
+                "lexical class",
+            );
+        }
     }
     for name in ["D", "_", "module"] {
-        rejected(
-            &mut client,
-            "textDocument/rename",
-            params(&uri, &source, "shared, shared", name),
-            "lexical class",
-        );
+        if b_only() {
+            client.request(
+                "textDocument/rename",
+                params(&uri, &source, "shared, shared", name),
+            );
+        } else {
+            rejected(
+                &mut client,
+                "textDocument/rename",
+                params(&uri, &source, "shared, shared", name),
+                "lexical class",
+            );
+        }
     }
     rejected(
         &mut client,
@@ -202,12 +219,16 @@ fn sort_and_input_rename_work_but_capture_and_module_rename_are_rejected() {
     let mut client = Client::start("base/00-valid");
     let (uri, source) = client.open("computation.den");
     for method in ["textDocument/prepareRename", "textDocument/rename"] {
-        rejected(
-            &mut client,
-            method,
-            params(&uri, &source, "source: Source", "origin"),
-            "Parameter rename is not supported",
-        );
+        if b_only() {
+            client.request(method, params(&uri, &source, "source: Source", "origin"));
+        } else {
+            rejected(
+                &mut client,
+                method,
+                params(&uri, &source, "source: Source", "origin"),
+                "Parameter rename is not supported",
+            );
+        }
         rejected(
             &mut client,
             method,
@@ -245,12 +266,19 @@ fn sort_and_input_rename_work_but_capture_and_module_rename_are_rejected() {
         params(&uri, &source, "mapped_to(source", "available"),
         "collide",
     );
-    rejected(
-        &mut client,
-        "textDocument/prepareRename",
-        params(&uri, &source, "computation;", "other"),
-        "module rename",
-    );
+    if b_only() {
+        client.request(
+            "textDocument/prepareRename",
+            params(&uri, &source, "computation;", "other"),
+        );
+    } else {
+        rejected(
+            &mut client,
+            "textDocument/prepareRename",
+            params(&uri, &source, "computation;", "other"),
+            "module rename",
+        );
+    }
     client.shutdown();
 }
 
@@ -365,4 +393,319 @@ fn generated_and_external_files_are_not_rename_targets() {
         "outside the workspace",
     );
     client.shutdown();
+}
+
+#[test]
+fn full_ir_rename_quotes_by_kind_and_covers_contracts_domains_helpers_and_aliases() {
+    if !b_only() {
+        return;
+    }
+    let mut c = Client::start("base/00-valid");
+    let (uri, _) = c.open("example.den");
+    let text = r#"namespace 'a::b' {
+sort S; const a, 1:S;
+input p(x:S, y:S); relation r(x:S, y:S);
+relation $gate(); relation '$gate'(); $gate(); '$gate'();
+r(a,1); r(X,Y) :- p(X,Y);
+domain S=[a,1];
+obligation unique: at_most_one(r, group_by: (x));
+assumption inputs: at_most_one(p, group_by: (x));
+#src=source("file:///a/r/x.inputmapping",view:"r",hash:"sha256:0000000000000000000000000000000000000000000000000000000000000000");
+#origin=loc(#src 1:1 to 1:2);
+r(a,1) loc(#origin);
+}
+namespace consumer { use 'a::b'; 'a::b'::r('a::b'::a, 'a::b'::1); }
+"#;
+    c.change(&uri, 2, text);
+    let mut version = 2;
+    for (needle, name, replacement, count) in [
+        ("r(x:S", "two words", "'two words'", 6),
+        ("a, 1:S", "I", "'I'", 5),
+        ("1:S", "007", "'007'", 5),
+        ("X,Y", "lower case", "?'lower case'", 2),
+        ("$gate();", "$condition_2", "$condition_2", 2),
+        ("'$gate'();", "$condition_2", "'$condition_2'", 2),
+        ("x:S, y:S); relation", "input slot", "'input slot'", 2),
+        ("#src=", "renamed", "#renamed", 2),
+        ("#origin=", "#renamed", "#renamed", 2),
+        ("unique:", "new obligation", "'new obligation'", 1),
+    ] {
+        let result = c.request("textDocument/rename", params(&uri, text, needle, name));
+        assert_eq!(edits(&result), count, "{needle}: {result}");
+        assert!(result["documentChanges"][0]["edits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["newText"] == replacement));
+        let changed = apply_file(text, &result, &uri);
+        assert!(changed.contains("file:///a/r/x.inputmapping"));
+        assert!(changed.contains("view:\"r\""));
+        assert!(changed.contains("1:1 to 1:2"));
+        version += 1;
+        c.change(&uri, version, &changed);
+        // Validate the actual applied version, then reset for the next independent rename.
+        let errors = c.diagnostics(&uri).to_string();
+        assert!(
+            !errors.contains("denotate-syntax") && !errors.contains("resolution"),
+            "{changed}\n{errors}"
+        );
+        version += 1;
+        c.change(&uri, version, text);
+    }
+    c.shutdown();
+}
+
+fn root_files(c: &mut Client, files: &[(&str, &str)]) {
+    for (file, text) in files {
+        let path = c.workspace.path().join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    let changes = files
+        .iter()
+        .map(|(f, _)| json!({"uri":support::file_uri(&c.workspace.path().join(f)),"type":1}))
+        .collect::<Vec<_>>();
+    c.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes":changes}),
+    );
+    c.request("denotate/test/idle", Value::Null);
+}
+
+#[test]
+fn shared_library_rename_includes_all_consumers_and_rejects_untouched_reference_capture() {
+    if !b_only() {
+        return;
+    }
+    let mut c = Client::start("base/00-valid");
+    let lib = "namespace shared; relation r(); r();";
+    let a = "namespace a; shared::r();";
+    let b = "namespace b; use shared; relation q(); q(); shared::r();";
+    root_files(
+        &mut c,
+        &[
+            ("lib/den.root", "{}"),
+            ("lib/code.den", lib),
+            ("a/den.root", r#"{"libraries":["../lib/den.root"]}"#),
+            ("a/code.den", a),
+            ("b/den.root", r#"{"libraries":["../lib/den.root"]}"#),
+            ("b/code.den", b),
+            ("other/den.root", "{}"),
+            ("other/code.den", "namespace other; broken(;"),
+        ],
+    );
+    let (a_uri, _) = c.open("a/code.den");
+    let (lib_uri, _) = c.open("lib/code.den");
+    let b_uri = support::file_uri(&c.workspace.path().join("b/code.den"));
+    // B is unopened, but its unedited q() would become ambiguous after r -> q.
+    let mut args = params(&a_uri, a, "shared::r", "q");
+    args["position"]["character"] = json!(a.find("shared::r").unwrap() + 8);
+    rejected(&mut c, "textDocument/rename", args.clone(), "collide");
+    args["newName"] = json!("renamed");
+    let result = c.request("textDocument/rename", args);
+    assert_eq!(edits(&result), 4);
+    assert_eq!(result["documentChanges"].as_array().unwrap().len(), 3);
+    assert_eq!(
+        apply_file(lib, &result, &lib_uri),
+        lib.replace("r()", "renamed()")
+    );
+    assert_eq!(
+        apply_file(a, &result, &a_uri),
+        a.replace("shared::r", "shared::renamed")
+    );
+    assert_eq!(
+        apply_file(b, &result, &b_uri),
+        b.replace("shared::r", "shared::renamed")
+    );
+    let closed = result["documentChanges"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["textDocument"]["uri"] == b_uri)
+        .unwrap();
+    assert!(closed["textDocument"]["version"].is_null());
+    // Damage in a consumer must block a library rename even when its home is clean.
+    let (b_uri, _) = c.open("b/code.den");
+    c.change(&b_uri, 2, "namespace b; shared::r(");
+    rejected(
+        &mut c,
+        "textDocument/prepareRename",
+        params(&lib_uri, lib, "r();", "renamed"),
+        "Repair diagnostics",
+    );
+    c.change(&b_uri, 3, b);
+    c.notify("textDocument/didChange",json!({"textDocument":{"uri":b_uri,"version":4},"contentChanges":[{"range":{"start":{"line":0,"character":5},"end":{"line":0,"character":1}},"text":"x"}]}));
+    rejected(
+        &mut c,
+        "textDocument/rename",
+        params(&lib_uri, lib, "r();", "renamed"),
+        "out of sync",
+    );
+    c.change(&b_uri, 5, b);
+    c.request(
+        "textDocument/rename",
+        params(&lib_uri, lib, "r();", "renamed"),
+    );
+    c.shutdown();
+}
+
+#[test]
+fn namespace_segment_rename_covers_split_nested_reopened_and_qualified_paths() {
+    if !b_only() {
+        return;
+    }
+    let mut c = Client::start("base/00-valid");
+    let first = "namespace alpha { namespace child { relation r(); r(); } } namespace alpha::child { relation q(); }";
+    let second = "namespace user; use alpha::child; alpha::child::r(); ::alpha::child::q();";
+    root_files(
+        &mut c,
+        &[
+            ("ns/den.root", "{}"),
+            ("ns/first.den", first),
+            ("ns/second.den", second),
+        ],
+    );
+    let (uri, _) = c.open("ns/first.den");
+    let (other, _) = c.open("ns/second.den");
+    let result = c.request(
+        "textDocument/rename",
+        params(&uri, first, "alpha {", "new::name"),
+    );
+    assert_eq!(
+        apply_file(first, &result, &uri),
+        first.replace("alpha", "'new::name'")
+    );
+    assert_eq!(
+        apply_file(second, &result, &other),
+        second.replace("alpha", "'new::name'")
+    );
+    let result = c.request(
+        "textDocument/rename",
+        params(&uri, first, "child {", "leaf"),
+    );
+    assert_eq!(
+        apply_file(first, &result, &uri),
+        first.replace("child", "leaf")
+    );
+    assert_eq!(
+        apply_file(second, &result, &other),
+        second.replace("child", "leaf")
+    );
+    let quoted = "namespace 'a::b' { relation r(); } 'a::b'::r();";
+    c.change(&uri, 2, quoted);
+    c.change(&other, 2, "namespace unused;");
+    let result = c.request(
+        "textDocument/rename",
+        params(&uri, quoted, "'a::b' {", "é'new"),
+    );
+    assert_eq!(
+        apply_file(quoted, &result, &uri),
+        quoted.replace("'a::b'", "'é\\'new'")
+    );
+    let collision = "namespace a { relation r(); } namespace b { relation q(); }";
+    c.change(&uri, 3, collision);
+    rejected(
+        &mut c,
+        "textDocument/rename",
+        params(&uri, collision, "a {", "b"),
+        "collide",
+    );
+    c.shutdown();
+}
+
+#[test]
+fn aliases_are_file_local_and_parameters_follow_their_relations_grouping_references() {
+    if !b_only() {
+        return;
+    }
+    let mut c = Client::start("base/00-valid");
+    let file = r#"namespace n;
+sort S; const a:S; relation r(x:S, y:S); input p(x:S, y:S);
+obligation o: at_most_one(r, group_by: (x));
+assumption w: at_most_one(p, group_by: (x));
+#s=source("file:///source.dsl",view:"dsl",hash:"sha256:0000000000000000000000000000000000000000000000000000000000000000");
+#map=loc(#s 1:1 to 1:2); r(a,a) loc(#map);
+"#;
+    root_files(
+        &mut c,
+        &[
+            ("local/den.root", "{}"),
+            ("local/one.den", file),
+            (
+                "local/two.den",
+                &file.replace("namespace n;", "namespace other;"),
+            ),
+        ],
+    );
+    let (uri, _) = c.open("local/one.den");
+    let result = c.request("textDocument/rename", params(&uri, file, "#s=", "source2"));
+    assert_eq!(edits(&result), 2);
+    assert_eq!(result["documentChanges"].as_array().unwrap().len(), 1);
+    let result = c.request(
+        "textDocument/rename",
+        params(&uri, file, "x:S, y:S); input", "column"),
+    );
+    assert_eq!(edits(&result), 2);
+    let changed = apply_file(file, &result, &uri);
+    assert!(changed.contains("relation r(column:S, y:S)"));
+    assert!(changed.contains("at_most_one(r, group_by: (column))"));
+    assert!(changed.contains("at_most_one(p, group_by: (x))"));
+    for (needle, name) in [("x:S, y:S); input", "y"), ("#map=", "#s")] {
+        rejected(
+            &mut c,
+            "textDocument/rename",
+            params(&uri, file, needle, name),
+            "collide",
+        );
+    }
+    c.shutdown();
+}
+
+#[test]
+fn damaged_manifests_and_read_only_consumers_prevent_partial_renames() {
+    if !b_only() {
+        return;
+    }
+    let mut c = Client::start("base/00-valid");
+    let lib = "namespace shared; relation r();";
+    root_files(
+        &mut c,
+        &[
+            ("lib/den.root", "{}"),
+            ("lib/lib.den", lib),
+            ("app/den.root", r#"{"libraries":["../lib/den.root"]}"#),
+            ("app/app.den", "shared::r();"),
+        ],
+    );
+    let (uri, _) = c.open("lib/lib.den");
+    let manifest = support::file_uri(&c.workspace.path().join("app/den.root"));
+    c.notify(
+        "denotate/manifest",
+        json!({"uri":manifest,"text":"{","version":1}),
+    );
+    rejected(
+        &mut c,
+        "textDocument/rename",
+        params(&uri, lib, "r();", "new"),
+        "manifest",
+    );
+    c.notify(
+        "denotate/manifest",
+        json!({"uri":manifest,"text":r#"{"libraries":["../lib/den.root"]}"#,"version":2}),
+    );
+    c.request("textDocument/rename", params(&uri, lib, "r();", "new"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let path = c.workspace.path().join("app/app.den");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o444)).unwrap();
+        rejected(
+            &mut c,
+            "textDocument/prepareRename",
+            params(&uri, lib, "r();", "new"),
+            "read-only",
+        );
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    c.shutdown();
 }
