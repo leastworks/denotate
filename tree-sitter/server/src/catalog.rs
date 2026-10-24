@@ -248,7 +248,7 @@ impl Catalog {
             .chain(self.resolution_errors.get(root).into_iter().flatten())
             .collect::<Vec<_>>();
         json!({"program":root, "state":if errors.is_empty() {"ready"} else {"invalid"},
-            "errors":errors, "checking":"not-enabled", "backend":null,"activeAssumptions":null})
+            "errors":errors})
     }
     pub fn status(&self, document: &str) -> Value {
         let home = self.home(document);
@@ -268,7 +268,7 @@ impl Catalog {
                 errors.push("Membership does not establish a unique home program".into());
             }
             json!({"state":if errors.is_empty() {"standalone"} else {"invalid"},
-                "errors":errors,"checking":"not-enabled","backend":null,"activeAssumptions":null})
+                "errors":errors})
         };
         status.as_object_mut().unwrap().remove("program");
         status["uri"] = json!(document);

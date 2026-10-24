@@ -3,8 +3,8 @@
 use denotate_ir::{SemanticKeys, SourceSpan, Sources};
 use denotate_presentation::{Diagnostic as Finding, Severity};
 use lsp_types::{
-    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString,
-    Position, Range, Url,
+    Diagnostic, DiagnosticRelatedInformation, DiagnosticSeverity, Location, NumberOrString, Range,
+    Url,
 };
 
 pub fn location(sources: &Sources, span: SourceSpan) -> Result<Location, String> {
@@ -12,25 +12,8 @@ pub fn location(sources: &Sources, span: SourceSpan) -> Result<Location, String>
     let snapshot = sources
         .snapshot(span.snapshot())
         .map_err(|e| e.to_string())?;
-    let position = |offset| {
-        let text = &snapshot.text[..offset];
-        let mut line = 0;
-        let mut start = 0;
-        let mut chars = text.char_indices().peekable();
-        while let Some((i, c)) = chars.next() {
-            if c == '\r' {
-                start = i + 1;
-                if chars.peek().is_some_and(|(_, c)| *c == '\n') {
-                    start = chars.next().unwrap().0 + 1;
-                }
-                line += 1;
-            } else if c == '\n' {
-                line += 1;
-                start = i + 1;
-            }
-        }
-        Position::new(line, text[start..].encode_utf16().count() as u32)
-    };
+    let lines = crate::document::line_starts(&snapshot.text);
+    let position = |offset| crate::document::position(&snapshot.text, &lines, offset);
     Ok(Location::new(
         Url::parse(&snapshot.uri).map_err(|e| e.to_string())?,
         Range::new(
@@ -83,6 +66,7 @@ pub fn diagnostic(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lsp_types::Position;
     #[test]
     fn immutable_unicode_crlf_and_cr_positions() {
         let mut sources = Sources::new();

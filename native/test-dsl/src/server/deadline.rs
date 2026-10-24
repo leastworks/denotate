@@ -16,6 +16,7 @@ fn server() -> Server {
         tests: true,
         hooks: TestHooks::default(),
         shutdown: false,
+        backend: denotate_check::BackendIdentity::bdd(),
     }
 }
 fn install(server: &mut Server, connection: &Connection, uri: &Url, version: i32) {

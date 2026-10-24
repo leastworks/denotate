@@ -118,6 +118,31 @@ exports.run = async function () {
     await replace(origin, 'saved source');
     await eventually(() => api.request('denotate/originStatus', { uri: originUri.toString() }), r => r.state === 'matching', 'matching dirty buffer is accepted');
 
+    // Actual checked findings must keep semantics and drop stale upstream links
+    // while a dirty DSL buffer differs from the exported content identity.
+    const checkedFolder = vscode.Uri.joinPath(folder, 'checked');
+    await vscode.workspace.fs.createDirectory(checkedFolder);
+    await vscode.workspace.fs.writeFile(vscode.Uri.joinPath(checkedFolder, 'den.root'), Buffer.from('{}'));
+    const checkedUri = vscode.Uri.joinPath(checkedFolder, 'program.den');
+    const checkedText = `sort S; const a,b:S; relation p(x:S);
+#s=source(${JSON.stringify(originUri.toString())},view:"dsl",hash:"${hash}");
+p(a) loc(#s 1:1 to 1:6); p(b) loc(#s 1:7 to 1:13);
+obligation unique: at_most_one(p, group_by: ());`;
+    await vscode.workspace.fs.writeFile(checkedUri, Buffer.from(checkedText));
+    const checkedDoc = await vscode.workspace.openTextDocument(checkedUri);
+    await vscode.window.showTextDocument(checkedDoc);
+    const conflicts = () => vscode.languages.getDiagnostics(checkedUri).filter(d => d.code === 'counterexample');
+    const links = ds => ds.flatMap(d => d.relatedInformation ?? []).filter(r => r.location.uri.toString() === originUri.toString());
+    await eventually(conflicts, ds => ds.length === 2 && links(ds).length >= 2, 'published conflict links to matching dirty DSL buffer');
+    await replace(origin, 'dirty source');
+    await eventually(async () => ({ status: await api.request('denotate/roots', { uri: checkedUri.toString() }), diagnostics: conflicts() }), r => r.status.checking === 'complete' && r.status.originNotices?.length === 1 && r.diagnostics.length === 2 && links(r.diagnostics).length === 0, 'dirty origin removes links and retains findings');
+    await replace(origin, 'saved source');
+    await eventually(conflicts, ds => ds.length === 2 && links(ds).length >= 2, 'matching dirty source restores checked links');
+    await replace(checkedDoc, checkedText.replace('p(b) loc(#s 1:7 to 1:13);', ''));
+    await eventually(async () => ({ status: await api.request('denotate/roots', { uri: checkedUri.toString() }), diagnostics: conflicts() }), r => r.status.checking === 'complete' && r.status.summary?.state === 'proved' && r.diagnostics.length === 0, 'dirty den member repairs conflict before save');
+    await replace(checkedDoc, checkedText);
+    await eventually(conflicts, ds => ds.length === 2, 'dirty den member restores conflict');
+
     // No implicit workspace root: create a standalone document outside the
     // existing root, then exercise both default and explicit destination creation.
     const temp = await require('node:fs/promises').mkdtemp(require('node:path').join(require('node:os').tmpdir(), 'denotate-root-smoke-'));
@@ -153,5 +178,5 @@ exports.run = async function () {
     await vscode.workspace.fs.writeFile(externalUri, Buffer.from('namespace external; relation r();'));
     await eventually(() => vscode.commands.executeCommand('vscode.executeDefinitionProvider', consumerUri, new vscode.Position(0,1)), refs => refs?.length === 1, 'external library watcher repairs declarations');
     await replace(rootDoc, rootText);
-    console.log('Denotate stage-2 smoke passed: roots, dirty manifests, authoritative DSL buffers, quick fixes;  syntax/repair, outline, definition/completion, references, hover/signatures, applied cross-file rename round trip and idempotent formatting.');
+    console.log('Denotate stage-4 smoke passed: checked dirty buffers and origin links; roots, dirty manifests, authoritative DSL buffers, quick fixes;  syntax/repair, outline, definition/completion, references, hover/signatures, applied cross-file rename round trip and idempotent formatting.');
 };

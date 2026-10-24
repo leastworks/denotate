@@ -1,7 +1,7 @@
 //! One serial checking worker. The server owns coalescing, cancellation and publication.
+use crate::analysis::{Failure, Output, Program};
 use crossbeam_channel::{Receiver, Sender, unbounded};
 use denotate_check::Limits;
-use denotate_test_dsl::analysis::{Failure, Output, Program};
 use lsp_types::Url;
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
@@ -25,6 +25,7 @@ pub struct Job {
     pub id: Identity,
     pub program: Program,
     pub limits: Limits,
+    pub backend: denotate_check::BackendIdentity,
     /// Test-only checkpoint, assigned by the server only in explicit test mode.
     pub hold: Option<Hold>,
     pub measure: bool,
@@ -69,10 +70,11 @@ impl Worker {
                         }
                     };
                     let start = job.measure.then(Instant::now);
-                    let result = job.program.check_cached(
+                    let result = job.program.check_with_backend(
                         &job.limits,
                         || checkpoint(HoldStage::AfterPrepare),
-                        session,
+                        job.backend,
+                        Some(session),
                     );
                     let check_ns =
                         start.map(|t| t.elapsed().as_nanos().min(u64::MAX as u128) as u64);

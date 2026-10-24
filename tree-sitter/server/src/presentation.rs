@@ -1,4 +1,4 @@
-//! Checked-result adapter, ready for the stage-4 publication gate. No scheduler
+//! Checked-result adapter. No scheduler
 //! or edits are implied by converting a snapshot-owned report.
 use denotate_check::CheckedReport;
 use denotate_ir_text::LoadedProgram;
@@ -6,19 +6,31 @@ use lsp_types::{Diagnostic, Url};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-#[allow(dead_code)] // Stage 4 installs the worker and freshness/publication gate.
 pub struct Publication {
     pub diagnostics: BTreeMap<Url, Vec<Diagnostic>>,
     pub status: Value,
 }
-#[allow(dead_code)]
 pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Publication, String> {
     let output =
         denotate_ir_text::presentation::present(program, report).map_err(|e| e.to_string())?;
     let mut diagnostics = BTreeMap::<_, Vec<_>>::new();
     for finding in output.diagnostics {
-        let (uri, diagnostic) =
+        let (uri, mut diagnostic) =
             denotate_editor::presentation::diagnostic(&finding, &program.sources, &program.keys)?;
+        let span_data = |span: denotate_ir::SourceSpan| -> Result<Value, String> {
+            let snapshot = program
+                .sources
+                .snapshot(span.snapshot())
+                .map_err(|e| e.to_string())?;
+            let range = span.byte_range();
+            Ok(
+                serde_json::json!({"uri":snapshot.uri,"view":snapshot.view,"hash":denotate_ir_text::origins::content_hash(&snapshot.text),"bytes":[range.start,range.end]}),
+            )
+        };
+        diagnostic.data.as_mut().unwrap()["locations"] = serde_json::json!({
+            "primary":span_data(finding.primary)?,
+            "related":finding.related.iter().map(|r|span_data(r.span)).collect::<Result<Vec<_>,_>>()?,
+        });
         diagnostics.entry(uri).or_default().push(diagnostic);
     }
     Ok(Publication {

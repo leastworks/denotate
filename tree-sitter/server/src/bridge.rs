@@ -5,7 +5,7 @@ use denotate_ir_text::origins::content_hash;
 use lsp_server::{Connection, Message, Request, Response};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Bridge {
     pub enabled: bool,
     known: BTreeMap<String, BTreeSet<String>>,
@@ -122,6 +122,23 @@ impl Bridge {
             snapshot["hash"] = json!(content_hash(snapshot["text"].as_str().unwrap()));
             self.snapshots.insert(uri, snapshot);
         }
+    }
+    pub fn snapshot_key(&self, members: &[String]) -> Value {
+        let uris = members
+            .iter()
+            .filter_map(|u| self.files.get(u))
+            .flat_map(|f| f.keys())
+            .collect::<BTreeSet<_>>();
+        json!(uris
+            .into_iter()
+            .map(|u| (u, (self.epochs.get(u), self.snapshots.get(u))))
+            .collect::<BTreeMap<_, _>>())
+    }
+    pub fn settled(&self) -> bool {
+        !self
+            .pending
+            .values()
+            .any(|(u, e)| self.epochs.get(u) == Some(e))
     }
     pub fn status(&self, uri: &str) -> Value {
         let Some(expected) = self.known.get(uri) else {

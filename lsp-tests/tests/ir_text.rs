@@ -471,3 +471,458 @@ fn consumer_ambiguity_is_attributed_to_the_app_and_library_home_stays_clean() {
     assert_eq!(c.diagnostics(&b), json!([]));
     c.shutdown();
 }
+
+const CONFLICT: &str = "sort S; const a,b:S; relation p(x:S); p(a); p(b); obligation unique: at_most_one(p, group_by: ());";
+fn checking_idle(c: &mut Client) {
+    c.request("denotate/test/checkingIdle", json!({}));
+}
+fn semantic_findings(c: &Client, uri: &str) -> Vec<Value> {
+    c.diagnostics(uri)
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["data"]["finding"].is_object())
+        .cloned()
+        .collect()
+}
+#[test]
+fn damage_and_repair_preserve_warm_library_and_consumer_sessions() {
+    if !b_only() {
+        return;
+    }
+    let mut c = Client::start("base/00-valid");
+    let base = c.workspace.path().to_owned();
+    for folder in ["lib", "app", "other"] {
+        std::fs::create_dir(base.join(folder)).unwrap();
+        std::fs::write(
+            base.join(folder).join("den.root"),
+            if folder == "lib" {
+                "{}"
+            } else {
+                r#"{"libraries":["../lib/den.root"]}"#
+            },
+        )
+        .unwrap();
+        std::fs::write(
+            base.join(folder).join("code.den"),
+            if folder == "lib" {
+                CONFLICT
+            } else {
+                "// library-only finding"
+            },
+        )
+        .unwrap();
+    }
+    let lib_root = support::file_uri(&base.join("lib/den.root"));
+    watched(&mut c, &lib_root, 1);
+    let (lib, _) = c.open("lib/code.den");
+    checking_idle(&mut c);
+    c.request("denotate/test/resetChecks", json!({}));
+    checking_idle(&mut c);
+    let program_roots = ["lib", "app", "other"].map(|folder| {
+        support::file_uri(&base.join(folder).join("den.root").canonicalize().unwrap())
+    });
+    let latest = |stats: &Value, root: &str| {
+        stats["finished"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .rev()
+            .find(|f| f["program"] == root && f["status"] == "published")
+            .unwrap()
+            .clone()
+    };
+    let cold = c.request("denotate/test/checkingStats", json!({}));
+    for root in &program_roots {
+        assert!(
+            latest(&cold, root)["cache"]["evaluationMisses"]
+                .as_u64()
+                .unwrap()
+                > 0
+        );
+    }
+    for damage in ["syntax", "manifest"] {
+        let before = c.request("denotate/test/checkingStats", json!({}));
+        if damage == "syntax" {
+            c.change(&lib, 2, &format!("{CONFLICT} p("));
+            // Continuing to type while blocked must neither enqueue work nor
+            // lose the retained state/session.
+            c.change(&lib, 3, &format!("{CONFLICT} p(a"));
+        } else {
+            manifest(&mut c, &lib_root, "{", 1);
+        }
+        checking_idle(&mut c);
+        assert!(semantic_findings(&c, &lib).is_empty(), "{damage}");
+        if damage == "syntax" {
+            assert!(!c.diagnostics(&lib).as_array().unwrap().is_empty());
+        }
+        for folder in ["lib", "app", "other"] {
+            let uri = support::file_uri(&base.join(folder).join("code.den"));
+            let status = roots(&mut c, &uri);
+            assert_eq!(status["checking"], "blocked", "{damage}: {status}");
+            assert_eq!(status["findings"], json!([]));
+        }
+        let blocked = c.request("denotate/test/checkingStats", json!({}));
+        assert_eq!(blocked["started"], before["started"], "{damage}");
+        assert_eq!(blocked["pending"], json!([]));
+        if damage == "syntax" {
+            c.change(&lib, 4, CONFLICT);
+        } else {
+            manifest(&mut c, &lib_root, "{}", 2);
+        }
+        checking_idle(&mut c);
+        let repaired = c.request("denotate/test/checkingStats", json!({}));
+        for root in &program_roots {
+            let previous = latest(&before, root);
+            let current = latest(&repaired, root);
+            assert!(current["revision"].as_u64() > previous["revision"].as_u64());
+            assert_eq!(current["summary"], previous["summary"], "{damage}: {root}");
+            let cache = &current["cache"];
+            assert_eq!(cache["evaluationMisses"], 0, "{damage}: {root}: {cache}");
+            assert_eq!(cache["verdictMisses"], 0, "{damage}: {root}: {cache}");
+            assert!(cache["evaluationHits"].as_u64().unwrap() > 0, "{cache}");
+            assert!(cache["verdictHits"].as_u64().unwrap() > 0, "{cache}");
+            assert!(semantic_findings(&c, &lib)
+                .iter()
+                .any(|d| d["data"]["program"] == *root));
+        }
+    }
+    // Actual catalog removal still releases the session. Rediscovery of the
+    // same root starts cold; keeping every session forever would fail this.
+    let app_path = base.join("app/den.root");
+    let app_root = support::file_uri(&app_path.canonicalize().unwrap());
+    let before = c.request("denotate/test/checkingStats", json!({}));
+    std::fs::remove_file(&app_path).unwrap();
+    watched(&mut c, &app_root, 3);
+    checking_idle(&mut c);
+    std::fs::write(&app_path, r#"{"libraries":["../lib/den.root"]}"#).unwrap();
+    watched(&mut c, &app_root, 1);
+    checking_idle(&mut c);
+    let restored = c.request("denotate/test/checkingStats", json!({}));
+    let current = latest(&restored, &app_root);
+    assert!(current["revision"].as_u64() > latest(&before, &app_root)["revision"].as_u64());
+    assert!(
+        current["cache"]["evaluationMisses"].as_u64().unwrap() > 0,
+        "{current}"
+    );
+    c.shutdown();
+}
+
+#[test]
+fn background_checks_publish_all_roots_and_preserve_labeled_library_fallbacks() {
+    if !b_only() {
+        return;
+    }
+    let mut c = Client::start("base/00-valid");
+    let base = c.workspace.path().to_owned();
+    for folder in ["lib", "app", "other"] {
+        std::fs::create_dir(base.join(folder)).unwrap();
+        std::fs::write(
+            base.join(folder).join("den.root"),
+            if folder == "lib" {
+                "{}"
+            } else {
+                r#"{"libraries":["../lib/den.root"]}"#
+            },
+        )
+        .unwrap();
+        std::fs::write(
+            base.join(folder).join("code.den"),
+            if folder == "lib" {
+                CONFLICT
+            } else {
+                "// library-only finding"
+            },
+        )
+        .unwrap();
+    }
+    c.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes":[{"uri":support::file_uri(&base.join("lib/den.root")),"type":1}]}),
+    );
+    let (lib, _) = c.open("lib/code.den");
+    checking_idle(&mut c);
+    let findings = semantic_findings(&c, &lib);
+    let programs = findings
+        .iter()
+        .filter(|d| d["data"]["kind"] == "counterexample")
+        .map(|d| d["data"]["program"].as_str().unwrap())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(programs.len(), 3, "{findings:?}");
+    for d in &findings {
+        if d["data"]["fallback"] == true {
+            assert!(
+                d["message"]
+                    .as_str()
+                    .unwrap()
+                    .starts_with("in app/den.root:")
+                    || d["message"]
+                        .as_str()
+                        .unwrap()
+                        .starts_with("in other/den.root:")
+            );
+        }
+    }
+    c.change(&lib,2,"sort S; const a:S; relation p(x:S); p(a); obligation unique: at_most_one(p, group_by: ());");
+    checking_idle(&mut c);
+    assert!(semantic_findings(&c, &lib).is_empty());
+    for folder in ["app", "other", "lib"] {
+        let status = c.request(
+            "denotate/roots",
+            json!({"uri":support::file_uri(&base.join(folder).join("code.den"))}),
+        );
+        assert_eq!(status["checking"], "complete");
+        assert_eq!(status["summary"]["state"], "proved");
+    }
+    c.shutdown();
+}
+#[test]
+fn completed_results_cannot_publish_after_member_manifest_config_dependency_or_home_changes() {
+    if !b_only() {
+        return;
+    }
+    for scenario in [
+        "member",
+        "manifest",
+        "config",
+        "dependency",
+        "home",
+        "sync",
+        "origin",
+        "syntax",
+    ] {
+        let mut c = Client::start_with_bridge("base/00-valid");
+        let base = c.workspace.path().to_owned();
+        std::fs::create_dir(base.join("app")).unwrap();
+        std::fs::create_dir(base.join("app/nested")).unwrap();
+        std::fs::create_dir(base.join("lib")).unwrap();
+        std::fs::write(base.join("lib/den.root"), "{}").unwrap();
+        std::fs::write(base.join("lib/code.den"), "relation helper();").unwrap();
+        std::fs::write(
+            base.join("app/den.root"),
+            r#"{"libraries":["../lib/den.root"]}"#,
+        )
+        .unwrap();
+        let text = if scenario == "origin" {
+            format!(
+                "{CONFLICT}\n#s=source(\"file:///changed.dsl\",view:\"dsl\",hash:\"sha256:{}\");",
+                "0".repeat(64)
+            )
+        } else {
+            CONFLICT.into()
+        };
+        std::fs::write(base.join("app/nested/code.den"), &text).unwrap();
+        c.notify(
+            "workspace/didChangeWatchedFiles",
+            json!({"changes":[{"uri":support::file_uri(&base.join("app/den.root")),"type":1}]}),
+        );
+        let (uri, _) = c.open("app/nested/code.den");
+        checking_idle(&mut c);
+        c.request("denotate/test/hold", json!({}));
+        c.change(&uri, 2, &format!("{text}\n// held"));
+        let held = c.notification("denotate/test/checkpoint");
+        let before = c.publications().len();
+        match scenario {
+            "member" => c.change(&uri,3,"relation fine(); fine();"),
+            "manifest" => c.notify("denotate/manifest",json!({"uri":support::file_uri(&base.join("app/den.root")),"version":1,"text":"{broken"})),
+            "config" => c.notify("workspace/didChangeConfiguration",json!({"settings":{"denotate":{"backend":"sat"}}})),
+            "dependency" => {std::fs::remove_file(base.join("lib/den.root")).unwrap(); c.notify("workspace/didChangeWatchedFiles",json!({"changes":[{"uri":support::file_uri(&base.join("lib/den.root")),"type":3}]}));},
+            "home" => c.notify("denotate/manifest",json!({"uri":support::file_uri(&base.join("app/nested/den.root")),"version":1,"text":"{}"})),
+            "sync" => c.notify("textDocument/didChange",json!({"textDocument":{"uri":uri,"version":3},"contentChanges":[{"range":{"start":{"line":0,"character":10},"end":{"line":0,"character":1}},"text":""}]})),
+            "origin" => c.notify("denotate/originChanged",json!({"uri":"file:///changed.dsl","generation":2})),
+            "syntax" => c.change(&uri,3,"sort S"),
+            _ => unreachable!(),
+        }
+        c.request("denotate/test/idle", json!({}));
+        let withdrawn = c.publications()[before..].iter().find(|p| {
+            p["uri"] == uri
+                && p["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|d| d["data"]["finding"].is_null())
+        });
+        assert!(
+            withdrawn.is_some(),
+            "{scenario}: must withdraw while pending/invalid"
+        );
+        c.request(
+            "denotate/test/release",
+            json!({"revision":held["revision"]}),
+        );
+        checking_idle(&mut c);
+        for publication in &c.publications()[before..] {
+            assert!(
+                publication["diagnostics"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|d| d["data"]["checkRevision"] != held["revision"]),
+                "{scenario}: stale diagnostic published"
+            );
+        }
+        if scenario == "syntax" {
+            assert!(c
+                .diagnostics(&uri)
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|d| d["source"] == "denotate-syntax"));
+        }
+        let stats = c.request("denotate/test/checkingStats", json!({}));
+        let finished = stats["finished"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["revision"] == held["revision"])
+            .unwrap();
+        assert_eq!(finished["status"], "discarded", "{scenario}");
+        c.shutdown();
+    }
+}
+#[test]
+fn queued_roots_keep_their_place_and_progress_after_cancellation_and_deadline() {
+    if !b_only() {
+        return;
+    }
+    let mut c = Client::start("base/00-valid");
+    checking_idle(&mut c);
+    c.request("denotate/test/hold", json!({}));
+    let (uri, _) = c.open("example.den");
+    let held = c.notification("denotate/test/checkpoint");
+    let base = c.workspace.path().to_owned();
+    for folder in ["waiting-a", "waiting-b"] {
+        std::fs::create_dir(base.join(folder)).unwrap();
+        std::fs::write(base.join(folder).join("den.root"), "{}").unwrap();
+        std::fs::write(base.join(folder).join("code.den"), CONFLICT).unwrap();
+    }
+    c.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes":[{"uri":support::file_uri(&base.join("waiting-a/den.root")),"type":1}]}),
+    );
+    let (a, _) = c.open("waiting-a/code.den");
+    for v in 2..6 {
+        c.change(&a, v, &format!("{CONFLICT}\n// {v}"));
+    }
+    c.change(&uri, 2, "relation replacement(); replacement();");
+    let stats = c.request("denotate/test/checkingStats", json!({}));
+    let pending = stats["pending"].as_array().unwrap();
+    assert_eq!(pending.len(), 3);
+    assert!(pending[0]["program"]
+        .as_str()
+        .unwrap()
+        .ends_with("waiting-a/den.root"));
+    assert!(pending[1]["program"]
+        .as_str()
+        .unwrap()
+        .ends_with("waiting-b/den.root"));
+    c.request(
+        "denotate/test/release",
+        json!({"revision":held["revision"]}),
+    );
+    checking_idle(&mut c);
+    assert!(!semantic_findings(&c, &a).is_empty());
+    c.notify(
+        "workspace/didChangeConfiguration",
+        json!({"settings":{"denotate":{"timeoutMs":0}}}),
+    );
+    checking_idle(&mut c);
+    let status = c.request("denotate/roots", json!({"uri":a}));
+    assert_eq!(status["checking"], "deadline");
+    c.notify(
+        "workspace/didChangeConfiguration",
+        json!({"settings":{"denotate":{"backend":"sat"}}}),
+    );
+    checking_idle(&mut c);
+    let status = c.request("denotate/roots", json!({"uri":a}));
+    assert_eq!(status["checking"], "complete");
+    assert_eq!(status["backend"], "sat");
+    c.shutdown();
+}
+
+#[test]
+fn empty_roots_and_standalones_have_current_check_status() {
+    if !b_only() {
+        return;
+    }
+    let mut c = Client::start("base/00-valid");
+    let base = c.workspace.path().to_owned();
+    std::fs::create_dir(base.join("empty")).unwrap();
+    let empty = support::file_uri(&base.join("empty/den.root"));
+    std::fs::write(base.join("empty/den.root"), "{}").unwrap();
+    c.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes":[{"uri":empty,"type":1}]}),
+    );
+    let external = tempfile::tempdir().unwrap();
+    let uri = support::file_uri(&external.path().join("standalone.den"));
+    c.notify(
+        "textDocument/didOpen",
+        json!({"textDocument":{"uri":uri,"version":1,"languageId":"denotate","text":CONFLICT}}),
+    );
+    checking_idle(&mut c);
+    let status = c.request("denotate/roots", json!({}));
+    let programs = status["programs"].as_array().unwrap();
+    let standalone = programs.iter().find(|p| p["program"] == uri).unwrap();
+    assert_eq!(standalone["state"], "standalone");
+    assert_eq!(standalone["checking"], "complete");
+    assert_eq!(standalone["summary"]["state"], "findings");
+    let empty = programs
+        .iter()
+        .find(|p| {
+            p["program"]
+                .as_str()
+                .is_some_and(|p| p.ends_with("/empty/den.root"))
+        })
+        .unwrap();
+    assert_eq!(empty["checking"], "complete");
+    assert_eq!(empty["summary"]["state"], "proved");
+    assert_eq!(empty["activeAssumptions"], json!([]));
+    c.shutdown();
+}
+
+#[cfg(unix)]
+#[test]
+fn ambiguous_canonical_home_blocks_only_affected_programs() {
+    if !b_only() {
+        return;
+    }
+    let mut c = Client::start("base/00-valid");
+    let base = c.workspace.path().to_owned();
+    for folder in ["a", "b", "independent"] {
+        std::fs::create_dir(base.join(folder)).unwrap();
+        std::fs::write(base.join(folder).join("den.root"), "{}").unwrap();
+    }
+    std::fs::write(base.join("a/code.den"), CONFLICT).unwrap();
+    std::os::unix::fs::symlink(base.join("a/code.den"), base.join("b/alias.den")).unwrap();
+    std::fs::write(base.join("independent/code.den"), CONFLICT).unwrap();
+    c.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes":[{"uri":support::file_uri(&base.join("a/den.root")),"type":1}]}),
+    );
+    let (independent, _) = c.open("independent/code.den");
+    checking_idle(&mut c);
+    assert!(!semantic_findings(&c, &independent).is_empty());
+    let statuses = c.request("denotate/roots", json!({}));
+    for folder in ["a", "b"] {
+        let status = statuses["programs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| {
+                s["program"]
+                    .as_str()
+                    .unwrap()
+                    .ends_with(&format!("/{folder}/den.root"))
+            })
+            .unwrap();
+        assert_eq!(status["state"], "invalid");
+        assert_eq!(status["checking"], "blocked");
+        assert!(status["errors"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e.as_str().unwrap().contains("unique home")));
+    }
+    c.shutdown();
+}

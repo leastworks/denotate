@@ -197,6 +197,21 @@ fn no_meaning_and_unsupported_are_not_success_or_overlap() {
         let out = checked(&p, BackendIdentity::bdd());
         assert_ne!(out.status["state"], "proved");
         assert!(out.diagnostics.iter().any(|d| d.kind == expected));
+        if expected == Kind::UnsupportedRegion {
+            let diagnostics = out
+                .diagnostics
+                .iter()
+                .filter(|d| d.kind == expected)
+                .collect::<Vec<_>>();
+            assert_eq!(diagnostics.len(), 1);
+            let d = diagnostics[0];
+            let texts = std::iter::once(d.primary)
+                .chain(d.related.iter().map(|r| r.span))
+                .map(|s| p.sources.text(s).unwrap())
+                .collect::<Vec<_>>();
+            assert!(texts.iter().any(|s| s.contains("x() :- !y()")));
+            assert!(texts.iter().any(|s| s.contains("y() :- !x()")));
+        }
         assert!(
             !out.diagnostics
                 .iter()
@@ -295,6 +310,22 @@ fn phase_exhaustion_and_rewrite_proofs_remain_distinct() {
             .any(|f| f.kind == Kind::Inconclusive && f.message.contains("Consistency checking"))
     );
     assert!(findings.iter().any(|f| f.kind == Kind::Counterexample));
+    let user_files = p
+        .documents
+        .iter()
+        .filter(|d| d.ownership == "user")
+        .map(|d| d.uri.clone())
+        .collect();
+    let placement = denotate_presentation::Placement {
+        program: &p.root,
+        user_files: &user_files,
+        sources: &p.sources,
+        current: &p.provenance,
+        upstream: &p.embedded.provenance,
+    };
+    for finding in findings.iter().filter(|f| f.kind == Kind::Inconclusive) {
+        assert_eq!(placement.finding(finding).unwrap().len(), 1);
+    }
     let p = program(
         "file:///app/den.root",
         "input i(); relation x(); x() :- i(), !i(), !x();",

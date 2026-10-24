@@ -1,5 +1,6 @@
 mod bridge;
 mod catalog;
+mod checking;
 mod formatting;
 mod presentation;
 mod rename;
@@ -32,6 +33,9 @@ struct Server {
     diagnostics_dirty: bool,
     catalog: catalog::Catalog,
     bridge: bridge::Bridge,
+    checking: checking::Checking,
+    observations: HashMap<Url, u64>,
+    observation: u64,
 }
 
 impl Server {
@@ -103,6 +107,11 @@ impl Server {
                 .flat_map(|r| self.catalog.nodes[r].errors.clone())
                 .collect::<Vec<_>>();
             for canonical in program.roots.values().flat_map(|r| &r.files) {
+                if self.catalog.home(canonical).is_none() {
+                    errors.push(format!(
+                        "{canonical}: membership does not establish a unique home program"
+                    ));
+                }
                 let actual = aliases.get(canonical).unwrap_or(canonical);
                 let uri = Url::parse(actual).unwrap();
                 match self.documents.get(&uri) {
@@ -160,6 +169,16 @@ impl Server {
             }
             status["errors"] = json!(errors);
         }
+        let root = status["homeProgram"]
+            .as_str()
+            .unwrap_or(uri.as_str())
+            .to_owned();
+        self.checking.status(&root, &mut status);
+        status
+    }
+    fn program_status(&self, root: &str) -> Value {
+        let mut status = self.catalog.program_status(root);
+        self.checking.status(root, &mut status);
         status
     }
     fn announce(&mut self, connection: &Connection) -> Result<()> {
@@ -311,7 +330,7 @@ impl Server {
                 connection,
                 "textDocument/publishDiagnostics",
                 json!({
-                    "uri": uri, "version": doc.version, "diagnostics": self.diagnostics[uri]
+                    "uri": uri, "version": doc.version, "diagnostics": self.diagnostics[uri].iter().cloned().chain(self.checking.diagnostics(uri)).collect::<Vec<_>>()
                 }),
             )?;
         } else {
@@ -326,6 +345,8 @@ impl Server {
 
     fn publish_all(&mut self, connection: &Connection) -> Result<()> {
         self.refresh_contexts();
+        self.announce(connection)?;
+        self.sync_checks()?;
         // Refresh all indexed dependents. Salsa reuses unchanged semantics;
         // selective publication/scheduling is not claimed by this prototype.
         let mut uris: Vec<_> = self
@@ -351,6 +372,8 @@ impl Server {
     }
 
     fn store(&mut self, uri: Url, doc: Document) {
+        self.observation += 1;
+        self.observations.insert(uri.clone(), self.observation);
         let canonical = Self::canonical_document(&uri);
         let aliases = self
             .documents
@@ -369,6 +392,7 @@ impl Server {
     }
 
     fn remove(&mut self, uri: &Url) {
+        self.observations.remove(uri);
         self.documents.remove(uri);
         self.semantics.remove(uri);
         self.bridge.remove(uri.as_str());
@@ -392,6 +416,7 @@ impl Server {
             )?;
         }
         self.refresh_contexts();
+        self.sync_checks()?;
         for other in self
             .documents
             .keys()
@@ -444,9 +469,22 @@ impl Server {
                 if let Some(uri) = request.params["uri"].as_str() {
                     Ok(self.root_status(&Url::parse(uri)?))
                 } else {
-                    Ok(
-                        json!({"programs":self.catalog.programs.keys().map(|r|self.catalog.program_status(r)).collect::<Vec<_>>()}),
-                    )
+                    let mut programs = self
+                        .catalog
+                        .programs
+                        .keys()
+                        .map(|r| self.program_status(r))
+                        .collect::<Vec<_>>();
+                    for uri in self.documents.keys() {
+                        if self.catalog.status(&Self::canonical_document(uri))["state"]
+                            == "standalone"
+                        {
+                            let mut status = self.root_status(uri);
+                            status["program"] = json!(uri);
+                            programs.push(status);
+                        }
+                    }
+                    Ok(json!({"programs":programs}))
                 }
             }
             "denotate/originStatus" => Ok(self
@@ -609,8 +647,14 @@ impl Server {
                 self.refresh_memberships();
                 self.publish_all(connection)?;
             }
+            "workspace/didChangeConfiguration" => {
+                self.checking.config =
+                    checking::Config::read(&notification.params["settings"]["denotate"])?;
+                self.publish_all(connection)?;
+            }
             "denotate/originChanged" => {
                 self.bridge.invalidate(connection, &notification.params)?;
+                self.publish_all(connection)?;
             }
 
             "textDocument/didOpen" => {
@@ -759,6 +803,12 @@ impl Server {
 }
 
 fn run(connection: &Connection) -> Result<()> {
+    run_with_mode(
+        connection,
+        std::env::var("DENOTATE_TEST_MODE").as_deref() == Ok("1"),
+    )
+}
+fn run_with_mode(connection: &Connection, test_mode: bool) -> Result<()> {
     let params = connection.initialize(json!({
         "workspace": {"workspaceFolders": {"supported": true,"changeNotifications": true}},
         "positionEncoding": "utf-16", "textDocumentSync": {"openClose": true, "change": 2},
@@ -784,14 +834,19 @@ fn run(connection: &Connection) -> Result<()> {
         parser: syntax::parser(),
         documents: Documents::default(),
         roots,
-        test_mode: std::env::var("DENOTATE_TEST_MODE").as_deref() == Ok("1"),
+        test_mode,
         semantics: semantic::Semantics::default(),
         diagnostics: HashMap::new(),
         diagnostics_dirty: true,
         catalog: catalog::Catalog::default(),
         bridge: bridge::Bridge::default(),
+        checking: checking::Checking::default(),
+        observations: HashMap::new(),
+        observation: 0,
     };
     server.bridge.enabled = params["initializationOptions"]["originSnapshotBridge"] == true;
+    server.checking.config = checking::Config::read(&params["initializationOptions"]["denotate"])?;
+    server.checking.enable()?;
     server.refresh_memberships();
     // Bridge clients own workspace and external-root watchers. Other clients can
     // opt into standard registration; origin authority is never inferred from it.
@@ -805,7 +860,7 @@ fn run(connection: &Connection) -> Result<()> {
         }))))?;
     }
     server.announce(connection)?;
-    transport::run(connection, &mut server)
+    server.serve_checks(connection)
 }
 
 impl transport::Handler for Server {
@@ -876,6 +931,9 @@ mod tests {
             diagnostics_dirty: true,
             catalog: catalog::Catalog::default(),
             bridge: bridge::Bridge::default(),
+            checking: checking::Checking::default(),
+            observations: HashMap::new(),
+            observation: 0,
         };
         let uri = Url::parse("file:///example.den").unwrap();
         let doc = Document::new(&mut server.parser, "module example; sort S".into(), 4, true);
@@ -1028,6 +1086,9 @@ mod tests {
             diagnostics_dirty: true,
             catalog: catalog::Catalog::default(),
             bridge: bridge::Bridge::default(),
+            checking: checking::Checking::default(),
+            observations: HashMap::new(),
+            observation: 0,
         };
         // Exercise the real dispatch path with cancellation already queued:
         // even malformed params must not reach request execution.
@@ -1143,3 +1204,6 @@ mod tests {
             .any(|d| d.code == Some(lsp_types::NumberOrString::String("resolution".into()))));
     }
 }
+
+#[cfg(test)]
+mod publication_tests;

@@ -1,5 +1,4 @@
-#[path = "../server/mod.rs"]
-mod server;
+use denotate_test_dsl::server;
 
 fn main() {
     if let Err(error) = denotate_editor::transport::stdio(server::run) {

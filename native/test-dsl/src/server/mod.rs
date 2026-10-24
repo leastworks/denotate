@@ -8,14 +8,14 @@ mod premask;
 mod prenormalize;
 mod worker;
 
+use crate::analysis::{self, Failure};
+use crate::{lowering::incremental::Session, syntax};
 use crossbeam_channel::{Sender, bounded};
 use denotate_check::{Cancellation, Limits};
 use denotate_editor::{
     Document, Documents, test_support,
     transport::{Result, send},
 };
-use denotate_test_dsl::analysis::{self, Failure};
-use denotate_test_dsl::{lowering::incremental::Session, syntax};
 use lsp_server::{Connection, Message, Notification, Request, RequestId, Response};
 use lsp_types::{
     Diagnostic, DidChangeTextDocumentParams, DidCloseTextDocumentParams, DidOpenTextDocumentParams,
@@ -64,9 +64,17 @@ struct Server {
     tests: bool,
     hooks: TestHooks,
     shutdown: bool,
+    backend: denotate_check::BackendIdentity,
 }
 
 pub fn run(connection: &Connection) -> Result<()> {
+    run_with_mode(
+        connection,
+        std::env::var("DENOTATE_TEST_MODE").as_deref() == Ok("1"),
+    )
+}
+/// Explicit test-hook mode for in-process clients of the production server.
+pub fn run_with_mode(connection: &Connection, tests: bool) -> Result<()> {
     connection.initialize(json!({
         "positionEncoding": "utf-16",
         "textDocumentSync": {"openClose": true, "change": 2}
@@ -80,9 +88,10 @@ pub fn run(connection: &Connection) -> Result<()> {
         active: None,
         pending: VecDeque::new(),
         idle: vec![],
-        tests: std::env::var("DENOTATE_TEST_MODE").as_deref() == Ok("1"),
+        tests,
         hooks: TestHooks::default(),
         shutdown: false,
+        backend: denotate_check::BackendIdentity::bdd(),
     };
     let result = server.serve(connection);
     server.stop();
@@ -217,6 +226,29 @@ impl Server {
 
     fn notification(&mut self, connection: &Connection, n: Notification) -> Result<()> {
         match n.method.as_str() {
+            "workspace/didChangeConfiguration" => {
+                let backend = match n.params["settings"]["inputmapping"]["backend"]
+                    .as_str()
+                    .unwrap_or("bdd")
+                {
+                    "bdd" => denotate_check::BackendIdentity::bdd(),
+                    "sat" => denotate_check::BackendIdentity::sat(),
+                    _ => return Err("Expected inputmapping.backend to be bdd or sat".into()),
+                };
+                if self.backend != backend {
+                    self.backend = backend;
+                    let docs = self
+                        .documents
+                        .iter()
+                        .filter(|(u, _)| self.documents.rejected_version(u).is_none())
+                        .map(|(u, d)| (u.clone(), d.document.text.clone(), d.document.version))
+                        .collect::<Vec<_>>();
+                    for (uri, text, version) in docs {
+                        let document = Document::new(&mut self.parser, text, version, true);
+                        self.install(connection, uri, document)?;
+                    }
+                }
+            }
             "textDocument/didOpen" => {
                 let p: DidOpenTextDocumentParams = serde_json::from_value(n.params)?;
                 let t = p.text_document;
@@ -340,6 +372,7 @@ impl Server {
                 },
                 program,
                 limits: Limits::default(),
+                backend: self.backend.clone(),
                 hold: None,
                 measure: self.tests,
             });

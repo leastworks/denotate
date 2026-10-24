@@ -31,23 +31,7 @@ impl Document {
     }
 
     fn from_tree(text: String, version: i32, open: bool, tree: Tree) -> Self {
-        let mut lines = vec![0];
-        let bytes = text.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] == b'\r' {
-                i += 1;
-                if bytes.get(i) == Some(&b'\n') {
-                    i += 1;
-                }
-                lines.push(i);
-            } else if bytes[i] == b'\n' {
-                i += 1;
-                lines.push(i);
-            } else {
-                i += 1;
-            }
-        }
+        let lines = line_starts(&text);
         Self {
             text,
             version,
@@ -104,11 +88,7 @@ impl Document {
     }
 
     pub fn position(&self, byte: usize) -> Position {
-        let line = self.lines.partition_point(|start| *start <= byte) - 1;
-        Position::new(
-            line as u32,
-            self.text[self.lines[line]..byte].encode_utf16().count() as u32,
-        )
+        position(&self.text, &self.lines, byte)
     }
 
     pub fn offset(&self, position: Position) -> Option<usize> {
@@ -140,5 +120,34 @@ fn point(text: &str, byte: usize) -> Point {
     Point::new(
         prefix.bytes().filter(|b| *b == b'\n').count(),
         prefix.rfind('\n').map_or(byte, |at| byte - at - 1),
+    )
+}
+
+/// LSP line boundaries (CR, LF, CRLF), shared by buffers and immutable findings.
+pub(crate) fn line_starts(text: &str) -> Vec<usize> {
+    let mut lines = vec![0];
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\r' {
+            i += 1;
+            if bytes.get(i) == Some(&b'\n') {
+                i += 1;
+            }
+            lines.push(i);
+        } else if bytes[i] == b'\n' {
+            i += 1;
+            lines.push(i);
+        } else {
+            i += 1;
+        }
+    }
+    lines
+}
+pub(crate) fn position(text: &str, lines: &[usize], byte: usize) -> Position {
+    let line = lines.partition_point(|start| *start <= byte) - 1;
+    Position::new(
+        line as u32,
+        text[lines[line]..byte].encode_utf16().count() as u32,
     )
 }

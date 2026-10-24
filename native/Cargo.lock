@@ -293,10 +293,14 @@ dependencies = [
 name = "denotate-tree-sitter"
 version = "0.0.1"
 dependencies = [
+ "crossbeam-channel",
  "denotate-check",
+ "denotate-check-session",
  "denotate-editor",
  "denotate-ir",
  "denotate-ir-text",
+ "denotate-presentation",
+ "denotate-test-dsl",
  "lsp-server",
  "lsp-types",
  "serde",

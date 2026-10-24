@@ -10,6 +10,7 @@
   "main": "./dist/extension.cjs",
   "activationEvents": ["onLanguage:denotate", "workspaceContains:**/den.root"],
   "contributes": {
+    "configuration": {"title": "Denotate", "properties": {"denotate.backend": {"type": "string", "enum": ["bdd", "sat"], "default": "bdd", "description": "Checker backend for every Denotate program."}}},
     "languages": [{"id": "denotate", "aliases": ["Denotate IR"], "extensions": [".den"], "configuration": "./dist/language-configuration.json"}],
     "grammars": [{"language": "denotate", "scopeName": "source.denotate", "path": "./dist/denotate.tmLanguage.json"}],
     "commands": [

@@ -7,7 +7,7 @@ let client;
 exports.activate = async (context) => {
   client = new LanguageClient('denotate-tree-sitter', 'Denotate IR (Tree-sitter)',
     { command: context.asAbsolutePath(process.platform === 'win32' ? 'dist/denotate-lsp.exe' : 'dist/denotate-lsp'), args: [] },
-    { documentSelector: [{ scheme: 'file', language: 'denotate' }], initializationOptions: { originSnapshotBridge: true } });
+    { documentSelector: [{ scheme: 'file', language: 'denotate' }], initializationOptions: { originSnapshotBridge: true, denotate: { backend: vscode.workspace.getConfiguration('denotate').get('backend', 'bdd') } } });
   context.subscriptions.push(client);
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 20);
   context.subscriptions.push(status);
@@ -72,7 +72,7 @@ exports.activate = async (context) => {
         : result.homeProgram ? vscode.workspace.asRelativePath(vscode.Uri.parse(result.homeProgram))
         : 'Home program unavailable';
       status.text = `Denotate: ${label}${result.state === 'invalid' ? ' (unavailable)' : ''}`;
-      status.tooltip = [label, `Checking: ${result.checking}`, `Backend: ${result.backend ?? 'not enabled'}`, `Active assumptions: ${result.activeAssumptions?.join(', ') ?? 'not loaded'}`, ...result.errors].join('\n');
+      status.tooltip = [label, `Checking: ${result.checking}`, `Backend: ${result.backend}`, `Active assumptions: ${result.activeAssumptions ? JSON.stringify(result.activeAssumptions) : 'not loaded'}`, `Outcome: ${result.summary?.state ?? result.checking}`, `Findings: ${result.findings?.length ?? 0}`, ...(result.originNotices ?? []).map(n => `Origin unavailable: ${n.uri} (${n.reason})`), ...result.errors].join('\n');
       status.show();
     } catch (error) { if (ticket === statusGeneration) { status.text = 'Denotate: Root unavailable'; status.tooltip = String(error); status.show(); } }
   };
@@ -91,6 +91,9 @@ exports.activate = async (context) => {
   client.onNotification('denotate/originSubscriptions', ({ uris }) => { origins = new Set(uris); refreshOriginWatchers(); });
   client.onNotification('denotate/rootsChanged', ({ watchFolders }) => { refreshRootWatchers(watchFolders); void refreshStatus(); });
   context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration(event => {
+      if (event.affectsConfiguration('denotate.backend')) void client.sendNotification('workspace/didChangeConfiguration', { settings: { denotate: { backend: vscode.workspace.getConfiguration('denotate').get('backend', 'bdd') } } });
+    }),
     vscode.workspace.onDidOpenTextDocument(doc => { void syncManifest(doc); void originChanged(doc.uri); }),
     vscode.workspace.onDidChangeTextDocument(({ document }) => { void syncManifest(document); void originChanged(document.uri); }),
     vscode.workspace.onDidSaveTextDocument(doc => { void syncManifest(doc); void originChanged(doc.uri); }),

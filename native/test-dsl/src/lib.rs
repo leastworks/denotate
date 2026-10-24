@@ -12,3 +12,10 @@ pub mod syntax;
 pub mod warnings;
 
 pub mod export;
+
+/// The production LSP entry point, also driven in memory by editor parity tests.
+pub mod server;
+
+// Shared test fixtures are also compiled as standalone integration-test crates.
+#[cfg(test)]
+extern crate self as denotate_test_dsl;

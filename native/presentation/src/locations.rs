@@ -123,6 +123,12 @@ impl Placement<'_> {
                 fallback,
                 evidence: Value::Null,
             });
+            if matches!(
+                kind,
+                Kind::Inconclusive | Kind::UnsupportedGroup | Kind::UnsupportedRegion
+            ) {
+                break;
+            }
         }
         // Unlocated builder IR still remains in the root's finding inventory.
         Ok(out)
