@@ -7,7 +7,7 @@ program - a reusable library of typed relations, facts, rules and contracts.
 When someone writes a program in that DSL, its frontend translates the program
 into additional Denotate facts and rules. These combine with the semantic library
 to describe what the DSL program means. Evaluation, verification and compilation
-are all meant to work from this shared description.
+can all work from this shared description.
 
 The project grew out of experience building declarative languages for business
 domains, where classifications, decisions, permissions and requirements need to
