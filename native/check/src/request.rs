@@ -95,6 +95,7 @@ pub enum InputConstraint {
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckRequest {
+    pub verification: Option<VerificationKey>,
     pub constraints: Vec<InputConstraint>,
     pub obligations: BTreeSet<ObligationKey>,
     pub scope: RequestScope,
@@ -103,6 +104,27 @@ pub struct CheckRequest {
     pub limits: DeterministicLimits,
 }
 impl CheckRequest {
+    pub fn for_verification(
+        corpus: &Corpus,
+        keys: &SemanticKeys,
+        domains: &Domains,
+        verification: VerificationId,
+        limits: &Limits,
+    ) -> Result<Self> {
+        let mut request = Self::all_obligations(corpus, keys, domains, &[], limits)?;
+        let (constraints, obligations) = verification_selection(corpus, keys, verification)?;
+        request.verification = Some(
+            keys.verification(verification)
+                .map_err(CheckError::Keys)?
+                .clone(),
+        );
+        // All current restrictions are input at-most-one constraints: the world
+        // with every input absent witnesses their joint consistency.
+        request.constraints = constraints;
+        request.obligations = obligations;
+        Ok(request)
+    }
+
     pub fn all_obligations(
         corpus: &Corpus,
         keys: &SemanticKeys,
@@ -121,6 +143,7 @@ impl CheckRequest {
             keyed_domains.insert(keys.sort(*s).map_err(CheckError::Keys)?.clone(), values);
         }
         Ok(Self {
+            verification: None,
             constraints: constraints
                 .iter()
                 .map(|c| {
@@ -183,12 +206,33 @@ impl CheckRequest {
         }
         let all = corpus
             .obligations()
-            .map(|o| keys.obligation(o.id).cloned().map_err(CheckError::Keys))
+            .map(|o| {
+                Ok((
+                    keys.obligation(o.id).map_err(CheckError::Keys)?.clone(),
+                    o.id,
+                ))
+            })
+            .collect::<Result<BTreeMap<_, _>>>()?;
+        let obligations = self
+            .obligations
+            .iter()
+            .map(|key| {
+                all.get(key)
+                    .copied()
+                    .ok_or(CheckError::InvalidRequest("unknown obligation key"))
+            })
             .collect::<Result<BTreeSet<_>>>()?;
-        if self.obligations != all {
-            return Err(CheckError::InvalidRequest(
-                "partial obligation selection is not supported",
-            ));
+        if let Some(verification) = &self.verification {
+            let declaration = corpus
+                .verifications()
+                .find(|v| keys.verification(v.id).is_ok_and(|key| key == verification))
+                .ok_or(CheckError::InvalidRequest("unknown verification key"))?;
+            let (constraints, selected) = verification_selection(corpus, keys, declaration.id)?;
+            if self.constraints != constraints || self.obligations != selected {
+                return Err(CheckError::InvalidRequest(
+                    "request does not match its verification",
+                ));
+            }
         }
         let sorts = corpus
             .sorts()
@@ -242,6 +286,7 @@ impl CheckRequest {
                 keys,
                 &domains,
                 &constraints,
+                &obligations,
                 &mut budget,
                 plans.expect("grounding requires a plan provider"),
                 store,
@@ -252,6 +297,7 @@ impl CheckRequest {
                 corpus,
                 &domains,
                 &constraints,
+                &obligations,
                 &mut budget,
                 plans.map(|store| (keys, store)),
             )
@@ -298,6 +344,37 @@ impl CheckRequest {
             unfinished: Some(ResourceReason::from(reason)),
         }
     }
+}
+
+fn verification_selection(
+    corpus: &Corpus,
+    keys: &SemanticKeys,
+    verification: VerificationId,
+) -> Result<(Vec<InputConstraint>, BTreeSet<ObligationKey>)> {
+    let declaration = corpus
+        .verification(verification)
+        .ok_or(CheckError::InvalidRequest("unknown verification"))?;
+    let constraints = declaration
+        .assumptions
+        .iter()
+        .map(|id| {
+            let assumption = corpus
+                .assumption(*id)
+                .ok_or(CheckError::InvalidRequest("unknown assumption"))?;
+            match &assumption.restriction {
+                Restriction::AtMostOne { relation, group_by } => Ok(InputConstraint::AtMostOne {
+                    relation: keys.relation(*relation).map_err(CheckError::Keys)?.clone(),
+                    group_by: group_by.clone(),
+                }),
+            }
+        })
+        .collect::<Result<_>>()?;
+    let obligations = declaration
+        .obligations
+        .iter()
+        .map(|id| keys.obligation(*id).cloned().map_err(CheckError::Keys))
+        .collect::<Result<_>>()?;
+    Ok((constraints, obligations))
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -389,7 +466,7 @@ pub struct ScopedResults {
     pub context: CheckRequest,
     pub groups: BTreeMap<GroupKey, ScopedResult>,
     /// Compact domain of legal groups, including trivially proved zero/one-member
-    /// groups. Empty only when preparation did not finish.
+    /// groups. Empty when none are selected or preparation did not finish.
     pub group_domains: BTreeMap<ObligationKey, KeyedGroups>,
     pub regions: BTreeMap<ComponentKey, RegionResult>,
     pub incomplete: BTreeMap<ComponentKey, ResourceReason>,

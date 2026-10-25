@@ -560,6 +560,7 @@ impl GroundProgram {
         keys: &SemanticKeys,
         domains: &Domains,
         constraints: &[InputAtMostOne],
+        obligations: &BTreeSet<ObligationId>,
         budget: &mut Budget<'_>,
         plans: &mut dyn JoinPlanStore,
         store: &mut dyn GroundingStore,
@@ -596,6 +597,9 @@ impl GroundProgram {
         let queries = query_start.elapsed();
         let assembly_start = Instant::now();
         let mut p = Self::empty(corpus, domains);
+        // Cached relation units contain possible tuples/rules only. Selection and
+        // permitted-world constraints are applied freshly after their assembly.
+        p.obligations = obligations.clone();
         let relations = corpus
             .relations()
             .map(|r| Ok((keys.relation(r.id).map_err(CheckError::Keys)?.clone(), r.id)))

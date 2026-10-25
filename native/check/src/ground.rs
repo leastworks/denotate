@@ -137,6 +137,8 @@ pub struct GroundProgram {
     pub(crate) component_rules: Vec<Vec<usize>>,
     pub(crate) dependencies: Vec<Dependency>,
     groups: Vec<AtMostOneGroup>,
+    // Keep the selection even when all its groups are trivial, and through admission.
+    pub(crate) obligations: BTreeSet<ObligationId>,
     pub(crate) input_groups: Vec<Vec<GroundAtom>>,
     metrics: PreparationMetrics,
 }
@@ -164,12 +166,14 @@ impl GroundProgram {
         constraints: &[InputAtMostOne],
         budget: &mut Budget<'_>,
     ) -> Result<Self> {
-        Self::prepare_using(corpus, domains, constraints, budget, None)
+        let obligations = corpus.obligations().map(|o| o.id).collect();
+        Self::prepare_using(corpus, domains, constraints, &obligations, budget, None)
     }
     pub(crate) fn prepare_using(
         corpus: &Corpus,
         domains: &Domains,
         constraints: &[InputAtMostOne],
+        obligations: &BTreeSet<ObligationId>,
         budget: &mut Budget<'_>,
         cache: Option<(&SemanticKeys, &mut dyn JoinPlanStore)>,
     ) -> Result<Self> {
@@ -178,6 +182,7 @@ impl GroundProgram {
         let start = Instant::now();
         let domains = validate_domains(corpus, domains, budget)?;
         let mut p = Self::empty(corpus, domains);
+        p.obligations = obligations.clone();
         if let Some((keys, store)) = cache {
             sparse::populate_cached(corpus, &mut p, budget, keys, store)?;
         } else {
@@ -259,6 +264,7 @@ impl GroundProgram {
             component_rules: vec![],
             dependencies: vec![],
             groups: vec![],
+            obligations: corpus.obligations().map(|o| o.id).collect(),
             input_groups: vec![],
             metrics: PreparationMetrics::default(),
         }
@@ -291,7 +297,10 @@ impl GroundProgram {
             budget.tick("obligation groups")?;
             by_relation.entry(atom.relation).or_default().push(atom);
         }
-        for obligation in corpus.obligations() {
+        for obligation in corpus
+            .obligations()
+            .filter(|o| self.obligations.contains(&o.id))
+        {
             budget.tick("obligation groups")?;
             let Requirement::AtMostOne { relation, group_by } = &obligation.requirement;
             let mut groups = BTreeMap::<Vec<ConstantId>, Vec<GroundAtom>>::new();

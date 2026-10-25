@@ -278,7 +278,10 @@ impl GroundKeyIndex {
                 ComponentKey(atoms.into_iter().collect::<Vec<_>>().into()),
             );
         }
-        for o in corpus.obligations() {
+        for o in corpus
+            .obligations()
+            .filter(|o| program.obligations.contains(&o.id))
+        {
             let Requirement::AtMostOne { relation, group_by } = &o.requirement;
             let signature = corpus
                 .relation(*relation)

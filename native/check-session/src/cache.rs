@@ -448,6 +448,10 @@ impl LocalMemoStore for Session {
         operations: &OperationalLimits,
         metrics: &mut LocalMetrics,
     ) -> Result<Arc<LocalMemo>, CheckError> {
+        // A scope identifies the cache slot, not its validity across verifications.
+        // LocalInput includes relevant constraints, input groups, obligation shape
+        // and completion proof context; Salsa compares that full input. Request
+        // identity and replay are attached afresh by PreparedCheck.
         if let Some(e) = self.entries.get_mut(&input.scope) {
             if e.input.as_ref() != input {
                 e.receipts = None;

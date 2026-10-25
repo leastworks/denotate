@@ -43,10 +43,30 @@ is a top-level inconclusive outcome, never an empty success.
 
 ## Requests, keys and results
 
-`CheckRequest` names obligations and W by semantic keys; `ScopedResults` reports
-per-group and per-region outcomes keyed by semantic identities (`GroupKey`,
-`ComponentKey`, `AtomKey`), so results correspond across snapshots without arena IDs.
-Witness ordering follows canonical `AtomKey` order, independent of declaration order.
+`CheckRequest::for_verification` builds a request from one IR verification: only its
+selected assumptions constrain permitted worlds, and only its selected obligations
+produce groups (including the compact domains for trivial groups). Preparation
+rejects unknown obligation or verification keys and requests whose constraints or
+obligations do not match their named verification. Current input `at_most_one`
+assumptions are jointly consistent because they permit all inputs to be absent.
+
+Admission, rewrite proofs and no-meaning/unsupported analysis use that request's
+constraints even when no obligations are selected. Unselected assumptions have no
+effect. The transitional `all_obligations` constructor keeps existing callers working
+with `verification: None`; unnamed requests may also select an obligation subset.
+The public `GroundProgram::prepare*` entry points still cover all obligations.
+
+`ScopedResults.context` retains the request, including its optional `VerificationKey`.
+Per-group and per-region outcomes use semantic identities (`GroupKey`, `ComponentKey`,
+`AtomKey`), so results correspond across snapshots without arena IDs. Witness ordering
+follows canonical `AtomKey` order, independent of declaration order.
+
+Sessions share join plans and possible-tuple grounding independently of verification
+selection. Group construction and admission run for the current request. Cached local
+answers include their relevant constraints, input groups and obligation shape;
+completion also includes any discharge-proof context. The result's request context
+and counterexample replay are assembled fresh, so reused work cannot carry a previous
+verification's identity into the current result.
 
 ## Rewrites
 

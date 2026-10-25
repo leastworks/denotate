@@ -154,12 +154,15 @@ fn request_context_and_scoped_results_are_owned_and_distinguish_reasons() {
         }
     }
     assert!(scoped_exhaustion);
-    let mut invalid = request(&p, &limits);
-    invalid.obligations.clear();
-    assert!(matches!(
-        invalid.prepare(&p.corpus, &p.keys, &(&limits).into()),
-        Err(CheckError::InvalidRequest(_))
-    ));
+    let mut empty = request(&p, &limits);
+    empty.obligations.clear();
+    let RequestPreparation::Complete(empty) = empty
+        .prepare(&p.corpus, &p.keys, &(&limits).into())
+        .unwrap()
+    else {
+        panic!("unexpected preparation exhaustion")
+    };
+    assert!(empty.keys().groups.is_empty());
     let cancelled = OperationalLimits::from(&limits);
     cancelled.cancellation.cancel();
     assert!(matches!(g.verify(&cancelled), Err(CheckError::Cancelled)));
