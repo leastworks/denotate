@@ -41,14 +41,22 @@ real program that the current choice serves badly.
 
 - **`den.root` JSON manifests define programs.** Kept as JSON rather than `.den` syntax
   to keep membership separate from program text.
-- **No implicit roots.** A file outside every `den.root` is a standalone program; the
-  editor and `check-den` share one membership rule.
-- **Every program is checked; there is no "active root" selection.** Each program
-  publishes only on its own files. When a finding involves none of them, it is
-  published on the library location, labeled with the consumer program, and is not
-  deduplicated across consumers.
-- **Consumer-caused failures belong to the consumer.** For example, a consumer
-  declaration that makes a library name ambiguous is reported on the consumer.
+- **No implicit roots.** A workspace-folder root would exist only in the editor, so the
+  editor and `check-den` would check different programs. A file outside every
+  `den.root` is a standalone program instead, with a quick fix to create a root.
+- **Every program is checked; there is no "active root" selection.** Because scanning
+  stops at nested roots, each file already has exactly one owning root, its home
+  program. A selection could only choose which consumer's results a shared library
+  file displays, making its diagnostics depend on hidden per-document state that every
+  switch would withdraw and republish. Instead each consumer's results appear on its
+  own files, and the library file shows the library checked alone. This replaced an
+  earlier design with an explicitly selected active root per document.
+- **A finding belongs to the program whose check produced it.** When a consumer's
+  finding involves none of its own files, it is published on the library location,
+  labeled with the consumer, rather than lost; it is not deduplicated, because each
+  consumer checks the library under its own facts and assumptions. Likewise a consumer
+  declaration that makes a library name ambiguous is reported on the consumer, since
+  the library checked alone has no such failure.
 
 ## The editor
 
