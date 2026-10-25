@@ -203,6 +203,13 @@ pub(crate) fn rule_positions(rule: &Rule) -> BTreeMap<String, OccurrenceId> {
     positions
 }
 fn validate(p: &ExportProgram<'_>) -> Result<()> {
+    // Printing IR assumption and verification declarations is not implemented yet;
+    // refuse rather than drop them from the output.
+    if p.corpus.assumptions().next().is_some() || p.corpus.verifications().next().is_some() {
+        return Err(fail(
+            "Exporting IR assumption and verification declarations is not supported yet",
+        ));
+    }
     let top = top_level(p.corpus).into_iter().collect::<BTreeSet<_>>();
     if p.layout.placements.keys().copied().collect::<BTreeSet<_>>() != top {
         return Err(fail(

@@ -814,3 +814,51 @@ fn compact_and_expanded_maps_follow_occurrence_order_with_numeric_indices() {
         support::compare(&program, &loaded, "file:///export", true);
     }
 }
+
+#[test]
+fn ir_assumptions_are_refused_rather_than_dropped() {
+    assert_ir_contract_export_refused(|c, value| {
+        c.assume_at_most_one_in(Namespace::default(), "one_value", value, [])
+            .unwrap();
+    });
+}
+
+#[test]
+fn ir_verifications_are_refused_rather_than_dropped() {
+    assert_ir_contract_export_refused(|c, _| {
+        c.verification_in(Namespace::default(), "normal", [], [])
+            .unwrap();
+    });
+}
+
+fn assert_ir_contract_export_refused(add_contract: impl FnOnce(&mut Corpus, RelationId)) {
+    let mut c = Corpus::new();
+    let s = c.declare_sort("S").unwrap();
+    let value = c
+        .declare_relation("value", RelationRole::Input, [Parameter::new("v", s)])
+        .unwrap();
+    add_contract(&mut c, value);
+    let layout = ExportLayout {
+        files: vec![ExportFile {
+            path: "program.den".into(),
+            ownership: Ownership::User,
+        }],
+        placements: top_level(&c).into_iter().map(|id| (id, 0)).collect(),
+        assumptions: vec![],
+    };
+    let (sources, provenance, domains) = (
+        Sources::new(),
+        Provenance::new(),
+        BTreeMap::from([(s, vec![])]),
+    );
+    let program = ExportProgram {
+        corpus: &c,
+        domains: &domains,
+        sources: &sources,
+        provenance: &provenance,
+        assumptions: &[],
+        layout: &layout,
+    };
+    let error = print(&program, PrintOptions::default()).unwrap_err();
+    assert!(error.0.contains("not supported yet"), "{error}");
+}
