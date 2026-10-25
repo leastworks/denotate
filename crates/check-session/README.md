@@ -29,13 +29,13 @@ program; see [checker policies](../../docs/checker-policies.md). It needs the
 `test-support` feature, which the recipe enables. Its own tests:
 
 ```sh
-cargo +1.93.0 test --release --manifest-path native/Cargo.toml --locked -p denotate-check-session --features test-support --example scorecard
+cargo +1.93.0 test --release --locked -p denotate-check-session --features test-support --example scorecard
 ```
 
 ## Tests
 
 ```sh
-cargo +1.93.0 test --manifest-path native/Cargo.toml --locked -p denotate-check-session
+cargo +1.93.0 test --locked -p denotate-check-session
 ```
 
 Regression inputs live in `fixtures/regression/` (semantic outcomes and edit pairs,

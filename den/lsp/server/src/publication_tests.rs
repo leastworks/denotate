@@ -13,7 +13,7 @@ use std::{
 };
 #[path = "../../../../test-dsl/tests/support/corpus.rs"]
 mod corpus;
-#[path = "../../../../native/ir-text/tests/support/mod.rs"]
+#[path = "../../../../crates/ir-text/tests/support/mod.rs"]
 mod correspondence;
 
 struct Client {

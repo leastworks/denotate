@@ -25,5 +25,5 @@ Tests include an independent stable-model oracle over every expression with up t
 nodes and two input leaves, in all four worlds.
 
 ```sh
-cargo +1.93.0 test --manifest-path native/Cargo.toml --locked -p denotate-normalize -p denotate-ir
+cargo +1.93.0 test --locked -p denotate-normalize -p denotate-ir
 ```

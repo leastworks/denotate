@@ -24,7 +24,7 @@
     }]
   },
   "scripts": {
-    "build": "cargo +1.93.0 build --manifest-path ../../native/Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp --release && node build.mjs",
+    "build": "cargo +1.93.0 build --manifest-path ../../Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp --release && node build.mjs",
     "test": "npm run build && node --test tests/package.test.mjs",
     "test:vscode": "npm run build && node scripts/run-vscode-smoke.mjs"
   },

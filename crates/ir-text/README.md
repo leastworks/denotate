@@ -80,8 +80,8 @@ user files are the program's own documents.
 ## Commands and tests
 
 ```sh
-just check-den native/ir-text/fixtures [--sat] [--verification library::default_checks]
-cargo +1.93.0 test --manifest-path native/Cargo.toml --locked -p denotate-ir-text
+just check-den crates/ir-text/fixtures [--sat] [--verification library::default_checks]
+cargo +1.93.0 test --locked -p denotate-ir-text
 ```
 
 `examples/check.rs` backs `just check-den`. The round trip of the InputMapping

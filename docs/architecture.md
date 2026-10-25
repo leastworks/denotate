@@ -6,16 +6,16 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
 ```
                      den/grammar  (Tree-sitter grammar of .den)
                           │ compiled into
- test-dsl ──lowers to──►  native/ir ◄── native/ir-text (.den load / print / index)
+ test-dsl ──lowers to──►  crates/ir ◄── crates/ir-text (.den load / print / index)
  (InputMapping)           │                    │
                           ▼                    │
-                 native/normalize              │
+                 crates/normalize              │
                           │                    │
-                 native/check  ──►  native/check-session (cached sessions)
+                 crates/check  ──►  crates/check-session (cached sessions)
                           │                    │
-                 native/presentation (interpret checked evidence)
+                 crates/presentation (interpret checked evidence)
                           │
-                 native/editor (LSP mechanics, scheduler, lifecycle, edits)
+                 crates/editor (LSP mechanics, scheduler, lifecycle, edits)
                           │
            den/lsp/server (.den editor)    test-dsl server (InputMapping editor)
 ```
@@ -24,7 +24,7 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
 
 | Crate | Owns | Does not own |
 | --- | --- | --- |
-| `denotate-ir` (`native/ir`) | Typed relational construction (`Corpus`), namespaces, occurrence identities, `Sources`/`Provenance`, semantic keys, recipe installation | Syntax, checking, wording |
+| `denotate-ir` (`crates/ir`) | Typed relational construction (`Corpus`), namespaces, occurrence identities, `Sources`/`Provenance`, semantic keys, recipe installation | Syntax, checking, wording |
 | `denotate-normalize` | Boolean normalization recipes (double-negation cancellation, Lloyd–Topor with linear helpers); no dependencies | Spans, IR handles |
 | `denotate-check` | Finite grounding, admissibility, concrete replay, BDD/SAT property checks, no-meaning and rewrite findings, limits and cancellation | Editors, sessions, wording |
 | `denotate-check-session` | Reusable checker sessions: plan, grounding and verdict caches, retention, warm/cold equivalence | Scheduling, LSP |
@@ -38,7 +38,7 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
 ## Rules that keep the layers honest
 
 - **One resolver.** The strict loader and the editor index share name decoding,
-  visibility and lookup keys (`native/ir-text`). The editor never re-implements
+  visibility and lookup keys (`crates/ir-text`). The editor never re-implements
   `.den` scoping.
 - **Meaning lives in the checker.** Presenters interpret checked evidence; they
   never re-derive outcomes. DSL presenters may replace wording and choose extra
@@ -64,7 +64,7 @@ with a warm session per program, and publishes each program's findings on its ow
 
 ## Tests at each layer
 
-- Unit and integration tests per crate (`just test-native`).
+- Unit and integration tests per crate (`just test-crates`).
 - `.den` round trip: the InputMapping regression programs are lowered, printed to
   `.den`, reloaded and checked; structure, origins and default-limit BDD/SAT outcomes
   must match (`test-dsl/tests/ir_text_roundtrip.rs`).

@@ -47,5 +47,5 @@ Construction validity does not imply admissibility; checking is `denotate-check`
 ## Tests
 
 ```sh
-cargo +1.93.0 test --manifest-path native/Cargo.toml --locked -p denotate-ir
+cargo +1.93.0 test --locked -p denotate-ir
 ```

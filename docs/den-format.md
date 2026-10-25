@@ -3,7 +3,7 @@
 `.den` is the text form of the Denotate IR. It is both an authoring format and an
 export format: a DSL can print its lowered program as `.den`, with embedded origins
 pointing back to the DSL source. The grammar is `den/grammar/grammar.js`; the loader
-and printer are in `native/ir-text`.
+and printer are in `crates/ir-text`.
 
 ## A small program
 

@@ -20,10 +20,10 @@ participating occurrences, and places them on source locations. It depends only 
 - `summary` builds root-level outcome summaries (backend, active assumptions, group
   and region outcomes, resource reasons).
 
-Frontends adapt the output: `native/ir-text`'s `presentation` module for `.den`, and
+Frontends adapt the output: `crates/ir-text`'s `presentation` module for `.den`, and
 the InputMapping presenter, which keeps its own wording, guard locations and
 safe-edit eligibility on top of the shared classification.
 
 ```sh
-cargo +1.93.0 test --manifest-path native/Cargo.toml --locked -p denotate-presentation -p denotate-ir-text
+cargo +1.93.0 test --locked -p denotate-presentation -p denotate-ir-text
 ```

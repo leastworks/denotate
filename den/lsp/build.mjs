@@ -16,5 +16,5 @@ const target = new URL(`dist/denotate-lsp${suffix}`, import.meta.url);
 // Replace the inode: overwriting a signed executable can leave stale macOS
 // code-signing state and cause SIGKILL at launch, even with identical bytes.
 await rm(target, { force: true });
-await copyFile(new URL(`../../native/target/release/denotate-lsp${suffix}`, import.meta.url), target);
+await copyFile(new URL(`../../target/release/denotate-lsp${suffix}`, import.meta.url), target);
 if (!suffix) await chmod(target, 0o755);

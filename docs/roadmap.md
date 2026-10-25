@@ -78,7 +78,7 @@ the bounds only prove that a unique two-valued meaning exists.
 
 ## Small items
 
-- Trim the unused module/file-based analysis in `native/analysis`, left from an earlier
+- Trim the unused module/file-based analysis in `crates/analysis`, left from an earlier
   editor prototype.
 - Include/exclude lists for the CLI's `den.root` folder scan, which currently also
   walks `.git`, `node_modules` and `target`.

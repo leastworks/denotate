@@ -22,8 +22,8 @@
   },
   "scripts": {
     "generate": "cd ../grammar && tree-sitter generate",
-    "build": "npm run generate && cargo +1.93.0 build --manifest-path ../../native/Cargo.toml --locked -p denotate-lsp --release && node build.mjs",
-    "test": "npm run generate && cargo +1.93.0 test --manifest-path ../../native/Cargo.toml --locked -p denotate-lsp",
+    "build": "npm run generate && cargo +1.93.0 build --manifest-path ../../Cargo.toml --locked -p denotate-lsp --release && node build.mjs",
+    "test": "npm run generate && cargo +1.93.0 test --manifest-path ../../Cargo.toml --locked -p denotate-lsp",
     "test:origins": "node --test tests/origin-navigation.cjs",
     "test:lsp": "npm run build && node scripts/test-lsp.mjs",
     "test:vscode": "npm run build && node scripts/run-vscode-smoke.mjs"

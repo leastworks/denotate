@@ -55,5 +55,5 @@ InputMapping `{uri, revision, version}`. `denotate/test/idle`, `frontendReady` a
 `validated` are fast barriers and never mean checking-idle.
 
 ```sh
-cargo +1.93.0 test --manifest-path native/Cargo.toml --locked -p denotate-editor
+cargo +1.93.0 test --locked -p denotate-editor
 ```

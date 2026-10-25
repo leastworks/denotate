@@ -163,7 +163,7 @@ read-only, generated-folder and dependency protections apply to every edited fil
 ## Test mode
 
 With `DENOTATE_TEST_MODE=1` the server exposes the shared checking test protocol
-(`native/editor` README): `denotate/test/checkingIdle`, `hold` (`beforeResult` or
+(`crates/editor` README): `denotate/test/checkingIdle`, `hold` (`beforeResult` or
 `duringCheck`), `checkpoint`, `release`, `resetChecks`, `checkingStats` and `checked`.
 The `.den` server's checking-idle barrier also waits for pending origin replies; its
 ticket identity is `{program, revision}`. `denotate/test/idle` and `validated` remain

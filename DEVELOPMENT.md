@@ -9,10 +9,13 @@ VS Code.
 
 ```sh
 just                                      # list every recipe
-just test-native                          # IR, checker, sessions, .den library, test DSL
+just test-crates                          # IR, checker, sessions, .den library, test DSL
 npm ci --prefix den/lsp && just test-b    # .den editor components and LSP scenarios
 just check-den den/lsp/examples/library-and-app/app   # check a .den program from the CLI
 ```
+
+The repository root is one Cargo workspace (`Cargo.toml`, `Cargo.lock`, `target/`)
+covering `crates/*`, `test-dsl`, `den/lsp/server` and `lsp-tests`.
 
 To try the `.den` editor, open `den/lsp/` in VS Code and run **Run Denotate semantic
 checking** (F5); see [den/lsp/README.md](den/lsp/README.md). The InputMapping editor
@@ -21,12 +24,11 @@ is in [test-dsl/vscode/](test-dsl/vscode/README.md).
 ## Verification
 
 ```sh
-just test-native
+just test-crates
 npm ci --prefix den/lsp && just test-b
 just test-inputmapping-lsp
 just test-b-vscode && just test-inputmapping-vscode   # needs local VS Code
-cargo +1.93.0 fmt --manifest-path native/Cargo.toml --all --check
-cargo +1.93.0 fmt --manifest-path Cargo.toml --all --check
+cargo +1.93.0 fmt --all --check
 ```
 
 If a grammar changes, regenerate with the pinned CLI (`npm run generate --prefix
@@ -37,7 +39,7 @@ that they are current.
 
 | Path | What |
 | --- | --- |
-| `native/` | Core Rust workspace: IR, normalization, checker, sessions, presentation, editor mechanics, `.den` library |
+| `crates/` | Core Rust crates: IR, normalization, checker, sessions, presentation, editor mechanics, `.den` library |
 | `den/grammar/` | Tree-sitter grammar of `.den` (generated parser committed) |
 | `den/lsp/` | `.den` language server (`server/`) and VS Code extension |
 | `test-dsl/` | InputMapping: parser, lowering, export to `.den`, LSP server and VS Code extension |

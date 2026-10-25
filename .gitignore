@@ -15,7 +15,6 @@
 node_modules/
 dist/
 /target/
-/native/target/
 .vscode-test/
 
 # local IDE settings

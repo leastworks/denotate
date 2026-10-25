@@ -24,7 +24,7 @@ test('language registration and built entry points exist', async () => {
     const suffix = process.platform === 'win32' ? '.exe' : '';
     await access(new URL(`dist/inputmapping-lsp${suffix}`, root), constants.X_OK);
     assert.deepEqual(await readFile(new URL(`dist/inputmapping-lsp${suffix}`, root)),
-        await readFile(new URL(`../../native/target/release/inputmapping-lsp${suffix}`, root)));
+        await readFile(new URL(`../../target/release/inputmapping-lsp${suffix}`, root)));
 });
 
 test('F5 builds this extension and opens only its example directory', async () => {

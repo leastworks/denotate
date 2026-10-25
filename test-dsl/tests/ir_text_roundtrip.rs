@@ -1,6 +1,6 @@
 #[path = "support/corpus.rs"]
 mod corpus;
-#[path = "../../native/ir-text/tests/support/mod.rs"]
+#[path = "../../crates/ir-text/tests/support/mod.rs"]
 mod correspondence;
 mod support;
 use denotate_check::*;

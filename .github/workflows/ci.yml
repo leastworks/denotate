@@ -18,7 +18,7 @@ jobs:
         run: |
           rustup toolchain install 1.93.0 --profile minimal
       - name: Native workspace (IR, checker, sessions, presentation, editor, ir-text, test DSL)
-        run: cargo +1.93.0 test --manifest-path native/Cargo.toml --locked --workspace --exclude denotate-lsp
+        run: cargo +1.93.0 test --locked --workspace --exclude denotate-lsp --exclude denotate-lsp-tests
       - name: Install .den editor dependencies
         run: npm ci --prefix den/lsp
       - name: Shared .den generated parser is current
@@ -36,8 +36,8 @@ jobs:
         run: npm run test:lsp --prefix den/lsp
       - name: InputMapping worker and diagnostics over LSP
         run: |
-          cargo +1.93.0 build --manifest-path native/Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp
-          DENOTATE_LSP_COMMAND="$GITHUB_WORKSPACE/native/target/debug/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.93.0 test --manifest-path Cargo.toml --locked -p denotate-lsp-tests --features inputmapping --test inputmapping
+          cargo +1.93.0 build --locked -p denotate-test-dsl --bin inputmapping-lsp
+          DENOTATE_LSP_COMMAND="$GITHUB_WORKSPACE/target/debug/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.93.0 test --locked -p denotate-lsp-tests --features inputmapping --test inputmapping
       - name: InputMapping editor package and example
         run: |
           npm ci --prefix test-dsl/vscode

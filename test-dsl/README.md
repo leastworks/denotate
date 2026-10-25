@@ -50,7 +50,7 @@ just demo-overlap                   # source-linked findings for a built-in exam
 just parse-inputmapping             # parse and lower a file, no checking
 just export-inputmapping OUT FILE…  # export one combined program as .den
 just test-inputmapping-lsp          # LSP scenarios against the InputMapping server
-cargo +1.93.0 test --manifest-path native/Cargo.toml --locked -p denotate-test-dsl
+cargo +1.93.0 test --locked -p denotate-test-dsl
 ```
 
 The editor lives in [vscode/](vscode/README.md). The server (`src/server/`) uses the

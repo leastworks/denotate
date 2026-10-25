@@ -1,6 +1,6 @@
 # denotate-analysis
 
-Salsa-based rule analysis reused by the `.den` editor index (`native/ir-text/src/index`).
+Salsa-based rule analysis reused by the `.den` editor index (`crates/ir-text/src/index`).
 It provides rule-local linting from resolved evidence: unsafe variables (head or
 negation without positive-body support), singleton variables, arity and sort evidence,
 and input-definition checks (`analyze_resolved_rule`, `RuleAnalysis`, `AtomEvidence`).
@@ -11,5 +11,5 @@ argument analysis from an earlier editor prototype; nothing outside the crate us
 today; trimming it is on the [roadmap](../../docs/roadmap.md#small-items).
 
 ```sh
-cargo +1.93.0 test --manifest-path native/Cargo.toml --locked -p denotate-analysis
+cargo +1.93.0 test --locked -p denotate-analysis
 ```

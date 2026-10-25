@@ -2,7 +2,7 @@
 
 A Rust language server (`server/`, crate `denotate-lsp`) and a VS Code extension
 (`src/extension.cjs`) for the [`.den` format](../../docs/den-format.md). Language
-semantics come from `native/ir-text`; this package owns the editor: program
+semantics come from `crates/ir-text`; this package owns the editor: program
 discovery, buffers, background checking, publication, navigation and rename.
 
 ## Try it
