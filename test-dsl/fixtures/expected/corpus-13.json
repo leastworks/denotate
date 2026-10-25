@@ -1,0 +1,762 @@
+{
+  "creator_warnings": [],
+  "diagnostics": [
+    {
+      "code": "NoMeaning",
+      "message": "These rules have no consistent result whenever input_a is present.\nExample observation - inputs present: input_a; inputs absent: input_b, input_bb, input_x.\nOther observations remain unsupported unless separately certified; a consistent equation solution does not establish meaning.\nIndependent obligation results remain available.",
+      "range": {
+        "end": {
+          "character": 34,
+          "line": 2
+        },
+        "start": {
+          "character": 18,
+          "line": 2
+        }
+      },
+      "relatedInformation": [
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 35,
+                "line": 2
+              },
+              "start": {
+                "character": 0,
+                "line": 2
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "cycle contributor"
+        }
+      ],
+      "severity": 1,
+      "source": "InputMapping"
+    }
+  ],
+  "groups": [],
+  "text": "input input_a, input_b, input_bb, input_x;\nslot a, b, c;\na <- input_a when not available(a);\n",
+  "worlds": [
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "mapped_to(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_x)": false,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "supplies(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_x,other_integer)": false
+      },
+      "inputs": []
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "mapped_to(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_x)": false,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "supplies(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_x,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "mapped_to(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_x)": false,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "supplies(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_x,other_integer)": false
+      },
+      "inputs": [
+        "value(input_b,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "mapped_to(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_x)": false,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "supplies(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_x,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "mapped_to(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_x)": false,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "supplies(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_x,other_integer)": false
+      },
+      "inputs": [
+        "value(input_bb,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "mapped_to(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_x)": false,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "supplies(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_x,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_bb,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "mapped_to(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_x)": false,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "supplies(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_x,other_integer)": false
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "mapped_to(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_x)": false,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "supplies(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_x,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "mapped_to(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_x)": true,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "supplies(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_x,other_integer)": true
+      },
+      "inputs": [
+        "value(input_x,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "mapped_to(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_x)": true,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "supplies(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_x,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_x,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "mapped_to(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_x)": true,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "supplies(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_x,other_integer)": true
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_x,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "mapped_to(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_x)": true,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "supplies(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_x,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_x,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "mapped_to(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_x)": true,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "supplies(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_x,other_integer)": true
+      },
+      "inputs": [
+        "value(input_bb,other_integer)",
+        "value(input_x,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "mapped_to(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_x)": true,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "supplies(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_x,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_x,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "mapped_to(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_x)": true,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "supplies(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_x,other_integer)": true
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_x,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "mapped_to(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_x)": true,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "supplies(input_a,a)": [
+          [
+            "mapped_to(input_a,a)",
+            "supplies(input_a,a)",
+            "available(a)"
+          ]
+        ],
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_x,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_x,other_integer)"
+      ]
+    }
+  ]
+}

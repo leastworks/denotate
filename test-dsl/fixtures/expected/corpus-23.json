@@ -1,0 +1,580 @@
+{
+  "creator_warnings": [],
+  "diagnostics": [
+    {
+      "code": "NoMeaning",
+      "message": "This dependency cycle involves masking and an authored negated condition; no consistent result exists when Input i is present and Input j is present.\nExample observation - inputs present: i, j; inputs absent: (none).\nOther observations remain unsupported unless separately certified; a consistent equation solution does not establish meaning.\nIndependent obligation results remain available.",
+      "range": {
+        "end": {
+          "character": 63,
+          "line": 0
+        },
+        "start": {
+          "character": 51,
+          "line": 0
+        }
+      },
+      "relatedInformation": [
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 64,
+                "line": 0
+              },
+              "start": {
+                "character": 39,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "cycle contributor"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 94,
+                "line": 0
+              },
+              "start": {
+                "character": 65,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "cycle contributor"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 93,
+                "line": 0
+              },
+              "start": {
+                "character": 77,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "mask condition"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 30,
+                "line": 0
+              },
+              "start": {
+                "character": 23,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "supporting InputMapping"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 38,
+                "line": 0
+              },
+              "start": {
+                "character": 31,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "supporting InputMapping"
+        }
+      ],
+      "severity": 1,
+      "source": "InputMapping"
+    },
+    {
+      "code": "NoMeaning",
+      "message": "This dependency cycle involves masking and an authored negated condition; no consistent result exists when Input i is present and Input j is present.\nExample observation - inputs present: i, j; inputs absent: (none).\nOther observations remain unsupported unless separately certified; a consistent equation solution does not establish meaning.\nIndependent obligation results remain available.",
+      "range": {
+        "end": {
+          "character": 93,
+          "line": 0
+        },
+        "start": {
+          "character": 77,
+          "line": 0
+        }
+      },
+      "relatedInformation": [
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 64,
+                "line": 0
+              },
+              "start": {
+                "character": 39,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "cycle contributor"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 94,
+                "line": 0
+              },
+              "start": {
+                "character": 65,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "cycle contributor"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 63,
+                "line": 0
+              },
+              "start": {
+                "character": 51,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "mask condition"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 30,
+                "line": 0
+              },
+              "start": {
+                "character": 23,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "supporting InputMapping"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 38,
+                "line": 0
+              },
+              "start": {
+                "character": 31,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "supporting InputMapping"
+        }
+      ],
+      "severity": 1,
+      "source": "InputMapping"
+    }
+  ],
+  "groups": [],
+  "text": "input i, j; slot a, b; a <- i; b <- j; mask a when available(b); mask b when not available(a);",
+  "worlds": [
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "available(b)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "mapped_to(i,a)": true,
+        "mapped_to(j,b)": true,
+        "masked(a)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "masked(b)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "present(i)": false,
+        "present(j)": false,
+        "slot_value(a,other_integer)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "slot_value(b,other_integer)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "supplies(i,a)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "supplies(j,b)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "value(i,other_integer)": false,
+        "value(j,other_integer)": false
+      },
+      "inputs": []
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "available(b)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "mapped_to(i,a)": true,
+        "mapped_to(j,b)": true,
+        "masked(a)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "masked(b)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "present(i)": true,
+        "present(j)": false,
+        "slot_value(a,other_integer)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "slot_value(b,other_integer)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "supplies(i,a)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "supplies(j,b)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "value(i,other_integer)": true,
+        "value(j,other_integer)": false
+      },
+      "inputs": [
+        "value(i,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "available(b)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "mapped_to(i,a)": true,
+        "mapped_to(j,b)": true,
+        "masked(a)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "masked(b)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "present(i)": false,
+        "present(j)": true,
+        "slot_value(a,other_integer)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "slot_value(b,other_integer)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "supplies(i,a)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "supplies(j,b)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "value(i,other_integer)": false,
+        "value(j,other_integer)": true
+      },
+      "inputs": [
+        "value(j,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "available(b)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "mapped_to(i,a)": true,
+        "mapped_to(j,b)": true,
+        "masked(a)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "masked(b)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "present(i)": true,
+        "present(j)": true,
+        "slot_value(a,other_integer)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "slot_value(b,other_integer)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "supplies(i,a)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "supplies(j,b)": [
+          [
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)",
+            "masked(b)"
+          ]
+        ],
+        "value(i,other_integer)": true,
+        "value(j,other_integer)": true
+      },
+      "inputs": [
+        "value(i,other_integer)",
+        "value(j,other_integer)"
+      ]
+    }
+  ]
+}

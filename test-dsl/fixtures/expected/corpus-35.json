@@ -1,0 +1,26 @@
+{
+  "creator_warnings": [],
+  "diagnostics": [],
+  "groups": [],
+  "text": "input i; slot a; a <- i when not not available(a);",
+  "worlds": [
+    {
+      "complete": true,
+      "facts": {
+        "present(i)": false,
+        "value(i,other_integer)": false
+      },
+      "inputs": []
+    },
+    {
+      "complete": true,
+      "facts": {
+        "present(i)": true,
+        "value(i,other_integer)": true
+      },
+      "inputs": [
+        "value(i,other_integer)"
+      ]
+    }
+  ]
+}

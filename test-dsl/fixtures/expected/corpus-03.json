@@ -1,0 +1,69 @@
+{
+  "creator_warnings": [],
+  "diagnostics": [
+    {
+      "code": "redundant",
+      "message": "This definition adds no result: other definitions already cover every case where it could apply.",
+      "range": {
+        "end": {
+          "character": 35,
+          "line": 3
+        },
+        "start": {
+          "character": 0,
+          "line": 3
+        }
+      },
+      "relatedInformation": [
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 35,
+                "line": 3
+              },
+              "start": {
+                "character": 0,
+                "line": 3
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "redundant definition"
+        }
+      ],
+      "severity": 2,
+      "source": "InputMapping"
+    }
+  ],
+  "groups": [],
+  "text": "input input_a;\nslot a;\na <- input_a;\na <- input_a when not available(a);\n",
+  "worlds": [
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "mapped_to(input_a,a)": true,
+        "present(input_a)": false,
+        "slot_value(a,other_integer)": false,
+        "supplies(input_a,a)": false,
+        "value(input_a,other_integer)": false
+      },
+      "inputs": []
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "mapped_to(input_a,a)": true,
+        "present(input_a)": true,
+        "slot_value(a,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "value(input_a,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)"
+      ]
+    }
+  ]
+}

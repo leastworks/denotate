@@ -1,0 +1,191 @@
+{
+  "creator_warnings": [],
+  "diagnostics": [
+    {
+      "code": "NoMeaning",
+      "message": "Masking Slot a depends on its own availability; no consistent result exists when Input i is present.\nExample observation - inputs present: i; inputs absent: (none).\nOther observations remain unsupported unless separately certified; a consistent equation solution does not establish meaning.\nIndependent obligation results remain available.",
+      "range": {
+        "end": {
+          "character": 82,
+          "line": 0
+        },
+        "start": {
+          "character": 37,
+          "line": 0
+        }
+      },
+      "relatedInformation": [
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 83,
+                "line": 0
+              },
+              "start": {
+                "character": 25,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "cycle contributor"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 82,
+                "line": 0
+              },
+              "start": {
+                "character": 70,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "cycle contributor"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 24,
+                "line": 0
+              },
+              "start": {
+                "character": 17,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "supporting InputMapping"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 65,
+                "line": 0
+              },
+              "start": {
+                "character": 37,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "cycle contributor"
+        }
+      ],
+      "severity": 1,
+      "source": "InputMapping"
+    }
+  ],
+  "groups": [],
+  "text": "input i; slot a; a <- i; mask a when (available(a) or present(i)) and available(a);",
+  "worlds": [
+    {
+      "complete": false,
+      "facts": {
+        "$condition_1()": [
+          [
+            "supplies(i,a)",
+            "available(a)",
+            "masked(a)",
+            "$condition_1()"
+          ]
+        ],
+        "available(a)": [
+          [
+            "supplies(i,a)",
+            "available(a)",
+            "masked(a)",
+            "$condition_1()"
+          ]
+        ],
+        "mapped_to(i,a)": true,
+        "masked(a)": [
+          [
+            "supplies(i,a)",
+            "available(a)",
+            "masked(a)",
+            "$condition_1()"
+          ]
+        ],
+        "present(i)": false,
+        "slot_value(a,other_integer)": [
+          [
+            "supplies(i,a)",
+            "available(a)",
+            "masked(a)",
+            "$condition_1()"
+          ]
+        ],
+        "supplies(i,a)": [
+          [
+            "supplies(i,a)",
+            "available(a)",
+            "masked(a)",
+            "$condition_1()"
+          ]
+        ],
+        "value(i,other_integer)": false
+      },
+      "inputs": []
+    },
+    {
+      "complete": false,
+      "facts": {
+        "$condition_1()": [
+          [
+            "supplies(i,a)",
+            "available(a)",
+            "masked(a)",
+            "$condition_1()"
+          ]
+        ],
+        "available(a)": [
+          [
+            "supplies(i,a)",
+            "available(a)",
+            "masked(a)",
+            "$condition_1()"
+          ]
+        ],
+        "mapped_to(i,a)": true,
+        "masked(a)": [
+          [
+            "supplies(i,a)",
+            "available(a)",
+            "masked(a)",
+            "$condition_1()"
+          ]
+        ],
+        "present(i)": true,
+        "slot_value(a,other_integer)": [
+          [
+            "supplies(i,a)",
+            "available(a)",
+            "masked(a)",
+            "$condition_1()"
+          ]
+        ],
+        "supplies(i,a)": [
+          [
+            "supplies(i,a)",
+            "available(a)",
+            "masked(a)",
+            "$condition_1()"
+          ]
+        ],
+        "value(i,other_integer)": true
+      },
+      "inputs": [
+        "value(i,other_integer)"
+      ]
+    }
+  ]
+}

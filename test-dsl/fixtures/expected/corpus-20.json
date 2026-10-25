@@ -1,0 +1,295 @@
+{
+  "creator_warnings": [],
+  "diagnostics": [],
+  "groups": [],
+  "text": "input input_a, input_b, input_bb, input_x;\nslot a, b, c;\nb <- input_b when (available(a) or available(c)) and (present(input_b) or present(input_x));\n",
+  "worlds": [
+    {
+      "complete": true,
+      "facts": {
+        "$condition_2()": false,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_x)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_x,other_integer)": false
+      },
+      "inputs": []
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_2()": false,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_x)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_x,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_2()": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_x)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_x,other_integer)": false
+      },
+      "inputs": [
+        "value(input_b,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_2()": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_x)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_x,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_2()": false,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_x)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_x,other_integer)": false
+      },
+      "inputs": [
+        "value(input_bb,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_2()": false,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_x)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_x,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_bb,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_2()": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_x)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_x,other_integer)": false
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_2()": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_x)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_x,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_2()": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_x)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_x,other_integer)": true
+      },
+      "inputs": [
+        "value(input_x,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_2()": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_x)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_x,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_x,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_2()": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_x)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_x,other_integer)": true
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_x,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_2()": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_x)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_x,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_x,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_2()": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_x)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_x,other_integer)": true
+      },
+      "inputs": [
+        "value(input_bb,other_integer)",
+        "value(input_x,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_2()": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_x)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_x,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_x,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_2()": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_x)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_x,other_integer)": true
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_x,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_2()": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_x)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_x,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_x,other_integer)"
+      ]
+    }
+  ]
+}

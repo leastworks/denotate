@@ -1,0 +1,28 @@
+{
+  "creator_warnings": [],
+  "diagnostics": [],
+  "groups": [],
+  "text": "input i; slot a, b; mask b when not (available(a) and present(i));",
+  "worlds": [
+    {
+      "complete": true,
+      "facts": {
+        "masked(b)": true,
+        "present(i)": false,
+        "value(i,other_integer)": false
+      },
+      "inputs": []
+    },
+    {
+      "complete": true,
+      "facts": {
+        "masked(b)": true,
+        "present(i)": true,
+        "value(i,other_integer)": true
+      },
+      "inputs": [
+        "value(i,other_integer)"
+      ]
+    }
+  ]
+}

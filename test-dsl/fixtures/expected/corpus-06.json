@@ -1,0 +1,3075 @@
+{
+  "creator_warnings": [],
+  "diagnostics": [
+    {
+      "code": "OverlappingMappings",
+      "message": "Slot b has overlapping InputMappings from input_b, input_bb. Mapping conditions: `available(a)`.\nCounterexample replayed on the whole program.\nLocations follow the retained grounded derivation for each conflicting tuple.",
+      "range": {
+        "end": {
+          "character": 1,
+          "line": 3
+        },
+        "start": {
+          "character": 0,
+          "line": 3
+        }
+      },
+      "relatedInformation": [
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 12,
+                "line": 3
+              },
+              "start": {
+                "character": 5,
+                "line": 3
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "conflicting Input"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 30,
+                "line": 3
+              },
+              "start": {
+                "character": 18,
+                "line": 3
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "mapping condition"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 1,
+                "line": 4
+              },
+              "start": {
+                "character": 0,
+                "line": 4
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "conflicting mapping target"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 13,
+                "line": 4
+              },
+              "start": {
+                "character": 5,
+                "line": 4
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "conflicting Input"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 31,
+                "line": 4
+              },
+              "start": {
+                "character": 19,
+                "line": 4
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "mapping condition"
+        }
+      ],
+      "severity": 1,
+      "source": "InputMapping"
+    },
+    {
+      "code": "OverlappingMappings",
+      "message": "Slot b has overlapping InputMappings from input_b, input_bb. Mapping conditions: `available(a)`.\nCounterexample replayed on the whole program.\nLocations follow the retained grounded derivation for each conflicting tuple.",
+      "range": {
+        "end": {
+          "character": 1,
+          "line": 4
+        },
+        "start": {
+          "character": 0,
+          "line": 4
+        }
+      },
+      "relatedInformation": [
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 1,
+                "line": 3
+              },
+              "start": {
+                "character": 0,
+                "line": 3
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "conflicting mapping target"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 12,
+                "line": 3
+              },
+              "start": {
+                "character": 5,
+                "line": 3
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "conflicting Input"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 30,
+                "line": 3
+              },
+              "start": {
+                "character": 18,
+                "line": 3
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "mapping condition"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 13,
+                "line": 4
+              },
+              "start": {
+                "character": 5,
+                "line": 4
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "conflicting Input"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 31,
+                "line": 4
+              },
+              "start": {
+                "character": 19,
+                "line": 4
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "mapping condition"
+        }
+      ],
+      "severity": 1,
+      "source": "InputMapping"
+    },
+    {
+      "code": "OverlappingMappings",
+      "message": "Slot d has overlapping InputMappings from input_d, input_dd. Mapping conditions: `not available(c)`.\nCounterexample replayed on the whole program.\nLocations follow the retained grounded derivation for each conflicting tuple.",
+      "range": {
+        "end": {
+          "character": 1,
+          "line": 6
+        },
+        "start": {
+          "character": 0,
+          "line": 6
+        }
+      },
+      "relatedInformation": [
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 12,
+                "line": 6
+              },
+              "start": {
+                "character": 5,
+                "line": 6
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "conflicting Input"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 34,
+                "line": 6
+              },
+              "start": {
+                "character": 18,
+                "line": 6
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "mapping condition"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 1,
+                "line": 7
+              },
+              "start": {
+                "character": 0,
+                "line": 7
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "conflicting mapping target"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 13,
+                "line": 7
+              },
+              "start": {
+                "character": 5,
+                "line": 7
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "conflicting Input"
+        }
+      ],
+      "severity": 1,
+      "source": "InputMapping"
+    },
+    {
+      "code": "OverlappingMappings",
+      "message": "Slot d has overlapping InputMappings from input_d, input_dd. Mapping conditions: `not available(c)`.\nCounterexample replayed on the whole program.\nLocations follow the retained grounded derivation for each conflicting tuple.",
+      "range": {
+        "end": {
+          "character": 1,
+          "line": 7
+        },
+        "start": {
+          "character": 0,
+          "line": 7
+        }
+      },
+      "relatedInformation": [
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 1,
+                "line": 6
+              },
+              "start": {
+                "character": 0,
+                "line": 6
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "conflicting mapping target"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 12,
+                "line": 6
+              },
+              "start": {
+                "character": 5,
+                "line": 6
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "conflicting Input"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 34,
+                "line": 6
+              },
+              "start": {
+                "character": 18,
+                "line": 6
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "mapping condition"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 13,
+                "line": 7
+              },
+              "start": {
+                "character": 5,
+                "line": 7
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "conflicting Input"
+        }
+      ],
+      "severity": 1,
+      "source": "InputMapping"
+    }
+  ],
+  "groups": [
+    [
+      [
+        "b"
+      ],
+      [
+        "supplies(input_b,b)",
+        "supplies(input_bb,b)"
+      ]
+    ],
+    [
+      [
+        "d"
+      ],
+      [
+        "supplies(input_d,d)",
+        "supplies(input_dd,d)"
+      ]
+    ]
+  ],
+  "text": "input input_a, input_b, input_bb, input_c, input_d, input_dd;\nslot a, b, c, d;\na <- input_a;\nb <- input_b when available(a);\nb <- input_bb when available(a);\nc <- input_c;\nd <- input_d when not available(c);\nd <- input_dd;\n",
+  "worlds": [
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_c)": false,
+        "present(input_d)": false,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": []
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_c)": false,
+        "present(input_d)": false,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_c)": false,
+        "present(input_d)": false,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_b,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": false,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_c)": false,
+        "present(input_d)": false,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": true,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_c)": false,
+        "present(input_d)": false,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_bb,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": false,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_c)": false,
+        "present(input_d)": false,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": true,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_bb,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_c)": false,
+        "present(input_d)": false,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": false,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_c)": false,
+        "present(input_d)": false,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": true,
+        "supplies(input_bb,b)": true,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_c)": true,
+        "present(input_d)": false,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_c,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_c)": true,
+        "present(input_d)": false,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_c,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_c)": true,
+        "present(input_d)": false,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_c,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": true,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_c)": true,
+        "present(input_d)": false,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": true,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_c,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_c)": true,
+        "present(input_d)": false,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_bb,other_integer)",
+        "value(input_c,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": true,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_c)": true,
+        "present(input_d)": false,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": true,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_c,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_c)": true,
+        "present(input_d)": false,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_c,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": true,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_c)": true,
+        "present(input_d)": false,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": true,
+        "supplies(input_bb,b)": true,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_c,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_c)": false,
+        "present(input_d)": true,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": true,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_d,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_c)": false,
+        "present(input_d)": true,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": true,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_d,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_c)": false,
+        "present(input_d)": true,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": true,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_d,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_c)": false,
+        "present(input_d)": true,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": true,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": true,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_d,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_c)": false,
+        "present(input_d)": true,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": true,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_bb,other_integer)",
+        "value(input_d,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_c)": false,
+        "present(input_d)": true,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": true,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": true,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_d,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_c)": false,
+        "present(input_d)": true,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": true,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_d,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_c)": false,
+        "present(input_d)": true,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": true,
+        "supplies(input_bb,b)": true,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": true,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_d,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_c)": true,
+        "present(input_d)": true,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_c,other_integer)",
+        "value(input_d,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_c)": true,
+        "present(input_d)": true,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_d,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_c)": true,
+        "present(input_d)": true,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_d,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": true,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_c)": true,
+        "present(input_d)": true,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": true,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_d,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_c)": true,
+        "present(input_d)": true,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_bb,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_d,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": true,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_c)": true,
+        "present(input_d)": true,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": true,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_d,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_c)": true,
+        "present(input_d)": true,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_d,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": true,
+        "available(d)": false,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_c)": true,
+        "present(input_d)": true,
+        "present(input_dd)": false,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": false,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": true,
+        "supplies(input_bb,b)": true,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": false,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": false
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_d,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_c)": false,
+        "present(input_d)": false,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_c)": false,
+        "present(input_d)": false,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_c)": false,
+        "present(input_d)": false,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_c)": false,
+        "present(input_d)": false,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": true,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_c)": false,
+        "present(input_d)": false,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_bb,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_c)": false,
+        "present(input_d)": false,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": true,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_c)": false,
+        "present(input_d)": false,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_c)": false,
+        "present(input_d)": false,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": true,
+        "supplies(input_bb,b)": true,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_c)": true,
+        "present(input_d)": false,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_c,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_c)": true,
+        "present(input_d)": false,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_c)": true,
+        "present(input_d)": false,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": true,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_c)": true,
+        "present(input_d)": false,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": true,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_c)": true,
+        "present(input_d)": false,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_bb,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": true,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_c)": true,
+        "present(input_d)": false,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": true,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_c)": true,
+        "present(input_d)": false,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": true,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_c)": true,
+        "present(input_d)": false,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": true,
+        "supplies(input_bb,b)": true,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": false,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_c)": false,
+        "present(input_d)": true,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": true,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_d,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_c)": false,
+        "present(input_d)": true,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": true,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_d,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_c)": false,
+        "present(input_d)": true,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": true,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_d,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_c)": false,
+        "present(input_d)": true,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": true,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": true,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_d,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_c)": false,
+        "present(input_d)": true,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": true,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_bb,other_integer)",
+        "value(input_d,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_c)": false,
+        "present(input_d)": true,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": true,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": true,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_d,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_c)": false,
+        "present(input_d)": true,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": true,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_d,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": false,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": true,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_c)": false,
+        "present(input_d)": true,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": false,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": true,
+        "supplies(input_bb,b)": true,
+        "supplies(input_c,c)": false,
+        "supplies(input_d,d)": true,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": false,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_d,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_c)": true,
+        "present(input_d)": true,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_c,other_integer)",
+        "value(input_d,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": false,
+        "present(input_c)": true,
+        "present(input_d)": true,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_d,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_c)": true,
+        "present(input_d)": true,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_d,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": true,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": false,
+        "present(input_c)": true,
+        "present(input_d)": true,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": true,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": false,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_d,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_c)": true,
+        "present(input_d)": true,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_bb,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_d,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": true,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": false,
+        "present(input_bb)": true,
+        "present(input_c)": true,
+        "present(input_d)": true,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": true,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": false,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_d,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "available(b)": false,
+        "available(c)": true,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": false,
+        "mapped_to(input_bb,b)": false,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": false,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_c)": true,
+        "present(input_d)": true,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": false,
+        "slot_value(b,other_integer)": false,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": false,
+        "supplies(input_b,b)": false,
+        "supplies(input_bb,b)": false,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": false,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_d,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "available(b)": true,
+        "available(c)": true,
+        "available(d)": true,
+        "mapped_to(input_a,a)": true,
+        "mapped_to(input_b,b)": true,
+        "mapped_to(input_bb,b)": true,
+        "mapped_to(input_c,c)": true,
+        "mapped_to(input_d,d)": false,
+        "mapped_to(input_dd,d)": true,
+        "present(input_a)": true,
+        "present(input_b)": true,
+        "present(input_bb)": true,
+        "present(input_c)": true,
+        "present(input_d)": true,
+        "present(input_dd)": true,
+        "slot_value(a,other_integer)": true,
+        "slot_value(b,other_integer)": true,
+        "slot_value(c,other_integer)": true,
+        "slot_value(d,other_integer)": true,
+        "supplies(input_a,a)": true,
+        "supplies(input_b,b)": true,
+        "supplies(input_bb,b)": true,
+        "supplies(input_c,c)": true,
+        "supplies(input_d,d)": false,
+        "supplies(input_dd,d)": true,
+        "value(input_a,other_integer)": true,
+        "value(input_b,other_integer)": true,
+        "value(input_bb,other_integer)": true,
+        "value(input_c,other_integer)": true,
+        "value(input_d,other_integer)": true,
+        "value(input_dd,other_integer)": true
+      },
+      "inputs": [
+        "value(input_a,other_integer)",
+        "value(input_b,other_integer)",
+        "value(input_bb,other_integer)",
+        "value(input_c,other_integer)",
+        "value(input_d,other_integer)",
+        "value(input_dd,other_integer)"
+      ]
+    }
+  ]
+}

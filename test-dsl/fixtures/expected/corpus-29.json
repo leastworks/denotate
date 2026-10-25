@@ -1,0 +1,77 @@
+{
+  "creator_warnings": [
+    "This negated condition is redundant: whenever its settled guard holds, the excluded condition cannot hold."
+  ],
+  "diagnostics": [],
+  "groups": [],
+  "text": "input i, x; slot a; a <- i when not present(x); mask a when present(x) and available(a);",
+  "worlds": [
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "mapped_to(i,a)": true,
+        "masked(a)": false,
+        "present(i)": false,
+        "present(x)": false,
+        "slot_value(a,other_integer)": false,
+        "supplies(i,a)": false,
+        "value(i,other_integer)": false,
+        "value(x,other_integer)": false
+      },
+      "inputs": []
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": true,
+        "mapped_to(i,a)": true,
+        "masked(a)": false,
+        "present(i)": true,
+        "present(x)": false,
+        "slot_value(a,other_integer)": true,
+        "supplies(i,a)": true,
+        "value(i,other_integer)": true,
+        "value(x,other_integer)": false
+      },
+      "inputs": [
+        "value(i,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "mapped_to(i,a)": false,
+        "masked(a)": false,
+        "present(i)": false,
+        "present(x)": true,
+        "slot_value(a,other_integer)": false,
+        "supplies(i,a)": false,
+        "value(i,other_integer)": false,
+        "value(x,other_integer)": true
+      },
+      "inputs": [
+        "value(x,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "mapped_to(i,a)": false,
+        "masked(a)": false,
+        "present(i)": true,
+        "present(x)": true,
+        "slot_value(a,other_integer)": false,
+        "supplies(i,a)": false,
+        "value(i,other_integer)": true,
+        "value(x,other_integer)": true
+      },
+      "inputs": [
+        "value(i,other_integer)",
+        "value(x,other_integer)"
+      ]
+    }
+  ]
+}

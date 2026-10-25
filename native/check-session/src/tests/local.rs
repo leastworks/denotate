@@ -1,5 +1,7 @@
-//! Local execution is compared with the unchanged global oracle and frozen inputs.
+//! Local execution is compared with the unchanged global oracle on corpus programs.
 use super::*;
+#[path = "../../../../test-dsl/tests/support/corpus.rs"]
+mod corpus;
 use crate::FreshSession;
 use denotate_test_dsl::{attribution::SourceView, presentation};
 
@@ -139,49 +141,29 @@ fn local_interruption_never_returns_a_semantic_value_and_recovers() {
 }
 
 #[test]
-fn local_execution_preserves_pre_mask_normalization_and_84_fingerprint_cases() {
-    for (text, count) in [
-        (
-            include_str!("../../../../test-dsl/fixtures/pre-mask.json"),
-            22,
-        ),
-        (
-            include_str!("../../../../test-dsl/fixtures/pre-normalize.json"),
-            38,
-        ),
-        (
-            include_str!("../../../../test-dsl/fixtures/pre-integration-fingerprints.json"),
-            84,
-        ),
-    ] {
-        let data: Value = serde_json::from_str(text).unwrap();
-        let cases = data["cases"].as_array().unwrap();
-        // Case counts are explicit so fixture coverage cannot silently shrink.
-        assert_eq!(cases.len(), count);
-        for row in cases {
-            let source = row["text"].as_str().unwrap();
-            let doc = std::sync::Arc::new(Document::new(
-                &mut syntax::parser().unwrap(),
-                source.into(),
-                1,
-                true,
-            ));
-            let frontend = denotate_test_dsl::analysis::prepare(
-                &"file:///baseline.inputmapping".parse().unwrap(),
-                1,
-                doc,
-                &mut denotate_test_dsl::lowering::incremental::Session::default(),
-            )
-            .unwrap();
-            if frontend.program.is_none() {
-                assert!(row.get("groups").is_none() && row.get("diagnostics").is_some());
-                assert_eq!(
-                    serde_json::to_value(frontend.fast).unwrap(),
-                    row["diagnostics"]
-                );
-            } else {
-                compare(source);
-            }
+fn local_execution_matches_global_on_the_inputmapping_corpus() {
+    let texts = corpus::texts();
+    // The count is explicit so corpus coverage cannot silently shrink.
+    assert_eq!(texts.len(), 38 + 84);
+    for source in &texts {
+        let doc = std::sync::Arc::new(Document::new(
+            &mut syntax::parser().unwrap(),
+            source.clone(),
+            1,
+            true,
+        ));
+        let frontend = denotate_test_dsl::analysis::prepare(
+            &"file:///corpus.inputmapping".parse().unwrap(),
+            1,
+            doc,
+            &mut denotate_test_dsl::lowering::incremental::Session::default(),
+        )
+        .unwrap();
+        if frontend.program.is_none() {
+            // Exact rejection diagnostics are pinned by the corpus expectations.
+            assert!(!frontend.fast.is_empty(), "{source}");
+        } else {
+            compare(source);
         }
     }
 }

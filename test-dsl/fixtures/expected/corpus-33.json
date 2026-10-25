@@ -1,0 +1,37 @@
+{
+  "diagnostics": [
+    {
+      "code": "syntax",
+      "message": "Unexpected syntax.",
+      "range": {
+        "end": {
+          "character": 42,
+          "line": 0
+        },
+        "start": {
+          "character": 24,
+          "line": 0
+        }
+      },
+      "severity": 1,
+      "source": "InputMapping"
+    },
+    {
+      "code": "paused",
+      "message": "Semantic checks paused until errors are fixed.",
+      "range": {
+        "end": {
+          "character": 0,
+          "line": 0
+        },
+        "start": {
+          "character": 0,
+          "line": 0
+        }
+      },
+      "severity": 3,
+      "source": "InputMapping"
+    }
+  ],
+  "text": "input i; slot a; mask a when present(mask);"
+}

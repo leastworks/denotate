@@ -1,0 +1,71 @@
+{
+  "creator_warnings": [],
+  "diagnostics": [
+    {
+      "code": "redundant",
+      "message": "This negated condition is redundant: whenever its settled guard holds, the excluded condition cannot hold.",
+      "range": {
+        "end": {
+          "character": 45,
+          "line": 0
+        },
+        "start": {
+          "character": 29,
+          "line": 0
+        }
+      },
+      "relatedInformation": [
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 45,
+                "line": 0
+              },
+              "start": {
+                "character": 29,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "redundant condition"
+        }
+      ],
+      "severity": 2,
+      "source": "InputMapping"
+    }
+  ],
+  "groups": [],
+  "text": "input i; slot a; a <- i when not available(a); mask a when present(i);",
+  "worlds": [
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "mapped_to(i,a)": true,
+        "masked(a)": false,
+        "present(i)": false,
+        "slot_value(a,other_integer)": false,
+        "supplies(i,a)": false,
+        "value(i,other_integer)": false
+      },
+      "inputs": []
+    },
+    {
+      "complete": true,
+      "facts": {
+        "available(a)": false,
+        "mapped_to(i,a)": true,
+        "masked(a)": true,
+        "present(i)": true,
+        "slot_value(a,other_integer)": false,
+        "supplies(i,a)": false,
+        "value(i,other_integer)": true
+      },
+      "inputs": [
+        "value(i,other_integer)"
+      ]
+    }
+  ]
+}

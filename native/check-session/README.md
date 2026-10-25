@@ -39,4 +39,5 @@ cargo +1.93.0 test --manifest-path native/Cargo.toml --locked -p denotate-check-
 ```
 
 Regression inputs live in `fixtures/regression/` (semantic outcomes and edit pairs,
-with no receipts, budgets or witness choices) and in the test DSL's `pre-*` corpora.
+with no receipts, budgets or witness choices) and in the test DSL's corpus
+([test-dsl/fixtures](../../test-dsl/fixtures/README.md)).

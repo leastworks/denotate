@@ -29,6 +29,10 @@ demo-overlap mode="overlap":
 parse-inputmapping file="test-dsl/fixtures/overlapping-mappings.txt":
     cargo +1.93.0 run --manifest-path native/Cargo.toml --locked -p denotate-test-dsl --example parse -- '{{file}}'
 
+# Rewrite the InputMapping corpus expectations from current behavior; review the diff.
+update-inputmapping-expectations:
+    UPDATE_EXPECTATIONS=1 cargo +1.93.0 test --manifest-path native/Cargo.toml --locked -p denotate-test-dsl --lib corpus_programs_match_their_expectations
+
 # Regenerate the committed DSL parser with the .den editor's pinned CLI (npm ci there first).
 generate-inputmapping: _check-node
     cd test-dsl/grammar && ../../den/lsp/node_modules/.bin/tree-sitter generate

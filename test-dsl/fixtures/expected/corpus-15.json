@@ -1,0 +1,55 @@
+{
+  "diagnostics": [
+    {
+      "code": "name",
+      "message": "'input_a' is a Input, but this position requires a Slot.",
+      "range": {
+        "end": {
+          "character": 35,
+          "line": 2
+        },
+        "start": {
+          "character": 28,
+          "line": 2
+        }
+      },
+      "relatedInformation": [
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 13,
+                "line": 0
+              },
+              "start": {
+                "character": 6,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "Declaration here."
+        }
+      ],
+      "severity": 1,
+      "source": "InputMapping"
+    },
+    {
+      "code": "paused",
+      "message": "Semantic checks paused until errors are fixed.",
+      "range": {
+        "end": {
+          "character": 0,
+          "line": 0
+        },
+        "start": {
+          "character": 0,
+          "line": 0
+        }
+      },
+      "severity": 3,
+      "source": "InputMapping"
+    }
+  ],
+  "text": "input input_a, input_b, input_bb, input_x;\nslot a, b, c;\nb <- input_b when available(input_a);\n"
+}

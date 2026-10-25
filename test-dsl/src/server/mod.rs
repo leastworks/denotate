@@ -3,9 +3,7 @@
 #[cfg(test)]
 mod deadline;
 #[cfg(test)]
-mod premask;
-#[cfg(test)]
-mod prenormalize;
+mod expectations;
 mod worker;
 
 use crate::analysis::{self, Failure};

@@ -1,0 +1,79 @@
+{
+  "creator_warnings": [],
+  "diagnostics": [],
+  "groups": [],
+  "text": "input i, j; slot a, b; a <- i when not (not (present(i) or available(b))); mask b when not (present(i) and not present(j));",
+  "worlds": [
+    {
+      "complete": true,
+      "facts": {
+        "$condition_1()": false,
+        "available(a)": false,
+        "mapped_to(i,a)": false,
+        "masked(b)": true,
+        "present(i)": false,
+        "present(j)": false,
+        "slot_value(a,other_integer)": false,
+        "supplies(i,a)": false,
+        "value(i,other_integer)": false,
+        "value(j,other_integer)": false
+      },
+      "inputs": []
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_1()": true,
+        "available(a)": true,
+        "mapped_to(i,a)": true,
+        "masked(b)": false,
+        "present(i)": true,
+        "present(j)": false,
+        "slot_value(a,other_integer)": true,
+        "supplies(i,a)": true,
+        "value(i,other_integer)": true,
+        "value(j,other_integer)": false
+      },
+      "inputs": [
+        "value(i,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_1()": false,
+        "available(a)": false,
+        "mapped_to(i,a)": false,
+        "masked(b)": true,
+        "present(i)": false,
+        "present(j)": true,
+        "slot_value(a,other_integer)": false,
+        "supplies(i,a)": false,
+        "value(i,other_integer)": false,
+        "value(j,other_integer)": true
+      },
+      "inputs": [
+        "value(j,other_integer)"
+      ]
+    },
+    {
+      "complete": true,
+      "facts": {
+        "$condition_1()": false,
+        "available(a)": true,
+        "mapped_to(i,a)": true,
+        "masked(b)": true,
+        "present(i)": true,
+        "present(j)": true,
+        "slot_value(a,other_integer)": true,
+        "supplies(i,a)": true,
+        "value(i,other_integer)": true,
+        "value(j,other_integer)": true
+      },
+      "inputs": [
+        "value(i,other_integer)",
+        "value(j,other_integer)"
+      ]
+    }
+  ]
+}

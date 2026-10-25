@@ -1,5 +1,5 @@
 //! Caching correctness: scripted edits compared with uncached shared normalization.
-//! Frozen captures and before_normalization.rs establish legacy compatibility.
+//! Corpus expectations and before_normalization.rs establish compatibility.
 use super::*;
 use denotate_test_dsl::lowering::incremental::{QueryCounts, Session};
 

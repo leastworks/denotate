@@ -1,0 +1,544 @@
+{
+  "creator_warnings": [],
+  "diagnostics": [
+    {
+      "code": "UnsupportedCycle",
+      "message": "This dependency cycle involves masking and an authored negated condition. The checker could not establish a single result.\nThis is not a proof that the program has no meaning. Independent obligation results remain available.",
+      "range": {
+        "end": {
+          "character": 59,
+          "line": 0
+        },
+        "start": {
+          "character": 43,
+          "line": 0
+        }
+      },
+      "relatedInformation": [
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 60,
+                "line": 0
+              },
+              "start": {
+                "character": 31,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "cycle contributor"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 86,
+                "line": 0
+              },
+              "start": {
+                "character": 61,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "cycle contributor"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 85,
+                "line": 0
+              },
+              "start": {
+                "character": 73,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "mask condition"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 30,
+                "line": 0
+              },
+              "start": {
+                "character": 23,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "supporting InputMapping"
+        }
+      ],
+      "severity": 2,
+      "source": "InputMapping"
+    },
+    {
+      "code": "UnsupportedCycle",
+      "message": "This dependency cycle involves masking and an authored negated condition. The checker could not establish a single result.\nThis is not a proof that the program has no meaning. Independent obligation results remain available.",
+      "range": {
+        "end": {
+          "character": 85,
+          "line": 0
+        },
+        "start": {
+          "character": 73,
+          "line": 0
+        }
+      },
+      "relatedInformation": [
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 60,
+                "line": 0
+              },
+              "start": {
+                "character": 31,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "cycle contributor"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 86,
+                "line": 0
+              },
+              "start": {
+                "character": 61,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "cycle contributor"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 59,
+                "line": 0
+              },
+              "start": {
+                "character": 43,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "cycle contributor"
+        },
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 30,
+                "line": 0
+              },
+              "start": {
+                "character": 23,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.inputmapping"
+          },
+          "message": "supporting InputMapping"
+        }
+      ],
+      "severity": 2,
+      "source": "InputMapping"
+    }
+  ],
+  "groups": [],
+  "text": "input i, j; slot a, b; a <- i; b <- j when not available(a); mask a when available(b);",
+  "worlds": [
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "available(b)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "mapped_to(i,a)": true,
+        "mapped_to(j,b)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "masked(a)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "present(i)": false,
+        "present(j)": false,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "slot_value(b,other_integer)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "supplies(i,a)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "supplies(j,b)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "value(i,other_integer)": false,
+        "value(j,other_integer)": false
+      },
+      "inputs": []
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "available(b)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "mapped_to(i,a)": true,
+        "mapped_to(j,b)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "masked(a)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "present(i)": true,
+        "present(j)": false,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "slot_value(b,other_integer)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "supplies(i,a)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "supplies(j,b)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "value(i,other_integer)": true,
+        "value(j,other_integer)": false
+      },
+      "inputs": [
+        "value(i,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "available(b)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "mapped_to(i,a)": true,
+        "mapped_to(j,b)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "masked(a)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "present(i)": false,
+        "present(j)": true,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "slot_value(b,other_integer)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "supplies(i,a)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "supplies(j,b)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "value(i,other_integer)": false,
+        "value(j,other_integer)": true
+      },
+      "inputs": [
+        "value(j,other_integer)"
+      ]
+    },
+    {
+      "complete": false,
+      "facts": {
+        "available(a)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "available(b)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "mapped_to(i,a)": true,
+        "mapped_to(j,b)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "masked(a)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "present(i)": true,
+        "present(j)": true,
+        "slot_value(a,other_integer)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "slot_value(b,other_integer)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "supplies(i,a)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "supplies(j,b)": [
+          [
+            "mapped_to(j,b)",
+            "supplies(i,a)",
+            "supplies(j,b)",
+            "available(a)",
+            "available(b)",
+            "masked(a)"
+          ]
+        ],
+        "value(i,other_integer)": true,
+        "value(j,other_integer)": true
+      },
+      "inputs": [
+        "value(i,other_integer)",
+        "value(j,other_integer)"
+      ]
+    }
+  ]
+}

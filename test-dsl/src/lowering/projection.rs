@@ -70,7 +70,7 @@ pub fn project(program: &ast::Program, sources: &Sources) -> Result<Projection> 
         *duplicate += 1;
     };
     // Declarations, mappings, then masks; each list retains authored order.
-    // This preserves pre-mask IR order and also supports hand-built ASTs.
+    // This preserves the historical IR order and also supports hand-built ASTs.
     for declaration in &program.declarations {
         sources.text(declaration.span)?;
         let mut spans = BTreeMap::from([(AstPath::Statement, declaration.span)]);

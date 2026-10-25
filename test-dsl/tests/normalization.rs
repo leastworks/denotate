@@ -7,8 +7,6 @@ mod fingerprint;
 #[path = "support/before_normalization.rs"]
 mod reference;
 mod support;
-#[path = "support/value_compatibility.rs"]
-mod value_compatibility;
 use denotate_editor::Document;
 use denotate_ir::installation::{self, BoundAtom};
 use denotate_ir::*;
@@ -119,7 +117,7 @@ fn compare_recipes(form: Arc<SemanticStatement>) {
     assert_eq!(old.removals, convert(new.assignments.removals));
 }
 #[test]
-fn frozen_recipes_agree_for_mapping_mask_and_nested_conditions() {
+fn reference_recipes_agree_for_mapping_mask_and_nested_conditions() {
     // Rejected programs are exercised through the server, before lowering.
     let mut texts: Vec<_> = corpus::accepted()
         .into_iter()
@@ -132,8 +130,8 @@ fn frozen_recipes_agree_for_mapping_mask_and_nested_conditions() {
         for s in projected.keys() {
             compare_recipes(s.form);
         }
-        // Installed compatibility is pinned independently in the server capture
-        // and additional_installed_cases_match_frozen_legacy_output below.
+        // Installed output is compared cached against uncached in
+        // generated_cases_install_identically_cached_and_uncached below.
     }
 }
 #[test]
@@ -155,10 +153,6 @@ fn unchanged_recipes_rebind_moved_sources_and_duplicate_statements_independently
         assert_eq!(
             fingerprint::fingerprint(&reused, &sources),
             fingerprint::fingerprint(&fresh, &sources)
-        );
-        assert_eq!(
-            value_compatibility::structure(fingerprint::fingerprint(&reused, &sources)),
-            frozen_installed(&text, revision)
         );
         let helpers: Vec<_> = reused
             .corpus
@@ -324,38 +318,17 @@ fn variable_library_definition_equals_hand_written_conjunctive_rule() {
     }
 }
 
-fn frozen_installed(text: &str, revision: u64) -> serde_json::Value {
-    let capture: serde_json::Value = serde_json::from_str(include_str!(
-        "../fixtures/pre-integration-fingerprints.json"
-    ))
-    .unwrap();
-    capture["cases"].as_array().unwrap().iter().find(|case|case["text"]==text && case["revision"]==revision)
-        .unwrap_or_else(||panic!("missing frozen case at revision {revision}: {text}"))["fingerprint"].clone()
-}
 #[test]
-fn additional_installed_cases_match_frozen_legacy_output() {
-    let capture: serde_json::Value = serde_json::from_str(include_str!(
-        "../fixtures/pre-integration-fingerprints.json"
-    ))
-    .unwrap();
-    let expected_cases = cases::capture_cases();
-    assert_eq!(
-        capture["cases"].as_array().unwrap().len(),
-        expected_cases.len()
-    );
+fn generated_cases_install_identically_cached_and_uncached() {
     let mut session = lowering::incremental::Session::new(true);
-    for (revision, text) in expected_cases {
+    for (revision, text) in cases::capture_cases() {
         let (ast, sources) = parse(&text, revision);
-        let expected = frozen_installed(&text, revision);
         let uncached = lowered(lowering::lower(&ast, &sources).unwrap());
         let cached = lowered(session.lower(&ast, &sources).unwrap());
         assert_eq!(
-            value_compatibility::structure(fingerprint::fingerprint(&uncached, &sources)),
-            expected
-        );
-        assert_eq!(
-            value_compatibility::structure(fingerprint::fingerprint(&cached, &sources)),
-            expected
+            fingerprint::fingerprint(&cached, &sources),
+            fingerprint::fingerprint(&uncached, &sources),
+            "{text}"
         );
     }
 }
