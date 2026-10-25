@@ -53,8 +53,9 @@ become multi-file.
 Accept `.den` programs in the scorecard, to re-score the provisional
 [checker policies](checker-policies.md) on real programs.
 
-## Building on Denotate
+## Small items
 
-Future bespoke DSLs (and successors of earlier projects) build on the Denotate IR:
-lower through the construction API with provenance, export as `.den`, and reuse the
-shared presentation and editor mechanics.
+- Trim the unused module/file-based analysis in `native/analysis`, left from an earlier
+  editor prototype.
+- Include/exclude lists for the CLI's `den.root` folder scan, which currently also
+  walks `.git`, `node_modules` and `target`.

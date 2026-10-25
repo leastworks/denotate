@@ -24,8 +24,7 @@ fabricated spans.
 
 `ProgramMembership` holds the selected root and `RootInfo { files, libraries }` per
 root; `ProgramMembership::single` builds an in-memory one-root program.
-`filesystem::discover` resolves `den.root` folders on disk for the CLI (it currently
-also scans `.git`, `node_modules` and `target`; include/exclude lists are future work).
+`filesystem::discover` resolves `den.root` folders on disk for the CLI.
 
 ## Printing
 
@@ -63,5 +62,6 @@ just check-den native/ir-text/fixtures [--sat]
 cargo +1.93.0 test --manifest-path native/Cargo.toml --locked -p denotate-ir-text
 ```
 
-`examples/check.rs` backs `just check-den`. The round trip of 128 InputMapping programs
-through printing and loading lives in `test-dsl/tests/ir_text_roundtrip.rs`.
+`examples/check.rs` backs `just check-den`. The round trip of the InputMapping
+regression programs through printing and loading lives in
+`test-dsl/tests/ir_text_roundtrip.rs`.

@@ -36,6 +36,24 @@ domain S = [a, b];
   reserved words unquoted. `$condition_N` is a generated helper (zero-arity, derived),
   distinct from a frontend relation spelled `'$condition_N'`.
 
+## Meaning
+
+A program's meaning is defined separately for each **permitted input world**: a choice
+of input tuples over the finite domains that satisfies every active assumption. In
+each world, the derived relations hold exactly the least fixed point of the rules.
+
+- Positive recursion is admitted.
+- A cycle through negation is admitted only with a justification: a proof that the
+  negation is redundant under the other premises and the assumptions (for example two
+  rules with mutually exclusive guards that each negate the other's head), or a certification of one world's meaning. Redundant
+  negations are reported as warnings; they never authorize edits.
+- Otherwise the affected component and everything depending on it is reported as
+  **unsupported**, never treated as false, or as **no meaning** where some permitted
+  input has no consistent result.
+- Obligations are checked over every permitted world. A **counterexample** is reported
+  only after concrete replay confirms it; exhausted limits give an explicit
+  **inconclusive** outcome.
+
 ## Namespaces
 
 - `namespace a::b;` applies to the rest of the file; `namespace a::b { ... }` blocks
@@ -59,7 +77,8 @@ A program is defined by a `den.root` JSON manifest:
 {"libraries": ["../common/den.root"]}
 ```
 
-`{}` means no libraries. A root contains every `.den` file under its folder, stopping
+`libraries` lists other manifests by paths relative to this one, each ending in
+`den.root`; `{}` means no libraries. A root contains every `.den` file under its folder, stopping
 at nested roots. Library roots are included transitively; diamonds and cycles are
 visited once. The root's own files are user-owned; reachable library files are
 library-owned. There is no implicit root: a `.den` file outside every `den.root` is a

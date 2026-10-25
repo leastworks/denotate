@@ -10,7 +10,8 @@ it when real programs exist, and change it on evidence.
 | SAT group backend | Kept selectable (`denotate.backend: "sat"`) | Large wins on programs with many distinct literals |
 | Relation-SCC grounding | Kept opt-in | Warm-run wins; not yet worth the complexity by default |
 | Plan cache | Small-rule bypass with bounded retention | Avoids caching cost for trivial rules |
-| Component-level evaluation | Removed | Lost everywhere it was measured |
+
+Tried and removed: component-level evaluation, which lost everywhere it was measured.
 
 Guarantees that are **not** provisional: cold and warm sessions produce identical
 results and receipts; conclusive BDD and SAT answers agree; limits produce explicit

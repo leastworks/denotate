@@ -5,15 +5,15 @@ extension implements the client side; headless clients can use the same contract
 
 ## Programs and home ownership
 
-A `den.root` JSON manifest defines a program: `{}` selects the `.den` files under its
-folder, stopping at nested manifests; `libraries` lists relative paths ending in
-`den.root`. The server discovers workspace roots and referenced external libraries,
-canonicalizes identities and keeps cycle-safe edges. Open documents outside the
-workspace discover their nearest root. There is no implicit workspace-folder root.
+Program membership follows the [`.den` format](../../docs/den-format.md#programs-denroot).
+The server discovers workspace roots and referenced external libraries, canonicalizes
+identities and keeps cycle-safe edges. Open documents outside the workspace discover
+their nearest root. There is no implicit workspace-folder root.
 
-Each file has one **home program**: the root that owns it directly (nearest manifest).
-Every known root, including library-alone programs and roots with no own files, is a
-separate program. Nothing is selected, preferred or merged.
+Each file has one **home program**: the root that owns it directly (nearest manifest),
+or itself as a standalone program when no root contains it. Every known root, including
+library-alone programs and roots with no own files, is a separate program. Nothing is
+selected, preferred or merged.
 
 A malformed manifest keeps its last known-good library links. Missing dependencies
 keep their identities and watcher subscriptions. Unreadable or out-of-sync members

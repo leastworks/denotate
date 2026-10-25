@@ -52,5 +52,5 @@ shared scheduler and server loop from `denotate-editor`; each open file is one p
 
 `fixtures/` holds the example programs and frozen regression corpora used across the
 repository: `pre-mask.json`, `pre-normalize.json` and `pre-integration-fingerprints.json`
-(see [PRE-MASK.md](fixtures/PRE-MASK.md)). They feed the 128-program `.den` round trip
-and the 119-program editor parity test. Do not regenerate them to accommodate a failure.
+(see [PRE-MASK.md](fixtures/PRE-MASK.md)). They feed the `.den` round trip and the
+editor parity test. Do not regenerate them to accommodate a failure.

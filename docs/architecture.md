@@ -56,18 +56,18 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
 
 ## Programs and checking in the editor
 
-A `.den` program is a `den.root` folder plus its referenced library roots. Every
-`.den` file has exactly one **home program** (its nearest `den.root`). The editor
-checks every known program in the background through one serial, fair scheduler
-with a warm session per program, and publishes a program's findings on its own
-files. See [decisions](decisions.md#programs-and-roots) for the full model.
+A `.den` program is a `den.root` folder plus its referenced libraries; a file outside
+every root is a standalone program ([format](den-format.md#programs-denroot)). The
+editor checks every known program in the background through one serial, fair scheduler
+with a warm session per program, and publishes each program's findings on its own files
+([protocol](../den/lsp/PROTOCOL.md), [decisions](decisions.md#programs-and-roots)).
 
 ## Tests at each layer
 
 - Unit and integration tests per crate (`just test-native`).
-- `.den` round trip: 128 InputMapping programs are lowered, printed to `.den`,
-  reloaded and checked; structure, origins and default-limit BDD/SAT outcomes must
-  match (`test-dsl/tests/ir_text_roundtrip.rs`).
-- Editor parity: both editors' *published* findings agree on the 119 parser-backed
-  programs (`den/lsp/server/src/publication_tests.rs`).
+- `.den` round trip: the InputMapping regression programs are lowered, printed to
+  `.den`, reloaded and checked; structure, origins and default-limit BDD/SAT outcomes
+  must match (`test-dsl/tests/ir_text_roundtrip.rs`).
+- Editor parity: for every parser-backed regression program, both editors publish the
+  same findings (`den/lsp/server/src/publication_tests.rs`).
 - LSP scenarios over real stdio (`lsp-tests/`) and installed VS Code smoke tests.

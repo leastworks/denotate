@@ -8,7 +8,7 @@ and input-definition checks (`analyze_resolved_rule`, `RuleAnalysis`, `AtomEvide
 Name resolution for `.den` is not here: it lives in `ir-text`'s index, shared with the
 strict loader. The crate also contains an older module/file-based declaration and
 argument analysis from an earlier editor prototype; nothing outside the crate uses it
-today, so it is a candidate for trimming.
+today; trimming it is on the [roadmap](../../docs/roadmap.md#small-items).
 
 ```sh
 cargo +1.93.0 test --manifest-path native/Cargo.toml --locked -p denotate-analysis

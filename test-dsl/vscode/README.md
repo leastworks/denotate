@@ -6,7 +6,7 @@ the language client.
 
 ## Try it
 
-From the repository root (Node 22+ and Rust 1.93.0):
+From the repository root, after the [setup](../../DEVELOPMENT.md#setup):
 
 ```sh
 npm ci --prefix test-dsl/vscode

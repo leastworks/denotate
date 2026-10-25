@@ -12,7 +12,7 @@ crate contains no roots, manifests, ownership rules, filesystem policy or DSL co
 | `publication` | Versioned diagnostics and one-time withdrawal on synchronization loss |
 | `transport` | Notification sending, serial dispatch, cancellation checkpoints, shutdown, stdio |
 | `checking` | `Scheduler`: serial worker, per-context checker sessions, FIFO coalescing, cancellation, revision tickets, checkpoint holds, cold reset |
-| `checking_server` | Bounded owner loop: queued edits before finished results, at most 256 messages per turn, next job after each turn, shared test protocol |
+| `checking_server` | Bounded owner loop: queued edits before finished results, a bounded batch of messages per turn, next job after each turn, shared test protocol |
 | `presentation` | Immutable finding spans to LSP locations, sharing the buffer line/column helper |
 | `workspace_edit` | Canonical editability checks, byte-span mapping, versioned workspace edits with a stale-snapshot check |
 | `test_support` | Fast `validated`/`idle` barriers and an async frontend-ready barrier |
