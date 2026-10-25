@@ -25,6 +25,23 @@ struct Form<'db> {
     content: Arc<SemanticStatement>,
 }
 
+// Validation and resolution keys are retained like forms. A multi-argument tracked
+// function would intern its arguments with Salsa's default collection, whose eviction
+// depends on the host's shard count, so cache reuse would differ between machines.
+#[salsa::interned(revisions = usize::MAX)]
+struct ValidationKey<'db> {
+    input: DeclarationInput,
+    form: Form<'db>,
+}
+
+#[salsa::interned(revisions = usize::MAX)]
+struct ResolutionKey<'db> {
+    input: DeclarationInput,
+    #[returns(ref)]
+    name: String,
+    kind: Kind,
+}
+
 #[salsa::input]
 struct DeclarationInput {
     #[returns(ref)]
@@ -109,16 +126,19 @@ fn declarations(db: &dyn Db, input: DeclarationInput) -> DeclarationData {
 }
 
 #[salsa::tracked]
-fn resolve(db: &dyn Db, input: DeclarationInput, name: String, kind: Kind) -> Resolution {
+fn resolve<'db>(db: &'db dyn Db, key: ResolutionKey<'db>) -> Resolution {
     db.record(Query::Resolve);
-    declarations(db, input).names.resolve(&name, kind)
+    declarations(db, *key.input(db))
+        .names
+        .resolve(key.name(db), *key.kind(db))
 }
 
 #[salsa::tracked(returns(ref))]
-fn validate(db: &dyn Db, input: DeclarationInput, form: Form<'_>) -> Vec<ValidationDiagnostic> {
+fn validate<'db>(db: &'db dyn Db, key: ValidationKey<'db>) -> Vec<ValidationDiagnostic> {
     db.record(Query::Validate);
-    validate_form(form.content(db), |name, kind| {
-        resolve(db, input, name.into(), kind).clone()
+    let input = *key.input(db);
+    validate_form(key.form(db).content(db), |name, kind| {
+        resolve(db, ResolutionKey::new(db, input, name.to_owned(), kind)).clone()
     })
 }
 
@@ -223,11 +243,10 @@ impl Session {
                 source.key.form.as_ref(),
                 SemanticStatement::Declaration { .. }
             ) {
-                errors.extend(
-                    declarations
-                        .names
-                        .bind(&source.key, validate(&self.db, self.input, form))?,
-                );
+                errors.extend(declarations.names.bind(
+                    &source.key,
+                    validate(&self.db, ValidationKey::new(&self.db, self.input, form)),
+                )?);
             }
         }
         // Gate the whole current snapshot, including duplicate declarations.
