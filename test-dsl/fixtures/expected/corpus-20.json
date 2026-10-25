@@ -7,7 +7,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_2()": false,
         "present(input_a)": false,
         "present(input_b)": false,
         "present(input_bb)": false,
@@ -22,7 +21,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_2()": false,
         "present(input_a)": true,
         "present(input_b)": false,
         "present(input_bb)": false,
@@ -39,7 +37,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_2()": true,
         "present(input_a)": false,
         "present(input_b)": true,
         "present(input_bb)": false,
@@ -56,7 +53,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_2()": true,
         "present(input_a)": true,
         "present(input_b)": true,
         "present(input_bb)": false,
@@ -74,7 +70,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_2()": false,
         "present(input_a)": false,
         "present(input_b)": false,
         "present(input_bb)": true,
@@ -91,7 +86,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_2()": false,
         "present(input_a)": true,
         "present(input_b)": false,
         "present(input_bb)": true,
@@ -109,7 +103,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_2()": true,
         "present(input_a)": false,
         "present(input_b)": true,
         "present(input_bb)": true,
@@ -127,7 +120,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_2()": true,
         "present(input_a)": true,
         "present(input_b)": true,
         "present(input_bb)": true,
@@ -146,7 +138,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_2()": true,
         "present(input_a)": false,
         "present(input_b)": false,
         "present(input_bb)": false,
@@ -163,7 +154,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_2()": true,
         "present(input_a)": true,
         "present(input_b)": false,
         "present(input_bb)": false,
@@ -181,7 +171,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_2()": true,
         "present(input_a)": false,
         "present(input_b)": true,
         "present(input_bb)": false,
@@ -199,7 +188,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_2()": true,
         "present(input_a)": true,
         "present(input_b)": true,
         "present(input_bb)": false,
@@ -218,7 +206,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_2()": true,
         "present(input_a)": false,
         "present(input_b)": false,
         "present(input_bb)": true,
@@ -236,7 +223,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_2()": true,
         "present(input_a)": true,
         "present(input_b)": false,
         "present(input_bb)": true,
@@ -255,7 +241,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_2()": true,
         "present(input_a)": false,
         "present(input_b)": true,
         "present(input_bb)": true,
@@ -274,7 +259,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_2()": true,
         "present(input_a)": true,
         "present(input_b)": true,
         "present(input_bb)": true,

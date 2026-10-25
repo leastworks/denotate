@@ -396,9 +396,9 @@ fn named_128_program_gate() {
             )],
         ));
     }
-    assert_eq!(corpus::programs().len(), 38);
+    assert_eq!(corpus::programs().len(), 39);
     let accepted = corpus::accepted();
-    assert_eq!(accepted.len(), 32);
+    assert_eq!(accepted.len(), 33);
     for (i, text) in accepted {
         cases.push((
             format!("corpus/{i:02}"),
@@ -414,7 +414,7 @@ fn named_128_program_gate() {
         ));
     }
     // Named parser-backed single-file parity catalog. Never filter failures.
-    assert_eq!(cases.len(), 119);
+    assert_eq!(cases.len(), 120);
     cases.push((
         "multi-file/overlap".into(),
         vec![
@@ -442,13 +442,13 @@ fn named_128_program_gate() {
             ),
         ],
     ));
-    assert_eq!(cases.len() + count, 128);
+    assert_eq!(cases.len() + count, 129);
     for (id, docs) in cases {
         let assembled = export::assemble(&docs).unwrap_or_else(|e| panic!("{id}: {e:?}"));
         gate(&id, assembled.program, assembled.sources);
         count += 1;
     }
-    assert_eq!(count, 128);
+    assert_eq!(count, 129);
 }
 #[test]
 fn named_rejections_and_combined_file_contract() {

@@ -157,7 +157,7 @@ fn cases() -> Vec<(String, SourceFile)> {
             ),
         ));
     }
-    assert_eq!(corpus::programs().len(), 38);
+    assert_eq!(corpus::programs().len(), 39);
     for (i, text) in corpus::accepted() {
         cases.push((
             format!("corpus/{i:02}"),
@@ -172,7 +172,7 @@ fn cases() -> Vec<(String, SourceFile)> {
             SourceFile::new("file:///case.inputmapping", revision, text),
         ));
     }
-    assert_eq!(cases.len(), 119);
+    assert_eq!(cases.len(), 120);
     cases
 }
 fn protocol_keys(

@@ -7,7 +7,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_1()": false,
         "available(a)": false,
         "mapped_to(i,a)": false,
         "masked(b)": true,
@@ -23,7 +22,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_1()": true,
         "available(a)": true,
         "mapped_to(i,a)": true,
         "masked(b)": false,
@@ -41,7 +39,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_1()": false,
         "available(a)": false,
         "mapped_to(i,a)": false,
         "masked(b)": true,
@@ -59,7 +56,6 @@
     {
       "complete": true,
       "facts": {
-        "$condition_1()": false,
         "available(a)": true,
         "mapped_to(i,a)": true,
         "masked(b)": true,

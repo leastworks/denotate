@@ -144,7 +144,7 @@ fn local_interruption_never_returns_a_semantic_value_and_recovers() {
 fn local_execution_matches_global_on_the_inputmapping_corpus() {
     let texts = corpus::texts();
     // The count is explicit so corpus coverage cannot silently shrink.
-    assert_eq!(texts.len(), 38 + 84);
+    assert_eq!(texts.len(), 39 + 84);
     for source in &texts {
         let doc = std::sync::Arc::new(Document::new(
             &mut syntax::parser().unwrap(),

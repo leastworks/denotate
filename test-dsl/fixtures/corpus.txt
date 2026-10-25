@@ -157,3 +157,5 @@ input i; slot a; a <- i when not not available(a);
 input i, j; slot a, b; a <- i when not (not (present(i) or available(b))); mask b when not (present(i) and not present(j));
 ---
 input i; slot a; a <- i; a <- i; mask a when not not present(i);
+---
+input i; slot a; a <- i when input_value(i) is 1;

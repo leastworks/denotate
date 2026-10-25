@@ -1,7 +1,13 @@
 //! Expected behavior of every corpus program: diagnostics, obligation groups and the
-//! settled or blocked facts of every small input world, through cached and uncached
-//! lowering. Regenerate deliberately with `just update-inputmapping-expectations` and
-//! review every changed expectation as a behavior change.
+//! facts of every small input world, through cached and uncached lowering. Regenerate
+//! deliberately with `just update-inputmapping-expectations` and review every changed
+//! expectation as a behavior change.
+//!
+//! Expectations exclude implementation choices: generated helper relations are
+//! projected out of world facts, and diagnostics backed by a checker-selected witness
+//! keep only their code, severity and evidence kind. The world facts already pin
+//! whether such a finding exists; replay validates witnesses in the checker, and
+//! witness wording is tested in `tests/checking.rs`, `completion.rs` and `values.rs`.
 use denotate_check::*;
 use denotate_editor::Document;
 use denotate_test_dsl::analysis;
@@ -62,12 +68,14 @@ fn capture(uncached: bool) -> Vec<Value> {
                     .join(",")
             )
         };
+        let meaningful = |a: &&GroundAtom| !p.corpus.is_generated_relation(a.relation);
         let component = |id| {
             ground
                 .component(id)
                 .unwrap()
                 .atoms
                 .iter()
+                .filter(meaningful)
                 .map(&atom)
                 .collect::<Vec<_>>()
         };
@@ -90,26 +98,39 @@ fn capture(uncached: bool) -> Vec<Value> {
         );
         let mut worlds = Vec::new();
         for bits in 0..(1 << inputs.len()) {
-            let replay = ground
-                .evaluate(
-                    inputs
-                        .iter()
-                        .enumerate()
-                        .filter(|(i, _)| bits & (1 << i) != 0)
-                        .map(|(_, a)| a.clone()),
-                    &limits,
-                )
-                .unwrap();
+            let present: Vec<_> = inputs
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| bits & (1 << i) != 0)
+                .map(|(_, a)| a.clone())
+                .collect();
+            // Every candidate is an input atom, so an invalid observation is one the
+            // input assumptions exclude. Record it; any other error fails the test.
+            let replay = match ground.evaluate(present.clone(), &limits) {
+                Ok(replay) => replay,
+                Err(CheckError::InvalidObservation(_)) => {
+                    worlds.push(json!({
+                        "inputs": present.iter().map(&atom).collect::<Vec<_>>(),
+                        "permitted": false,
+                    }));
+                    continue;
+                }
+                Err(error) => panic!("{text}: {error:?}"),
+            };
             let facts: BTreeMap<_, _> = ground
                 .atoms()
+                .filter(meaningful)
                 .map(|a| {
                     (
                         atom(a),
                         match replay.fact(a).unwrap() {
                             FactState::Settled(v) => json!(v),
-                            FactState::Blocked(ids) => {
-                                json!(ids.into_iter().map(&component).collect::<Vec<_>>())
-                            }
+                            FactState::Blocked(ids) => json!(
+                                ids.into_iter()
+                                    .map(&component)
+                                    .filter(|atoms| !atoms.is_empty())
+                                    .collect::<Vec<_>>()
+                            ),
                         },
                     )
                 })
@@ -120,20 +141,40 @@ fn capture(uncached: bool) -> Vec<Value> {
                 "complete": replay.is_complete(),
             }));
         }
-        let mut output = program.check(&limits, || {}).unwrap();
-        // Finding identities in `data` are covered by the presenter and LSP tests.
-        for diagnostic in &mut output.diagnostics {
-            diagnostic.data = None;
-        }
+        let output = program.check(&limits, || {}).unwrap();
         cases.push(json!({
             "text": text,
             "groups": groups,
             "worlds": worlds,
-            "diagnostics": output.diagnostics,
+            "diagnostics": output.diagnostics.into_iter().map(diagnostic).collect::<Vec<_>>(),
             "creator_warnings": output.creator_warnings,
         }));
     }
     cases
+}
+
+/// Evidence kinds whose diagnostic content depends on a checker-selected input world.
+const WITNESS_EVIDENCE: [&str; 3] = [
+    "replayed-counterexample",
+    "no-meaning-observation",
+    "unfounded-support-world",
+];
+
+/// The visible diagnostic, or only its witness-independent fields when its message,
+/// ranges and related locations are derived from a selected witness.
+fn diagnostic(mut d: lsp_types::Diagnostic) -> Value {
+    let evidence = d
+        .data
+        .take()
+        .and_then(|data| data["evidence"]["kind"].as_str().map(String::from));
+    match evidence {
+        Some(evidence) if WITNESS_EVIDENCE.contains(&evidence.as_str()) => json!({
+            "code": d.code,
+            "severity": d.severity,
+            "evidence": evidence,
+        }),
+        _ => serde_json::to_value(d).unwrap(),
+    }
 }
 
 fn path(i: usize) -> String {

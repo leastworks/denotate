@@ -3,135 +3,13 @@
   "diagnostics": [
     {
       "code": "OverlappingMappings",
-      "message": "Slot b has overlapping InputMappings from i, j.\nCounterexample replayed on the whole program.\nLocations follow the retained grounded derivation for each conflicting tuple.",
-      "range": {
-        "end": {
-          "character": 38,
-          "line": 0
-        },
-        "start": {
-          "character": 37,
-          "line": 0
-        }
-      },
-      "relatedInformation": [
-        {
-          "location": {
-            "range": {
-              "end": {
-                "character": 43,
-                "line": 0
-              },
-              "start": {
-                "character": 42,
-                "line": 0
-              }
-            },
-            "uri": "file:///corpus.inputmapping"
-          },
-          "message": "conflicting Input"
-        },
-        {
-          "location": {
-            "range": {
-              "end": {
-                "character": 46,
-                "line": 0
-              },
-              "start": {
-                "character": 45,
-                "line": 0
-              }
-            },
-            "uri": "file:///corpus.inputmapping"
-          },
-          "message": "conflicting mapping target"
-        },
-        {
-          "location": {
-            "range": {
-              "end": {
-                "character": 51,
-                "line": 0
-              },
-              "start": {
-                "character": 50,
-                "line": 0
-              }
-            },
-            "uri": "file:///corpus.inputmapping"
-          },
-          "message": "conflicting Input"
-        }
-      ],
-      "severity": 1,
-      "source": "InputMapping"
+      "evidence": "replayed-counterexample",
+      "severity": 1
     },
     {
       "code": "OverlappingMappings",
-      "message": "Slot b has overlapping InputMappings from i, j.\nCounterexample replayed on the whole program.\nLocations follow the retained grounded derivation for each conflicting tuple.",
-      "range": {
-        "end": {
-          "character": 46,
-          "line": 0
-        },
-        "start": {
-          "character": 45,
-          "line": 0
-        }
-      },
-      "relatedInformation": [
-        {
-          "location": {
-            "range": {
-              "end": {
-                "character": 38,
-                "line": 0
-              },
-              "start": {
-                "character": 37,
-                "line": 0
-              }
-            },
-            "uri": "file:///corpus.inputmapping"
-          },
-          "message": "conflicting mapping target"
-        },
-        {
-          "location": {
-            "range": {
-              "end": {
-                "character": 43,
-                "line": 0
-              },
-              "start": {
-                "character": 42,
-                "line": 0
-              }
-            },
-            "uri": "file:///corpus.inputmapping"
-          },
-          "message": "conflicting Input"
-        },
-        {
-          "location": {
-            "range": {
-              "end": {
-                "character": 51,
-                "line": 0
-              },
-              "start": {
-                "character": 50,
-                "line": 0
-              }
-            },
-            "uri": "file:///corpus.inputmapping"
-          },
-          "message": "conflicting Input"
-        }
-      ],
-      "severity": 1,
-      "source": "InputMapping"
+      "evidence": "replayed-counterexample",
+      "severity": 1
     }
   ],
   "groups": [

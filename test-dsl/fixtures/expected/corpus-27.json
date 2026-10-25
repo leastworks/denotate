@@ -3,85 +3,8 @@
   "diagnostics": [
     {
       "code": "NoMeaning",
-      "message": "Masking Slot a depends on its own availability; no consistent result exists when Input i is present.\nExample observation - inputs present: i; inputs absent: (none).\nOther observations remain unsupported unless separately certified; a consistent equation solution does not establish meaning.\nIndependent obligation results remain available.",
-      "range": {
-        "end": {
-          "character": 82,
-          "line": 0
-        },
-        "start": {
-          "character": 37,
-          "line": 0
-        }
-      },
-      "relatedInformation": [
-        {
-          "location": {
-            "range": {
-              "end": {
-                "character": 83,
-                "line": 0
-              },
-              "start": {
-                "character": 25,
-                "line": 0
-              }
-            },
-            "uri": "file:///corpus.inputmapping"
-          },
-          "message": "cycle contributor"
-        },
-        {
-          "location": {
-            "range": {
-              "end": {
-                "character": 82,
-                "line": 0
-              },
-              "start": {
-                "character": 70,
-                "line": 0
-              }
-            },
-            "uri": "file:///corpus.inputmapping"
-          },
-          "message": "cycle contributor"
-        },
-        {
-          "location": {
-            "range": {
-              "end": {
-                "character": 24,
-                "line": 0
-              },
-              "start": {
-                "character": 17,
-                "line": 0
-              }
-            },
-            "uri": "file:///corpus.inputmapping"
-          },
-          "message": "supporting InputMapping"
-        },
-        {
-          "location": {
-            "range": {
-              "end": {
-                "character": 65,
-                "line": 0
-              },
-              "start": {
-                "character": 37,
-                "line": 0
-              }
-            },
-            "uri": "file:///corpus.inputmapping"
-          },
-          "message": "cycle contributor"
-        }
-      ],
-      "severity": 1,
-      "source": "InputMapping"
+      "evidence": "no-meaning-observation",
+      "severity": 1
     }
   ],
   "groups": [],
@@ -90,20 +13,11 @@
     {
       "complete": false,
       "facts": {
-        "$condition_1()": [
-          [
-            "supplies(i,a)",
-            "available(a)",
-            "masked(a)",
-            "$condition_1()"
-          ]
-        ],
         "available(a)": [
           [
             "supplies(i,a)",
             "available(a)",
-            "masked(a)",
-            "$condition_1()"
+            "masked(a)"
           ]
         ],
         "mapped_to(i,a)": true,
@@ -111,8 +25,7 @@
           [
             "supplies(i,a)",
             "available(a)",
-            "masked(a)",
-            "$condition_1()"
+            "masked(a)"
           ]
         ],
         "present(i)": false,
@@ -120,16 +33,14 @@
           [
             "supplies(i,a)",
             "available(a)",
-            "masked(a)",
-            "$condition_1()"
+            "masked(a)"
           ]
         ],
         "supplies(i,a)": [
           [
             "supplies(i,a)",
             "available(a)",
-            "masked(a)",
-            "$condition_1()"
+            "masked(a)"
           ]
         ],
         "value(i,other_integer)": false
@@ -139,20 +50,11 @@
     {
       "complete": false,
       "facts": {
-        "$condition_1()": [
-          [
-            "supplies(i,a)",
-            "available(a)",
-            "masked(a)",
-            "$condition_1()"
-          ]
-        ],
         "available(a)": [
           [
             "supplies(i,a)",
             "available(a)",
-            "masked(a)",
-            "$condition_1()"
+            "masked(a)"
           ]
         ],
         "mapped_to(i,a)": true,
@@ -160,8 +62,7 @@
           [
             "supplies(i,a)",
             "available(a)",
-            "masked(a)",
-            "$condition_1()"
+            "masked(a)"
           ]
         ],
         "present(i)": true,
@@ -169,16 +70,14 @@
           [
             "supplies(i,a)",
             "available(a)",
-            "masked(a)",
-            "$condition_1()"
+            "masked(a)"
           ]
         ],
         "supplies(i,a)": [
           [
             "supplies(i,a)",
             "available(a)",
-            "masked(a)",
-            "$condition_1()"
+            "masked(a)"
           ]
         ],
         "value(i,other_integer)": true
