@@ -3,6 +3,7 @@
   "diagnostics": [],
   "groups": [],
   "text": "input i, j; slot a, b; a <- i when not (not (present(i) or available(b))); mask b when not (present(i) and not present(j));",
+  "witness_findings": [],
   "worlds": [
     {
       "complete": true,

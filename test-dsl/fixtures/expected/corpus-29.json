@@ -5,6 +5,7 @@
   "diagnostics": [],
   "groups": [],
   "text": "input i, x; slot a; a <- i when not present(x); mask a when present(x) and available(a);",
+  "witness_findings": [],
   "worlds": [
     {
       "complete": true,

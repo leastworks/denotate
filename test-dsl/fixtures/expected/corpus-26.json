@@ -200,6 +200,7 @@
   ],
   "groups": [],
   "text": "input i, j; slot a, b; a <- i; b <- j; mask a when available(b); mask b when available(a);",
+  "witness_findings": [],
   "worlds": [
     {
       "complete": false,

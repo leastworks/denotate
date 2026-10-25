@@ -12,9 +12,10 @@ comparisons, which check paths against each other, and the expectation test
 test requires cached and uncached lowering to agree before comparing.
 
 Expectations leave out implementation choices: generated helper relations are not
-part of world facts, and a diagnostic built from a checker-selected witness (an
-overlap counterexample or a no-meaning observation) records only its code, severity
-and evidence kind. The world facts already pin whether such a finding exists; the
+part of world facts, and diagnostics built from a checker-selected witness (an
+overlap counterexample or a no-meaning observation) become one entry per finding in
+`witness_findings`, with only code, severity and evidence kind; the witness decides
+their wording, ranges and how many highlights a finding gets. The world facts already pin whether such a finding exists; the
 checker validates witnesses by replay, and witness wording is tested separately.
 
 When behavior changes on purpose, regenerate and review:

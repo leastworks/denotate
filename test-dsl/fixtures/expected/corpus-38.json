@@ -3,6 +3,7 @@
   "diagnostics": [],
   "groups": [],
   "text": "input i; slot a; a <- i when input_value(i) is 1;",
+  "witness_findings": [],
   "worlds": [
     {
       "complete": true,

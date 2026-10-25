@@ -1,27 +1,6 @@
 {
   "creator_warnings": [],
-  "diagnostics": [
-    {
-      "code": "OverlappingMappings",
-      "evidence": "replayed-counterexample",
-      "severity": 1
-    },
-    {
-      "code": "OverlappingMappings",
-      "evidence": "replayed-counterexample",
-      "severity": 1
-    },
-    {
-      "code": "OverlappingMappings",
-      "evidence": "replayed-counterexample",
-      "severity": 1
-    },
-    {
-      "code": "OverlappingMappings",
-      "evidence": "replayed-counterexample",
-      "severity": 1
-    }
-  ],
+  "diagnostics": [],
   "groups": [
     [
       [
@@ -43,6 +22,18 @@
     ]
   ],
   "text": "input input_a, input_b, input_bb, input_c, input_d, input_dd;\nslot a, b, c, d;\na <- input_a;\nb <- input_b when available(a);\nb <- input_bb when available(a);\nc <- input_c;\nd <- input_d when not available(c);\nd <- input_dd;\n",
+  "witness_findings": [
+    {
+      "code": "OverlappingMappings",
+      "evidence": "replayed-counterexample",
+      "severity": 1
+    },
+    {
+      "code": "OverlappingMappings",
+      "evidence": "replayed-counterexample",
+      "severity": 1
+    }
+  ],
   "worlds": [
     {
       "complete": true,

@@ -1,14 +1,15 @@
 {
   "creator_warnings": [],
-  "diagnostics": [
+  "diagnostics": [],
+  "groups": [],
+  "text": "input i; slot a; a <- i; mask a when (available(a) or present(i)) and available(a);",
+  "witness_findings": [
     {
       "code": "NoMeaning",
       "evidence": "no-meaning-observation",
       "severity": 1
     }
   ],
-  "groups": [],
-  "text": "input i; slot a; a <- i; mask a when (available(a) or present(i)) and available(a);",
   "worlds": [
     {
       "complete": false,

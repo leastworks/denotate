@@ -3,6 +3,7 @@
   "diagnostics": [],
   "groups": [],
   "text": "input i; slot a; a <- i; a <- i; mask a when not not present(i);",
+  "witness_findings": [],
   "worlds": [
     {
       "complete": true,

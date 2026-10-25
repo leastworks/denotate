@@ -38,6 +38,7 @@
   ],
   "groups": [],
   "text": "input i; slot a, b; a <- i; mask b; mask b when available(a) or present(i);",
+  "witness_findings": [],
   "worlds": [
     {
       "complete": true,

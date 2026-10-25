@@ -168,6 +168,7 @@
   ],
   "groups": [],
   "text": "input i, j; slot a, b; a <- i; b <- j when not available(a); mask a when available(b);",
+  "witness_findings": [],
   "worlds": [
     {
       "complete": false,

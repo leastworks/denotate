@@ -5,7 +5,7 @@
 //!
 //! Expectations exclude implementation choices: generated helper relations are
 //! projected out of world facts, and diagnostics backed by a checker-selected witness
-//! keep only their code, severity and evidence kind. The world facts already pin
+//! become one summary per finding (code, severity and evidence kind). The world facts already pin
 //! whether such a finding exists; replay validates witnesses in the checker, and
 //! witness wording is tested in `tests/checking.rs`, `completion.rs` and `values.rs`.
 use denotate_check::*;
@@ -142,11 +142,13 @@ fn capture(uncached: bool) -> Vec<Value> {
             }));
         }
         let output = program.check(&limits, || {}).unwrap();
+        let (diagnostics, witness_findings) = diagnostics(output.diagnostics);
         cases.push(json!({
             "text": text,
             "groups": groups,
             "worlds": worlds,
-            "diagnostics": output.diagnostics.into_iter().map(diagnostic).collect::<Vec<_>>(),
+            "diagnostics": diagnostics,
+            "witness_findings": witness_findings,
             "creator_warnings": output.creator_warnings,
         }));
     }
@@ -160,21 +162,31 @@ const WITNESS_EVIDENCE: [&str; 3] = [
     "unfounded-support-world",
 ];
 
-/// The visible diagnostic, or only its witness-independent fields when its message,
-/// ranges and related locations are derived from a selected witness.
-fn diagnostic(mut d: lsp_types::Diagnostic) -> Value {
-    let evidence = d
-        .data
-        .take()
-        .and_then(|data| data["evidence"]["kind"].as_str().map(String::from));
-    match evidence {
-        Some(evidence) if WITNESS_EVIDENCE.contains(&evidence.as_str()) => json!({
-            "code": d.code,
-            "severity": d.severity,
-            "evidence": evidence,
-        }),
-        _ => serde_json::to_value(d).unwrap(),
+/// Visible diagnostics in emitted order, except those built from a selected witness.
+/// Their message, ranges, related locations and number of highlights depend on the
+/// witness, so each distinct finding (grouped by `data.finding`) contributes one
+/// summary of witness-independent fields, sorted. The identity groups but is not
+/// recorded: region identities can name generated helpers.
+fn diagnostics(all: Vec<lsp_types::Diagnostic>) -> (Vec<Value>, Vec<Value>) {
+    let mut visible = Vec::new();
+    let mut findings = BTreeMap::new();
+    for mut d in all {
+        let data = d.data.take().unwrap_or(Value::Null);
+        match data["evidence"]["kind"].as_str() {
+            Some(evidence) if WITNESS_EVIDENCE.contains(&evidence) => {
+                let summary = json!({"code": d.code, "severity": d.severity, "evidence": evidence});
+                let previous = findings.insert(data["finding"].to_string(), summary.clone());
+                assert!(
+                    previous.is_none_or(|p| p == summary),
+                    "one finding with different summaries"
+                );
+            }
+            _ => visible.push(serde_json::to_value(d).unwrap()),
+        }
     }
+    let mut summaries: Vec<_> = findings.into_values().collect();
+    summaries.sort_by_key(Value::to_string);
+    (visible, summaries)
 }
 
 fn path(i: usize) -> String {

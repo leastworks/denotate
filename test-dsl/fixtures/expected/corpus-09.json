@@ -3,6 +3,7 @@
   "diagnostics": [],
   "groups": [],
   "text": "input input_a, input_b, input_bb, input_x;\nslot a, b, c;\nb <- input_bb when not available(a);\n",
+  "witness_findings": [],
   "worlds": [
     {
       "complete": true,

@@ -3,6 +3,7 @@
   "diagnostics": [],
   "groups": [],
   "text": "input i; slot a, b; mask b when not (available(a) and present(i));",
+  "witness_findings": [],
   "worlds": [
     {
       "complete": true,

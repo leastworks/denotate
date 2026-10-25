@@ -1,14 +1,15 @@
 {
   "creator_warnings": [],
-  "diagnostics": [
+  "diagnostics": [],
+  "groups": [],
+  "text": "input input_a, input_b, input_bb, input_x;\nslot a, b, c;\na <- input_a when not available(a);\n",
+  "witness_findings": [
     {
       "code": "NoMeaning",
       "evidence": "no-meaning-observation",
       "severity": 1
     }
   ],
-  "groups": [],
-  "text": "input input_a, input_b, input_bb, input_x;\nslot a, b, c;\na <- input_a when not available(a);\n",
   "worlds": [
     {
       "complete": false,

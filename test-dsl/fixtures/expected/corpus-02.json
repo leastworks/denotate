@@ -136,6 +136,7 @@
   ],
   "groups": [],
   "text": "input input_a, input_b;\nslot a, b;\na <- input_a when not available(b);\nb <- input_b when not available(a);\n",
+  "witness_findings": [],
   "worlds": [
     {
       "complete": false,

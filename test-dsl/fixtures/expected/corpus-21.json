@@ -1,17 +1,6 @@
 {
   "creator_warnings": [],
-  "diagnostics": [
-    {
-      "code": "OverlappingMappings",
-      "evidence": "replayed-counterexample",
-      "severity": 1
-    },
-    {
-      "code": "OverlappingMappings",
-      "evidence": "replayed-counterexample",
-      "severity": 1
-    }
-  ],
+  "diagnostics": [],
   "groups": [
     [
       [
@@ -24,6 +13,13 @@
     ]
   ],
   "text": "input i, j, x, y; slot a, b; a <- i; b <- i; b <- j; mask b when present(x); mask b when present(y);",
+  "witness_findings": [
+    {
+      "code": "OverlappingMappings",
+      "evidence": "replayed-counterexample",
+      "severity": 1
+    }
+  ],
   "worlds": [
     {
       "complete": true,

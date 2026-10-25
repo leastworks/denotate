@@ -72,6 +72,7 @@
   ],
   "groups": [],
   "text": "input input_a, input_b, input_x;\nslot a, b;\na <- input_a when present(input_x) and not available(b);\nb <- input_b when not present(input_x) and not available(a);\n",
+  "witness_findings": [],
   "worlds": [
     {
       "complete": true,

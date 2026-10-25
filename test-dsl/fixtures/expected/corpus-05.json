@@ -2,16 +2,6 @@
   "creator_warnings": [],
   "diagnostics": [
     {
-      "code": "OverlappingMappings",
-      "evidence": "replayed-counterexample",
-      "severity": 1
-    },
-    {
-      "code": "OverlappingMappings",
-      "evidence": "replayed-counterexample",
-      "severity": 1
-    },
-    {
       "code": "UnsupportedGroup",
       "message": "Overlap check for slot d was skipped: it depends on a region with a no-consistent-result finding. See related locations.\nNo proof or counterexample is available for this slot.",
       "range": {
@@ -78,11 +68,6 @@
       ],
       "severity": 3,
       "source": "InputMapping"
-    },
-    {
-      "code": "NoMeaning",
-      "evidence": "no-meaning-observation",
-      "severity": 1
     }
   ],
   "groups": [
@@ -106,6 +91,18 @@
     ]
   ],
   "text": "input input_a, input_b, input_bb, input_c, input_d, input_dd;\nslot a, b, c, d;\na <- input_a;\nb <- input_b when available(a);\nb <- input_bb when available(a) and present(input_c);\nc <- input_c when not available(c);\nd <- input_d when not available(c);\nd <- input_dd;\n",
+  "witness_findings": [
+    {
+      "code": "NoMeaning",
+      "evidence": "no-meaning-observation",
+      "severity": 1
+    },
+    {
+      "code": "OverlappingMappings",
+      "evidence": "replayed-counterexample",
+      "severity": 1
+    }
+  ],
   "worlds": [
     {
       "complete": false,

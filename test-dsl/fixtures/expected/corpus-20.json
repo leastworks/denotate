@@ -3,6 +3,7 @@
   "diagnostics": [],
   "groups": [],
   "text": "input input_a, input_b, input_bb, input_x;\nslot a, b, c;\nb <- input_b when (available(a) or available(c)) and (present(input_b) or present(input_x));\n",
+  "witness_findings": [],
   "worlds": [
     {
       "complete": true,

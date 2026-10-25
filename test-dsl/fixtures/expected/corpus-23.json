@@ -1,19 +1,15 @@
 {
   "creator_warnings": [],
-  "diagnostics": [
-    {
-      "code": "NoMeaning",
-      "evidence": "no-meaning-observation",
-      "severity": 1
-    },
+  "diagnostics": [],
+  "groups": [],
+  "text": "input i, j; slot a, b; a <- i; b <- j; mask a when available(b); mask b when not available(a);",
+  "witness_findings": [
     {
       "code": "NoMeaning",
       "evidence": "no-meaning-observation",
       "severity": 1
     }
   ],
-  "groups": [],
-  "text": "input i, j; slot a, b; a <- i; b <- j; mask a when available(b); mask b when not available(a);",
   "worlds": [
     {
       "complete": false,
