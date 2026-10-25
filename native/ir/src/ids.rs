@@ -29,7 +29,15 @@ macro_rules! declaration_id {
     )*};
 }
 
-declaration_id!(SortId, ConstantId, RelationId, RuleId, ObligationId);
+declaration_id!(
+    SortId,
+    ConstantId,
+    RelationId,
+    RuleId,
+    ObligationId,
+    AssumptionId,
+    VerificationId
+);
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Copy, Hash)]
 pub struct SnapshotId {

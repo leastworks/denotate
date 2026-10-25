@@ -100,3 +100,42 @@ fn library_rule_identity_survives_content_change_and_owned_keys_are_structural()
     assert_eq!(std::collections::HashSet::from([a, b]).len(), 1);
     assert_ne!(OwnerKey::new("other", vec![0, 1, 255]), make());
 }
+
+#[test]
+fn assumptions_and_verifications_need_typed_keys() {
+    let mut c = Corpus::new();
+    let s = c.declare_sort("S").unwrap();
+    let input = c
+        .declare_relation("value", RelationRole::Input, [Parameter::new("v", s)])
+        .unwrap();
+    let a = c
+        .assume_at_most_one_in(Namespace::default(), "one", input, [])
+        .unwrap();
+    let v = c
+        .verification_in(Namespace::default(), "normal", [a], [])
+        .unwrap();
+    let mut keys = SemanticKeys::default();
+    keys.bind_sort(&c, s, SortKey(QualifiedKey::new("", "S")))
+        .unwrap();
+    keys.bind_relation(
+        &c,
+        input,
+        RelationKey::Named(QualifiedKey::new("", "value")),
+    )
+    .unwrap();
+    assert_eq!(keys.validate(&c), Err(KeyError::MissingBinding(a.into())));
+    let assumption = AssumptionKey(QualifiedKey::new("", "one"));
+    keys.bind_assumption(&c, a, assumption.clone()).unwrap();
+    assert_eq!(keys.validate(&c), Err(KeyError::MissingBinding(v.into())));
+    let verification = VerificationKey(QualifiedKey::new("", "normal"));
+    keys.bind_verification(&c, v, verification.clone()).unwrap();
+    keys.validate(&c).unwrap();
+    assert_eq!(keys.assumption(a), Ok(&assumption));
+    assert_eq!(keys.verification(v), Ok(&verification));
+    // Typed keys cannot be bound through the untyped occurrence path.
+    let mut untyped = SemanticKeys::default();
+    assert_eq!(
+        untyped.bind_occurrence(&c, a.into(), OccurrenceKey::Assumption(assumption)),
+        Err(KeyError::InvalidKind(a.into()))
+    );
+}

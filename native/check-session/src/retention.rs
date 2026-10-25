@@ -125,7 +125,14 @@ fn slice<T: Retained>(s: &[T], p: &mut Payload) {
 }
 macro_rules! fields {($t:ty {$($f:ident),* $(,)?})=>{impl Retained for $t {fn heap(&self,p:&mut Payload){let Self{$($f),*}=self;$($f.heap(p);)*}}};}
 macro_rules! wrapped {($($t:ty),*)=>{$(impl Retained for $t {fn heap(&self,p:&mut Payload){self.0.heap(p);}})*};}
-wrapped!(SortKey, ObligationKey, ComponentKey, GroundingKey);
+wrapped!(
+    SortKey,
+    ObligationKey,
+    AssumptionKey,
+    VerificationKey,
+    ComponentKey,
+    GroundingKey
+);
 impl Retained for OwnerKey {
     fn heap(&self, p: &mut Payload) {
         p.allocation(self.namespace().as_ptr() as usize, self.namespace().len());
@@ -159,6 +166,8 @@ impl Retained for OccurrenceKey {
             Self::Relation(k) => k.heap(p),
             Self::Rule(k) => k.heap(p),
             Self::Obligation(k) => k.heap(p),
+            Self::Assumption(k) => k.heap(p),
+            Self::Verification(k) => k.heap(p),
             Self::Installed { owner, local: _ } => owner.heap(p),
             Self::Library {
                 rule,

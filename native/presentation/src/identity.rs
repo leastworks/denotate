@@ -50,6 +50,8 @@ fn occurrence(k: &OccurrenceKey) -> Value {
         OccurrenceKey::Relation(k) => json!({"relation":relation(k)}),
         OccurrenceKey::Rule(k) => json!({"rule":rule(k)}),
         OccurrenceKey::Obligation(k) => json!({"obligation":qualified(&k.0)}),
+        OccurrenceKey::Assumption(k) => json!({"assumption":qualified(&k.0)}),
+        OccurrenceKey::Verification(k) => json!({"verification":qualified(&k.0)}),
         OccurrenceKey::Installed { owner: o, local } => {
             json!({"installed":{"owner":owner(o),"local":local}})
         }

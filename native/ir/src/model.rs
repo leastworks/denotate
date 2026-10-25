@@ -42,6 +42,14 @@ pub enum ConstructionError {
         relation: RelationId,
         index: usize,
     },
+    /// Assumptions restrict permitted input worlds, so they name input relations.
+    AssumptionOverDerived(RelationId),
+    UnknownAssumption(AssumptionId),
+    UnknownObligation(ObligationId),
+    DuplicateReference {
+        verification: String,
+        reference: OccurrenceId,
+    },
 }
 
 impl fmt::Display for ConstructionError {
@@ -219,6 +227,34 @@ pub struct Obligation {
     pub message_template: String,
 }
 
+/// Restrict permitted input worlds: distinct tuples in the remaining columns, per
+/// grouping tuple, of an input relation. An assumption, not a requirement on meaning.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Restriction {
+    AtMostOne {
+        relation: RelationId,
+        group_by: Vec<usize>,
+    },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct Assumption {
+    pub id: AssumptionId,
+    pub name: String,
+    pub restriction: Restriction,
+}
+
+/// A named verification context: the assumptions that define permitted input worlds
+/// and the obligations checked under them. Declaring an assumption activates nothing;
+/// only a verification's selection does. References keep their authored order.
+#[derive(Debug, PartialEq, Eq)]
+pub struct VerificationDeclaration {
+    pub id: VerificationId,
+    pub name: String,
+    pub assumptions: Vec<AssumptionId>,
+    pub obligations: Vec<ObligationId>,
+}
+
 /// Assembled relational declarations and rules. No source spans or domain-specific
 /// concepts. Mutations go through checked constructors; accessors are read-only.
 #[derive(Debug)]
@@ -232,11 +268,13 @@ pub struct Corpus {
     generated_relations: BTreeSet<RelationId>,
     rules: BTreeMap<RuleId, Rule>,
     obligations: BTreeMap<ObligationId, Obligation>,
+    assumptions: BTreeMap<AssumptionId, Assumption>,
+    verifications: BTreeMap<VerificationId, VerificationDeclaration>,
     occurrences: BTreeSet<OccurrenceId>,
     namespaces: BTreeMap<OccurrenceId, Namespace>,
 }
 
-/// Top-level declarations, rules and obligations, excluding atom/term occurrences.
+/// Top-level declarations, rules and contracts, excluding atom/term occurrences.
 /// Each kind retains corpus order; this does not impose a semantic global order.
 pub fn top_level(c: &Corpus) -> Vec<OccurrenceId> {
     c.sorts()
@@ -245,6 +283,8 @@ pub fn top_level(c: &Corpus) -> Vec<OccurrenceId> {
         .chain(c.relations().map(|x| x.id.into()))
         .chain(c.rules().map(|x| x.id.into()))
         .chain(c.obligations().map(|x| x.id.into()))
+        .chain(c.assumptions().map(|x| x.id.into()))
+        .chain(c.verifications().map(|x| x.id.into()))
         .collect()
 }
 impl Default for Corpus {
@@ -258,6 +298,8 @@ impl Default for Corpus {
             generated_relations: BTreeSet::new(),
             rules: BTreeMap::new(),
             obligations: BTreeMap::new(),
+            assumptions: BTreeMap::new(),
+            verifications: BTreeMap::new(),
             occurrences: BTreeSet::new(),
             namespaces: BTreeMap::new(),
         }
@@ -319,6 +361,18 @@ impl Corpus {
     }
     pub fn obligation(&self, id: ObligationId) -> Option<&Obligation> {
         self.obligations.get(&id)
+    }
+    pub fn assumptions(&self) -> impl Iterator<Item = &Assumption> {
+        self.assumptions.values()
+    }
+    pub fn assumption(&self, id: AssumptionId) -> Option<&Assumption> {
+        self.assumptions.get(&id)
+    }
+    pub fn verifications(&self) -> impl Iterator<Item = &VerificationDeclaration> {
+        self.verifications.values()
+    }
+    pub fn verification(&self, id: VerificationId) -> Option<&VerificationDeclaration> {
+        self.verifications.get(&id)
     }
 
     fn require_sort(&self, sort: SortId) -> Result<()> {
@@ -683,6 +737,30 @@ impl Corpus {
                 name,
             });
         }
+        let indices = self.group_columns(relation, group_by)?;
+        let id = ObligationId(self.fresh());
+        self.obligations.insert(
+            id,
+            Obligation {
+                id,
+                name,
+                requirement: Requirement::AtMostOne {
+                    relation,
+                    group_by: indices,
+                },
+                message_template: message_template.into(),
+            },
+        );
+        self.occurrences.insert(id.into());
+        self.namespaces.insert(id.into(), namespace);
+        Ok(id)
+    }
+
+    fn group_columns(
+        &self,
+        relation: RelationId,
+        group_by: impl IntoIterator<Item = Column>,
+    ) -> Result<Vec<usize>> {
         let declaration = self
             .relation(relation)
             .ok_or(ConstructionError::UnknownRelation(relation))?;
@@ -701,17 +779,106 @@ impl Corpus {
             }
             indices.push(index);
         }
-        let id = ObligationId(self.fresh());
-        self.obligations.insert(
+        Ok(indices)
+    }
+
+    /// Declare a named input assumption. It restricts no world until selected.
+    pub fn assume_at_most_one_in(
+        &mut self,
+        namespace: impl Into<Namespace>,
+        name: impl Into<String>,
+        relation: RelationId,
+        group_by: impl IntoIterator<Item = Column>,
+    ) -> Result<AssumptionId> {
+        let namespace = namespace.into();
+        let name = name.into();
+        named(&name, "assumption")?;
+        if self
+            .assumptions()
+            .any(|a| a.name == name && self.namespace(a.id) == Some(&namespace))
+        {
+            return Err(ConstructionError::DuplicateName {
+                kind: "assumption",
+                name,
+            });
+        }
+        let declaration = self
+            .relation(relation)
+            .ok_or(ConstructionError::UnknownRelation(relation))?;
+        if declaration.role != RelationRole::Input {
+            return Err(ConstructionError::AssumptionOverDerived(relation));
+        }
+        let indices = self.group_columns(relation, group_by)?;
+        let id = AssumptionId(self.fresh());
+        self.assumptions.insert(
             id,
-            Obligation {
+            Assumption {
                 id,
                 name,
-                requirement: Requirement::AtMostOne {
+                restriction: Restriction::AtMostOne {
                     relation,
                     group_by: indices,
                 },
-                message_template: message_template.into(),
+            },
+        );
+        self.occurrences.insert(id.into());
+        self.namespaces.insert(id.into(), namespace);
+        Ok(id)
+    }
+
+    /// Declare a verification selecting assumptions and obligations of this corpus.
+    pub fn verification_in(
+        &mut self,
+        namespace: impl Into<Namespace>,
+        name: impl Into<String>,
+        assumptions: impl IntoIterator<Item = AssumptionId>,
+        obligations: impl IntoIterator<Item = ObligationId>,
+    ) -> Result<VerificationId> {
+        let namespace = namespace.into();
+        let name = name.into();
+        named(&name, "verification")?;
+        if self
+            .verifications()
+            .any(|v| v.name == name && self.namespace(v.id) == Some(&namespace))
+        {
+            return Err(ConstructionError::DuplicateName {
+                kind: "verification",
+                name,
+            });
+        }
+        let assumptions: Vec<_> = assumptions.into_iter().collect();
+        let obligations: Vec<_> = obligations.into_iter().collect();
+        let mut seen = BTreeSet::new();
+        for &a in &assumptions {
+            if self.assumption(a).is_none() {
+                return Err(ConstructionError::UnknownAssumption(a));
+            }
+            if !seen.insert(OccurrenceId::from(a)) {
+                return Err(ConstructionError::DuplicateReference {
+                    verification: name,
+                    reference: a.into(),
+                });
+            }
+        }
+        for &o in &obligations {
+            if self.obligation(o).is_none() {
+                return Err(ConstructionError::UnknownObligation(o));
+            }
+            if !seen.insert(OccurrenceId::from(o)) {
+                return Err(ConstructionError::DuplicateReference {
+                    verification: name,
+                    reference: o.into(),
+                });
+            }
+        }
+        let id = VerificationId(self.fresh());
+        self.verifications.insert(
+            id,
+            VerificationDeclaration {
+                id,
+                name,
+                assumptions,
+                obligations,
             },
         );
         self.occurrences.insert(id.into());

@@ -171,6 +171,19 @@ fn ir_construction<T>(
                 index + 1,
                 relation(id)
             ),
+            ConstructionError::AssumptionOverDerived(id) => format!(
+                "Assumptions restrict inputs; relation {:?} is not an input",
+                relation(id)
+            ),
+            ConstructionError::UnknownAssumption(_) => {
+                "Unknown assumption in IR construction".into()
+            }
+            ConstructionError::UnknownObligation(_) => {
+                "Unknown obligation in IR construction".into()
+            }
+            ConstructionError::DuplicateReference { verification, .. } => {
+                format!("Verification {verification:?} selects the same declaration twice")
+            }
         };
         diagnostic(m, span, message)
     })

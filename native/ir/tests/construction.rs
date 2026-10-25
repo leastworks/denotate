@@ -342,3 +342,73 @@ fn qualified_declarations_preserve_display_names_and_reject_same_namespace_dupli
     assert!(!c.is_generated_relation(frontend));
     assert_eq!(c.relation(generated).unwrap().name, "$condition_42");
 }
+
+#[test]
+fn assumptions_restrict_inputs_and_verifications_select_declarations() {
+    let mut c = Corpus::new();
+    let s = c.declare_sort("S").unwrap();
+    let input = unary(&mut c, "value", s, RelationRole::Input);
+    let derived = unary(&mut c, "present", s, RelationRole::Derived);
+    let ns = Namespace::new(["demo"]).unwrap();
+    let a = c
+        .assume_at_most_one_in(ns.clone(), "one_value", input, [])
+        .unwrap();
+    assert_eq!(
+        c.assume_at_most_one_in(ns.clone(), "over_derived", derived, []),
+        Err(ConstructionError::AssumptionOverDerived(derived))
+    );
+    assert!(matches!(
+        c.assume_at_most_one_in(ns.clone(), "bad_column", input, ["missing".into()]),
+        Err(ConstructionError::InvalidGroupColumn { .. })
+    ));
+    assert!(matches!(
+        c.assume_at_most_one_in(ns.clone(), "one_value", input, []),
+        Err(ConstructionError::DuplicateName {
+            kind: "assumption",
+            ..
+        })
+    ));
+    c.assume_at_most_one_in(Namespace::default(), "one_value", input, [])
+        .unwrap();
+    let o = c
+        .at_most_one_in(ns.clone(), "unique", derived, [], "")
+        .unwrap();
+
+    let v = c.verification_in(ns.clone(), "normal", [a], [o]).unwrap();
+    let declared = c.verification(v).unwrap();
+    assert_eq!(
+        (
+            declared.assumptions.as_slice(),
+            declared.obligations.as_slice()
+        ),
+        (&[a][..], &[o][..])
+    );
+    // Empty selections are allowed: no restrictions, or a consistency-only context.
+    c.verification_in(ns.clone(), "unrestricted", [], [o])
+        .unwrap();
+    c.verification_in(ns.clone(), "inputs_only", [a], [])
+        .unwrap();
+    assert!(matches!(
+        c.verification_in(ns.clone(), "twice", [a, a], [o]),
+        Err(ConstructionError::DuplicateReference { .. })
+    ));
+    assert!(matches!(
+        c.verification_in(ns.clone(), "normal", [a], [o]),
+        Err(ConstructionError::DuplicateName {
+            kind: "verification",
+            ..
+        })
+    ));
+    let mut other = Corpus::new();
+    let t = other.declare_sort("S").unwrap();
+    let foreign_input = unary(&mut other, "value", t, RelationRole::Input);
+    let foreign = other
+        .assume_at_most_one_in(Namespace::default(), "one_value", foreign_input, [])
+        .unwrap();
+    assert_eq!(
+        c.verification_in(ns, "foreign", [foreign], []),
+        Err(ConstructionError::UnknownAssumption(foreign))
+    );
+    let top = top_level(&c);
+    assert!(top.contains(&a.into()) && top.contains(&v.into()));
+}
