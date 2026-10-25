@@ -37,10 +37,7 @@ fn lower(text: &str) -> (Program, Sources, LoweredProgram) {
 }
 
 fn constraints(p: &LoweredProgram) -> Vec<InputAtMostOne> {
-    vec![InputAtMostOne {
-        relation: p.library.value,
-        group_by: vec![0],
-    }]
+    verification_constraints(&p.corpus, p.library.default_checks).unwrap()
 }
 fn prepare(p: &LoweredProgram, limits: &Limits) -> std::result::Result<GroundProgram, CheckError> {
     GroundProgram::prepare_with_input_groups(&p.corpus, &p.domains(), &constraints(p), limits)

@@ -19,7 +19,8 @@ second <- second_input when input_value(kind) is 2 and not available(first);
   or holds one signed 64-bit integer.
 - The built-in library defines `present`, `supplies`, `available` and `slot_value`,
   the obligation that at most one input supplies a slot, and the assumption that each
-  input has at most one value.
+  input has at most one value. Its IR verification `default_checks` selects
+  `one_value_per_input` and `one_input_per_slot`.
 
 ## Pipeline
 
@@ -33,7 +34,14 @@ second <- second_input when input_value(kind) is 2 and not available(first);
    inputs, quoted guards, example observations, related locations, and explicit
    safe-removal eligibility for redundant guards (rewrite warnings).
 5. **Export** to `.den` (`src/export.rs`, `just export-inputmapping`): one `.den` file
-   per source plus a generated library root, with embedded origins.
+   per source plus a generated library root, with embedded origins. The assumption
+   and default verification are printed in `library/library.den`, so `just check-den`
+   checks an exported program under the same selection.
+
+`LoweredProgram::request` constructs a `CheckRequest::for_verification` for
+`MappingLibrary::default_checks`. Direct preparation uses the same selected
+restrictions through `denotate_check::verification_constraints`; neither path
+maintains a separate list of input constraints.
 
 ## Commands
 

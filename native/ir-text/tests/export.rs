@@ -1,5 +1,4 @@
 mod support;
-use denotate_check::InputAtMostOne;
 use denotate_ir::*;
 use denotate_ir_text::{origins::*, *};
 use std::collections::BTreeMap;
@@ -10,7 +9,6 @@ fn fixture() -> (
     Provenance,
     denotate_check::Domains,
     ExportLayout,
-    Vec<ExportAssumption>,
 ) {
     let mut c = Corpus::new();
     let ns = Namespace::new(["a::quoted", "b"]).unwrap();
@@ -47,6 +45,10 @@ fn fixture() -> (
     let obligation = c
         .at_most_one("unique", r, [], "quoted \"message\"\n")
         .unwrap();
+    for name in ["assumption_0", "assumption_1"] {
+        c.assume_at_most_one_in(Namespace::default(), name, p, [])
+            .unwrap();
+    }
     let mut sources = Sources::new();
     let snapshot = sources
         .add(
@@ -101,7 +103,6 @@ fn fixture() -> (
             },
         ],
         placements: top_level(&c).into_iter().map(|id| (id, 0)).collect(),
-        assumptions: vec![0, 0],
     };
     for (i, id) in user_rules.iter().enumerate() {
         layout
@@ -112,36 +113,23 @@ fn fixture() -> (
     layout.placements.insert(helper.into(), 1);
     layout.placements.insert(duplicate_helper.into(), 2);
     layout.placements.insert(obligation.into(), 1);
-    let assumptions = (0..2)
-        .map(|_| ExportAssumption {
-            namespace: Namespace::default(),
-            name: None,
-            constraint: InputAtMostOne {
-                relation: p,
-                group_by: vec![],
-            },
-            origins: vec![Origin::new(sources.span(snapshot, 3..5).unwrap())],
-        })
-        .collect();
     (
         c,
         sources,
         provenance,
         BTreeMap::from([(s, vec![a]), (empty, vec![])]),
         layout,
-        assumptions,
     )
 }
 #[test]
 fn export_preserves_origins_domains_helpers_ownership_and_file_rule_sequences() {
-    let (c, sources, provenance, domains, layout, assumptions) = fixture();
+    let (c, sources, provenance, domains, layout) = fixture();
     let p = ExportProgram {
         corpus: &c,
         sources: &sources,
         provenance: &provenance,
         domains: &domains,
         layout: &layout,
-        assumptions: &assumptions,
     };
     for embedded_origins in [false, true] {
         let bundle = print(&p, PrintOptions { embedded_origins }).unwrap();
@@ -204,13 +192,13 @@ fn export_preserves_origins_domains_helpers_ownership_and_file_rule_sequences() 
     }
 }
 #[test]
-fn invalid_layout_domains_and_assumptions_fail_before_export() {
-    let (c, sources, provenance, domains, layout, assumptions) = fixture();
+fn invalid_layout_and_domains_fail_before_export() {
+    let (c, sources, provenance, domains, layout) = fixture();
     let mut invalid = layout.clone();
     invalid
         .placements
         .remove(&c.sorts().next().unwrap().id.into());
-    let p = |layout, domains, assumptions| {
+    let p = |layout, domains| {
         print(
             &ExportProgram {
                 corpus: &c,
@@ -218,24 +206,20 @@ fn invalid_layout_domains_and_assumptions_fail_before_export() {
                 provenance: &provenance,
                 domains,
                 layout,
-                assumptions,
             },
             PrintOptions::default(),
         )
     };
-    assert!(p(&invalid, &domains, &assumptions).is_err());
+    assert!(p(&invalid, &domains).is_err());
     let mut invalid = layout.clone();
     invalid.files[1].path = invalid.files[0].path.clone();
-    assert!(p(&invalid, &domains, &assumptions).is_err());
+    assert!(p(&invalid, &domains).is_err());
     let mut invalid = layout.clone();
     invalid.files[1].path = "../escape.den".into();
-    assert!(p(&invalid, &domains, &assumptions).is_err());
+    assert!(p(&invalid, &domains).is_err());
     let mut invalid = domains.clone();
     invalid.clear();
-    assert!(p(&layout, &invalid, &assumptions).is_err());
-    let mut invalid = assumptions.clone();
-    invalid[0].constraint.group_by = vec![99];
-    assert!(p(&layout, &domains, &invalid).is_err());
+    assert!(p(&layout, &invalid).is_err());
 }
 #[test]
 fn hash_vectors_and_every_character_boundary_round_trip() {
@@ -356,7 +340,7 @@ fn invalid_location_graphs_fail_even_when_unused_or_sources_unavailable() {
 
 #[test]
 fn fused_views_and_revisions_share_a_uri_without_merging_with_current_text() {
-    let (c, mut sources, mut provenance, domains, layout, assumptions) = fixture();
+    let (c, mut sources, mut provenance, domains, layout) = fixture();
     // This URI is also the destination. All three historical identities must
     // survive independently of the current .den snapshot and of local revisions.
     let mut origins = Vec::new();
@@ -385,7 +369,6 @@ fn fused_views_and_revisions_share_a_uri_without_merging_with_current_text() {
         provenance: &provenance,
         domains: &domains,
         layout: &layout,
-        assumptions: &assumptions,
     };
     let bundle = print(&p, PrintOptions::default()).unwrap();
     assert!(bundle.files["sources/a.den"].contains("loc(fused["));
@@ -455,7 +438,7 @@ fn grouped_constants_union_self_and_indexed_origins_and_resolve_once() {
 #[test]
 fn fresh_arenas_and_source_registration_history_do_not_change_bytes() {
     let export = |noise: bool| {
-        let (c, sources, provenance, domains, layout, assumptions) = fixture();
+        let (c, sources, provenance, domains, layout) = fixture();
         let mut reordered = Sources::new();
         if noise {
             reordered
@@ -484,13 +467,6 @@ fn fresh_arenas_and_source_registration_history_do_not_change_bytes() {
                 .attach(&c, &reordered, id, origins.iter().map(&map_origin))
                 .unwrap();
         }
-        let assumptions = assumptions
-            .into_iter()
-            .map(|mut a| {
-                a.origins = a.origins.iter().map(&map_origin).collect();
-                a
-            })
-            .collect::<Vec<_>>();
         print(
             &ExportProgram {
                 corpus: &c,
@@ -498,7 +474,6 @@ fn fresh_arenas_and_source_registration_history_do_not_change_bytes() {
                 provenance: &remapped,
                 domains: &domains,
                 layout: &layout,
-                assumptions: &assumptions,
             },
             PrintOptions::default(),
         )
@@ -520,14 +495,12 @@ fn readable_export(text: &str) -> String {
             ownership: Ownership::User,
         }],
         placements: top_level(&p.corpus).into_iter().map(|id| (id, 0)).collect(),
-        assumptions: vec![],
     };
     let export = ExportProgram {
         corpus: &p.corpus,
         domains: &p.domains,
         sources: &p.sources,
         provenance: &p.provenance,
-        assumptions: &[],
         layout: &layout,
     };
     let mut plain = String::new();
@@ -687,7 +660,6 @@ fn helper_labels_survive_except_collisions_and_unspellable_names() {
             ownership: Ownership::User,
         }],
         placements: top_level(&c).into_iter().map(|id| (id, 0)).collect(),
-        assumptions: vec![],
     };
     let sources = Sources::new();
     let provenance = Provenance::new();
@@ -697,7 +669,6 @@ fn helper_labels_survive_except_collisions_and_unspellable_names() {
         domains: &domains,
         sources: &sources,
         provenance: &provenance,
-        assumptions: &[],
         layout: &layout,
     };
     let bundle = print(&program, PrintOptions::default()).unwrap();
@@ -755,7 +726,6 @@ fn compact_and_expanded_maps_follow_occurrence_order_with_numeric_indices() {
             ownership: Ownership::User,
         }],
         placements: top_level(&p.corpus).into_iter().map(|id| (id, 0)).collect(),
-        assumptions: vec![],
     };
     let expected = std::iter::once("self".to_owned())
         .chain(std::iter::once("head".to_owned()))
@@ -783,7 +753,6 @@ fn compact_and_expanded_maps_follow_occurrence_order_with_numeric_indices() {
             domains: &p.domains,
             sources: &p.sources,
             provenance: &p.provenance,
-            assumptions: &[],
             layout: &layout,
         };
         let bundle = print(&program, PrintOptions::default()).unwrap();

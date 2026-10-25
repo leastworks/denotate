@@ -346,6 +346,32 @@ impl CheckRequest {
     }
 }
 
+/// Lower the selected IR restrictions for keyed requests and direct preparation.
+/// A foreign verification is rejected; unselected assumptions never contribute.
+pub fn verification_constraints(
+    corpus: &Corpus,
+    verification: VerificationId,
+) -> Result<Vec<InputAtMostOne>> {
+    let declaration = corpus
+        .verification(verification)
+        .ok_or(CheckError::InvalidRequest("unknown verification"))?;
+    declaration
+        .assumptions
+        .iter()
+        .map(|id| {
+            let assumption = corpus
+                .assumption(*id)
+                .ok_or(CheckError::InvalidRequest("unknown assumption"))?;
+            match &assumption.restriction {
+                Restriction::AtMostOne { relation, group_by } => Ok(InputAtMostOne {
+                    relation: *relation,
+                    group_by: group_by.clone(),
+                }),
+            }
+        })
+        .collect()
+}
+
 fn verification_selection(
     corpus: &Corpus,
     keys: &SemanticKeys,
@@ -354,19 +380,13 @@ fn verification_selection(
     let declaration = corpus
         .verification(verification)
         .ok_or(CheckError::InvalidRequest("unknown verification"))?;
-    let constraints = declaration
-        .assumptions
-        .iter()
-        .map(|id| {
-            let assumption = corpus
-                .assumption(*id)
-                .ok_or(CheckError::InvalidRequest("unknown assumption"))?;
-            match &assumption.restriction {
-                Restriction::AtMostOne { relation, group_by } => Ok(InputConstraint::AtMostOne {
-                    relation: keys.relation(*relation).map_err(CheckError::Keys)?.clone(),
-                    group_by: group_by.clone(),
-                }),
-            }
+    let constraints = verification_constraints(corpus, verification)?
+        .into_iter()
+        .map(|c| {
+            Ok(InputConstraint::AtMostOne {
+                relation: keys.relation(c.relation).map_err(CheckError::Keys)?.clone(),
+                group_by: c.group_by,
+            })
         })
         .collect::<Result<_>>()?;
     let obligations = declaration

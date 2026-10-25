@@ -24,6 +24,65 @@ fn program(text: &str) -> analysis::Program {
     .program
     .unwrap()
 }
+
+#[test]
+fn requests_and_direct_preparation_follow_the_selected_assumptions() {
+    use denotate_ir::{Namespace, QualifiedKey, VerificationKey};
+
+    let mut p = program(
+        "input i, j; slot a; a <- i when input_value(i) is 1; a <- j when input_value(i) is 2;",
+    );
+    let p = &mut p.lowered;
+    let limits = Limits::default();
+    let default = p.library.default_checks;
+    let unrestricted = p
+        .corpus
+        .verification_in(
+            Namespace::default(),
+            "unrestricted",
+            [],
+            [p.library.unique_input],
+        )
+        .unwrap();
+    p.keys
+        .bind_verification(
+            &p.corpus,
+            unrestricted,
+            VerificationKey(QualifiedKey::new("test", "unrestricted")),
+        )
+        .unwrap();
+
+    // The guards are exclusive only when the selected assumption forbids two
+    // values for i. The unselected declaration remains in the corpus.
+    for (verification, proved) in [(default, true), (unrestricted, false)] {
+        p.library.default_checks = verification;
+        let direct = p.prepare(&limits).unwrap().admit(&limits).unwrap();
+        let direct = direct
+            .symbolic(&limits)
+            .unwrap()
+            .verify_at_most_one(&limits)
+            .unwrap();
+        assert_eq!(direct.all_obligations_proved(), proved);
+
+        let request = p.request(&limits).unwrap();
+        assert_eq!(
+            request.verification.as_ref(),
+            Some(p.keys.verification(verification).unwrap())
+        );
+        let RequestPreparation::Complete(prepared) = request
+            .prepare(&p.corpus, &p.keys, &(&limits).into())
+            .unwrap()
+        else {
+            panic!("unexpected preparation exhaustion")
+        };
+        let admitted = prepared.admit(&(&limits).into()).unwrap();
+        let CheckOutcome::Complete(checked) = admitted.verify(&(&limits).into()).unwrap() else {
+            panic!("unexpected checking exhaustion")
+        };
+        assert_eq!(checked.verification.all_obligations_proved(), proved);
+    }
+}
+
 #[test]
 fn affected_fixtures_keep_status_and_diagnostic_summaries() {
     let report: Value = serde_json::from_str(include_str!(
@@ -45,10 +104,7 @@ fn affected_fixtures_keep_status_and_diagnostic_summaries() {
         let old = GroundProgram::prepare_with_input_groups(
             &p.lowered.corpus,
             &p.lowered.domains(),
-            &[InputAtMostOne {
-                relation: p.lowered.library.value,
-                group_by: vec![0],
-            }],
+            &verification_constraints(&p.lowered.corpus, p.lowered.library.default_checks).unwrap(),
             &limits,
         )
         .unwrap()

@@ -76,6 +76,13 @@ fn quoted_text(source: &SourceFile, raw: &str, span: Range<usize>) -> Result<Str
     let mut out = String::new();
     let mut chars = raw[1..raw.len() - 1].chars();
     while let Some(c) = chars.next() {
+        if matches!(c, '\'' | '\r' | '\n') {
+            return Err(error(
+                source,
+                span,
+                "Quote or newline must be escaped in a name",
+            ));
+        }
         if c != '\\' {
             out.push(c);
             continue;
@@ -105,18 +112,7 @@ pub(crate) fn name(source: &SourceFile, node: Node<'_>) -> Result<Name> {
 }
 pub(crate) fn name_in(source: &SourceFile, node: Node<'_>, parameter: bool) -> Result<Name> {
     if node.kind() == "qualified_name" {
-        let mut parts = path_parts(text(source, node));
-        if parts.first() == Some(&"") {
-            parts.remove(0);
-        }
-        let member = parts.pop().unwrap();
-        let module = namespace_parts(source, &parts, node.byte_range())?;
-        return Ok(Name {
-            namespace: Some(module),
-            text: decode(source, member, node.byte_range())?,
-            generated: member.starts_with('$'),
-            span: node.byte_range(),
-        });
+        return decode_reference(source, path_parts(text(source, node)), node.byte_range());
     }
     let spelling = match node.kind() {
         "quoted_identifier" => quoted_text(source, text(source, node), node.byte_range())?,
@@ -246,6 +242,10 @@ pub(crate) fn path_parts(raw: &str) -> Vec<&str> {
     let (mut quoted, mut escaped, mut start) = (false, false, 0);
     let mut parts = Vec::new();
     for (i, c) in raw.char_indices() {
+        // The second colon of a consumed separator cannot start another one.
+        if i < start {
+            continue;
+        }
         if escaped {
             escaped = false;
             continue;
@@ -265,6 +265,55 @@ pub(crate) fn path_parts(raw: &str) -> Vec<&str> {
     parts.push(&raw[start..]);
     parts
 }
+
+/// Validate a complete reference token before applying the shared name decoding.
+/// Namespace segments are identifiers or quoted names; only a qualified member
+/// may be an integer, and only the member may be a generated identifier.
+pub(crate) fn reference_name(source: &SourceFile, span: Range<usize>) -> Result<Name> {
+    let raw = &source.text[span.clone()];
+    let parts = path_parts(raw);
+    let qualified = parts.len() > 1;
+    let identifier = |text: &str| {
+        text.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
+            && text.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+    };
+    for (i, part) in parts.iter().enumerate() {
+        if qualified && i == 0 && part.is_empty() {
+            continue;
+        }
+        let member = i + 1 == parts.len();
+        let digits = part.strip_prefix('-').unwrap_or(part);
+        let integer =
+            qualified && member && !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit());
+        let generated = member && part.strip_prefix('$').is_some_and(identifier);
+        if !part.starts_with('\'') && !identifier(part) && !integer && !generated {
+            return Err(error(source, span, "Expected one qualified name"));
+        }
+    }
+    decode_reference(source, parts, span)
+}
+
+fn decode_reference(source: &SourceFile, mut parts: Vec<&str>, span: Range<usize>) -> Result<Name> {
+    let qualified = parts.len() > 1;
+    if qualified && parts.first() == Some(&"") {
+        parts.remove(0);
+    }
+    let member = parts
+        .pop()
+        .expect("path_parts always returns a final segment");
+    let namespace = if qualified {
+        Some(namespace_parts(source, &parts, span.clone())?)
+    } else {
+        None
+    };
+    Ok(Name {
+        namespace,
+        text: decode(source, member, span.clone())?,
+        generated: member.starts_with('$'),
+        span,
+    })
+}
+
 fn decode(source: &SourceFile, raw: &str, span: Range<usize>) -> Result<String> {
     if raw.starts_with('\'') {
         return quoted_text(source, raw, span);

@@ -124,14 +124,11 @@ impl LoweredProgram {
         &self,
         limits: &denotate_check::Limits,
     ) -> std::result::Result<denotate_check::CheckRequest, denotate_check::CheckError> {
-        denotate_check::CheckRequest::all_obligations(
+        denotate_check::CheckRequest::for_verification(
             &self.corpus,
             &self.keys,
             &self.domains(),
-            &[denotate_check::InputAtMostOne {
-                relation: self.library.value,
-                group_by: vec![0],
-            }],
+            self.library.default_checks,
             limits,
         )
     }
@@ -143,10 +140,7 @@ impl LoweredProgram {
             &self.corpus,
             &self.keys,
             &self.domains(),
-            &[denotate_check::InputAtMostOne {
-                relation: self.library.value,
-                group_by: vec![0],
-            }],
+            &denotate_check::verification_constraints(&self.corpus, self.library.default_checks)?,
             limits,
         )
     }

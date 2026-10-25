@@ -48,9 +48,9 @@ named files plus root manifests. Library files go under `library/` with their ow
 root. `ExportBundle::documents(base_uri)` reloads a bundle in memory.
 `PrintOptions { embedded_origins: false }` omits origins.
 
-`ExportAssumption` and its separate layout placements remain supported for InputMapping
-until it declares its assumption in the IR. Their exported declarations reload into the IR. Names must not collide
-with IR assumptions in the same namespace.
+Assumptions and verifications are printed from IR declarations with ordinary
+top-level layout placements and provenance. There is no separate export assumption
+record; API callers declare both contracts in the corpus before exporting.
 
 `spelling(name, NameKind)` is the kind-aware spelling used by the printer; editors must
 use it for replacement names (rename), not display quoting.

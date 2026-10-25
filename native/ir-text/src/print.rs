@@ -1,6 +1,6 @@
 //! Pure, deterministic export. Layout is supplied independently of namespace and origins.
 use crate::{ProgramMembership, RootInfo, SourceFile, origins::*};
-use denotate_check::{Domains, InputAtMostOne};
+use denotate_check::Domains;
 use denotate_ir::*;
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -18,23 +18,12 @@ pub struct ExportFile {
 pub struct ExportLayout {
     pub files: Vec<ExportFile>,
     pub placements: BTreeMap<OccurrenceId, usize>,
-    /// One file index per assumption, including repeated constraints.
-    pub assumptions: Vec<usize>,
-}
-#[derive(Clone, Debug)]
-/// Transitional InputMapping export adapter, until InputMapping declares IR assumptions.
-pub struct ExportAssumption {
-    pub namespace: Namespace,
-    pub name: Option<String>,
-    pub constraint: InputAtMostOne,
-    pub origins: Vec<Origin>,
 }
 pub struct ExportProgram<'a> {
     pub corpus: &'a Corpus,
     pub domains: &'a Domains,
     pub sources: &'a Sources,
     pub provenance: &'a Provenance,
-    pub assumptions: &'a [ExportAssumption],
     pub layout: &'a ExportLayout,
 }
 #[derive(Clone, Copy, Debug)]
@@ -212,13 +201,9 @@ fn validate(p: &ExportProgram<'_>) -> Result<()> {
             "Layout must place every top-level occurrence exactly once, with no foreign or child IDs",
         ));
     }
-    if p.layout.assumptions.len() != p.assumptions.len() {
-        return Err(fail("Missing assumption placement"));
-    }
     if p.layout
         .placements
         .values()
-        .chain(&p.layout.assumptions)
         .any(|i| *i >= p.layout.files.len())
     {
         return Err(fail("Unknown output file index"));
@@ -290,37 +275,6 @@ fn validate(p: &ExportProgram<'_>) -> Result<()> {
             return Err(fail("Foreign provenance occurrence"));
         }
         for origin in origins {
-            p.sources
-                .text(origin.span)
-                .map_err(|e| fail(e.to_string()))?;
-        }
-    }
-    let mut names = p
-        .corpus
-        .assumptions()
-        .map(|a| (p.corpus.namespace(a.id).unwrap(), &a.name))
-        .collect::<BTreeSet<_>>();
-    for a in p.assumptions {
-        let r = p
-            .corpus
-            .relation(a.constraint.relation)
-            .ok_or_else(|| fail("Foreign assumption relation"))?;
-        if r.role != RelationRole::Input
-            || a.constraint
-                .group_by
-                .iter()
-                .any(|i| *i >= r.parameters.len())
-            || a.constraint.group_by.iter().collect::<BTreeSet<_>>().len()
-                != a.constraint.group_by.len()
-        {
-            return Err(fail("Invalid input assumption"));
-        }
-        if let Some(name) = &a.name {
-            if name.is_empty() || !names.insert((&a.namespace, name)) {
-                return Err(fail("Empty or duplicate assumption name"));
-            }
-        }
-        for origin in &a.origins {
             p.sources
                 .text(origin.span)
                 .map_err(|e| fail(e.to_string()))?;
@@ -625,44 +579,6 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
                 origins: BTreeMap::new(),
             });
         }
-    }
-    let mut names = p
-        .assumptions
-        .iter()
-        .filter_map(|a| a.name.as_ref().map(|n| (a.namespace.clone(), n.clone())))
-        .chain(
-            c.assumptions()
-                .map(|a| (c.namespace(a.id).unwrap().clone(), a.name.clone())),
-        )
-        .collect::<BTreeSet<_>>();
-    for (i, a) in p.assumptions.iter().enumerate() {
-        let name = match &a.name {
-            Some(n) => n.clone(),
-            None => {
-                let mut j = i;
-                loop {
-                    let n = format!("assumption_{j}");
-                    if names.insert((a.namespace.clone(), n.clone())) {
-                        break n;
-                    }
-                    j += 1;
-                }
-            }
-        };
-        lines[p.layout.assumptions[i]].push(Line {
-            block: false,
-            namespace: a.namespace.clone(),
-            text: format!(
-                "assumption {}: {}",
-                spelling(&name, NameKind::Identifier),
-                contract(a.constraint.relation, &a.constraint.group_by, &a.namespace)
-            ),
-            origins: if options.embedded_origins {
-                BTreeMap::from([("self".into(), descriptors(p.sources, &a.origins)?)])
-            } else {
-                BTreeMap::new()
-            },
-        });
     }
     let mut files = BTreeMap::new();
     for (file, lines) in p.layout.files.iter().zip(lines) {

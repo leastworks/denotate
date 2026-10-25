@@ -161,19 +161,22 @@ impl Index {
         }
     }
 }
+fn default_request(p: &LoadedProgram, limits: &Limits, backend: BackendIdentity) -> CheckRequest {
+    let mut requests = p.verification_requests(limits, backend).unwrap();
+    assert_eq!(requests.len(), 1);
+    let (key, request) = requests.pop().unwrap();
+    assert_eq!(request.verification.as_ref(), Some(&key));
+    request
+}
 fn check(
     c: &Corpus,
     keys: &SemanticKeys,
-    domains: &Domains,
-    w: &[InputAtMostOne],
-    backend: BackendIdentity,
+    request: &CheckRequest,
     session: &mut Session,
     index: &Index,
 ) -> Outcomes {
     let limits = Limits::default();
     let operations = OperationalLimits::from(&limits);
-    let mut request = CheckRequest::all_obligations(c, keys, domains, w, &limits).unwrap();
-    request.backend = backend;
     let prepared = match session.prepare(&request, c, keys, &operations).unwrap() {
         RequestPreparation::Complete(p) => p,
         RequestPreparation::Inconclusive { reason, .. } => {
@@ -224,19 +227,17 @@ fn gate(id: &str, program: LoweredProgram, sources: Sources) {
         .map(|(i, s)| (s.id, format!("sources/{i}.den")))
         .collect();
     let layout = export::layout(&program, &sources, &paths).unwrap();
-    let assumptions = export::assumptions(&program);
     let domains = program.domains();
     let export = ExportProgram {
         corpus: &program.corpus,
         domains: &domains,
         sources: &sources,
         provenance: &program.attribution.provenance,
-        assumptions: &assumptions,
         layout: &layout,
     };
     let bundle = print(&export, PrintOptions::default()).unwrap();
     if id == "multi-file/integers" {
-        assert_eq!(assumptions.len(), 1);
+        assert_eq!(program.corpus.assumptions().count(), 1);
         assert!(bundle.files["shared.den"].contains("const 1:"));
         assert!(bundle.files["shared.den"].contains("const 2:"));
         assert_eq!(program.corpus.sorts().count(), 3);
@@ -268,11 +269,23 @@ fn gate(id: &str, program: LoweredProgram, sources: Sources) {
     let map = correspondence::compare(&export, &loaded, "file:///export", true);
     let left = Index::new(&program.corpus, &program.corpus, &program.keys, None);
     let right = Index::new(&program.corpus, &loaded.corpus, &loaded.keys, Some(&map));
-    let w = assumptions
-        .iter()
-        .map(|a| a.constraint.clone())
-        .collect::<Vec<_>>();
-    let loaded_w = loaded.input_assumptions();
+    let verification = loaded.corpus.verifications().next().unwrap();
+    assert_eq!(loaded.corpus.verifications().count(), 1);
+    assert_eq!(
+        map.ids[&program.library.default_checks.into()],
+        verification.id.into()
+    );
+    assert_eq!(verification.assumptions.len(), 1);
+    assert_eq!(
+        map.ids[&program.library.one_value_per_input.into()],
+        verification.assumptions[0].into()
+    );
+    assert_eq!(verification.obligations.len(), 1);
+    assert_eq!(
+        map.ids[&program.library.unique_input.into()],
+        verification.obligations[0].into()
+    );
+    assert!(bundle.files["library/library.den"].contains("verification default_checks"));
     if !id.starts_with("api/") && !id.starts_with("multi-file/") {
         presentation_gate(id, &program, &sources, &loaded, &left, &right);
     }
@@ -280,21 +293,50 @@ fn gate(id: &str, program: LoweredProgram, sources: Sources) {
     for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
         let mut direct_session = Session::default();
         let mut text_session = Session::default();
+        let mut direct_request = program.request(&Limits::default()).unwrap();
+        direct_request.backend = backend.clone();
+        let text_request = default_request(&loaded, &Limits::default(), backend.clone());
+        assert_eq!(
+            direct_request.obligations,
+            BTreeSet::from([program
+                .keys
+                .obligation(program.library.unique_input)
+                .unwrap()
+                .clone()])
+        );
+        assert_eq!(
+            text_request.obligations,
+            BTreeSet::from([loaded
+                .keys
+                .obligation(verification.obligations[0])
+                .unwrap()
+                .clone()])
+        );
+        assert_eq!(
+            direct_request.verification,
+            Some(
+                program
+                    .keys
+                    .verification(program.library.default_checks)
+                    .unwrap()
+                    .clone()
+            )
+        );
+        assert_eq!(
+            text_request.verification,
+            Some(loaded.keys.verification(verification.id).unwrap().clone())
+        );
         let direct = check(
             &program.corpus,
             &program.keys,
-            &domains,
-            &w,
-            backend.clone(),
+            &direct_request,
             &mut direct_session,
             &left,
         );
         let text = check(
             &loaded.corpus,
             &loaded.keys,
-            &loaded.domains,
-            &loaded_w,
-            backend.clone(),
+            &text_request,
             &mut text_session,
             &right,
         );
@@ -308,9 +350,7 @@ fn gate(id: &str, program: LoweredProgram, sources: Sources) {
             check(
                 &program.corpus,
                 &program.keys,
-                &domains,
-                &w,
-                backend.clone(),
+                &direct_request,
                 &mut direct_session,
                 &left
             ),
@@ -321,9 +361,7 @@ fn gate(id: &str, program: LoweredProgram, sources: Sources) {
             check(
                 &loaded.corpus,
                 &loaded.keys,
-                &loaded.domains,
-                &loaded_w,
-                backend,
+                &text_request,
                 &mut text_session,
                 &right
             ),
@@ -557,14 +595,12 @@ fn narrowed_domains_and_active_assumptions_change_both_paths_together() {
                 ownership: Ownership::User,
             }],
             placements: top_level(&p.corpus).into_iter().map(|id| (id, 0)).collect(),
-            assumptions: vec![],
         };
         let export = ExportProgram {
             corpus: &p.corpus,
             domains: &p.domains,
             sources: &p.sources,
             provenance: &p.provenance,
-            assumptions: &[],
             layout: &layout,
         };
         let (membership, docs) = print(&export, PrintOptions::default())
@@ -577,13 +613,12 @@ fn narrowed_domains_and_active_assumptions_change_both_paths_together() {
                 (&p, Index::new(&p.corpus, &p.corpus, &p.keys, None)),
                 (&q, Index::new(&p.corpus, &q.corpus, &q.keys, Some(&map))),
             ] {
-                let w = current.input_assumptions();
                 let actual = check(
                     &current.corpus,
                     &current.keys,
-                    &current.domains,
-                    &w,
-                    backend.clone(),
+                    &current
+                        .request(&Limits::default(), backend.clone())
+                        .unwrap(),
                     &mut Session::default(),
                     &index,
                 );
@@ -620,34 +655,25 @@ fn unambiguous_witness_keeps_exact_primary_and_related_generic_origins() {
         })
         .into_iter()
         .collect::<BTreeSet<_>>();
-    let domains = a.program.domains();
-    let w = export::assumptions(&a.program)
-        .into_iter()
-        .map(|a| a.constraint)
-        .collect::<Vec<_>>();
-    let qw = q.input_assumptions();
     for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
-        for (c, keys, domains, w, sources, provenance) in [
+        for (c, keys, mut request, sources, provenance) in [
             (
                 &a.program.corpus,
                 &a.program.keys,
-                &domains,
-                &w,
+                a.program.request(&Limits::default()).unwrap(),
                 &a.sources,
                 &a.program.attribution.provenance,
             ),
             (
                 &q.corpus,
                 &q.keys,
-                &q.domains,
-                &qw,
+                default_request(&q, &Limits::default(), backend.clone()),
                 &q.sources,
                 &q.embedded.provenance,
             ),
         ] {
             let limits = Limits::default();
             let operations = OperationalLimits::from(&limits);
-            let mut request = CheckRequest::all_obligations(c, keys, domains, w, &limits).unwrap();
             request.backend = backend.clone();
             let mut session = Session::default();
             let RequestPreparation::Complete(prepared) =
@@ -728,18 +754,12 @@ fn presentation_gate(
     use denotate_test_dsl::presentation as dsl;
     let limits = Limits::default();
     let ops = OperationalLimits::from(&limits);
-    let domains = p.domains();
-    let w = export::assumptions(p)
-        .into_iter()
-        .map(|a| a.constraint)
-        .collect::<Vec<_>>();
     for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
         let mut direct_session = Session::default();
         let mut text_session = Session::default();
         let mut previous = None;
         for _ in 0..2 {
-            let mut request =
-                CheckRequest::all_obligations(&p.corpus, &p.keys, &domains, &w, &limits).unwrap();
+            let mut request = p.request(&limits).unwrap();
             request.backend = backend.clone();
             let RequestPreparation::Complete(prepared) = direct_session
                 .prepare(&request, &p.corpus, &p.keys, &ops)
@@ -764,7 +784,7 @@ fn presentation_gate(
                     )
                 })
                 .collect::<BTreeSet<_>>();
-            let request = q.request(&limits, backend.clone()).unwrap();
+            let request = default_request(q, &limits, backend.clone());
             let RequestPreparation::Complete(prepared) = text_session
                 .prepare(&request, &q.corpus, &q.keys, &ops)
                 .unwrap()

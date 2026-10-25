@@ -1,6 +1,6 @@
 use denotate_ir::{
-    ConstantId, ConstructionError, Corpus, Literal, ObligationId, Parameter, RelationId,
-    RelationRole, RuleId, SortId, Term,
+    AssumptionId, ConstantId, ConstructionError, Corpus, Literal, ObligationId, Parameter,
+    RelationId, RelationRole, RuleId, SortId, Term, VerificationId,
 };
 
 pub struct MappingLibrary {
@@ -13,6 +13,8 @@ pub struct MappingLibrary {
     pub available: RelationId,
     pub masked: RelationId,
     pub unique_input: ObligationId,
+    pub one_value_per_input: AssumptionId,
+    pub default_checks: VerificationId,
     pub integer: SortId,
     pub value: RelationId,
     pub slot_value: RelationId,
@@ -107,6 +109,19 @@ pub fn build(corpus: &mut Corpus) -> Result<MappingLibrary, ConstructionError> {
         ["slot".into()],
         "Slot {slot} has overlapping InputMappings from {inputs}.",
     )?;
+    let namespace = corpus.namespace(unique_input).unwrap().clone();
+    let one_value_per_input = corpus.assume_at_most_one_in(
+        namespace.clone(),
+        "one_value_per_input",
+        value,
+        ["input".into()],
+    )?;
+    let default_checks = corpus.verification_in(
+        namespace,
+        "default_checks",
+        [one_value_per_input],
+        [unique_input],
+    )?;
     Ok(MappingLibrary {
         rules: [
             ("supplies", supplies_rule),
@@ -123,6 +138,8 @@ pub fn build(corpus: &mut Corpus) -> Result<MappingLibrary, ConstructionError> {
         available,
         masked,
         unique_input,
+        one_value_per_input,
+        default_checks,
         integer,
         value,
         slot_value,

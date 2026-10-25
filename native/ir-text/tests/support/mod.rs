@@ -251,47 +251,7 @@ pub fn compare(
             q.domains[&sort.id].iter().map(|id| (*id).into()).collect()
         );
     }
-    assert_eq!(
-        a.assumptions().count() + p.assumptions.len(),
-        b.assumptions().count()
-    );
-    let mut unmatched = b
-        .assumptions()
-        .filter(|a| !ids.values().any(|id| *id == a.id.into()))
-        .map(|a| a.id)
-        .collect::<BTreeSet<_>>();
-    for (i, x) in p.assumptions.iter().enumerate() {
-        let uri = format!("{base}/{}", p.layout.files[p.layout.assumptions[i]].path);
-        let index = *unmatched
-            .iter()
-            .find(|j| {
-                let y = b.assumption(**j).unwrap();
-                let Restriction::AtMostOne { relation, group_by } = &y.restriction;
-                x.namespace == *b.namespace(y.id).unwrap()
-                    && x.name.as_ref().is_none_or(|n| n == y.name.as_str())
-                    && ids[&x.constraint.relation.into()] == (*relation).into()
-                    && x.constraint.group_by == *group_by
-                    && q.owners[&y.id.into()] == uri
-            })
-            .unwrap();
-        unmatched.remove(&index);
-        if traced {
-            let expected = x
-                .origins
-                .iter()
-                .map(|o| origins::OriginDescriptor::of(p.sources, o).unwrap())
-                .collect::<BTreeSet<_>>();
-            let actual = q
-                .embedded
-                .associations
-                .get(&origins::OriginTarget::Occurrence(index.into()))
-                .cloned()
-                .unwrap_or_default()
-                .into_iter()
-                .collect();
-            assert_eq!(expected, actual);
-        }
-    }
+    assert_eq!(a.assumptions().count(), b.assumptions().count());
     for (x, y) in &ids {
         if traced {
             assert_eq!(
@@ -331,7 +291,7 @@ pub fn compare(
     }
     check_current_rule_spans(q);
     assert_eq!(
-        ids.len() + p.assumptions.len(),
+        ids.len(),
         q.owners.len(),
         "every current occurrence must have a correspondence"
     );

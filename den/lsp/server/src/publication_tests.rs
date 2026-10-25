@@ -319,13 +319,11 @@ fn published_parity_119_programs_bdd_sat_cold_warm_and_exact_origins() {
             .collect();
         let layout = export::layout(p, &assembled.sources, &paths).unwrap();
         let domains = p.domains();
-        let assumptions = export::assumptions(p);
         let export = ExportProgram {
             corpus: &p.corpus,
             domains: &domains,
             sources: &assembled.sources,
             provenance: &p.attribution.provenance,
-            assumptions: &assumptions,
             layout: &layout,
         };
         let bundle = print(&export, PrintOptions::default()).unwrap();

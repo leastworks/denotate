@@ -22,38 +22,25 @@ pub fn name_segments(raw: &str) -> Vec<Range<usize>> {
         .collect()
 }
 
-/// Decode one standalone reference with the grammar and loader's name rules.
+/// Parse one complete standalone reference using the loader's name rules.
 pub fn parse_name(raw: &str) -> Result<Name, String> {
     let raw = raw.trim();
-    let source = crate::SourceFile::new("argument", 0, format!("domain {raw} = [];"));
-    let scopes = crate::ast::parse(&source).map_err(|e| {
+    let source = crate::SourceFile::new("argument", 0, raw);
+    let name = crate::ast::reference_name(&source, 0..raw.len()).map_err(|e| {
         e.into_iter()
             .map(|d| d.message)
             .collect::<Vec<_>>()
             .join("; ")
     })?;
-    let statements = scopes
-        .iter()
-        .flat_map(|s| &s.statements)
-        .collect::<Vec<_>>();
-    let [
-        crate::ast::Statement {
-            decl: crate::ast::Decl::Domain(name, values),
-            ..
-        },
-    ] = statements.as_slice()
-    else {
-        return Err("Expected one qualified name".into());
-    };
-    if !values.is_empty() || name.span != (7..7 + raw.len()) {
-        return Err("Expected one qualified name".into());
-    }
     Ok(Name {
-        namespace: name.namespace.clone(),
-        text: name.text.clone(),
+        namespace: name.namespace,
+        text: name.text,
         generated: name.generated,
     })
 }
+
+#[cfg(test)]
+mod name_tests;
 
 /// Decode a namespace path using the same rules as strict loading.
 pub fn namespace_path(

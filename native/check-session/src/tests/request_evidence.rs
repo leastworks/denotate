@@ -2,8 +2,7 @@
 use super::*;
 
 pub(super) fn request(p: &LoweredProgram, limits: &Limits) -> CheckRequest {
-    CheckRequest::all_obligations(&p.corpus, &p.keys, &p.domains(), &constraints(p), limits)
-        .unwrap()
+    p.request(limits).unwrap()
 }
 pub(super) fn checked<'s>(p: &'s LoweredProgram, limits: &Limits) -> PreparedCheck<'s> {
     let RequestPreparation::Complete(g) = request(p, limits)
@@ -154,10 +153,38 @@ fn request_context_and_scoped_results_are_owned_and_distinguish_reasons() {
         }
     }
     assert!(scoped_exhaustion);
-    let mut empty = request(&p, &limits);
-    empty.obligations.clear();
+    let (_, _, mut empty_program) = lower(source);
+    let id = empty_program
+        .corpus
+        .verification_in(
+            Namespace::default(),
+            "consistency_only",
+            [empty_program.library.one_value_per_input],
+            [],
+        )
+        .unwrap();
+    empty_program
+        .keys
+        .bind_verification(
+            &empty_program.corpus,
+            id,
+            VerificationKey(QualifiedKey::new("test", "consistency_only")),
+        )
+        .unwrap();
+    let empty = CheckRequest::for_verification(
+        &empty_program.corpus,
+        &empty_program.keys,
+        &empty_program.domains(),
+        id,
+        &limits,
+    )
+    .unwrap();
     let RequestPreparation::Complete(empty) = empty
-        .prepare(&p.corpus, &p.keys, &(&limits).into())
+        .prepare(
+            &empty_program.corpus,
+            &empty_program.keys,
+            &(&limits).into(),
+        )
         .unwrap()
     else {
         panic!("unexpected preparation exhaustion")
@@ -270,9 +297,25 @@ fn request_preparation_preserves_current_inventory_and_errors() {
 
 #[test]
 fn explicit_request_constraints_control_permitted_worlds_and_validate_keys() {
-    let (_, _, p) = lower(
+    let (_, _, mut p) = lower(
         "input i, j; slot a; a <- i when input_value(i) is 1; a <- j when input_value(i) is 2;",
     );
+    let unrestricted = p
+        .corpus
+        .verification_in(
+            Namespace::default(),
+            "unrestricted",
+            [],
+            [p.library.unique_input],
+        )
+        .unwrap();
+    p.keys
+        .bind_verification(
+            &p.corpus,
+            unrestricted,
+            VerificationKey(QualifiedKey::new("test", "unrestricted")),
+        )
+        .unwrap();
     let limits = Limits::default();
     let constrained = checked(&p, &limits);
     let CheckOutcome::Complete(constrained) = constrained.verify(&(&limits).into()).unwrap() else {
@@ -286,8 +329,9 @@ fn explicit_request_constraints_control_permitted_worlds_and_validate_keys() {
             .values()
             .all(|r| matches!(r, ScopedResult::Proved))
     );
-    let mut req = request(&p, &limits);
-    req.constraints.clear();
+    let mut req =
+        CheckRequest::for_verification(&p.corpus, &p.keys, &p.domains(), unrestricted, &limits)
+            .unwrap();
     let RequestPreparation::Complete(unrestricted) =
         req.prepare(&p.corpus, &p.keys, &(&limits).into()).unwrap()
     else {

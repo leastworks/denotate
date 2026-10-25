@@ -80,6 +80,20 @@ pub fn library(
             ObligationKey(QualifiedKey::new(LIBRARY, o.name.as_str())),
         )?;
     }
+    for a in corpus.assumptions() {
+        keys.bind_assumption(
+            corpus,
+            a.id,
+            AssumptionKey(QualifiedKey::new(LIBRARY, a.name.as_str())),
+        )?;
+    }
+    for v in corpus.verifications() {
+        keys.bind_verification(
+            corpus,
+            v.id,
+            VerificationKey(QualifiedKey::new(LIBRARY, v.name.as_str())),
+        )?;
+    }
     Ok(keys)
 }
 

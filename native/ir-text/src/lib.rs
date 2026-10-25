@@ -12,8 +12,8 @@ mod print;
 pub use load::{DocumentInfo, LoadedProgram, load, load_with_resolver};
 pub use membership::{ActiveRoot, ProgramMembership, RootInfo, roots};
 pub use print::{
-    ExportAssumption, ExportBundle, ExportError, ExportFile, ExportLayout, ExportProgram, NameKind,
-    Ownership, PrintOptions, print, spelling,
+    ExportBundle, ExportError, ExportFile, ExportLayout, ExportProgram, NameKind, Ownership,
+    PrintOptions, print, spelling,
 };
 
 use std::{ops::Range, sync::Arc};

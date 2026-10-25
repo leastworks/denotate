@@ -163,14 +163,12 @@ fn ir_contracts_round_trip_with_selected_keys_and_origins() {
             ownership: Ownership::User,
         }],
         placements: top_level(&p.corpus).into_iter().map(|id| (id, 0)).collect(),
-        assumptions: vec![],
     };
     let export = ExportProgram {
         corpus: &p.corpus,
         domains: &p.domains,
         sources: &p.sources,
         provenance: &p.provenance,
-        assumptions: &[],
         layout: &layout,
     };
     for embedded_origins in [false, true] {

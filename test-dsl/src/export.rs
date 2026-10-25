@@ -94,7 +94,6 @@ pub fn layout(
             ownership: Ownership::Library,
         }],
         placements: BTreeMap::new(),
-        assumptions: vec![0],
     };
     let mut source_files = BTreeMap::new();
     let mut ordered = paths
@@ -145,17 +144,6 @@ pub fn layout(
     }
     Ok(layout)
 }
-pub fn assumptions(program: &LoweredProgram) -> Vec<ExportAssumption> {
-    vec![ExportAssumption {
-        namespace: Namespace::default(),
-        name: Some("one_value_per_input".into()),
-        constraint: denotate_check::InputAtMostOne {
-            relation: program.library.value,
-            group_by: vec![0],
-        },
-        origins: vec![],
-    }]
-}
 pub fn bundle(
     program: &LoweredProgram,
     sources: &Sources,
@@ -168,7 +156,6 @@ pub fn bundle(
             domains: &program.domains(),
             sources,
             provenance: &program.attribution.provenance,
-            assumptions: &assumptions(program),
             layout: &layout(program, sources, paths)?,
         },
         options,
