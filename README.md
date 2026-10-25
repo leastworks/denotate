@@ -81,3 +81,7 @@ definition.
 The aim is a foundation on which programs can be evaluated, checked, transformed
 and compiled with their meaning intact - and with explanations that remain connected
 to what their authors wrote.
+
+---
+
+Code layout, setup and design documents: [DEVELOPMENT.md](DEVELOPMENT.md).

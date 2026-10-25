@@ -1,5 +1,7 @@
 # Agent instructions
 
+Code layout, setup and design documents: [DEVELOPMENT.md](DEVELOPMENT.md).
+
 ## Commits
 
 - Do not add `Co-Authored-By` or other AI attribution trailers to commit messages
