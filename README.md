@@ -82,6 +82,12 @@ The aim is a foundation on which programs can be evaluated, checked, transformed
 and compiled with their meaning intact - and with explanations that remain connected
 to what their authors wrote.
 
+## Where it stands
+
+Today Denotate checks contracts over finite input domains with BDD and SAT, and
+supports writing `.den` directly in a VS Code editor. Compilation, specialization and
+other reasoning engines are the direction, not yet built.
+
 ---
 
 Code layout, setup and design documents: [DEVELOPMENT.md](DEVELOPMENT.md).
