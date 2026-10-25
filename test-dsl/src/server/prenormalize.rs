@@ -18,7 +18,7 @@ mod value_compatibility;
 
 fn capture(uncached: bool) -> Value {
     let mut cases = Vec::new();
-    let texts = include_str!("../../fixtures/pre-normalize.txt").split("\n---\n");
+    let texts = include_str!("../../fixtures/corpus.txt").split("\n---\n");
     for text in texts {
         let document = Arc::new(Document::new(
             &mut syntax::parser().unwrap(),

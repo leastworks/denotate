@@ -1,5 +1,7 @@
 #[path = "support/normalization_cases.rs"]
 mod cases;
+#[path = "support/corpus.rs"]
+mod corpus;
 #[path = "support/normalization_fingerprint.rs"]
 mod fingerprint;
 #[path = "support/before_normalization.rs"]
@@ -118,15 +120,10 @@ fn compare_recipes(form: Arc<SemanticStatement>) {
 }
 #[test]
 fn frozen_recipes_agree_for_mapping_mask_and_nested_conditions() {
-    let capture: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/pre-normalize.json")).unwrap();
-    // Syntax-error captures are exercised through the server, before lowering.
-    let mut texts: Vec<_> = capture["cases"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|c| c.get("structure").is_some())
-        .map(|c| c["text"].as_str().unwrap().to_owned())
+    // Rejected programs are exercised through the server, before lowering.
+    let mut texts: Vec<_> = corpus::accepted()
+        .into_iter()
+        .map(|(_, text)| text.to_owned())
         .collect();
     texts.extend(cases::nested());
     for text in texts {

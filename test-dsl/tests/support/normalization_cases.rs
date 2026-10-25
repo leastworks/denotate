@@ -1,4 +1,4 @@
-//! Shared case enumeration for the pre-integration capture and its regression tests.
+// Generated normalization cases: nested Boolean shapes plus duplicate and moved statements.
 pub fn nested() -> Vec<String> {
     let mut texts = vec![];
     let leaves = [

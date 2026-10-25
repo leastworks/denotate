@@ -11,6 +11,8 @@ use std::{
     thread::JoinHandle,
     time::Duration,
 };
+#[path = "../../../../test-dsl/tests/support/corpus.rs"]
+mod corpus;
 #[path = "../../../../native/ir-text/tests/support/mod.rs"]
 mod correspondence;
 
@@ -155,33 +157,19 @@ fn cases() -> Vec<(String, SourceFile)> {
             ),
         ));
     }
-    let pre: Value = serde_json::from_str(
-        &std::fs::read_to_string(root.join("fixtures/pre-normalize.json")).unwrap(),
-    )
-    .unwrap();
-    for i in (0..=13).chain(17..=31).chain(35..=37) {
+    assert_eq!(corpus::programs().len(), 38);
+    for (i, text) in corpus::accepted() {
         cases.push((
-            format!("pre-normalize/{i:02}"),
-            SourceFile::new(
-                "file:///case.inputmapping",
-                1,
-                pre["cases"][i]["text"].as_str().unwrap(),
-            ),
+            format!("corpus/{i:02}"),
+            SourceFile::new("file:///case.inputmapping", 1, text),
         ));
     }
-    let pre: Value = serde_json::from_str(
-        &std::fs::read_to_string(root.join("fixtures/pre-integration-fingerprints.json")).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(pre["cases"].as_array().unwrap().len(), 84);
-    for (i, c) in pre["cases"].as_array().unwrap().iter().enumerate() {
+    let generated = corpus::generated();
+    assert_eq!(generated.len(), 84);
+    for (i, (revision, text)) in generated.into_iter().enumerate() {
         cases.push((
-            format!("pre-integration/{i:02}"),
-            SourceFile::new(
-                "file:///case.inputmapping",
-                c["revision"].as_u64().unwrap(),
-                c["text"].as_str().unwrap(),
-            ),
+            format!("generated/{i:02}"),
+            SourceFile::new("file:///case.inputmapping", revision, text),
         ));
     }
     assert_eq!(cases.len(), 119);

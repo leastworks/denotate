@@ -1,3 +1,5 @@
+#[path = "support/corpus.rs"]
+mod corpus;
 #[path = "../../native/ir-text/tests/support/mod.rs"]
 mod correspondence;
 mod support;
@@ -394,36 +396,21 @@ fn named_128_program_gate() {
             )],
         ));
     }
-    let pre: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(root.join("fixtures/pre-normalize.json")).unwrap(),
-    )
-    .unwrap();
-    let indices = (0..=13).chain(17..=31).chain(35..=37).collect::<Vec<_>>();
-    assert_eq!(indices.len(), 32);
-    for i in indices {
+    assert_eq!(corpus::programs().len(), 38);
+    let accepted = corpus::accepted();
+    assert_eq!(accepted.len(), 32);
+    for (i, text) in accepted {
         cases.push((
-            format!("pre-normalize/{i:02}"),
-            vec![SourceFile::new(
-                "file:///case.inputmapping",
-                1,
-                pre["cases"][i]["text"].as_str().unwrap(),
-            )],
+            format!("corpus/{i:02}"),
+            vec![SourceFile::new("file:///case.inputmapping", 1, text)],
         ));
     }
-    let captured: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(root.join("fixtures/pre-integration-fingerprints.json")).unwrap(),
-    )
-    .unwrap();
-    assert_eq!(captured["cases"].as_array().unwrap().len(), 84);
-    for i in 0..84 {
-        let case = &captured["cases"][i];
+    let generated = corpus::generated();
+    assert_eq!(generated.len(), 84);
+    for (i, (revision, text)) in generated.into_iter().enumerate() {
         cases.push((
-            format!("pre-integration/{i:02}"),
-            vec![SourceFile::new(
-                "file:///case.inputmapping",
-                case["revision"].as_u64().unwrap(),
-                case["text"].as_str().unwrap(),
-            )],
+            format!("generated/{i:02}"),
+            vec![SourceFile::new("file:///case.inputmapping", revision, text)],
         ));
     }
     // Named parser-backed single-file parity catalog. Never filter failures.
@@ -465,14 +452,13 @@ fn named_128_program_gate() {
 }
 #[test]
 fn named_rejections_and_combined_file_contract() {
-    let pre: serde_json::Value =
-        serde_json::from_str(include_str!("../fixtures/pre-normalize.json")).unwrap();
-    for i in [14, 15, 16, 32, 33, 34] {
-        let text = pre["cases"][i]["text"].as_str().unwrap();
+    let programs = corpus::programs();
+    for i in corpus::REJECTED {
+        let text = programs[i];
         let errors = export::assemble(&[SourceFile::new("file:///bad", 1, text)])
             .err()
             .unwrap();
-        assert!(!errors.is_empty(), "pre-normalize/{i}");
+        assert!(!errors.is_empty(), "corpus/{i}");
         if i < 17 {
             assert!(
                 errors
