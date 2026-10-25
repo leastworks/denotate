@@ -14,11 +14,24 @@ npm ci --prefix den/lsp && just test-b    # .den editor components and LSP scena
 just check-den den/lsp/examples/library-and-app/app   # check a .den program from the CLI
 ```
 
-The full verification gate is in [AGENTS.md](AGENTS.md).
-
 To try the `.den` editor, open `den/lsp/` in VS Code and run **Run Denotate semantic
 checking** (F5); see [den/lsp/README.md](den/lsp/README.md). The InputMapping editor
 is in [test-dsl/vscode/](test-dsl/vscode/README.md).
+
+## Verification
+
+```sh
+just test-native
+npm ci --prefix den/lsp && just test-b
+just test-inputmapping-lsp
+just test-b-vscode && just test-inputmapping-vscode   # needs local VS Code
+cargo +1.93.0 fmt --manifest-path native/Cargo.toml --all --check
+cargo +1.93.0 fmt --manifest-path Cargo.toml --all --check
+```
+
+If a grammar changes, regenerate with the pinned CLI (`npm run generate --prefix
+den/lsp`, `just generate-inputmapping`) and commit the generated files; CI checks
+that they are current.
 
 ## Layout
 
