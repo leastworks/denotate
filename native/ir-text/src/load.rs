@@ -22,13 +22,6 @@ pub struct DocumentInfo {
     /// Exact location syntax for step 2; it is not interpreted as DSL origins yet.
     pub location_syntax: Vec<SourceSpan>,
 }
-#[derive(Clone, Debug)]
-pub struct Assumption {
-    pub namespace: Namespace,
-    pub name: QualifiedKey,
-    pub constraint: InputAtMostOne,
-    pub location: SourceSpan,
-}
 #[derive(Debug)]
 pub struct LoadedProgram {
     pub root: String,
@@ -39,7 +32,6 @@ pub struct LoadedProgram {
     pub provenance: Provenance,
     pub embedded: crate::origins::EmbeddedOrigins,
     pub domains: Domains,
-    pub assumptions: Vec<Assumption>,
     pub documents: Vec<DocumentInfo>,
     pub membership: ProgramMembership,
     /// Occurrence -> owning document URI. Look up user/library classification
@@ -47,16 +39,51 @@ pub struct LoadedProgram {
     pub owners: BTreeMap<OccurrenceId, String>,
 }
 impl LoadedProgram {
+    pub fn verification_requests(
+        &self,
+        limits: &Limits,
+        backend: BackendIdentity,
+    ) -> std::result::Result<Vec<(VerificationKey, CheckRequest)>, denotate_check::CheckError> {
+        let mut requests = self
+            .corpus
+            .verifications()
+            .map(|v| {
+                let mut request = CheckRequest::for_verification(
+                    &self.corpus,
+                    &self.keys,
+                    &self.domains,
+                    v.id,
+                    limits,
+                )?;
+                request.backend = backend.clone();
+                Ok((
+                    request.verification.clone().expect("named request"),
+                    request,
+                ))
+            })
+            .collect::<std::result::Result<Vec<_>, denotate_check::CheckError>>()?;
+        requests.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(requests)
+    }
+    /// Transitional all-assumptions adapter, until the editor checks verifications.
+    pub fn input_assumptions(&self) -> Vec<InputAtMostOne> {
+        self.corpus
+            .assumptions()
+            .map(|a| match &a.restriction {
+                Restriction::AtMostOne { relation, group_by } => InputAtMostOne {
+                    relation: *relation,
+                    group_by: group_by.clone(),
+                },
+            })
+            .collect()
+    }
+    /// Transitional editor request, until the editor uses `verification_requests`.
     pub fn request(
         &self,
         limits: &Limits,
         backend: BackendIdentity,
     ) -> std::result::Result<CheckRequest, denotate_check::CheckError> {
-        let constraints = self
-            .assumptions
-            .iter()
-            .map(|a| a.constraint.clone())
-            .collect::<Vec<_>>();
+        let constraints = self.input_assumptions();
         let mut request = CheckRequest::all_obligations(
             &self.corpus,
             &self.keys,
@@ -513,7 +540,6 @@ pub fn load_with_resolver(
             provenance: Provenance::new(),
             embedded: Default::default(),
             domains: BTreeMap::new(),
-            assumptions: Vec::new(),
             documents: Vec::new(),
             membership: membership.clone(),
             owners: BTreeMap::new(),
@@ -703,7 +729,6 @@ pub fn load_with_resolver(
     }
     let mut explicit_domains = BTreeSet::new();
     let mut duplicates = BTreeMap::new();
-    let mut assumption_names = BTreeSet::new();
     for m in &scopes {
         let module = &m.namespace;
         for s in &m.statements {
@@ -768,22 +793,30 @@ pub fn load_with_resolver(
                                 "Assumptions may constrain only input relations",
                             ));
                         }
-                        if !assumption_names.insert((module.clone(), name.text.clone())) {
-                            return Err(diagnostic(
-                                m,
-                                name.span.clone(),
-                                "Duplicate assumption name",
-                            ));
-                        }
-                        b.program.assumptions.push(Assumption {
-                            namespace: module.clone(),
-                            name: QualifiedKey::new(namespace_key(module), name.text.as_str()),
-                            constraint: InputAtMostOne {
-                                relation: id,
-                                group_by: grouping,
-                            },
-                            location: b.span(m, s.span.clone())?,
-                        });
+                        let aid = ir_construction(
+                            m,
+                            s.span.clone(),
+                            b.program.corpus.assume_at_most_one_in(
+                                module,
+                                &name.text,
+                                id,
+                                grouping.into_iter().map(Column::Index),
+                            ),
+                            &b.program.corpus,
+                        )?;
+                        construction(
+                            m,
+                            name.span.clone(),
+                            b.program.keys.bind_assumption(
+                                &b.program.corpus,
+                                aid,
+                                AssumptionKey(QualifiedKey::new(
+                                    namespace_key(module),
+                                    name.text.as_str(),
+                                )),
+                            ),
+                        )?;
+                        b.origin(m, aid, name.span.clone())?;
                     } else {
                         let oid = ir_construction(
                             m,
@@ -813,6 +846,124 @@ pub fn load_with_resolver(
                     }
                 }
                 _ => (),
+            }
+        }
+    }
+    // Resolve only after every contract in the closure has been declared.
+    let mut entries = b
+        .program
+        .corpus
+        .assumptions()
+        .map(|a| {
+            (
+                b.program.corpus.namespace(a.id).unwrap().clone(),
+                a.name.clone(),
+                crate::index::ContractKind::Assumption,
+                Some(OccurrenceId::from(a.id)),
+            )
+        })
+        .chain(b.program.corpus.obligations().map(|o| {
+            (
+                b.program.corpus.namespace(o.id).unwrap().clone(),
+                o.name.clone(),
+                crate::index::ContractKind::Obligation,
+                Some(OccurrenceId::from(o.id)),
+            )
+        }))
+        .collect::<Vec<_>>();
+    // Include forward verification labels for the same wrong-kind diagnostics as the index.
+    for m in &scopes {
+        for s in &m.statements {
+            if let Decl::Verification { name, .. } = &s.decl {
+                entries.push((
+                    m.namespace.clone(),
+                    name.text.clone(),
+                    crate::index::ContractKind::Verification,
+                    None,
+                ));
+            }
+        }
+    }
+    for m in &scopes {
+        for s in &m.statements {
+            if let Decl::Verification {
+                name,
+                assumptions,
+                obligations,
+            } = &s.decl
+            {
+                let scope = crate::index::Scope {
+                    namespace: m.namespace.clone(),
+                    imports: m.imports.iter().map(|(n, _)| n.clone()).collect(),
+                };
+                let resolve = |names: &[Name], kind| {
+                    crate::index::resolve_contract_list(
+                        &scope,
+                        names.iter().map(|n| {
+                            (
+                                crate::index::Name {
+                                    namespace: n.namespace.clone(),
+                                    text: n.text.clone(),
+                                    generated: n.generated,
+                                },
+                                n.span.clone(),
+                            )
+                        }),
+                        kind,
+                        &entries,
+                    )
+                    .map_err(|errors| {
+                        errors
+                            .into_iter()
+                            .flat_map(|(span, msg)| diagnostic(m, span, msg))
+                            .collect::<Vec<_>>()
+                    })
+                };
+                let selected_a = resolve(assumptions, crate::index::ContractKind::Assumption)?;
+                let selected_o = resolve(obligations, crate::index::ContractKind::Obligation)?;
+                let a = selected_a
+                    .iter()
+                    .map(|id| {
+                        b.program
+                            .corpus
+                            .assumptions()
+                            .find(|a| Some(OccurrenceId::from(a.id)) == *id)
+                            .unwrap()
+                            .id
+                    })
+                    .collect::<Vec<_>>();
+                let o = selected_o
+                    .iter()
+                    .map(|id| {
+                        b.program
+                            .corpus
+                            .obligations()
+                            .find(|o| Some(OccurrenceId::from(o.id)) == *id)
+                            .unwrap()
+                            .id
+                    })
+                    .collect::<Vec<_>>();
+                let id = ir_construction(
+                    m,
+                    s.span.clone(),
+                    b.program
+                        .corpus
+                        .verification_in(&m.namespace, &name.text, a, o),
+                    &b.program.corpus,
+                )?;
+                construction(
+                    m,
+                    name.span.clone(),
+                    b.program.keys.bind_verification(
+                        &b.program.corpus,
+                        id,
+                        VerificationKey(QualifiedKey::new(
+                            namespace_key(&m.namespace),
+                            name.text.as_str(),
+                        )),
+                    ),
+                )?;
+                b.origin(m, id, name.span.clone())?;
             }
         }
     }

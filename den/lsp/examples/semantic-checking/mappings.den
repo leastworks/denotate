@@ -12,3 +12,8 @@ mapped_to(i, a);
 mapped_to(j, a);
 
 obligation one_source_per_slot: at_most_one(mapped_to, group_by: slot);
+
+verification default_checks {
+    assumptions: [];
+    obligations: [one_source_per_slot];
+}

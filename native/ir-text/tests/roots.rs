@@ -40,7 +40,7 @@ fn root_diamonds_and_cycles_preserve_edges_without_duplicating_rules_or_w() {
     let program = load(&membership, &sources).unwrap();
     assert_eq!(program.documents.len(), 4);
     assert_eq!(program.corpus.rules().count(), 1);
-    assert_eq!(program.assumptions.len(), 1);
+    assert_eq!(program.corpus.assumptions().count(), 1);
     assert_eq!(program.membership.roots, graph);
     for doc in &program.documents {
         assert_eq!(

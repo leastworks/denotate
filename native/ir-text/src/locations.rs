@@ -246,7 +246,13 @@ fn collect<'a>(n: Node<'a>, aliases: &mut Vec<Node<'a>>, suffixes: &mut Vec<(Nod
     }
     if matches!(
         n.kind(),
-        "sort" | "constants" | "relation" | "statement" | "obligation" | "assumption"
+        "sort"
+            | "constants"
+            | "relation"
+            | "statement"
+            | "obligation"
+            | "assumption"
+            | "verification"
     ) {
         if let Some(loc) = children(n).into_iter().find(|c| c.kind() == "location") {
             suffixes.push((n, loc));
@@ -277,14 +283,6 @@ fn targets(
                 .into_iter()
                 .map(|(pos, id)| (pos, vec![OriginTarget::Occurrence(id)]))
                 .collect();
-        }
-    } else if statement.kind() == "assumption" {
-        for (i, a) in p.assumptions.iter().enumerate() {
-            if p.sources.snapshot(a.location.snapshot()).unwrap().uri == source.uri
-                && a.location.byte_range() == range
-            {
-                result.insert("self".into(), vec![OriginTarget::Assumption(i)]);
-            }
         }
     } else {
         let mut ids = top_level(&p.corpus)
@@ -462,9 +460,6 @@ pub(crate) fn restore(
                     .provenance
                     .attach(&p.corpus, &p.sources, id, origins)
                     .expect("validated location graph"),
-                OriginTarget::Assumption(i) => {
-                    embedded.assumptions.insert(i, origins);
-                }
             }
         }
         embedded

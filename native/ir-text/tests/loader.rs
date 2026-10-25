@@ -89,8 +89,16 @@ fn imported_assumptions_are_explicit_and_active() {
     );
     let docs = [root, lib];
     let p = load("root", &docs).unwrap();
-    assert_eq!(p.assumptions.len(), 1);
-    assert_eq!(p.assumptions[0].name.namespace.as_ref(), "lib");
+    assert_eq!(p.corpus.assumptions().count(), 1);
+    assert_eq!(
+        p.keys
+            .assumption(p.corpus.assumptions().next().unwrap().id)
+            .unwrap()
+            .0
+            .namespace
+            .as_ref(),
+        "lib"
+    );
     assert_eq!(
         p.documents
             .iter()
@@ -529,7 +537,7 @@ fn reserved_words_are_allowed_as_parameter_and_grouping_names() {
         let program = single(&format!(
             "module m; sort S; const a,b:S; input p({word}:S); assumption w: at_most_one(p, group_by: {word}); obligation unique: at_most_one(p, group_by: ({word}));"
         ));
-        assert_eq!(program.assumptions[0].constraint.group_by, vec![0]);
+        assert_eq!(program.input_assumptions()[0].group_by, vec![0]);
         assert_eq!(
             program.corpus.relations().next().unwrap().parameters[0].name,
             word

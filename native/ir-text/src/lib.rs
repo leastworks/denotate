@@ -9,7 +9,7 @@ mod membership;
 pub mod origins;
 pub mod presentation;
 mod print;
-pub use load::{Assumption, DocumentInfo, LoadedProgram, load, load_with_resolver};
+pub use load::{DocumentInfo, LoadedProgram, load, load_with_resolver};
 pub use membership::{ActiveRoot, ProgramMembership, RootInfo, roots};
 pub use print::{
     ExportAssumption, ExportBundle, ExportError, ExportFile, ExportLayout, ExportProgram, NameKind,
@@ -73,6 +73,7 @@ pub fn reserved_word(name: &str) -> bool {
             | "domain"
             | "obligation"
             | "assumption"
+            | "verification"
             | "source"
     )
 }

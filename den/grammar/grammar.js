@@ -4,7 +4,7 @@ module.exports = grammar({
   name: 'denotate',
   extras: $ => [/[ \t\r\n]+/, $.comment],
   word: $ => $.identifier,
-  reserved: { global: $ => ['module', 'namespace', 'use', 'sort', 'const', 'relation', 'input', 'domain', 'obligation', 'assumption', 'source'], parameter_names: _ => [] },
+  reserved: { global: $ => ['module', 'namespace', 'use', 'sort', 'const', 'relation', 'input', 'domain', 'obligation', 'assumption', 'verification', 'source'], parameter_names: _ => [] },
   rules: {
     // A file-scoped header may follow only imports (and whitespace/comments).
     // Once a global declaration or namespace block starts, no header can follow.
@@ -17,7 +17,7 @@ module.exports = grammar({
     _namespace_block: $ => seq('namespace', field('name', $._namespace_path), '{', repeat(choice(alias($._namespace_block, $.namespace), $._declaration)), '}'),
     _namespace_path: $ => choice($._name, $.qualified_name),
     _declaration: $ => choice($.import, $._non_import_declaration),
-    _non_import_declaration: $ => choice($.sort, $.constants, $.relation, $.statement, $.domain, $.obligation, $.assumption, $.source_location, $.location_alias),
+    _non_import_declaration: $ => choice($.sort, $.constants, $.relation, $.statement, $.domain, $.obligation, $.assumption, $.verification, $.source_location, $.location_alias),
     import: $ => seq('use', field('name', $._namespace_path), ';'),
     sort: $ => seq('sort', field('name', $._name), optional($.location), ';'),
     constants: $ => seq('const', field('name', $._constant), repeat(seq(',', field('name', $._constant))), ':', field('sort', $._reference), optional($.location), ';'),
@@ -39,6 +39,7 @@ module.exports = grammar({
     domain: $ => seq('domain', field('sort', $._reference), '=', '[', optional(seq(field('value', $._constant_reference), repeat(seq(',', field('value', $._constant_reference))))), ']', ';'),
     obligation: $ => seq('obligation', field('name', $._name), ':', $.cardinality, optional(seq('message', field('message', $.string))), optional($.location), ';'),
     assumption: $ => seq('assumption', field('name', $._name), ':', $.cardinality, optional($.location), ';'),
+    verification: $ => seq('verification', field('name', $._name), '{', 'assumptions', ':', '[', optional(seq(field('assumption', $._reference), repeat(seq(',', field('assumption', $._reference))))), ']', ';', 'obligations', ':', '[', optional(seq(field('obligation', $._reference), repeat(seq(',', field('obligation', $._reference))))), ']', ';', '}', optional($.location)),
     cardinality: $ => seq('at_most_one', '(', field('relation', $._reference), ',', 'group_by', ':', choice(field('column', $._parameter_name), seq('(', optional(seq(field('column', $._parameter_name), repeat(seq(',', field('column', $._parameter_name))))), ')')), ')'),
     location: $ => seq('loc', '(', choice($.location_value, $.compact_map), ')'),
     location_value: $ => choice($.alias, $.source_range, seq('fused', '[', $.location_value, repeat(seq(',', $.location_value)), ']')),

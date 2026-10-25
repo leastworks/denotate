@@ -156,7 +156,7 @@ fn export_preserves_origins_domains_helpers_ownership_and_file_rule_sequences() 
         support::compare(&p, &loaded, "file:///export", embedded_origins);
         assert_eq!(loaded.corpus.rules().count(), 3);
         assert_eq!(loaded.corpus.constants().count(), 2);
-        assert_eq!(loaded.assumptions.len(), 2);
+        assert_eq!(loaded.corpus.assumptions().count(), 2);
         assert_eq!(
             loaded
                 .corpus
@@ -193,7 +193,13 @@ fn export_preserves_origins_domains_helpers_ownership_and_file_rule_sequences() 
         }
         if embedded_origins {
             assert!(bundle.files.values().any(|s| s.contains("= loc(#src0 {")));
-            assert_eq!(loaded.embedded.assumptions.len(), 2);
+            assert!(
+                loaded.corpus.assumptions().all(|a| !loaded
+                    .embedded
+                    .provenance
+                    .origins(a.id)
+                    .is_empty())
+            );
         }
     }
 }
@@ -514,24 +520,14 @@ fn readable_export(text: &str) -> String {
             ownership: Ownership::User,
         }],
         placements: top_level(&p.corpus).into_iter().map(|id| (id, 0)).collect(),
-        assumptions: vec![0; p.assumptions.len()],
+        assumptions: vec![],
     };
-    let assumptions = p
-        .assumptions
-        .iter()
-        .map(|a| ExportAssumption {
-            namespace: a.namespace.clone(),
-            name: Some(a.name.name.to_string()),
-            constraint: a.constraint.clone(),
-            origins: vec![Origin::new(a.location)],
-        })
-        .collect::<Vec<_>>();
     let export = ExportProgram {
         corpus: &p.corpus,
         domains: &p.domains,
         sources: &p.sources,
         provenance: &p.provenance,
-        assumptions: &assumptions,
+        assumptions: &[],
         layout: &layout,
     };
     let mut plain = String::new();
@@ -813,52 +809,4 @@ fn compact_and_expanded_maps_follow_occurrence_order_with_numeric_indices() {
         let loaded = load_with_resolver(&membership, &documents, Some(&mut &p.sources)).unwrap();
         support::compare(&program, &loaded, "file:///export", true);
     }
-}
-
-#[test]
-fn ir_assumptions_are_refused_rather_than_dropped() {
-    assert_ir_contract_export_refused(|c, value| {
-        c.assume_at_most_one_in(Namespace::default(), "one_value", value, [])
-            .unwrap();
-    });
-}
-
-#[test]
-fn ir_verifications_are_refused_rather_than_dropped() {
-    assert_ir_contract_export_refused(|c, _| {
-        c.verification_in(Namespace::default(), "normal", [], [])
-            .unwrap();
-    });
-}
-
-fn assert_ir_contract_export_refused(add_contract: impl FnOnce(&mut Corpus, RelationId)) {
-    let mut c = Corpus::new();
-    let s = c.declare_sort("S").unwrap();
-    let value = c
-        .declare_relation("value", RelationRole::Input, [Parameter::new("v", s)])
-        .unwrap();
-    add_contract(&mut c, value);
-    let layout = ExportLayout {
-        files: vec![ExportFile {
-            path: "program.den".into(),
-            ownership: Ownership::User,
-        }],
-        placements: top_level(&c).into_iter().map(|id| (id, 0)).collect(),
-        assumptions: vec![],
-    };
-    let (sources, provenance, domains) = (
-        Sources::new(),
-        Provenance::new(),
-        BTreeMap::from([(s, vec![])]),
-    );
-    let program = ExportProgram {
-        corpus: &c,
-        domains: &domains,
-        sources: &sources,
-        provenance: &provenance,
-        assumptions: &[],
-        layout: &layout,
-    };
-    let error = print(&program, PrintOptions::default()).unwrap_err();
-    assert!(error.0.contains("not supported yet"), "{error}");
 }

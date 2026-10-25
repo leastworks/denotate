@@ -35,6 +35,11 @@ pub(crate) enum Decl {
         columns: Vec<Name>,
         message: String,
     },
+    Verification {
+        name: Name,
+        assumptions: Vec<Name>,
+        obligations: Vec<Name>,
+    },
     Domain(Name, Vec<Name>),
 }
 #[derive(Clone, Debug)]
@@ -170,7 +175,7 @@ fn atom(source: &SourceFile, node: Node<'_>) -> Result<Atom> {
         span: node.byte_range(),
     })
 }
-fn syntax_errors(source: &SourceFile, root: Node<'_>, out: &mut Vec<crate::Diagnostic>) {
+pub(crate) fn syntax_errors(source: &SourceFile, root: Node<'_>, out: &mut Vec<crate::Diagnostic>) {
     // Recovery may keep the declaration keyword outside the ERROR node holding
     // its invalid name. Inspect the whole token stream, not individual error
     // subtrees. Comments and quoted names are leaves, never scanned as code.
@@ -487,6 +492,17 @@ fn scope(
                         .unwrap_or_default(),
                 }
             }
+            "verification" => Decl::Verification {
+                name: name(source, field(source, node, "name")?)?,
+                assumptions: node
+                    .children_by_field_name("assumption", &mut node.walk())
+                    .map(|n| name(source, n))
+                    .collect::<Result<_>>()?,
+                obligations: node
+                    .children_by_field_name("obligation", &mut node.walk())
+                    .map(|n| name(source, n))
+                    .collect::<Result<_>>()?,
+            },
             "domain" => Decl::Domain(
                 name(source, field(source, node, "sort")?)?,
                 node.children_by_field_name("value", &mut node.walk())

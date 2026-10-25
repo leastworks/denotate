@@ -133,6 +133,23 @@ origins still reloads with full current-text provenance.
 ## Commands
 
 ```sh
-just check-den <folder-or-den.root> [--sat]          # load and check a program
+just check-den <folder-or-den.root> [--sat] [--verification QUALIFIED_NAME]
 just export-inputmapping <out-dir> <file.inputmapping>…   # export a DSL program as .den
 ```
+
+`check-den` runs each verification declared in the program and its reachable libraries,
+printing its name, selected assumptions and results. With no verification it prints
+`No verification configured` and runs no semantic checks. `--verification` selects one
+declaration using the usual quoted/qualified name syntax; a bare name must be unique
+across the closure. Unknown or ambiguous names are errors. Every filtered run is labeled
+partial, even if the program contains only one verification.
+
+Obligations that no verification in the closure selects are listed as unchecked, also
+in a filtered run. A verification with `obligations: []` is reported as consistency-only.
+
+Exit codes: **0** for a complete run with conclusive checks, no findings and no unchecked
+obligations (a consistency-only notice alone does not fail the run); **1** for findings;
+**2** for incomplete, invalid, unconfigured or partial runs, including unchecked
+obligations; **3** for filesystem or other operational failures. Incomplete or partial
+status takes precedence over findings. The editor does not use verifications yet: it
+still checks every obligation under every assumption.

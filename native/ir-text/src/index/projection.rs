@@ -17,6 +17,7 @@ pub struct Projection {
     pub declarations: BTreeMap<String, Declaration>,
     pub anchors: BTreeMap<String, Range<usize>>,
     pub references: Vec<Reference>,
+    pub verifications: Vec<VerificationReferences>,
     pub rules: BTreeMap<String, Rule>,
     pub rule_anchors: BTreeMap<String, BTreeMap<String, Range<usize>>>,
     pub scopes: Vec<(Range<usize>, Scope)>,
@@ -67,6 +68,7 @@ impl Projection {
             declarations: BTreeMap::new(),
             anchors: BTreeMap::new(),
             references: vec![],
+            verifications: vec![],
             rules: BTreeMap::new(),
             rule_anchors: BTreeMap::new(),
             scopes: vec![],
@@ -77,6 +79,32 @@ impl Projection {
         };
         leaves(&out.source, tree.root_node(), &mut out.tokens);
         out.block(tree.root_node(), Scope::default(), previous);
+        fn verification_syntax(source: &SourceFile, node: Node<'_>, out: &mut Vec<Issue>) {
+            fn keyword(node: Node<'_>) -> bool {
+                (node.kind() == "verification" && !node.is_named())
+                    || node.children(&mut node.walk()).any(keyword)
+            }
+            if !node.has_error() {
+                return;
+            }
+            if (node.kind() == "verification" && node.is_named())
+                || (node.is_error() && keyword(node))
+            {
+                let mut errors = Vec::new();
+                ast::syntax_errors(source, node, &mut errors);
+                out.extend(errors.into_iter().map(|d| Issue {
+                    span: d.range,
+                    code: "verification-syntax".into(),
+                    message: d.message,
+                    warning: false,
+                }));
+            } else {
+                for child in node.children(&mut node.walk()) {
+                    verification_syntax(source, child, out);
+                }
+            }
+        }
+        verification_syntax(&out.source, tree.root_node(), &mut out.issues);
         if let Some(previous) = previous {
             out.reconcile_renamed_declarations(previous);
         }
@@ -95,6 +123,7 @@ impl Projection {
         {
             let same_group = |other: &&Declaration| {
                 other.kind == d.kind
+                    && other.contract == d.contract
                     && other.scope.namespace == d.scope.namespace
                     && other.parent == d.parent
             };
@@ -210,6 +239,12 @@ impl Projection {
         previous: Option<&Self>,
     ) -> Option<String> {
         let name = self.name(node, kind == Kind::Parameter)?;
+        let contract = match node.parent().map(|p| p.kind()) {
+            Some("assumption") => Some(ContractKind::Assumption),
+            Some("obligation") => Some(ContractKind::Obligation),
+            Some("verification") => Some(ContractKind::Verification),
+            _ => None,
+        };
         // Reused tree nodes retain identity even when their anchor moves. When
         // Tree-sitter rebuilt a parent, match the same semantic declaration.
         let old = previous.and_then(|p| {
@@ -218,6 +253,7 @@ impl Projection {
                     .values()
                     .find(|d| {
                         d.kind == kind
+                            && d.contract == contract
                             && (d.name == name || kind == Kind::Namespace)
                             && d.scope.namespace == scope.namespace
                             && d.parent == parent
@@ -246,6 +282,7 @@ impl Projection {
             Declaration {
                 id: id.clone(),
                 kind,
+                contract,
                 name,
                 scope: scope.clone(),
                 input: false,
@@ -407,9 +444,25 @@ impl Projection {
                         }
                     }
                 }
-                "obligation" | "assumption" => {
+                "obligation" | "assumption" | "verification" => {
                     if let Some(n) = field(node, "name") {
                         self.declare(n, &scope, Kind::Contract, None, previous);
+                    }
+                    if node.kind() == "verification" {
+                        let mut names = |key| {
+                            node.children_by_field_name(key, &mut node.walk())
+                                .filter_map(|n| {
+                                    self.name(n, false).map(|name| (name, n.byte_range()))
+                                })
+                                .collect()
+                        };
+                        let assumptions = names("assumption");
+                        let obligations = names("obligation");
+                        self.verifications.push(VerificationReferences {
+                            scope: scope.clone(),
+                            assumptions,
+                            obligations,
+                        });
                     }
                     for card in node
                         .named_children(&mut node.walk())

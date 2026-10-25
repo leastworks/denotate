@@ -261,6 +261,10 @@
         },
         {
           "type": "SYMBOL",
+          "name": "verification"
+        },
+        {
+          "type": "SYMBOL",
           "name": "source_location"
         },
         {
@@ -1000,6 +1004,165 @@
         }
       ]
     },
+    "verification": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "verification"
+        },
+        {
+          "type": "FIELD",
+          "name": "name",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_name"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "{"
+        },
+        {
+          "type": "STRING",
+          "value": "assumptions"
+        },
+        {
+          "type": "STRING",
+          "value": ":"
+        },
+        {
+          "type": "STRING",
+          "value": "["
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "FIELD",
+                  "name": "assumption",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "_reference"
+                  }
+                },
+                {
+                  "type": "REPEAT",
+                  "content": {
+                    "type": "SEQ",
+                    "members": [
+                      {
+                        "type": "STRING",
+                        "value": ","
+                      },
+                      {
+                        "type": "FIELD",
+                        "name": "assumption",
+                        "content": {
+                          "type": "SYMBOL",
+                          "name": "_reference"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": "]"
+        },
+        {
+          "type": "STRING",
+          "value": ";"
+        },
+        {
+          "type": "STRING",
+          "value": "obligations"
+        },
+        {
+          "type": "STRING",
+          "value": ":"
+        },
+        {
+          "type": "STRING",
+          "value": "["
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "FIELD",
+                  "name": "obligation",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "_reference"
+                  }
+                },
+                {
+                  "type": "REPEAT",
+                  "content": {
+                    "type": "SEQ",
+                    "members": [
+                      {
+                        "type": "STRING",
+                        "value": ","
+                      },
+                      {
+                        "type": "FIELD",
+                        "name": "obligation",
+                        "content": {
+                          "type": "SYMBOL",
+                          "name": "_reference"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "STRING",
+          "value": "]"
+        },
+        {
+          "type": "STRING",
+          "value": ";"
+        },
+        {
+          "type": "STRING",
+          "value": "}"
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "location"
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        }
+      ]
+    },
     "cardinality": {
       "type": "SEQ",
       "members": [
@@ -1655,6 +1818,10 @@
       {
         "type": "STRING",
         "value": "assumption"
+      },
+      {
+        "type": "STRING",
+        "value": "verification"
       },
       {
         "type": "STRING",

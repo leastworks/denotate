@@ -11,9 +11,22 @@ program membership and authoritative snapshots.
 ## Loading
 
 `load(&ProgramMembership, &[SourceFile])` returns a `LoadedProgram`: `Corpus`, semantic
-keys, finite domains, active assumptions W, exact current `.den` provenance, documents
+keys, finite domains, exact current `.den` provenance, documents
 with their ownership, and occurrence owners. It requires snapshots for every reachable
 member, ignores unrelated documents and rejects conflicting snapshots of one URI.
+
+Named assumptions and verifications are declarations in `Corpus`, with typed semantic
+keys and occurrence-based provenance (including embedded origins). There is no separate
+loader-owned assumption table. `verification_requests(limits, backend)` returns one
+`(VerificationKey, CheckRequest)` per verification in the whole reachable closure,
+sorted by key; it returns an empty list when no verification is declared. Each request
+selects exactly its declaration's assumptions and obligations. References use shared
+namespace lookup and resolve only the kind required by their list.
+
+`request(limits, backend)` remains a transitional editor adapter: it checks every
+obligation under every IR assumption, preserving the editor's current behavior until
+the editor checks verifications. `input_assumptions()` provides those lowered restrictions for transitional
+callers; the IR remains their source of meaning.
 
 `load_with_resolver(…, Some(&mut resolver))` also restores embedded origins through a
 caller-owned `origins::OriginResolver` (one resolution per URI/view/hash identity).
@@ -29,11 +42,15 @@ root; `ProgramMembership::single` builds an in-memory one-root program.
 ## Printing
 
 `print(&ExportProgram, PrintOptions) -> Result<ExportBundle, ExportError>` is pure. It
-takes the corpus, domains, sources, provenance, assumption records and an explicit
-`ExportLayout` (a file for every top-level occurrence and assumption), and returns
+takes the corpus, domains, sources, provenance and an explicit `ExportLayout`
+(a file for every top-level occurrence, including assumptions and verifications), and returns
 named files plus root manifests. Library files go under `library/` with their own
 root. `ExportBundle::documents(base_uri)` reloads a bundle in memory.
 `PrintOptions { embedded_origins: false }` omits origins.
+
+`ExportAssumption` and its separate layout placements remain supported for InputMapping
+until it declares its assumption in the IR. Their exported declarations reload into the IR. Names must not collide
+with IR assumptions in the same namespace.
 
 `spelling(name, NameKind)` is the kind-aware spelling used by the printer; editors must
 use it for replacement names (rename), not display quoting.
@@ -47,6 +64,11 @@ per-file projections with current anchors, and resolves per program on demand wi
 Salsa-tracked queries. Trivia refreshes anchors without invalidating answers; damaged
 signatures suppress cascades. It does not need a successfully loaded `Corpus`.
 
+Verification declarations retain their contract kind and projected reference lists.
+The index and loader share list resolution, including wrong-kind, ambiguous and
+duplicate-reference errors. Navigation, completion and rename for verification references are
+not implemented yet.
+
 Rule linting comes from `denotate-analysis`.
 
 ## Presentation
@@ -58,7 +80,7 @@ user files are the program's own documents.
 ## Commands and tests
 
 ```sh
-just check-den native/ir-text/fixtures [--sat]
+just check-den native/ir-text/fixtures [--sat] [--verification library::default_checks]
 cargo +1.93.0 test --manifest-path native/Cargo.toml --locked -p denotate-ir-text
 ```
 

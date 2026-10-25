@@ -22,6 +22,7 @@ pub struct ExportLayout {
     pub assumptions: Vec<usize>,
 }
 #[derive(Clone, Debug)]
+/// Transitional InputMapping export adapter, until InputMapping declares IR assumptions.
 pub struct ExportAssumption {
     pub namespace: Namespace,
     pub name: Option<String>,
@@ -151,6 +152,8 @@ enum SymbolKind {
     Sort,
     Constant(SortId),
     Relation,
+    Assumption,
+    Obligation,
 }
 struct Symbol {
     text: String,
@@ -203,13 +206,6 @@ pub(crate) fn rule_positions(rule: &Rule) -> BTreeMap<String, OccurrenceId> {
     positions
 }
 fn validate(p: &ExportProgram<'_>) -> Result<()> {
-    // Printing IR assumption and verification declarations is not implemented yet;
-    // refuse rather than drop them from the output.
-    if p.corpus.assumptions().next().is_some() || p.corpus.verifications().next().is_some() {
-        return Err(fail(
-            "Exporting IR assumption and verification declarations is not supported yet",
-        ));
-    }
     let top = top_level(p.corpus).into_iter().collect::<BTreeSet<_>>();
     if p.layout.placements.keys().copied().collect::<BTreeSet<_>>() != top {
         return Err(fail(
@@ -299,7 +295,11 @@ fn validate(p: &ExportProgram<'_>) -> Result<()> {
                 .map_err(|e| fail(e.to_string()))?;
         }
     }
-    let mut names = BTreeSet::new();
+    let mut names = p
+        .corpus
+        .assumptions()
+        .map(|a| (p.corpus.namespace(a.id).unwrap(), &a.name))
+        .collect::<BTreeSet<_>>();
     for a in p.assumptions {
         let r = p
             .corpus
@@ -329,6 +329,7 @@ fn validate(p: &ExportProgram<'_>) -> Result<()> {
     Ok(())
 }
 struct Line {
+    block: bool,
     namespace: Namespace,
     text: String,
     origins: BTreeMap<String, Vec<OriginDescriptor>>,
@@ -418,6 +419,24 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
             },
         );
     }
+    for a in c.assumptions() {
+        symbols.insert(
+            a.id.into(),
+            Symbol {
+                text: spelling(&a.name, NameKind::Identifier),
+                kind: SymbolKind::Assumption,
+            },
+        );
+    }
+    for o in c.obligations() {
+        symbols.insert(
+            o.id.into(),
+            Symbol {
+                text: spelling(&o.name, NameKind::Identifier),
+                kind: SymbolKind::Obligation,
+            },
+        );
+    }
     let reference = |id, context: &Namespace| reference(c, &symbols, id, context);
     let mut lines: Vec<Vec<Line>> = p.layout.files.iter().map(|_| Vec::new()).collect();
     let mut add =
@@ -431,6 +450,7 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
                 BTreeMap::new()
             };
             lines[p.layout.placements[&id]].push(Line {
+                block: c.verifications().any(|v| OccurrenceId::from(v.id) == id),
                 namespace: c.namespace(id).unwrap().clone(),
                 text,
                 origins,
@@ -547,6 +567,41 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
             single(o.id.into()),
         )?;
     }
+    for a in c.assumptions() {
+        let Restriction::AtMostOne { relation, group_by } = &a.restriction;
+        add(
+            a.id.into(),
+            format!(
+                "assumption {}: {}",
+                spelling(&a.name, NameKind::Identifier),
+                contract(*relation, group_by, c.namespace(a.id).unwrap())
+            ),
+            single(a.id.into()),
+        )?;
+    }
+    for v in c.verifications() {
+        let context = c.namespace(v.id).unwrap();
+        let assumptions = v
+            .assumptions
+            .iter()
+            .map(|id| reference((*id).into(), context))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let obligations = v
+            .obligations
+            .iter()
+            .map(|id| reference((*id).into(), context))
+            .collect::<Vec<_>>()
+            .join(", ");
+        add(
+            v.id.into(),
+            format!(
+                "verification {} {{ assumptions: [{assumptions}]; obligations: [{obligations}]; }}",
+                spelling(&v.name, NameKind::Identifier)
+            ),
+            single(v.id.into()),
+        )?;
+    }
     for s in c.sorts() {
         let defaults = c
             .constants()
@@ -560,6 +615,7 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
                 .collect::<Vec<_>>();
             members.sort();
             lines[p.layout.placements[&s.id.into()]].push(Line {
+                block: false,
                 namespace: c.namespace(s.id).unwrap().clone(),
                 text: format!(
                     "domain {} = [{}]",
@@ -574,6 +630,10 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
         .assumptions
         .iter()
         .filter_map(|a| a.name.as_ref().map(|n| (a.namespace.clone(), n.clone())))
+        .chain(
+            c.assumptions()
+                .map(|a| (c.namespace(a.id).unwrap().clone(), a.name.clone())),
+        )
         .collect::<BTreeSet<_>>();
     for (i, a) in p.assumptions.iter().enumerate() {
         let name = match &a.name {
@@ -590,6 +650,7 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
             }
         };
         lines[p.layout.assumptions[i]].push(Line {
+            block: false,
             namespace: a.namespace.clone(),
             text: format!(
                 "assumption {}: {}",
@@ -705,7 +766,8 @@ fn render(lines: Vec<Line>) -> String {
             aliases.push(format!("{alias} = {value};\n"));
             format!(" loc({alias})")
         };
-        let declaration = format!("{}{suffix};\n", line.text);
+        let terminator = if line.block { "" } else { ";" };
+        let declaration = format!("{}{suffix}{terminator}\n", line.text);
         if !file_scoped && open_namespace != line.namespace {
             if !open_namespace.is_global() {
                 out.push_str("}\n");

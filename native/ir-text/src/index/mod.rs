@@ -22,6 +22,39 @@ pub fn name_segments(raw: &str) -> Vec<Range<usize>> {
         .collect()
 }
 
+/// Decode one standalone reference with the grammar and loader's name rules.
+pub fn parse_name(raw: &str) -> Result<Name, String> {
+    let raw = raw.trim();
+    let source = crate::SourceFile::new("argument", 0, format!("domain {raw} = [];"));
+    let scopes = crate::ast::parse(&source).map_err(|e| {
+        e.into_iter()
+            .map(|d| d.message)
+            .collect::<Vec<_>>()
+            .join("; ")
+    })?;
+    let statements = scopes
+        .iter()
+        .flat_map(|s| &s.statements)
+        .collect::<Vec<_>>();
+    let [
+        crate::ast::Statement {
+            decl: crate::ast::Decl::Domain(name, values),
+            ..
+        },
+    ] = statements.as_slice()
+    else {
+        return Err("Expected one qualified name".into());
+    };
+    if !values.is_empty() || name.span != (7..7 + raw.len()) {
+        return Err("Expected one qualified name".into());
+    }
+    Ok(Name {
+        namespace: name.namespace.clone(),
+        text: name.text.clone(),
+        generated: name.generated,
+    })
+}
+
 /// Decode a namespace path using the same rules as strict loading.
 pub fn namespace_path(
     source: &crate::SourceFile,
@@ -144,12 +177,93 @@ impl Kind {
 pub struct Declaration {
     pub id: String,
     pub kind: Kind,
+    pub contract: Option<ContractKind>,
     pub name: Name,
     pub scope: Scope,
     pub input: bool,
     pub parameters: Option<Vec<(String, Option<Name>)>>,
     pub sort: Option<Name>,
     pub parent: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ContractKind {
+    Assumption,
+    Obligation,
+    Verification,
+}
+impl ContractKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Assumption => "assumption",
+            Self::Obligation => "obligation",
+            Self::Verification => "verification",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct VerificationReferences {
+    pub scope: Scope,
+    pub assumptions: Vec<(Name, Range<usize>)>,
+    pub obligations: Vec<(Name, Range<usize>)>,
+}
+
+/// Shared contract reference resolution for strict loading and recoverable indexing.
+pub(crate) fn resolve_contract_list<T: Clone + Ord>(
+    scope: &Scope,
+    names: impl IntoIterator<Item = (Name, Range<usize>)>,
+    kind: ContractKind,
+    entries: &[(Namespace, String, ContractKind, T)],
+) -> Result<Vec<T>, Vec<(Range<usize>, String)>> {
+    let mut selected = Vec::new();
+    let mut seen = BTreeSet::new();
+    let mut errors = Vec::new();
+    for (name, span) in names {
+        let candidates = candidate_keys(
+            visible_namespaces(&scope.namespace, &scope.imports, name.namespace.as_ref()),
+            &name.text,
+            name.generated,
+        );
+        let matching = entries
+            .iter()
+            .filter(|(ns, text, _, _)| candidates.contains(&(ns.clone(), text.clone(), false)))
+            .collect::<Vec<_>>();
+        let expected = matching.iter().filter(|e| e.2 == kind).collect::<Vec<_>>();
+        let message = match expected.as_slice() {
+            [entry] => {
+                if seen.insert(entry.3.clone()) {
+                    selected.push(entry.3.clone());
+                    None
+                } else {
+                    Some(format!(
+                        "Duplicate {} reference {:?}",
+                        kind.label(),
+                        name.spelling()
+                    ))
+                }
+            }
+            [] if !matching.is_empty() => Some(format!(
+                "Expected {} {:?}; name has a different contract kind",
+                kind.label(),
+                name.spelling()
+            )),
+            [] => Some(format!("Unknown {} {:?}", kind.label(), name.spelling())),
+            _ => Some(format!(
+                "Ambiguous {} {:?}; qualify it with its namespace",
+                kind.label(),
+                name.spelling()
+            )),
+        };
+        if let Some(message) = message {
+            errors.push((span, message));
+        }
+    }
+    if errors.is_empty() {
+        Ok(selected)
+    } else {
+        Err(errors)
+    }
 }
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Expected {

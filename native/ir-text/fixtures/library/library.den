@@ -17,3 +17,8 @@ slot_value(S, V) :- supplies(I, S), value(I, V);
 assumption one_value_per_input: at_most_one(value, group_by: input);
 obligation one_input_per_slot: at_most_one(supplies, group_by: slot)
     message "At most one input may supply each slot.";
+
+verification default_checks {
+    assumptions: [one_value_per_input];
+    obligations: [one_input_per_slot];
+}

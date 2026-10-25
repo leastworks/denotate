@@ -190,6 +190,53 @@ pub fn compare(
         assert_eq!(ga, gb);
         bind(&mut ids, x.id.into(), y.id.into());
     }
+    for x in a.assumptions() {
+        let y = b
+            .assumptions()
+            .find(|y| y.name == x.name && a.namespace(x.id) == b.namespace(y.id))
+            .unwrap();
+        let (
+            Restriction::AtMostOne {
+                relation: ra,
+                group_by: ga,
+            },
+            Restriction::AtMostOne {
+                relation: rb,
+                group_by: gb,
+            },
+        ) = (&x.restriction, &y.restriction);
+        assert_eq!(ids[&(*ra).into()], (*rb).into());
+        assert_eq!(ga, gb);
+        bind(&mut ids, x.id.into(), y.id.into());
+    }
+    assert_eq!(a.verifications().count(), b.verifications().count());
+    for x in a.verifications() {
+        let y = b
+            .verifications()
+            .find(|y| y.name == x.name && a.namespace(x.id) == b.namespace(y.id))
+            .unwrap();
+        assert_eq!(
+            x.assumptions
+                .iter()
+                .map(|id| ids[&(*id).into()])
+                .collect::<Vec<_>>(),
+            y.assumptions
+                .iter()
+                .map(|id| (*id).into())
+                .collect::<Vec<OccurrenceId>>()
+        );
+        assert_eq!(
+            x.obligations
+                .iter()
+                .map(|id| ids[&(*id).into()])
+                .collect::<Vec<_>>(),
+            y.obligations
+                .iter()
+                .map(|id| (*id).into())
+                .collect::<Vec<OccurrenceId>>()
+        );
+        bind(&mut ids, x.id.into(), y.id.into());
+    }
     for (sort, domain) in p.domains {
         let mapped = domain
             .iter()
@@ -204,19 +251,27 @@ pub fn compare(
             q.domains[&sort.id].iter().map(|id| (*id).into()).collect()
         );
     }
-    assert_eq!(p.assumptions.len(), q.assumptions.len());
-    let mut unmatched = (0..q.assumptions.len()).collect::<BTreeSet<_>>();
+    assert_eq!(
+        a.assumptions().count() + p.assumptions.len(),
+        b.assumptions().count()
+    );
+    let mut unmatched = b
+        .assumptions()
+        .filter(|a| !ids.values().any(|id| *id == a.id.into()))
+        .map(|a| a.id)
+        .collect::<BTreeSet<_>>();
     for (i, x) in p.assumptions.iter().enumerate() {
         let uri = format!("{base}/{}", p.layout.files[p.layout.assumptions[i]].path);
         let index = *unmatched
             .iter()
             .find(|j| {
-                let y = &q.assumptions[**j];
-                x.namespace == y.namespace
-                    && x.name.as_ref().is_none_or(|n| n == y.name.name.as_ref())
-                    && ids[&x.constraint.relation.into()] == y.constraint.relation.into()
-                    && x.constraint.group_by == y.constraint.group_by
-                    && q.sources.snapshot(y.location.snapshot()).unwrap().uri == uri
+                let y = b.assumption(**j).unwrap();
+                let Restriction::AtMostOne { relation, group_by } = &y.restriction;
+                x.namespace == *b.namespace(y.id).unwrap()
+                    && x.name.as_ref().is_none_or(|n| n == y.name.as_str())
+                    && ids[&x.constraint.relation.into()] == (*relation).into()
+                    && x.constraint.group_by == *group_by
+                    && q.owners[&y.id.into()] == uri
             })
             .unwrap();
         unmatched.remove(&index);
@@ -229,7 +284,7 @@ pub fn compare(
             let actual = q
                 .embedded
                 .associations
-                .get(&origins::OriginTarget::Assumption(index))
+                .get(&origins::OriginTarget::Occurrence(index.into()))
                 .cloned()
                 .unwrap_or_default()
                 .into_iter()
@@ -276,7 +331,7 @@ pub fn compare(
     }
     check_current_rule_spans(q);
     assert_eq!(
-        ids.len(),
+        ids.len() + p.assumptions.len(),
         q.owners.len(),
         "every current occurrence must have a correspondence"
     );

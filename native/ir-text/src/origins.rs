@@ -88,7 +88,6 @@ pub struct OriginNotice {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum OriginTarget {
     Occurrence(OccurrenceId),
-    Assumption(usize),
 }
 /// Descriptor associations are retained even when a source cannot be resolved.
 #[derive(Debug, Default)]
@@ -96,7 +95,6 @@ pub struct EmbeddedOrigins {
     pub associations: BTreeMap<OriginTarget, Vec<OriginDescriptor>>,
     pub notices: Vec<OriginNotice>,
     pub provenance: Provenance,
-    pub assumptions: BTreeMap<usize, Vec<Origin>>,
 }
 impl crate::LoadedProgram {
     /// Origins of the smallest annotated occurrence containing the cursor.
@@ -114,7 +112,6 @@ impl crate::LoadedProgram {
                     .iter()
                     .map(|o| o.span)
                     .collect::<Vec<_>>(),
-                OriginTarget::Assumption(i) => vec![self.assumptions[*i].location],
             };
             for span in spans {
                 let range = span.byte_range();

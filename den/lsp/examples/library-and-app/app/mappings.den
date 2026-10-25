@@ -1,5 +1,5 @@
-// These two mappings can overlap when the library's one_present_input
-// assumption is commented out. Toggle that assumption in lib/library.den.
+// The library verification checks these mappings with one_present_input.
+// The app verification below also checks them with unrestricted inputs.
 namespace mappings;
 use library;
 
@@ -8,3 +8,8 @@ const a: Slot;
 
 mapped_to(i, a);
 mapped_to(j, a);
+
+verification unrestricted_inputs {
+    assumptions: [];
+    obligations: [library::one_input_per_slot];
+}

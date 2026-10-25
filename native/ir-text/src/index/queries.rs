@@ -510,6 +510,40 @@ impl Index {
             return file.issues.clone();
         }
         let mut out = file.issues.clone();
+        let contracts = self.roots[root]
+            .files(&self.db)
+            .iter()
+            .filter_map(|f| self.files.get(f.uri(&self.db)))
+            .flat_map(|f| {
+                f.declarations.values().filter_map(|d| {
+                    d.contract.map(|kind| {
+                        (
+                            d.scope.namespace.clone(),
+                            d.name.text.clone(),
+                            kind,
+                            (f.source.uri.clone(), d.id.clone()),
+                        )
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        for v in &file.verifications {
+            for (kind, names) in [
+                (ContractKind::Assumption, &v.assumptions),
+                (ContractKind::Obligation, &v.obligations),
+            ] {
+                if let Err(errors) =
+                    resolve_contract_list(&v.scope, names.clone(), kind, &contracts)
+                {
+                    out.extend(errors.into_iter().map(|(span, message)| Issue {
+                        span,
+                        code: "verification-reference".into(),
+                        message,
+                        warning: false,
+                    }));
+                }
+            }
+        }
         let mut add = |span: Range<usize>, code: &str, message: String| {
             out.push(Issue {
                 span,
@@ -519,6 +553,22 @@ impl Index {
             })
         };
         for d in file.declarations.values() {
+            if let Some(kind) = d.contract {
+                if contracts
+                    .iter()
+                    .filter(|(ns, name, k, _)| {
+                        *ns == d.scope.namespace && *name == d.name.text && *k == kind
+                    })
+                    .count()
+                    > 1
+                {
+                    add(
+                        file.anchors[&d.id].clone(),
+                        "duplicate-declaration",
+                        format!("Duplicate {} name {:?}", kind.label(), d.name.text),
+                    );
+                }
+            }
             if d.kind == Kind::Relation
                 && d.name.generated
                 && (d.input || d.parameters.as_ref().is_some_and(|p| !p.is_empty()))

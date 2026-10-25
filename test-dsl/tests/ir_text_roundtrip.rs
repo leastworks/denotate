@@ -272,11 +272,7 @@ fn gate(id: &str, program: LoweredProgram, sources: Sources) {
         .iter()
         .map(|a| a.constraint.clone())
         .collect::<Vec<_>>();
-    let loaded_w = loaded
-        .assumptions
-        .iter()
-        .map(|a| a.constraint.clone())
-        .collect::<Vec<_>>();
+    let loaded_w = loaded.input_assumptions();
     if !id.starts_with("api/") && !id.starts_with("multi-file/") {
         presentation_gate(id, &program, &sources, &loaded, &left, &right);
     }
@@ -555,30 +551,20 @@ fn narrowed_domains_and_active_assumptions_change_both_paths_together() {
             &[doc],
         )
         .unwrap();
-        let assumptions = p
-            .assumptions
-            .iter()
-            .map(|a| ExportAssumption {
-                namespace: a.namespace.clone(),
-                name: Some(a.name.name.to_string()),
-                constraint: a.constraint.clone(),
-                origins: vec![Origin::new(a.location)],
-            })
-            .collect::<Vec<_>>();
         let layout = ExportLayout {
             files: vec![ExportFile {
                 path: "program.den".into(),
                 ownership: Ownership::User,
             }],
             placements: top_level(&p.corpus).into_iter().map(|id| (id, 0)).collect(),
-            assumptions: vec![0; assumptions.len()],
+            assumptions: vec![],
         };
         let export = ExportProgram {
             corpus: &p.corpus,
             domains: &p.domains,
             sources: &p.sources,
             provenance: &p.provenance,
-            assumptions: &assumptions,
+            assumptions: &[],
             layout: &layout,
         };
         let (membership, docs) = print(&export, PrintOptions::default())
@@ -591,11 +577,7 @@ fn narrowed_domains_and_active_assumptions_change_both_paths_together() {
                 (&p, Index::new(&p.corpus, &p.corpus, &p.keys, None)),
                 (&q, Index::new(&p.corpus, &q.corpus, &q.keys, Some(&map))),
             ] {
-                let w = current
-                    .assumptions
-                    .iter()
-                    .map(|a| a.constraint.clone())
-                    .collect::<Vec<_>>();
+                let w = current.input_assumptions();
                 let actual = check(
                     &current.corpus,
                     &current.keys,
@@ -643,11 +625,7 @@ fn unambiguous_witness_keeps_exact_primary_and_related_generic_origins() {
         .into_iter()
         .map(|a| a.constraint)
         .collect::<Vec<_>>();
-    let qw = q
-        .assumptions
-        .iter()
-        .map(|a| a.constraint.clone())
-        .collect::<Vec<_>>();
+    let qw = q.input_assumptions();
     for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
         for (c, keys, domains, w, sources, provenance) in [
             (

@@ -555,6 +555,10 @@
         {
           "type": "statement",
           "named": true
+        },
+        {
+          "type": "verification",
+          "named": true
         }
       ]
     }
@@ -871,6 +875,10 @@
         {
           "type": "statement",
           "named": true
+        },
+        {
+          "type": "verification",
+          "named": true
         }
       ]
     }
@@ -997,6 +1005,80 @@
     }
   },
   {
+    "type": "verification",
+    "named": true,
+    "fields": {
+      "assumption": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "generated_identifier",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "quoted_identifier",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "quoted_identifier",
+            "named": true
+          }
+        ]
+      },
+      "obligation": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "generated_identifier",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "quoted_identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "location",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
     "type": "!",
     "named": false
   },
@@ -1050,6 +1132,10 @@
   },
   {
     "type": "assumption",
+    "named": false
+  },
+  {
+    "type": "assumptions",
     "named": false
   },
   {
@@ -1126,6 +1212,10 @@
     "named": false
   },
   {
+    "type": "obligations",
+    "named": false
+  },
+  {
     "type": "occurrence_position",
     "named": true
   },
@@ -1159,6 +1249,10 @@
   },
   {
     "type": "use",
+    "named": false
+  },
+  {
+    "type": "verification",
     "named": false
   },
   {

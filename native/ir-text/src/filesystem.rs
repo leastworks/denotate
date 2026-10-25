@@ -29,24 +29,38 @@ fn failure(path: &Path, message: impl ToString) -> Vec<Diagnostic> {
         message: message.to_string(),
     }]
 }
-fn io<T>(path: &Path, result: std::io::Result<T>) -> Result<T> {
-    result.map_err(|e| failure(path, e))
+/// Command exit policy distinguishes invalid manifests from filesystem failures.
+#[derive(Debug)]
+pub enum DiscoveryError {
+    Invalid(Vec<Diagnostic>),
+    Operational(Vec<Diagnostic>),
 }
-fn manifest(path: &Path) -> Result<PathBuf> {
+impl DiscoveryError {
+    pub fn diagnostics(self) -> Vec<Diagnostic> {
+        match self {
+            Self::Invalid(d) | Self::Operational(d) => d,
+        }
+    }
+}
+type DiscoveryResult<T> = std::result::Result<T, DiscoveryError>;
+fn io<T>(path: &Path, result: std::io::Result<T>) -> DiscoveryResult<T> {
+    result.map_err(|e| DiscoveryError::Operational(failure(path, e)))
+}
+fn manifest(path: &Path) -> DiscoveryResult<PathBuf> {
     let path = if path.is_dir() {
         path.join("den.root")
     } else {
         path.to_owned()
     };
     if path.file_name().is_none_or(|n| n != "den.root") {
-        return Err(failure(
+        return Err(DiscoveryError::Invalid(failure(
             &path,
             "Expected a den.root manifest or its containing folder",
-        ));
+        )));
     }
     io(&path, fs::canonicalize(&path))
 }
-fn members(folder: &Path, out: &mut BTreeMap<String, PathBuf>) -> Result<()> {
+fn members(folder: &Path, out: &mut BTreeMap<String, PathBuf>) -> DiscoveryResult<()> {
     let entries = io(folder, fs::read_dir(folder))?;
     for entry in entries {
         let entry = io(folder, entry)?;
@@ -57,7 +71,7 @@ fn members(folder: &Path, out: &mut BTreeMap<String, PathBuf>) -> Result<()> {
             if !path
                 .join("den.root")
                 .try_exists()
-                .map_err(|e| failure(&path, e))?
+                .map_err(|e| DiscoveryError::Operational(failure(&path, e)))?
             {
                 members(&path, out)?;
             }
@@ -98,6 +112,9 @@ pub fn manifest_libraries(text: &str) -> std::result::Result<Vec<PathBuf>, Strin
 /// stops at nested `den.root` files. Repeated paths and cycles are canonicalized
 /// and visited once; the returned graph retains every dependency edge.
 pub fn discover(root: &Path) -> Result<(ProgramMembership, Vec<SourceFile>)> {
+    discover_classified(root).map_err(DiscoveryError::diagnostics)
+}
+pub fn discover_classified(root: &Path) -> DiscoveryResult<(ProgramMembership, Vec<SourceFile>)> {
     let selected = manifest(root)?;
     let mut pending = vec![selected.clone()];
     let mut roots = BTreeMap::new();
@@ -110,7 +127,9 @@ pub fn discover(root: &Path) -> Result<(ProgramMembership, Vec<SourceFile>)> {
         let text = io(&path, fs::read_to_string(&path))?;
         let folder = path.parent().expect("a canonical file has a parent");
         let mut libraries = BTreeSet::new();
-        for relative in manifest_libraries(&text).map_err(|e| failure(&path, e))? {
+        for relative in
+            manifest_libraries(&text).map_err(|e| DiscoveryError::Invalid(failure(&path, e)))?
+        {
             let target = manifest(&folder.join(relative))?;
             libraries.insert(uri(&target));
             pending.push(target);
@@ -135,7 +154,7 @@ pub fn discover(root: &Path) -> Result<(ProgramMembership, Vec<SourceFile>)> {
                 io(&path, fs::read_to_string(&path))?,
             ))
         })
-        .collect::<Result<_>>()?;
+        .collect::<DiscoveryResult<_>>()?;
     Ok((
         ProgramMembership {
             root: uri(&selected),

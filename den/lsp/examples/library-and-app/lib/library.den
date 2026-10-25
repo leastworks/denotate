@@ -12,8 +12,14 @@ relation available(slot: Slot);
 supplies(I, S) :- mapped_to(I, S), present(I);
 available(S) :- supplies(_, S);
 
-// Comment out the next line to allow both inputs to be present together.
+// The verification below selects this restriction. Use assumptions: [] there
+// to check worlds where both inputs may be present.
 assumption one_present_input: at_most_one(present, group_by: ());
 
 obligation one_input_per_slot: at_most_one(supplies, group_by: slot)
     message "At most one input may supply each slot.";
+
+verification default_checks {
+    assumptions: [one_present_input];
+    obligations: [one_input_per_slot];
+}
