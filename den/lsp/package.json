@@ -3,6 +3,7 @@
   "displayName": "Denotate",
   "description": "Denotate .den editor: checking, navigation and origins",
   "version": "0.0.1",
+  "license": "Apache-2.0",
   "publisher": "denotate",
   "private": true,
   "engines": {"node": ">=22.0.0", "vscode": "^1.141.0"},

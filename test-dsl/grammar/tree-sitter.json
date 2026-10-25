@@ -1,5 +1,5 @@
 {
   "grammars": [{"name": "inputmapping", "camelcase": "InputMapping", "scope": "source.inputmapping", "path": ".", "file-types": ["inputmapping"]}],
-  "metadata": {"version": "0.0.1", "license": "UNLICENSED", "description": "InputMapping test DSL", "authors": [{"name": "Denotate"}]},
+  "metadata": {"version": "0.0.1", "license": "Apache-2.0", "description": "InputMapping test DSL", "authors": [{"name": "Denotate"}]},
   "bindings": {"c": false, "go": false, "node": false, "python": false, "rust": false, "swift": false}
 }

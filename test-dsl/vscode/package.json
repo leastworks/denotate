@@ -3,6 +3,7 @@
   "displayName": "InputMapping (Denotate prototype)",
   "description": "Source-linked semantic diagnostics for the InputMapping test DSL",
   "version": "0.0.1",
+  "license": "Apache-2.0",
   "publisher": "denotate",
   "private": true,
   "engines": { "node": ">=22.0.0", "vscode": "^1.141.0" },
