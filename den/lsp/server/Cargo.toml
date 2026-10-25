@@ -3,6 +3,7 @@ name = "denotate-lsp"
 version = "0.0.1"
 edition = "2021"
 publish = false
+rust-version = "1.93"
 workspace = "../../../native"
 
 [dependencies]

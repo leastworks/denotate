@@ -5,7 +5,7 @@ const server = fileURLToPath(new URL(`../dist/denotate-lsp${process.platform ===
 // Run every shared LSP scenario against the freshly built .den server. The
 // InputMapping scenarios are feature-gated and run through their own recipe.
 const env = { ...process.env, DENOTATE_LSP_COMMAND: server, DENOTATE_LSP_ARGS: '[]' };
-const result = spawnSync('cargo', ['test', '--manifest-path', `${root}Cargo.toml`, '--locked',
+const result = spawnSync('cargo', ['+1.93.0', 'test', '--manifest-path', `${root}Cargo.toml`, '--locked',
     '-p', 'denotate-lsp-tests', '--', '--nocapture'], { env, stdio: 'inherit' });
 if (result.error) throw result.error;
 process.exit(result.status ?? 1);

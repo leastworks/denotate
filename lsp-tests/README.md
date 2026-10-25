@@ -12,4 +12,5 @@ starts it in a temporary copy of a `fixtures/` workspace, with `DENOTATE_TEST_MO
 - `tests/latency.rs` is an ignored, manual latency smoke with no thresholds
   (`just bench-lsp`).
 
-The workspace is pinned to Rust 1.78 (`Cargo.toml` at the repository root).
+This is its own workspace (`Cargo.toml` at the repository root), built with the
+repository's Rust 1.93.0 (`rust-toolchain.toml`).

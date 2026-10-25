@@ -3,7 +3,7 @@ name = "denotate-lsp-tests"
 version = "0.0.1"
 edition = "2021"
 publish = false
-rust-version = "1.78"
+rust-version = "1.93"
 
 [features]
 # Opt in explicitly: these scenarios target the DSL server, not either IR editor.

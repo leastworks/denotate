@@ -3,6 +3,7 @@ name = "denotate-editor"
 version = "0.0.1"
 edition = "2021"
 publish = false
+rust-version = "1.93"
 
 [dependencies]
 crossbeam-channel = "=0.5.17"

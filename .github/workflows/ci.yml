@@ -14,10 +14,9 @@ jobs:
           node-version: '22'
           cache: npm
           cache-dependency-path: den/lsp/package-lock.json
-      - name: Install Rust toolchains
+      - name: Install Rust toolchain
         run: |
           rustup toolchain install 1.93.0 --profile minimal
-          rustup toolchain install 1.78.0 --profile minimal
       - name: Native workspace (IR, checker, sessions, presentation, editor, ir-text, test DSL)
         run: cargo +1.93.0 test --manifest-path native/Cargo.toml --locked --workspace --exclude denotate-lsp
       - name: Install .den editor dependencies
@@ -38,7 +37,7 @@ jobs:
       - name: InputMapping worker and diagnostics over LSP
         run: |
           cargo +1.93.0 build --manifest-path native/Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp
-          DENOTATE_LSP_COMMAND="$GITHUB_WORKSPACE/native/target/debug/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.78.0 test --manifest-path Cargo.toml --locked -p denotate-lsp-tests --features inputmapping --test inputmapping
+          DENOTATE_LSP_COMMAND="$GITHUB_WORKSPACE/native/target/debug/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.93.0 test --manifest-path Cargo.toml --locked -p denotate-lsp-tests --features inputmapping --test inputmapping
       - name: InputMapping editor package and example
         run: |
           npm ci --prefix test-dsl/vscode

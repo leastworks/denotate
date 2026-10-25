@@ -36,7 +36,7 @@ generate-inputmapping: _check-node
 # Build the InputMapping diagnostics server and exercise it over real LSP (no GUI).
 test-inputmapping-lsp:
     cargo +1.93.0 build --manifest-path native/Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp
-    DENOTATE_LSP_COMMAND="{{justfile_directory()}}/native/target/debug/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.78.0 test --manifest-path Cargo.toml --locked -p denotate-lsp-tests --features inputmapping --test inputmapping
+    DENOTATE_LSP_COMMAND="{{justfile_directory()}}/native/target/debug/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.93.0 test --manifest-path Cargo.toml --locked -p denotate-lsp-tests --features inputmapping --test inputmapping
 
 # Build the InputMapping VS Code extension and check its package/example (no GUI).
 test-inputmapping-extension: _check-node
@@ -58,7 +58,7 @@ test-b-vscode: _check-node
 # Measure real .den LSP round trips at three sizes; no timing pass/fail threshold.
 bench-lsp: _check-node
     npm run build --prefix den/lsp
-    cargo test --manifest-path Cargo.toml --locked -p denotate-lsp-tests --test latency -- --ignored --nocapture --test-threads=1
+    cargo +1.93.0 test --manifest-path Cargo.toml --locked -p denotate-lsp-tests --test latency -- --ignored --nocapture --test-threads=1
 
 [private]
 _check-node:

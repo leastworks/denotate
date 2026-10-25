@@ -26,7 +26,7 @@ npm ci --prefix den/lsp && just test-b
 just test-inputmapping-lsp
 just test-b-vscode && just test-inputmapping-vscode   # needs local VS Code
 cargo +1.93.0 fmt --manifest-path native/Cargo.toml --all --check
-cargo fmt --manifest-path Cargo.toml --all --check
+cargo +1.93.0 fmt --manifest-path Cargo.toml --all --check
 ```
 
 If a grammar changes, regenerate with the pinned CLI (`npm run generate --prefix
