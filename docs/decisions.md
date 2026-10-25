@@ -9,9 +9,10 @@ real program that the current choice serves badly.
 ## Meaning and checking
 
 - **Negation is admitted by justification, not by stratification.** Business DSLs
-  naturally define mutually exclusive cases that negate each other. Relation-level stratification would reject them, so the checker
-  proves such negations redundant under the assumptions, or certifies a world, and
-  reports everything else as unsupported or no-meaning ([meaning](den-format.md#meaning)).
+  naturally define mutually exclusive cases that negate each other. Relation-level
+  stratification would reject them, so the checker proves such negations redundant
+  under the assumptions, or certifies a world, and reports everything else as
+  unsupported or no-meaning ([meaning](den-format.md#meaning)).
   The well-founded semantics is not adopted until a real program needs it.
 - **Conclusive answers must be sound.** A false counterexample or a silent success
   misleads the author; an explicit inconclusive or unsupported outcome does not. Hence

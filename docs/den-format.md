@@ -45,8 +45,9 @@ each world, the derived relations hold exactly the least fixed point of the rule
 - Positive recursion is admitted.
 - A cycle through negation is admitted only with a justification: a proof that the
   negation is redundant under the other premises and the assumptions (for example two
-  rules with mutually exclusive guards that each negate the other's head), or a certification of one world's meaning. Redundant
-  negations are reported as warnings; they never authorize edits.
+  rules with mutually exclusive guards that each negate the other's head), or a
+  certification of one world's meaning. Redundant negations are reported as warnings;
+  they never authorize edits.
 - Otherwise the affected component and everything depending on it is reported as
   **unsupported**, never treated as false, or as **no meaning** where some permitted
   input has no consistent result.
