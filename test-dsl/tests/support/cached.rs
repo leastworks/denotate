@@ -1,5 +1,5 @@
 //! Caching correctness: scripted edits compared with uncached shared normalization.
-//! Corpus expectations and before_normalization.rs establish compatibility.
+//! Corpus expectations establish behavior; these tests establish reuse.
 use super::*;
 use denotate_test_dsl::lowering::incremental::{QueryCounts, Session};
 

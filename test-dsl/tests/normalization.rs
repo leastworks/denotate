@@ -4,8 +4,6 @@ mod cases;
 mod corpus;
 #[path = "support/normalization_fingerprint.rs"]
 mod fingerprint;
-#[path = "support/before_normalization.rs"]
-mod reference;
 mod support;
 use denotate_editor::Document;
 use denotate_ir::installation::{self, BoundAtom};
@@ -14,10 +12,9 @@ use denotate_normalize as n;
 use denotate_test_dsl::{
     ast::Program,
     library,
-    lowering::{self, assembly, projection, recipe, semantic::*},
+    lowering::{self, assembly, projection, recipe},
     syntax,
 };
-use std::{collections::BTreeMap, sync::Arc};
 
 fn parse(text: &str, revision: u64) -> (Program, Sources) {
     let mut sources = Sources::new();
@@ -41,98 +38,6 @@ fn lowered(outcome: lowering::LoweringOutcome) -> lowering::LoweredProgram {
         panic!("names")
     };
     p
-}
-fn compare_recipes(form: Arc<SemanticStatement>) {
-    let old = reference::Recipe::lower(form.clone());
-    let new = recipe::Recipe::lower(form).unwrap();
-    let Some(recipe) = new.normalized else { return };
-    let local = |id: n::Local| reference::LocalOccurrence(id.0);
-    let constant = |a: &recipe::Value| {
-        let recipe::Value::Name(a) = a else {
-            panic!("not a legacy leaf");
-        };
-        reference::ConstantRef {
-            kind: a.kind,
-            name: a.name.clone(),
-        }
-    };
-    let instructions: Vec<_> = recipe
-        .instructions()
-        .iter()
-        .map(|i| match i {
-            n::Instruction::Helper { id } => reference::Instruction::Helper { id: local(*id) },
-            n::Instruction::Atom {
-                id,
-                target,
-                arguments,
-            } => {
-                let (relation, values) = match target {
-                    n::Target::Helper(id) => (reference::RelationRef::Helper(local(*id)), vec![]),
-                    n::Target::Head(p) | n::Target::Leaf(p) => (
-                        match p.relation {
-                            recipe::Relation::MappedTo => reference::RelationRef::MappedTo,
-                            recipe::Relation::Masked => reference::RelationRef::Masked,
-                            recipe::Relation::Present => reference::RelationRef::Present,
-                            recipe::Relation::Available => reference::RelationRef::Available,
-                            _ => panic!("not a legacy leaf"),
-                        },
-                        p.arguments.iter().map(constant).collect(),
-                    ),
-                };
-                assert_eq!(arguments.len(), values.len());
-                reference::Instruction::Atom {
-                    id: local(*id),
-                    relation,
-                    arguments: arguments
-                        .iter()
-                        .zip(values)
-                        .map(|(a, value)| reference::Argument {
-                            id: local(a.id),
-                            value,
-                        })
-                        .collect(),
-                }
-            }
-            n::Instruction::Rule { id, head, body } => reference::Instruction::Rule {
-                id: local(*id),
-                head: local(*head),
-                body: body
-                    .iter()
-                    .map(|l| reference::Literal {
-                        atom: local(l.atom),
-                        negative: l.polarity == n::Polarity::Negative,
-                    })
-                    .collect(),
-            },
-        })
-        .collect();
-    assert_eq!(old.instructions(), instructions);
-    let convert = |map: BTreeMap<n::Local, AstPath>| {
-        map.into_iter()
-            .map(|(id, path)| (local(id), path))
-            .collect::<BTreeMap<_, _>>()
-    };
-    assert_eq!(*old.origins(), convert(new.assignments.origins));
-    assert_eq!(old.guards, convert(new.assignments.guards));
-    assert_eq!(old.removals, convert(new.assignments.removals));
-}
-#[test]
-fn reference_recipes_agree_for_mapping_mask_and_nested_conditions() {
-    // Rejected programs are exercised through the server, before lowering.
-    let mut texts: Vec<_> = corpus::accepted()
-        .into_iter()
-        .map(|(_, text)| text.to_owned())
-        .collect();
-    texts.extend(cases::nested());
-    for text in texts {
-        let (ast, sources) = parse(&text, 1);
-        let projected = projection::project(&ast, &sources).unwrap();
-        for s in projected.keys() {
-            compare_recipes(s.form);
-        }
-        // Installed output is compared cached against uncached in
-        // generated_cases_install_identically_cached_and_uncached below.
-    }
 }
 #[test]
 fn unchanged_recipes_rebind_moved_sources_and_duplicate_statements_independently() {

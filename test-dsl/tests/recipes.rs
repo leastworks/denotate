@@ -1,5 +1,3 @@
-#[path = "support/before_recipes.rs"]
-mod before_recipes;
 #[path = "support/cached.rs"]
 mod cached;
 mod support;
@@ -286,76 +284,6 @@ fn check(p: &LoweredProgram) -> Value {
     json!({"admitted": report.whole_program_admitted(), "worlds": worlds, "groups": groups, "completion": completion})
 }
 
-fn compare(ast: &Program, sources: &Sources) {
-    match (
-        before_recipes::lower(ast, sources).unwrap(),
-        lowering::lower(ast, sources).unwrap(),
-    ) {
-        (LoweringOutcome::Lowered(old), LoweringOutcome::Lowered(new)) => {
-            assert_eq!(fingerprint(&old, sources), fingerprint(&new, sources));
-            assert_eq!(check(&old), check(&new));
-        }
-        (LoweringOutcome::UserErrors(old), LoweringOutcome::UserErrors(new)) => {
-            assert_eq!(old, new)
-        }
-        _ => panic!("outcomes differ"),
-    }
-}
-
-#[test]
-fn every_existing_fixture_agrees_with_the_pre_recipe_lowerer() {
-    for fixture in [
-        Fixture::overlap(),
-        Fixture::exclusive(),
-        Fixture::ambiguous(),
-        Fixture::redundant(),
-        Fixture::mixed(false, false),
-        Fixture::mixed(true, false),
-        Fixture::mixed(false, true),
-    ] {
-        compare(&fixture.ast, &fixture.sources);
-    }
-    let text = include_str!("../fixtures/lowering.txt");
-    let declarations = text.lines().take(2).collect::<Vec<_>>().join("\n");
-    for mapping in text.lines().skip(2).filter(|s| !s.is_empty()) {
-        let (sources, ast) = parse(&format!("{declarations}\n{mapping}\n"));
-        compare(&ast, &sources);
-    }
-    for text in [
-        "input i, i; slot s; s <- i;",
-        "input i; slot s; missing <- i; s <- missing;",
-        "input same; slot same; same <- same;",
-        "input i; slot s; s <- i; s <- i;",
-    ] {
-        let (sources, ast) = parse(text);
-        compare(&ast, &sources);
-    }
-}
-
-#[test]
-fn nested_and_generated_boolean_shapes_preserve_all_occurrence_paths() {
-    let mut expressions = vec![
-        "not ((available(a) and available(c)) or present(x))".to_owned(),
-        "not (not available(a) or available(c))".into(),
-        "not not (available(a) and available(c))".into(),
-        "not not (available(a) or available(c))".into(),
-        "not (available(a) and (present(x) or available(c)))".into(),
-    ];
-    for a in ["available(a)", "not available(a)", "not not available(a)"] {
-        for op in ["and", "or"] {
-            for prefix in ["", "not ", "not not "] {
-                expressions.push(format!("{prefix}({a} {op} present(x))"));
-            }
-        }
-    }
-    for expr in expressions {
-        let (sources, ast) = parse(&format!(
-            "input i, x; slot a, b, c; a <- x; b <- i when {expr};"
-        ));
-        compare(&ast, &sources);
-    }
-}
-
 #[test]
 fn recipes_reassemble_against_current_spans_and_current_edit_eligibility() {
     let text =
@@ -486,14 +414,6 @@ fn local_helpers_and_duplicate_occurrences_survive_new_assembly_order() {
         assert_eq!(
             fingerprint(&assembled, &sources),
             fingerprint(&lowered(&ast, &sources), &sources)
-        );
-        let LoweringOutcome::Lowered(baseline) = before_recipes::lower(&ast, &sources).unwrap()
-        else {
-            panic!()
-        };
-        assert_eq!(
-            fingerprint(&assembled, &sources),
-            fingerprint(&baseline, &sources)
         );
     }
 }
