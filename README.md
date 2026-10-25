@@ -1,4 +1,4 @@
-# Denotate
+<h1 align="center"><img src="docs/assets/logo.png" alt="Denotate" width="480"></h1>
 
 Denotate is a semantic metalanguage: a language for defining the meaning of
 domain-specific languages. A DSL designer writes its semantics as a Denotate
