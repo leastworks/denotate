@@ -53,6 +53,29 @@ become multi-file.
 Accept `.den` programs in the scorecard, to re-score the provisional
 [checker policies](checker-policies.md) on real programs.
 
+## Research: admission by well-founded totality
+
+A sound, symbolic way to admit cycles through negation. The reduct operator Γ is
+antimonotone, so Γ² is monotone; its least and greatest fixed points L and U bound
+every stable model (the alternating-fixpoint construction of the well-founded
+model). Where L = U in a world, that world has exactly one stable model, so a
+component whose bounds agree is admitted there. This adopts no third truth value:
+the bounds only prove that a unique two-valued meaning exists.
+
+- **Approach:** compute L and U as BDD conditions per fact under the selected
+  assumptions; the component is admitted on the worlds where L and U agree for all
+  of its atoms. This generalizes per-world certification (`certify_observation`)
+  to all worlds at once, and fits cycles that input guards break world by world.
+  Facts in L or outside U can also prune no-meaning and SAT searches.
+- **Limits:** totality is sufficient, not necessary (`a :- not b. b :- not a.
+  a :- b.` has one stable model but a non-total well-founded model), so it
+  complements discharge rewrites and certification. It proposes no edit, so it needs
+  its own evidence kind and wording, and a recorded admission decision.
+- **Trigger:** real programs with unsupported regions that their input guards
+  resolve per world but discharge cannot. Prototype on one component and validate
+  against the stable-model oracle and certification. Background: approximation
+  fixpoint theory (Denecker, Marek, Truszczyński).
+
 ## Small items
 
 - Trim the unused module/file-based analysis in `native/analysis`, left from an earlier
