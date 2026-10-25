@@ -1,4 +1,4 @@
-# InputMapping fixtures
+# Test DSL fixtures
 
 | Path | Contents |
 | --- | --- |
@@ -21,7 +21,7 @@ checker validates witnesses by replay, and witness wording is tested separately.
 When behavior changes on purpose, regenerate and review:
 
 ```sh
-just update-inputmapping-expectations
+just update-test-dsl-expectations
 git diff test-dsl/fixtures/expected
 ```
 

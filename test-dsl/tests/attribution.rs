@@ -11,7 +11,7 @@ fn lower(text: &str) -> (Sources, LoweredProgram) {
     let mut sources = Sources::new();
     let snapshot = sources
         .add(
-            "file:///origins.inputmapping",
+            "file:///origins.testdsl",
             1,
             SourceView::TestDsl.as_str(),
             text,
@@ -300,7 +300,7 @@ fn lower_validates_unused_declaration_attribution_before_returning_success() {
     let text = "input unused;";
     let mut sources = Sources::new();
     let snapshot = sources
-        .add("file:///unknown.inputmapping", 1, "mistyped-view", text)
+        .add("file:///unknown.testdsl", 1, "mistyped-view", text)
         .unwrap();
     let document = Document::new(&mut syntax::parser().unwrap(), text.into(), 1, true);
     let ParseOutcome::Parsed(ast) = syntax::project(&document, &sources, snapshot).unwrap() else {

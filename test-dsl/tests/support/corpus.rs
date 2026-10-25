@@ -1,4 +1,4 @@
-//! The InputMapping regression corpus shared by tests across the repository:
+//! The test DSL regression corpus shared by tests across the repository:
 //! hand-written programs in `fixtures/corpus.txt` plus generated normalization cases.
 #![allow(dead_code)] // Each test uses part of the corpus.
 

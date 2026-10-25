@@ -134,7 +134,7 @@ origins still reloads with full current-text provenance.
 
 ```sh
 just check-den <folder-or-den.root> [--sat] [--verification QUALIFIED_NAME]
-just export-inputmapping <out-dir> <file.inputmapping>…   # export a DSL program as .den
+just export-test-dsl <out-dir> <file.testdsl>…   # export a DSL program as .den
 ```
 
 `check-den` runs each verification declared in the program and its reachable libraries,

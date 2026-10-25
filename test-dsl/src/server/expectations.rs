@@ -1,6 +1,6 @@
 //! Expected behavior of every corpus program: diagnostics, obligation groups and the
 //! facts of every small input world, through cached and uncached lowering. Regenerate
-//! deliberately with `just update-inputmapping-expectations` and review every changed
+//! deliberately with `just update-test-dsl-expectations` and review every changed
 //! expectation as a behavior change.
 //!
 //! Expectations exclude implementation choices: generated helper relations are
@@ -31,7 +31,7 @@ fn capture(uncached: bool) -> Vec<Value> {
             true,
         ));
         let prepared = analysis::prepare(
-            &Url::parse("file:///corpus.inputmapping").unwrap(),
+            &Url::parse("file:///corpus.testdsl").unwrap(),
             1,
             document,
             &mut Session::default(),
@@ -218,7 +218,7 @@ fn corpus_programs_match_their_expectations() {
         assert_eq!(
             case, &expected,
             "corpus/{i:02} differs from fixtures/expected/corpus-{i:02}.json; if the change \
-             is intended, run `just update-inputmapping-expectations` and review the diff"
+             is intended, run `just update-test-dsl-expectations` and review the diff"
         );
     }
 }

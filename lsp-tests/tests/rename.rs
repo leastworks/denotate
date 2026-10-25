@@ -368,7 +368,7 @@ r(a,1); r(X,Y) :- p(X,Y);
 domain S=[a,1];
 obligation unique: at_most_one(r, group_by: (x));
 assumption inputs: at_most_one(p, group_by: (x));
-#src=source("file:///a/r/x.inputmapping",view:"r",hash:"sha256:0000000000000000000000000000000000000000000000000000000000000000");
+#src=source("file:///a/r/x.testdsl",view:"r",hash:"sha256:0000000000000000000000000000000000000000000000000000000000000000");
 #origin=loc(#src 1:1 to 1:2);
 r(a,1) loc(#origin);
 }
@@ -396,7 +396,7 @@ namespace consumer { use 'a::b'; 'a::b'::r('a::b'::a, 'a::b'::1); }
             .iter()
             .all(|e| e["newText"] == replacement));
         let changed = apply_file(text, &result, &uri);
-        assert!(changed.contains("file:///a/r/x.inputmapping"));
+        assert!(changed.contains("file:///a/r/x.testdsl"));
         assert!(changed.contains("view:\"r\""));
         assert!(changed.contains("1:1 to 1:2"));
         version += 1;

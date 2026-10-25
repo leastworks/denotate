@@ -1,4 +1,4 @@
-//! Combined-file assembly and the explicit InputMapping-to-generic-export adapter.
+//! Combined-file assembly and the explicit test-DSL-to-generic-export adapter.
 use crate::{
     ast::Program,
     lowering::{self, FilePlacement, LoweredProgram, LoweringOutcome},
@@ -66,7 +66,7 @@ pub fn assemble(documents: &[SourceFile]) -> std::result::Result<Assembled, Vec<
         }
     }
     let program = match lowering::lower(&ast, &sources)
-        .map_err(|e| fail("inputmapping:assembly", e.to_string()))?
+        .map_err(|e| fail("testdsl:assembly", e.to_string()))?
     {
         LoweringOutcome::Lowered(p) => p,
         LoweringOutcome::UserErrors(errors) => {

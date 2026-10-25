@@ -1,8 +1,8 @@
 mod completion;
 mod incremental_inventory;
-mod input_mapping;
 mod rewrites;
 mod symbolic;
+mod test_dsl;
 mod verifications;
 mod sparse {
     pub(super) use denotate_check::test_support::sparse::assert_equivalent;

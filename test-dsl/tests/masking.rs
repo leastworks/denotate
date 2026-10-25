@@ -10,7 +10,7 @@ use support::{atom, domains};
 fn lower(text: &str) -> (LoweredProgram, Sources) {
     let mut sources = Sources::new();
     let snapshot = sources
-        .add("file:///mask.inputmapping", 1, "test-dsl", text)
+        .add("file:///mask.testdsl", 1, "test-dsl", text)
         .unwrap();
     let doc = Document::new(&mut syntax::parser().unwrap(), text.into(), 1, true);
     let syntax::ParseOutcome::Parsed(ast) = syntax::project(&doc, &sources, snapshot).unwrap()
@@ -199,7 +199,7 @@ fn mixed_cycles_retain_authored_negations_and_specific_related_labels() {
                 }
             }
             assert!(d.related.iter().any(|r| {
-                sources.text(r.span).unwrap() == "a <- i;" && r.label == "supporting InputMapping"
+                sources.text(r.span).unwrap() == "a <- i;" && r.label == "supporting mapping"
             }));
             if kind == presentation::DiagnosticKind::UnsupportedCycle {
                 assert!(
@@ -448,7 +448,7 @@ fn mask_names_are_checked_at_the_target_and_keyword_is_reserved_everywhere() {
         let mut sources = Sources::new();
         let text = format!("input i; slot a; a <- i; {statement}");
         let snap = sources
-            .add("file:///error.inputmapping", 1, "test-dsl", text.clone())
+            .add("file:///error.testdsl", 1, "test-dsl", text.clone())
             .unwrap();
         let doc = Document::new(&mut syntax::parser().unwrap(), text, 1, true);
         let syntax::ParseOutcome::Parsed(ast) = syntax::project(&doc, &sources, snap).unwrap()
@@ -476,7 +476,7 @@ fn mask_names_are_checked_at_the_target_and_keyword_is_reserved_everywhere() {
     ] {
         let mut sources = Sources::new();
         let snap = sources
-            .add("file:///error.inputmapping", 1, "test-dsl", text)
+            .add("file:///error.testdsl", 1, "test-dsl", text)
             .unwrap();
         let doc = Document::new(&mut syntax::parser().unwrap(), text.into(), 1, true);
         assert!(

@@ -20,8 +20,8 @@ inconclusive outcomes, never silent success.
 ## Re-scoring
 
 ```sh
-just score-inputmapping path/to/program.inputmapping \
-    --edit path/to/edited.inputmapping --json /tmp/scorecard.json
+just score-test-dsl path/to/program.testdsl \
+    --edit path/to/edited.testdsl --json /tmp/scorecard.json
 ```
 
 Only the first file is required. Without `--edit`, the command appends an unrelated

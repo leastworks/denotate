@@ -20,7 +20,7 @@ fn grounding_matches_fresh_checks_on_the_corpus() {
             true,
         ));
         let frontend = denotate_test_dsl::analysis::prepare(
-            &"file:///grounding-corpus.inputmapping".parse().unwrap(),
+            &"file:///grounding-corpus.testdsl".parse().unwrap(),
             1,
             document,
             &mut lowering::incremental::Session::default(),

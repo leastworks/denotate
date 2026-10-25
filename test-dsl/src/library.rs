@@ -21,7 +21,7 @@ pub struct MappingLibrary {
     pub other: ConstantId,
 }
 
-/// Build semantics, not a solver: no InputMapping-specific type exists in the IR.
+/// Build semantics, not a solver: no test-DSL-specific type exists in the IR.
 pub fn build(corpus: &mut Corpus) -> Result<MappingLibrary, ConstructionError> {
     let slot = corpus.declare_sort("Slot")?;
     let input = corpus.declare_sort("Input")?;
@@ -107,7 +107,7 @@ pub fn build(corpus: &mut Corpus) -> Result<MappingLibrary, ConstructionError> {
         "one_input_per_slot",
         supplies,
         ["slot".into()],
-        "Slot {slot} has overlapping InputMappings from {inputs}.",
+        "Slot {slot} has overlapping mappings from {inputs}.",
     )?;
     let namespace = corpus.namespace(unique_input).unwrap().clone();
     let one_value_per_input = corpus.assume_at_most_one_in(

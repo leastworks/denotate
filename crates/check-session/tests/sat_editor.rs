@@ -17,7 +17,7 @@ fn sat_editor_spurious_completion_is_an_unsupported_diagnostic() {
         true,
     ));
     let program = analysis::prepare(
-        &"file:///sat-loop.inputmapping".parse().unwrap(),
+        &"file:///sat-loop.testdsl".parse().unwrap(),
         1,
         doc,
         &mut lowering::incremental::Session::default(),
@@ -68,7 +68,7 @@ fn sat_editor_corpus_fresh_cached_and_current_diagnostics() {
                 true,
             ));
             let frontend = analysis::prepare(
-                &"file:///sat-corpus.inputmapping".parse().unwrap(),
+                &"file:///sat-corpus.testdsl".parse().unwrap(),
                 version as u64 + 1,
                 document,
                 &mut lower,

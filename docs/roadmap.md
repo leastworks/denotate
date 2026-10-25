@@ -29,7 +29,7 @@ to P′ is valid if, for every permitted input world, the least fixed points agr
 **projected onto the observable interface**.
 
 - **Observable interface:** the DSL library or `.den` author marks observable
-  relations (for InputMapping, classifications such as `slot_value` and `available`);
+  relations (for the test DSL, classifications such as `slot_value` and `available`);
   others are internal helpers that may change. Inputs are always part of the interface;
   generated helpers are always internal. Needs IR support and round-tripping `.den` syntax.
 - **Approach:** BDD fact conditions are canonical under a shared input order, so
@@ -41,11 +41,11 @@ to P′ is valid if, for every permitted input world, the least fixed points agr
   must be observable; interface syntax; refactorings that change W, domains or the
   input schema are out of the first version.
 
-## InputMapping language services
+## Test DSL language services
 
 Definition, references, hover, rename and possibly quick fixes for the test DSL. When
 built, extract the `.den` editor's validated-rename engine into shared code, designed
-against both editors, and generalize the root catalog when InputMapping programs
+against both editors, and generalize the root catalog when test DSL programs
 become multi-file.
 
 ## `.den` scorecard support

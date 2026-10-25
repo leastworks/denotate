@@ -23,7 +23,7 @@ fn parse(text: &str) -> (Sources, Program) {
     let mut sources = Sources::new();
     let snapshot = sources
         .add(
-            "file:///recipe.inputmapping",
+            "file:///recipe.testdsl",
             1,
             SourceView::TestDsl.as_str(),
             text,

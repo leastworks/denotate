@@ -150,7 +150,7 @@ fn memo_all_edit_transitions_reuse_and_invalidation() {
         ) {
             // Invalid edits stop before the cache. Compare fresh frontend diagnostics
             // and retain the session for the subsequent repair/undo.
-            let uri = "file:///invalid.inputmapping".parse().unwrap();
+            let uri = "file:///invalid.testdsl".parse().unwrap();
             let document = std::sync::Arc::new(Document::new(
                 &mut syntax::parser().unwrap(),
                 source.into(),

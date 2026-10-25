@@ -24,7 +24,7 @@ release it only when the program disappears.
 
 ## Scorecard
 
-`examples/scorecard.rs` (`just score-inputmapping`) re-scores the retained paths on a
+`examples/scorecard.rs` (`just score-test-dsl`) re-scores the retained paths on a
 program; see [checker policies](../../docs/checker-policies.md). It needs the
 `test-support` feature, which the recipe enables. Its own tests:
 

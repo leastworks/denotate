@@ -27,7 +27,7 @@
                 "line": 0
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "cycle contributor"
         },
@@ -43,7 +43,7 @@
                 "line": 0
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "cycle contributor"
         },
@@ -59,7 +59,7 @@
                 "line": 0
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "mask condition"
         },
@@ -75,13 +75,13 @@
                 "line": 0
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
-          "message": "supporting InputMapping"
+          "message": "supporting mapping"
         }
       ],
       "severity": 2,
-      "source": "InputMapping"
+      "source": "test DSL"
     },
     {
       "code": "UnsupportedCycle",
@@ -109,7 +109,7 @@
                 "line": 0
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "cycle contributor"
         },
@@ -125,7 +125,7 @@
                 "line": 0
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "cycle contributor"
         },
@@ -141,7 +141,7 @@
                 "line": 0
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "cycle contributor"
         },
@@ -157,13 +157,13 @@
                 "line": 0
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
-          "message": "supporting InputMapping"
+          "message": "supporting mapping"
         }
       ],
       "severity": 2,
-      "source": "InputMapping"
+      "source": "test DSL"
     }
   ],
   "groups": [],

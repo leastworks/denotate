@@ -10,7 +10,7 @@ use std::{collections::BTreeSet, sync::Arc, time::Duration};
 
 fn program(text: &str) -> analysis::Program {
     analysis::prepare(
-        &Url::parse("file:///request.inputmapping").unwrap(),
+        &Url::parse("file:///request.testdsl").unwrap(),
         1,
         Arc::new(Document::new(
             &mut syntax::parser().unwrap(),

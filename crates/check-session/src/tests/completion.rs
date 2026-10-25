@@ -4,7 +4,7 @@ use denotate_check::test_support::rewrites::*;
 use denotate_check::*;
 use std::collections::BTreeSet;
 #[test]
-fn ambiguous_input_mapping_has_answers_but_no_admitted_meaning() {
+fn ambiguous_test_dsl_has_answers_but_no_admitted_meaning() {
     let f = dsl_fixture::Fixture::ambiguous();
     let p = f.lower();
     let limits = Limits::default();

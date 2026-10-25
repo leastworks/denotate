@@ -81,7 +81,7 @@ impl From<ProvenanceError> for LoweringFailure {
 }
 impl fmt::Display for LoweringFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "InputMapping lowering failed: {self:?}")
+        write!(f, "test DSL lowering failed: {self:?}")
     }
 }
 impl std::error::Error for LoweringFailure {}

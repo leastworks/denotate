@@ -27,13 +27,13 @@
                 "line": 5
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "blocking no-meaning finding"
         }
       ],
       "severity": 3,
-      "source": "InputMapping"
+      "source": "test DSL"
     },
     {
       "code": "UnsupportedGroup",
@@ -61,13 +61,13 @@
                 "line": 5
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "blocking no-meaning finding"
         }
       ],
       "severity": 3,
-      "source": "InputMapping"
+      "source": "test DSL"
     }
   ],
   "groups": [

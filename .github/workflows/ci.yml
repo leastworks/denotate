@@ -25,7 +25,7 @@ jobs:
         run: |
           npm run generate --prefix den/lsp
           test -z "$(git status --porcelain --untracked-files=all -- den/grammar/src)"
-      - name: InputMapping generated parser is current
+      - name: Test DSL generated parser is current
         run: |
           cd test-dsl/grammar
           ../../den/lsp/node_modules/.bin/tree-sitter generate
@@ -34,11 +34,11 @@ jobs:
         run: npm test --prefix den/lsp
       - name: .den editor LSP scenarios
         run: npm run test:lsp --prefix den/lsp
-      - name: InputMapping worker and diagnostics over LSP
+      - name: Test DSL worker and diagnostics over LSP
         run: |
-          cargo +1.93.0 build --locked -p denotate-test-dsl --bin inputmapping-lsp
-          DENOTATE_LSP_COMMAND="$GITHUB_WORKSPACE/target/debug/inputmapping-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.93.0 test --locked -p denotate-lsp-tests --features inputmapping --test inputmapping
-      - name: InputMapping editor package and example
+          cargo +1.93.0 build --locked -p denotate-test-dsl --bin test-dsl-lsp
+          DENOTATE_LSP_COMMAND="$GITHUB_WORKSPACE/target/debug/test-dsl-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.93.0 test --locked -p denotate-lsp-tests --features test-dsl --test test_dsl
+      - name: Test DSL editor package and example
         run: |
           npm ci --prefix test-dsl/vscode
           npm test --prefix test-dsl/vscode

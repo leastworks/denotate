@@ -16,7 +16,7 @@ impl Fixture {
         let mut sources = Sources::new();
         let snapshot = sources
             .add(
-                "file:///example.inputmapping",
+                "file:///example.testdsl",
                 1,
                 SourceView::TestDsl.as_str(),
                 text,

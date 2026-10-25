@@ -8,12 +8,12 @@ use tree_sitter::{Node, Parser};
 use tree_sitter_language::LanguageFn;
 
 unsafe extern "C" {
-    fn tree_sitter_inputmapping() -> *const ();
+    fn tree_sitter_testdsl() -> *const ();
 }
 
 pub fn parser() -> Result<Parser, tree_sitter::LanguageError> {
     // This symbol is linked from the generated grammar compiled by build.rs.
-    let language = unsafe { LanguageFn::from_raw(tree_sitter_inputmapping) };
+    let language = unsafe { LanguageFn::from_raw(tree_sitter_testdsl) };
     denotate_editor::parser(language.into())
 }
 
@@ -38,7 +38,7 @@ pub enum ParseFailure {
 }
 impl fmt::Display for ParseFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "InputMapping projection failure: {self:?}")
+        write!(f, "test DSL projection failure: {self:?}")
     }
 }
 impl std::error::Error for ParseFailure {}

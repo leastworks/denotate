@@ -142,16 +142,13 @@ fn cases() -> Vec<(String, SourceFile)> {
     let mut cases = vec![];
     for (id, path) in [
         ("text/overlap", "fixtures/overlapping-mappings.txt"),
-        (
-            "text/vscode-overlap",
-            "vscode/examples/overlap.inputmapping",
-        ),
-        ("text/vscode-values", "vscode/examples/values.inputmapping"),
+        ("text/vscode-overlap", "vscode/examples/overlap.testdsl"),
+        ("text/vscode-values", "vscode/examples/values.testdsl"),
     ] {
         cases.push((
             id.into(),
             SourceFile::new(
-                format!("file:///{id}.inputmapping"),
+                format!("file:///{id}.testdsl"),
                 1,
                 std::fs::read_to_string(root.join(path)).unwrap(),
             ),
@@ -161,7 +158,7 @@ fn cases() -> Vec<(String, SourceFile)> {
     for (i, text) in corpus::accepted() {
         cases.push((
             format!("corpus/{i:02}"),
-            SourceFile::new("file:///case.inputmapping", 1, text),
+            SourceFile::new("file:///case.testdsl", 1, text),
         ));
     }
     let generated = corpus::generated();
@@ -169,7 +166,7 @@ fn cases() -> Vec<(String, SourceFile)> {
     for (i, (revision, text)) in generated.into_iter().enumerate() {
         cases.push((
             format!("generated/{i:02}"),
-            SourceFile::new("file:///case.inputmapping", revision, text),
+            SourceFile::new("file:///case.testdsl", revision, text),
         ));
     }
     assert_eq!(cases.len(), 120);
@@ -303,7 +300,7 @@ fn published_parity_119_programs_bdd_sat_cold_warm_and_exact_origins() {
     entries.push((
         "exact-span".into(),
         SourceFile::new(
-            "file:///exact.inputmapping",
+            "file:///exact.testdsl",
             1,
             "input i, j; slot a; a <- i; a <- j;",
         ),
@@ -349,7 +346,7 @@ fn published_parity_119_programs_bdd_sat_cold_warm_and_exact_origins() {
             );
             dsl.notify(
                 "workspace/didChangeConfiguration",
-                json!({"settings":{"inputmapping":{"backend":backend}}}),
+                json!({"settings":{"testdsl":{"backend":backend}}}),
             );
             let mut previous = None;
             for warm in 0..2 {

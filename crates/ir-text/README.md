@@ -84,6 +84,6 @@ just check-den crates/ir-text/fixtures [--sat] [--verification library::default_
 cargo +1.93.0 test --locked -p denotate-ir-text
 ```
 
-`examples/check.rs` backs `just check-den`. The round trip of the InputMapping
+`examples/check.rs` backs `just check-den`. The round trip of the test DSL
 regression programs through printing and loading lives in
 `test-dsl/tests/ir_text_roundtrip.rs`.

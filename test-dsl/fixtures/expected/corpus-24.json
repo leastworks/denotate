@@ -27,13 +27,13 @@
                 "line": 0
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "redundant condition"
         }
       ],
       "severity": 2,
-      "source": "InputMapping"
+      "source": "test DSL"
     }
   ],
   "groups": [],

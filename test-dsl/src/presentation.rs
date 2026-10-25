@@ -1,4 +1,4 @@
-//! InputMapping wording, guards and source-view selection over shared checked
+//! The test DSL wording, guards and source-view selection over shared checked
 //! findings. Missing attribution is a creator failure, never a user error.
 
 use crate::{
@@ -174,7 +174,7 @@ fn present_using(
         };
         if group.group.obligation != lowered.library.unique_input || group.group.key.len() != 1 {
             return Err(PresentationError::InvalidFinding(
-                "unexpected InputMapping obligation",
+                "unexpected test DSL obligation",
             ));
         }
         let slot = group.group.key[0];
@@ -576,7 +576,7 @@ fn input_case<'a>(
 ) -> Result<(&'a denotate_ir::Constant, ConstantId)> {
     if atom.relation != lowered.library.value || atom.arguments.len() != 2 {
         return Err(PresentationError::InvalidFinding(
-            "unexpected InputMapping input",
+            "unexpected test DSL input",
         ));
     }
     let input = lowered
@@ -760,7 +760,7 @@ fn cycle_locations(
             related.extend(
                 origins(rule.source.into())?
                     .into_iter()
-                    .map(|o| RelatedLocation::new(o.span, "supporting InputMapping")),
+                    .map(|o| RelatedLocation::new(o.span, "supporting mapping")),
             );
         }
     }

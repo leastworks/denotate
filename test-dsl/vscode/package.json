@@ -1,7 +1,7 @@
 {
-  "name": "inputmapping-prototype",
-  "displayName": "InputMapping (Denotate prototype)",
-  "description": "Source-linked semantic diagnostics for the InputMapping test DSL",
+  "name": "denotate-test-dsl",
+  "displayName": "Denotate test DSL",
+  "description": "Source-linked semantic diagnostics for the test DSL",
   "version": "0.0.1",
   "license": "Apache-2.0",
   "publisher": "denotate",
@@ -9,22 +9,22 @@
   "engines": { "node": ">=22.0.0", "vscode": "^1.141.0" },
   "categories": ["Programming Languages"],
   "main": "./dist/extension.cjs",
-  "activationEvents": ["onLanguage:inputmapping"],
+  "activationEvents": ["onLanguage:testdsl"],
   "contributes": {
     "languages": [{
-      "id": "inputmapping",
-      "aliases": ["InputMapping"],
-      "extensions": [".inputmapping"],
+      "id": "testdsl",
+      "aliases": ["test DSL"],
+      "extensions": [".testdsl"],
       "configuration": "./language-configuration.json"
     }],
     "grammars": [{
-      "language": "inputmapping",
-      "scopeName": "source.inputmapping",
-      "path": "./syntaxes/inputmapping.tmLanguage.json"
+      "language": "testdsl",
+      "scopeName": "source.testdsl",
+      "path": "./syntaxes/testdsl.tmLanguage.json"
     }]
   },
   "scripts": {
-    "build": "cargo +1.93.0 build --manifest-path ../../Cargo.toml --locked -p denotate-test-dsl --bin inputmapping-lsp --release && node build.mjs",
+    "build": "cargo +1.93.0 build --manifest-path ../../Cargo.toml --locked -p denotate-test-dsl --bin test-dsl-lsp --release && node build.mjs",
     "test": "npm run build && node --test tests/package.test.mjs",
     "test:vscode": "npm run build && node scripts/run-vscode-smoke.mjs"
   },

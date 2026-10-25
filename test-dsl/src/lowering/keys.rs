@@ -4,8 +4,8 @@ use super::{semantic::StatementKey, *};
 use denotate_ir::installation::Installation;
 use denotate_normalize::Instruction;
 
-pub const LIBRARY: &str = "InputMapping/library";
-const DOCUMENT: &str = "InputMapping/document";
+pub const LIBRARY: &str = "test-dsl/library";
+const DOCUMENT: &str = "test-dsl/document";
 
 pub fn owner(statement: &StatementKey) -> OwnerKey {
     // This encoding relies on DERIVED Debug for EVERY type nested inside

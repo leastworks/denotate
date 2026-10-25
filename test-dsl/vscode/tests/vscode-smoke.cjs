@@ -5,7 +5,7 @@ function nextEvent(subscribe, accepts = () => true) {
     return new Promise((resolve, reject) => {
         const timer = setTimeout(() => {
             subscription.dispose();
-            reject(new Error('Timed out waiting for InputMapping publication/checkpoint'));
+            reject(new Error('Timed out waiting for the test DSL publication/checkpoint'));
         }, 15000);
         const subscription = subscribe(value => {
             if (!accepts(value)) return;
@@ -17,10 +17,10 @@ function nextEvent(subscribe, accepts = () => true) {
 }
 
 exports.run = async function () {
-    const extension = vscode.extensions.getExtension('denotate.inputmapping-prototype');
-    assert.ok(extension, 'InputMapping extension must be installed');
+    const extension = vscode.extensions.getExtension('denotate.denotate-test-dsl');
+    assert.ok(extension, 'The test DSL extension must be installed');
     const client = await extension.activate();
-    const uri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, 'overlap.inputmapping');
+    const uri = vscode.Uri.joinPath(vscode.workspace.workspaceFolders[0].uri, 'overlap.testdsl');
     const publications = new vscode.EventEmitter();
     // Observe actual converted diagnostics after the language client installs
     // them in VS Code, not just the server's wire-level messages.
@@ -65,7 +65,7 @@ exports.run = async function () {
             const diagnostic = diagnostics.find(item => item.range.start.line === line + shift);
             assert.ok(diagnostic, `diagnostic on mapping line ${line + shift}`);
             assert.equal(diagnostic.code, 'OverlappingMappings');
-            assert.equal(diagnostic.source, 'InputMapping');
+            assert.equal(diagnostic.source, 'test DSL');
             assert.equal(diagnostic.severity, vscode.DiagnosticSeverity.Error);
             assert.equal(diagnostic.range.start.character, 0);
             assert.equal(diagnostic.range.end.line, line + shift);
@@ -88,9 +88,9 @@ exports.run = async function () {
             document = await vscode.workspace.openTextDocument(uri);
             await vscode.window.showTextDocument(document);
         });
-        assert.equal(document.languageId, 'inputmapping');
+        assert.equal(document.languageId, 'testdsl');
         assert.ok(extension.packageJSON.contributes.grammars.some(item =>
-            item.language === 'inputmapping' && item.scopeName === 'source.inputmapping'));
+            item.language === 'testdsl' && item.scopeName === 'source.testdsl'));
         for (const feature of ['completionProvider', 'definitionProvider', 'renameProvider',
             'documentFormattingProvider', 'codeActionProvider']) {
             const capability = client.initializeResult.capabilities[feature];
@@ -98,16 +98,16 @@ exports.run = async function () {
         }
         const original = document.getText();
         overlaps(first);
-        console.log('InputMapping: activation, both target ranges and related Input locations passed');
+        console.log('Test DSL: activation, both target ranges and related Input locations passed');
 
         const fixed = original.replace('slot a, b;', 'slot a, b, c;').replace('b <- input_bb', 'c <- input_bb');
         assert.deepEqual(await validUpdate(() => replace(fixed)), []);
         overlaps(await validUpdate(() => replace(original)));
-        console.log('InputMapping: repair clears final findings; restoring the conflict restores both');
+        console.log('Test DSL: repair clears final findings; restoring the conflict restores both');
 
         assert.deepEqual(await validUpdate(() => replace(original + '\nmask b;\n')), []);
         overlaps(await validUpdate(() => replace(original)));
-        console.log('InputMapping: masking clears the overlap; removal restores both exact target ranges');
+        console.log('Test DSL: masking clears the overlap; removal restores both exact target ranges');
 
         for (const [broken, code] of [
             [original.replace('input_bb when', 'when'), 'syntax'],
@@ -123,7 +123,7 @@ exports.run = async function () {
             assert.ok(result.diagnostics.every(d => d.code === code || d.code === 'paused'));
             overlaps(await validUpdate(() => replace(original)));
         }
-        console.log('InputMapping: syntax/name errors pause checking; repair resumes it');
+        console.log('Test DSL: syntax/name errors pause checking; repair resumes it');
 
         overlaps(await validUpdate(() => replace('// comment\n' + original)), 1);
         const noMeaning = await validUpdate(() => replace(
@@ -157,7 +157,7 @@ exports.run = async function () {
         assert.equal(document.getText(literal.range), '9223372036854775808');
         assert.ok(invalid.diagnostics.every(d => d.code === 'literal' || d.code === 'paused'));
         overlaps(await validUpdate(() => replace(original)));
-        console.log('InputMapping: current ranges, no-meaning, value guards and overflow repair passed');
+        console.log('Test DSL: current ranges, no-meaning, value guards and overflow repair passed');
     } finally {
         delete client.clientOptions.middleware.handleDiagnostics;
         publications.dispose();

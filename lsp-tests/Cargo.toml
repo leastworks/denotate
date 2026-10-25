@@ -8,11 +8,11 @@ license = "Apache-2.0"
 
 [features]
 # Opt in explicitly: these scenarios target the DSL server, not either IR editor.
-inputmapping = []
+test-dsl = []
 
 [[test]]
-name = "inputmapping"
-required-features = ["inputmapping"]
+name = "test_dsl"
+required-features = ["test-dsl"]
 
 [dev-dependencies]
 serde_json = "=1.0.145"

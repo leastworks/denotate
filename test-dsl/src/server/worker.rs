@@ -1,4 +1,4 @@
-//! InputMapping's check payload and closure; scheduling is shared editor machinery.
+//! the test DSL's check payload and closure; scheduling is shared editor machinery.
 use crate::analysis::{Failure, Output, Program};
 use denotate_editor::checking::{self, Scheduler, Ticket};
 use lsp_types::Url;
@@ -16,7 +16,7 @@ pub type Worker = Scheduler<Url, Payload, Checked, i32>;
 
 pub fn spawn() -> std::io::Result<Worker> {
     Worker::spawn(
-        "inputmapping-check",
+        "testdsl-check",
         |job: &checking::Job<Url, Payload, i32>, session, checkpoint| {
             let start = job.payload.measure.then(Instant::now);
             let result = job.payload.program.check_with_backend(

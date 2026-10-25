@@ -27,7 +27,7 @@
                 "line": 2
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "cycle contributor"
         },
@@ -43,7 +43,7 @@
                 "line": 3
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "cycle contributor"
         },
@@ -59,13 +59,13 @@
                 "line": 3
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "cycle contributor"
         }
       ],
       "severity": 2,
-      "source": "InputMapping"
+      "source": "test DSL"
     },
     {
       "code": "UnsupportedCycle",
@@ -93,7 +93,7 @@
                 "line": 2
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "cycle contributor"
         },
@@ -109,7 +109,7 @@
                 "line": 3
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "cycle contributor"
         },
@@ -125,13 +125,13 @@
                 "line": 2
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "cycle contributor"
         }
       ],
       "severity": 2,
-      "source": "InputMapping"
+      "source": "test DSL"
     }
   ],
   "groups": [],

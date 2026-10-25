@@ -19,7 +19,7 @@ use denotate_test_dsl::{
 fn parse(text: &str, revision: u64) -> (Program, Sources) {
     let mut sources = Sources::new();
     let snapshot = sources
-        .add("file:///generic.inputmapping", revision, "test-dsl", text)
+        .add("file:///generic.testdsl", revision, "test-dsl", text)
         .unwrap();
     let doc = Document::new(
         &mut syntax::parser().unwrap(),

@@ -1,4 +1,4 @@
-//! InputMapping's source contract. Generic provenance remains many-to-many;
+//! the test DSL's source contract. Generic provenance remains many-to-many;
 //! this lowerer does not fuse authored constructs, so each occurrence has at
 //! most one distinct origin in each view. Presentation labels are not origins.
 

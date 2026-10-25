@@ -312,7 +312,7 @@ mod tests {
             // Configure once before the first query. No production switch and no
             // mutation of an untracked dependency after Salsa has cached a value.
             session.db.recipe_error = Some((form.clone(), expected.clone()));
-            let uri = Url::parse("file:///cached-error.inputmapping").unwrap();
+            let uri = Url::parse("file:///cached-error.testdsl").unwrap();
             let mut checks = 0;
             let mut prepare = |session: &mut Session, text: &str, revision| {
                 let document = Arc::new(Document::new(
@@ -332,7 +332,7 @@ mod tests {
             };
             let text = "input i; slot a; a <- i;";
             let failure = prepare(&mut session, text, 1).unwrap_err();
-            assert!(failure.contains("InputMapping lowering failed: Recipe("));
+            assert!(failure.contains("test DSL lowering failed: Recipe("));
             assert!(failure.contains(&expected.to_string()));
             let before = session.stats().queries;
             assert_eq!(before.recipe, 3);

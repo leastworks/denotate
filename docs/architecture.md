@@ -7,7 +7,7 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
                      den/grammar  (Tree-sitter grammar of .den)
                           │ compiled into
  test-dsl ──lowers to──►  crates/ir ◄── crates/ir-text (.den load / print / index)
- (InputMapping)           │                    │
+ (test DSL)           │                    │
                           ▼                    │
                  crates/normalize              │
                           │                    │
@@ -17,7 +17,7 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
                           │
                  crates/editor (LSP mechanics, scheduler, lifecycle, edits)
                           │
-           den/lsp/server (.den editor)    test-dsl server (InputMapping editor)
+           den/lsp/server (.den editor)    test-dsl server (the test DSL editor)
 ```
 
 ## Crates and their responsibilities
@@ -33,7 +33,7 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
 | `denotate-ir-text` | `.den` parsing, strict loading, printing, embedded origins, folder-root membership, the incremental editor index | Workspace discovery (except the `filesystem` command adapter), buffers, scheduling |
 | `denotate-analysis` | Rule linting (singleton/unsafe variables, arity and sort evidence) reused by the `.den` index | Name resolution for `.den` (lives in `ir-text`) |
 | `denotate-lsp` (`den/lsp/server`) | The `.den` editor: root catalog, home programs, snapshot bridge, editor services, checking and publication, Go to Origin, rename | Language semantics (delegated to `ir-text`) |
-| `denotate-test-dsl` (`test-dsl`) | InputMapping: parser, lowering, attribution, wording, export layout, its LSP server | Generic checking or presentation |
+| `denotate-test-dsl` (`test-dsl`) | Test DSL: parser, lowering, attribution, wording, export layout, its LSP server | Generic checking or presentation |
 
 ## Rules that keep the layers honest
 
@@ -65,7 +65,7 @@ with a warm session per program, and publishes each program's findings on its ow
 ## Tests at each layer
 
 - Unit and integration tests per crate (`just test-crates`).
-- `.den` round trip: the InputMapping regression programs are lowered, printed to
+- `.den` round trip: the test DSL regression programs are lowered, printed to
   `.den`, reloaded and checked; structure, origins and default-limit BDD/SAT outcomes
   must match (`test-dsl/tests/ir_text_roundtrip.rs`).
 - Editor parity: for every parser-backed regression program, both editors publish the

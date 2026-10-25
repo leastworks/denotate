@@ -55,7 +55,7 @@ pub fn diagnostic(
     Diagnostic {
         range,
         code: Some(NumberOrString::String(code.into())),
-        source: Some("InputMapping".into()),
+        source: Some("test DSL".into()),
         message,
         severity: Some(severity),
         ..Default::default()
@@ -459,7 +459,7 @@ mod tests {
             true,
         ));
         let mut p = prepare(
-            &Url::parse("file:///example.inputmapping").unwrap(),
+            &Url::parse("file:///example.testdsl").unwrap(),
             1,
             doc,
             &mut incremental::Session::default(),
@@ -487,7 +487,7 @@ mod tests {
             true,
         ));
         let p = prepare(
-            &Url::parse("file:///example.inputmapping").unwrap(),
+            &Url::parse("file:///example.testdsl").unwrap(),
             1,
             doc,
             &mut incremental::Session::default(),

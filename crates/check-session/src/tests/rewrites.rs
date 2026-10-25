@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 pub(super) mod dsl_fixture;
 pub(super) use denotate_check::test_support::rewrites::subsets;
 #[test]
-fn lowered_input_mapping_forwarding_agrees_with_cartesian_stable_model_oracle() {
+fn lowered_test_dsl_forwarding_agrees_with_cartesian_stable_model_oracle() {
     let f = dsl_fixture::Fixture::exclusive();
     let lowered = f.lower();
     let domains = dsl_fixture::domains(&lowered);

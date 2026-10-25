@@ -1,6 +1,7 @@
-# InputMapping (test DSL)
+# Test DSL
 
-InputMapping is the first DSL built on the Denotate IR: a small language mapping inputs
+The test DSL is the first DSL built on the Denotate IR, and only an example: a small
+language mapping inputs
 to slots. It exercises the whole path a bespoke DSL takes — parsing, lowering with
 provenance, checking, source-linked presentation, its own editor, and export to `.den`.
 
@@ -30,10 +31,10 @@ second <- second_input when input_value(kind) is 2 and not available(first);
    attribution failures are creator-facing errors. Conditions go through
    `denotate-normalize` recipes, cached and installed fresh per snapshot.
 3. **Check** through `denotate-check-session` (BDD or SAT).
-4. **Present** with InputMapping wording on top of `denotate-presentation`: conflicting
+4. **Present** with test DSL wording on top of `denotate-presentation`: conflicting
    inputs, quoted guards, example observations, related locations, and explicit
    safe-removal eligibility for redundant guards (rewrite warnings).
-5. **Export** to `.den` (`src/export.rs`, `just export-inputmapping`): one `.den` file
+5. **Export** to `.den` (`src/export.rs`, `just export-test-dsl`): one `.den` file
    per source plus a generated library root, with embedded origins. The assumption
    and default verification are printed in `library/library.den`, so `just check-den`
    checks an exported program under the same selection.
@@ -47,9 +48,9 @@ maintains a separate list of input constraints.
 
 ```sh
 just demo-overlap                   # source-linked findings for a built-in example
-just parse-inputmapping             # parse and lower a file, no checking
-just export-inputmapping OUT FILE…  # export one combined program as .den
-just test-inputmapping-lsp          # LSP scenarios against the InputMapping server
+just parse-test-dsl             # parse and lower a file, no checking
+just export-test-dsl OUT FILE…  # export one combined program as .den
+just test-dsl-lsp          # LSP scenarios against the test DSL server
 cargo +1.93.0 test --locked -p denotate-test-dsl
 ```
 

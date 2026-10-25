@@ -196,7 +196,7 @@ fn constructs_the_example_and_library_via_the_public_api() {
     );
     assert_eq!(
         obligation.message_template,
-        "Slot {slot} has overlapping InputMappings from {inputs}."
+        "Slot {slot} has overlapping mappings from {inputs}."
     );
     // No present facts have been fixed. This constructs an obligation; it does
     // not evaluate it, establish the conflict or require missing slots to exist.

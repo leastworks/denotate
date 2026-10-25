@@ -1,7 +1,7 @@
 // One document is one program. Keep names on the word token so reserved words
 // cannot slip through a second, context-specific identifier regex.
 module.exports = grammar({
-  name: 'inputmapping',
+  name: 'testdsl',
   extras: $ => [/[ \t\r\n]+/, $.comment],
   word: $ => $.identifier,
   reserved: {

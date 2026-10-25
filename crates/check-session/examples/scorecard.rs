@@ -124,7 +124,7 @@ fn prepare(
     let parse_ns = start.elapsed().as_nanos();
     let start = Instant::now();
     let prepared = analysis::prepare(
-        &"file:///closeout.inputmapping".parse().unwrap(),
+        &"file:///closeout.testdsl".parse().unwrap(),
         revision as u64 + 1,
         doc,
         lower,
@@ -471,7 +471,7 @@ fn main() {
 mod tests {
     use super::*;
     fn config() -> Config {
-        Config::parse(["example.inputmapping", "--samples", "1"].map(String::from)).unwrap()
+        Config::parse(["example.testdsl", "--samples", "1"].map(String::from)).unwrap()
     }
 
     #[test]

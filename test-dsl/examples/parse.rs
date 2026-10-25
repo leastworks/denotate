@@ -22,7 +22,7 @@ fn main() -> ExitCode {
 fn run() -> Result<bool, Box<dyn std::error::Error>> {
     let path = std::env::args()
         .nth(1)
-        .ok_or("expected an InputMapping file path")?;
+        .ok_or("expected a test DSL file path")?;
     let text = std::fs::read_to_string(&path)?;
     let mut sources = Sources::new();
     let snapshot = sources.add(&path, 1, SourceView::TestDsl.as_str(), text.as_str())?;

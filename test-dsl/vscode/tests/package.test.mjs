@@ -6,14 +6,14 @@ const root = new URL('../', import.meta.url);
 const read = file => readFile(new URL(file, root), 'utf8');
 
 test('the editor example is the existing lowering/provenance fixture', async () => {
-    assert.equal(await read('examples/overlap.inputmapping'), await read('../fixtures/overlapping-mappings.txt'));
+    assert.equal(await read('examples/overlap.testdsl'), await read('../fixtures/overlapping-mappings.txt'));
 });
 
 test('language registration and built entry points exist', async () => {
     const manifest = JSON.parse(await read('package.json'));
     const language = manifest.contributes.languages[0];
-    assert.equal(language.id, 'inputmapping');
-    assert.deepEqual(language.extensions, ['.inputmapping']);
+    assert.equal(language.id, 'testdsl');
+    assert.deepEqual(language.extensions, ['.testdsl']);
     const grammar = manifest.contributes.grammars[0];
     assert.equal(grammar.language, language.id);
     assert.equal(JSON.parse(await read(grammar.path)).scopeName, grammar.scopeName);
@@ -22,9 +22,9 @@ test('language registration and built entry points exist', async () => {
         assert.ok((await read(entry)).length > 0);
     }
     const suffix = process.platform === 'win32' ? '.exe' : '';
-    await access(new URL(`dist/inputmapping-lsp${suffix}`, root), constants.X_OK);
-    assert.deepEqual(await readFile(new URL(`dist/inputmapping-lsp${suffix}`, root)),
-        await readFile(new URL(`../../target/release/inputmapping-lsp${suffix}`, root)));
+    await access(new URL(`dist/test-dsl-lsp${suffix}`, root), constants.X_OK);
+    assert.deepEqual(await readFile(new URL(`dist/test-dsl-lsp${suffix}`, root)),
+        await readFile(new URL(`../../target/release/test-dsl-lsp${suffix}`, root)));
 });
 
 test('F5 builds this extension and opens only its example directory', async () => {

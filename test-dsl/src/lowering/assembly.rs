@@ -134,7 +134,7 @@ pub fn assemble<R: std::borrow::Borrow<Recipe>>(
                 arguments,
             })
         };
-        // InputMapping's IR currently belongs to global, independently of the
+        // the test DSL's IR currently belongs to global, independently of the
         // source file. Bind context on installation, not in cached recipes.
         let installed = installation::install_in(
             &mut corpus,

@@ -1,4 +1,4 @@
-//! Ground InputMapping syntax. Spans refer to immutable UTF-8 source snapshots.
+//! Ground test DSL syntax. Spans refer to immutable UTF-8 source snapshots.
 //! Parsing is separate; there is no name resolution or IR identity in this AST.
 
 use denotate_ir::SourceSpan;

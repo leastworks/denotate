@@ -13,7 +13,7 @@ use std::{collections::BTreeSet, sync::Arc};
 fn parse(text: &str, revision: u64) -> (Program, Sources) {
     let mut s = Sources::new();
     let id = s
-        .add("file:///values.inputmapping", revision, "test-dsl", text)
+        .add("file:///values.testdsl", revision, "test-dsl", text)
         .unwrap();
     let doc = Document::new(
         &mut syntax::parser().unwrap(),
@@ -41,7 +41,7 @@ fn diagnostics(text: &str) -> Vec<lsp_types::Diagnostic> {
         true,
     ));
     let p = analysis::prepare(
-        &Url::parse("file:///values.inputmapping").unwrap(),
+        &Url::parse("file:///values.testdsl").unwrap(),
         1,
         doc,
         &mut Session::default(),
@@ -299,7 +299,7 @@ fn typed_value_names_safe_edits_and_budget_outcomes_keep_the_frontend_contract()
         true,
     ));
     let program = analysis::prepare(
-        &Url::parse("file:///budget.inputmapping").unwrap(),
+        &Url::parse("file:///budget.testdsl").unwrap(),
         1,
         doc,
         &mut Session::default(),

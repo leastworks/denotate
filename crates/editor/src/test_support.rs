@@ -82,7 +82,7 @@ mod tests {
     #[test]
     fn barrier_keeps_the_existing_method_payload_and_publication_order() {
         let (server, client) = Connection::memory();
-        let uri = Url::parse("file:///anything.inputmapping").unwrap();
+        let uri = Url::parse("file:///anything.testdsl").unwrap();
         send(
             &server,
             "textDocument/publishDiagnostics",
@@ -108,7 +108,7 @@ mod tests {
     #[test]
     fn async_frontend_ready_is_a_distinct_versioned_barrier() {
         let (server, client) = Connection::memory();
-        let uri = Url::parse("file:///example.inputmapping").unwrap();
+        let uri = Url::parse("file:///example.testdsl").unwrap();
         frontend_ready(&server, &uri, 4).unwrap();
         let Message::Notification(n) = client.receiver.try_recv().unwrap() else {
             panic!()

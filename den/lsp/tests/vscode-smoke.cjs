@@ -104,7 +104,7 @@ exports.run = async function () {
     await replace(rootDoc, rootText);
     await eventually(() => api.request('denotate/roots', { uri: exampleUri.toString() }), r => r.state === 'ready', 'manifest repair restores root');
 
-    const originUri = vscode.Uri.joinPath(folder, 'origin.inputmapping');
+    const originUri = vscode.Uri.joinPath(folder, 'origin.testdsl');
     await vscode.workspace.fs.writeFile(originUri, Buffer.from('saved source'));
     const origin = await vscode.workspace.openTextDocument(originUri);
     const hash = 'sha256:' + require('node:crypto').createHash('sha256').update('saved source').digest('hex');
@@ -176,7 +176,7 @@ obligation unique: at_most_one(p, group_by: ());`;
     await replace(checkedDoc, checkedText);
 
     // Real VS Code decoding removes the UTF-8 signature from getText().
-    const bomUri = vscode.Uri.joinPath(checkedFolder, 'bom.inputmapping');
+    const bomUri = vscode.Uri.joinPath(checkedFolder, 'bom.testdsl');
     const bomText = '\ufeffA😀x\r\nZ';
     await vscode.workspace.fs.writeFile(bomUri, Buffer.from(bomText));
     const bomHash = 'sha256:' + require('node:crypto').createHash('sha256').update(bomText).digest('hex');

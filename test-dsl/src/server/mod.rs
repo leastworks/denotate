@@ -80,13 +80,13 @@ impl Server {
         }
         match n.method.as_str() {
             "workspace/didChangeConfiguration" => {
-                let backend = match n.params["settings"]["inputmapping"]["backend"]
+                let backend = match n.params["settings"]["testdsl"]["backend"]
                     .as_str()
                     .unwrap_or("bdd")
                 {
                     "bdd" => denotate_check::BackendIdentity::bdd(),
                     "sat" => denotate_check::BackendIdentity::sat(),
-                    _ => return Err("Expected inputmapping.backend to be bdd or sat".into()),
+                    _ => return Err("Expected testdsl.backend to be bdd or sat".into()),
                 };
                 if self.backend != backend {
                     self.backend = backend;
@@ -321,7 +321,7 @@ impl CheckingHandler for Server {
         log(
             connection,
             1,
-            format!("InputMapping notification rejected: {error}"),
+            format!("test DSL notification rejected: {error}"),
         )
     }
 }

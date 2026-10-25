@@ -3,7 +3,7 @@ import { fileURLToPath } from 'node:url';
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const server = fileURLToPath(new URL(`../dist/denotate-lsp${process.platform === 'win32' ? '.exe' : ''}`, import.meta.url));
 // Run every shared LSP scenario against the freshly built .den server. The
-// InputMapping scenarios are feature-gated and run through their own recipe.
+// test DSL scenarios are feature-gated and run through their own recipe.
 const env = { ...process.env, DENOTATE_LSP_COMMAND: server, DENOTATE_LSP_ARGS: '[]' };
 const result = spawnSync('cargo', ['+1.93.0', 'test', '--manifest-path', `${root}Cargo.toml`, '--locked',
     '-p', 'denotate-lsp-tests', '--', '--nocapture'], { env, stdio: 'inherit' });

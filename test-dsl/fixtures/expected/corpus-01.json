@@ -27,13 +27,13 @@
                 "line": 2
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "redundant condition"
         }
       ],
       "severity": 2,
-      "source": "InputMapping"
+      "source": "test DSL"
     },
     {
       "code": "redundant",
@@ -61,13 +61,13 @@
                 "line": 3
               }
             },
-            "uri": "file:///corpus.inputmapping"
+            "uri": "file:///corpus.testdsl"
           },
           "message": "redundant condition"
         }
       ],
       "severity": 2,
-      "source": "InputMapping"
+      "source": "test DSL"
     }
   ],
   "groups": [],

@@ -25,13 +25,13 @@ In Run and Debug choose a launch configuration and press **F5**; the build runs 
 - **Run Denotate (language services)** opens the shared `fixtures/base/00-valid/`
   workspace for outline, navigation, completion, hover, rename and formatting.
 
-To see DSL origins, export an InputMapping program and open the output folder:
+To see DSL origins, export a test DSL program and open the output folder:
 
 ```sh
-just export-inputmapping /tmp/example-den test-dsl/vscode/examples/overlap.inputmapping
+just export-test-dsl /tmp/example-den test-dsl/vscode/examples/overlap.testdsl
 ```
 
-Findings on the exported `.den` carry related locations into the `.inputmapping`
+Findings on the exported `.den` carry related locations into the `.testdsl`
 source; **Denotate: Go to Origin** jumps there (hash-checked; a changed source is
 reported, not navigated). Do not commit generated exports: they contain absolute
 `file://` URIs.
@@ -56,9 +56,9 @@ The custom protocol (root status, manifest sync, origin snapshots, test hooks) i
 ## Tests
 
 ```sh
-just test-b          # server component tests, syntax manifest, all shared LSP scenarios
+just test-den          # server component tests, syntax manifest, all shared LSP scenarios
 npm run test:origins --prefix den/lsp   # Go to Origin unit tests
-just test-b-vscode   # installed VS Code smoke (needs a local VS Code)
+just test-den-vscode   # installed VS Code smoke (needs a local VS Code)
 ```
 
 `npm run build` regenerates the parser from `den/grammar` with the pinned

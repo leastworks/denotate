@@ -144,7 +144,7 @@ impl Client {
         }
         copy_members(&root().join("fixtures").join(fixture), workspace.path());
         // The .den language server by default; DENOTATE_LSP_COMMAND selects another
-        // server (the InputMapping scenarios use it).
+        // server (the test DSL scenarios use it).
         let server = root().join(if cfg!(windows) {
             "den/lsp/dist/denotate-lsp.exe"
         } else {

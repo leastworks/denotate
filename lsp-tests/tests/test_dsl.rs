@@ -8,7 +8,10 @@ fn uri(client: &Client, name: &str) -> String {
     file_uri(&client.workspace.path().join(name))
 }
 fn open(client: &mut Client, uri: &str, text: &str) {
-    client.notify("textDocument/didOpen", json!({"textDocument": {"uri": uri, "languageId": "inputmapping", "version": 1, "text": text}}));
+    client.notify(
+        "textDocument/didOpen",
+        json!({"textDocument": {"uri": uri, "languageId": "testdsl", "version": 1, "text": text}}),
+    );
     ready(client, uri, 1);
 }
 fn ready(client: &mut Client, uri: &str, version: i64) {
@@ -73,7 +76,7 @@ fn queries(stats: &Value, uri: &str) -> [u64; 4] {
 #[test]
 fn masks_clear_and_restore_overlap_with_current_ranges_and_cached_mapping_recipes() {
     let mut c = Client::start("base/00-valid");
-    let u = uri(&c, "masks.inputmapping");
+    let u = uri(&c, "masks.testdsl");
     open(&mut c, &u, SOURCE);
     c.validated(&u, 1);
     assert_eq!(codes(&c, &u, "OverlappingMappings").len(), 2);
@@ -129,7 +132,7 @@ fn masks_clear_and_restore_overlap_with_current_ranges_and_cached_mapping_recipe
 #[test]
 fn mask_cycles_report_conditions_and_related_mappings_without_inventing_authored_not() {
     let mut c = Client::start("base/00-valid");
-    let u = uri(&c, "mask-cycles.inputmapping");
+    let u = uri(&c, "mask-cycles.testdsl");
     let single = "input i;\nslot a;\na <- i;\nmask a when available(a);\n";
     open(&mut c, &u, single);
     c.validated(&u, 1);
@@ -172,7 +175,7 @@ fn mask_cycles_report_conditions_and_related_mappings_without_inventing_authored
 #[test]
 fn lowering_reuses_forms_across_comments_helpers_reordering_and_duplicates() {
     let mut c = Client::start("base/00-valid");
-    let u = uri(&c, "cached.inputmapping");
+    let u = uri(&c, "cached.testdsl");
     open(&mut c, &u, SOURCE);
     c.validated(&u, 1);
     let initial = stats(&mut c);
@@ -226,7 +229,7 @@ fn lowering_reuses_forms_across_comments_helpers_reordering_and_duplicates() {
 #[test]
 fn cached_errors_and_duplicate_checks_block_assembly_and_worker_dispatch() {
     let mut c = Client::start("base/00-valid");
-    let u = uri(&c, "cached-errors.inputmapping");
+    let u = uri(&c, "cached-errors.testdsl");
     open(&mut c, &u, SOURCE);
     c.validated(&u, 1);
     let initial = stats(&mut c);
@@ -297,8 +300,8 @@ fn cached_errors_and_duplicate_checks_block_assembly_and_worker_dispatch() {
 #[test]
 fn lowering_sessions_survive_syntax_errors_but_are_isolated_and_dropped_on_close() {
     let mut c = Client::start("base/00-valid");
-    let a = uri(&c, "first.inputmapping");
-    let b = uri(&c, "second.inputmapping");
+    let a = uri(&c, "first.testdsl");
+    let b = uri(&c, "second.testdsl");
     open(&mut c, &a, SOURCE);
     c.validated(&a, 1);
     let initial = stats(&mut c);
@@ -343,7 +346,7 @@ fn parsed_program_reports_both_targets_related_terms_and_clears_on_repair() {
     ] {
         assert!(c.capabilities[feature].is_null() || c.capabilities[feature] == false);
     }
-    let u = uri(&c, "program.inputmapping");
+    let u = uri(&c, "program.testdsl");
     open(&mut c, &u, SOURCE);
     c.validated(&u, 1);
     let errors = codes(&c, &u, "OverlappingMappings");
@@ -384,7 +387,7 @@ fn parsed_program_reports_both_targets_related_terms_and_clears_on_repair() {
 #[test]
 fn invalid_source_pauses_the_whole_program_and_repairs_resume_checking() {
     let mut c = Client::start("base/00-valid");
-    let u = uri(&c, "invalid.inputmapping");
+    let u = uri(&c, "invalid.testdsl");
     open(&mut c, &u, SOURCE);
     c.validated(&u, 1);
     for (version, text, kind) in [
@@ -419,7 +422,7 @@ fn invalid_source_pauses_the_whole_program_and_repairs_resume_checking() {
 #[test]
 fn source_semantics_and_scoped_findings_survive_the_protocol_adapter() {
     let mut c = Client::start("base/00-valid");
-    let u = uri(&c, "cases.inputmapping");
+    let u = uri(&c, "cases.testdsl");
     open(&mut c, &u, "");
     c.validated(&u, 1);
     for (n, text) in [
@@ -454,7 +457,7 @@ fn source_semantics_and_scoped_findings_survive_the_protocol_adapter() {
 #[test]
 fn completed_old_result_cannot_publish_into_a_newer_valid_or_broken_snapshot() {
     let mut c = Client::start("base/00-valid");
-    let u = uri(&c, "late.inputmapping");
+    let u = uri(&c, "late.testdsl");
     open(&mut c, &u, SOURCE);
     c.validated(&u, 1);
     hold(&mut c, "beforeResult");
@@ -494,9 +497,9 @@ fn completed_old_result_cannot_publish_into_a_newer_valid_or_broken_snapshot() {
 #[test]
 fn queued_document_edits_keep_fifo_position_and_active_edits_join_the_tail() {
     let mut c = Client::start("base/00-valid");
-    let a = uri(&c, "a.inputmapping");
-    let b = uri(&c, "b.inputmapping");
-    let d = uri(&c, "c.inputmapping");
+    let a = uri(&c, "a.testdsl");
+    let b = uri(&c, "b.testdsl");
+    let d = uri(&c, "c.testdsl");
     hold(&mut c, "duringCheck");
     open(&mut c, &a, SOURCE);
     let held = checkpoint(&mut c, &a, 1);
@@ -535,8 +538,8 @@ fn queued_document_edits_keep_fifo_position_and_active_edits_join_the_tail() {
 fn shutdown_releases_held_checks_without_a_client_release() {
     for phase in ["duringCheck", "beforeResult"] {
         let mut c = Client::start("base/00-valid");
-        let a = uri(&c, "a.inputmapping");
-        let b = uri(&c, "b.inputmapping");
+        let a = uri(&c, "a.testdsl");
+        let b = uri(&c, "b.testdsl");
         hold(&mut c, phase);
         open(&mut c, &a, SOURCE);
         checkpoint(&mut c, &a, 1);
@@ -548,8 +551,8 @@ fn shutdown_releases_held_checks_without_a_client_release() {
 #[test]
 fn cancellation_after_preparation_and_pending_coalescing_are_per_document() {
     let mut c = Client::start("base/00-valid");
-    let a = uri(&c, "a.inputmapping");
-    let b = uri(&c, "b.inputmapping");
+    let a = uri(&c, "a.testdsl");
+    let b = uri(&c, "b.testdsl");
     hold(&mut c, "duringCheck");
     open(&mut c, &a, SOURCE);
     let held = checkpoint(&mut c, &a, 1);
@@ -589,7 +592,7 @@ fn cancellation_after_preparation_and_pending_coalescing_are_per_document() {
 #[test]
 fn close_reopen_with_reused_editor_version_rejects_the_old_snapshot() {
     let mut c = Client::start("base/00-valid");
-    let u = uri(&c, "reopened.inputmapping");
+    let u = uri(&c, "reopened.testdsl");
     hold(&mut c, "beforeResult");
     open(&mut c, &u, SOURCE);
     let held = checkpoint(&mut c, &u, 1);
@@ -615,8 +618,8 @@ fn close_reopen_with_reused_editor_version_rejects_the_old_snapshot() {
 #[test]
 fn ranged_edits_recover_from_sync_loss_without_blocking_another_document() {
     let mut c = Client::start("base/00-valid");
-    let a = uri(&c, "lost.inputmapping");
-    let b = uri(&c, "independent.inputmapping");
+    let a = uri(&c, "lost.testdsl");
+    let b = uri(&c, "independent.testdsl");
     open(&mut c, &a, SOURCE);
     c.validated(&a, 1);
     // Spec-legal past-end column clamps, preserving the other lines.
@@ -638,7 +641,7 @@ fn ranged_edits_recover_from_sync_loss_without_blocking_another_document() {
 #[test]
 fn value_literals_validate_before_recipes_and_numeric_aliases_reuse_cached_forms() {
     let mut c = Client::start("base/00-valid");
-    let u = uri(&c, "values.inputmapping");
+    let u = uri(&c, "values.testdsl");
     let text="input i, j;\nslot a;\na <- i when input_value(i) is 1;\na <- j when input_value(j) is 1;\n";
     open(&mut c, &u, text);
     c.validated(&u, 1);
@@ -682,7 +685,7 @@ fn value_literals_validate_before_recipes_and_numeric_aliases_reuse_cached_forms
 #[test]
 fn values_copy_through_slots_masks_and_w_sensitive_cycles_in_the_server() {
     let mut c = Client::start("base/00-valid");
-    let u = uri(&c, "value-copy.inputmapping");
+    let u = uri(&c, "value-copy.testdsl");
     let text="input i, j; slot a, b; a <- i; b <- j when slot_value(a) is 1; b <- i when slot_value(a) is 1;";
     open(&mut c, &u, text);
     c.validated(&u, 1);
@@ -721,7 +724,7 @@ fn values_copy_through_slots_masks_and_w_sensitive_cycles_in_the_server() {
 #[test]
 fn checker_cache_reuses_current_diagnostics_and_drops_on_close() {
     let mut c = Client::start("base/00-valid");
-    let u = uri(&c, "checker-cache.inputmapping");
+    let u = uri(&c, "checker-cache.testdsl");
     let source = "input i,j,k,l,m; slot a; a <- i when present(j) and present(k) and present(l) and present(m); a <- j;";
     open(&mut c, &u, source);
     c.validated(&u, 1);
@@ -759,7 +762,7 @@ fn checker_cache_reuses_current_diagnostics_and_drops_on_close() {
 #[test]
 fn published_findings_have_shared_identity_witness_and_current_outcome_summary() {
     let mut c = Client::start("base/00-valid");
-    let u = uri(&c, "presenter.inputmapping");
+    let u = uri(&c, "presenter.testdsl");
     let source = "input i, j; slot a; a <- i; a <- j;";
     open(&mut c, &u, source);
     c.validated(&u, 1);
@@ -796,7 +799,7 @@ fn published_findings_have_shared_identity_witness_and_current_outcome_summary()
 #[test]
 fn shared_checking_barriers_and_cold_reset_keep_document_identity_and_findings() {
     let mut c = Client::start("base/00-valid");
-    let u = uri(&c, "shared-hooks.inputmapping");
+    let u = uri(&c, "shared-hooks.testdsl");
     hold(&mut c, "beforeResult");
     open(&mut c, &u, SOURCE);
     let held = checkpoint(&mut c, &u, 1);
@@ -827,8 +830,8 @@ fn shared_checking_barriers_and_cold_reset_keep_document_identity_and_findings()
 #[test]
 fn sync_loss_withdraws_once_and_republishes_other_documents_full_findings() {
     let mut c = Client::start("base/00-valid");
-    let a = uri(&c, "lost.inputmapping");
-    let b = uri(&c, "unaffected.inputmapping");
+    let a = uri(&c, "lost.testdsl");
+    let b = uri(&c, "unaffected.testdsl");
     for u in [&a, &b] {
         open(&mut c, u, SOURCE);
         c.validated(u, 1);

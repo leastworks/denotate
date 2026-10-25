@@ -14,7 +14,7 @@
         }
       },
       "severity": 1,
-      "source": "InputMapping"
+      "source": "test DSL"
     },
     {
       "code": "paused",
@@ -30,7 +30,7 @@
         }
       },
       "severity": 3,
-      "source": "InputMapping"
+      "source": "test DSL"
     }
   ],
   "text": "input i; slot a; mask <- i;"

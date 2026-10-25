@@ -85,7 +85,7 @@ fn fixture_overlap_has_replayed_ground_evidence_and_exact_term_locations() {
         assert_eq!(diagnostic.kind, DiagnosticKind::OverlappingMappings);
         assert_eq!(
             diagnostic.message,
-            "Slot b has overlapping InputMappings from input_b, input_bb. Mapping conditions: `available(a)`."
+            "Slot b has overlapping mappings from input_b, input_bb. Mapping conditions: `available(a)`."
         );
         for mapping in &f.ast.mappings[1..] {
             assert!(

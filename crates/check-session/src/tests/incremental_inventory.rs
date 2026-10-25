@@ -19,7 +19,7 @@ type Inventory = BTreeMap<&'static str, Entities>;
 fn parse(text: &str) -> (Program, Sources) {
     let mut sources = Sources::new();
     let id = sources
-        .add("file:///inventory.inputmapping", 1, "test-dsl", text)
+        .add("file:///inventory.testdsl", 1, "test-dsl", text)
         .unwrap();
     let doc = Document::new(&mut syntax::parser().unwrap(), text.into(), 1, true);
     let syntax::ParseOutcome::Parsed(ast) = syntax::project(&doc, &sources, id).unwrap() else {

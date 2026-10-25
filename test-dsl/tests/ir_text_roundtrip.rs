@@ -415,16 +415,13 @@ fn named_128_program_gate() {
     let mut cases = vec![];
     for (id, path) in [
         ("text/overlap", "fixtures/overlapping-mappings.txt"),
-        (
-            "text/vscode-overlap",
-            "vscode/examples/overlap.inputmapping",
-        ),
-        ("text/vscode-values", "vscode/examples/values.inputmapping"),
+        ("text/vscode-overlap", "vscode/examples/overlap.testdsl"),
+        ("text/vscode-values", "vscode/examples/values.testdsl"),
     ] {
         cases.push((
             id.into(),
             vec![SourceFile::new(
-                format!("file:///{id}.inputmapping"),
+                format!("file:///{id}.testdsl"),
                 1,
                 std::fs::read_to_string(root.join(path)).unwrap(),
             )],
@@ -436,7 +433,7 @@ fn named_128_program_gate() {
     for (i, text) in accepted {
         cases.push((
             format!("corpus/{i:02}"),
-            vec![SourceFile::new("file:///case.inputmapping", 1, text)],
+            vec![SourceFile::new("file:///case.testdsl", 1, text)],
         ));
     }
     let generated = corpus::generated();
@@ -444,7 +441,7 @@ fn named_128_program_gate() {
     for (i, (revision, text)) in generated.into_iter().enumerate() {
         cases.push((
             format!("generated/{i:02}"),
-            vec![SourceFile::new("file:///case.inputmapping", revision, text)],
+            vec![SourceFile::new("file:///case.testdsl", revision, text)],
         ));
     }
     // Named parser-backed single-file parity catalog. Never filter failures.
@@ -452,25 +449,21 @@ fn named_128_program_gate() {
     cases.push((
         "multi-file/overlap".into(),
         vec![
-            SourceFile::new(
-                "file:///declarations.inputmapping",
-                1,
-                "input i, j; slot a;",
-            ),
-            SourceFile::new("file:///left.inputmapping", 1, "a <- i;"),
-            SourceFile::new("file:///right.inputmapping", 1, "a <- j;"),
+            SourceFile::new("file:///declarations.testdsl", 1, "input i, j; slot a;"),
+            SourceFile::new("file:///left.testdsl", 1, "a <- i;"),
+            SourceFile::new("file:///right.testdsl", 1, "a <- j;"),
         ],
     ));
     cases.push((
         "multi-file/integers".into(),
         vec![
             SourceFile::new(
-                "file:///a.inputmapping",
+                "file:///a.testdsl",
                 1,
                 "input i; slot a; a <- i when input_value(i) is 1;",
             ),
             SourceFile::new(
-                "file:///b.inputmapping",
+                "file:///b.testdsl",
                 1,
                 "input j; slot b; b <- j when input_value(j) is 2;",
             ),
@@ -632,7 +625,7 @@ fn narrowed_domains_and_active_assumptions_change_both_paths_together() {
 fn unambiguous_witness_keeps_exact_primary_and_related_generic_origins() {
     use denotate_ir_text::origins::OriginDescriptor;
     let text = "input i, j; slot a; a <- i; a <- j;";
-    let a = export::assemble(&[SourceFile::new("file:///witness.inputmapping", 1, text)]).unwrap();
+    let a = export::assemble(&[SourceFile::new("file:///witness.testdsl", 1, text)]).unwrap();
     let paths = a
         .sources
         .snapshots()
@@ -852,7 +845,7 @@ fn presentation_gate(
 #[test]
 fn unambiguous_presenters_preserve_every_primary_dsl_span() {
     let assembled = export::assemble(&[SourceFile::new(
-        "file:///witness.inputmapping",
+        "file:///witness.testdsl",
         1,
         "input i, j; slot a; a <- i; a <- j;",
     )])

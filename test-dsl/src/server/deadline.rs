@@ -53,7 +53,7 @@ fn stop(mut server: Server) {
 fn deadline_publishes_an_operational_notice_and_success_clears_it() {
     let (connection, client) = Connection::memory();
     let mut server = server();
-    let uri = Url::parse("file:///deadline.inputmapping").unwrap();
+    let uri = Url::parse("file:///deadline.testdsl").unwrap();
     install(&mut server, &connection, &uri, 1);
     publications(&client);
     server.worker.pending_limits_mut(&uri).unwrap().timeout = Duration::ZERO;
@@ -101,7 +101,7 @@ fn deadline_publishes_an_operational_notice_and_success_clears_it() {
 fn stale_deadline_never_publishes_over_a_newer_document() {
     let (connection, client) = Connection::memory();
     let mut server = server();
-    let uri = Url::parse("file:///deadline.inputmapping").unwrap();
+    let uri = Url::parse("file:///deadline.testdsl").unwrap();
     install(&mut server, &connection, &uri, 1);
     server.worker.pending_limits_mut(&uri).unwrap().timeout = Duration::ZERO;
     let event = completed(&mut server);

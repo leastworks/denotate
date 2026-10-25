@@ -1,6 +1,6 @@
 # denotate-editor
 
-Language-independent LSP mechanics shared by the `.den` editor and the InputMapping
+Language-independent LSP mechanics shared by the `.den` editor and the test DSL
 editor. Frontends supply their grammar, checking closure and publication policy; this
 crate contains no roots, manifests, ownership rules, filesystem policy or DSL concepts.
 
@@ -51,7 +51,7 @@ latency measurements.
 | `denotate/test/checked` | Notification after an accepted completed check is published. |
 
 Ticket identities are frontend-defined: the `.den` server uses `{program, revision}`,
-InputMapping `{uri, revision, version}`. `denotate/test/idle`, `frontendReady` and
+the test DSL `{uri, revision, version}`. `denotate/test/idle`, `frontendReady` and
 `validated` are fast barriers and never mean checking-idle.
 
 ```sh

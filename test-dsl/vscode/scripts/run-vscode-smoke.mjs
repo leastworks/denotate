@@ -9,7 +9,7 @@ if (!vscodeExecutablePath || !path.isAbsolute(vscodeExecutablePath)) {
     throw new Error('Set DENOTATE_VSCODE_EXECUTABLE to an absolute path to an installed VS Code.');
 }
 const extensionDevelopmentPath = fileURLToPath(new URL('..', import.meta.url));
-const temporary = await mkdtemp(path.join(tmpdir(), 'inputmapping-vscode-'));
+const temporary = await mkdtemp(path.join(tmpdir(), 'testdsl-vscode-'));
 try {
     const workspace = path.join(temporary, 'workspace');
     await cp(new URL('../examples/', import.meta.url), workspace, { recursive: true });

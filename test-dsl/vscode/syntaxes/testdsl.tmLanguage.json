@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "test DSL",
+  "scopeName": "source.testdsl",
+  "patterns": [
+    { "name": "comment.line.double-slash.testdsl", "match": "//[^\\r\\n]*" },
+    { "name": "keyword.declaration.testdsl", "match": "\\b(input|slot)\\b" },
+    { "name": "keyword.control.testdsl", "match": "\\b(mask|when)\\b" },
+    { "name": "keyword.operator.logical.testdsl", "match": "\\b(and|or|not|is)\\b" },
+    { "name": "support.function.testdsl", "match": "\\b(available|present|input_value|slot_value)\\b" },
+    { "name": "constant.numeric.integer.testdsl", "match": "-?[0-9]+" },
+    { "name": "keyword.operator.assignment.testdsl", "match": "<-" },
+    { "name": "punctuation.separator.testdsl", "match": "[,;]" }
+  ]
+}

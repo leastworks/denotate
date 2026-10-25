@@ -146,7 +146,7 @@ impl GroundProgram {
     /// Prepare unrestricted input worlds (W = true). This does not infer input
     /// constraints from relation names, signatures or checked obligations.
     /// Use `prepare_with_input_groups` when the caller selects input exclusivity;
-    /// InputMapping callers should use that frontend's `LoweredProgram::prepare`.
+    /// Test DSL callers should use that frontend's `LoweredProgram::prepare`.
     pub fn prepare(corpus: &Corpus, domains: &Domains, limits: &Limits) -> Result<Self> {
         Self::prepare_with_input_groups(corpus, domains, &[], limits)
     }

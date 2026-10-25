@@ -1,4 +1,4 @@
-//! Export one combined InputMapping program to a new/empty output directory.
+//! Export one combined test DSL program to a new/empty output directory.
 use denotate_ir_text::{PrintOptions, SourceFile, filesystem::uri};
 use denotate_test_dsl::export;
 use std::{

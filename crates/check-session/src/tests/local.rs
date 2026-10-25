@@ -141,7 +141,7 @@ fn local_interruption_never_returns_a_semantic_value_and_recovers() {
 }
 
 #[test]
-fn local_execution_matches_global_on_the_inputmapping_corpus() {
+fn local_execution_matches_global_on_the_test_dsl_corpus() {
     let texts = corpus::texts();
     // The count is explicit so corpus coverage cannot silently shrink.
     assert_eq!(texts.len(), 39 + 84);
@@ -153,7 +153,7 @@ fn local_execution_matches_global_on_the_inputmapping_corpus() {
             true,
         ));
         let frontend = denotate_test_dsl::analysis::prepare(
-            &"file:///corpus.inputmapping".parse().unwrap(),
+            &"file:///corpus.testdsl".parse().unwrap(),
             1,
             doc,
             &mut denotate_test_dsl::lowering::incremental::Session::default(),

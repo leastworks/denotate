@@ -12,9 +12,9 @@ for (const [entry, output] of [
         bundle: true, platform: 'node', format: 'cjs', target: 'node22', external: ['vscode'] });
 }
 const suffix = process.platform === 'win32' ? '.exe' : '';
-const target = new URL(`dist/inputmapping-lsp${suffix}`, import.meta.url);
+const target = new URL(`dist/test-dsl-lsp${suffix}`, import.meta.url);
 // Replace the inode; overwriting a signed executable in place can cause a
 // macOS SIGKILL at launch despite its bytes and signature being correct.
 await rm(target, { force: true });
-await copyFile(new URL(`../../target/release/inputmapping-lsp${suffix}`, import.meta.url), target);
+await copyFile(new URL(`../../target/release/test-dsl-lsp${suffix}`, import.meta.url), target);
 if (!suffix) await chmod(target, 0o755);

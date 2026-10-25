@@ -5,5 +5,5 @@ fn main() {
         .include("grammar/src")
         .file("grammar/src/parser.c")
         .warnings(false)
-        .compile("tree-sitter-inputmapping");
+        .compile("tree-sitter-testdsl");
 }

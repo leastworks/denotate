@@ -20,7 +20,7 @@ fn parse(text: &str) -> Parsed {
     let mut sources = Sources::new();
     let snapshot = sources
         .add(
-            "file:///example.inputmapping",
+            "file:///example.testdsl",
             1,
             SourceView::TestDsl.as_str(),
             text,
@@ -296,7 +296,7 @@ fn malformed_source_never_projects_a_partial_program() {
         let mut sources = Sources::new();
         let snapshot = sources
             .add(
-                "file:///broken.inputmapping",
+                "file:///broken.testdsl",
                 1,
                 SourceView::TestDsl.as_str(),
                 text.as_str(),
@@ -338,7 +338,7 @@ fn keywords_are_reserved_in_every_identifier_position_but_prefixes_are_names() {
             let mut sources = Sources::new();
             let snapshot = sources
                 .add(
-                    "file:///reserved.inputmapping",
+                    "file:///reserved.testdsl",
                     1,
                     SourceView::TestDsl.as_str(),
                     text.as_str(),
@@ -392,12 +392,7 @@ fn missing_tokens_have_insertion_spans_and_snapshot_mismatch_is_a_creator_failur
     let text = "input i";
     let mut sources = Sources::new();
     let snapshot = sources
-        .add(
-            "file:///a.inputmapping",
-            1,
-            SourceView::TestDsl.as_str(),
-            text,
-        )
+        .add("file:///a.testdsl", 1, SourceView::TestDsl.as_str(), text)
         .unwrap();
     let document = Document::new(&mut syntax::parser().unwrap(), text.into(), 1, true);
     let ParseOutcome::SyntaxErrors(errors) =
@@ -410,7 +405,7 @@ fn missing_tokens_have_insertion_spans_and_snapshot_mismatch_is_a_creator_failur
     assert_eq!(errors[0].span.byte_range(), text.len()..text.len());
     let newer = sources
         .add(
-            "file:///a.inputmapping",
+            "file:///a.testdsl",
             2,
             SourceView::TestDsl.as_str(),
             "input input_long;",
@@ -430,7 +425,7 @@ fn incremental_damage_and_repair_match_fresh_projection_at_the_current_snapshot(
     let mut sources = Sources::new();
     let initial = sources
         .add(
-            "file:///edit.inputmapping",
+            "file:///edit.testdsl",
             1,
             SourceView::TestDsl.as_str(),
             text,
@@ -480,7 +475,7 @@ fn incremental_damage_and_repair_match_fresh_projection_at_the_current_snapshot(
             .unwrap();
         let snapshot = sources
             .add(
-                "file:///edit.inputmapping",
+                "file:///edit.testdsl",
                 version as u64,
                 SourceView::TestDsl.as_str(),
                 document.text.as_str(),

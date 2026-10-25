@@ -29,7 +29,7 @@ namespace b {
  domain a::S=[a::'007', a::7];
  obligation unique: at_most_one(q, group_by: x);
  assumption known: at_most_one(a::p, group_by: (x));
- #source = source("file:///source.inputmapping", view: "dsl", hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000");
+ #source = source("file:///source.testdsl", view: "dsl", hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000");
  #origin = loc(#source 1:1 to 1:2);
  q('007') loc(#source {self: 1:1 to 1:2, head.0: 1:1 to 1:2});
  q(7) loc(#origin);

@@ -21,7 +21,7 @@ participating occurrences, and places them on source locations. It depends only 
   and region outcomes, resource reasons).
 
 Frontends adapt the output: `crates/ir-text`'s `presentation` module for `.den`, and
-the InputMapping presenter, which keeps its own wording, guard locations and
+the test DSL presenter, which keeps its own wording, guard locations and
 safe-edit eligibility on top of the shared classification.
 
 ```sh
