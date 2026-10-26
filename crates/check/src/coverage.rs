@@ -56,7 +56,6 @@ impl SymbolicMeaning<'_> {
     pub(crate) fn check_coverage(
         &self,
         limits: &Limits,
-        sat: bool,
         mut queries: Option<&mut QueryRun<'_>>,
     ) -> Result<BTreeMap<ObligationId, CoverageReport>> {
         let mut ordered = self.program.coverage.iter().collect::<Vec<_>>();
@@ -70,7 +69,6 @@ impl SymbolicMeaning<'_> {
             let result = self.coverage_obligation(
                 shape,
                 queries.as_ref().map(|q| q.keys),
-                sat,
                 &mut budget,
                 &mut report,
             );
@@ -98,7 +96,6 @@ impl SymbolicMeaning<'_> {
         &self,
         shape: &CoverageShape,
         keys: Option<&SemanticKeys>,
-        sat: bool,
         budget: &mut Budget<'_>,
         report: &mut CoverageReport,
     ) -> Result<()> {
@@ -142,7 +139,7 @@ impl SymbolicMeaning<'_> {
                 .map(|(i, p)| domains[i][*p])
                 .collect::<Vec<_>>();
             let tuples = members.get(&group).map_or(&[][..], Vec::as_slice);
-            let (example, unresolved) = self.coverage_group(tuples, sat, budget)?;
+            let (example, unresolved) = self.coverage_group(tuples, budget)?;
             report.examined = increment(report.examined)?;
             if unresolved {
                 report.unsupported = increment(report.unsupported)?;
@@ -176,7 +173,6 @@ impl SymbolicMeaning<'_> {
     fn coverage_group(
         &self,
         tuples: &[GroundAtom],
-        sat: bool,
         budget: &mut Budget<'_>,
     ) -> Result<(Option<(Observation, ReplayScope)>, bool)> {
         use biodivine_lib_bdd::op_function;
@@ -202,11 +198,7 @@ impl SymbolicMeaning<'_> {
         let mut unresolved = false;
         loop {
             budget.tick("coverage search")?;
-            let observation = if sat {
-                context.sat_witness(&remaining, budget)?
-            } else {
-                context.witness_with_budget(&remaining, budget)?
-            };
+            let observation = context.witness_with_budget(&remaining, budget)?;
             let Some(observation) = observation else {
                 return Ok((None, unresolved));
             };

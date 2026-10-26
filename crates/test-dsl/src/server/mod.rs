@@ -42,7 +42,6 @@ struct Server {
     worker: Worker,
     tests: bool,
     hooks: CheckingHooks,
-    backend: denotate_check::BackendIdentity,
 }
 
 pub fn run(connection: &Connection) -> Result<()> {
@@ -65,7 +64,6 @@ pub fn run_with_mode(connection: &Connection, tests: bool) -> Result<()> {
         worker: worker::spawn()?,
         tests,
         hooks: CheckingHooks::default(),
-        backend: denotate_check::BackendIdentity::bdd(),
     };
     checking_server::run(&mut server, connection)
 }
@@ -77,32 +75,6 @@ impl Server {
     fn notification(&mut self, connection: &Connection, n: Notification) -> Result<()> {
         if lifecycle::handles(&n.method) {
             return lifecycle::notification(self, connection, n);
-        }
-        match n.method.as_str() {
-            "workspace/didChangeConfiguration" => {
-                let backend = match n.params["settings"]["testdsl"]["backend"]
-                    .as_str()
-                    .unwrap_or("bdd")
-                {
-                    "bdd" => denotate_check::BackendIdentity::bdd(),
-                    "sat" => denotate_check::BackendIdentity::sat(),
-                    _ => return Err("Expected testdsl.backend to be bdd or sat".into()),
-                };
-                if self.backend != backend {
-                    self.backend = backend;
-                    let docs = self
-                        .documents
-                        .iter()
-                        .filter(|(u, _)| self.documents.rejected_version(u).is_none())
-                        .map(|(u, d)| (u.clone(), d.document.text.clone(), d.document.version))
-                        .collect::<Vec<_>>();
-                    for (uri, text, version) in docs {
-                        let document = Document::new(&mut self.parser, text, version, true);
-                        self.install(connection, uri, document)?;
-                    }
-                }
-            }
-            _ => (), // No disk indexing, workspace mutation or language-service requests.
         }
         Ok(())
     }
@@ -165,7 +137,6 @@ impl Server {
                 ticket,
                 payload: Payload {
                     program,
-                    backend: self.backend.clone(),
                     measure: self.tests,
                 },
                 limits: Limits::default(),

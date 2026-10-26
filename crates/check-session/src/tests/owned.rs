@@ -22,7 +22,7 @@ fn ops() -> OperationalLimits {
     })
 }
 #[test]
-fn coarse_scc_work_counts_executed_cones_not_cache_hits_or_sat_queries() {
+fn coarse_scc_work_counts_executed_cones_not_cache_hits() {
     let queries = inputs(
         "input i,j,k; slot shared,a,b; shared <- i; \
          a <- j when available(shared); a <- k when available(shared); \
@@ -82,12 +82,6 @@ fn coarse_scc_work_counts_executed_cones_not_cache_hits_or_sat_queries() {
         assert_eq!(&bypass.execute(q, &ops(), &mut metrics).unwrap(), value);
     }
     check_metrics(&metrics);
-    let mut metrics = LocalMetrics::default();
-    for mut q in queries {
-        q.backend = BackendIdentity::sat();
-        session.execute(&q, &ops(), &mut metrics).unwrap();
-    }
-    assert!(metrics.scc_work.is_empty());
 }
 #[test]
 fn owned_queries_survive_snapshot_drop_and_salsa_backdates_semantics_separately_from_receipts() {

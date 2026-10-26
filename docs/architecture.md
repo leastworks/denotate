@@ -26,7 +26,7 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
 | --- | --- | --- |
 | `denotate-ir` (`crates/ir`) | Typed relational construction (`Corpus`), namespaces, occurrence identities, `Sources`/`Provenance`, semantic keys, recipe installation | Syntax, checking, wording |
 | `denotate-normalize` | Boolean normalization recipes (double-negation cancellation, Lloyd–Topor with linear helpers); no dependencies | Spans, IR handles |
-| `denotate-check` | Finite grounding, admissibility, concrete replay, BDD/SAT property checks, no-meaning and rewrite findings, limits and cancellation | Editors, sessions, wording |
+| `denotate-check` | Finite grounding, admissibility, concrete replay, BDD property checks, no-meaning and rewrite findings, limits and cancellation | Editors, sessions, wording |
 | `denotate-check-session` | Reusable checker sessions: plan, grounding and verdict caches, retention, warm/cold equivalence | Scheduling, LSP |
 | `denotate-presentation` | Frontend-independent interpretation of checked evidence: finding identity, kind, severity, notes, primary/related placement, labeled fallback | LSP types, DSL vocabulary, filesystem |
 | `denotate-editor` | Language-independent LSP mechanics: documents, synchronization, transport, the checking scheduler and server loop, lifecycle, publication, workspace edits, LSP positions | Roots, manifests, ownership, DSL concepts |
@@ -67,7 +67,7 @@ publishes their findings on the program's own files
 
 - Unit and integration tests per crate (`just test-crates`).
 - `.den` round trip: the test DSL regression programs are lowered, printed to
-  `.den`, reloaded and checked; structure, origins and default-limit BDD/SAT outcomes
+  `.den`, reloaded and checked; structure, origins and default-limit BDD outcomes
   must match (`crates/test-dsl/tests/ir_text_roundtrip.rs`).
 - Editor parity: for every parser-backed regression program, both editors publish the
   same findings (`crates/den-lsp/src/publication_tests.rs`).

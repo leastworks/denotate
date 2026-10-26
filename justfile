@@ -16,7 +16,7 @@ score-test-dsl +args:
 export-test-dsl +args:
     cargo +1.93.0 run --locked -p denotate-test-dsl --example export -- "$@"
 
-# Load and check a folder-rooted .den program: ROOT_FOLDER_OR_DEN.ROOT [--sat].
+# Load and check a folder-rooted .den program: ROOT_FOLDER_OR_DEN.ROOT.
 [positional-arguments]
 check-den +args:
     cargo +1.93.0 run --locked -p denotate-ir-text --example check -- "$@"

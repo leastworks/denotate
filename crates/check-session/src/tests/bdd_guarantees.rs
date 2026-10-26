@@ -1,5 +1,5 @@
-//! SAT portability: independent finite stable-model oracle, fresh/cached equality,
-//! backend switching and current-snapshot diagnostics.
+//! BDD guarantees retained from the backend experiment: independent stable-model
+//! oracle, fresh/cached equality, eviction, limits and cancellation recovery.
 use super::*;
 
 fn limits() -> Limits {
@@ -9,14 +9,9 @@ fn limits() -> Limits {
     }
 }
 
-fn run(
-    p: &LoweredProgram,
-    backend: BackendIdentity,
-    session: Option<&mut crate::Session>,
-) -> Accounted<ScopedResults> {
+fn run(p: &LoweredProgram, session: Option<&mut crate::Session>) -> Accounted<ScopedResults> {
     let l = limits();
-    let mut req = request_evidence::request(p, &l);
-    req.backend = backend;
+    let req = request_evidence::request(p, &l);
     let RequestPreparation::Complete(g) = req.prepare(&p.corpus, &p.keys, &(&l).into()).unwrap()
     else {
         panic!()
@@ -29,15 +24,12 @@ fn run(
     .unwrap() else {
         panic!()
     };
-    for a in r.queries.values().filter(|a| a.input.uses_sat()) {
-        assert!(a.evaluation.is_none());
-    }
     r.checked.results.receipts.total().unwrap();
     r.checked.results
 }
 
 #[test]
-fn sat_frozen_edits_fresh_cold_warm_evicted_and_backend_switch() {
+fn bdd_corpus_edits_fresh_cold_warm_and_evicted() {
     let mut sources = regression_cases()
         .into_iter()
         .map(|r| r["source"].as_str().unwrap().to_owned())
@@ -53,9 +45,9 @@ fn sat_frozen_edits_fresh_cold_warm_evicted_and_backend_switch() {
         let LoweringOutcome::Lowered(p) = lowering::lower(&ast, &src).unwrap() else {
             continue;
         };
-        let fresh = run(&p, BackendIdentity::sat(), None);
-        assert_eq!(fresh, run(&p, BackendIdentity::sat(), Some(&mut session)));
-        assert_eq!(fresh, run(&p, BackendIdentity::sat(), Some(&mut session)));
+        let fresh = run(&p, None);
+        assert_eq!(fresh, run(&p, Some(&mut session)));
+        assert_eq!(fresh, run(&p, Some(&mut session)));
         assert_eq!(
             session.stats().verdict_misses + session.stats().completion_misses,
             0,
@@ -63,24 +55,8 @@ fn sat_frozen_edits_fresh_cold_warm_evicted_and_backend_switch() {
             session.stats()
         );
         session.evict_values();
-        assert_eq!(fresh, run(&p, BackendIdentity::sat(), Some(&mut session)));
-        let bdd = run(&p, BackendIdentity::bdd(), Some(&mut session));
-        assert_eq!(fresh, run(&p, BackendIdentity::sat(), Some(&mut session)));
-        for (k, result) in &fresh.value.groups {
-            groups += 1;
-            match result {
-                ScopedResult::Unsupported(UnsupportedReason::UnfoundedSupport(_)) => {}
-                ScopedResult::Counterexample(c, _) => {
-                    let ScopedResult::Counterexample(b, _) = &bdd.value.groups[k] else {
-                        panic!("SAT unsound: {source}")
-                    };
-                    if c.scope == CertificationScope::WholeProgram {
-                        assert_eq!(c, b, "{source}");
-                    }
-                }
-                _ => assert_eq!(result, &bdd.value.groups[k], "{source}"),
-            }
-        }
+        assert_eq!(fresh, run(&p, Some(&mut session)));
+        groups += fresh.value.groups.len();
     }
     assert!(groups > 0);
 }
@@ -123,7 +99,7 @@ fn generic(
     }
     c.at_most_one("unique", d, [], "test").unwrap();
     let mut keys = SemanticKeys::default();
-    let q = |n: &str| QualifiedKey::new("sat-tests", n);
+    let q = |n: &str| QualifiedKey::new("stable-model-tests", n);
     keys.bind_sort(&c, s, SortKey(q("V"))).unwrap();
     for constant in c.constants() {
         keys.bind_constant(
@@ -190,7 +166,7 @@ fn generic(
     )
 }
 
-// Independent GL-reduct enumeration; neither the SAT encoding nor checker replay
+// Independent GL-reduct enumeration; neither BDD evaluation nor checker replay
 // defines this oracle. Enumerate all interpretations, then check least closure.
 fn stable(spec: &[RuleSpec], world: usize) -> Vec<usize> {
     (0..4)
@@ -224,7 +200,7 @@ fn stable(spec: &[RuleSpec], world: usize) -> Vec<usize> {
 }
 
 #[test]
-fn sat_small_worlds_completion_unsat_and_unfounded_candidates() {
+fn bdd_small_worlds_match_stable_models_including_recursive_support() {
     let cases = [
         vec![(2, vec![(0, false)]), (3, vec![(1, false)])],
         vec![(2, vec![(0, false)]), (3, vec![(0, true)])],
@@ -249,16 +225,14 @@ fn sat_small_worlds_completion_unsat_and_unfounded_candidates() {
             (3, vec![(1, false), (1, true)]),
         ],
     ];
-    let mut unsupported = 0;
     let mut proved_recursive = 0;
     for spec in cases {
         for exclusive in [false, true] {
             let (c, keys, domains, constraints) = generic(&spec, exclusive);
             let l = limits();
             let ops = (&l).into();
-            let mut request =
+            let request =
                 CheckRequest::all_obligations(&c, &keys, &domains, &constraints, &l).unwrap();
-            request.backend = BackendIdentity::sat();
             let RequestPreparation::Complete(g) = request.prepare(&c, &keys, &ops).unwrap() else {
                 panic!()
             };
@@ -290,42 +264,26 @@ fn sat_small_worlds_completion_unsat_and_unfounded_candidates() {
                             }
                         });
                         assert!(violating.contains(&world));
-                        // AtomKey order is a then b: lexicographic absent-first.
-                        assert_eq!(
-                            world,
-                            *violating.iter().min_by_key(|w| (**w & 1, **w & 2)).unwrap()
-                        );
                     }
-                    ScopedResult::Unsupported(UnsupportedReason::UnfoundedSupport(candidate)) => {
-                        unsupported += 1;
-                        let world = candidate.present.iter().fold(0, |w, a| {
-                            w | if a.arguments[0].name.as_ref() == "a" {
-                                1
-                            } else {
-                                2
-                            }
-                        });
-                        assert!(!violating.contains(&world));
-                    }
-                    other => panic!("unexpected SAT result: {other:?}"),
+                    other => panic!("unexpected BDD result: {other:?}"),
                 }
             }
         }
     }
-    assert!(unsupported > 0 && proved_recursive > 0);
+    assert!(proved_recursive > 0);
 }
 
 #[test]
-fn sat_bypass_and_validation_limits_preserve_results_and_status() {
+fn bdd_bypass_limits_and_cancellation_recovery_preserve_results() {
     let (_, _, p) = lower("input i,j; slot a; a <- i; a <- j;");
-    let fresh = run(&p, BackendIdentity::sat(), None);
+    let fresh = run(&p, None);
     for bytes in [0, 1024, 16 * 1024] {
         let mut session = crate::Session::new(crate::Retention {
             max_bytes: bytes,
             ..Default::default()
         });
-        assert_eq!(fresh, run(&p, BackendIdentity::sat(), Some(&mut session)));
-        assert_eq!(fresh, run(&p, BackendIdentity::sat(), Some(&mut session)));
+        assert_eq!(fresh, run(&p, Some(&mut session)));
+        assert_eq!(fresh, run(&p, Some(&mut session)));
     }
     let l = limits();
     let g = request_evidence::checked(&p, &l);
@@ -339,7 +297,6 @@ fn sat_bypass_and_validation_limits_preserve_results_and_status() {
         .unwrap()
         .input
         .clone();
-    input.backend = BackendIdentity::sat();
     input.limits.max_work = 0;
     let memo = NoLocalMemo
         .execute(&input, &(&l).into(), &mut LocalMetrics::default())
@@ -352,6 +309,14 @@ fn sat_bypass_and_validation_limits_preserve_results_and_status() {
         Err(CheckError::Cancelled)
     ));
     input.limits.max_work = l.max_work;
+    let expired = OperationalLimits {
+        timeout: Duration::ZERO,
+        ..OperationalLimits::from(&limits())
+    };
+    assert!(matches!(
+        NoLocalMemo.execute(&input, &expired, &mut LocalMetrics::default()),
+        Err(CheckError::Deadline { .. })
+    ));
     let mut session = crate::Session::default();
     session.interrupt_after_evaluation();
     assert!(matches!(
@@ -385,9 +350,9 @@ fn sat_bypass_and_validation_limits_preserve_results_and_status() {
 }
 
 #[test]
-fn sat_keeps_valid_cone_finding_when_whole_program_needs_an_alternate_world() {
+fn bdd_certifies_an_alternate_world_without_losing_the_cone_finding() {
     // The conflict is unconditional. An unrelated negative cycle settles only
-    // when i(a) is present. BDD retries that don't-care; SAT deliberately does not.
+    // when i(a) is present. Certification retries that don't-care input.
     let spec = vec![
         (2, vec![]),
         (3, vec![(0, false)]),
@@ -397,13 +362,8 @@ fn sat_keeps_valid_cone_finding_when_whole_program_needs_an_alternate_world() {
     let (c, keys, domains, constraints) = generic(&spec, false);
     let l = limits();
     let ops = (&l).into();
-    let mut request = CheckRequest::all_obligations(&c, &keys, &domains, &constraints, &l).unwrap();
-    for sat in [false, true] {
-        request.backend = if sat {
-            BackendIdentity::sat()
-        } else {
-            BackendIdentity::bdd()
-        };
+    let request = CheckRequest::all_obligations(&c, &keys, &domains, &constraints, &l).unwrap();
+    {
         let RequestPreparation::Complete(g) = request.prepare(&c, &keys, &ops).unwrap() else {
             panic!()
         };
@@ -416,18 +376,7 @@ fn sat_keeps_valid_cone_finding_when_whole_program_needs_an_alternate_world() {
         else {
             panic!("a certification failure erased the cone finding")
         };
-        assert_eq!(
-            candidate.scope,
-            if sat {
-                CertificationScope::ConeOnly
-            } else {
-                CertificationScope::WholeProgram
-            }
-        );
-        if sat {
-            assert!(candidate.candidate.present.is_empty());
-            assert!(candidate.confined_to_no_meaning.is_empty());
-        }
+        assert_eq!(candidate.scope, CertificationScope::WholeProgram);
         assert!(!r.results.value.regions.is_empty());
     }
 }

@@ -16,8 +16,17 @@ real program that the current choice serves badly.
   The well-founded semantics is not adopted until a real program needs it.
 - **Conclusive answers must be sound.** A false counterexample or a silent success
   misleads the author; an explicit inconclusive or unsupported outcome does not. Hence
-  counterexamples only after concrete replay (or certification), and SAT's
-  unfounded-support world is never presented as an overlap witness.
+  counterexamples only after concrete replay (or certification); blocked or unknown
+  facts are never evidence of absence.
+- **BDD is the only backend.** The SAT experiment had synthetic/test-DSL performance
+  wins but no demonstrated need on real programs. It increased implementation and test
+  work for every obligation kind and made diagnostics depend on a setting. We retired
+  it before extending the vocabulary further. Reintroduce an alternative only for a
+  real program that exhausts BDD evaluation within reasonable limits, re-scored with
+  the `.den` scorecard (a prerequisite still on the roadmap), with better conclusive
+  outcomes under comparable limits and agreement with the independent semantic oracles.
+  The existing protocol backend/configuration identity remains fixed BDD metadata for
+  result validation and compatibility; it is not a user-selectable option.
 - **Assumptions take effect only through an explicit verification.** Assumptions are
   the domain constraints a library author chooses. When every declared assumption was
   active, declaring or importing one silently changed every check, and one obligation

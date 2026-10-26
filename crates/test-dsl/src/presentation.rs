@@ -99,7 +99,7 @@ pub fn present(
 ) -> Result<Vec<Diagnostic>> {
     present_using(lowered, report, sources, view, None)
 }
-/// Editor entry point adds backend-specific explanations from checked results.
+/// Editor entry point preserves the checked verification identity.
 pub fn present_checked(
     lowered: &LoweredProgram,
     report: &CheckedReport<'_>,
@@ -121,11 +121,7 @@ fn present_using(
     view: &str,
     results: Option<&ScopedResults>,
 ) -> Result<Vec<Diagnostic>> {
-    let shared = denotate_presentation::interpret(
-        &lowered.corpus,
-        report,
-        results.map(|r| (&lowered.keys, r)),
-    )?;
+    let shared = denotate_presentation::interpret(&lowered.corpus, report)?;
     let view = SourceView::try_from(view)?;
     lowered.attribution.validate(&lowered.corpus, sources)?;
     let origins = |id: OccurrenceId| -> Result<Vec<RelatedLocation>> {

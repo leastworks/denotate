@@ -6,18 +6,32 @@ it when real programs exist, and change it on evidence.
 
 | Path / policy | Decision | Why |
 | --- | --- | --- |
-| Editor default backend | Cached coarse BDD | Predictable, canonical conditions; good warm reuse |
-| SAT group backend | Kept selectable (`denotate.backend: "sat"`) | Large wins on programs with many distinct literals |
+| Checker backend | BDD only; cached coarse BDD in editors | Predictable, canonical conditions; good warm reuse |
 | Relation-SCC grounding | Kept opt-in | Warm-run wins; not yet worth the complexity by default |
 | Plan cache | Small-rule bypass with bounded retention | Avoids caching cost for trivial rules |
-| Coverage under SAT | Shares BDD symbolic evaluation; SAT only finds the uncovered world | First correct implementation; gives no relief where BDD evaluation exhausts |
 | Coverage results | Recomputed each check; preparation is reused | No measured need for a coverage verdict cache yet |
 
 Tried and removed: component-level evaluation, which lost everywhere it was measured.
 
 Guarantees that are **not** provisional: cold and warm sessions produce identical
-results and receipts; conclusive BDD and SAT answers agree; limits produce explicit
-inconclusive outcomes, never silent success.
+results and receipts; conclusive answers agree with independent small-world and
+stable-model oracles; limits produce explicit inconclusive outcomes, never silent success.
+
+## Backend retirement
+
+BDD is the only supported backend. The SAT experiment showed wins on synthetic and
+test-DSL workloads, but no demonstrated need on real programs. Maintaining it multiplied
+implementation and validation work for each obligation kind and made diagnostics depend
+on a setting. Its coverage path still depended on BDD evaluation, so it could not help
+when that evaluation exhausted. The implementation, dependency and selectors are retired;
+Git history retains the experiment.
+
+Revisit only for a real program that exhausts BDD evaluation within reasonable limits,
+re-scored with the `.den` scorecard. That scorecard is still on the roadmap and is a
+prerequisite to this decision. An alternative must demonstrate better conclusive outcomes
+under comparable limits, while matching the independent semantic oracles; inconclusive
+or unsupported answers are not wins. A second backend is not a standing feature-parity
+requirement.
 
 ## Re-scoring
 
@@ -33,7 +47,7 @@ meaningful numbers. `--samples N` (default 5, after one warm-up), `--timeout-ms 
 available. Run it alone for useful timings.
 
 It reports cold, trivia-warm and semantic-edit timings for uncached global BDD, fresh
-local BDD, fresh SAT, cached BDD and SAT (each with optional relation-SCC grounding),
+local BDD, cached BDD (with optional relation-SCC grounding),
 and controls for planning and grounding reuse. It measures lowering and checker reuse,
 **not** parser or LSP scheduling latency. Results are compared against a same-run
 global control; conclusive contradictions, warm mismatches and operational errors

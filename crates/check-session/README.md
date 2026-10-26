@@ -22,7 +22,7 @@ Editors hold one session per program through the shared scheduler in
 `denotate-editor`, keep it warm while a program is temporarily uncheckable, and
 release it only when the program disappears.
 
-Coverage uses the shared checker's bounded enumeration and backend queries afresh
+Coverage uses the shared checker's bounded enumeration and BDD queries afresh
 on each check, while reusing preparation. Its results retain the current verification
 and resolved domains; no coverage verdict is reused across context changes.
 

@@ -103,8 +103,6 @@ pub enum GroupOutcome {
     Proved,
     /// Raw nonempty violation condition; use verify_at_most_one for a replayed finding.
     Overlap(Condition),
-    /// A concretely validated backend candidate, replayed again in this snapshot.
-    Candidate(Observation),
     Unsupported,
     Inconclusive(Inconclusive),
 }

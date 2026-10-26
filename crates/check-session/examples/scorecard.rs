@@ -1,5 +1,5 @@
-//! File-based slice-6 re-scoring. See ../SCORECARD.md for timing boundaries.
-use denotate_check::{BackendIdentity, Limits, ScopedResult};
+//! File-based BDD re-scoring. See docs/checker-policies.md for timing boundaries.
+use denotate_check::{Limits, ScopedResult};
 use denotate_check_session::{Retention, Session};
 use denotate_editor::Document;
 use denotate_test_dsl::{analysis, lowering, syntax};
@@ -11,14 +11,11 @@ use std::{
 };
 
 const USAGE: &str = "scorecard PROGRAM [--edit FILE] [--samples N] [--json FILE] [--unconstrained] [--timeout-ms N]";
-const MODES: [&str; 9] = [
+const MODES: [&str; 6] = [
     "global-bdd",
     "fresh-local-bdd",
-    "fresh-sat",
     "cached-bdd",
-    "cached-sat",
     "grounding-bdd",
-    "grounding-sat",
     "bdd-no-plans",
     "fresh-grounding-bdd",
 ];
@@ -88,7 +85,7 @@ fn default_edit(source: &str) -> String {
 
 fn session(mode: &str, unconstrained: bool) -> Option<Session> {
     let s = match mode {
-        "global-bdd" | "fresh-sat" => return None,
+        "global-bdd" => return None,
         "fresh-local-bdd" => {
             return Some(Session::new(Retention {
                 max_entries: 0,
@@ -96,7 +93,7 @@ fn session(mode: &str, unconstrained: bool) -> Option<Session> {
                 max_condition_nodes: 0,
             }));
         }
-        "grounding-bdd" | "grounding-sat" => Session::with_grounding(),
+        "grounding-bdd" => Session::with_grounding(),
         "fresh-grounding-bdd" => Session::with_fresh_grounding(),
         "bdd-no-plans" => Session::with_fresh_planning(),
         _ => Session::default(),
@@ -221,17 +218,11 @@ fn collect(c: &Config, source: &str, edited: &str) -> Result<Value, String> {
             let mut phases = serde_json::Map::new();
             for (phase_index, phase) in PHASES.into_iter().enumerate() {
                 let (program, mut row) = prepare(texts[phase_index], phase_index, &mut lower)?;
-                let backend = if mode.ends_with("sat") {
-                    BackendIdentity::sat()
-                } else {
-                    BackendIdentity::bdd()
-                };
                 let start = Instant::now();
                 let mut preparation_ns = None;
-                let output = program.check_with_backend(
+                let output = program.check_using(
                     &limits,
                     || preparation_ns = Some(start.elapsed().as_nanos()),
-                    backend,
                     cache.as_mut(),
                 );
                 let checking_ns = start.elapsed().as_nanos();
@@ -270,10 +261,8 @@ fn collect(c: &Config, source: &str, edited: &str) -> Result<Value, String> {
                         previous = Some(output.results.clone());
                         if mode != "global-bdd" {
                             if let Some(Ok(reference)) = global.get(phase_index) {
-                                let mut neutral = output.results.value.clone();
-                                neutral.context.backend = BackendIdentity::bdd();
                                 row["matches_global_results"] =
-                                    json!(neutral == reference.results.value);
+                                    json!(output.results.value == reference.results.value);
                                 row["matches_global_diagnostics"] =
                                     json!(output.diagnostics == reference.diagnostics);
                                 let conflict = contradiction(output, reference);
@@ -504,21 +493,21 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_sat_is_reported_without_claiming_equivalence() {
-        let source = "input i,j,k; slot a,b; a <- i when available(b); a <- j when available(b); b <- i when available(a); b <- k;";
+    fn unsupported_bdd_is_reported_without_claiming_a_proof() {
+        let source = "input i,j,k; slot a,b; a <- i when not available(a); b <- j when available(a); b <- k;";
         let mut c = config();
         c.unconstrained = true;
         let data = collect(&c, source, &default_edit(source)).unwrap();
         assert_eq!(data["failures"], json!([]));
         assert!(
-            data["samples"][0]["cached-sat"]["cold"]["results"]["unsupported"]
+            data["samples"][0]["cached-bdd"]["cold"]["results"]["unsupported"]
                 .as_u64()
                 .unwrap()
                 > 0
         );
         assert_eq!(
-            data["samples"][0]["cached-sat"]["cold"]["matches_global_results"],
-            false
+            data["samples"][0]["cached-bdd"]["cold"]["matches_global_results"],
+            true
         );
         assert_eq!(
             data["samples"][0]["fresh-local-bdd"]["warm"]["cache"]["evaluation_hits"],

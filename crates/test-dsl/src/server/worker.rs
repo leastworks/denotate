@@ -7,7 +7,6 @@ use std::time::Instant;
 pub type Identity = Ticket<Url, i32>;
 pub struct Payload {
     pub program: Program,
-    pub backend: denotate_check::BackendIdentity,
     pub measure: bool,
 }
 pub(super) type Checked = (Result<Output, Failure>, Option<u64>);
@@ -19,12 +18,10 @@ pub fn spawn() -> std::io::Result<Worker> {
         "testdsl-check",
         |job: &checking::Job<Url, Payload, i32>, session, checkpoint| {
             let start = job.payload.measure.then(Instant::now);
-            let result = job.payload.program.check_with_backend(
-                &job.limits,
-                checkpoint,
-                job.payload.backend.clone(),
-                Some(session),
-            );
+            let result = job
+                .payload
+                .program
+                .check_using(&job.limits, checkpoint, Some(session));
             let check_ns = start.map(|t| t.elapsed().as_nanos().min(u64::MAX as u128) as u64);
             (result, check_ns)
         },

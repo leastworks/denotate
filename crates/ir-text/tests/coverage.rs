@@ -16,15 +16,10 @@ fn load_text(text: &str) -> LoadedProgram {
 fn run(
     p: &LoadedProgram,
     session: &mut Session,
-    backend: BackendIdentity,
     limits: &Limits,
 ) -> (ScopedResults, presentation::Presentation) {
     let operations = OperationalLimits::from(limits);
-    let request = p
-        .verification_requests(limits, backend)
-        .unwrap()
-        .remove(0)
-        .1;
+    let request = p.verification_requests(limits).unwrap().remove(0).1;
     let RequestPreparation::Complete(prepared) = session
         .prepare(&request, &p.corpus, &p.keys, &operations)
         .unwrap()
@@ -39,15 +34,15 @@ fn run(
     let output = presentation::present(p, &report.checked).unwrap();
     (report.checked.results.value, output)
 }
-fn coverage(text: &str, backend: BackendIdentity) -> (CoverageResult, presentation::Presentation) {
+fn coverage(text: &str) -> (CoverageResult, presentation::Presentation) {
     let p = load_text(text);
-    let (result, out) = run(&p, &mut Session::default(), backend, &Limits::default());
+    let (result, out) = run(&p, &mut Session::default(), &Limits::default());
     (result.coverage.into_values().next().unwrap(), out)
 }
 const V: &str = "verification checks { assumptions: []; obligations: [covered]; }";
 #[test]
 fn resolved_domains_empty_domains_global_and_zero_arity() {
-    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+    {
         for (body, missing, no_groups) in [
             (
                 "sort S; const a,b:S; relation p(x:S); p(a); obligation covered: at_least_one(p, group_by: (x));",
@@ -90,7 +85,7 @@ fn resolved_domains_empty_domains_global_and_zero_arity() {
                 false,
             ),
         ] {
-            let (result, out) = coverage(&format!("{body}{V}"), backend.clone());
+            let (result, out) = coverage(&format!("{body}{V}"));
             assert_eq!(
                 (result.missing, result.no_groups, result.complete()),
                 (missing, no_groups, true),
@@ -124,7 +119,7 @@ fn resolved_domains_empty_domains_global_and_zero_arity() {
 }
 
 #[test]
-fn small_world_oracle_and_replayed_absence_agree_for_both_backends() {
+fn small_world_oracle_and_replayed_absence_agree_with_bdd() {
     // Independently evaluate four Boolean rule forms, not checker-derived expectations.
     for formula in 0..4 {
         for facts in 0..4 {
@@ -164,17 +159,17 @@ fn small_world_oracle_and_replayed_absence_agree_for_both_backends() {
                     })
                     .count();
                 let p = load_text(&text);
-                for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+                {
                     let mut session = Session::default();
-                    let (cold, _) = run(&p, &mut session, backend.clone(), &Limits::default());
-                    let (warm, _) = run(&p, &mut session, backend, &Limits::default());
+                    let (cold, _) = run(&p, &mut session, &Limits::default());
+                    let (warm, _) = run(&p, &mut session, &Limits::default());
                     assert_eq!(cold.coverage, warm.coverage);
                     let result = cold.coverage.values().next().unwrap();
                     assert_eq!(result.missing, expected, "{text}");
                     assert!(result.complete());
                     // Replay through the public prepared request so W is validated too.
                     let request = p
-                        .verification_requests(&Limits::default(), BackendIdentity::bdd())
+                        .verification_requests(&Limits::default())
                         .unwrap()
                         .remove(0)
                         .1;
@@ -221,22 +216,16 @@ fn small_world_oracle_and_replayed_absence_agree_for_both_backends() {
 
 #[test]
 fn blocked_worlds_do_not_become_absence_and_independent_producers_can_cover() {
-    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
-        let (blocked, _) = coverage(
-            &format!(
-                "relation p(); p() :- !p(); obligation covered: at_least_one(p, group_by: ()); {V}"
-            ),
-            backend.clone(),
-        );
+    {
+        let (blocked, _) = coverage(&format!(
+            "relation p(); p() :- !p(); obligation covered: at_least_one(p, group_by: ()); {V}"
+        ));
         assert_eq!(blocked.missing, 0);
         assert!(!blocked.complete());
         assert!(blocked.unsupported > 0);
-        let (mixed, out) = coverage(
-            &format!(
-                "input i(); relation p(); relation q(); p() :- !q(), !i(); q() :- !p(), !i(); obligation covered: at_least_one(p, group_by: ()); {V}"
-            ),
-            backend.clone(),
-        );
+        let (mixed, out) = coverage(&format!(
+            "input i(); relation p(); relation q(); p() :- !q(), !i(); q() :- !p(), !i(); obligation covered: at_least_one(p, group_by: ()); {V}"
+        ));
         assert_eq!(mixed.missing, 1);
         assert!(!mixed.complete());
         assert!(
@@ -244,12 +233,9 @@ fn blocked_worlds_do_not_become_absence_and_independent_producers_can_cover() {
                 .iter()
                 .any(|d| d.kind == Kind::Counterexample)
         );
-        let (covered, _) = coverage(
-            &format!(
-                "sort S; const a,b:S; relation p(x:S); p(a); p(b) :- !p(b); obligation covered: at_least_one(p, group_by: ()); {V}"
-            ),
-            backend,
-        );
+        let (covered, _) = coverage(&format!(
+            "sort S; const a,b:S; relation p(x:S); p(a); p(b) :- !p(b); obligation covered: at_least_one(p, group_by: ()); {V}"
+        ));
         assert!(covered.proved());
     }
 }
@@ -268,10 +254,10 @@ fn bounded_enumeration_preserves_failure_and_aggregates_with_stable_identity() {
         max_work: 2000,
         ..Limits::default()
     };
-    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+    {
         let mut session = Session::default();
-        let (cold, out) = run(&p, &mut session, backend.clone(), &limits);
-        let (warm, _) = run(&p, &mut session, backend, &limits);
+        let (cold, out) = run(&p, &mut session, &limits);
+        let (warm, _) = run(&p, &mut session, &limits);
         assert_eq!(cold.coverage, warm.coverage);
         let c = cold.coverage.values().next().unwrap();
         assert!(c.missing > 0 && c.missing < 10000);
@@ -309,18 +295,8 @@ fn coverage_round_trip_preserves_kind_selection_and_origins() {
         let (membership, documents) = bundle.documents("file:///export");
         let reloaded = load_with_resolver(&membership, &documents, Some(&mut &p.sources)).unwrap();
         support::compare(&export, &reloaded, "file:///export", embedded_origins);
-        let (a, _) = run(
-            &p,
-            &mut Session::default(),
-            BackendIdentity::bdd(),
-            &Limits::default(),
-        );
-        let (b, _) = run(
-            &reloaded,
-            &mut Session::default(),
-            BackendIdentity::sat(),
-            &Limits::default(),
-        );
+        let (a, _) = run(&p, &mut Session::default(), &Limits::default());
+        let (b, _) = run(&reloaded, &mut Session::default(), &Limits::default());
         assert_eq!(
             a.coverage.values().next().unwrap().missing,
             b.coverage.values().next().unwrap().missing
@@ -330,7 +306,7 @@ fn coverage_round_trip_preserves_kind_selection_and_origins() {
 
 #[test]
 fn sessions_refresh_domains_facts_and_selected_assumptions_without_changing_identity() {
-    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+    {
         let mut session = Session::default();
         let mut finding = None;
         for (facts, domain, missing) in [
@@ -343,13 +319,8 @@ fn sessions_refresh_domains_facts_and_selected_assumptions_without_changing_iden
             let p = load_text(&format!(
                 "sort S; const a,b:S; relation p(x:S); {facts} {domain} obligation covered: at_least_one(p, group_by: (x)); {V}"
             ));
-            let (warm, out) = run(&p, &mut session, backend.clone(), &Limits::default());
-            let (cold, _) = run(
-                &p,
-                &mut Session::default(),
-                backend.clone(),
-                &Limits::default(),
-            );
+            let (warm, out) = run(&p, &mut session, &Limits::default());
+            let (cold, _) = run(&p, &mut Session::default(), &Limits::default());
             assert_eq!(cold.coverage, warm.coverage);
             assert_eq!(warm.coverage.values().next().unwrap().missing, missing);
             if missing > 0 {
@@ -368,7 +339,7 @@ fn sessions_refresh_domains_facts_and_selected_assumptions_without_changing_iden
             let p = load_text(&format!(
                 "sort S; const a,b:S; input i(x:S); relation p(); p() :- !i(a); p() :- !i(b); assumption allowed: at_most_one(i, group_by: ()); obligation covered: at_least_one(p, group_by: ()); verification checks {{ assumptions: [{selection}]; obligations: [covered]; }}"
             ));
-            let (result, _) = run(&p, &mut session, backend.clone(), &Limits::default());
+            let (result, _) = run(&p, &mut session, &Limits::default());
             assert_eq!(result.coverage.values().next().unwrap().missing, missing);
         }
     }
@@ -407,7 +378,7 @@ fn coverage_is_obligation_only_and_grouping_validation_is_shared() {
 fn included_coverage_uses_each_consumers_facts_domains_and_context_identity() {
     use std::collections::{BTreeMap, BTreeSet};
     let library = "namespace lib; sort S; const a,b:S; relation p(x:S); obligation covered: at_least_one(p, group_by: (x)); verification checks { assumptions: []; obligations: [covered]; }";
-    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+    {
         let roots = BTreeMap::from([
             (
                 "lib".into(),
@@ -445,12 +416,7 @@ fn included_coverage_uses_each_consumers_facts_domains_and_context_identity() {
                 &documents,
             )
             .unwrap();
-            let (result, out) = run(
-                &p,
-                &mut Session::default(),
-                backend.clone(),
-                &Limits::default(),
-            );
+            let (result, out) = run(&p, &mut Session::default(), &Limits::default());
             assert_eq!(result.coverage.values().next().unwrap().missing, missing);
             if missing > 0 {
                 assert_eq!(out.diagnostics.len(), 1);

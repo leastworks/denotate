@@ -204,7 +204,7 @@ origins still reloads with full current-text provenance.
 ## Commands
 
 ```sh
-just check-den <folder-or-den.root> [--sat] [--verification QUALIFIED_NAME]
+just check-den <folder-or-den.root> [--verification QUALIFIED_NAME]
 just export-test-dsl <out-dir> <file.testdsl>…   # export a DSL program as .den
 ```
 

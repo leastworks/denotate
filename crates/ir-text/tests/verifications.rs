@@ -15,7 +15,7 @@ fn single(text: &str) -> LoadedProgram {
 }
 fn checked(p: &LoadedProgram) -> Vec<(String, Vec<ScopedResult>)> {
     let limits = Limits::default();
-    p.verification_requests(&limits, BackendIdentity::bdd())
+    p.verification_requests(&limits)
         .unwrap()
         .into_iter()
         .map(|(key, request)| {
@@ -42,7 +42,7 @@ fn explicit_selection_and_no_implicit_verification() {
     let unconfigured = single(BODY);
     assert!(
         unconfigured
-            .verification_requests(&Limits::default(), BackendIdentity::bdd())
+            .verification_requests(&Limits::default())
             .unwrap()
             .is_empty()
     );
@@ -62,10 +62,10 @@ fn explicit_selection_and_no_implicit_verification() {
         [ScopedResult::Counterexample(..)]
     ));
     assert!(
-        p.verification_requests(&Limits::default(), BackendIdentity::sat())
+        p.verification_requests(&Limits::default())
             .unwrap()
             .iter()
-            .all(|(_, r)| r.backend == BackendIdentity::sat())
+            .all(|(_, r)| r.backend == BackendIdentity::bdd())
     );
 }
 #[test]
@@ -262,9 +262,7 @@ fn closure_verifications_run_once_and_consumer_can_add_its_own() {
         ),
     ];
     let p = load(&membership, &docs).unwrap();
-    let requests = p
-        .verification_requests(&Limits::default(), BackendIdentity::bdd())
-        .unwrap();
+    let requests = p.verification_requests(&Limits::default()).unwrap();
     assert_eq!(requests.len(), 2);
     assert_ne!(requests[0].0, requests[1].0);
     assert_eq!(requests[0].1.obligations, requests[1].1.obligations);

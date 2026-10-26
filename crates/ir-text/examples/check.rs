@@ -8,7 +8,7 @@ use denotate_ir_text::{filesystem, index, load_with_resolver};
 use std::{collections::BTreeSet, fmt::Write};
 
 type Failure = (u8, String);
-const USAGE: &str = "Usage: check ROOT_FOLDER_OR_DEN.ROOT [--sat] [--verification QUALIFIED_NAME]";
+const USAGE: &str = "Usage: check ROOT_FOLDER_OR_DEN.ROOT [--verification QUALIFIED_NAME]";
 
 fn format_errors(ds: Vec<denotate_ir_text::Diagnostic>) -> String {
     ds.iter()
@@ -33,11 +33,10 @@ fn name(namespace: &denotate_ir::Namespace, text: &str) -> String {
 fn run(args: impl IntoIterator<Item = String>, output: &mut String) -> Result<u8, Failure> {
     let mut args = args.into_iter();
     let root = args.next().ok_or((2, USAGE.into()))?;
-    let mut backend = BackendIdentity::bdd();
+    let backend = BackendIdentity::bdd();
     let mut selection = None;
     while let Some(option) = args.next() {
         match option.as_str() {
-            "--sat" => backend = BackendIdentity::sat(),
             "--verification" if selection.is_none() => {
                 selection = Some(args.next().ok_or((2, USAGE.into()))?)
             }
@@ -83,7 +82,7 @@ fn run(args: impl IntoIterator<Item = String>, output: &mut String) -> Result<u8
     let limits = Limits::default();
     let operations = OperationalLimits::from(&limits);
     let mut requests = p
-        .verification_requests(&limits, backend)
+        .verification_requests(&limits)
         .map_err(|e| (2, e.to_string()))?;
     let checked = requests
         .iter()
@@ -295,7 +294,8 @@ mod tests {
     const RESTRICTED: &str = "verification v { assumptions: [a]; obligations: [o]; }";
     #[test]
     fn codes_distinguish_proofs_findings_incomplete_and_unconfigured() {
-        for backend in [vec![], vec!["--sat"]] {
+        {
+            let backend: Vec<&str> = vec![];
             let proved = Fixture::new(&format!("{BODY} {RESTRICTED}"));
             let (code, output) = proved.run(&backend);
             assert_eq!(code, 0, "{output}");
@@ -357,7 +357,8 @@ mod tests {
     }
     #[test]
     fn coverage_cli_proofs_failures_and_empty_grouping_notes() {
-        for args in [&[][..], &["--sat"][..]] {
+        {
+            let args: &[&str] = &[];
             for (body, code) in [
                 ("sort S; const a,b:S; relation p(x:S);", 1),
                 ("sort S; const a,b:S; relation p(x:S); p(a); p(b);", 0),
@@ -377,6 +378,9 @@ mod tests {
     }
     #[test]
     fn invalid_input_and_operational_failure_have_distinct_codes() {
+        let (code, output) = Fixture::new("").run(&["--sat"]);
+        assert_eq!(code, 2);
+        assert!(output.contains("Unknown or repeated argument"));
         let invalid = Fixture::new("verification v { assumptions: []; }");
         assert_eq!(invalid.run(&[]).0, 2);
         fs::write(invalid.0.join("den.root"), "not json").unwrap();

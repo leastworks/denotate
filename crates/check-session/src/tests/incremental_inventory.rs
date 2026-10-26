@@ -493,7 +493,7 @@ mod plans;
 #[path = "owned.rs"]
 mod owned;
 
+#[path = "bdd_guarantees.rs"]
+mod bdd_guarantees;
 #[path = "grounding.rs"]
 mod grounding;
-#[path = "sat.rs"]
-mod sat;

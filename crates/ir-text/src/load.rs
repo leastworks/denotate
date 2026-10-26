@@ -3,7 +3,7 @@ use crate::{
     ast::{self, Atom as AstAtom, Decl, Name, Scope, Statement, namespace_key},
     error,
 };
-use denotate_check::{BackendIdentity, CheckRequest, Domains, Limits};
+use denotate_check::{CheckRequest, Domains, Limits};
 use denotate_ir::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -42,20 +42,18 @@ impl LoadedProgram {
     pub fn verification_requests(
         &self,
         limits: &Limits,
-        backend: BackendIdentity,
     ) -> std::result::Result<Vec<(VerificationKey, CheckRequest)>, denotate_check::CheckError> {
         let mut requests = self
             .corpus
             .verifications()
             .map(|v| {
-                let mut request = CheckRequest::for_verification(
+                let request = CheckRequest::for_verification(
                     &self.corpus,
                     &self.keys,
                     &self.domains,
                     v.id,
                     limits,
                 )?;
-                request.backend = backend.clone();
                 Ok((
                     request.verification.clone().expect("named request"),
                     request,

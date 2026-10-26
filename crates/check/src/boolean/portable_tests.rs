@@ -2,6 +2,75 @@
 use super::*;
 use denotate_ir::{QualifiedKey, RelationKey};
 
+#[test]
+fn constrained_queries_match_exhaustive_boolean_worlds_without_mutating_the_formula() {
+    let selected: Vec<_> = ["a", "b", "c"]
+        .into_iter()
+        .map(|name| AtomKey {
+            relation: RelationKey::Named(QualifiedKey::new("boolean-oracle", name)),
+            arguments: vec![],
+        })
+        .collect();
+    let current = Current::new(&selected, false);
+    let ctx = current.context();
+    let limits = &current.limits;
+    let variables: Vec<_> = current
+        .atoms
+        .values()
+        .map(|atom| ctx.input(atom, limits).unwrap())
+        .collect();
+    // Preserve the retired solver's independent CNF oracle on the BDD query path.
+    for seed in 0..128_u32 {
+        let mut rng = seed + 1;
+        let mut clauses = Vec::new();
+        let mut formula = ctx.true_condition();
+        for _ in 0..5 {
+            let mut literals = Vec::new();
+            let mut clause = ctx.false_condition();
+            for _ in 0..3 {
+                rng = rng.wrapping_mul(1664525).wrapping_add(1013904223);
+                let (index, positive) = ((rng as usize >> 4) % 3, rng & 1 != 0);
+                literals.push((index, positive));
+                let literal = if positive {
+                    variables[index].clone()
+                } else {
+                    ctx.not(&variables[index], limits).unwrap()
+                };
+                clause = ctx.or(&clause, &literal, limits).unwrap();
+            }
+            clauses.push(literals);
+            formula = ctx.and(&formula, &clause, limits).unwrap();
+        }
+        let mut any = false;
+        for mask in 0..8 {
+            let expected = clauses.iter().all(|clause| {
+                clause
+                    .iter()
+                    .any(|(index, positive)| (mask & (1 << index) != 0) == *positive)
+            });
+            any |= expected;
+            let mut restricted = formula.clone();
+            for (index, variable) in variables.iter().enumerate() {
+                let literal = if mask & (1 << index) != 0 {
+                    variable.clone()
+                } else {
+                    ctx.not(variable, limits).unwrap()
+                };
+                restricted = ctx.and(&restricted, &literal, limits).unwrap();
+            }
+            assert_eq!(
+                ctx.witness(&restricted, limits).unwrap().is_some(),
+                expected
+            );
+        }
+        assert_eq!(
+            ctx.witness(&formula, limits).unwrap().is_some(),
+            any,
+            "an unsatisfiable restricted query must not poison the original formula"
+        );
+    }
+}
+
 struct Current {
     program: GroundProgram,
     keys: denotate_ir::SemanticKeys,

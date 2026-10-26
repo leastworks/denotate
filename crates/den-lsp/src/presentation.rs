@@ -137,11 +137,7 @@ mod tests {
         .unwrap();
         let limits = Limits::default();
         let ops = OperationalLimits::from(&limits);
-        let request = program
-            .verification_requests(&limits, BackendIdentity::bdd())
-            .unwrap()
-            .remove(0)
-            .1;
+        let request = program.verification_requests(&limits).unwrap().remove(0).1;
         let RequestPreparation::Complete(prepared) = request
             .prepare(&program.corpus, &program.keys, &ops)
             .unwrap()

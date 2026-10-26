@@ -1,6 +1,6 @@
 use denotate_check::{
-    Accounted, BackendIdentity, Limits, LocalCheckOutcome, OperationalLimits, RequestPreparation,
-    ScopedResult, ScopedResults,
+    Accounted, Limits, LocalCheckOutcome, OperationalLimits, RequestPreparation, ScopedResult,
+    ScopedResults,
 };
 use denotate_check_session::Session;
 use denotate_ir::{Literal, Namespace, Term};
@@ -18,18 +18,10 @@ fn load(root: &str, documents: &[SourceFile]) -> denotate_ir_text::Result<Loaded
 fn single(text: &str) -> LoadedProgram {
     load("m", &[source("m", text)]).unwrap()
 }
-fn check(
-    p: &LoadedProgram,
-    session: &mut Session,
-    backend: BackendIdentity,
-) -> Accounted<ScopedResults> {
+fn check(p: &LoadedProgram, session: &mut Session) -> Accounted<ScopedResults> {
     let limits = Limits::default();
     let ops = OperationalLimits::from(&limits);
-    let request = p
-        .verification_requests(&limits, backend)
-        .unwrap()
-        .remove(0)
-        .1;
+    let request = p.verification_requests(&limits).unwrap().remove(0).1;
     let RequestPreparation::Complete(prepared) =
         session.prepare(&request, &p.corpus, &p.keys, &ops).unwrap()
     else {
@@ -65,19 +57,13 @@ fn explicit_domains_preserve_worlds_and_unused_declarations() {
     assert_eq!(wide.corpus.constants().count(), 2);
     assert_eq!(narrow.corpus.constants().count(), 2);
     assert!(narrow.domains.values().any(Vec::is_empty));
-    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+    {
         let mut session = Session::default();
-        assert_eq!(
-            counterexamples(&check(&wide, &mut session, backend.clone())),
-            1
-        );
-        let edited = check(&narrow, &mut session, backend.clone());
-        assert_eq!(
-            edited,
-            check(&narrow, &mut Session::default(), backend.clone())
-        );
+        assert_eq!(counterexamples(&check(&wide, &mut session)), 1);
+        let edited = check(&narrow, &mut session);
+        assert_eq!(edited, check(&narrow, &mut Session::default()));
         assert_eq!(counterexamples(&edited), 0);
-        assert_eq!(counterexamples(&check(&wide, &mut session, backend)), 1);
+        assert_eq!(counterexamples(&check(&wide, &mut session)), 1);
     }
 }
 
@@ -111,9 +97,9 @@ fn imported_assumptions_are_explicit_and_active() {
             .ownership,
         "user"
     );
-    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+    {
         let mut session = Session::default();
-        let result = check(&p, &mut session, backend.clone());
+        let result = check(&p, &mut session);
         assert_eq!(result.value.context.constraints.len(), 1);
         assert_eq!(counterexamples(&result), 0);
         assert!(
@@ -130,9 +116,9 @@ fn imported_assumptions_are_explicit_and_active() {
             .into();
         edited[0].revision += 1;
         let edited = load("root", &edited).unwrap();
-        let reused = check(&edited, &mut session, backend.clone());
+        let reused = check(&edited, &mut session);
         assert_eq!(counterexamples(&reused), 1);
-        assert_eq!(reused, check(&edited, &mut Session::default(), backend));
+        assert_eq!(reused, check(&edited, &mut Session::default()));
     }
 }
 
@@ -167,18 +153,11 @@ fn whole_export_root_sees_cross_module_conflicts_and_shared_constants() {
         );
     }
     assert_eq!(p.documents.len(), 5);
-    assert_eq!(
-        counterexamples(&check(&p, &mut Session::default(), BackendIdentity::bdd())),
-        1
-    );
+    assert_eq!(counterexamples(&check(&p, &mut Session::default())), 1);
     let subset = [docs[0].clone(), docs[1].clone(), docs[2].clone()];
     let constituent = load("a", &subset).unwrap();
     assert_eq!(
-        counterexamples(&check(
-            &constituent,
-            &mut Session::default(),
-            BackendIdentity::bdd()
-        )),
+        counterexamples(&check(&constituent, &mut Session::default())),
         0
     );
     let index = roots(&[membership("root", &docs)]).unwrap();
@@ -326,8 +305,8 @@ fn stable_keys_and_warm_answers_ignore_trivia_and_location_syntax() {
         .collect::<Vec<_>>();
     assert_ne!(rules[0], rules[1]);
     let mut session = Session::default();
-    let a = check(&cold, &mut session, BackendIdentity::bdd());
-    let b = check(&warm, &mut session, BackendIdentity::bdd());
+    let a = check(&cold, &mut session);
+    let b = check(&warm, &mut session);
     assert_eq!(a, b);
     assert!(session.stats().evaluation_hits > 0);
     assert_eq!(warm.documents[0].location_syntax.len(), 3);
@@ -469,18 +448,18 @@ fn value_encoding_fixture_checks_and_rule_edits_refresh_answers() {
         source("root", include_str!("../fixtures/root.den")),
     ];
     let p = load("root", &docs).unwrap();
-    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+    {
         let mut session = Session::default();
-        let result = check(&p, &mut session, backend.clone());
+        let result = check(&p, &mut session);
         assert_eq!(counterexamples(&result), 1);
         assert_eq!(result.value.context.constraints.len(), 1);
         let mut edited = docs.clone();
         edited[1].text = edited[1].text.replace("mapped_to(j, a);", "").into();
         edited[1].revision += 1;
         let edited = load("root", &edited).unwrap();
-        let result = check(&edited, &mut session, backend.clone());
+        let result = check(&edited, &mut session);
         assert_eq!(counterexamples(&result), 0);
-        assert_eq!(result, check(&edited, &mut Session::default(), backend));
+        assert_eq!(result, check(&edited, &mut Session::default()));
     }
 }
 
@@ -904,12 +883,12 @@ fn moving_constructs_between_files_preserves_resolved_keys_and_warm_answers() {
         moved.corpus.rules().next().unwrap().id,
         moved.corpus.rules().last().unwrap().id
     );
-    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+    {
         let mut session = Session::default();
-        let first = check(&original, &mut session, backend.clone());
-        let warm = check(&moved, &mut session, backend.clone());
+        let first = check(&original, &mut session);
+        let warm = check(&moved, &mut session);
         assert_eq!(first.value, warm.value);
-        assert_eq!(warm, check(&moved, &mut Session::default(), backend));
+        assert_eq!(warm, check(&moved, &mut Session::default()));
     }
 }
 

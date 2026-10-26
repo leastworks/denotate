@@ -8,7 +8,7 @@ let client;
 exports.activate = async (context) => {
   client = new LanguageClient('denotate', 'Denotate',
     { command: context.asAbsolutePath(process.platform === 'win32' ? 'dist/denotate-lsp.exe' : 'dist/denotate-lsp'), args: [] },
-    { documentSelector: [{ scheme: 'file', language: 'denotate' }], initializationOptions: { originSnapshotBridge: true, denotate: { backend: vscode.workspace.getConfiguration('denotate').get('backend', 'bdd') } } });
+    { documentSelector: [{ scheme: 'file', language: 'denotate' }], initializationOptions: { originSnapshotBridge: true } });
   context.subscriptions.push(client);
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 20);
   context.subscriptions.push(status);
@@ -90,9 +90,6 @@ exports.activate = async (context) => {
   client.onNotification('denotate/originSubscriptions', ({ uris }) => { origins = new Set(uris); refreshOriginWatchers(); });
   client.onNotification('denotate/rootsChanged', ({ watchFolders }) => { refreshRootWatchers(watchFolders); void refreshStatus(); });
   context.subscriptions.push(
-    vscode.workspace.onDidChangeConfiguration(event => {
-      if (event.affectsConfiguration('denotate.backend')) void client.sendNotification('workspace/didChangeConfiguration', { settings: { denotate: { backend: vscode.workspace.getConfiguration('denotate').get('backend', 'bdd') } } });
-    }),
     vscode.workspace.onDidOpenTextDocument(doc => { void syncManifest(doc); void originChanged(doc.uri); }),
     vscode.workspace.onDidChangeTextDocument(({ document }) => { void syncManifest(document); void originChanged(document.uri); }),
     vscode.workspace.onDidSaveTextDocument(doc => { void syncManifest(doc); void originChanged(doc.uri); }),

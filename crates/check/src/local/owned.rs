@@ -370,16 +370,6 @@ pub fn evaluate_owned_local(
     let limits = input.limits.with_operations(operations);
     let mut budget = Budget::tracked(&limits);
     let start = Instant::now();
-    if input.uses_sat() {
-        operations.cancellation.check()?;
-        // SAT owns the full computation in the answer query. This empty stage
-        // preserves the existing receipt graph without evaluating any BDDs.
-        return Ok(OwnedEvaluation {
-            value: None,
-            failure: None,
-            receipt: receipt(input, &budget, false),
-        });
-    }
     let evaluated = (|| {
         let rt = Runtime::new(input, &mut budget, true)?;
         #[cfg(any(test, feature = "test-support"))]
@@ -432,9 +422,6 @@ pub fn answer_owned_local(
     operations: &OperationalLimits,
     metrics: &mut LocalMetrics,
 ) -> Result<OwnedAnswer> {
-    if input.uses_sat() {
-        return super::sat::answer(input, operations, metrics);
-    }
     let limits = input.limits.with_operations(operations);
     let mut budget = Budget::tracked(&limits);
     let start = Instant::now();

@@ -118,8 +118,7 @@ highlights with one finding identity. Publication identity is the full
 distinct even with identical assumptions. Messages do not embed context labels;
 unsupported and inconclusive findings use one
 primary with the other producers related. Evidence kinds are
-`replayed-counterexample`, `replayed-coverage-counterexamples`, `no-meaning-observation`, `unfounded-support-world`
-(never an overlap witness), `rewrite-proof` and `no-witness`. Rewrite proofs do not
+`replayed-counterexample`, `replayed-coverage-counterexamples`, `no-meaning-observation`, `rewrite-proof` and `no-witness`. Rewrite proofs do not
 authorize edits.
 
 ### Coverage results
@@ -154,10 +153,13 @@ consistency-only handling also apply unchanged.
 ### Configuration
 
 `initializationOptions.denotate` or
-`workspace/didChangeConfiguration {settings: {denotate: {backend, timeoutMs}}}`:
-`backend` is `bdd` (default) or `sat`; `timeoutMs` defaults to 10000 and bounds each verification's check separately, so a
+`workspace/didChangeConfiguration {settings: {denotate: {timeoutMs}}}`:
+`timeoutMs` defaults to 10000 and bounds each verification's check separately, so a
 program with several verifications may take that long per verification. An update
-replaces the whole object. The VS Code setting is `denotate.backend`.
+replaces the whole object. There is no backend setting: BDD is the only implementation.
+The `backend` fields in status and summaries remain fixed BDD metadata for compatibility
+and result identity; they do not select an algorithm. Obsolete backend configuration
+properties are ignored like other unknown configuration properties.
 
 ### Scheduling
 

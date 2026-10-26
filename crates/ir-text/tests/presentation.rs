@@ -4,14 +4,10 @@ use denotate_ir_text::*;
 use denotate_presentation::{Kind, Severity};
 use std::collections::{BTreeMap, BTreeSet};
 
-fn checked(p: &LoadedProgram, backend: BackendIdentity) -> presentation::Presentation {
+fn checked(p: &LoadedProgram) -> presentation::Presentation {
     let limits = Limits::default();
     let ops = OperationalLimits::from(&limits);
-    let request = p
-        .verification_requests(&limits, backend)
-        .unwrap()
-        .remove(0)
-        .1;
+    let request = p.verification_requests(&limits).unwrap().remove(0).1;
     let mut session = Session::default();
     let RequestPreparation::Complete(prepared) =
         session.prepare(&request, &p.corpus, &p.keys, &ops).unwrap()
@@ -68,9 +64,9 @@ const LIB: &str = "sort S; const a,b: S; relation p(x:S); obligation unique: at_
 
 #[test]
 fn consumer_locations_and_labeled_fallback_do_not_change_library_home() {
-    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+    {
         let app = program("file:///app/den.root", "p(a); p(b);", LIB);
-        let out = checked(&app, backend.clone());
+        let out = checked(&app);
         let conflicts = out
             .diagnostics
             .iter()
@@ -95,7 +91,7 @@ fn consumer_locations_and_labeled_fallback_do_not_change_library_home() {
             );
         }
         let second = program("file:///second/den.root", "p(a); p(b);", LIB);
-        let second_out = checked(&second, backend.clone());
+        let second_out = checked(&second);
         assert!(
             second_out
                 .diagnostics
@@ -108,18 +104,18 @@ fn consumer_locations_and_labeled_fallback_do_not_change_library_home() {
                 )
         );
         let library = program("file:///lib/den.root", "", LIB);
-        assert!(checked(&library, backend.clone()).diagnostics.is_empty());
+        assert!(checked(&library).diagnostics.is_empty());
         let bad_library = format!("{LIB} p(a); p(b);");
         let library = program("file:///lib/den.root", "", &bad_library);
         assert!(
-            checked(&library, backend.clone())
+            checked(&library)
                 .diagnostics
                 .iter()
                 .filter(|d| d.kind == Kind::Counterexample)
                 .all(|d| !d.fallback)
         );
         let consumer = program("file:///app/den.root", "relation unused();", &bad_library);
-        let out = checked(&consumer, backend);
+        let out = checked(&consumer);
         let d = out
             .diagnostics
             .iter()
@@ -144,7 +140,7 @@ fn consumer_locations_and_labeled_fallback_do_not_change_library_home() {
             "relation unused();",
             &bad_library,
         );
-        let other = checked(&second, BackendIdentity::bdd());
+        let other = checked(&second);
         assert_ne!(
             d.data(&consumer.keys).unwrap()["program"],
             other.diagnostics[0].data(&second.keys).unwrap()["program"]
@@ -167,7 +163,7 @@ fn current_and_embedded_denotate_views_stay_separate_and_missing_origins_do_not_
             .attach(&p.corpus, &p.sources, rule.id, [Origin::new(span)])
             .unwrap();
     }
-    let out = checked(&p, BackendIdentity::bdd());
+    let out = checked(&p);
     for d in out
         .diagnostics
         .iter()
@@ -181,10 +177,7 @@ fn current_and_embedded_denotate_views_stay_separate_and_missing_origins_do_not_
         );
     }
     p.embedded.provenance = denotate_ir::Provenance::new();
-    assert_eq!(
-        out.diagnostics.len(),
-        checked(&p, BackendIdentity::bdd()).diagnostics.len()
-    );
+    assert_eq!(out.diagnostics.len(), checked(&p).diagnostics.len());
 }
 
 #[test]
@@ -197,7 +190,7 @@ fn no_meaning_and_unsupported_are_not_success_or_overlap() {
         ),
     ] {
         let p = program("file:///app/den.root", rules, LIB);
-        let out = checked(&p, BackendIdentity::bdd());
+        let out = checked(&p);
         assert_ne!(out.status["state"], "proved");
         assert!(out.diagnostics.iter().any(|d| d.kind == expected));
         if expected == Kind::UnsupportedRegion {
@@ -239,55 +232,44 @@ fn exhausted_request_keeps_backend_assumptions_and_reason_in_status() {
         LIB,
     );
     let limits = Limits::default();
-    let request = p
-        .verification_requests(&limits, BackendIdentity::sat())
-        .unwrap()
-        .remove(1)
-        .1;
+    let request = p.verification_requests(&limits).unwrap().remove(1).1;
     let status = denotate_presentation::summary(&request.exhausted(Inconclusive {
         phase: "grounding",
         resource: "deadline",
     }));
     assert_eq!(status["state"], "incomplete");
-    assert_eq!(status["backend"]["backend"], "sat");
+    assert_eq!(status["backend"]["backend"], "bdd");
     assert_eq!(status["activeAssumptions"].as_array().unwrap().len(), 1);
     assert_eq!(status["unfinished"]["resource"], "deadline");
 }
 
 #[test]
-fn sat_unfounded_world_is_exposed_separately_from_replayed_counterexamples() {
+fn recursive_support_presents_only_replayed_counterexamples() {
     let cases = [
         "d(a) :- i(a); d(a) :- d(a); d(b) :- i(b);",
         "d(a) :- i(a); d(a) :- d(a); d(b) :- i(a), !d(a);",
         "d(a) :- i(a); d(b) :- d(a); d(a) :- d(b);",
     ];
-    let mut unsupported = 0;
+    let mut counterexamples = 0;
     for rules in cases {
         let text = format!(
             "sort S; const a,b:S; input i(x:S); relation d(x:S); {rules} obligation unique: at_most_one(d, group_by: ()); verification checks {{ assumptions: []; obligations: [unique]; }}"
         );
-        let doc = SourceFile::new("file:///sat.den", 1, text);
+        let doc = SourceFile::new("file:///recursive.den", 1, text);
         let p = load(
             &ProgramMembership::single("file:///den.root", [doc.uri.clone()]),
             &[doc],
         )
         .unwrap();
-        let out = checked(&p, BackendIdentity::sat());
+        let out = checked(&p);
         for d in &out.diagnostics {
-            if d.evidence["kind"] == "unfounded-support-world" {
-                unsupported += 1;
-                assert_eq!(d.kind, Kind::UnsupportedGroup);
-                assert!(
-                    d.notes
-                        .iter()
-                        .any(|s| s.contains("not an overlap counterexample"))
-                );
-                assert!(d.evidence.get("tuples").is_none());
-                assert!(d.evidence.get("world").is_some());
-            }
+            assert_eq!(d.kind, Kind::Counterexample);
+            assert_eq!(d.evidence["kind"], "replayed-counterexample");
+            assert!(d.evidence["tuples"].as_array().unwrap().len() >= 2);
+            counterexamples += 1;
         }
     }
-    assert!(unsupported > 0);
+    assert!(counterexamples > 0);
 }
 
 #[test]
@@ -310,7 +292,7 @@ fn phase_exhaustion_and_rewrite_proofs_remain_distinct() {
     let report = meaning
         .verify_with_phase_limits(&limits, &exhausted, &limits)
         .unwrap();
-    let findings = denotate_presentation::interpret(&p.corpus, &report, None).unwrap();
+    let findings = denotate_presentation::interpret(&p.corpus, &report).unwrap();
     assert!(
         findings
             .iter()
@@ -339,7 +321,7 @@ fn phase_exhaustion_and_rewrite_proofs_remain_distinct() {
         "input i(); relation x(); x() :- i(), !i(), !x();",
         LIB,
     );
-    let out = checked(&p, BackendIdentity::bdd());
+    let out = checked(&p);
     assert!(out.diagnostics.iter().any(|f| f.kind == Kind::Rewrite));
     assert!(
         !out.diagnostics
@@ -358,7 +340,7 @@ fn phase_exhaustion_and_rewrite_proofs_remain_distinct() {
         "relation unused();",
         &format!("{LIB} input i(); relation x(); x() :- i(), !i(), !x();"),
     );
-    let fallback = checked(&library_only, BackendIdentity::bdd());
+    let fallback = checked(&library_only);
     assert!(
         fallback.status["findings"]
             .as_array()
@@ -379,8 +361,8 @@ fn a_consumers_participating_constant_declarations_are_valid_primaries() {
         "const a,b:S;",
         "sort S; input i(x:S); relation p(x:S); p(X) :- i(X); obligation unique: at_most_one(p, group_by: ()); verification checks { assumptions: []; obligations: [unique]; }",
     );
-    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
-        let out = checked(&p, backend);
+    {
+        let out = checked(&p);
         let conflicts = out
             .diagnostics
             .iter()

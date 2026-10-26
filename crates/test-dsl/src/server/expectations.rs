@@ -156,11 +156,10 @@ fn capture(uncached: bool) -> Vec<Value> {
 }
 
 /// Evidence kinds whose diagnostic content depends on a checker-selected input world.
-const WITNESS_EVIDENCE: [&str; 4] = [
+const WITNESS_EVIDENCE: [&str; 3] = [
     "replayed-counterexample",
     "replayed-coverage-counterexamples",
     "no-meaning-observation",
-    "unfounded-support-world",
 ];
 
 /// Visible diagnostics in emitted order, except those built from a selected witness.

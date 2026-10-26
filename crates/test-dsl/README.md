@@ -30,7 +30,7 @@ second <- second_input when input_value(kind) is 2 and not available(first);
    (name, kind, duplicate, literal) produce diagnostics and no IR; construction or
    attribution failures are creator-facing errors. Conditions go through
    `denotate-normalize` recipes, cached and installed fresh per snapshot.
-3. **Check** through `denotate-check-session` (BDD or SAT).
+3. **Check** through `denotate-check-session` (BDD).
 4. **Present** with test DSL wording on top of `denotate-presentation`: conflicting
    inputs, quoted guards, example observations, related locations, and explicit
    safe-removal eligibility for redundant guards (rewrite warnings).

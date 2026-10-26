@@ -21,33 +21,21 @@ use std::collections::BTreeMap;
 
 #[derive(Clone, PartialEq, Eq)]
 pub struct Config {
-    pub backend: BackendIdentity,
     pub timeout_ms: u64,
 }
 impl Default for Config {
     fn default() -> Self {
-        Self {
-            backend: BackendIdentity::bdd(),
-            timeout_ms: 10_000,
-        }
+        Self { timeout_ms: 10_000 }
     }
 }
 impl Config {
     pub fn read(value: &Value) -> std::result::Result<Self, &'static str> {
-        let backend = match value["backend"].as_str().unwrap_or("bdd") {
-            "bdd" => BackendIdentity::bdd(),
-            "sat" => BackendIdentity::sat(),
-            _ => return Err("Expected denotate.backend to be bdd or sat"),
-        };
         let timeout_ms = value
             .get("timeoutMs")
             .map(|v| v.as_u64().ok_or("Expected nonnegative timeoutMs"))
             .transpose()?
             .unwrap_or(10_000);
-        Ok(Self {
-            backend,
-            timeout_ms,
-        })
+        Ok(Self { timeout_ms })
     }
 }
 #[derive(Clone)]
@@ -99,7 +87,7 @@ fn check(
             .map_err(Failure::Invalid)?;
     job.limits.cancellation.check()?;
     let mut publication = presentation::configuration(&program).map_err(Failure::Internal)?;
-    let requests = program.verification_requests(&job.limits, s.config.backend.clone())?;
+    let requests = program.verification_requests(&job.limits)?;
     for (i, (_, request)) in requests.iter().enumerate() {
         job.limits.cancellation.check()?;
         // Each context gets its own operation limits; a failed context cannot
@@ -262,7 +250,7 @@ impl Checking {
         Ok(())
     }
     pub fn status(&self, root: &str, status: &mut Value) {
-        status["backend"] = json!(self.config.backend.backend);
+        status["backend"] = json!("bdd");
         status["checking"] = json!("blocked");
         status["verifications"] = Value::Null;
         status["uncheckedObligations"] = Value::Null;
@@ -503,7 +491,7 @@ impl Server {
                 .iter()
                 .map(|(r, n)| (r, json!({"files":n.files,"libraries":n.libraries})))
                 .collect::<BTreeMap<_, _>>();
-            let key = json!({"members":observations,"manifests":manifests,"graph":graph,"origins":self.bridge.snapshot_key(&files.iter().map(|f|f.uri.clone()).collect::<Vec<_>>()),"backend":self.checking.config.backend.backend,"timeoutMs":self.checking.config.timeout_ms});
+            let key = json!({"members":observations,"manifests":manifests,"graph":graph,"origins":self.bridge.snapshot_key(&files.iter().map(|f|f.uri.clone()).collect::<Vec<_>>()),"timeoutMs":self.checking.config.timeout_ms});
             let label = Url::parse(&root)
                 .ok()
                 .and_then(|u| u.to_file_path().ok())

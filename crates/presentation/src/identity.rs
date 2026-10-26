@@ -158,11 +158,6 @@ pub fn evidence_data(finding: &crate::Finding<'_>, keys: &SemanticKeys) -> Resul
         .filter(|c| c.role == crate::Role::Producer)
         .map(|c| Ok(occurrence(keys.bindings().key(c.occurrence)?)))
         .collect::<Result<Vec<_>>>()?;
-    if let Some(world) = &finding.unsupported_world {
-        return Ok(
-            json!({"kind":"unfounded-support-world","world":{"present":world.present.iter().map(atom_data).collect::<Vec<_>>(),"absent":world.absent.iter().map(atom_data).collect::<Vec<_>>()},"producers":producers}),
-        );
-    }
     Ok(match &finding.evidence {
         crate::Evidence::Coverage(c) => json!({
             "kind":if c.missing > 0 {"replayed-coverage-counterexamples"} else {"no-witness"},
@@ -193,9 +188,6 @@ pub fn evidence_data(finding: &crate::Finding<'_>, keys: &SemanticKeys) -> Resul
 fn result_reason(result: &ScopedResult) -> Option<Value> {
     match result {
         ScopedResult::Inconclusive(r) => Some(json!({"phase":r.phase,"resource":r.resource})),
-        ScopedResult::Unsupported(UnsupportedReason::UnfoundedSupport(_)) => {
-            Some(json!({"kind":"unfounded-support"}))
-        }
         ScopedResult::Unsupported(UnsupportedReason::UnsettledNegativeCycle) => {
             Some(json!({"kind":"unsettled-negative-cycle"}))
         }

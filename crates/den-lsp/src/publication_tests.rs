@@ -314,7 +314,7 @@ fn summary(mut s: Value, keys: &BTreeMap<String, Value>) -> Value {
 }
 
 #[test]
-fn published_parity_119_programs_bdd_sat_cold_warm_and_exact_origins() {
+fn published_parity_corpus_bdd_cold_warm_and_exact_origins() {
     let mut entries = cases();
     entries.push((
         "exact-span".into(),
@@ -356,17 +356,9 @@ fn published_parity_119_programs_bdd_sat_cold_warm_and_exact_origins() {
         let map = correspondence::compare(&export, &loaded, base.trim_end_matches('/'), true);
         let keys = protocol_keys(&p.corpus, &p.keys, &loaded, &map.ids);
         let origins = BTreeMap::from([(source.uri.clone(), source.text.to_string())]);
-        for backend in ["bdd", "sat"] {
+        {
             let mut den = Client::start(&dir.0, true, origins.clone());
             let mut dsl = Client::start(&dir.0, false, BTreeMap::new());
-            den.notify(
-                "workspace/didChangeConfiguration",
-                json!({"settings":{"denotate":{"backend":backend}}}),
-            );
-            dsl.notify(
-                "workspace/didChangeConfiguration",
-                json!({"settings":{"testdsl":{"backend":backend}}}),
-            );
             let mut previous = None;
             for warm in 0..2 {
                 let version = source.revision + warm;
@@ -396,7 +388,7 @@ fn published_parity_119_programs_bdd_sat_cold_warm_and_exact_origins() {
                 }
                 let left = findings(&dsl.published, &source.uri, &BTreeMap::new());
                 let right = findings(&den.published, &membership.root, &keys);
-                assert_eq!(left, right, "{id} {backend} warm={warm}");
+                assert_eq!(left, right, "{id} warm={warm}");
                 let stats = dsl.call("denotate/test/checkingStats", json!({}));
                 let ds = summary(
                     stats["finished"].as_array().unwrap().last().unwrap()["summary"].clone(),
@@ -405,7 +397,7 @@ fn published_parity_119_programs_bdd_sat_cold_warm_and_exact_origins() {
                 let status=den.call("denotate/roots",json!({"uri":files.iter().find(|f|f.uri.ends_with("sources/program.den")).unwrap().uri}));
                 assert_eq!(status["checking"], "complete", "{id}: {status}");
                 let ns = summary(status["verifications"][0]["summary"].clone(), &keys);
-                assert_eq!(ds, ns, "{id} {backend} summaries");
+                assert_eq!(ds, ns, "{id} summaries");
                 if let Some((old_findings, old_summary)) = &previous {
                     assert_eq!(&left, old_findings);
                     assert_eq!(&ds, old_summary);
@@ -417,25 +409,13 @@ fn published_parity_119_programs_bdd_sat_cold_warm_and_exact_origins() {
                     &loaded.corpus,
                     &loaded.keys,
                     &loaded
-                        .verification_requests(
-                            &Limits::default(),
-                            if backend == "bdd" {
-                                BackendIdentity::bdd()
-                            } else {
-                                BackendIdentity::sat()
-                            },
-                        )
+                        .verification_requests(&Limits::default())
                         .unwrap()
                         .remove(0)
                         .1,
                 );
                 validate_producer_origins(&den.published, &loaded);
-                let mut request = p.request(&Limits::default()).unwrap();
-                request.backend = if backend == "bdd" {
-                    BackendIdentity::bdd()
-                } else {
-                    BackendIdentity::sat()
-                };
+                let request = p.request(&Limits::default()).unwrap();
                 validate_published_witnesses(
                     &dsl.published,
                     &source.uri,
@@ -536,10 +516,6 @@ fn validate_published_witnesses(
         let e = &data["evidence"];
         if !seen.insert(e.to_string()) {
             continue;
-        }
-        if e["kind"] == "unfounded-support-world" {
-            assert_ne!(data["kind"], "counterexample");
-            assert!(e.get("tuples").is_none());
         }
         if data["kind"] != "counterexample" {
             continue;

@@ -5,10 +5,8 @@ Frontend-independent interpretation of checked evidence. It turns a checker
 participating occurrences, and places them on source locations. It depends only on
 `denotate-ir` and `denotate-check`: no LSP, DSL vocabulary, filesystem or scheduling.
 
-- `interpret(corpus, verification, keyed)` returns `Finding`s for counterexamples,
-  no-meaning regions, unsupported groups and regions, and inconclusive outcomes. With
-  semantic keys and scoped results it also tags SAT's unfounded-support world, which
-  is never presented as a replayed overlap.
+- `interpret(corpus, verification)` returns `Finding`s for counterexamples,
+  no-meaning regions, unsupported groups and regions, and inconclusive outcomes.
 - Coverage produces one primary per obligation/verification, bounded missing-group
   examples with separate observations, and exact or lower-bound counts. Empty grouping
   domains produce an Information note without turning a proof into a failure.

@@ -13,7 +13,6 @@ use std::{
 mod input;
 mod memo;
 mod owned;
-pub(crate) mod sat;
 pub use input::*;
 pub use owned::{answer_owned_local, evaluate_owned_local};
 #[cfg(test)]
@@ -173,20 +172,6 @@ impl PreparedCheck<'_> {
                 _ => None,
             };
             let mut outcome = match answer {
-                Some(LocalAnswer::Group(LocalVerdict::Candidate(candidate))) => {
-                    let present = candidate
-                        .present
-                        .iter()
-                        .map(|a| {
-                            atoms
-                                .get(a)
-                                .cloned()
-                                .ok_or(CheckError::Internal("missing SAT input binding"))
-                        })
-                        .collect::<Result<BTreeSet<_>>>()?;
-                    let absent = self.program.inputs.difference(&present).cloned().collect();
-                    GroupOutcome::Candidate(Observation { present, absent })
-                }
                 Some(LocalAnswer::Group(LocalVerdict::Proved)) => GroupOutcome::Proved,
                 Some(LocalAnswer::Group(LocalVerdict::Unsupported(_))) => GroupOutcome::Unsupported,
                 Some(LocalAnswer::Group(LocalVerdict::Overlap(_))) => GroupOutcome::Proved, // replaced by current-context import below
@@ -393,11 +378,7 @@ impl PreparedCheck<'_> {
                         ground: &self.keys,
                         receipts: &mut receipts,
                     };
-                    verification.coverage = meaning.check_coverage(
-                        &limits,
-                        self.request.backend == BackendIdentity::sat(),
-                        Some(&mut queries),
-                    )?;
+                    verification.coverage = meaning.check_coverage(&limits, Some(&mut queries))?;
                 }
                 Err(e) => {
                     let reason = Inconclusive::from_error(e)?;

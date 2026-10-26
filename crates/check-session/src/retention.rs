@@ -241,7 +241,6 @@ fields!(EvidenceKeys {
 impl Retained for UnsupportedReason {
     fn heap(&self, p: &mut Payload) {
         match self {
-            Self::UnfoundedSupport(c) => c.heap(p),
             Self::UnsettledNegativeCycle => {}
             Self::DependsOnUnsettled(k) => k.heap(p),
         }
@@ -322,7 +321,6 @@ impl Retained for OwnedCondition {
 impl Retained for LocalVerdict {
     fn heap(&self, p: &mut Payload) {
         match self {
-            Self::Candidate(c) => c.heap(p),
             Self::Proved => {}
             Self::Overlap(c) => c.heap(p),
             Self::Unsupported(r) => r.heap(p),

@@ -150,7 +150,7 @@ impl<'p> SymbolicMeaning<'p> {
     ) -> Result<Verification<'p>> {
         limits.cancellation.check()?;
         let report = self.check_queries(limits, queries.as_deref_mut())?;
-        let coverage = self.check_coverage(limits, false, queries.as_deref_mut())?;
+        let coverage = self.check_coverage(limits, queries.as_deref_mut())?;
         let mut verified = self.verify_report(
             limits,
             completion_limits,
@@ -175,9 +175,7 @@ impl<'p> SymbolicMeaning<'p> {
         let mut metrics = FindingMetrics::default();
         let mut groups = Vec::new();
         let mut violations = Vec::new();
-        let mut candidates = Vec::new();
         for check in report.groups {
-            candidates.push(matches!(check.outcome, GroupOutcome::Candidate(_)));
             if queries.is_some() {
                 budget = Budget::tracked(limits);
             }
@@ -190,16 +188,12 @@ impl<'p> SymbolicMeaning<'p> {
                     GroupOutcome::Proved => VerifiedOutcome::Proved,
                     GroupOutcome::Unsupported => VerifiedOutcome::Unsupported,
                     GroupOutcome::Inconclusive(cause) => VerifiedOutcome::Inconclusive(cause),
-                    candidate @ (GroupOutcome::Overlap(_) | GroupOutcome::Candidate(_)) => {
+                    GroupOutcome::Overlap(condition) => {
                         let start = Instant::now();
-                        let observation = match candidate {
-                            GroupOutcome::Candidate(observation) => observation,
-                            GroupOutcome::Overlap(condition) => self
-                                .context
-                                .witness_with_budget(&condition, &mut budget)?
-                                .ok_or(CheckError::Internal("overlap has no witness"))?,
-                            _ => unreachable!(),
-                        };
+                        let observation = self
+                            .context
+                            .witness_with_budget(&condition, &mut budget)?
+                            .ok_or(CheckError::Internal("overlap has no witness"))?;
                         metrics.witness += start.elapsed();
                         let start = Instant::now();
                         let selected =
@@ -362,22 +356,11 @@ impl<'p> SymbolicMeaning<'p> {
         let certification_start = Instant::now();
         certification_limits.cancellation.check()?;
         let mut certification_budget = Budget::new(certification_limits);
-        for ((group, condition), candidate) in groups.iter_mut().zip(violations).zip(candidates) {
+        for (group, condition) in groups.iter_mut().zip(violations) {
             if queries.is_some() {
                 certification_budget = Budget::tracked(certification_limits);
             }
             let needs_completion = matches!(&group.outcome, VerifiedOutcome::Counterexample(c) if c.replay_scope == ReplayScope::ConeOnly);
-            if candidate {
-                if let VerifiedOutcome::Counterexample(example) = &mut group.outcome {
-                    if example.replay_scope == ReplayScope::ConeOnly {
-                        self.program.certify_replayed_candidate(
-                            example,
-                            &group.group,
-                            &mut certification_budget,
-                        )?;
-                    }
-                }
-            }
             if let (VerifiedOutcome::Counterexample(example), Some(condition)) =
                 (&mut group.outcome, condition)
             {

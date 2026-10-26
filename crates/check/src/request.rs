@@ -63,18 +63,13 @@ impl DeterministicLimits {
         }
     }
 }
+/// Fixed BDD algorithm identity for request/result validation, not a selector.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendIdentity {
     pub backend: String,
     pub configuration: String,
 }
 impl BackendIdentity {
-    pub fn sat() -> Self {
-        Self {
-            backend: "sat".into(),
-            configuration: "batsat-0.6.0/completion-v1/absent-first-v1".into(),
-        }
-    }
     pub fn bdd() -> Self {
         Self {
             backend: "bdd".into(),
@@ -201,7 +196,7 @@ impl CheckRequest {
     ) -> Result<RequestPreparation<'s>> {
         operations.cancellation.check()?;
         keys.validate(corpus).map_err(CheckError::Keys)?;
-        if self.backend != BackendIdentity::bdd() && self.backend != BackendIdentity::sat() {
+        if self.backend != BackendIdentity::bdd() {
             return Err(CheckError::InvalidRequest("unknown backend/configuration"));
         }
         let all = corpus
@@ -400,8 +395,6 @@ fn verification_selection(
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum UnsupportedReason {
-    /// The canonical completion witness fails concrete cone validation.
-    UnfoundedSupport(Candidate),
     /// The BDD fixed-point backend cannot settle this negative recursive SCC.
     UnsettledNegativeCycle,
     /// The group's closed dependency cone includes unsettled negative recursion.
@@ -415,9 +408,6 @@ impl std::fmt::Debug for UnsupportedReason {
             Self::UnsettledNegativeCycle => f.write_str("NegativeCycle"),
             Self::DependsOnUnsettled(keys) => {
                 f.debug_tuple("UnsettledDependencies").field(keys).finish()
-            }
-            Self::UnfoundedSupport(candidate) => {
-                f.debug_tuple("UnfoundedSupport").field(candidate).finish()
             }
         }
     }
@@ -591,18 +581,6 @@ impl PreparedCheck<'_> {
         Ok(self)
     }
     pub fn verify(&self, operations: &OperationalLimits) -> Result<CheckOutcome<'_>> {
-        if self.request.backend == BackendIdentity::sat() {
-            return Ok(match self.verify_local(operations)? {
-                LocalCheckOutcome::Complete(r) => CheckOutcome::Complete(r.checked),
-                LocalCheckOutcome::Inconclusive { reason, receipts } => {
-                    CheckOutcome::Inconclusive {
-                        stage: CheckStage::Verification,
-                        reason,
-                        receipts,
-                    }
-                }
-            });
-        }
         let limits = self.request.limits.with_operations(operations);
         let mut receipts = self.receipts.clone();
         let mut budget = Budget::tracked(&limits);

@@ -45,7 +45,6 @@ pub fn assert_symbolic_agrees(program: &GroundProgram) {
                 .count();
             match &check.outcome {
                 GroupOutcome::Proved => assert!(count <= 1),
-                GroupOutcome::Candidate(_) => panic!("unexpected SAT candidate in BDD oracle"),
                 GroupOutcome::Overlap(condition) => assert_eq!(
                     symbolic
                         .context()

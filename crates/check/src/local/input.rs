@@ -59,8 +59,6 @@ pub struct LocalEvaluation {
 pub enum LocalVerdict {
     Proved,
     Overlap(OwnedCondition),
-    /// Validated concrete observation; fresh current-snapshot replay is still required.
-    Candidate(Candidate),
     Unsupported(UnsupportedReason),
     Inconclusive(ResourceReason),
 }
@@ -101,7 +99,7 @@ pub struct LocalMetrics {
     pub unique_atoms: usize,
     pub cone_inputs: usize,
     #[cfg(any(test, feature = "test-support"))]
-    /// Per-check physical work; cache hits and SAT group queries add nothing.
+    /// Per-check physical work; cache hits add nothing.
     /// Timing covers SCC fixed-point evaluation, excluding context setup/export.
     pub scc_work: BTreeMap<ComponentKey, SccWork>,
 }
@@ -404,15 +402,11 @@ impl LocalMemoStore for NoLocalMemo {
 }
 
 impl LocalInput {
-    pub fn uses_sat(&self) -> bool {
-        self.backend == BackendIdentity::sat() && matches!(self.scope, LocalScope::Group(_))
-    }
-
     /// Group verdicts consume conditions and scope, not producer implementation
     /// or attribution. Salsa can backdate this projection after equal evaluation.
     pub fn for_answer(&self) -> Self {
         let mut input = self.clone();
-        if matches!(input.scope, LocalScope::Group(_)) && !input.uses_sat() {
+        if matches!(input.scope, LocalScope::Group(_)) {
             input.rules.clear();
             input.original_dependencies.clear();
             input.rewrites.clear();

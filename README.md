@@ -85,7 +85,7 @@ to what their authors wrote.
 ## Where it stands
 
 Today Denotate checks contracts under explicitly selected assumptions, over finite
-input domains, with BDD and SAT, and supports writing `.den` directly in a VS Code
+input domains, with BDD, and supports writing `.den` directly in a VS Code
 editor. Compilation, specialization and other reasoning engines are the direction,
 not yet built.
 

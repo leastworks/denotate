@@ -5,7 +5,7 @@ directly in `.den`.
 
 ## Contract vocabulary
 
-`at_least_one` coverage is implemented through the IR, BDD and SAT checking, `.den`,
+`at_least_one` coverage is implemented through the IR, BDD checking, `.den`,
 CLI and editor, with bounded enumeration and aggregated diagnostics. Next add
 `exactly_one` and `empty` through those same paths. They are checked like
 `at_most_one`, inside [verifications](den-format.md#verifications): which input worlds
@@ -54,7 +54,8 @@ to P′ is valid if, for every permitted input world, the least fixed points agr
   generated helpers are always internal. Needs IR support and round-tripping `.den` syntax.
 - **Approach:** BDD fact conditions are canonical under a shared input order, so
   equivalence is equality per observable fact and the difference is a counterexample
-  world; a SAT miter is the second backend. Inconclusive within limits means refuse.
+  world. Inconclusive within limits means refuse; alternative solvers require a
+  demonstrated need under the [backend policy](checker-policies.md#backend-retirement).
 - **Sequence:** an equivalence API in the checker; rename uses it as a
   syntax-independent validator; then refactoring commands.
 - **Open:** whether obligation verdicts are always compared or obligation relations
@@ -88,7 +89,7 @@ the bounds only prove that a unique two-valued meaning exists.
   assumptions; the component is admitted on the worlds where L and U agree for all
   of its atoms. This generalizes per-world certification (`certify_observation`)
   to all worlds at once, and fits cycles that input guards break world by world.
-  Facts in L or outside U can also prune no-meaning and SAT searches.
+  Facts in L or outside U can also prune no-meaning searches.
 - **Limits:** totality is sufficient, not necessary (`a :- not b. b :- not a.
   a :- b.` has one stable model but a non-total well-founded model), so it
   complements discharge rewrites and certification. It proposes no edit, so it needs
@@ -99,9 +100,6 @@ the bounds only prove that a unique two-valued meaning exists.
   fixpoint theory (Denecker, Marek, Truszczyński).
 
 ## Small items
-
-- Encode `at_least_one` coverage natively for SAT, so the SAT backend helps where BDD
-  evaluation exhausts (today SAT coverage shares BDD evaluation).
 
 - Richer assumption forms (beyond input `at_most_one`) must establish that the selected
   assumptions permit some world before checking, reporting `inconsistent-assumptions`

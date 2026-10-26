@@ -79,7 +79,6 @@ pub struct Finding<'a> {
     pub notes: Vec<String>,
     pub contributions: Vec<Contribution>,
     pub cycle_rules: Vec<RuleId>,
-    pub unsupported_world: Option<Candidate>,
     /// Original checked evidence, for optional frontend wording and attribution.
     pub evidence: Evidence<'a>,
 }
@@ -132,13 +131,7 @@ fn linked_region<'a>(
 
 /// Interpret outcomes once. Frontends may replace wording/choose highlights, but
 /// retain each finding's identity, classification and checked evidence.
-/// Keyed results add SAT's separate unsupported-world explanation; they never
-/// turn an unvalidated equation world into an overlap witness.
-pub fn interpret<'a>(
-    corpus: &Corpus,
-    report: &'a Verification<'_>,
-    keyed: Option<(&SemanticKeys, &ScopedResults)>,
-) -> Result<Vec<Finding<'a>>> {
+pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Vec<Finding<'a>>> {
     let mut findings = Vec::new();
     for group in &report.groups {
         let obligation = corpus
@@ -267,7 +260,6 @@ pub fn interpret<'a>(
             notes,
             contributions,
             cycle_rules: cycle_rules.into_iter().collect(),
-            unsupported_world: None,
             evidence: Evidence::Group(group),
         });
     }
@@ -327,7 +319,6 @@ pub fn interpret<'a>(
                 role: Role::Obligation,
             }],
             cycle_rules: vec![],
-            unsupported_world: None,
             evidence: Evidence::Coverage(coverage),
         });
     }
@@ -366,7 +357,6 @@ pub fn interpret<'a>(
             notes,
             contributions,
             cycle_rules: rules.into_iter().collect(),
-            unsupported_world: None,
             evidence: Evidence::Region(region),
         });
     }
@@ -374,36 +364,6 @@ pub fn interpret<'a>(
         for c in &finding.contributions {
             if !corpus.contains_occurrence(c.occurrence) {
                 return Err(Error::InvalidFinding("evidence belongs to another corpus"));
-            }
-        }
-        if let Some((keys, results)) = keyed {
-            let result = match &finding.identity {
-                Identity::Group { obligation, tuple } => results.groups.get(&GroupKey {
-                    obligation: keys.obligation(*obligation)?.clone(),
-                    tuple: tuple
-                        .iter()
-                        .map(|c| keys.constant(*c).cloned())
-                        .collect::<std::result::Result<_, _>>()?,
-                }),
-                Identity::Region(atoms) => results
-                    .regions
-                    .get(&ComponentKey(
-                        atoms
-                            .iter()
-                            .map(|a| AtomKey::from_atom(keys, a))
-                            .collect::<std::result::Result<BTreeSet<_>, _>>()?
-                            .into_iter()
-                            .collect::<Vec<_>>()
-                            .into(),
-                    ))
-                    .map(|r| &r.outcome),
-                _ => None,
-            };
-            if let Some(ScopedResult::Unsupported(UnsupportedReason::UnfoundedSupport(world))) =
-                result
-            {
-                finding.unsupported_world = Some(world.clone());
-                finding.notes.push("The equation world has unfounded support and did not pass concrete replay. It is not an overlap counterexample or a proof of no meaning.".into());
             }
         }
     }

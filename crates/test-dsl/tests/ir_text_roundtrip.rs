@@ -161,8 +161,8 @@ impl Index {
         }
     }
 }
-fn default_request(p: &LoadedProgram, limits: &Limits, backend: BackendIdentity) -> CheckRequest {
-    let mut requests = p.verification_requests(limits, backend).unwrap();
+fn default_request(p: &LoadedProgram, limits: &Limits) -> CheckRequest {
+    let mut requests = p.verification_requests(limits).unwrap();
     assert_eq!(requests.len(), 1);
     let (key, request) = requests.pop().unwrap();
     assert_eq!(request.verification.as_ref(), Some(&key));
@@ -190,9 +190,8 @@ fn check(
             return index.outcomes(&request.exhausted(reason));
         }
     };
-    // verify() uses backend-specific concrete replay/certification before it can
+    // verify() uses concrete replay/certification before it can
     // produce CertifiedCandidate. Recheck overlap tuples in the ground program;
-    // never pass SAT's separate unfounded-support world off as an overlap.
     for group in &report.checked.verification.groups {
         if let VerifiedOutcome::Counterexample(counterexample) = &group.outcome {
             assert!(counterexample.tuples.len() >= 2);
@@ -289,13 +288,11 @@ fn gate(id: &str, program: LoweredProgram, sources: Sources) {
     if !id.starts_with("api/") && !id.starts_with("multi-file/") {
         presentation_gate(id, &program, &sources, &loaded, &left, &right);
     }
-    let mut previous: Option<Outcomes> = None;
-    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+    {
         let mut direct_session = Session::default();
         let mut text_session = Session::default();
-        let mut direct_request = program.request(&Limits::default()).unwrap();
-        direct_request.backend = backend.clone();
-        let text_request = default_request(&loaded, &Limits::default(), backend.clone());
+        let direct_request = program.request(&Limits::default()).unwrap();
+        let text_request = default_request(&loaded, &Limits::default());
         assert_eq!(
             direct_request.obligations,
             BTreeSet::from([program
@@ -340,11 +337,7 @@ fn gate(id: &str, program: LoweredProgram, sources: Sources) {
             &mut text_session,
             &right,
         );
-        assert_eq!(
-            direct, text,
-            "{id}: direct versus text, {}",
-            backend.backend
-        );
+        assert_eq!(direct, text, "{id}: direct versus text");
         assert_eq!(
             direct,
             check(
@@ -367,29 +360,6 @@ fn gate(id: &str, program: LoweredProgram, sources: Sources) {
             ),
             "{id}: text cold/warm"
         );
-        if let Some(previous) = &previous {
-            for (key, value) in &direct.groups {
-                if let Some(other) = previous.groups.get(key) {
-                    if matches!(value, Status::Proved | Status::Counterexample)
-                        && matches!(other, Status::Proved | Status::Counterexample)
-                    {
-                        assert_eq!(value, other, "{id}: conclusive backend answers");
-                    }
-                }
-            }
-        }
-        if let Some(previous) = &previous {
-            for (key, (_, completion)) in &direct.regions {
-                if let Some((_, other)) = previous.regions.get(key) {
-                    if matches!(completion, Completion::Clear | Completion::NoMeaning)
-                        && matches!(other, Completion::Clear | Completion::NoMeaning)
-                    {
-                        assert_eq!(completion, other, "{id}: conclusive region completion");
-                    }
-                }
-            }
-        }
-        previous = Some(direct);
     }
 }
 #[test]
@@ -608,7 +578,7 @@ fn narrowed_domains_and_active_assumptions_change_both_paths_together() {
             .documents("file:///export");
         let q = load_with_resolver(&membership, &docs, Some(&mut &p.sources)).unwrap();
         let map = correspondence::compare(&export, &q, "file:///export", true);
-        for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+        {
             for (current, index) in [
                 (&p, Index::new(&p.corpus, &p.corpus, &p.keys, None)),
                 (&q, Index::new(&p.corpus, &q.corpus, &q.keys, Some(&map))),
@@ -616,7 +586,7 @@ fn narrowed_domains_and_active_assumptions_change_both_paths_together() {
                 let actual = check(
                     &current.corpus,
                     &current.keys,
-                    &default_request(current, &Limits::default(), backend.clone()),
+                    &default_request(current, &Limits::default()),
                     &mut Session::default(),
                     &index,
                 );
@@ -653,8 +623,8 @@ fn unambiguous_witness_keeps_exact_primary_and_related_generic_origins() {
         })
         .into_iter()
         .collect::<BTreeSet<_>>();
-    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
-        for (c, keys, mut request, sources, provenance) in [
+    {
+        for (c, keys, request, sources, provenance) in [
             (
                 &a.program.corpus,
                 &a.program.keys,
@@ -665,14 +635,13 @@ fn unambiguous_witness_keeps_exact_primary_and_related_generic_origins() {
             (
                 &q.corpus,
                 &q.keys,
-                default_request(&q, &Limits::default(), backend.clone()),
+                default_request(&q, &Limits::default()),
                 &q.sources,
                 &q.embedded.provenance,
             ),
         ] {
             let limits = Limits::default();
             let operations = OperationalLimits::from(&limits);
-            request.backend = backend.clone();
             let mut session = Session::default();
             let RequestPreparation::Complete(prepared) =
                 session.prepare(&request, c, keys, &operations).unwrap()
@@ -756,13 +725,12 @@ fn presentation_gate(
     use denotate_test_dsl::presentation as dsl;
     let limits = Limits::default();
     let ops = OperationalLimits::from(&limits);
-    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+    {
         let mut direct_session = Session::default();
         let mut text_session = Session::default();
         let mut previous = None;
         for _ in 0..2 {
-            let mut request = p.request(&limits).unwrap();
-            request.backend = backend.clone();
+            let request = p.request(&limits).unwrap();
             let RequestPreparation::Complete(prepared) = direct_session
                 .prepare(&request, &p.corpus, &p.keys, &ops)
                 .unwrap()
@@ -786,7 +754,7 @@ fn presentation_gate(
                     )
                 })
                 .collect::<BTreeSet<_>>();
-            let request = default_request(q, &limits, backend.clone());
+            let request = default_request(q, &limits);
             let RequestPreparation::Complete(prepared) = text_session
                 .prepare(&request, &q.corpus, &q.keys, &ops)
                 .unwrap()
@@ -805,7 +773,7 @@ fn presentation_gate(
                 .filter(|d| d.kind != Kind::Rewrite)
                 .map(|d| (d.kind, finding_identity(right, &q.keys, &d.identity)))
                 .collect::<BTreeSet<_>>();
-            assert_eq!(direct_set, text_set, "{id}: presenter parity ({backend:?})");
+            assert_eq!(direct_set, text_set, "{id}: presenter parity");
             if let Some(previous) = &previous {
                 assert_eq!(previous, &direct_set, "{id}: presenter cold/warm");
             }

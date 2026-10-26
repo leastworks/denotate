@@ -17,7 +17,7 @@ member, ignores unrelated documents and rejects conflicting snapshots of one URI
 
 Named assumptions and verifications are declarations in `Corpus`, with typed semantic
 keys and occurrence-based provenance (including embedded origins). There is no separate
-loader-owned assumption table. `verification_requests(limits, backend)` returns one
+loader-owned assumption table. `verification_requests(limits)` returns one
 `(VerificationKey, CheckRequest)` per verification in the whole reachable closure,
 sorted by key; it returns an empty list when no verification is declared. Each request
 selects exactly its declaration's assumptions and obligations. References use shared
@@ -81,7 +81,7 @@ user files are the program's own documents.
 ## Commands and tests
 
 ```sh
-just check-den crates/ir-text/fixtures [--sat] [--verification library::default_checks]
+just check-den crates/ir-text/fixtures [--verification library::default_checks]
 cargo +1.93.0 test --locked -p denotate-ir-text
 ```
 

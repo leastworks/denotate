@@ -692,7 +692,7 @@ fn completed_results_cannot_publish_after_member_manifest_config_dependency_or_h
         match scenario {
             "member" => c.change(&uri,3,"relation fine(); fine();"),
             "manifest" => c.notify("denotate/manifest",json!({"uri":support::file_uri(&base.join("app/den.root")),"version":1,"text":"{broken"})),
-            "config" => c.notify("workspace/didChangeConfiguration",json!({"settings":{"denotate":{"backend":"sat"}}})),
+            "config" => c.notify("workspace/didChangeConfiguration",json!({"settings":{"denotate":{"timeoutMs":20000}}})),
             "dependency" => {std::fs::remove_file(base.join("lib/den.root")).unwrap(); c.notify("workspace/didChangeWatchedFiles",json!({"changes":[{"uri":support::file_uri(&base.join("lib/den.root")),"type":3}]}));},
             "home" => c.notify("denotate/manifest",json!({"uri":support::file_uri(&base.join("app/nested/den.root")),"version":1,"text":"{}"})),
             "sync" => c.notify("textDocument/didChange",json!({"textDocument":{"uri":uri,"version":3},"contentChanges":[{"range":{"start":{"line":0,"character":10},"end":{"line":0,"character":1}},"text":""}]})),
@@ -795,12 +795,12 @@ fn queued_roots_keep_their_place_and_progress_after_cancellation_and_deadline() 
     assert_eq!(status["checking"], "deadline");
     c.notify(
         "workspace/didChangeConfiguration",
-        json!({"settings":{"denotate":{"backend":"sat"}}}),
+        json!({"settings":{"denotate":{"timeoutMs":20000}}}),
     );
     checking_idle(&mut c);
     let status = c.request("denotate/roots", json!({"uri":a}));
     assert_eq!(status["checking"], "complete");
-    assert_eq!(status["backend"], "sat");
+    assert_eq!(status["backend"], "bdd");
     c.shutdown();
 }
 
@@ -1081,51 +1081,37 @@ fn verification_edits_qualify_and_withdraw_every_semantic_finding() {
 }
 
 #[test]
-fn verification_selections_keep_cold_warm_and_backend_results_separate() {
+fn verification_selections_keep_cold_warm_results_separate() {
     let mut c = Client::start("base/00-valid");
     let (uri, _) = c.open("example.den");
     let body = "sort S; const i,j:S; input value(x:S); relation a(); relation b(); a() :- value(i), !b(); b() :- value(j), !a(); assumption one: at_most_one(value, group_by: ()); obligation unique: at_most_one(value, group_by: ());";
     let mut version = 1;
-    let mut bdd = vec![];
-    for backend in ["bdd", "sat"] {
-        c.notify(
-            "workspace/didChangeConfiguration",
-            json!({"settings":{"denotate":{"backend":backend}}}),
+    for selection in ["one", "", "one"] {
+        version += 1;
+        c.change(&uri, version, &format!("{body} verification checks {{ assumptions: [{selection}]; obligations: [unique]; }}"));
+        checking_idle(&mut c);
+        let warm = c.request("denotate/roots", json!({"uri":uri}));
+        c.request("denotate/test/resetChecks", json!({}));
+        checking_idle(&mut c);
+        let cold = c.request("denotate/roots", json!({"uri":uri}));
+        assert_eq!(cold["verifications"], warm["verifications"]);
+        let verification = &cold["verifications"][0];
+        assert_eq!(verification["verification"], "::checks");
+        assert_eq!(verification["mode"], "normal");
+        assert_eq!(verification["consistency"], "consistent");
+        assert_eq!(
+            verification["summary"]["state"],
+            if selection.is_empty() {
+                "findings"
+            } else {
+                "proved"
+            }
         );
-        let mut outcomes = vec![];
-        for selection in ["one", "", "one"] {
-            version += 1;
-            c.change(&uri, version, &format!("{body} verification checks {{ assumptions: [{selection}]; obligations: [unique]; }}"));
-            checking_idle(&mut c);
-            let warm = c.request("denotate/roots", json!({"uri":uri}));
-            c.request("denotate/test/resetChecks", json!({}));
-            checking_idle(&mut c);
-            let cold = c.request("denotate/roots", json!({"uri":uri}));
-            assert_eq!(cold["verifications"], warm["verifications"]);
-            let verification = &cold["verifications"][0];
-            assert_eq!(verification["verification"], "::checks");
-            assert_eq!(verification["mode"], "normal");
-            assert_eq!(verification["consistency"], "consistent");
-            assert_eq!(
-                verification["summary"]["state"],
-                if selection.is_empty() {
-                    "findings"
-                } else {
-                    "proved"
-                }
-            );
-            let kinds = semantic_findings(&c, &uri)
-                .iter()
-                .map(|d| d["data"]["kind"].as_str().unwrap().to_owned())
-                .collect::<std::collections::BTreeSet<_>>();
-            assert_eq!(kinds.contains("unsupported-region"), selection.is_empty());
-            outcomes.push((verification["summary"]["state"].clone(), kinds));
-        }
-        if backend == "bdd" {
-            bdd = outcomes;
-        } else {
-            assert_eq!(bdd, outcomes);
-        }
+        let kinds = semantic_findings(&c, &uri)
+            .iter()
+            .map(|d| d["data"]["kind"].as_str().unwrap().to_owned())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(kinds.contains("unsupported-region"), selection.is_empty());
     }
     c.shutdown();
 }

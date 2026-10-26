@@ -24,11 +24,7 @@ pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Pr
         current: &program.provenance,
         upstream: &program.embedded.provenance,
     };
-    let findings = interpret(
-        &program.corpus,
-        &report.verification,
-        Some((&program.keys, &report.results.value)),
-    )?;
+    let findings = interpret(&program.corpus, &report.verification)?;
     let mut diagnostics = Vec::new();
     let mut inventory = Vec::new();
     for finding in findings {

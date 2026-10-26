@@ -160,8 +160,8 @@ fn fixture(b_grouping: Option<Vec<Column>>) -> Fixture {
     }
 }
 
-fn request(f: &Fixture, verification: VerificationId, backend: BackendIdentity) -> CheckRequest {
-    let mut request = CheckRequest::for_verification(
+fn request(f: &Fixture, verification: VerificationId) -> CheckRequest {
+    let request = CheckRequest::for_verification(
         &f.corpus,
         &f.keys,
         &f.domains,
@@ -169,7 +169,6 @@ fn request(f: &Fixture, verification: VerificationId, backend: BackendIdentity) 
         &Limits::default(),
     )
     .unwrap();
-    request.backend = backend;
     request
 }
 
@@ -279,9 +278,9 @@ fn assert_behavior(capture: &Capture, restricted: bool, obligations: bool) {
 }
 
 #[test]
-fn selected_context_controls_admission_and_obligations_across_backends_and_sessions() {
+fn selected_context_controls_admission_and_obligations_across_sessions() {
     let f = fixture(Some(vec![]));
-    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+    {
         for mut session in [Session::default(), Session::with_grounding()] {
             for (verification, restricted, obligations) in [
                 (f.with_a, true, true),
@@ -291,7 +290,7 @@ fn selected_context_controls_admission_and_obligations_across_backends_and_sessi
                 (f.unrestricted, false, true),
                 (f.with_a, true, true),
             ] {
-                let request = request(&f, verification, backend.clone());
+                let request = request(&f, verification);
                 let fresh = check(&f, &request, None);
                 assert_behavior(&fresh, restricted, obligations);
                 let warm = check(&f, &request, Some(&mut session));
@@ -303,17 +302,17 @@ fn selected_context_controls_admission_and_obligations_across_backends_and_sessi
 
 #[test]
 fn edits_to_unselected_assumptions_do_not_change_the_selected_context() {
-    for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
+    {
         for mut session in [Session::default(), Session::with_grounding()] {
             let baseline = fixture(Some(vec![]));
             let expected = check(
                 &baseline,
-                &request(&baseline, baseline.with_a, backend.clone()),
+                &request(&baseline, baseline.with_a),
                 Some(&mut session),
             );
             for grouping in [Some(vec!["key".into()]), None, Some(vec![])] {
                 let f = fixture(grouping);
-                let request = request(&f, f.with_a, backend.clone());
+                let request = request(&f, f.with_a);
                 assert_eq!(check(&f, &request, None), expected);
                 assert_eq!(check(&f, &request, Some(&mut session)), expected);
             }
@@ -366,7 +365,7 @@ fn verification_requests_reject_unknown_or_mismatched_selections() {
     let f = fixture(Some(vec![]));
     let operations = OperationalLimits::from(&Limits::default());
     for change in 0..6 {
-        let mut request = request(&f, f.with_a, BackendIdentity::bdd());
+        let mut request = request(&f, f.with_a);
         match change {
             0 => request.obligations.clear(),
             1 => request.constraints.clear(),

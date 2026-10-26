@@ -2,9 +2,9 @@
 
 The finite relational checker. It grounds a `Corpus` over explicit finite domains,
 checks admissibility, replays concrete input worlds, and proves or refutes
-`at_most_one` and `at_least_one` obligations symbolically (BDD by default, SAT selectable), returning
+`at_most_one` and `at_least_one` obligations symbolically (BDD), returning
 only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
-`biodivine-lib-bdd` and a pinned SAT solver.
+`biodivine-lib-bdd`.
 
 ## Pipeline
 
@@ -85,14 +85,11 @@ establish absence or presence; uncertified worlds remain unsupported while bound
 continues for a settled counterexample. A known-present tuple can prove coverage without
 settling other producers. All-absent inputs witness consistency of the current assumptions.
 
-Both coverage backends currently share symbolic fixed-point evaluation. BDD searches the
-resulting absence condition; SAT encodes that condition as a Boolean circuit and solves it,
-then both replay the concrete observation. SAT coverage therefore shares BDD evaluation
-limits; it does not yet provide an alternative for programs that exhaust BDD evaluation.
-The existing SAT uniqueness implementation is unchanged. Sessions reuse preparation but
+Coverage uses symbolic BDD fixed-point evaluation and searches the resulting absence
+condition, then replays the concrete observation. Sessions reuse preparation but
 recompute coverage evaluation and summaries each check; a separate coverage verdict cache
-is deferred until measurements justify it. These choices affect performance/inconclusiveness,
-not the meaning of conclusive answers.
+is deferred until measurements justify it. BDD is the only backend; the retirement and
+reintroduction criteria are in [checker policies](../../docs/checker-policies.md#backend-retirement).
 
 ## Rewrites
 

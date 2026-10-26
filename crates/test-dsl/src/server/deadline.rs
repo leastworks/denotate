@@ -13,7 +13,6 @@ fn server() -> Server {
         worker: worker::spawn().unwrap(),
         tests: true,
         hooks: CheckingHooks::default(),
-        backend: denotate_check::BackendIdentity::bdd(),
     }
 }
 fn install(server: &mut Server, connection: &Connection, uri: &Url, version: i32) {
