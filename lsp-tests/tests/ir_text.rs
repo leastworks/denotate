@@ -29,6 +29,7 @@ namespace b {
  domain a::S=[a::'007', a::7];
  obligation unique: at_most_one(q, group_by: x);
  assumption known: at_most_one(a::p, group_by: (x));
+ verification checks { assumptions: [known]; obligations: [unique]; }
  #source = source("file:///source.testdsl", view: "dsl", hash: "sha256:0000000000000000000000000000000000000000000000000000000000000000");
  #origin = loc(#source 1:1 to 1:2);
  q('007') loc(#source {self: 1:1 to 1:2, head.0: 1:1 to 1:2});
@@ -447,7 +448,7 @@ fn consumer_ambiguity_is_attributed_to_the_app_and_library_home_stays_clean() {
     c.shutdown();
 }
 
-const CONFLICT: &str = "sort S; const a,b:S; relation p(x:S); p(a); p(b); obligation unique: at_most_one(p, group_by: ());";
+const CONFLICT: &str = "sort S; const a,b:S; relation p(x:S); p(a); p(b); obligation unique: at_most_one(p, group_by: ()); verification checks { assumptions: []; obligations: [unique]; }";
 fn checking_idle(c: &mut Client) {
     c.request("denotate/test/checkingIdle", json!({}));
 }
@@ -456,7 +457,7 @@ fn semantic_findings(c: &Client, uri: &str) -> Vec<Value> {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|d| d["data"]["finding"].is_object())
+        .filter(|d| d["data"]["finding"].is_object() && d["code"] != "unchecked-obligation")
         .cloned()
         .collect()
 }
@@ -632,7 +633,7 @@ fn background_checks_publish_all_roots_and_preserve_labeled_library_fallbacks() 
             );
         }
     }
-    c.change(&lib,2,"sort S; const a:S; relation p(x:S); p(a); obligation unique: at_most_one(p, group_by: ());");
+    c.change(&lib,2,"sort S; const a:S; relation p(x:S); p(a); obligation unique: at_most_one(p, group_by: ()); verification checks { assumptions: []; obligations: [unique]; }");
     checking_idle(&mut c);
     assert!(semantic_findings(&c, &lib).is_empty());
     for folder in ["app", "other", "lib"] {
@@ -835,9 +836,9 @@ fn empty_roots_and_standalones_have_current_check_status() {
                 .is_some_and(|p| p.ends_with("/empty/den.root"))
         })
         .unwrap();
-    assert_eq!(empty["checking"], "complete");
-    assert_eq!(empty["summary"]["state"], "proved");
-    assert_eq!(empty["activeAssumptions"], json!([]));
+    assert_eq!(empty["checking"], "unconfigured");
+    assert_eq!(empty["summary"]["state"], "unconfigured");
+    assert_eq!(empty["verifications"], json!([]));
     c.shutdown();
 }
 
@@ -993,4 +994,307 @@ assumption origin_constraint: at_most_one(origin_input, group_by: ()) loc(#v 4:1
         .as_str()
         .unwrap()
         .contains("invalid"));
+}
+
+#[test]
+fn verification_edits_qualify_and_withdraw_every_semantic_finding() {
+    let mut c = Client::start("base/00-valid");
+    let (uri, _) = c.open("example.den");
+    let body = "sort S; const a,b:S; relation p(x:S); p(a); p(b); obligation unique: at_most_one(p, group_by: ()); relation n(); n() :- !n(); relation x(); relation y(); x() :- !y(); y() :- !x(); input guard(); relation redundant(); redundant() :- guard(), !guard(), !redundant();";
+    let verification =
+        |name| format!("verification {name} {{ assumptions: []; obligations: [unique]; }}");
+    c.change(&uri, 2, body);
+    checking_idle(&mut c);
+    let status = c.request("denotate/roots", json!({"uri":uri}));
+    assert_eq!(status["checking"], "unconfigured");
+    assert_eq!(status["verifications"], json!([]));
+    assert_eq!(status["uncheckedObligations"], json!(["::unique"]));
+    assert!(semantic_findings(&c, &uri).is_empty());
+    assert!(c
+        .diagnostics(&uri)
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "unchecked-obligation" && d["severity"] == 3));
+    let single = format!("{body} {}", verification("one"));
+    c.change(&uri, 3, &single);
+    checking_idle(&mut c);
+    let kinds = semantic_findings(&c, &uri)
+        .iter()
+        .map(|d| d["data"]["kind"].as_str().unwrap().to_owned())
+        .collect::<std::collections::BTreeSet<_>>();
+    for kind in [
+        "counterexample",
+        "no-meaning",
+        "unsupported-region",
+        "redundant",
+    ] {
+        assert!(kinds.contains(kind), "missing {kind}: {kinds:?}");
+    }
+    let identities = |c: &Client, verification: &str| {
+        semantic_findings(c, &uri)
+            .iter()
+            .filter(|d| d["data"]["finding"]["verification"] == json!(["", verification]))
+            .map(|d| d["data"]["finding"].to_string())
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    let one = identities(&c, "one");
+    assert!(!one.is_empty());
+    c.change(&uri, 4, &format!("{single} {}", verification("two")));
+    checking_idle(&mut c);
+    assert_eq!(identities(&c, "one"), one);
+    let two = identities(&c, "two");
+    assert_eq!(one.len(), two.len());
+    assert!(one.is_disjoint(&two));
+    let status = c.request("denotate/roots", json!({"uri":uri}));
+    assert_eq!(status["verifications"].as_array().unwrap().len(), 2);
+    assert_eq!(status["uncheckedObligations"], json!([]));
+    c.change(&uri, 5, &single);
+    checking_idle(&mut c);
+    assert_eq!(identities(&c, "one"), one);
+    assert!(identities(&c, "two").is_empty());
+    c.change(
+        &uri,
+        6,
+        &format!("{body} verification broken {{ assumptions: []; obligations: [missing]; }}"),
+    );
+    checking_idle(&mut c);
+    let status = c.request("denotate/roots", json!({"uri":uri}));
+    assert_eq!(status["checking"], "blocked");
+    assert!(status["verifications"].is_null());
+    assert!(status["uncheckedObligations"].is_null());
+    assert!(semantic_findings(&c, &uri).is_empty());
+    assert!(!c
+        .diagnostics(&uri)
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "unchecked-obligation"));
+    c.change(&uri, 7, body);
+    checking_idle(&mut c);
+    assert!(semantic_findings(&c, &uri).is_empty());
+    assert_eq!(
+        c.request("denotate/roots", json!({"uri":uri}))["checking"],
+        "unconfigured"
+    );
+    c.shutdown();
+}
+
+#[test]
+fn verification_selections_keep_cold_warm_and_backend_results_separate() {
+    let mut c = Client::start("base/00-valid");
+    let (uri, _) = c.open("example.den");
+    let body = "sort S; const i,j:S; input value(x:S); relation a(); relation b(); a() :- value(i), !b(); b() :- value(j), !a(); assumption one: at_most_one(value, group_by: ()); obligation unique: at_most_one(value, group_by: ());";
+    let mut version = 1;
+    let mut bdd = vec![];
+    for backend in ["bdd", "sat"] {
+        c.notify(
+            "workspace/didChangeConfiguration",
+            json!({"settings":{"denotate":{"backend":backend}}}),
+        );
+        let mut outcomes = vec![];
+        for selection in ["one", "", "one"] {
+            version += 1;
+            c.change(&uri, version, &format!("{body} verification checks {{ assumptions: [{selection}]; obligations: [unique]; }}"));
+            checking_idle(&mut c);
+            let warm = c.request("denotate/roots", json!({"uri":uri}));
+            c.request("denotate/test/resetChecks", json!({}));
+            checking_idle(&mut c);
+            let cold = c.request("denotate/roots", json!({"uri":uri}));
+            assert_eq!(cold["verifications"], warm["verifications"]);
+            let verification = &cold["verifications"][0];
+            assert_eq!(verification["verification"], "::checks");
+            assert_eq!(verification["mode"], "normal");
+            assert_eq!(verification["consistency"], "consistent");
+            assert_eq!(
+                verification["summary"]["state"],
+                if selection.is_empty() {
+                    "findings"
+                } else {
+                    "proved"
+                }
+            );
+            let kinds = semantic_findings(&c, &uri)
+                .iter()
+                .map(|d| d["data"]["kind"].as_str().unwrap().to_owned())
+                .collect::<std::collections::BTreeSet<_>>();
+            assert_eq!(kinds.contains("unsupported-region"), selection.is_empty());
+            outcomes.push((verification["summary"]["state"].clone(), kinds));
+        }
+        if backend == "bdd" {
+            bdd = outcomes;
+        } else {
+            assert_eq!(bdd, outcomes);
+        }
+    }
+    c.shutdown();
+}
+
+#[test]
+fn library_notices_follow_consumer_selections_and_structural_warnings_are_once_per_declaration() {
+    let mut c = Client::start("base/00-valid");
+    let base = c.workspace.path().to_owned();
+    for folder in ["lib", "app", "other"] {
+        std::fs::create_dir(base.join(folder)).unwrap();
+        std::fs::write(
+            base.join(folder).join("den.root"),
+            if folder == "lib" {
+                "{}"
+            } else {
+                r#"{"libraries":["../lib/den.root"]}"#
+            },
+        )
+        .unwrap();
+        std::fs::write(base.join(folder).join("code.den"), if folder == "lib" {
+            "namespace lib; sort S; const a,b:S; relation p(x:S); obligation offered: at_most_one(p, group_by: ()); obligation usual: at_most_one(p, group_by: ()); verification normal { assumptions: []; obligations: [usual]; } verification meaning { assumptions: []; obligations: []; }"
+        } else { "// user extension" }).unwrap();
+    }
+    c.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes":[{"uri":support::file_uri(&base.join("lib/den.root")),"type":1}]}),
+    );
+    let (lib, _) = c.open("lib/code.den");
+    let (app, _) = c.open("app/code.den");
+    checking_idle(&mut c);
+    let notices = |c: &Client| {
+        c.diagnostics(&lib)
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["code"] == "unchecked-obligation")
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(notices(&c).len(), 3);
+    assert_eq!(
+        notices(&c)
+            .iter()
+            .filter(|d| d["data"]["fallback"] == true)
+            .count(),
+        2
+    );
+    let structural = c
+        .diagnostics(&lib)
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["code"] == "consistency-only")
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(structural.len(), 1);
+    assert_eq!(structural[0]["severity"], 2);
+    let status = c.request("denotate/roots", json!({"uri":app}));
+    assert_eq!(status["summary"]["state"], "incomplete");
+    assert_eq!(status["uncheckedObligations"], json!(["lib::offered"]));
+    assert_eq!(status["verifications"][0]["mode"], "consistency-only");
+    // A pending selected check removes the missing-selection notice immediately.
+    c.request("denotate/test/hold", json!({"stage":"beforeResult"}));
+    let extension = "lib::p(lib::a); lib::p(lib::b); verification custom { assumptions: []; obligations: [lib::offered]; }";
+    c.change(&app, 2, extension);
+    let held = c.notification("denotate/test/checkpoint");
+    let status = c.request("denotate/roots", json!({"uri":app}));
+    assert_eq!(status["uncheckedObligations"], json!([]));
+    assert_eq!(notices(&c).len(), 2);
+    c.request(
+        "denotate/test/release",
+        json!({"revision":held["revision"]}),
+    );
+    checking_idle(&mut c);
+    assert!(semantic_findings(&c, &app)
+        .iter()
+        .any(|d| d["data"]["kind"] == "counterexample"));
+    assert_eq!(
+        c.diagnostics(&lib)
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["code"] == "consistency-only")
+            .count(),
+        1
+    );
+    let app_status = c.request("denotate/roots", json!({"uri":app}));
+    let lib_status = c.request("denotate/roots", json!({"uri":lib}));
+    let normal = |status: &Value| {
+        status["verifications"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["verification"] == "lib::normal")
+            .unwrap()["summary"]["state"]
+            .clone()
+    };
+    assert_eq!(normal(&app_status), "findings");
+    assert_eq!(normal(&lib_status), "proved");
+    assert!(semantic_findings(&c, &app)
+        .iter()
+        .any(|d| d["data"]["finding"]["verification"] == json!(["lib", "normal"])));
+    c.change(&app, 3, "// removed extension");
+    checking_idle(&mut c);
+    assert_eq!(notices(&c).len(), 3);
+    c.shutdown();
+}
+
+#[test]
+fn a_consumer_ambiguity_in_a_library_verification_is_located_on_the_consumer() {
+    let mut c = Client::start("base/00-valid");
+    let base = c.workspace.path().to_owned();
+    for folder in ["lib", "app"] {
+        std::fs::create_dir(base.join(folder)).unwrap();
+        std::fs::write(
+            base.join(folder).join("den.root"),
+            if folder == "lib" {
+                "{}"
+            } else {
+                r#"{"libraries":["../lib/den.root"]}"#
+            },
+        )
+        .unwrap();
+    }
+    std::fs::write(base.join("lib/code.den"), "namespace library { sort S; input p(x:S); assumption allowed: at_most_one(p, group_by: ()); obligation unique: at_most_one(p, group_by: ()); } namespace library::checks { verification checks { assumptions: [allowed]; obligations: [unique]; } }").unwrap();
+    std::fs::write(base.join("app/code.den"), "// consumer").unwrap();
+    c.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes":[{"uri":support::file_uri(&base.join("app/den.root")),"type":1}]}),
+    );
+    let (lib, _) = c.open("lib/code.den");
+    let (app, _) = c.open("app/code.den");
+    checking_idle(&mut c);
+    c.change(
+        &app,
+        2,
+        "namespace library::checks; assumption allowed: at_most_one(library::p, group_by: ());",
+    );
+    checking_idle(&mut c);
+    let status = c.request("denotate/roots", json!({"uri":app}));
+    assert_eq!(status["checking"], "blocked");
+    assert!(status["uncheckedObligations"].is_null());
+    let diagnostics = c.diagnostics(&app);
+    let conflict = diagnostics
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["code"] == "verification-reference")
+        .unwrap();
+    assert!(conflict["message"]
+        .as_str()
+        .unwrap()
+        .contains("Ambiguous assumption"));
+    assert!(conflict["relatedInformation"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["location"]["uri"] == lib));
+    assert!(c.diagnostics(&lib).as_array().unwrap().is_empty());
+    assert_eq!(
+        c.request("denotate/roots", json!({"uri":lib}))["summary"]["state"],
+        "proved"
+    );
+    c.change(&app, 3, "// consumer repaired");
+    checking_idle(&mut c);
+    assert!(c.diagnostics(&app).as_array().unwrap().is_empty());
+    assert_eq!(
+        c.request("denotate/roots", json!({"uri":app}))["summary"]["state"],
+        "proved"
+    );
+    c.shutdown();
 }

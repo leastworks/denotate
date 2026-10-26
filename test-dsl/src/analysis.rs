@@ -349,7 +349,7 @@ impl Program {
             );
             d.data = Some(serde_json::json!({
                 "program":self.uri.as_str(),
-                "finding":finding.identity.data(&self.lowered.keys).map_err(|e|Failure::Creator(e.to_string()))?,
+                "finding":finding.identity.data_in(&self.lowered.keys, output.results.value.context.verification.as_ref()).map_err(|e|Failure::Creator(e.to_string()))?,
                 "kind":finding.kind.semantic_kind().code(),
                 "evidence":finding.evidence,
                 "fallback":false,
@@ -394,6 +394,14 @@ impl Program {
                     })
                     .collect::<Result<_, Failure>>()?,
             );
+            d.data = Some(serde_json::json!({
+                "program": self.uri.as_str(),
+                "finding": denotate_presentation::Identity::Rewrite { rule: warning.rule, literal: warning.literal }
+                    .data_in(&self.lowered.keys, output.results.value.context.verification.as_ref())
+                    .map_err(|e| Failure::Creator(e.to_string()))?,
+                "kind": "redundant", "fallback": false,
+                "evidence": {"kind": "rewrite-proof", "coversAllInstances": warning.covers_all_instances},
+            }));
             output.diagnostics.push(d);
         }
         for warning in warnings::covered_masks(&self.lowered, &self.sources)

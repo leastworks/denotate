@@ -23,11 +23,6 @@ sorted by key; it returns an empty list when no verification is declared. Each r
 selects exactly its declaration's assumptions and obligations. References use shared
 namespace lookup and resolve only the kind required by their list.
 
-`request(limits, backend)` remains a transitional editor adapter: it checks every
-obligation under every IR assumption, preserving the editor's current behavior until
-the editor checks verifications. `input_assumptions()` provides those lowered restrictions for transitional
-callers; the IR remains their source of meaning.
-
 `load_with_resolver(…, Some(&mut resolver))` also restores embedded origins through a
 caller-owned `origins::OriginResolver` (one resolution per URI/view/hash identity).
 `&Sources` resolves in-memory snapshots; `filesystem::FileOriginResolver` reads local

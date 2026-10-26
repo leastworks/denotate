@@ -127,7 +127,7 @@ exports.run = async function () {
     const checkedText = `sort S; const a,b:S; relation p(x:S);
 #s=source(${JSON.stringify(originUri.toString())},view:"dsl",hash:"${hash}");
 p(a) loc(#s 1:1 to 1:6); p(b) loc(#s 1:7 to 1:13);
-obligation unique: at_most_one(p, group_by: ());`;
+obligation unique: at_most_one(p, group_by: ()); verification checks { assumptions: []; obligations: [unique]; }`;
     await vscode.workspace.fs.writeFile(checkedUri, Buffer.from(checkedText));
     const checkedDoc = await vscode.workspace.openTextDocument(checkedUri);
     await vscode.window.showTextDocument(checkedDoc);
@@ -158,6 +158,15 @@ obligation unique: at_most_one(p, group_by: ());`;
     await navigate();
     assert.equal(vscode.window.activeTextEditor.document.uri.toString(), checkedUri.toString(), 'changed open origin must never navigate to matching disk');
     await replace(origin, 'saved source');
+
+    const checkedStatus = await eventually(() => api.request('denotate/roots', { uri: checkedUri.toString() }),
+        r => r.checking === 'complete' && r.verifications?.length === 1, 'per-verification status');
+    assert.equal(checkedStatus.verifications[0].verification, '::checks');
+    assert.deepEqual(checkedStatus.verifications[0].assumptions, []);
+    assert.equal(checkedStatus.verifications[0].mode, 'normal');
+    assert.equal(checkedStatus.verifications[0].consistency, 'consistent');
+    assert.equal(checkedStatus.verifications[0].summary.state, 'findings');
+    assert.deepEqual(checkedStatus.uncheckedObligations, []);
 
     // Scalar columns are interpreted against the exact CRLF/astral snapshot,
     // then converted to the target editor's UTF-16 positions.

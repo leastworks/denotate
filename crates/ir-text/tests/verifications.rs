@@ -46,13 +46,6 @@ fn explicit_selection_and_no_implicit_verification() {
             .unwrap()
             .is_empty()
     );
-    assert!(
-        unconfigured
-            .request(&Limits::default(), BackendIdentity::bdd())
-            .unwrap()
-            .verification
-            .is_none()
-    );
     let p = single(&format!(
         "verification restricted {{ assumptions: [a]; obligations: [o]; }} {BODY} verification unrestricted {{ assumptions: []; obligations: [o]; }} verification consistency {{ assumptions: [a]; obligations: []; }}"
     ));
@@ -149,7 +142,14 @@ fn distinct_contract_kinds_and_field_words_can_share_names() {
     index
         .set_membership(&ProgramMembership::single("r", ["x".into()]))
         .unwrap();
-    assert!(index.diagnostics("r", "x").is_empty());
+    let diagnostics = index.diagnostics("r", "x");
+    assert_eq!(diagnostics.len(), 1);
+    assert_eq!(diagnostics[0].code, "consistency-only");
+    assert!(diagnostics[0].warning);
+    assert_eq!(
+        diagnostics[0].message,
+        "No obligations selected; this is a consistency-only verification."
+    );
 }
 #[test]
 fn ir_contracts_round_trip_with_selected_keys_and_origins() {
@@ -269,4 +269,28 @@ fn closure_verifications_run_once_and_consumer_can_add_its_own() {
     assert_ne!(requests[0].0, requests[1].0);
     assert_eq!(requests[0].1.obligations, requests[1].1.obligations);
     assert_ne!(requests[0].1.constraints, requests[1].1.constraints);
+}
+
+#[test]
+fn consistency_only_warning_requires_an_explicit_empty_obligation_list() {
+    for (list, warning) in [("[]", true), ("['']", false), ("[", false)] {
+        let text = format!("verification checks {{ assumptions: []; obligations: {list}; }}");
+        let mut index = index::Index::default();
+        index.update(
+            SourceFile::new("x", 1, text.clone()),
+            parser().parse(&text, None).unwrap(),
+        );
+        index
+            .set_membership(&ProgramMembership::single("root", ["x".into()]))
+            .unwrap();
+        assert_eq!(
+            index
+                .diagnostics("root", "x")
+                .iter()
+                .filter(|d| d.code == "consistency-only")
+                .count(),
+            usize::from(warning),
+            "{text}"
+        );
+    }
 }

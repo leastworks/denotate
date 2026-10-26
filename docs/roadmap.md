@@ -20,6 +20,10 @@ formatting, driven by what goes wrong in the first real programs. Known items:
 - Each Go to Origin and rename request rebuilds snapshots and reloads programs
   synchronously; origin restoration scans the corpus per statement. Fine at current
   sizes; revisit with real programs.
+- Unchecked-obligation notices and verification status load the program a second
+  time, synchronously on the server loop, at each snapshot change so they are
+  available before checking finishes. Derive them from the incremental index instead
+  if this shows up as editing latency.
 
 ## Refactoring by semantic equivalence
 

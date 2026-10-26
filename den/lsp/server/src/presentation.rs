@@ -39,6 +39,89 @@ pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Pu
     })
 }
 
+/// Selection is configuration, independent of semantic checking or its budgets.
+pub fn configuration(program: &LoadedProgram) -> Result<Publication, String> {
+    use denotate_ir::{Namespace, OccurrenceId};
+    use lsp_types::{DiagnosticSeverity, NumberOrString};
+    use serde_json::json;
+    use std::collections::BTreeSet;
+    let name = |id: OccurrenceId, text: &str| {
+        denotate_ir_text::index::Name {
+            namespace: Some(
+                program
+                    .corpus
+                    .namespace(id)
+                    .cloned()
+                    .unwrap_or_else(Namespace::default),
+            ),
+            text: text.into(),
+            generated: false,
+        }
+        .spelling()
+    };
+    let mut declarations = program.corpus.verifications().collect::<Vec<_>>();
+    declarations.sort_by_key(|v| program.keys.verification(v.id).unwrap());
+    let selected = declarations
+        .iter()
+        .flat_map(|v| v.obligations.iter().copied())
+        .collect::<BTreeSet<_>>();
+    let verifications = declarations.iter().map(|v| json!({
+        "verification": name(v.id.into(), &v.name),
+        "assumptions": v.assumptions.iter().map(|id| name((*id).into(), &program.corpus.assumption(*id).unwrap().name)).collect::<Vec<_>>(),
+        "mode": if v.obligations.is_empty() { "consistency-only" } else { "normal" },
+        "consistency": "consistent", "checking": "pending", "summary": null,
+    })).collect::<Vec<_>>();
+    let mut unchecked = vec![];
+    let mut diagnostics = BTreeMap::<_, Vec<_>>::new();
+    for obligation in program
+        .corpus
+        .obligations()
+        .filter(|o| !selected.contains(&o.id))
+    {
+        let spelling = name(obligation.id.into(), &obligation.name);
+        unchecked.push(spelling.clone());
+        let key = &program
+            .keys
+            .obligation(obligation.id)
+            .map_err(|e| e.to_string())?
+            .0;
+        let uri = &program.owners[&obligation.id.into()];
+        let fallback = program
+            .documents
+            .iter()
+            .find(|d| &d.uri == uri)
+            .unwrap()
+            .ownership
+            == "library";
+        let message = format!(
+            "Obligation {spelling} is not checked by any verification in program {}.",
+            program.root
+        );
+        // The declaration is the sole notice site, including the labeled library fallback.
+        if let Some(origin) = program.provenance.origins(obligation.id).first() {
+            let location = denotate_editor::presentation::location(&program.sources, origin.span)?;
+            diagnostics.entry(location.uri).or_default().push(Diagnostic {
+                range: location.range,
+                severity: Some(DiagnosticSeverity::INFORMATION),
+                code: Some(NumberOrString::String("unchecked-obligation".into())),
+                source: Some("denotate".into()),
+                message: if fallback { format!("in {}: {message}", program.root) } else { message },
+                data: Some(json!({"program": program.root, "finding": {"uncheckedObligation": [key.namespace.as_ref(), key.name.as_ref()]}, "kind": "unchecked-obligation", "fallback": fallback})),
+                ..Default::default()
+            });
+        }
+    }
+    unchecked.sort();
+    Ok(Publication {
+        diagnostics,
+        status: json!({
+            "state": if verifications.is_empty() { "unconfigured" } else { "incomplete" },
+            "checking": if verifications.is_empty() { "unconfigured" } else { "pending" },
+            "verifications": verifications, "uncheckedObligations": unchecked, "findings": [],
+        }),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -46,7 +129,7 @@ mod tests {
     use denotate_ir_text::{load, ProgramMembership, SourceFile};
     #[test]
     fn converts_checked_identity_locations_and_summary_without_publishing() {
-        let doc = SourceFile::new("file:///unicode.den", 7, "// 😀\nsort S; const a,b: S; relation p(x:S); p(a); p(b); obligation unique: at_most_one(p, group_by: ());");
+        let doc = SourceFile::new("file:///unicode.den", 7, "// 😀\nsort S; const a,b: S; relation p(x:S); p(a); p(b); obligation unique: at_most_one(p, group_by: ()); verification checks { assumptions: []; obligations: [unique]; }");
         let program = load(
             &ProgramMembership::single("file:///den.root", [doc.uri.clone()]),
             &[doc],
@@ -54,7 +137,11 @@ mod tests {
         .unwrap();
         let limits = Limits::default();
         let ops = OperationalLimits::from(&limits);
-        let request = program.request(&limits, BackendIdentity::bdd()).unwrap();
+        let request = program
+            .verification_requests(&limits, BackendIdentity::bdd())
+            .unwrap()
+            .remove(0)
+            .1;
         let RequestPreparation::Complete(prepared) = request
             .prepare(&program.corpus, &program.keys, &ops)
             .unwrap()

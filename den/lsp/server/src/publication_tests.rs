@@ -236,6 +236,19 @@ fn protocol_keys(
         };
         bind(key(a.id, old), key(b.id, &loaded.keys));
     }
+    for a in original.verifications() {
+        let b = loaded
+            .corpus
+            .verifications()
+            .find(|v| OccurrenceId::from(v.id) == ids[&a.id.into()])
+            .unwrap();
+        let a = &old.verification(a.id).unwrap().0;
+        let b = &loaded.keys.verification(b.id).unwrap().0;
+        bind(
+            json!([a.namespace.as_ref(), a.name.as_ref()]),
+            json!([b.namespace.as_ref(), b.name.as_ref()]),
+        );
+    }
     keys
 }
 fn translate(value: &Value, keys: &BTreeMap<String, Value>) -> Value {
@@ -385,7 +398,7 @@ fn published_parity_119_programs_bdd_sat_cold_warm_and_exact_origins() {
                 );
                 let status=den.call("denotate/roots",json!({"uri":files.iter().find(|f|f.uri.ends_with("sources/program.den")).unwrap().uri}));
                 assert_eq!(status["checking"], "complete", "{id}: {status}");
-                let ns = summary(status["summary"].clone(), &keys);
+                let ns = summary(status["verifications"][0]["summary"].clone(), &keys);
                 assert_eq!(ds, ns, "{id} {backend} summaries");
                 if let Some((old_findings, old_summary)) = &previous {
                     assert_eq!(&left, old_findings);
@@ -398,7 +411,7 @@ fn published_parity_119_programs_bdd_sat_cold_warm_and_exact_origins() {
                     &loaded.corpus,
                     &loaded.keys,
                     &loaded
-                        .request(
+                        .verification_requests(
                             &Limits::default(),
                             if backend == "bdd" {
                                 BackendIdentity::bdd()
@@ -406,7 +419,9 @@ fn published_parity_119_programs_bdd_sat_cold_warm_and_exact_origins() {
                                 BackendIdentity::sat()
                             },
                         )
-                        .unwrap(),
+                        .unwrap()
+                        .remove(0)
+                        .1,
                 );
                 validate_producer_origins(&den.published, &loaded);
                 let mut request = p.request(&Limits::default()).unwrap();

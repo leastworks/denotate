@@ -25,7 +25,11 @@ fn check(
 ) -> Accounted<ScopedResults> {
     let limits = Limits::default();
     let ops = OperationalLimits::from(&limits);
-    let request = p.request(&limits, backend).unwrap();
+    let request = p
+        .verification_requests(&limits, backend)
+        .unwrap()
+        .remove(0)
+        .1;
     let RequestPreparation::Complete(prepared) =
         session.prepare(&request, &p.corpus, &p.keys, &ops).unwrap()
     else {
@@ -55,7 +59,7 @@ fn keys(p: &LoadedProgram) -> Vec<String> {
 
 #[test]
 fn explicit_domains_preserve_worlds_and_unused_declarations() {
-    let code = "module m; sort S; sort Empty; const a,b:S; input p(x:S); obligation unique: at_most_one(p, group_by: ());";
+    let code = "module m; sort S; sort Empty; const a,b:S; input p(x:S); obligation unique: at_most_one(p, group_by: ()); verification checks { assumptions: []; obligations: [unique]; }";
     let wide = single(code);
     let narrow = single(&format!("{code} domain S = [a];"));
     assert_eq!(wide.corpus.constants().count(), 2);
@@ -85,7 +89,7 @@ fn imported_assumptions_are_explicit_and_active() {
     );
     let root = source(
         "root",
-        "module root; use lib; obligation unique: at_most_one(lib::p, group_by: ());",
+        "module root; use lib; obligation unique: at_most_one(lib::p, group_by: ()); verification checks { assumptions: [lib::one]; obligations: [unique]; }",
     );
     let docs = [root, lib];
     let p = load("root", &docs).unwrap();
@@ -120,11 +124,11 @@ fn imported_assumptions_are_explicit_and_active() {
                 .all(|r| matches!(r, ScopedResult::Proved))
         );
         let mut edited = docs.clone();
-        edited[1].text = edited[1]
+        edited[0].text = edited[0]
             .text
-            .replace("assumption one: at_most_one(p, group_by: ());", "")
+            .replace("assumptions: [lib::one]", "assumptions: []")
             .into();
-        edited[1].revision += 1;
+        edited[0].revision += 1;
         let edited = load("root", &edited).unwrap();
         let reused = check(&edited, &mut session, backend.clone());
         assert_eq!(counterexamples(&reused), 1);
@@ -137,7 +141,7 @@ fn whole_export_root_sees_cross_module_conflicts_and_shared_constants() {
     let docs = vec![
         source(
             "lib",
-            "module lib; sort S; relation r(x:S); obligation unique: at_most_one(r, group_by: ());",
+            "module lib; sort S; relation r(x:S); obligation unique: at_most_one(r, group_by: ()); verification checks { assumptions: []; obligations: [unique]; }",
         ),
         source("shared", "module shared; use lib; const a,b:lib::S;"),
         source("a", "module a; use lib; use shared; lib::r(shared::a);"),
@@ -309,10 +313,10 @@ fn value_literals_and_quoted_names_keep_canonical_values_and_exact_spans() {
 #[test]
 fn stable_keys_and_warm_answers_ignore_trivia_and_location_syntax() {
     let cold = single(
-        "module m; sort S; const a,b:S; input p(x:S); relation r(x:S); r(X) :- p(X); r(X) :- p(X); obligation u: at_most_one(r, group_by: ());",
+        "module m; sort S; const a,b:S; input p(x:S); relation r(x:S); r(X) :- p(X); r(X) :- p(X); obligation u: at_most_one(r, group_by: ()); verification checks { assumptions: []; obligations: [u]; }",
     );
     let warm = single(
-        "// shifted\nmodule m; sort S; const a,b:S; input p(x:S); relation r(x:S); r( X ) :- p(X) loc(#map);\nr(X) :- p( X ); obligation u: at_most_one(r, group_by: ()); #map = {head.0: loc(#dsl 1:1 to 1:2)}; #dsl = source(\"file:///original.dsl\", view: \"dsl\", hash: \"sha256:0000000000000000000000000000000000000000000000000000000000000000\");",
+        "// shifted\nmodule m; sort S; const a,b:S; input p(x:S); relation r(x:S); r( X ) :- p(X) loc(#map);\nr(X) :- p( X ); obligation u: at_most_one(r, group_by: ()); verification checks { assumptions: []; obligations: [u]; } #map = {head.0: loc(#dsl 1:1 to 1:2)}; #dsl = source(\"file:///original.dsl\", view: \"dsl\", hash: \"sha256:0000000000000000000000000000000000000000000000000000000000000000\");",
     );
     assert_eq!(keys(&cold), keys(&warm));
     let rules = cold
@@ -537,7 +541,12 @@ fn reserved_words_are_allowed_as_parameter_and_grouping_names() {
         let program = single(&format!(
             "module m; sort S; const a,b:S; input p({word}:S); assumption w: at_most_one(p, group_by: {word}); obligation unique: at_most_one(p, group_by: ({word}));"
         ));
-        assert_eq!(program.input_assumptions()[0].group_by, vec![0]);
+        assert_eq!(
+            match &program.corpus.assumptions().next().unwrap().restriction {
+                denotate_ir::Restriction::AtMostOne { group_by, .. } => group_by.clone(),
+            },
+            vec![0]
+        );
         assert_eq!(
             program.corpus.relations().next().unwrap().parameters[0].name,
             word
@@ -874,7 +883,7 @@ fn moving_constructs_between_files_preserves_resolved_keys_and_warm_answers() {
         source("a", "namespace lib; sort S; const a,b:S; input p(x:S);"),
         source(
             "b",
-            "namespace n; use lib; relation r(x:S); r(X) :- p(X); r(X) :- p(X); obligation unique: at_most_one(r, group_by: ());",
+            "namespace n; use lib; relation r(x:S); r(X) :- p(X); r(X) :- p(X); obligation unique: at_most_one(r, group_by: ()); verification checks { assumptions: []; obligations: [unique]; }",
         ),
     ];
     let after = [
@@ -884,7 +893,7 @@ fn moving_constructs_between_files_preserves_resolved_keys_and_warm_answers() {
         ),
         source(
             "y",
-            "namespace n; r(X) :- lib::p(X); obligation unique: at_most_one(n::r, group_by: ());",
+            "namespace n; r(X) :- lib::p(X); obligation unique: at_most_one(n::r, group_by: ()); verification checks { assumptions: []; obligations: [unique]; }",
         ),
     ];
     let original = load("root", &before).unwrap();

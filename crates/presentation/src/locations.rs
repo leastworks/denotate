@@ -19,6 +19,7 @@ impl RelatedLocation {
 #[derive(Debug)]
 pub struct Diagnostic {
     pub program: String,
+    pub verification: Option<VerificationKey>,
     pub identity: Identity,
     pub kind: Kind,
     pub message: String,
@@ -31,7 +32,7 @@ pub struct Diagnostic {
 impl Diagnostic {
     pub fn data(&self, keys: &SemanticKeys) -> Result<Value> {
         Ok(
-            json!({"program":self.program,"finding":self.identity.data(keys)?,"kind":self.kind.code(),"fallback":self.fallback,"evidence":self.evidence}),
+            json!({"program":self.program,"finding":self.identity.data_in(keys, self.verification.as_ref())?,"kind":self.kind.code(),"fallback":self.fallback,"evidence":self.evidence}),
         )
     }
 }
@@ -39,6 +40,7 @@ impl Diagnostic {
 /// have the same view label. Only current text can supply a primary location.
 pub struct Placement<'a> {
     pub program: &'a str,
+    pub verification: Option<&'a VerificationKey>,
     pub user_files: &'a BTreeSet<String>,
     pub sources: &'a Sources,
     pub current: &'a Provenance,
@@ -106,6 +108,7 @@ impl Placement<'_> {
             }
             out.push(Diagnostic {
                 program: self.program.into(),
+                verification: self.verification.cloned(),
                 identity: identity.clone(),
                 kind,
                 message: if fallback {
@@ -176,6 +179,7 @@ mod tests {
         let files = BTreeSet::from(["file:///x".into()]);
         let placement = Placement {
             program: "root",
+            verification: None,
             user_files: &files,
             sources: &sources,
             current: &current,

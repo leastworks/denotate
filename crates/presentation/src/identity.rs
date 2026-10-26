@@ -66,6 +66,18 @@ pub fn atom_data(k: &AtomKey) -> Value {
     json!({"relation":relation(&k.relation),"arguments":k.arguments.iter().map(constant).collect::<Vec<_>>()})
 }
 impl Identity {
+    /// A finding belongs to the selected verification as well as its group,
+    /// region or rewrite. Null is reserved for low-level unnamed requests.
+    pub fn data_in(
+        &self,
+        keys: &SemanticKeys,
+        verification: Option<&VerificationKey>,
+    ) -> Result<Value> {
+        let mut data = self.data(keys)?;
+        data["verification"] = verification.map(|v| qualified(&v.0)).unwrap_or(Value::Null);
+        Ok(data)
+    }
+
     /// Structured, arena-independent protocol data. Never Debug strings, rendered
     /// messages or ambiguous joined namespace/name strings.
     pub fn data(&self, keys: &SemanticKeys) -> Result<Value> {

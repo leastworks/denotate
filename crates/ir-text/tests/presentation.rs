@@ -7,7 +7,11 @@ use std::collections::{BTreeMap, BTreeSet};
 fn checked(p: &LoadedProgram, backend: BackendIdentity) -> presentation::Presentation {
     let limits = Limits::default();
     let ops = OperationalLimits::from(&limits);
-    let request = p.request(&limits, backend).unwrap();
+    let request = p
+        .verification_requests(&limits, backend)
+        .unwrap()
+        .remove(0)
+        .1;
     let mut session = Session::default();
     let RequestPreparation::Complete(prepared) =
         session.prepare(&request, &p.corpus, &p.keys, &ops).unwrap()
@@ -60,8 +64,7 @@ fn program(root: &str, app: &str, library: &str) -> LoadedProgram {
     )
     .unwrap()
 }
-const LIB: &str =
-    "sort S; const a,b: S; relation p(x:S); obligation unique: at_most_one(p, group_by: ());";
+const LIB: &str = "sort S; const a,b: S; relation p(x:S); obligation unique: at_most_one(p, group_by: ()); verification checks { assumptions: []; obligations: [unique]; }";
 
 #[test]
 fn consumer_locations_and_labeled_fallback_do_not_change_library_home() {
@@ -232,11 +235,15 @@ fn no_meaning_and_unsupported_are_not_success_or_overlap() {
 fn exhausted_request_keeps_backend_assumptions_and_reason_in_status() {
     let p = program(
         "file:///app/den.root",
-        "input i(x:S); assumption w: at_most_one(i, group_by: ());",
+        "input i(x:S); assumption w: at_most_one(i, group_by: ()); verification constrained { assumptions: [w]; obligations: [unique]; }",
         LIB,
     );
     let limits = Limits::default();
-    let request = p.request(&limits, BackendIdentity::sat()).unwrap();
+    let request = p
+        .verification_requests(&limits, BackendIdentity::sat())
+        .unwrap()
+        .remove(1)
+        .1;
     let status = denotate_presentation::summary(&request.exhausted(Inconclusive {
         phase: "grounding",
         resource: "deadline",
@@ -257,7 +264,7 @@ fn sat_unfounded_world_is_exposed_separately_from_replayed_counterexamples() {
     let mut unsupported = 0;
     for rules in cases {
         let text = format!(
-            "sort S; const a,b:S; input i(x:S); relation d(x:S); {rules} obligation unique: at_most_one(d, group_by: ());"
+            "sort S; const a,b:S; input i(x:S); relation d(x:S); {rules} obligation unique: at_most_one(d, group_by: ()); verification checks {{ assumptions: []; obligations: [unique]; }}"
         );
         let doc = SourceFile::new("file:///sat.den", 1, text);
         let p = load(
@@ -318,6 +325,7 @@ fn phase_exhaustion_and_rewrite_proofs_remain_distinct() {
         .collect();
     let placement = denotate_presentation::Placement {
         program: &p.root,
+        verification: None,
         user_files: &user_files,
         sources: &p.sources,
         current: &p.provenance,
@@ -369,7 +377,7 @@ fn a_consumers_participating_constant_declarations_are_valid_primaries() {
     let p = program(
         "file:///app/den.root",
         "const a,b:S;",
-        "sort S; input i(x:S); relation p(x:S); p(X) :- i(X); obligation unique: at_most_one(p, group_by: ());",
+        "sort S; input i(x:S); relation p(x:S); p(X) :- i(X); obligation unique: at_most_one(p, group_by: ()); verification checks { assumptions: []; obligations: [unique]; }",
     );
     for backend in [BackendIdentity::bdd(), BackendIdentity::sat()] {
         let out = checked(&p, backend);

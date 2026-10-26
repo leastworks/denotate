@@ -457,7 +457,21 @@ impl Projection {
                                 .collect()
                         };
                         let assumptions = names("assumption");
-                        let obligations = names("obligation");
+                        let obligations: Vec<_> = names("obligation");
+                        if node
+                            .children_by_field_name("obligation", &mut node.walk())
+                            .next()
+                            .is_none()
+                            && !node.has_error()
+                            && !node.is_missing()
+                        {
+                            self.issues.push(Issue {
+                                span: field(node, "name").map_or(node.byte_range(), |n| n.byte_range()),
+                                code: "consistency-only".into(),
+                                message: "No obligations selected; this is a consistency-only verification.".into(),
+                                warning: true,
+                            });
+                        }
                         self.verifications.push(VerificationReferences {
                             scope: scope.clone(),
                             assumptions,

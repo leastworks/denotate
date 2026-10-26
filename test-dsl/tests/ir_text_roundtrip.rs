@@ -574,7 +574,8 @@ fn narrowed_domains_and_active_assumptions_change_both_paths_together() {
             "file:///original.den",
             1,
             format!(
-                "sort S; const a, b: S; input p(x: S); relation q(x: S); q(X) :- p(X); obligation unique: at_most_one(q, group_by: ()); {domain} {assumption}"
+                "sort S; const a, b: S; input p(x: S); relation q(x: S); q(X) :- p(X); obligation unique: at_most_one(q, group_by: ()); {domain} {assumption} verification checks {{ assumptions: [{selected}]; obligations: [unique]; }}",
+                selected = if assumption.is_empty() { "" } else { "w" }
             ),
         );
         let p = load(
@@ -609,9 +610,7 @@ fn narrowed_domains_and_active_assumptions_change_both_paths_together() {
                 let actual = check(
                     &current.corpus,
                     &current.keys,
-                    &current
-                        .request(&Limits::default(), backend.clone())
-                        .unwrap(),
+                    &default_request(current, &Limits::default(), backend.clone()),
                     &mut Session::default(),
                     &index,
                 );

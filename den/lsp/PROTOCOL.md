@@ -24,7 +24,7 @@ and navigation. Ordinary `.den` edits do not rescan folders.
 ### Requests
 
 - `denotate/roots {uri}` returns
-  `{uri, homeProgram, state, errors, checking, backend, activeAssumptions, findings, summary?, originNotices?, checkRevision?}`.
+  `{uri, homeProgram, state, errors, checking, backend, verifications, uncheckedObligations, findings, summary?, originNotices?, checkRevision?}`.
   `state` is `standalone`, `ready` or `invalid` and describes resolution readiness,
   not a successful check. `homeProgram` is a canonical manifest URI (null when
   standalone or unresolved).
@@ -35,7 +35,9 @@ and navigation. Ordinary `.den` edits do not rescan folders.
   `denotate.createRoot [documentUri, folderUri?, chooseFolder=false]` creates `{}`
   exclusively (never overwriting an existing or open manifest) and triggers discovery.
 
-The status bar shows the home program, readiness and errors.
+The status bar shows the home program, verification count and aggregate outcome.
+Its tooltip includes one line per verification with its assumptions, mode, consistency,
+checking state and outcome, plus unchecked obligations and origin notices.
 
 ## Findings and publication
 
@@ -50,17 +52,71 @@ A consumer-caused library failure (for example, a consumer declaration that make
 library name ambiguous) is reported in the consumer's status and on the conflicting
 consumer declaration, with the library location related.
 
-`checking` is `pending`, `checking`, `complete`, `blocked`, `deadline`, `cancelled` or
-`failed`. `complete` means the check finished; `summary.state` is `proved`, `findings`
-or `incomplete`. Proved obligations appear in the summary, not as diagnostics.
-`activeAssumptions` is null until a current result exists. `originNotices` reports
-unavailable or changed sources separately from findings.
+`checking` is `pending`, `checking`, `complete`, `unconfigured`, `blocked`,
+`deadline`, `cancelled` or `failed`. `unconfigured` means the complete program has no
+verification declarations: it publishes no admission, obligation, no-meaning,
+unsupported-region or rewrite findings. Syntax, resolution, type and structural
+checks remain available. Invalid verification syntax or references block checking;
+they never trigger an implicit verification.
 
-Each semantic diagnostic's `data` holds `program`, `finding` (a structured group,
-region or rewrite identity built from semantic keys, never arena IDs or message text),
+`verifications` is null while configuration cannot be resolved, otherwise a list in
+verification-key order:
+
+```json
+{
+  "verification": "library::default_checks",
+  "assumptions": ["library::one_present_input"],
+  "mode": "normal",
+  "consistency": "consistent",
+  "checking": "complete",
+  "summary": {"state": "proved"}
+}
+```
+
+Names are qualified `.den` spellings (`::checks` for a global name). `mode` is
+`normal` or `consistency-only`; the latter selects no obligations but still runs
+context-wide semantic analysis. `consistency: "consistent"` follows from the
+all-absent input world permitted by every currently supported assumption; it is
+not an admission or obligation proof. `summary` is null until that verification has
+a current result, then contains the shared checker summary (backend, lowered input
+restrictions, groups, regions, incomplete work and finding inventory).
+`complete` means execution finished, including conclusive findings or explicitly
+inconclusive scopes; `summary.state` is `proved`, `findings` or `incomplete`.
+Operational deadlines/failures are recorded on the affected verification; independent
+verifications still run. Cancellation withdraws the obsolete program job.
+
+The program-level `summary` contains `state`, `checking`, `verifications`,
+`uncheckedObligations`, `findings` and `originNotices`. Its state is `unconfigured`
+with no verifications; otherwise any unchecked obligation, unfinished verification
+or incomplete summary makes it `incomplete`. With all work complete it is `findings`
+if any verification has findings, otherwise `proved`. Known findings remain listed
+even when the aggregate is incomplete. Proved obligations appear only in summaries.
+`originNotices` reports unavailable or changed sources separately from findings.
+
+`uncheckedObligations` is null for unresolved configuration, otherwise a sorted list
+of qualified obligation names selected by no verification in the program's closure.
+Selections are independent of execution: pending, blocked or inconclusive selected
+checks are never reported as unchecked. Notices are computed before checking and
+remain available while checks are pending or exhausted. Each unchecked obligation
+gets one Information diagnostic per program at its declaration, including the labeled
+library fallback: `Obligation <name> is not checked by any verification in program
+<program>.` The code is `unchecked-obligation`; its data uses the program/obligation
+identity (`finding.uncheckedObligation`), not a semantic verification identity.
+
+An explicit empty obligation list gets one structural Warning per declaration, in
+its own document, even with multiple consumers: `No obligations selected; this is a
+consistency-only verification.` Its code is `consistency-only`. It carries no
+per-program semantic finding identity.
+
+Each semantic diagnostic's `data` holds `program`, `finding` (an object containing `verification: [namespaceKey, name]` alongside
+exactly one existing `group`, `region` or `rewrite` identity, all built from semantic
+keys, never arena IDs or message text),
 `kind`, `fallback`, `evidence`, `checkRevision` and `locations` (URI, view, SHA-256
 and byte range for primary and related spans). Counterexamples may produce several
-highlights with one finding identity; unsupported and inconclusive findings use one
+highlights with one finding identity. Publication identity is the full
+`(data.program, data.finding)` pair: two verifications of the same obligation remain
+distinct even with identical assumptions. Messages do not embed context labels;
+unsupported and inconclusive findings use one
 primary with the other producers related. Evidence kinds are
 `replayed-counterexample`, `no-meaning-observation`, `unfounded-support-world`
 (never an overlap witness), `rewrite-proof` and `no-witness`. Rewrite proofs do not
@@ -70,10 +126,17 @@ authorize edits.
 
 `initializationOptions.denotate` or
 `workspace/didChangeConfiguration {settings: {denotate: {backend, timeoutMs}}}`:
-`backend` is `bdd` (default) or `sat`; `timeoutMs` defaults to 10000. An update
+`backend` is `bdd` (default) or `sat`; `timeoutMs` defaults to 10000 and bounds each verification's check separately, so a
+program with several verifications may take that long per verification. An update
 replaces the whole object. The VS Code setting is `denotate.backend`.
 
 ### Scheduling
+
+Every verification in the reachable closure runs once in each including program,
+using that program's facts and domains; consumers may add verifications over library
+declarations. Each program has one session and one job that executes its verifications
+in key order, checks cancellation between contexts and publishes the merged results
+atomically. No verification is implicitly selected when none exists.
 
 At most one job runs and one latest job waits per program; a queued replacement keeps
 its FIFO position, while a replacement for the running program joins the tail. Member,

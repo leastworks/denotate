@@ -502,15 +502,14 @@ impl Index {
     pub fn declaration(&self, target: &Symbol) -> Option<&Declaration> {
         self.files.get(&target.uri)?.declarations.get(&target.id)
     }
-    pub fn diagnostics(&self, root: &str, uri: &str) -> Vec<Issue> {
-        let Some(file) = self.files.get(uri) else {
-            return vec![];
-        };
+    fn contract_entries(
+        &self,
+        root: &str,
+    ) -> Vec<(Namespace, String, ContractKind, (String, String))> {
         if !self.roots.contains_key(root) {
-            return file.issues.clone();
+            return vec![];
         }
-        let mut out = file.issues.clone();
-        let contracts = self.roots[root]
+        self.roots[root]
             .files(&self.db)
             .iter()
             .filter_map(|f| self.files.get(f.uri(&self.db)))
@@ -526,7 +525,57 @@ impl Index {
                     })
                 })
             })
-            .collect::<Vec<_>>();
+            .collect::<Vec<_>>()
+    }
+
+    /// Ambiguous verification targets for consumer-error placement only. This
+    /// deliberately does not register navigation/rename references (Stage D2).
+    pub fn verification_conflicts(
+        &self,
+        root: &str,
+        uri: &str,
+        span: &Range<usize>,
+    ) -> Vec<Symbol> {
+        let Some(file) = self.files.get(uri) else {
+            return vec![];
+        };
+        let entries = self.contract_entries(root);
+        for v in &file.verifications {
+            for (kind, names) in [
+                (ContractKind::Assumption, &v.assumptions),
+                (ContractKind::Obligation, &v.obligations),
+            ] {
+                if let Some((name, _)) = names.iter().find(|(_, range)| range == span) {
+                    let matching = matching_contracts(&v.scope, name, &entries)
+                        .into_iter()
+                        .filter(|e| e.2 == kind)
+                        .collect::<Vec<_>>();
+                    if matching.len() > 1 {
+                        return matching
+                            .into_iter()
+                            .map(|e| Symbol {
+                                uri: e.3.0.clone(),
+                                id: e.3.1.clone(),
+                                name: e.1.clone(),
+                                module: None,
+                            })
+                            .collect();
+                    }
+                }
+            }
+        }
+        vec![]
+    }
+
+    pub fn diagnostics(&self, root: &str, uri: &str) -> Vec<Issue> {
+        let Some(file) = self.files.get(uri) else {
+            return vec![];
+        };
+        if !self.roots.contains_key(root) {
+            return file.issues.clone();
+        }
+        let mut out = file.issues.clone();
+        let contracts = self.contract_entries(root);
         for v in &file.verifications {
             for (kind, names) in [
                 (ContractKind::Assumption, &v.assumptions),

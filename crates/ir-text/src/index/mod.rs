@@ -196,6 +196,22 @@ pub struct VerificationReferences {
     pub obligations: Vec<(Name, Range<usize>)>,
 }
 
+fn matching_contracts<'a, T>(
+    scope: &Scope,
+    name: &Name,
+    entries: &'a [(Namespace, String, ContractKind, T)],
+) -> Vec<&'a (Namespace, String, ContractKind, T)> {
+    let candidates = candidate_keys(
+        visible_namespaces(&scope.namespace, &scope.imports, name.namespace.as_ref()),
+        &name.text,
+        name.generated,
+    );
+    entries
+        .iter()
+        .filter(|(ns, text, _, _)| candidates.contains(&(ns.clone(), text.clone(), false)))
+        .collect()
+}
+
 /// Shared contract reference resolution for strict loading and recoverable indexing.
 pub(crate) fn resolve_contract_list<T: Clone + Ord>(
     scope: &Scope,
@@ -207,15 +223,7 @@ pub(crate) fn resolve_contract_list<T: Clone + Ord>(
     let mut seen = BTreeSet::new();
     let mut errors = Vec::new();
     for (name, span) in names {
-        let candidates = candidate_keys(
-            visible_namespaces(&scope.namespace, &scope.imports, name.namespace.as_ref()),
-            &name.text,
-            name.generated,
-        );
-        let matching = entries
-            .iter()
-            .filter(|(ns, text, _, _)| candidates.contains(&(ns.clone(), text.clone(), false)))
-            .collect::<Vec<_>>();
+        let matching = matching_contracts(scope, &name, entries);
         let expected = matching.iter().filter(|e| e.2 == kind).collect::<Vec<_>>();
         let message = match expected.as_slice() {
             [entry] => {

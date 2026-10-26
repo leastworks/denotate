@@ -72,6 +72,7 @@ pub type Event = checking::Event<String, Output>;
 pub enum Failure {
     Cancelled,
     Deadline,
+    Exhausted(Inconclusive),
     Invalid(Vec<denotate_ir_text::Diagnostic>),
     Internal(String),
 }
@@ -80,6 +81,9 @@ impl From<CheckError> for Failure {
         match e {
             CheckError::Cancelled => Self::Cancelled,
             CheckError::Deadline { .. } => Self::Deadline,
+            CheckError::LimitExceeded { phase, resource } => {
+                Self::Exhausted(Inconclusive { phase, resource })
+            }
             _ => Self::Internal(e.to_string()),
         }
     }
@@ -94,23 +98,101 @@ fn check(
         denotate_ir_text::load_with_resolver(&s.membership, &s.files, Some(&mut &s.bridge))
             .map_err(Failure::Invalid)?;
     job.limits.cancellation.check()?;
-    let request = program.request(&job.limits, s.config.backend.clone())?;
-    let operations = OperationalLimits::from(&job.limits);
-    let exhausted = |reason| Publication {
-        diagnostics: BTreeMap::new(),
-        status: denotate_presentation::summary(&request.exhausted(reason)),
-    };
-    let ground = match session.prepare(&request, &program.corpus, &program.keys, &operations)? {
-        RequestPreparation::Complete(p) => p,
-        RequestPreparation::Inconclusive { reason, .. } => return Ok(exhausted(reason)),
-    };
-    let ground = ground.admit(&operations)?;
-    let mut publication = match session.verify(&ground, &operations)? {
-        LocalCheckOutcome::Complete(report) => {
-            presentation::present(&program, &report.checked).map_err(Failure::Internal)?
+    let mut publication = presentation::configuration(&program).map_err(Failure::Internal)?;
+    let requests = program.verification_requests(&job.limits, s.config.backend.clone())?;
+    for (i, (_, request)) in requests.iter().enumerate() {
+        job.limits.cancellation.check()?;
+        // Each context gets its own operation limits; a failed context cannot
+        // consume another verification's deadline or prevent its execution.
+        let operations = OperationalLimits::from(&job.limits);
+        let exhausted = |reason| Publication {
+            diagnostics: BTreeMap::new(),
+            status: denotate_presentation::summary(&request.exhausted(reason)),
+        };
+        let mut run = || -> std::result::Result<Publication, Failure> {
+            let ground =
+                match session.prepare(request, &program.corpus, &program.keys, &operations)? {
+                    RequestPreparation::Complete(p) => p,
+                    RequestPreparation::Inconclusive { reason, .. } => {
+                        return Ok(exhausted(reason))
+                    }
+                };
+            let ground = ground.admit(&operations)?;
+            match session.verify(&ground, &operations)? {
+                LocalCheckOutcome::Complete(report) => {
+                    presentation::present(&program, &report.checked).map_err(Failure::Internal)
+                }
+                LocalCheckOutcome::Inconclusive { reason, .. } => Ok(exhausted(reason)),
+            }
+        };
+        let (checking, result) = match run() {
+            Ok(result) => ("complete", result),
+            Err(Failure::Cancelled) => return Err(Failure::Cancelled),
+            Err(Failure::Exhausted(reason)) => ("complete", exhausted(reason)),
+            Err(Failure::Deadline) => (
+                "deadline",
+                exhausted(Inconclusive {
+                    phase: "checking",
+                    resource: "deadline",
+                }),
+            ),
+            Err(error) => (
+                "failed",
+                Publication {
+                    diagnostics: BTreeMap::new(),
+                    status: json!({"state":"incomplete","error":format!("{error:?}")}),
+                },
+            ),
+        };
+        let entry = &mut publication.status["verifications"][i];
+        entry["checking"] = json!(checking);
+        entry["summary"] = result.status.clone();
+        for (uri, diagnostics) in result.diagnostics {
+            publication
+                .diagnostics
+                .entry(uri)
+                .or_default()
+                .extend(diagnostics);
         }
-        LocalCheckOutcome::Inconclusive { reason, .. } => exhausted(reason),
+        if let Some(findings) = result.status["findings"].as_array() {
+            publication.status["findings"]
+                .as_array_mut()
+                .unwrap()
+                .extend(findings.iter().cloned());
+        }
+    }
+    let verifications = publication.status["verifications"].as_array().unwrap();
+    let checking = if verifications.is_empty() {
+        "unconfigured"
+    } else if verifications.iter().any(|v| v["checking"] == "failed") {
+        "failed"
+    } else if verifications.iter().any(|v| v["checking"] == "deadline") {
+        "deadline"
+    } else {
+        "complete"
     };
+    let state = if verifications.is_empty() {
+        "unconfigured"
+    } else if checking != "complete"
+        || !publication.status["uncheckedObligations"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+        || verifications
+            .iter()
+            .any(|v| v["summary"]["state"] == "incomplete")
+    {
+        "incomplete"
+    } else if verifications
+        .iter()
+        .any(|v| v["summary"]["state"] == "findings")
+    {
+        "findings"
+    } else {
+        "proved"
+    };
+    publication.status["checking"] = json!(checking);
+    publication.status["state"] = json!(state);
     publication.status["originNotices"] = json!(program.embedded.notices.iter().map(|n|json!({"uri":n.source.uri,"view":n.source.view,"hash":n.source.hash,"reason":format!("{:?}",n.reason)})).collect::<Vec<_>>());
     for diagnostics in publication.diagnostics.values_mut() {
         for d in diagnostics {
@@ -128,16 +210,18 @@ fn check(
                     }
                 }
             }
-            if d.data.as_ref().is_some_and(|v| v["fallback"] == true) {
-                let prefix = format!("in {}: ", program.root);
-                if let Some(message) = d.message.strip_prefix(&prefix) {
-                    d.message = format!("in {}: {message}", s.label);
-                }
-            }
+            label_fallback(d, &program.root, &s.label);
         }
     }
     job.limits.cancellation.check()?;
     Ok(publication)
+}
+fn label_fallback(d: &mut Diagnostic, root: &str, label: &str) {
+    if d.data.as_ref().is_some_and(|v| v["fallback"] == true) {
+        if let Some(message) = d.message.strip_prefix(&format!("in {root}: ")) {
+            d.message = format!("in {label}: {message}");
+        }
+    }
 }
 struct State {
     // None means the program still exists but cannot currently be checked.
@@ -146,6 +230,7 @@ struct State {
     revision: u64,
     checking: &'static str,
     publication: Option<Publication>,
+    configuration: Option<Publication>,
     errors: Vec<String>,
 }
 #[derive(Default)]
@@ -179,7 +264,8 @@ impl Checking {
     pub fn status(&self, root: &str, status: &mut Value) {
         status["backend"] = json!(self.config.backend.backend);
         status["checking"] = json!("blocked");
-        status["activeAssumptions"] = Value::Null;
+        status["verifications"] = Value::Null;
+        status["uncheckedObligations"] = Value::Null;
         status["findings"] = json!([]);
         if let Some(state) = self.states.get(root) {
             status["checking"] = json!(state.checking);
@@ -193,10 +279,18 @@ impl Checking {
                     .unwrap()
                     .extend(state.errors.iter().map(|e| json!(e)));
             }
-            if let Some(p) = &state.publication {
-                status["activeAssumptions"] = p.status["activeAssumptions"].clone();
+            if let Some(p) = state.publication.as_ref().or(state.configuration.as_ref()) {
+                status["verifications"] = p.status["verifications"].clone();
+                status["uncheckedObligations"] = p.status["uncheckedObligations"].clone();
+                if state.publication.is_none() {
+                    for v in status["verifications"].as_array_mut().unwrap() {
+                        v["checking"] = json!(state.checking);
+                    }
+                }
                 status["findings"] = p.status.get("findings").cloned().unwrap_or(json!([]));
                 status["summary"] = p.status.clone();
+                status["summary"]["verifications"] = status["verifications"].clone();
+                status["summary"]["checking"] = status["checking"].clone();
                 status["originNotices"] =
                     p.status.get("originNotices").cloned().unwrap_or(json!([]));
             }
@@ -205,7 +299,7 @@ impl Checking {
     pub fn diagnostics(&self, uri: &Url) -> Vec<Diagnostic> {
         self.states
             .values()
-            .filter_map(|s| s.publication.as_ref())
+            .filter_map(|s| s.publication.as_ref().or(s.configuration.as_ref()))
             .filter_map(|p| p.diagnostics.get(uri))
             .flatten()
             .cloned()
@@ -242,6 +336,7 @@ impl Checking {
                         revision,
                         checking: "blocked",
                         publication: None,
+                        configuration: None,
                         errors: vec![],
                     },
                 );
@@ -251,6 +346,15 @@ impl Checking {
                 timeout: std::time::Duration::from_millis(snapshot.config.timeout_ms),
                 ..Limits::default()
             };
+            let mut configuration = denotate_ir_text::load(&snapshot.membership, &snapshot.files)
+                .ok()
+                .and_then(|p| presentation::configuration(&p).ok());
+            if let Some(config) = &mut configuration {
+                for d in config.diagnostics.values_mut().flatten() {
+                    d.data.as_mut().unwrap()["checkRevision"] = json!(revision);
+                    label_fallback(d, &root, &snapshot.label);
+                }
+            }
             worker.enqueue(Job {
                 ticket,
                 payload: Payload {
@@ -266,6 +370,7 @@ impl Checking {
                     revision,
                     checking: "pending",
                     publication: None,
+                    configuration,
                     errors: vec![],
                 },
             );
@@ -507,7 +612,12 @@ impl Server {
                     for diagnostic in publication.diagnostics.values_mut().flatten() {
                         diagnostic.data.as_mut().unwrap()["checkRevision"] = json!(revision);
                     }
-                    state.checking = "complete";
+                    state.checking = match publication.status["checking"].as_str() {
+                        Some("unconfigured") => "unconfigured",
+                        Some("deadline") => "deadline",
+                        Some("failed") => "failed",
+                        _ => "complete",
+                    };
                     state.publication = Some(publication);
                 } else {
                     // A failed destination check must never stop independent roots.
@@ -529,6 +639,12 @@ impl Server {
                     .into_iter()
                     .map(|e| format!("{}: {}", e.uri, e.message))
                     .collect();
+            }
+            Err(Failure::Exhausted(reason)) => {
+                state.checking = "failed";
+                state
+                    .errors
+                    .push(format!("Configuration exhausted: {reason:?}"));
             }
             Err(Failure::Internal(error)) => {
                 state.checking = "failed";
@@ -591,13 +707,57 @@ impl CheckingHandler for Server {
 mod tests {
     use super::*;
     #[test]
+    fn an_exhausted_verification_does_not_prevent_the_next_one() {
+        let text = "sort S; const a,b,c:S; input p(x:S); relation single(); single(); obligation expensive: at_most_one(p, group_by: ()); obligation trivial: at_most_one(single, group_by: ()); verification first { assumptions: []; obligations: [expensive]; } verification second { assumptions: []; obligations: [trivial]; }";
+        let job = Job {
+            ticket: Ticket {
+                key: "file:///den.root".into(),
+                revision: 1,
+                metadata: (),
+            },
+            payload: Payload {
+                snapshot: Snapshot {
+                    membership: ProgramMembership::single(
+                        "file:///den.root",
+                        ["file:///p.den".into()],
+                    ),
+                    files: vec![SourceFile::new("file:///p.den", 1, text)],
+                    key: Value::Null,
+                    bridge: Bridge::default(),
+                    config: Config::default(),
+                    label: "p".into(),
+                },
+                measure: false,
+            },
+            limits: Limits {
+                max_bdd_nodes: 2,
+                ..Limits::default()
+            },
+        };
+        let mut session = denotate_check_session::Session::default();
+        let cold = check(&job, &mut session).unwrap();
+        let statuses = &cold.status["verifications"];
+        assert_eq!(statuses[0]["verification"], "::first");
+        assert_eq!(
+            statuses[0]["summary"]["state"], "incomplete",
+            "{}",
+            cold.status
+        );
+        assert_eq!(statuses[1]["verification"], "::second");
+        assert_eq!(statuses[1]["checking"], "complete");
+        assert_eq!(statuses[1]["summary"]["state"], "proved", "{}", cold.status);
+        assert_eq!(cold.status["state"], "incomplete");
+        assert_eq!(cold.status["uncheckedObligations"], json!([]));
+        assert_eq!(check(&job, &mut session).unwrap().status, cold.status);
+    }
+    #[test]
     fn a_deadline_does_not_drop_a_waiting_valid_root() {
         let snapshot = |root: &str| Snapshot {
             membership: ProgramMembership::single(root, [format!("file:///{root}.den")]),
             files: vec![SourceFile::new(
                 format!("file:///{root}.den"),
                 1,
-                "relation p(); p();",
+                "relation p(); p(); verification checks { assumptions: []; obligations: []; }",
             )],
             key: json!(root),
             bridge: Bridge::default(),
@@ -621,13 +781,14 @@ mod tests {
             .timeout = std::time::Duration::ZERO;
         checking.start().unwrap();
         let events = checking.worker.as_ref().unwrap().events().clone();
-        let Event::Finished(ticket, (Err(Failure::Deadline), _)) = events
+        let Event::Finished(ticket, (Ok(deadline), _)) = events
             .recv_timeout(std::time::Duration::from_secs(5))
             .unwrap()
         else {
             panic!("expected deadline");
         };
         assert_eq!(ticket.key, "a");
+        assert_eq!(deadline.status["checking"], "deadline");
         checking.worker.as_mut().unwrap().complete(&ticket, || true);
         checking.start().unwrap();
         let Event::Finished(ticket, (Ok(publication), _)) = events

@@ -72,8 +72,16 @@ exports.activate = async (context) => {
       const label = result.state === 'standalone' ? 'Standalone document'
         : result.homeProgram ? vscode.workspace.asRelativePath(vscode.Uri.parse(result.homeProgram))
         : 'Home program unavailable';
-      status.text = `Denotate: ${label}${result.state === 'invalid' ? ' (unavailable)' : ''}`;
-      status.tooltip = [label, `Checking: ${result.checking}`, `Backend: ${result.backend}`, `Active assumptions: ${result.activeAssumptions ? JSON.stringify(result.activeAssumptions) : 'not loaded'}`, `Outcome: ${result.summary?.state ?? result.checking}`, `Findings: ${result.findings?.length ?? 0}`, ...(result.originNotices ?? []).map(n => `Origin unavailable: ${n.uri} (${n.reason})`), ...result.errors].join('\n');
+      const verifications = result.verifications;
+      const outcomeState = result.state === 'invalid' ? 'invalid' : result.summary?.state ?? result.checking;
+      const outcome = outcomeState === 'unconfigured' ? 'No verification configured' : outcomeState;
+      const count = verifications ? `${verifications.length} verification${verifications.length === 1 ? '' : 's'}` : 'configuration incomplete';
+      status.text = `Denotate: ${label} · ${count} · ${outcome}`;
+      status.tooltip = [label, `${count}: ${outcome}`, `Checking: ${result.checking}`, `Backend: ${result.backend}`,
+        ...(verifications ?? []).map(v => `${v.verification}: ${v.summary?.state ?? v.checking} (${v.checking}); assumptions [${v.assumptions.join(', ')}]; ${v.mode}; ${v.consistency}`),
+        ...((verifications ?? []).some(v => v.mode === 'consistency-only') ? ['Consistency-only: no obligations selected; context-wide semantic diagnostics still run.'] : []),
+        `Unchecked obligations: ${result.uncheckedObligations?.join(', ') || (verifications ? 'none' : 'configuration incomplete')}`,
+        `Findings: ${result.findings?.length ?? 0}`, ...(result.originNotices ?? []).map(n => `Origin unavailable: ${n.uri} (${n.reason})`), ...result.errors].flat().join('\n');
       status.show();
     } catch (error) { if (ticket === statusGeneration) { status.text = 'Denotate: Root unavailable'; status.tooltip = String(error); status.show(); } }
   };

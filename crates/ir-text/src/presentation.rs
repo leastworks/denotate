@@ -18,6 +18,7 @@ pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Pr
         .collect();
     let placement = Placement {
         program: &program.root,
+        verification: report.results.value.context.verification.as_ref(),
         user_files: &user_files,
         sources: &program.sources,
         current: &program.provenance,
@@ -40,7 +41,7 @@ pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Pr
                 &finding,
             )?);
         }
-        inventory.push(json!({"identity":finding.identity.data(&program.keys)?,"kind":finding.kind.code(),
+        inventory.push(json!({"identity":finding.identity.data_in(&program.keys, report.results.value.context.verification.as_ref())?,"kind":finding.kind.code(),
             "message":finding.message,"fallback":placed.iter().any(|d|d.fallback),"located":!placed.is_empty()}));
         diagnostics.extend(placed);
     }
@@ -56,7 +57,7 @@ pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Pr
             d.evidence =
                 json!({"kind":"rewrite-proof","coversAllInstances":rewrite.covers_all_instances});
         }
-        inventory.push(json!({"identity":rewrite.identity().data(&program.keys)?,"kind":Kind::Rewrite.code(),
+        inventory.push(json!({"identity":rewrite.identity().data_in(&program.keys, report.results.value.context.verification.as_ref())?,"kind":Kind::Rewrite.code(),
             "message":rewrite.message,"fallback":placed.iter().any(|d|d.fallback),"located":!placed.is_empty()}));
         diagnostics.extend(placed);
     }

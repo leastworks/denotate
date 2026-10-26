@@ -249,22 +249,31 @@ impl Server {
                         continue;
                     }
                     failures.push(format!("{canonical}: {}", issue.message));
-                    if own.contains(canonical) || issue.code != "resolution" {
+                    if own.contains(canonical)
+                        || !matches!(issue.code.as_str(), "resolution" | "verification-reference")
+                    {
                         continue;
                     }
                     // A consumer can introduce ambiguity in a library's namespace.
                     // Attribute that failure to its conflicting user declarations,
                     // never to the library's otherwise unaffected home view.
-                    let Some(reference) = self.semantics.reference_at(uri, issue.span.start) else {
-                        continue;
+                    let candidates = if issue.code == "verification-reference" {
+                        self.semantics
+                            .core
+                            .verification_conflicts(root, uri.as_str(), &issue.span)
+                    } else {
+                        let Some(reference) = self.semantics.reference_at(uri, issue.span.start)
+                        else {
+                            continue;
+                        };
+                        self.semantics.core.candidates(
+                            root,
+                            uri.as_str(),
+                            &reference.scope,
+                            &reference.lookup,
+                            Some(&reference.name),
+                        )
                     };
-                    let candidates = self.semantics.core.candidates(
-                        root,
-                        uri.as_str(),
-                        &reference.scope,
-                        &reference.lookup,
-                        Some(&reference.name),
-                    );
                     if candidates.len() < 2 {
                         continue;
                     }

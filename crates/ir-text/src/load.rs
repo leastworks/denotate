@@ -3,7 +3,7 @@ use crate::{
     ast::{self, Atom as AstAtom, Decl, Name, Scope, Statement, namespace_key},
     error,
 };
-use denotate_check::{BackendIdentity, CheckRequest, Domains, InputAtMostOne, Limits};
+use denotate_check::{BackendIdentity, CheckRequest, Domains, Limits};
 use denotate_ir::*;
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -64,35 +64,6 @@ impl LoadedProgram {
             .collect::<std::result::Result<Vec<_>, denotate_check::CheckError>>()?;
         requests.sort_by(|a, b| a.0.cmp(&b.0));
         Ok(requests)
-    }
-    /// Transitional all-assumptions adapter, until the editor checks verifications.
-    pub fn input_assumptions(&self) -> Vec<InputAtMostOne> {
-        self.corpus
-            .assumptions()
-            .map(|a| match &a.restriction {
-                Restriction::AtMostOne { relation, group_by } => InputAtMostOne {
-                    relation: *relation,
-                    group_by: group_by.clone(),
-                },
-            })
-            .collect()
-    }
-    /// Transitional editor request, until the editor uses `verification_requests`.
-    pub fn request(
-        &self,
-        limits: &Limits,
-        backend: BackendIdentity,
-    ) -> std::result::Result<CheckRequest, denotate_check::CheckError> {
-        let constraints = self.input_assumptions();
-        let mut request = CheckRequest::all_obligations(
-            &self.corpus,
-            &self.keys,
-            &self.domains,
-            &constraints,
-            limits,
-        )?;
-        request.backend = backend;
-        Ok(request)
     }
 }
 

@@ -17,11 +17,16 @@ In Run and Debug choose a launch configuration and press **F5**; the build runs 
 - **Run Denotate semantic checking** opens `examples/semantic-checking/`: two facts
   violate an obligation. Comment one out to clear the findings; unsaved edits are
   checked. Hover the status bar item for the program, checking state, backend and
-  active assumptions.
+  per-verification assumptions and outcomes.
 - **Run Denotate library and app** opens `examples/library-and-app/`: the library
-  holds the obligation and an assumption, the app supplies facts. Comment out the
-  assumption to see the conflict on the app's facts, with related locations in the
-  library; the library file itself stays clean.
+  holds the obligation, an assumption and `library::default_checks`; the app supplies
+  facts and `mappings::unrestricted_inputs`. The library verification proves uniqueness
+  in both programs. The app's unrestricted verification reports overlapping facts.
+  Add `library::one_present_input` to the app verification's `assumptions` list to
+  clear that conflict, then remove it to restore it. Editing the library verification
+  to `assumptions: []` exposes the app conflict in that context too; the library-alone
+  program remains clean because it has no mappings. Deleting a referenced assumption
+  instead produces a reference error.
 - **Run Denotate (language services)** opens the shared `fixtures/base/00-valid/`
   workspace for outline, navigation, completion, hover, rename and formatting.
 
@@ -43,9 +48,12 @@ reported, not navigated). Do not commit generated exports: they contain absolute
   with **Create den.root here** quick fixes.
 - **Editor services** for the full grammar: diagnostics, outline, definition,
   references, completion, hover, signature help, semantic tokens and formatting.
-- **Checking.** Every program is checked in the background (BDD by default; set
-  `denotate.backend` to `sat`), with one warm session per program and fair serial
-  scheduling. Results publish only if they still match the current snapshots.
+- **Checking.** Each program checks all included verifications in the background
+  (BDD by default; set `denotate.backend` to `sat`), with one warm session per program
+  and fair serial scheduling. Results publish atomically only if they still match
+  current snapshots. Without a verification, status is **No verification configured**
+  and semantic checking is disabled. Unselected obligations receive Information
+  notices; empty obligation lists receive a consistency-only Warning.
 - **Go to Origin** for occurrences with embedded origins.
 - **Rename** validated across every affected program, including unopened library
   consumers.
