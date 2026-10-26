@@ -59,7 +59,8 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
 A `.den` program is a `den.root` folder plus its referenced libraries; a file outside
 every root is a standalone program ([format](den-format.md#programs-denroot)). The
 editor checks every known program in the background through one serial, fair scheduler
-with a warm session per program, and publishes each program's findings on its own files
+with a warm session per program; one job checks all of a program's verifications and
+publishes their findings on the program's own files
 ([protocol](../crates/den-lsp/PROTOCOL.md), [decisions](decisions.md#programs-and-roots)).
 
 ## Tests at each layer

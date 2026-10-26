@@ -6,9 +6,11 @@ directly in `.den`.
 ## Contract vocabulary
 
 Add `at_least_one`, `exactly_one` and `empty`, each with IR support, BDD and SAT
-checking, `.den` syntax, printing and editor diagnostics. `at_least_one` groups range
-over all domain combinations, including empty groups; `exactly_one` reports coverage
-and uniqueness separately; `empty` requires no tuples in any permitted world.
+checking, `.den` syntax, printing and editor diagnostics. They are checked like
+`at_most_one`, inside [verifications](den-format.md#verifications): which input worlds
+count as permitted is decisive for coverage. `at_least_one` groups range over all
+domain combinations, including empty groups; `exactly_one` reports coverage and
+uniqueness separately; `empty` requires no tuples in any permitted world.
 
 ## Authoring robustness
 

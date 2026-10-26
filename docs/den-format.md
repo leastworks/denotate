@@ -18,6 +18,10 @@ assumption unique_input: at_most_one(value, group_by: ());
 obligation unique_output: at_most_one(present, group_by: ())
     message "At most one value.";
 domain S = [a, b];
+verification single_value {
+    assumptions: [unique_input];
+    obligations: [unique_output];
+}
 ```
 
 - **Sorts and constants.** A sort's domain defaults to all its declared constants in
@@ -28,19 +32,54 @@ domain S = [a, b];
 - **Rules** are `head :- body` with positive and `!`negated atoms; facts have no body.
   Variables are uppercase identifiers or `?'any name'`; `_` in a positive body is a
   fresh variable. Integers are typed constants (`01` canonicalizes to `1`).
-- **Contracts.** `obligation name: at_most_one(rel, group_by: (cols))` is checked.
-  `assumption` constrains input worlds (W); every assumption in a program is active.
-  Only input `at_most_one` assumptions are supported.
+- **Contracts.** `obligation name: at_most_one(rel, group_by: (cols))` is a property to
+  check; `assumption name: at_most_one(input, group_by: (cols))` restricts input
+  worlds. Only input `at_most_one` assumptions are supported. Neither does anything on
+  its own: a [verification](#verifications) selects which are checked, and under which
+  assumptions.
 - **Names.** Quote any non-identifier or reserved word: `'007'`, `'module'`.
   Escapes: `\\`, `\'`, `\n`, `\r`, `\t`. Parameter names and `group_by` columns accept
   reserved words unquoted. `$condition_N` is a generated helper (zero-arity, derived),
   distinct from a frontend relation spelled `'$condition_N'`.
 
+## Verifications
+
+```den
+verification normal_operation {
+    assumptions: [one_value_per_input, lib::one_request_per_customer];
+    obligations: [unique_assignment];
+}
+```
+
+- A verification names the assumptions that define its permitted input worlds and the
+  obligations checked in them. Both lists are required, in this order; either may be
+  `[]`. `assumptions: []` means unrestricted inputs. `obligations: []` is a
+  consistency-only verification: semantic analysis still runs, but no obligation is
+  checked, and the declaration gets a warning.
+- References follow the usual namespace lookup and resolve only to their own kind; an
+  unknown, wrong-kind, ambiguous or repeated reference is an error. `verification` is a
+  reserved word; `assumptions` and `obligations` are not.
+- Declaring or importing an assumption activates nothing. The same obligation can be
+  checked under several verifications, each with its own results.
+- Every verification in a program's closure runs in that program: a library's
+  verifications run in the library's own program and in every consumer, with that
+  consumer's facts and domains. A consumer may add verifications over library
+  declarations; it cannot replace or weaken an included one. Domains are per program,
+  not per verification.
+- A program with no verification gets **no semantic checking**: syntax, resolution and
+  type errors are still reported, but no implicit context is ever assumed. An
+  obligation that no verification in the program selects gets a notice, also when it
+  is declared in a library.
+
 ## Meaning
 
 A program's meaning is defined separately for each **permitted input world**: a choice
-of input tuples over the finite domains that satisfies every active assumption. In
-each world, the derived relations hold exactly the least fixed point of the rules.
+of input tuples over the finite domains that satisfies the assumptions selected by the
+verification being checked. In each world, the derived relations hold exactly the
+least fixed point of the rules. Admission, rewrites, no-meaning and unsupported
+findings below are therefore per verification: the same program can be admitted under
+one verification and unsupported under another, while the meaning of a fixed world
+never depends on the verification.
 
 - Positive recursion is admitted.
 - A cycle through negation is admitted only with a justification: a proof that the
@@ -151,5 +190,5 @@ Exit codes: **0** for a complete run with conclusive checks, no findings and no 
 obligations (a consistency-only notice alone does not fail the run); **1** for findings;
 **2** for incomplete, invalid, unconfigured or partial runs, including unchecked
 obligations; **3** for filesystem or other operational failures. Incomplete or partial
-status takes precedence over findings. The editor does not use verifications yet: it
-still checks every obligation under every assumption.
+status takes precedence over findings. The `.den` editor applies the same policy,
+checking every verification in the background.

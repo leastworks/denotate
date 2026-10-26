@@ -17,7 +17,7 @@ participating occurrences, and places them on source locations. It depends only 
   If no own occurrence participates, it produces the labeled fallback
   (`in <program>: …`). Current-text and upstream provenance are separate inputs.
 - `rewrites` groups proven rewrite warnings and their coverage; they never carry edits.
-- `summary` builds root-level outcome summaries (backend, active assumptions, group
+- `summary` builds root-level outcome summaries (backend, selected assumptions, group
   and region outcomes, resource reasons).
 
 Frontends adapt the output: `crates/ir-text`'s `presentation` module for `.den`, and

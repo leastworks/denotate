@@ -18,6 +18,20 @@ real program that the current choice serves badly.
   misleads the author; an explicit inconclusive or unsupported outcome does not. Hence
   counterexamples only after concrete replay (or certification), and SAT's
   unfounded-support world is never presented as an overlap witness.
+- **Assumptions take effect only through an explicit verification.** Assumptions are
+  the domain constraints a library author chooses. When every declared assumption was
+  active, declaring or importing one silently changed every check, and one obligation
+  could not be checked under two sets of assumptions. A verification names its
+  context, so the author's choice is visible and the same obligation can be checked
+  under several contexts.
+- **No verification, no semantic checking.** Any implicit context (unrestricted inputs,
+  or all assumptions) would be a choice the author never made, and could report a
+  library as wrong, or as proved, for inputs it was never meant to accept. The
+  editor and `check-den` say "unconfigured" instead.
+- **Analysis is per verification.** Admission, rewrite proofs and no-meaning findings
+  depend on the permitted worlds, so they are computed for each verification, never
+  once for the program and reused. Finding identities include the verification, so
+  two verifications of one obligation never overwrite or deduplicate each other.
 - **Correctness and usability before performance.** Performance policies are
   provisional until re-scored on real programs ([checker policies](checker-policies.md)).
 - **Budgets, receipts, timings and witness choices are not goldens.** They change
@@ -52,6 +66,15 @@ real program that the current choice serves badly.
   switch would withdraw and republish. Instead each consumer's results appear on its
   own files, and the library file shows the library checked alone. This replaced an
   earlier design with an explicitly selected active root per document.
+- **Included verifications run in every consumer; consumers only add.** A library's
+  verification states a contract that each consumer must meet with its own facts, so
+  it runs in every program that includes it and cannot be overridden or weakened by
+  a consumer, which may only add verifications of its own.
+- **Unchecked obligations are noticed, including in libraries.** Moving from implicit
+  to explicit selection creates a new silent failure: an obligation nothing checks.
+  Each program reports every obligation in its closure that no verification selects,
+  at the declaration (through the labeled fallback for library files), as information
+  rather than as a finding.
 - **A finding belongs to the program whose check produced it.** When a consumer's
   finding involves none of its own files, it is published on the library location,
   labeled with the consumer, rather than lost; it is not deduplicated, because each
