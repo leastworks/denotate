@@ -17,7 +17,7 @@ jobs:
       - name: Install Rust toolchain
         run: |
           rustup toolchain install 1.93.0 --profile minimal
-      - name: Native workspace (IR, checker, sessions, presentation, editor, ir-text, test DSL)
+      - name: Rust crates (IR, checker, sessions, presentation, editor, ir-text, test DSL)
         run: cargo +1.93.0 test --locked --workspace --exclude denotate-lsp --exclude denotate-lsp-tests
       - name: Install .den editor dependencies
         run: npm ci --prefix editors/den
