@@ -1298,3 +1298,143 @@ fn a_consumer_ambiguity_in_a_library_verification_is_located_on_the_consumer() {
     );
     c.shutdown();
 }
+
+#[test]
+fn verification_navigation_hover_outline_highlighting_and_typed_completion() {
+    let mut c = Client::start("base/00-valid");
+    let (uri, _) = c.open("example.den");
+    let text = "namespace lib { sort S; input p(x:S); assumption same: at_most_one(p, group_by: ()); obligation same: at_most_one(p, group_by: ()); verification same { assumptions: [same]; obligations: [same]; } }\nuse lib; verification custom { assumptions: [lib::same]; obligations: [same]; }";
+    c.change(&uri, 2, text);
+    for (needle, decl, offset, label) in [
+        ("lib::same", "assumption same", 11, "assumption same"),
+        ("same]; }", "obligation same", 11, "obligation same"),
+        ("custom {", "verification custom", 13, "verification custom"),
+    ] {
+        let definition = query(&mut c, "textDocument/definition", &uri, text, needle, 0);
+        assert_eq!(definition.as_array().unwrap().len(), 1, "{definition}");
+        assert_eq!(
+            definition[0]["targetSelectionRange"]["start"],
+            position(text, decl, offset)
+        );
+        let hover = query(&mut c, "textDocument/hover", &uri, text, needle, 0);
+        assert_eq!(hover["contents"]["value"], label);
+        let refs = query(&mut c, "textDocument/references", &uri, text, decl, offset);
+        assert_eq!(
+            refs.as_array().unwrap().len(),
+            if needle == "custom {" { 1 } else { 3 },
+            "{refs}"
+        );
+    }
+    let outline = c.request(
+        "textDocument/documentSymbol",
+        json!({"textDocument":{"uri":uri}}),
+    );
+    assert!(outline
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["name"] == "verification custom"));
+    assert!(outline[0]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["name"] == "verification same"));
+    let legend = c.capabilities["semanticTokensProvider"]["legend"]["tokenTypes"]
+        .as_array()
+        .unwrap();
+    let event = legend.iter().position(|v| v == "event").unwrap() as u64;
+    let tokens = c.request(
+        "textDocument/semanticTokens/full",
+        json!({"textDocument":{"uri":uri}}),
+    );
+    assert_eq!(
+        tokens["data"]
+            .as_array()
+            .unwrap()
+            .chunks(5)
+            .filter(|t| t[3] == event)
+            .count(),
+        8
+    );
+    let prefix = "namespace lib { sort S; input p(x:S); assumption allowed: at_most_one(p, group_by: ()); obligation unique: at_most_one(p, group_by: ()); verification checks { assumptions: []; obligations: []; } } use lib;";
+    for (version, field, expected) in [(3, "assumptions", "allowed"), (4, "obligations", "unique")]
+    {
+        let source = format!("{prefix} verification custom {{ {field}: [ ]; }}");
+        c.change(&uri, version, &source);
+        let result = query(&mut c, "textDocument/completion", &uri, &source, "[ ];", 2);
+        assert_eq!(
+            result["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|i| i["label"].as_str().unwrap())
+                .collect::<Vec<_>>(),
+            [expected]
+        );
+    }
+    // Recovery must retain qualification even when the member name is absent.
+    for (i, (typed, expected)) in [
+        ("lib::", "lib::allowed"),
+        ("::lib::a", "::lib::allowed"),
+        ("lib::al", "lib::allowed"),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let source = format!("{prefix} verification custom {{ assumptions: [{typed}");
+        c.change(&uri, 5 + i as i64, &source);
+        let result = query(
+            &mut c,
+            "textDocument/completion",
+            &uri,
+            &source,
+            &format!("[{typed}"),
+            1 + typed.len(),
+        );
+        assert_eq!(
+            result["items"].as_array().unwrap().len(),
+            1,
+            "{typed}: {result}"
+        );
+        assert_eq!(result["items"][0]["textEdit"]["newText"], expected);
+        assert_eq!(
+            result["items"][0]["textEdit"]["range"]["start"],
+            position(&source, &format!("[{typed}"), 1)
+        );
+    }
+    // Ambiguous unqualified names are offered with their absolute namespaces.
+    let source = "namespace a { sort S; input p(x:S); assumption allowed: at_most_one(p, group_by: ()); } namespace 'b::c' { assumption allowed: at_most_one(a::p, group_by: ()); } use a; use 'b::c'; verification v { assumptions: [ ]; obligations: []; }";
+    c.change(&uri, 8, source);
+    let result = query(&mut c, "textDocument/completion", &uri, source, "[ ];", 2);
+    assert_eq!(
+        result["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|i| i["textEdit"]["newText"].as_str().unwrap())
+            .collect::<std::collections::BTreeSet<_>>(),
+        std::collections::BTreeSet::from(["a::allowed", "'b::c'::allowed"])
+    );
+    let partial = source.replace("[ ]", "[al]");
+    c.change(&uri, 9, &partial);
+    let result = query(&mut c, "textDocument/completion", &uri, &partial, "[al]", 3);
+    assert_eq!(result["items"].as_array().unwrap().len(), 2, "{result}");
+    assert!(result["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|i| i["kind"] == 23));
+    let source = source.replace("[ ]", "['b::c'::]");
+    c.change(&uri, 10, &source);
+    let result = query(
+        &mut c,
+        "textDocument/completion",
+        &uri,
+        &source,
+        "['b::c'::]",
+        9,
+    );
+    assert_eq!(result["items"].as_array().unwrap().len(), 1, "{result}");
+    assert_eq!(result["items"][0]["textEdit"]["newText"], "'b::c'::allowed");
+    c.shutdown();
+}

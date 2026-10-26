@@ -92,7 +92,7 @@ impl Document {
             let kind = match node.kind() {
                 "module" | "namespace" | "import" => SymbolKind::MODULE,
                 "domain" => SymbolKind::ARRAY,
-                "obligation" | "assumption" => SymbolKind::EVENT,
+                "obligation" | "assumption" | "verification" => SymbolKind::EVENT,
                 "source_location" | "location_alias" => SymbolKind::CONSTANT,
                 "sort" => SymbolKind::CLASS,
                 "constants" => SymbolKind::CONSTANT,
@@ -136,6 +136,9 @@ impl Document {
             if node.kind() == "namespace" {
                 self.collect_symbols(node, &mut children);
                 label = format!("namespace {}", &self.text[selection.byte_range()]);
+            }
+            if node.kind() == "verification" {
+                label = format!("verification {}", &self.text[selection.byte_range()]);
             }
             #[allow(deprecated)]
             result.push(DocumentSymbol {

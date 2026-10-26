@@ -655,3 +655,114 @@ fn damaged_manifests_and_read_only_consumers_prevent_partial_renames() {
     }
     c.shutdown();
 }
+
+#[test]
+fn contract_rename_follows_typed_selections_in_every_consumer_and_rejects_capture() {
+    let mut c = Client::start("base/00-valid");
+    let lib = "namespace lib; sort S; input p(x:S); assumption same: at_most_one(p, group_by: ()); obligation same: at_most_one(p, group_by: ()); verification same { assumptions: [same]; obligations: [same]; } verification consistency { assumptions: [same]; obligations: []; }";
+    let a = "use lib; verification custom { assumptions: [same]; obligations: [same]; }";
+    let b = "use lib; assumption other: at_most_one(lib::p, group_by: ()); verification custom { assumptions: [lib::same, other]; obligations: [lib::same]; }";
+    root_files(
+        &mut c,
+        &[
+            ("lib/den.root", "{}"),
+            ("lib/code.den", lib),
+            ("a/den.root", r#"{"libraries":["../lib/den.root"]}"#),
+            ("a/code.den", a),
+            ("b/den.root", r#"{"libraries":["../lib/den.root"]}"#),
+            ("b/code.den", b),
+        ],
+    );
+    let (uri, _) = c.open("lib/code.den");
+    let (a_uri, _) = c.open("a/code.den");
+    let b_uri = support::file_uri(&c.workspace.path().join("b/code.den"));
+    // The unsaved buffer is authoritative; the second consumer stays closed.
+    let a = a.replace("[same]", "[lib::same]");
+    c.change(&a_uri, 2, &a);
+    for (needle, field) in [
+        (
+            "same: at_most_one(p, group_by: ()); obligation",
+            "assumptions",
+        ),
+        (
+            "same: at_most_one(p, group_by: ()); verification",
+            "obligations",
+        ),
+    ] {
+        let result = c.request(
+            "textDocument/rename",
+            params(&uri, lib, needle, "new::name"),
+        );
+        let renamed = apply_file(lib, &result, &uri);
+        assert!(
+            renamed.contains(&format!("{field}: ['new::name']")),
+            "{renamed}"
+        );
+        assert!(renamed.contains(if field == "assumptions" {
+            "obligations: [same]"
+        } else {
+            "assumptions: [same]"
+        }));
+        assert!(apply_file(&a, &result, &a_uri).contains(&format!("{field}: [lib::'new::name']")));
+        let changed = apply_file(b, &result, &b_uri);
+        assert!(
+            changed.contains(&format!("{field}: [lib::'new::name'")),
+            "{changed}"
+        );
+        assert!(result["documentChanges"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|d| d["textDocument"]["uri"] == b_uri)
+            .unwrap()["textDocument"]["version"]
+            .is_null());
+        let from_ref = c.request(
+            "textDocument/rename",
+            params(
+                &a_uri,
+                &a,
+                if field == "assumptions" {
+                    "same]; obligations"
+                } else {
+                    "same]; }"
+                },
+                "new::name",
+            ),
+        );
+        assert_eq!(result, from_ref);
+    }
+    rejected(
+        &mut c,
+        "textDocument/rename",
+        params(
+            &uri,
+            lib,
+            "same: at_most_one(p, group_by: ()); obligation",
+            "other",
+        ),
+        "collide",
+    );
+    // Verification names are declarations, with no selection-list references.
+    let result = c.request(
+        "textDocument/rename",
+        params(&uri, lib, "same {", "renamed"),
+    );
+    assert_eq!(edits(&result), 1);
+    assert_eq!(
+        apply_file(lib, &result, &uri),
+        lib.replace("verification same", "verification renamed")
+    );
+    rejected(
+        &mut c,
+        "textDocument/rename",
+        params(&uri, lib, "same {", "consistency"),
+        "collide",
+    );
+    // Namespace rename also follows prefixes within verification selections.
+    let result = c.request(
+        "textDocument/rename",
+        params(&uri, lib, "lib;", "'library'"),
+    );
+    assert!(apply_file(b, &result, &b_uri).contains("'\\'library\\''::same"));
+    c.shutdown();
+}

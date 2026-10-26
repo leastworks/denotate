@@ -238,6 +238,30 @@ obligation unique: at_most_one(p, group_by: ()); verification checks { assumptio
     assert.ok(checkedDoc.getText().includes("p('column name':S)"));
     await replace(checkedDoc, checkedText);
 
+    // Verification language services use the installed providers and apply
+    // validated edits before checking the newly named context.
+    const selectedObligation = checkedDoc.positionAt(checkedText.indexOf('[unique]') + 1);
+    const obligationDefinition = await vscode.commands.executeCommand('vscode.executeDefinitionProvider', checkedUri, selectedObligation);
+    assert.equal(obligationDefinition.length, 1);
+    const obligationRename = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', checkedUri, selectedObligation, 'one output');
+    assert.ok(await vscode.workspace.applyEdit(obligationRename));
+    assert.ok(checkedDoc.getText().includes("obligation 'one output':"));
+    assert.ok(checkedDoc.getText().includes("obligations: ['one output']"));
+    const verificationAt = checkedDoc.positionAt(checkedDoc.getText().indexOf('checks {'));
+    const verificationRename = await vscode.commands.executeCommand('vscode.executeDocumentRenameProvider', checkedUri, verificationAt, 'renamed_checks');
+    assert.ok(await vscode.workspace.applyEdit(verificationRename));
+    await eventually(() => api.request('denotate/roots', { uri: checkedUri.toString() }),
+        r => r.checking === 'complete' && r.verifications?.[0]?.verification === '::renamed_checks' && r.verifications[0].summary?.state === 'findings',
+        'renamed verification still checks the renamed obligation');
+    const contractEdits = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', checkedUri, { tabSize: 4, insertSpaces: true });
+    const contractFormat = new vscode.WorkspaceEdit();
+    contractFormat.set(checkedUri, contractEdits);
+    assert.ok(await vscode.workspace.applyEdit(contractFormat));
+    assert.ok(checkedDoc.getText().includes("verification renamed_checks {\n    assumptions: [];\n    obligations: ['one output'];\n}"));
+    const secondContractFormat = await vscode.commands.executeCommand('vscode.executeFormatDocumentProvider', checkedUri, { tabSize: 4, insertSpaces: true });
+    assert.equal(secondContractFormat?.length ?? 0, 0);
+    await replace(checkedDoc, checkedText);
+
     // No implicit workspace root: create a standalone document outside the
     // existing root, then exercise both default and explicit destination creation.
     const temp = await require('node:fs/promises').mkdtemp(require('node:path').join(require('node:os').tmpdir(), 'denotate-root-smoke-'));
@@ -273,5 +297,5 @@ obligation unique: at_most_one(p, group_by: ()); verification checks { assumptio
     await vscode.workspace.fs.writeFile(externalUri, Buffer.from('namespace external; relation r();'));
     await eventually(() => vscode.commands.executeCommand('vscode.executeDefinitionProvider', consumerUri, new vscode.Position(0,1)), refs => refs?.length === 1, 'external library watcher repairs declarations');
     await replace(rootDoc, rootText);
-    console.log('Denotate stage-6 smoke passed: validated quoted constant/parameter rename and checked round trip; Go to Origin on matching dirty buffers, changed-buffer refusal and Unicode/CRLF selections; checked dirty buffers and origin links; roots, dirty manifests, authoritative DSL buffers, quick fixes;  syntax/repair, outline, definition/completion, references, hover/signatures, applied cross-file rename round trip and idempotent formatting.');
+    console.log('Denotate smoke passed: verification navigation, applied obligation/verification rename and formatting; validated quoted constant/parameter rename and checked round trip; Go to Origin on matching dirty buffers, changed-buffer refusal and Unicode/CRLF selections; checked dirty buffers and origin links; roots, dirty manifests, authoritative DSL buffers, quick fixes;  syntax/repair, outline, definition/completion, references, hover/signatures, applied cross-file rename round trip and idempotent formatting.');
 };

@@ -198,17 +198,21 @@ pub struct VerificationReferences {
 
 fn matching_contracts<'a, T>(
     scope: &Scope,
-    name: &Name,
+    name: Option<&Name>,
     entries: &'a [(Namespace, String, ContractKind, T)],
 ) -> Vec<&'a (Namespace, String, ContractKind, T)> {
-    let candidates = candidate_keys(
-        visible_namespaces(&scope.namespace, &scope.imports, name.namespace.as_ref()),
-        &name.text,
-        name.generated,
+    let visible = visible_namespaces(
+        &scope.namespace,
+        &scope.imports,
+        name.and_then(|n| n.namespace.as_ref()),
     );
+    let keys = name.map(|n| candidate_keys(visible.clone(), &n.text, n.generated));
     entries
         .iter()
-        .filter(|(ns, text, _, _)| candidates.contains(&(ns.clone(), text.clone(), false)))
+        .filter(|(ns, text, _, _)| match &keys {
+            Some(keys) => keys.contains(&(ns.clone(), text.clone(), false)),
+            None => visible.contains(ns),
+        })
         .collect()
 }
 
@@ -223,7 +227,7 @@ pub(crate) fn resolve_contract_list<T: Clone + Ord>(
     let mut seen = BTreeSet::new();
     let mut errors = Vec::new();
     for (name, span) in names {
-        let matching = matching_contracts(scope, &name, entries);
+        let matching = matching_contracts(scope, Some(&name), entries);
         let expected = matching.iter().filter(|e| e.2 == kind).collect::<Vec<_>>();
         let message = match expected.as_slice() {
             [entry] => {
@@ -267,6 +271,7 @@ pub enum Expected {
 }
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Lookup {
+    Contract(ContractKind),
     Name(Kind),
     Constant(Expected),
     Anonymous(Expected),

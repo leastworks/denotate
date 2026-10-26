@@ -248,7 +248,7 @@ fn checked_bindings(
     let mut result = BTreeMap::new();
     for uri in &program.members {
         let file = &index.files[uri];
-        if file.tree.root_node().has_error() || !file.issues.is_empty() {
+        if file.tree.root_node().has_error() || file.issues.iter().any(|issue| !issue.warning) {
             return Err(format!(
                 "Rename requires complete syntax in {uri}. Repair diagnostics first."
             ));
@@ -375,7 +375,7 @@ fn validate(
                             } else {
                                 span.clone()
                             };
-                            Ok((span.start, span.end, d.kind, d.name.generated))
+                            Ok((span.start, span.end, d.kind, d.contract, d.name.generated))
                         })
                         .collect()
                 };

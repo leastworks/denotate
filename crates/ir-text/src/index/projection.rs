@@ -449,15 +449,16 @@ impl Projection {
                         self.declare(n, &scope, Kind::Contract, None, previous);
                     }
                     if node.kind() == "verification" {
-                        let mut names = |key| {
+                        let mut names = |key, kind| {
                             node.children_by_field_name(key, &mut node.walk())
                                 .filter_map(|n| {
-                                    self.name(n, false).map(|name| (name, n.byte_range()))
+                                    self.reference(n, &scope, Lookup::Contract(kind))
+                                        .map(|name| (name, n.byte_range()))
                                 })
                                 .collect()
                         };
-                        let assumptions = names("assumption");
-                        let obligations: Vec<_> = names("obligation");
+                        let assumptions = names("assumption", ContractKind::Assumption);
+                        let obligations: Vec<_> = names("obligation", ContractKind::Obligation);
                         if node
                             .children_by_field_name("obligation", &mut node.walk())
                             .next()
@@ -635,6 +636,48 @@ impl Projection {
             .any(|t| t.comment && t.span.start <= byte && byte <= t.span.end)
         {
             return None;
+        }
+        // List delimiters survive parser recovery, including an unfinished
+        // qualified reference. Replace the whole list member, not just its last
+        // token, so completing `lib::` cannot insert a second namespace prefix.
+        let tokens = self
+            .tokens
+            .iter()
+            .filter(|t| !t.comment)
+            .collect::<Vec<_>>();
+        if let Some(open) = tokens
+            .iter()
+            .rposition(|t| t.span.end <= byte && t.text == "[")
+        {
+            let label = open.checked_sub(2).map(|i| tokens[i].text.as_str());
+            let kind = match label {
+                Some("assumptions") => Some(ContractKind::Assumption),
+                Some("obligations") => Some(ContractKind::Obligation),
+                _ => None,
+            };
+            if let Some(kind) = kind.filter(|_| tokens[open - 1].text == ":") {
+                let after = &tokens[open + 1..];
+                if !after
+                    .iter()
+                    .any(|t| t.span.end <= byte && matches!(t.text.as_str(), "]" | ";" | "{" | "}"))
+                {
+                    let member = after
+                        .iter()
+                        .rposition(|t| t.span.end <= byte && t.text == ",")
+                        .map_or(0, |i| i + 1);
+                    let name = after[member..]
+                        .iter()
+                        .take_while(|t| !matches!(t.text.as_str(), "," | "]" | ";" | "{" | "}"))
+                        .collect::<Vec<_>>();
+                    let span = match (name.first(), name.last()) {
+                        (Some(first), Some(last)) if first.span.start <= byte => {
+                            first.span.start..last.span.end
+                        }
+                        _ => byte..byte,
+                    };
+                    return Some((Lookup::Contract(kind), self.scope_at(byte), span));
+                }
+            }
         }
         if let Some(r) = self.reference_at(byte.saturating_sub(1)).filter(|r| {
             !matches!(

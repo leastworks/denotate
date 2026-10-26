@@ -387,3 +387,67 @@ fn diagnostic_namespace_labels_use_den_spelling_and_name_spelling_preserves_kind
     assert_eq!(spelling("I", NameKind::Variable), "I");
     assert_eq!(spelling("i", NameKind::Variable), "?'i'");
 }
+
+#[test]
+fn verification_references_use_typed_root_specific_resolution_and_list_completion() {
+    use denotate_ir_text::index::ContractKind;
+    let library = "namespace lib { sort S; input p(x:S); assumption same: at_most_one(p, group_by: ()); obligation same: at_most_one(p, group_by: ()); verification same { assumptions: [same]; obligations: [same]; } }";
+    let app = "use lib; verification custom { assumptions: [same]; obligations: [lib::same]; }";
+    let mut index = Index::default();
+    update(&mut index, "library", library);
+    update(&mut index, "app", app);
+    for (root, files) in [
+        ("home", vec!["library"]),
+        ("consumer", vec!["library", "app"]),
+    ] {
+        index
+            .set_membership(&ProgramMembership::single(
+                root,
+                files.into_iter().map(String::from),
+            ))
+            .unwrap();
+    }
+    assert!(index.diagnostics("consumer", "app").is_empty());
+    for (needle, kind) in [
+        ("same]; obligations", ContractKind::Assumption),
+        ("lib::same", ContractKind::Obligation),
+    ] {
+        let r = index.files["app"]
+            .reference_at(app.find(needle).unwrap())
+            .unwrap();
+        assert_eq!(r.lookup, Lookup::Contract(kind));
+        let found = index.candidates("consumer", "app", &r.scope, &r.lookup, Some(&r.name));
+        assert_eq!(found.len(), 1);
+        assert_eq!(index.declaration(&found[0]).unwrap().contract, Some(kind));
+    }
+    // A consumer declaration can make an imported reference ambiguous, without
+    // changing the library's home resolution or the other contract kind.
+    update(
+        &mut index,
+        "app",
+        &format!("{app} assumption same: at_most_one(lib::p, group_by: ());"),
+    );
+    let issues = index.diagnostics("consumer", "app");
+    assert_eq!(issues.len(), 1, "{issues:?}");
+    assert!(issues[0].message.contains("Ambiguous assumption"));
+    assert!(index.diagnostics("home", "library").is_empty());
+    for (label, kind) in [
+        ("assumptions", ContractKind::Assumption),
+        ("obligations", ContractKind::Obligation),
+    ] {
+        for suffix in ["]; }", "", "sa", "same, "] {
+            let text = format!("use lib; verification v {{ {label}: [ {suffix}");
+            update(&mut index, "app", &text);
+            let byte = if suffix.starts_with(']') {
+                text.find(']').unwrap()
+            } else {
+                text.len()
+            };
+            let (lookup, scope, _) = index.files["app"].completion_context(byte).unwrap();
+            assert_eq!(lookup, Lookup::Contract(kind), "{text}");
+            let names = index.candidates("consumer", "app", &scope, &lookup, None);
+            assert_eq!(names.len(), 1, "{text}");
+            assert_eq!(index.declaration(&names[0]).unwrap().contract, Some(kind));
+        }
+    }
+}

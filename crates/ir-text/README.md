@@ -61,8 +61,9 @@ signatures suppress cascades. It does not need a successfully loaded `Corpus`.
 
 Verification declarations retain their contract kind and projected reference lists.
 The index and loader share list resolution, including wrong-kind, ambiguous and
-duplicate-reference errors. Navigation, completion and rename for verification references are
-not implemented yet.
+duplicate-reference errors. Typed contract references also drive navigation and validated
+rename. Completion uses the same candidates, restricted to assumptions or obligations
+by the list being edited, including empty and unfinished lists.
 
 Rule linting comes from `denotate-analysis`.
 

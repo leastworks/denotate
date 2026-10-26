@@ -411,10 +411,24 @@ impl Index {
         lookup: &Lookup,
         name: Option<&Name>,
     ) -> Vec<Symbol> {
+        let root_name = root;
         let Some(&root) = self.roots.get(root) else {
             return vec![];
         };
         match lookup {
+            Lookup::Contract(kind) => {
+                let entries = self.contract_entries(root_name);
+                matching_contracts(scope, name, &entries)
+                    .into_iter()
+                    .filter(|e| e.2 == *kind)
+                    .map(|e| Symbol {
+                        uri: e.3.0.clone(),
+                        id: e.3.1.clone(),
+                        name: e.1.clone(),
+                        module: Some(crate::ast::namespace_key(&e.0)),
+                    })
+                    .collect()
+            }
             Lookup::Name(Kind::Alias) => self
                 .files
                 .get(uri)
@@ -528,45 +542,6 @@ impl Index {
             .collect::<Vec<_>>()
     }
 
-    /// Ambiguous verification targets for consumer-error placement only. This
-    /// deliberately does not register navigation/rename references (Stage D2).
-    pub fn verification_conflicts(
-        &self,
-        root: &str,
-        uri: &str,
-        span: &Range<usize>,
-    ) -> Vec<Symbol> {
-        let Some(file) = self.files.get(uri) else {
-            return vec![];
-        };
-        let entries = self.contract_entries(root);
-        for v in &file.verifications {
-            for (kind, names) in [
-                (ContractKind::Assumption, &v.assumptions),
-                (ContractKind::Obligation, &v.obligations),
-            ] {
-                if let Some((name, _)) = names.iter().find(|(_, range)| range == span) {
-                    let matching = matching_contracts(&v.scope, name, &entries)
-                        .into_iter()
-                        .filter(|e| e.2 == kind)
-                        .collect::<Vec<_>>();
-                    if matching.len() > 1 {
-                        return matching
-                            .into_iter()
-                            .map(|e| Symbol {
-                                uri: e.3.0.clone(),
-                                id: e.3.1.clone(),
-                                name: e.1.clone(),
-                                module: None,
-                            })
-                            .collect();
-                    }
-                }
-            }
-        }
-        vec![]
-    }
-
     pub fn diagnostics(&self, root: &str, uri: &str) -> Vec<Issue> {
         let Some(file) = self.files.get(uri) else {
             return vec![];
@@ -666,7 +641,11 @@ impl Index {
         for r in &file.references {
             if matches!(
                 r.lookup,
-                Lookup::Declaration(_) | Lookup::Variable { .. } | Lookup::Anonymous(_)
+                // Contract lists are diagnosed above, including duplicate selections.
+                Lookup::Contract(_)
+                    | Lookup::Declaration(_)
+                    | Lookup::Variable { .. }
+                    | Lookup::Anonymous(_)
             ) {
                 continue;
             }

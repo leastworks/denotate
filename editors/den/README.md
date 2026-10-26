@@ -48,6 +48,9 @@ reported, not navigated). Do not commit generated exports: they contain absolute
   with **Create den.root here** quick fixes.
 - **Editor services** for the full grammar: diagnostics, outline, definition,
   references, completion, hover, signature help, semantic tokens and formatting.
+  Verification lists navigate to their assumptions and obligations; completion offers
+  only the appropriate kind. Validated rename follows those references through every
+  affected program, including consumers of a library.
 - **Checking.** Each program checks all included verifications in the background
   (BDD by default; set `denotate.backend` to `sat`), with one warm session per program
   and fair serial scheduling. Results publish atomically only if they still match

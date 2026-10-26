@@ -204,12 +204,26 @@ After the picker it resolves the source again, verifies hash and coordinates on 
 exact text and on the opened document, and refuses if the `.den` document changed
 meanwhile. Missing, changed or invalid origins produce a notice, not a jump.
 
+## Verification language services
+
+Assumption, obligation and verification declarations participate in definition,
+references, hover and document outline. Selection-list references use the same typed,
+program-scoped resolver as loading: `assumptions` offers only assumptions and
+`obligations` only obligations, including while lists are incomplete. Ambiguous names
+are offered with namespace qualification. Names of different contract kinds remain
+independent even when spelled alike.
+
+Contract names use the standard `event` semantic token type (appended to the existing
+legend); the outline and completion also use `Event`. Formatting indents verification blocks and
+preserves comments, quoted names and attached origins.
+
 ## Rename
 
 `textDocument/prepareRename` and `textDocument/rename` cover sorts, relations, typed
 constants, rule-local variables, namespace segments (the segment under the cursor),
-relation parameters and their `group_by` references, contract labels and file-local
-aliases. `newName` is the logical name: replacement text comes from the printer's
+relation parameters and their `group_by` references, assumption/obligation names and
+their verification-list references, verification names, and file-local aliases.
+`newName` is the logical name: replacement text comes from the printer's
 `spelling(name, NameKind)` (a constant `I` becomes `'I'`, a variable `?'lower case'`).
 Generated helpers keep `$`, aliases `#`. Prepare returns `{range, placeholder}` when
 the decoded name differs from the source token.

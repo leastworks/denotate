@@ -366,7 +366,11 @@ impl Semantics {
                                 .unwrap_or_else(|| "unknown sort".into());
                             format!("const {}: {label}", d.name.spelling())
                         }
-                        _ => format!("{} {}", d.kind.label(), d.name.spelling()),
+                        _ => format!(
+                            "{} {}",
+                            d.contract.map_or(d.kind.label(), |k| k.label()),
+                            d.name.spelling()
+                        ),
                     }
                 }
             };
@@ -427,7 +431,16 @@ impl Semantics {
             // reference is an absolute namespace path in the text format.
             let qualified = file
                 .reference_at(span.start)
-                .and_then(|r| r.name.namespace.clone());
+                .and_then(|r| r.name.namespace.clone())
+                .or_else(|| {
+                    let raw = &doc.text[span.clone()];
+                    let completed = if raw.ends_with("::") {
+                        format!("{raw}member")
+                    } else {
+                        raw.to_owned()
+                    };
+                    index::parse_name(&completed).ok()?.namespace
+                });
             let mut values = self.candidates(uri, &scope, &lookup, None);
             if let Some(ns) = &qualified {
                 values = self.core.candidates(
@@ -451,7 +464,7 @@ impl Semantics {
                     let matches = self.candidates(uri, &scope, &lookup, Some(&name));
                     if matches.len() != 1 || matches[0] != s { name.namespace = Some(d.scope.namespace.clone()); }
                 }
-                let spelling = if matches!(lookup, Lookup::Name(Kind::Namespace | Kind::Alias)) {
+                let mut spelling = if matches!(lookup, Lookup::Name(Kind::Namespace | Kind::Alias)) {
                     // Namespace keys already encode segment boundaries; aliases
                     // are grammar tokens, not quoted declaration identifiers.
                     s.name.clone()
@@ -459,10 +472,18 @@ impl Semantics {
                     && d.name.text.as_bytes().first().is_some_and(u8::is_ascii_uppercase) {
                     index::quoted(&d.name.text)
                 } else { name.spelling() };
-                if !spelling.starts_with(prefix) { return None; }
+                if prefix.starts_with("::") && !spelling.starts_with("::") {
+                    spelling = format!("::{spelling}");
+                }
+                // Qualification added to disambiguate a candidate must not hide
+                // it when the author has started typing the unqualified name.
+                if !spelling.starts_with(prefix)
+                    && !(qualified.is_none() && name.namespace.is_some() && d.name.spelling().starts_with(prefix)) {
+                    return None;
+                }
                 let kind = match lookup { Lookup::Name(Kind::Namespace) => Kind::Namespace, _ => d.kind };
                 Some(json!({"label": s.name, "detail": s.module,
-                    "kind": match kind { Kind::Namespace => 9, Kind::Sort => 7, Kind::Relation => 3, Kind::Parameter => 5, _ => 21 },
+                    "kind": match kind { Kind::Namespace => 9, Kind::Sort => 7, Kind::Relation => 3, Kind::Parameter => 5, Kind::Contract => 23, _ => 21 },
                     "textEdit": {"range": range(doc, &span), "newText": spelling}}))
             }).collect::<Vec<_>>();
             if lookup == Lookup::Name(Kind::Relation) {
@@ -496,6 +517,7 @@ impl Semantics {
             .filter_map(|r| {
                 let kind = match &r.lookup {
                     Lookup::Name(k) => *k,
+                    Lookup::Contract(_) => Kind::Contract,
                     Lookup::Constant(_) => Kind::Constant,
                     Lookup::Variable { .. } => return Some((r.span.clone(), 1, 0)),
                     Lookup::Parameter(_) => Kind::Parameter,
@@ -508,6 +530,7 @@ impl Semantics {
                     Kind::Relation => 2,
                     Kind::Parameter => 4,
                     Kind::Constant => 1,
+                    Kind::Contract => 5,
                     _ => return None,
                 };
                 Some((r.span.clone(), token, u32::from(kind == Kind::Constant)))

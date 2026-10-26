@@ -257,23 +257,16 @@ impl Server {
                     // A consumer can introduce ambiguity in a library's namespace.
                     // Attribute that failure to its conflicting user declarations,
                     // never to the library's otherwise unaffected home view.
-                    let candidates = if issue.code == "verification-reference" {
-                        self.semantics
-                            .core
-                            .verification_conflicts(root, uri.as_str(), &issue.span)
-                    } else {
-                        let Some(reference) = self.semantics.reference_at(uri, issue.span.start)
-                        else {
-                            continue;
-                        };
-                        self.semantics.core.candidates(
-                            root,
-                            uri.as_str(),
-                            &reference.scope,
-                            &reference.lookup,
-                            Some(&reference.name),
-                        )
+                    let Some(reference) = self.semantics.reference_at(uri, issue.span.start) else {
+                        continue;
                     };
+                    let candidates = self.semantics.core.candidates(
+                        root,
+                        uri.as_str(),
+                        &reference.scope,
+                        &reference.lookup,
+                        Some(&reference.name),
+                    );
                     if candidates.len() < 2 {
                         continue;
                     }
@@ -752,7 +745,7 @@ fn run_with_mode(connection: &Connection, test_mode: bool) -> Result<()> {
         "referencesProvider": true, "hoverProvider": true, "renameProvider": {"prepareProvider": true},
         "documentFormattingProvider": true, "documentRangeFormattingProvider": true,
         "signatureHelpProvider": {"triggerCharacters": ["(", ","], "retriggerCharacters": [","]},
-        "semanticTokensProvider": {"legend": {"tokenTypes": ["type", "variable", "function", "namespace", "parameter"], "tokenModifiers": ["readonly"]}, "full": true}
+        "semanticTokensProvider": {"legend": {"tokenTypes": ["type", "variable", "function", "namespace", "parameter", "event"], "tokenModifiers": ["readonly"]}, "full": true}
     }))?;
     let initialize: InitializeParams = serde_json::from_value(params.clone())?;
     #[allow(deprecated)]
