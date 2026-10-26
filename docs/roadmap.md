@@ -8,9 +8,22 @@ directly in `.den`.
 Add `at_least_one`, `exactly_one` and `empty`, each with IR support, BDD and SAT
 checking, `.den` syntax, printing and editor diagnostics. They are checked like
 `at_most_one`, inside [verifications](den-format.md#verifications): which input worlds
-count as permitted is decisive for coverage. `at_least_one` groups range over all
-domain combinations, including empty groups; `exactly_one` reports coverage and
-uniqueness separately; `empty` requires no tuples in any permitted world.
+count as permitted is decisive for coverage.
+
+- **Groups.** Coverage groups range over every combination of grouping-column domain
+  values, including groups with no possible producer; never infer eligible groups
+  from facts. `group_by: ()` is one global group over the whole relation. No grouping
+  combinations (an empty domain) means no groups.
+- **`exactly_one`** has separate coverage and uniqueness results: neither is assumed
+  while checking the other, a known failure stays a failure when the other part is
+  inconclusive, and the obligation is proved only when both are.
+- **`empty(R)`** takes no `group_by`; its counterexample is a present tuple.
+- **Coverage counterexamples** name the missing group and a permitted world with
+  replay-confirmed absence of every matching tuple; blocked or unknown facts never
+  count as absent. With no possible producer, the finding sits at the obligation.
+- Cover zero-arity relations, grouping by all columns and duplicate derivations.
+  Deferred: "why not derived" explanations, conditional eligibility, new assumption
+  forms.
 
 ## Authoring robustness
 
@@ -57,7 +70,9 @@ become multi-file.
 ## `.den` scorecard support
 
 Accept `.den` programs in the scorecard, to re-score the provisional
-[checker policies](checker-policies.md) on real programs.
+[checker policies](checker-policies.md) on real programs. It runs verifications
+through the same request API as `check-den`, comparing variants only within the same
+verification.
 
 ## Research: admission by well-founded totality
 
@@ -83,6 +98,15 @@ the bounds only prove that a unique two-valued meaning exists.
   fixpoint theory (Denecker, Marek, Truszczyński).
 
 ## Small items
+
+- Richer assumption forms (beyond input `at_most_one`) must establish that the selected
+  assumptions permit some world before checking, reporting `inconsistent-assumptions`
+  otherwise; today every assumption permits the all-absent world.
+- Let library authors mark obligations as offered but not checked by default, to quiet
+  per-consumer notices for menu-style libraries.
+- Per-verification scope (domains); today every verification uses its program's domains.
+- The test DSL editor treats each open file as one program; composing companion `.den`
+  files (extra verifications over an export) is unscoped integration work.
 
 - Trim the unused module/file-based analysis in `crates/analysis`, left from an earlier
   editor prototype.
