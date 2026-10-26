@@ -4,10 +4,10 @@ Denotate is layered so that the IR's meaning is defined once, in Rust, and every
 consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
 
 ```
-                     den/grammar  (Tree-sitter grammar of .den)
+                     grammars/den  (Tree-sitter grammar of .den)
                           │ compiled into
- test-dsl ──lowers to──►  crates/ir ◄── crates/ir-text (.den load / print / index)
- (test DSL)           │                    │
+ crates/test-dsl ─lowers─► crates/ir ◄── crates/ir-text (.den load / print / index)
+                          │                    │
                           ▼                    │
                  crates/normalize              │
                           │                    │
@@ -17,7 +17,7 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
                           │
                  crates/editor (LSP mechanics, scheduler, lifecycle, edits)
                           │
-           den/lsp/server (.den editor)    test-dsl server (the test DSL editor)
+           crates/den-lsp (.den editor)    crates/test-dsl server (test DSL editor)
 ```
 
 ## Crates and their responsibilities
@@ -32,8 +32,8 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
 | `denotate-editor` | Language-independent LSP mechanics: documents, synchronization, transport, the checking scheduler and server loop, lifecycle, publication, workspace edits, LSP positions | Roots, manifests, ownership, DSL concepts |
 | `denotate-ir-text` | `.den` parsing, strict loading, printing, embedded origins, folder-root membership, the incremental editor index | Workspace discovery (except the `filesystem` command adapter), buffers, scheduling |
 | `denotate-analysis` | Rule linting (singleton/unsafe variables, arity and sort evidence) reused by the `.den` index | Name resolution for `.den` (lives in `ir-text`) |
-| `denotate-lsp` (`den/lsp/server`) | The `.den` editor: root catalog, home programs, snapshot bridge, editor services, checking and publication, Go to Origin, rename | Language semantics (delegated to `ir-text`) |
-| `denotate-test-dsl` (`test-dsl`) | Test DSL: parser, lowering, attribution, wording, export layout, its LSP server | Generic checking or presentation |
+| `denotate-lsp` (`crates/den-lsp`) | The `.den` editor: root catalog, home programs, snapshot bridge, editor services, checking and publication, Go to Origin, rename | Language semantics (delegated to `ir-text`) |
+| `denotate-test-dsl` (`crates/test-dsl`) | Test DSL: parser, lowering, attribution, wording, export layout, its LSP server | Generic checking or presentation |
 
 ## Rules that keep the layers honest
 
@@ -46,7 +46,7 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
 - **Buffers are authoritative.** Editors supply snapshots; the core performs no
   disk reads. In the `.den` editor, unsaved manifests and open DSL buffers come
   from the VS Code extension through the snapshot bridge
-  ([PROTOCOL.md](../den/lsp/PROTOCOL.md)); a failed lookup never falls back to disk.
+  ([PROTOCOL.md](../crates/den-lsp/PROTOCOL.md)); a failed lookup never falls back to disk.
 - **Publication is validated.** A result is published only if the complete current
   observation (members, manifests, membership, homes, origins, configuration)
   still matches the one it was computed from.
@@ -60,14 +60,14 @@ A `.den` program is a `den.root` folder plus its referenced libraries; a file ou
 every root is a standalone program ([format](den-format.md#programs-denroot)). The
 editor checks every known program in the background through one serial, fair scheduler
 with a warm session per program, and publishes each program's findings on its own files
-([protocol](../den/lsp/PROTOCOL.md), [decisions](decisions.md#programs-and-roots)).
+([protocol](../crates/den-lsp/PROTOCOL.md), [decisions](decisions.md#programs-and-roots)).
 
 ## Tests at each layer
 
 - Unit and integration tests per crate (`just test-crates`).
 - `.den` round trip: the test DSL regression programs are lowered, printed to
   `.den`, reloaded and checked; structure, origins and default-limit BDD/SAT outcomes
-  must match (`test-dsl/tests/ir_text_roundtrip.rs`).
+  must match (`crates/test-dsl/tests/ir_text_roundtrip.rs`).
 - Editor parity: for every parser-backed regression program, both editors publish the
-  same findings (`den/lsp/server/src/publication_tests.rs`).
-- LSP scenarios over real stdio (`lsp-tests/`) and installed VS Code smoke tests.
+  same findings (`crates/den-lsp/src/publication_tests.rs`).
+- LSP scenarios over real stdio (`crates/lsp-tests/`) and installed VS Code smoke tests.

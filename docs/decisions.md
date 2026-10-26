@@ -2,7 +2,7 @@
 
 Settled design choices and why they were made. Current behavior is specified in the
 [`.den` format](den-format.md), the [architecture](architecture.md) and the
-[editor protocol](../den/lsp/PROTOCOL.md); this page records the reasons and the
+[editor protocol](../crates/den-lsp/PROTOCOL.md); this page records the reasons and the
 alternatives that were rejected. Revisit a decision only with new evidence, such as a
 real program that the current choice serves badly.
 

@@ -1,4 +1,4 @@
-#[path = "../../../test-dsl/tests/support/corpus.rs"]
+#[path = "../../test-dsl/tests/support/corpus.rs"]
 mod corpus;
 use denotate_check::Limits;
 use denotate_editor::Document;

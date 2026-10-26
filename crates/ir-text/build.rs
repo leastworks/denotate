@@ -1,5 +1,5 @@
 fn main() {
-    let grammar = "../../den/grammar/src";
+    let grammar = "../../grammars/den/src";
     println!("cargo:rerun-if-changed={grammar}/parser.c");
     println!("cargo:rerun-if-changed={grammar}/tree_sitter/parser.h");
     cc::Build::new()

@@ -1,6 +1,6 @@
 #[path = "support/corpus.rs"]
 mod corpus;
-#[path = "../../crates/ir-text/tests/support/mod.rs"]
+#[path = "../../ir-text/tests/support/mod.rs"]
 mod correspondence;
 mod support;
 use denotate_check::*;
@@ -415,8 +415,14 @@ fn named_128_program_gate() {
     let mut cases = vec![];
     for (id, path) in [
         ("text/overlap", "fixtures/overlapping-mappings.txt"),
-        ("text/vscode-overlap", "vscode/examples/overlap.testdsl"),
-        ("text/vscode-values", "vscode/examples/values.testdsl"),
+        (
+            "text/vscode-overlap",
+            "../../editors/test-dsl/examples/overlap.testdsl",
+        ),
+        (
+            "text/vscode-values",
+            "../../editors/test-dsl/examples/values.testdsl",
+        ),
     ] {
         cases.push((
             id.into(),

@@ -40,4 +40,4 @@ cargo +1.93.0 test --locked -p denotate-check-session
 
 Regression inputs live in `fixtures/regression/` (semantic outcomes and edit pairs,
 with no receipts, budgets or witness choices) and in the test DSL's corpus
-([test-dsl/fixtures](../../test-dsl/fixtures/README.md)).
+([crates/test-dsl/fixtures](../test-dsl/fixtures/README.md)).

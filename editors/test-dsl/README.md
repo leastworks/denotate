@@ -1,6 +1,6 @@
 # The test DSL in VS Code
 
-The VS Code extension for the [test DSL](../README.md). It starts the Rust
+The VS Code extension for the [test DSL](../../crates/test-dsl/README.md). It starts the Rust
 `test-dsl-lsp` server over stdio; JavaScript provides only VS Code registration and
 the language client.
 
@@ -9,8 +9,8 @@ the language client.
 From the repository root, after the [setup](../../DEVELOPMENT.md#setup):
 
 ```sh
-npm ci --prefix test-dsl/vscode
-code test-dsl/vscode
+npm ci --prefix editors/test-dsl
+code editors/test-dsl
 ```
 
 Press **F5** and choose **Run test DSL**. The build bundles the client and copies

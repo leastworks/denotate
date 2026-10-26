@@ -21,7 +21,7 @@
     ]
   },
   "scripts": {
-    "generate": "cd ../grammar && tree-sitter generate",
+    "generate": "cd ../../grammars/den && tree-sitter generate",
     "build": "npm run generate && cargo +1.93.0 build --manifest-path ../../Cargo.toml --locked -p denotate-lsp --release && node build.mjs",
     "test": "npm run generate && cargo +1.93.0 test --manifest-path ../../Cargo.toml --locked -p denotate-lsp",
     "test:origins": "node --test tests/origin-navigation.cjs",

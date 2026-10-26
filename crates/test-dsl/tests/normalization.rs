@@ -242,7 +242,7 @@ fn generated_cases_install_identically_cached_and_uncached() {
 fn keyed_frontend_preparation_preserves_limits_and_routes_binding_failures_to_creator() {
     use denotate_check::{CheckError, Limits};
     let corpus: serde_json::Value = serde_json::from_str(include_str!(
-        "../../crates/check-session/fixtures/regression/outcomes.json"
+        "../../check-session/fixtures/regression/outcomes.json"
     ))
     .unwrap();
     for row in corpus["cases"].as_array().unwrap() {

@@ -13,32 +13,32 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-          cache-dependency-path: den/lsp/package-lock.json
+          cache-dependency-path: editors/den/package-lock.json
       - name: Install Rust toolchain
         run: |
           rustup toolchain install 1.93.0 --profile minimal
       - name: Native workspace (IR, checker, sessions, presentation, editor, ir-text, test DSL)
         run: cargo +1.93.0 test --locked --workspace --exclude denotate-lsp --exclude denotate-lsp-tests
       - name: Install .den editor dependencies
-        run: npm ci --prefix den/lsp
+        run: npm ci --prefix editors/den
       - name: Shared .den generated parser is current
         run: |
-          npm run generate --prefix den/lsp
-          test -z "$(git status --porcelain --untracked-files=all -- den/grammar/src)"
+          npm run generate --prefix editors/den
+          test -z "$(git status --porcelain --untracked-files=all -- grammars/den/src)"
       - name: Test DSL generated parser is current
         run: |
-          cd test-dsl/grammar
-          ../../den/lsp/node_modules/.bin/tree-sitter generate
+          cd grammars/test-dsl
+          ../../editors/den/node_modules/.bin/tree-sitter generate
           test -z "$(git status --porcelain --untracked-files=all -- src)"
       - name: .den editor syntax manifest and component tests
-        run: npm test --prefix den/lsp
+        run: npm test --prefix editors/den
       - name: .den editor LSP scenarios
-        run: npm run test:lsp --prefix den/lsp
+        run: npm run test:lsp --prefix editors/den
       - name: Test DSL worker and diagnostics over LSP
         run: |
           cargo +1.93.0 build --locked -p denotate-test-dsl --bin test-dsl-lsp
           DENOTATE_LSP_COMMAND="$GITHUB_WORKSPACE/target/debug/test-dsl-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.93.0 test --locked -p denotate-lsp-tests --features test-dsl --test test_dsl
       - name: Test DSL editor package and example
         run: |
-          npm ci --prefix test-dsl/vscode
-          npm test --prefix test-dsl/vscode
+          npm ci --prefix editors/test-dsl
+          npm test --prefix editors/test-dsl

@@ -22,7 +22,7 @@ When behavior changes on purpose, regenerate and review:
 
 ```sh
 just update-test-dsl-expectations
-git diff test-dsl/fixtures/expected
+git diff crates/test-dsl/fixtures/expected
 ```
 
 An unexpected expectation diff is a finding to explain, never something to accept by

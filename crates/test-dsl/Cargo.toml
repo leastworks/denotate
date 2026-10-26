@@ -7,13 +7,13 @@ license = "Apache-2.0"
 publish = false
 
 [dependencies]
-denotate-presentation = { path = "../crates/presentation" }
-denotate-ir-text = { path = "../crates/ir-text" }
-denotate-ir = { path = "../crates/ir" }
-denotate-normalize = { path = "../crates/normalize" }
-denotate-check = { path = "../crates/check" }
-denotate-check-session = { path = "../crates/check-session" }
-denotate-editor = { path = "../crates/editor" }
+denotate-presentation = { path = "../presentation" }
+denotate-ir-text = { path = "../ir-text" }
+denotate-ir = { path = "../ir" }
+denotate-normalize = { path = "../normalize" }
+denotate-check = { path = "../check" }
+denotate-check-session = { path = "../check-session" }
+denotate-editor = { path = "../editor" }
 tree-sitter = "=0.25.10"
 tree-sitter-language = "=0.1.5"
 lsp-types = "=0.95.1"

@@ -86,7 +86,7 @@ fn requests_and_direct_preparation_follow_the_selected_assumptions() {
 #[test]
 fn affected_fixtures_keep_status_and_diagnostic_summaries() {
     let report: Value = serde_json::from_str(include_str!(
-        "../../crates/check-session/fixtures/regression/outcomes.json"
+        "../../check-session/fixtures/regression/outcomes.json"
     ))
     .unwrap();
     let mut sources = BTreeSet::new();

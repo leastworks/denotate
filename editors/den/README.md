@@ -8,8 +8,8 @@ discovery, buffers, background checking, publication, navigation and rename.
 ## Try it
 
 ```sh
-npm ci --prefix den/lsp
-code den/lsp
+npm ci --prefix editors/den
+code editors/den
 ```
 
 In Run and Debug choose a launch configuration and press **F5**; the build runs first.
@@ -33,7 +33,7 @@ In Run and Debug choose a launch configuration and press **F5**; the build runs 
 To see DSL origins, export a test DSL program and open the output folder:
 
 ```sh
-just export-test-dsl /tmp/example-den test-dsl/vscode/examples/overlap.testdsl
+just export-test-dsl /tmp/example-den editors/test-dsl/examples/overlap.testdsl
 ```
 
 Findings on the exported `.den` carry related locations into the `.testdsl`
@@ -59,15 +59,15 @@ reported, not navigated). Do not commit generated exports: they contain absolute
   consumers.
 
 The custom protocol (root status, manifest sync, origin snapshots, test hooks) is in
-[PROTOCOL.md](PROTOCOL.md).
+[PROTOCOL.md](../../crates/den-lsp/PROTOCOL.md).
 
 ## Tests
 
 ```sh
 just test-den          # server component tests, syntax manifest, all shared LSP scenarios
-npm run test:origins --prefix den/lsp   # Go to Origin unit tests
+npm run test:origins --prefix editors/den   # Go to Origin unit tests
 just test-den-vscode   # installed VS Code smoke (needs a local VS Code)
 ```
 
-`npm run build` regenerates the parser from `den/grammar` with the pinned
+`npm run build` regenerates the parser from `grammars/den` with the pinned
 `tree-sitter-cli`, builds the release server and bundles the extension into `dist/`.

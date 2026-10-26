@@ -195,7 +195,7 @@ mod tests {
 
     #[test]
     fn every_fixture_preserves_tokens_and_is_idempotent_with_useful_coverage() {
-        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../fixtures");
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures");
         let manifest: Value =
             serde_json::from_str(&std::fs::read_to_string(root.join("syntax.json")).unwrap())
                 .unwrap();

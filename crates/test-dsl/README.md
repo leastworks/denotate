@@ -54,7 +54,7 @@ just test-dsl-lsp          # LSP scenarios against the test DSL server
 cargo +1.93.0 test --locked -p denotate-test-dsl
 ```
 
-The editor lives in [vscode/](vscode/README.md). The server (`src/server/`) uses the
+The editor lives in [editors/test-dsl/](../../editors/test-dsl/README.md). The server (`src/server/`) uses the
 shared scheduler and server loop from `denotate-editor`; each open file is one program.
 
 ## Fixtures

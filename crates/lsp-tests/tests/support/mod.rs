@@ -75,8 +75,10 @@ pub fn apply_edits(text: &str, edits: &[Value]) -> String {
 }
 
 pub fn root() -> PathBuf {
+    // crates/lsp-tests -> repository root.
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
+        .ancestors()
+        .nth(2)
         .unwrap()
         .to_path_buf()
 }
@@ -146,14 +148,17 @@ impl Client {
         // The .den language server by default; DENOTATE_LSP_COMMAND selects another
         // server (the test DSL scenarios use it).
         let server = root().join(if cfg!(windows) {
-            "den/lsp/dist/denotate-lsp.exe"
+            "editors/den/dist/denotate-lsp.exe"
         } else {
-            "den/lsp/dist/denotate-lsp"
+            "editors/den/dist/denotate-lsp"
         });
         let executable = match std::env::var("DENOTATE_LSP_COMMAND") {
             Ok(command) => command,
             Err(_) => {
-                assert!(server.exists(), "Run npm run build --prefix den/lsp first");
+                assert!(
+                    server.exists(),
+                    "Run npm run build --prefix editors/den first"
+                );
                 server.to_string_lossy().into_owned()
             }
         };

@@ -16,7 +16,7 @@ denotate-ir = { path = "../ir" }
 
 [dev-dependencies]
 denotate-check = { path = "../check", features = ["test-support"] }
-denotate-test-dsl = { path = "../../test-dsl" }
+denotate-test-dsl = { path = "../test-dsl" }
 denotate-editor = { path = "../editor" }
 denotate-normalize = { path = "../normalize" }
 serde_json.workspace = true

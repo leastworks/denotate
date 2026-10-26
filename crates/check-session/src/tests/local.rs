@@ -1,6 +1,6 @@
 //! Local execution is compared with the unchanged global oracle on corpus programs.
 use super::*;
-#[path = "../../../../test-dsl/tests/support/corpus.rs"]
+#[path = "../../../test-dsl/tests/support/corpus.rs"]
 mod corpus;
 use crate::FreshSession;
 use denotate_test_dsl::{attribution::SourceView, presentation};

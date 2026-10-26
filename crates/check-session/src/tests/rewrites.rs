@@ -1,7 +1,7 @@
 use denotate_check::test_support::rewrites::*;
 use denotate_check::*;
 use std::collections::BTreeSet;
-#[path = "../../../../test-dsl/tests/support/mod.rs"]
+#[path = "../../../test-dsl/tests/support/mod.rs"]
 pub(super) mod dsl_fixture;
 pub(super) use denotate_check::test_support::rewrites::subsets;
 #[test]

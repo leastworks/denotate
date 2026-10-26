@@ -8,9 +8,9 @@ members = [
     "crates/check-session",
     "crates/presentation",
     "crates/editor",
-    "test-dsl",
-    "den/lsp/server",
-    "lsp-tests",
+    "crates/test-dsl",
+    "crates/den-lsp",
+    "crates/lsp-tests",
 ]
 resolver = "2"
 

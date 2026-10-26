@@ -26,7 +26,7 @@ demo-overlap mode="overlap":
     cargo +1.93.0 run --locked -p denotate-test-dsl --example overlap -- {{mode}}
 
 # Parse actual test DSL text and lower it to IR; no semantic checking or editor.
-parse-test-dsl file="test-dsl/fixtures/overlapping-mappings.txt":
+parse-test-dsl file="crates/test-dsl/fixtures/overlapping-mappings.txt":
     cargo +1.93.0 run --locked -p denotate-test-dsl --example parse -- '{{file}}'
 
 # Rewrite the test DSL corpus expectations from current behavior; review the diff.
@@ -35,7 +35,7 @@ update-test-dsl-expectations:
 
 # Regenerate the committed DSL parser with the .den editor's pinned CLI (npm ci there first).
 generate-test-dsl: _check-node
-    cd test-dsl/grammar && ../../den/lsp/node_modules/.bin/tree-sitter generate
+    cd grammars/test-dsl && ../../editors/den/node_modules/.bin/tree-sitter generate
 
 # Build the test DSL diagnostics server and exercise it over real LSP (no GUI).
 test-dsl-lsp:
@@ -44,24 +44,24 @@ test-dsl-lsp:
 
 # Build the test DSL VS Code extension and check its package/example (no GUI).
 test-dsl-extension: _check-node
-    npm test --prefix test-dsl/vscode
+    npm test --prefix editors/test-dsl
 
 # Launch an isolated VS Code and test source-linked test DSL diagnostics.
 test-dsl-vscode: _check-node
-    DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix test-dsl/vscode
+    DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix editors/test-dsl
 
 # Build the .den editor, check the shared syntax manifest and run every shared LSP scenario.
 test-den: _check-node
-    npm test --prefix den/lsp
-    npm run test:lsp --prefix den/lsp
+    npm test --prefix editors/den
+    npm run test:lsp --prefix editors/den
 
 # Launch an isolated VS Code with the .den editor extension under test.
 test-den-vscode: _check-node
-    DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix den/lsp
+    DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix editors/den
 
 # Measure real .den LSP round trips at three sizes; no timing pass/fail threshold.
 bench-lsp: _check-node
-    npm run build --prefix den/lsp
+    npm run build --prefix editors/den
     cargo +1.93.0 test --locked -p denotate-lsp-tests --test latency -- --ignored --nocapture --test-threads=1
 
 [private]

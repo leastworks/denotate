@@ -4,7 +4,7 @@ The `.den` format library: parsing, strict loading into a checked program, print
 embedded origins, folder-root membership and the incremental editor index. The format
 itself is described in [docs/den-format.md](../../docs/den-format.md).
 
-It compiles the committed parser generated from `den/grammar` (needs a C compiler, not
+It compiles the committed parser generated from `grammars/den` (needs a C compiler, not
 Node). Apart from the `filesystem` command adapter it performs no IO: callers supply
 program membership and authoritative snapshots.
 
@@ -81,4 +81,4 @@ cargo +1.93.0 test --locked -p denotate-ir-text
 
 `examples/check.rs` backs `just check-den`. The round trip of the test DSL
 regression programs through printing and loading lives in
-`test-dsl/tests/ir_text_roundtrip.rs`.
+`crates/test-dsl/tests/ir_text_roundtrip.rs`.

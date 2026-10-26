@@ -6,7 +6,7 @@ const root = new URL('../', import.meta.url);
 const read = file => readFile(new URL(file, root), 'utf8');
 
 test('the editor example is the existing lowering/provenance fixture', async () => {
-    assert.equal(await read('examples/overlap.testdsl'), await read('../fixtures/overlapping-mappings.txt'));
+    assert.equal(await read('examples/overlap.testdsl'), await read('../../crates/test-dsl/fixtures/overlapping-mappings.txt'));
 });
 
 test('language registration and built entry points exist', async () => {
