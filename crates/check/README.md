@@ -2,7 +2,7 @@
 
 The finite relational checker. It grounds a `Corpus` over explicit finite domains,
 checks admissibility, replays concrete input worlds, and proves or refutes
-`at_most_one` obligations symbolically (BDD by default, SAT selectable), returning
+`at_most_one` and `at_least_one` obligations symbolically (BDD by default, SAT selectable), returning
 only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
 `biodivine-lib-bdd` and a pinned SAT solver.
 
@@ -67,6 +67,32 @@ answers include their relevant constraints, input groups and obligation shape;
 completion also includes any discharge-proof context. The result's request context
 and counterexample replay are assembled fresh, so reused work cannot carry a previous
 verification's identity into the current result.
+
+## Coverage
+
+`Verification.coverage` and `ScopedResults.coverage` contain per-obligation summaries:
+examined groups, missing groups, unsupported groups, an optional inconclusive reason,
+zero-group status and at most three replayed examples. Missing counts are exact only
+when `complete()` is true. `proved()` requires complete checking and zero missing groups.
+`ScopedResults::group` does not infer coverage from zero/one possible tuples: use the
+coverage summary for its outcome. Existing uniqueness group identities are unchanged.
+
+Coverage streams the Cartesian product of resolved grouping domains under a per-obligation
+work allowance; retained examples are bounded independently. Empty grouping has one
+group; an empty grouping-column domain has none. Counterexamples require replay-confirmed
+absence of all possible members. When replay is blocked, observation certification may
+establish absence or presence; uncertified worlds remain unsupported while bounded search
+continues for a settled counterexample. A known-present tuple can prove coverage without
+settling other producers. All-absent inputs witness consistency of the current assumptions.
+
+Both coverage backends currently share symbolic fixed-point evaluation. BDD searches the
+resulting absence condition; SAT encodes that condition as a Boolean circuit and solves it,
+then both replay the concrete observation. SAT coverage therefore shares BDD evaluation
+limits; it does not yet provide an alternative for programs that exhaust BDD evaluation.
+The existing SAT uniqueness implementation is unchanged. Sessions reuse preparation but
+recompute coverage evaluation and summaries each check; a separate coverage verdict cache
+is deferred until measurements justify it. These choices affect performance/inconclusiveness,
+not the meaning of conclusive answers.
 
 ## Rewrites
 

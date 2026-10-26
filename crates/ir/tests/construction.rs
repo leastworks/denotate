@@ -412,3 +412,41 @@ fn assumptions_restrict_inputs_and_verifications_select_declarations() {
     let top = top_level(&c);
     assert!(top.contains(&a.into()) && top.contains(&v.into()));
 }
+
+#[test]
+fn coverage_uses_the_same_namespaces_and_grouping_validation_as_uniqueness() {
+    let mut c = Corpus::new();
+    let s = c.declare_sort("S").unwrap();
+    let r = unary(&mut c, "r", s, RelationRole::Derived);
+    let namespace = Namespace::new(["library"]).unwrap();
+    let id = c
+        .at_least_one_in(
+            namespace.clone(),
+            "covered",
+            r,
+            ["value".into()],
+            "coverage",
+        )
+        .unwrap();
+    assert_eq!(c.namespace(id), Some(&namespace));
+    assert_eq!(
+        c.obligation(id).unwrap().requirement,
+        Requirement::AtLeastOne {
+            relation: r,
+            group_by: vec![0]
+        }
+    );
+    assert!(matches!(
+        c.at_most_one_in(namespace, "covered", r, [], ""),
+        Err(ConstructionError::DuplicateName { .. })
+    ));
+    assert!(matches!(
+        c.at_least_one("bad", r, ["missing".into()], ""),
+        Err(ConstructionError::InvalidGroupColumn { .. })
+    ));
+    assert!(matches!(
+        c.at_least_one("bad", r, ["value".into(), Column::Index(0)], ""),
+        Err(ConstructionError::DuplicateGroupColumn { .. })
+    ));
+    assert!(c.at_least_one("global", r, [], "").is_ok());
+}

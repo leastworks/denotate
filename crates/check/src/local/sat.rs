@@ -34,11 +34,11 @@ impl Callbacks for Stop {
     }
 }
 
-struct Encoding {
+pub(crate) struct Encoding {
     solver: Solver<Stop>,
 }
 impl Encoding {
-    fn new(operations: &OperationalLimits) -> Self {
+    pub(crate) fn new(operations: &OperationalLimits) -> Self {
         Self {
             solver: Solver::new(
                 Default::default(),
@@ -53,7 +53,7 @@ impl Encoding {
             ),
         }
     }
-    fn var(&mut self) -> Result<Lit> {
+    pub(crate) fn var(&mut self) -> Result<Lit> {
         self.solver.cb().check()?;
         if self.solver.num_vars() >= (u32::MAX / 2) - 2 {
             return Err(CheckError::LimitExceeded {
@@ -63,12 +63,12 @@ impl Encoding {
         }
         Ok(Lit::new(self.solver.new_var_default(), true))
     }
-    fn clause(&mut self, mut lits: Vec<Lit>) -> Result<()> {
+    pub(crate) fn clause(&mut self, mut lits: Vec<Lit>) -> Result<()> {
         self.solver.cb().check()?;
         self.solver.add_clause_reuse(&mut lits);
         self.solver.cb().check()
     }
-    fn and(&mut self, lits: &[Lit]) -> Result<Lit> {
+    pub(crate) fn and(&mut self, lits: &[Lit]) -> Result<Lit> {
         let v = self.var()?;
         for &lit in lits {
             self.clause(vec![!v, lit])?;
@@ -78,11 +78,11 @@ impl Encoding {
         self.clause(reverse)?;
         Ok(v)
     }
-    fn or(&mut self, lits: &[Lit]) -> Result<Lit> {
+    pub(crate) fn or(&mut self, lits: &[Lit]) -> Result<Lit> {
         let negated = lits.iter().map(|l| !*l).collect::<Vec<_>>();
         Ok(!self.and(&negated)?)
     }
-    fn solve(&mut self, assumptions: &[Lit]) -> Result<bool> {
+    pub(crate) fn solve(&mut self, assumptions: &[Lit]) -> Result<bool> {
         self.solver.cb().check()?;
         let result = self.solver.solve_limited(assumptions);
         self.solver.cb().check()?;

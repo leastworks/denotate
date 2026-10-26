@@ -728,6 +728,7 @@ pub fn load_with_resolver(
                 Decl::Contract {
                     name,
                     assumption,
+                    coverage,
                     relation,
                     columns,
                     message,
@@ -757,6 +758,13 @@ pub fn load_with_resolver(
                         grouping.push(index);
                     }
                     if *assumption {
+                        if *coverage {
+                            return Err(diagnostic(
+                                m,
+                                s.span.clone(),
+                                "at_least_one is supported only for obligations",
+                            ));
+                        }
                         if declaration.role != RelationRole::Input {
                             return Err(diagnostic(
                                 m,
@@ -792,13 +800,23 @@ pub fn load_with_resolver(
                         let oid = ir_construction(
                             m,
                             s.span.clone(),
-                            b.program.corpus.at_most_one_in(
-                                module,
-                                &name.text,
-                                id,
-                                grouping.into_iter().map(Column::Index),
-                                message,
-                            ),
+                            if *coverage {
+                                b.program.corpus.at_least_one_in(
+                                    module,
+                                    &name.text,
+                                    id,
+                                    grouping.into_iter().map(Column::Index),
+                                    message,
+                                )
+                            } else {
+                                b.program.corpus.at_most_one_in(
+                                    module,
+                                    &name.text,
+                                    id,
+                                    grouping.into_iter().map(Column::Index),
+                                    message,
+                                )
+                            },
                             &b.program.corpus,
                         )?;
                         construction(

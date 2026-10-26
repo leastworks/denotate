@@ -1438,3 +1438,193 @@ fn verification_navigation_hover_outline_highlighting_and_typed_completion() {
     assert_eq!(result["items"][0]["textEdit"]["newText"], "'b::c'::allowed");
     c.shutdown();
 }
+
+#[test]
+fn coverage_publication_services_and_empty_domain_notices_follow_verifications() {
+    let mut c = Client::start("ir-text/standalone");
+    let (uri, _) = c.open("example.den");
+    let body="namespace lib { sort S; const a,b,c,d:S; relation p(x:S); obligation covered: at_least_one(p, group_by: (x)); } use lib;";
+    let verification = "verification checks { assumptions: []; obligations: [covered]; }";
+    let text = format!("{body} {verification}");
+    c.change(&uri, 2, &text);
+    checking_idle(&mut c);
+    let diagnostics = c.diagnostics(&uri);
+    let failures = diagnostics
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["code"] == "counterexample")
+        .collect::<Vec<_>>();
+    assert_eq!(failures.len(), 1, "{diagnostics}");
+    let original_identity = failures[0]["data"]["finding"].clone();
+    assert_eq!(original_identity["component"], "coverage");
+    assert_eq!(original_identity["obligation"], json!(["lib", "covered"]));
+    assert_eq!(
+        failures[0]["data"]["evidence"]["missingGroups"],
+        json!({"count":4,"exact":true})
+    );
+    assert_eq!(
+        failures[0]["data"]["evidence"]["examples"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    let definition = query(
+        &mut c,
+        "textDocument/definition",
+        &uri,
+        &text,
+        "at_least_one(p",
+        13,
+    );
+    assert_eq!(
+        definition[0]["targetSelectionRange"]["start"],
+        position(&text, "relation p", 9)
+    );
+    let completion = query(
+        &mut c,
+        "textDocument/completion",
+        &uri,
+        &text,
+        "group_by: (x)",
+        12,
+    );
+    assert!(completion["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|i| i["label"] == "x"));
+    let hover = query(&mut c, "textDocument/hover", &uri, &text, "covered];", 0);
+    assert_eq!(hover["contents"]["value"], "obligation covered");
+    let references = query(
+        &mut c,
+        "textDocument/references",
+        &uri,
+        &text,
+        "covered];",
+        0,
+    );
+    assert_eq!(references.as_array().unwrap().len(), 2);
+    let outline = c.request(
+        "textDocument/documentSymbol",
+        json!({"textDocument":{"uri":uri}}),
+    );
+    assert!(outline[0]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["name"]
+            .as_str()
+            .is_some_and(|n| n.starts_with("obligation covered:"))));
+    let event = c.capabilities["semanticTokensProvider"]["legend"]["tokenTypes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|v| v == "event")
+        .unwrap() as u64;
+    let tokens = c.request(
+        "textDocument/semanticTokens/full",
+        json!({"textDocument":{"uri":uri}}),
+    );
+    assert_eq!(
+        tokens["data"]
+            .as_array()
+            .unwrap()
+            .chunks(5)
+            .filter(|t| t[3] == event)
+            .count(),
+        3
+    );
+    let edits = c.request(
+        "textDocument/formatting",
+        json!({"textDocument":{"uri":uri},"options":{"tabSize":4,"insertSpaces":true}}),
+    );
+    let formatted = support::apply_edits(&text, edits.as_array().unwrap());
+    assert_ne!(formatted, text);
+    let rename=c.request("textDocument/rename",json!({"textDocument":{"uri":uri},"position":position(&text,"covered];",0),"newName":"complete output"}));
+    let changed = support::apply_edits(
+        &text,
+        rename["documentChanges"][0]["edits"].as_array().unwrap(),
+    );
+    assert!(changed.contains("obligation 'complete output': at_least_one"));
+    assert!(changed.contains("obligations: ['complete output']"));
+    c.change(&uri, 3, &changed);
+    checking_idle(&mut c);
+    assert_eq!(
+        c.diagnostics(&uri)
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["code"] == "counterexample")
+            .count(),
+        1
+    );
+    let two = format!("{text} {}", verification.replace("checks", "again"));
+    c.change(&uri, 4, &two);
+    checking_idle(&mut c);
+    assert_eq!(
+        c.diagnostics(&uri)
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["code"] == "counterexample")
+            .count(),
+        2
+    );
+    c.change(&uri, 5, &format!("{text} p(a); p(b); p(c); p(d);"));
+    checking_idle(&mut c);
+    assert_eq!(
+        c.request("denotate/roots", json!({"uri":uri}))["summary"]["state"],
+        "proved"
+    );
+    assert!(c.diagnostics(&uri).as_array().unwrap().is_empty());
+    c.change(&uri, 6, &format!("{text} domain lib::S=[];"));
+    checking_idle(&mut c);
+    let notes = c.diagnostics(&uri);
+    assert_eq!(notes.as_array().unwrap().len(), 1, "{notes}");
+    assert_eq!(notes[0]["code"], "empty-grouping-domain");
+    assert_eq!(notes[0]["severity"], 3);
+    assert_eq!(
+        c.request("denotate/roots", json!({"uri":uri}))["summary"]["state"],
+        "proved"
+    );
+    let global = text.replace("group_by: (x)", "group_by: ()");
+    c.change(&uri, 7, &format!("{global} domain lib::S=[];"));
+    checking_idle(&mut c);
+    let failures = c.diagnostics(&uri);
+    assert_eq!(failures.as_array().unwrap().len(), 1, "{failures}");
+    assert_eq!(failures[0]["code"], "counterexample");
+    c.change(
+        &uri,
+        8,
+        &text.replace("obligations: [covered]", "obligations: []"),
+    );
+    checking_idle(&mut c);
+    let unchecked = c.diagnostics(&uri);
+    assert!(
+        unchecked
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|d| d["code"] == "unchecked-obligation"),
+        "{unchecked}"
+    );
+    assert!(unchecked
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|d| d["code"] != "counterexample"));
+    c.change(&uri, 9, &formatted);
+    checking_idle(&mut c);
+    assert_eq!(c.diagnostics(&uri).as_array().unwrap().len(), 1);
+    assert_eq!(c.diagnostics(&uri)[0]["data"]["finding"], original_identity);
+    assert_eq!(
+        c.request(
+            "textDocument/formatting",
+            json!({"textDocument":{"uri":uri},"options":{"tabSize":4,"insertSpaces":true}})
+        ),
+        json!([])
+    );
+    c.shutdown();
+}

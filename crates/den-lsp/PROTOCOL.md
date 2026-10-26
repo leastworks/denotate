@@ -109,7 +109,7 @@ consistency-only verification.` Its code is `consistency-only`. It carries no
 per-program semantic finding identity.
 
 Each semantic diagnostic's `data` holds `program`, `finding` (an object containing `verification: [namespaceKey, name]` alongside
-exactly one existing `group`, `region` or `rewrite` identity, all built from semantic
+either a `group`, `region` or `rewrite` identity, or an `obligation`/`component` coverage identity, all built from semantic
 keys, never arena IDs or message text),
 `kind`, `fallback`, `evidence`, `checkRevision` and `locations` (URI, view, SHA-256
 and byte range for primary and related spans). Counterexamples may produce several
@@ -118,9 +118,38 @@ highlights with one finding identity. Publication identity is the full
 distinct even with identical assumptions. Messages do not embed context labels;
 unsupported and inconclusive findings use one
 primary with the other producers related. Evidence kinds are
-`replayed-counterexample`, `no-meaning-observation`, `unfounded-support-world`
+`replayed-counterexample`, `replayed-coverage-counterexamples`, `no-meaning-observation`, `unfounded-support-world`
 (never an overlap witness), `rewrite-proof` and `no-witness`. Rewrite proofs do not
 authorize edits.
+
+### Coverage results
+
+A coverage finding uses
+`{"verification": [namespaceKey, name], "obligation": [namespaceKey, name], "component": "coverage"}`.
+Program ownership remains `data.program`. Its identity is independent of displayed groups
+and witnesses. Coverage failures have one primary diagnostic per obligation/verification;
+uniqueness retains its existing per-overlap-group reporting and identities.
+
+`summary.coverage` (present when coverage is selected) lists entries with `identity`,
+`outcome` (`proved`, `counterexample`, `unsupported`, `inconclusive`), `examinedGroups`,
+`missingGroups: {count, exact}`, `complete`, `noGroups`, `unsupportedGroups` and `reason`
+(null or `{phase, resource}`). The count is of distinct groups with an established
+failure in at least one permitted world. An incomplete count is a lower bound.
+A failure can coexist with `complete: false`; it remains a failure and blocks a proof.
+
+Coverage counterexample evidence has kind `replayed-coverage-counterexamples`, component
+`coverage`, the same `missingGroups`, `complete`, `unsupportedGroups` and `reason`, and
+`examples` (currently at most three, ordered by semantic group keys). Each example contains
+`group` (typed constant keys), its own `observation: {present, absent}`, and replay `scope`
+(`whole-program` or `cone-only`). Examples need not share an input world. Limiting the
+sample does not make an otherwise completed check incomplete. Other coverage outcomes
+carry `no-witness` evidence.
+
+An empty resolved grouping-column domain gives a proved coverage result and an Information
+diagnostic with code `empty-grouping-domain` at the obligation: `no groups: the grouping
+domain is empty`. This note does not invalidate the proof. `group_by: ()` always creates
+one global group and never gets this note. Normal unselected-obligation notices and
+consistency-only handling also apply unchanged.
 
 ### Configuration
 

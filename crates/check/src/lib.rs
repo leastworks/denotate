@@ -44,3 +44,6 @@ extern crate self as denotate_check;
 #[cfg(any(test, feature = "test-support"))]
 #[doc(hidden)]
 pub mod test_support;
+
+mod coverage;
+pub use coverage::{CoverageExample, CoverageReport, CoverageResult, CoverageSummary};

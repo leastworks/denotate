@@ -13,7 +13,7 @@ use std::{
 mod input;
 mod memo;
 mod owned;
-mod sat;
+pub(crate) mod sat;
 pub use input::*;
 pub use owned::{answer_owned_local, evaluate_owned_local};
 #[cfg(test)]
@@ -367,7 +367,7 @@ impl PreparedCheck<'_> {
             ground: &self.keys,
             receipts: &mut receipts,
         };
-        let verification = presentation.verify_report(
+        let mut verification = presentation.verify_report(
             &limits,
             &limits,
             &limits,
@@ -375,6 +375,44 @@ impl PreparedCheck<'_> {
             report,
             Some(completions),
         )?;
+        if !self.program.coverage.is_empty() {
+            let mut coverage_budget = Budget::tracked(&limits);
+            let meaning = self.program.symbolic_impl(&mut coverage_budget, true);
+            if let Err(e) = &meaning {
+                coverage_budget.failure(e);
+            }
+            coverage_budget.record(
+                &mut receipts,
+                QueryKey::CoverageMeaning,
+                [QueryKey::FindingContext],
+            )?;
+            match meaning {
+                Ok(meaning) => {
+                    let mut queries = QueryRun {
+                        keys: self.semantic_keys,
+                        ground: &self.keys,
+                        receipts: &mut receipts,
+                    };
+                    verification.coverage = meaning.check_coverage(
+                        &limits,
+                        self.request.backend == BackendIdentity::sat(),
+                        Some(&mut queries),
+                    )?;
+                }
+                Err(e) => {
+                    let reason = Inconclusive::from_error(e)?;
+                    for id in self.program.coverage.keys() {
+                        verification.coverage.insert(
+                            *id,
+                            CoverageReport {
+                                inconclusive: Some(reason),
+                                ..CoverageReport::default()
+                            },
+                        );
+                    }
+                }
+            }
+        }
         let mut value = self.project(&verification, self.semantic_keys)?;
         for (scope, artifact) in &artifacts {
             if let (

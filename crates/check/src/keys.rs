@@ -282,7 +282,8 @@ impl GroundKeyIndex {
             .obligations()
             .filter(|o| program.obligations.contains(&o.id))
         {
-            let Requirement::AtMostOne { relation, group_by } = &o.requirement;
+            let relation = &o.requirement.relation();
+            let group_by = o.requirement.group_by();
             let signature = corpus
                 .relation(*relation)
                 .ok_or(KeyError::UnknownOccurrence((*relation).into()))?;
@@ -299,7 +300,7 @@ impl GroundKeyIndex {
             }
             let mut groups = KeyedGroups {
                 relation: keys.relation(*relation)?.clone(),
-                columns: group_by.clone(),
+                columns: group_by.to_vec(),
                 domains,
                 members: BTreeMap::new(),
             };

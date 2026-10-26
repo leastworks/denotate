@@ -13,6 +13,8 @@ pub enum QueryKey {
     Grounding(GroundingKey),
     Admission,
     Symbolic,
+    CoverageMeaning,
+    Coverage(denotate_ir::ObligationKey),
     ConeIndex,
     ConeDiscovery(GroupKey),
     RegionDiscovery(ComponentKey),

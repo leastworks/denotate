@@ -1167,8 +1167,21 @@
       "type": "SEQ",
       "members": [
         {
-          "type": "STRING",
-          "value": "at_most_one"
+          "type": "FIELD",
+          "name": "kind",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "at_most_one"
+              },
+              {
+                "type": "STRING",
+                "value": "at_least_one"
+              }
+            ]
+          }
         },
         {
           "type": "STRING",

@@ -10,6 +10,7 @@ use std::{
 
 mod equations;
 mod portable;
+mod sat_condition;
 pub(crate) use equations::{EquationContext, Formula};
 pub use portable::OwnedCondition;
 

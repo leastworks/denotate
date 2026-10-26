@@ -10,6 +10,8 @@ it when real programs exist, and change it on evidence.
 | SAT group backend | Kept selectable (`denotate.backend: "sat"`) | Large wins on programs with many distinct literals |
 | Relation-SCC grounding | Kept opt-in | Warm-run wins; not yet worth the complexity by default |
 | Plan cache | Small-rule bypass with bounded retention | Avoids caching cost for trivial rules |
+| Coverage under SAT | Shares BDD symbolic evaluation; SAT only finds the uncovered world | First correct implementation; gives no relief where BDD evaluation exhausts |
+| Coverage results | Recomputed each check; preparation is reused | No measured need for a coverage verdict cache yet |
 
 Tried and removed: component-level evaluation, which lost everywhere it was measured.
 

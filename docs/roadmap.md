@@ -5,8 +5,9 @@ directly in `.den`.
 
 ## Contract vocabulary
 
-Add `at_least_one`, `exactly_one` and `empty`, each with IR support, BDD and SAT
-checking, `.den` syntax, printing and editor diagnostics. They are checked like
+`at_least_one` coverage is implemented through the IR, BDD and SAT checking, `.den`,
+CLI and editor, with bounded enumeration and aggregated diagnostics. Next add
+`exactly_one` and `empty` through those same paths. They are checked like
 `at_most_one`, inside [verifications](den-format.md#verifications): which input worlds
 count as permitted is decisive for coverage.
 
@@ -98,6 +99,9 @@ the bounds only prove that a unique two-valued meaning exists.
   fixpoint theory (Denecker, Marek, Truszczyński).
 
 ## Small items
+
+- Encode `at_least_one` coverage natively for SAT, so the SAT backend helps where BDD
+  evaluation exhausts (today SAT coverage shares BDD evaluation).
 
 - Richer assumption forms (beyond input `at_most_one`) must establish that the selected
   assumptions permit some world before checking, reporting `inconsistent-assumptions`

@@ -494,9 +494,9 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
         }
         add(r.id.into(), text, rule_positions(r))?;
     }
-    let contract = |relation: RelationId, columns: &[usize], context: &Namespace| {
+    let contract = |kind: &str, relation: RelationId, columns: &[usize], context: &Namespace| {
         format!(
-            "at_most_one({}, group_by: ({}))",
+            "{kind}({}, group_by: ({}))",
             reference(relation.into(), context),
             columns
                 .iter()
@@ -509,13 +509,18 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
         )
     };
     for o in c.obligations() {
-        let Requirement::AtMostOne { relation, group_by } = &o.requirement;
+        let relation = &o.requirement.relation();
+        let group_by = o.requirement.group_by();
+        let kind = match o.requirement {
+            Requirement::AtMostOne { .. } => "at_most_one",
+            Requirement::AtLeastOne { .. } => "at_least_one",
+        };
         add(
             o.id.into(),
             format!(
                 "obligation {}: {} message {}",
                 spelling(&o.name, NameKind::Identifier),
-                contract(*relation, group_by, c.namespace(o.id).unwrap()),
+                contract(kind, *relation, group_by, c.namespace(o.id).unwrap()),
                 serde_json::to_string(&o.message_template).unwrap()
             ),
             single(o.id.into()),
@@ -528,7 +533,12 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
             format!(
                 "assumption {}: {}",
                 spelling(&a.name, NameKind::Identifier),
-                contract(*relation, group_by, c.namespace(a.id).unwrap())
+                contract(
+                    "at_most_one",
+                    *relation,
+                    group_by,
+                    c.namespace(a.id).unwrap()
+                )
             ),
             single(a.id.into()),
         )?;

@@ -708,6 +708,7 @@ fn unambiguous_witness_keeps_exact_primary_and_related_generic_origins() {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum FindingIdentity {
+    Coverage(usize),
     Group(usize, Vec<usize>),
     Region(Vec<AtomIdentity>),
 }
@@ -718,6 +719,9 @@ fn finding_identity(
 ) -> FindingIdentity {
     use denotate_presentation::Identity;
     match id {
+        Identity::Coverage(id) => {
+            FindingIdentity::Coverage(index.obligations[keys.obligation(*id).unwrap()])
+        }
         Identity::Group { obligation, tuple } => FindingIdentity::Group(
             index.obligations[keys.obligation(*obligation).unwrap()],
             tuple

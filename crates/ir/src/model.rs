@@ -215,6 +215,23 @@ pub enum Requirement {
         relation: RelationId,
         group_by: Vec<usize>,
     },
+    AtLeastOne {
+        relation: RelationId,
+        group_by: Vec<usize>,
+    },
+}
+
+impl Requirement {
+    pub fn relation(&self) -> RelationId {
+        match self {
+            Self::AtMostOne { relation, .. } | Self::AtLeastOne { relation, .. } => *relation,
+        }
+    }
+    pub fn group_by(&self) -> &[usize] {
+        match self {
+            Self::AtMostOne { group_by, .. } | Self::AtLeastOne { group_by, .. } => group_by,
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -725,8 +742,56 @@ impl Corpus {
         group_by: impl IntoIterator<Item = Column>,
         message_template: impl Into<String>,
     ) -> Result<ObligationId> {
-        let namespace = namespace.into();
-        let name = name.into();
+        self.cardinality_in(
+            namespace.into(),
+            name.into(),
+            relation,
+            group_by,
+            message_template.into(),
+            false,
+        )
+    }
+    pub fn at_least_one(
+        &mut self,
+        name: impl Into<String>,
+        relation: RelationId,
+        group_by: impl IntoIterator<Item = Column>,
+        message_template: impl Into<String>,
+    ) -> Result<ObligationId> {
+        self.at_least_one_in(
+            Namespace::default(),
+            name,
+            relation,
+            group_by,
+            message_template,
+        )
+    }
+    pub fn at_least_one_in(
+        &mut self,
+        namespace: impl Into<Namespace>,
+        name: impl Into<String>,
+        relation: RelationId,
+        group_by: impl IntoIterator<Item = Column>,
+        message_template: impl Into<String>,
+    ) -> Result<ObligationId> {
+        self.cardinality_in(
+            namespace.into(),
+            name.into(),
+            relation,
+            group_by,
+            message_template.into(),
+            true,
+        )
+    }
+    fn cardinality_in(
+        &mut self,
+        namespace: Namespace,
+        name: String,
+        relation: RelationId,
+        group_by: impl IntoIterator<Item = Column>,
+        message_template: String,
+        coverage: bool,
+    ) -> Result<ObligationId> {
         named(&name, "obligation")?;
         if self
             .obligations()
@@ -744,9 +809,16 @@ impl Corpus {
             Obligation {
                 id,
                 name,
-                requirement: Requirement::AtMostOne {
-                    relation,
-                    group_by: indices,
+                requirement: if coverage {
+                    Requirement::AtLeastOne {
+                        relation,
+                        group_by: indices,
+                    }
+                } else {
+                    Requirement::AtMostOne {
+                        relation,
+                        group_by: indices,
+                    }
                 },
                 message_template: message_template.into(),
             },

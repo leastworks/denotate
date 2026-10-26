@@ -203,6 +203,7 @@ fn run(args: impl IntoIterator<Item = String>, output: &mut String) -> Result<u8
                 let result = &report.checked.results.value;
                 incomplete |= result.unfinished.is_some()
                     || !result.incomplete.is_empty()
+                    || result.coverage.values().any(|c| !c.complete())
                     || result.groups.values().any(|r| {
                         matches!(
                             r,
@@ -215,9 +216,10 @@ fn run(args: impl IntoIterator<Item = String>, output: &mut String) -> Result<u8
                     });
                 let presented = denotate_ir_text::presentation::present(&p, &report.checked)
                     .map_err(|e| (2, e.to_string()))?;
-                findings |= presented.status["findings"]
-                    .as_array()
-                    .is_some_and(|f| !f.is_empty());
+                findings |= presented.status["findings"].as_array().is_some_and(|f| {
+                    f.iter()
+                        .any(|finding| finding["kind"] != "empty-grouping-domain")
+                });
                 writeln!(output, "Results: {:#}", presented.status).unwrap();
             }
             LocalCheckOutcome::Inconclusive { reason, .. } => {
@@ -352,6 +354,26 @@ mod tests {
         let (code, output) = single.run(&["--verification", "::v"]);
         assert_eq!(code, 2);
         assert!(output.contains("Partial run:"));
+    }
+    #[test]
+    fn coverage_cli_proofs_failures_and_empty_grouping_notes() {
+        for args in [&[][..], &["--sat"][..]] {
+            for (body, code) in [
+                ("sort S; const a,b:S; relation p(x:S);", 1),
+                ("sort S; const a,b:S; relation p(x:S); p(a); p(b);", 0),
+                ("sort S; relation p(x:S);", 0),
+            ] {
+                let fixture = Fixture::new(&format!(
+                    "{body} obligation covered: at_least_one(p, group_by: (x)); verification v {{ assumptions: []; obligations: [covered]; }}"
+                ));
+                let (actual, output) = fixture.run(args);
+                assert_eq!(actual, code, "{output}");
+                assert!(output.contains("coverage"));
+                if !body.contains("const") {
+                    assert!(output.contains("empty-grouping-domain"));
+                }
+            }
+        }
     }
     #[test]
     fn invalid_input_and_operational_failure_have_distinct_codes() {

@@ -617,3 +617,22 @@ fn all_two_node_signed_graphs_agree_with_an_independent_reachability_oracle() {
         }
     }
 }
+
+#[test]
+fn low_level_verification_does_not_silently_drop_coverage() {
+    let mut c = Corpus::new();
+    let r = relation(&mut c, "r", false);
+    let id = c.at_least_one("covered", r, [], "").unwrap();
+    let limits = Limits::default();
+    let ground = prepare(&c).admit(&limits).unwrap();
+    let meaning = ground.symbolic(&limits).unwrap();
+    let report = meaning.verify_at_most_one(&limits).unwrap();
+    assert_eq!(report.coverage[&id].missing, 1);
+    assert!(!report.all_obligations_proved());
+    rule(&mut c, r, &[]);
+    let ground = prepare(&c).admit(&limits).unwrap();
+    let meaning = ground.symbolic(&limits).unwrap();
+    let report = meaning.verify_at_most_one(&limits).unwrap();
+    assert!(report.coverage[&id].proved());
+    assert!(report.all_obligations_proved());
+}

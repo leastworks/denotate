@@ -32,6 +32,17 @@ real program that the current choice serves badly.
   depend on the permitted worlds, so they are computed for each verification, never
   once for the program and reused. Finding identities include the verification, so
   two verifications of one obligation never overwrite or deduplicate each other.
+- **Coverage ranges over resolved domains.** Enumerating only groups with producing
+  tuples would silently miss missing assignments. `at_least_one` therefore includes
+  all grouping-domain combinations, including overrides. Enumeration is bounded;
+  exhaustion remains explicit, with known failures preserved. An empty grouping
+  domain proves coverage vacuously but gets an Information note to expose accidental
+  empty scope. Empty grouping itself still creates one global group.
+- **Coverage failures are aggregated; uniqueness failures remain per group.** One
+  diagnostic per missing domain combination could flood an obligation declaration.
+  Coverage therefore retains a bounded sample and an exact count or explicit lower
+  bound. Its identity depends on the obligation, component and verification, never
+  on sample selection. Each example retains its own input world.
 - **Correctness and usability before performance.** Performance policies are
   provisional until re-scored on real programs ([checker policies](checker-policies.md)).
 - **Budgets, receipts, timings and witness choices are not goldens.** They change

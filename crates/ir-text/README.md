@@ -50,6 +50,11 @@ record; API callers declare both contracts in the corpus before exporting.
 `spelling(name, NameKind)` is the kind-aware spelling used by the printer; editors must
 use it for replacement names (rename), not display quoting.
 
+`at_least_one` obligations load and print through the ordinary contract declarations;
+`at_least_one` assumptions are rejected. Grouping uses resolved domains, including
+explicit overrides. Coverage results and diagnostics are described in the
+[format](../../docs/den-format.md#coverage-obligations).
+
 ## Editor index
 
 `index::Index` is the recoverable editor boundary. The editor supplies each file's

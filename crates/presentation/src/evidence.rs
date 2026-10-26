@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Kind {
+    EmptyGroupingDomain,
     Counterexample,
     NoMeaning,
     UnsupportedGroup,
@@ -16,6 +17,7 @@ impl Kind {
     pub fn code(self) -> &'static str {
         match self {
             Self::Counterexample => "counterexample",
+            Self::EmptyGroupingDomain => "empty-grouping-domain",
             Self::NoMeaning => "no-meaning",
             Self::UnsupportedGroup => "unsupported-group",
             Self::UnsupportedRegion => "unsupported-region",
@@ -27,7 +29,9 @@ impl Kind {
         match self {
             Self::Counterexample | Self::NoMeaning => Severity::Error,
             Self::UnsupportedRegion | Self::Rewrite => Severity::Warning,
-            Self::UnsupportedGroup | Self::Inconclusive => Severity::Information,
+            Self::UnsupportedGroup | Self::Inconclusive | Self::EmptyGroupingDomain => {
+                Severity::Information
+            }
         }
     }
 }
@@ -63,6 +67,7 @@ pub struct Contribution {
 }
 #[derive(Debug)]
 pub enum Evidence<'a> {
+    Coverage(&'a CoverageReport),
     Group(&'a VerifiedGroup),
     Region(&'a UnresolvedRegion),
 }
@@ -266,6 +271,66 @@ pub fn interpret<'a>(
             evidence: Evidence::Group(group),
         });
     }
+    for (id, coverage) in &report.coverage {
+        let obligation = corpus
+            .obligation(*id)
+            .ok_or(Error::InvalidFinding("foreign coverage obligation"))?;
+        let subject = format!("Obligation {}", obligation.name);
+        let (kind, message) = if coverage.missing > 0 {
+            (
+                Kind::Counterexample,
+                format!(
+                    "{subject}: {}{} {} coverage{}",
+                    if coverage.complete() { "" } else { "at least " },
+                    coverage.missing,
+                    if coverage.missing == 1 {
+                        "group fails"
+                    } else {
+                        "groups fail"
+                    },
+                    if coverage.complete() {
+                        "."
+                    } else {
+                        "; checking incomplete."
+                    }
+                ),
+            )
+        } else if coverage.no_groups {
+            (
+                Kind::EmptyGroupingDomain,
+                format!("{subject}: no groups: the grouping domain is empty"),
+            )
+        } else if let Some(cause) = coverage.inconclusive {
+            (
+                Kind::Inconclusive,
+                format!(
+                    "{subject}: coverage checking incomplete ({}: {}).",
+                    cause.phase, cause.resource
+                ),
+            )
+        } else if coverage.unsupported > 0 {
+            (
+                Kind::UnsupportedGroup,
+                format!("{subject}: coverage is unsupported in some permitted worlds."),
+            )
+        } else {
+            continue;
+        };
+        let notes = Vec::new();
+        findings.push(Finding {
+            identity: Identity::Coverage(*id),
+            kind,
+            message,
+            notes,
+            contributions: vec![Contribution {
+                occurrence: (*id).into(),
+                role: Role::Obligation,
+            }],
+            cycle_rules: vec![],
+            unsupported_world: None,
+            evidence: Evidence::Coverage(coverage),
+        });
+    }
     for region in &report.unresolved {
         let component = report
             .program()
@@ -395,6 +460,27 @@ pub fn generic_details(corpus: &Corpus, finding: &Finding<'_>) -> Result<Vec<Str
     };
     let mut details = Vec::new();
     let observation = match &finding.evidence {
+        Evidence::Coverage(c) => {
+            for e in &c.examples {
+                let group = e
+                    .group
+                    .iter()
+                    .map(|id| {
+                        let c = corpus
+                            .constant(*id)
+                            .ok_or(Error::InvalidFinding("unknown grouping constant"))?;
+                        Ok(name((*id).into(), &c.name))
+                    })
+                    .collect::<Result<Vec<_>>>()?
+                    .join(", ");
+                details.push(format!(
+                    "Missing group ({group}). Example input observation — present: {}; absent: {}.",
+                    show(&e.observation.present)?,
+                    show(&e.observation.absent)?
+                ));
+            }
+            None
+        }
         Evidence::Group(g) => match &g.outcome {
             VerifiedOutcome::Counterexample(c) => {
                 details.push(format!("Replayed tuples: {}.", show(&c.tuples)?));

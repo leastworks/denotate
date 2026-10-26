@@ -7,7 +7,7 @@ provenance and semantic keys. Plain Rust; its only workspace dependency is
 ## Construction
 
 `Corpus` builds sorts, constants, named-parameter input and derived relations,
-conjunctive signed rules, facts and `at_most_one` obligations (grouping columns by
+conjunctive signed rules, facts and `at_most_one` / `at_least_one` obligations (grouping columns by
 name or index, with a message template that the IR does not render). Constructors
 return `ConstructionError` for foreign handles, duplicate or empty names, arity and
 sort mismatches, inconsistent variable sorts, unsafe head or negative variables,

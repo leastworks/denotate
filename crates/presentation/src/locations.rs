@@ -126,10 +126,12 @@ impl Placement<'_> {
                 fallback,
                 evidence: Value::Null,
             });
-            if matches!(
-                kind,
-                Kind::Inconclusive | Kind::UnsupportedGroup | Kind::UnsupportedRegion
-            ) {
+            if matches!(identity, Identity::Coverage(_))
+                || matches!(
+                    kind,
+                    Kind::Inconclusive | Kind::UnsupportedGroup | Kind::UnsupportedRegion
+                )
+            {
                 break;
             }
         }

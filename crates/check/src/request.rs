@@ -338,6 +338,7 @@ impl CheckRequest {
         ScopedResults {
             context: self.clone(),
             groups: BTreeMap::new(),
+            coverage: BTreeMap::new(),
             group_domains: BTreeMap::new(),
             regions: BTreeMap::new(),
             incomplete: BTreeMap::new(),
@@ -485,6 +486,7 @@ pub struct RegionResult {
 pub struct ScopedResults {
     pub context: CheckRequest,
     pub groups: BTreeMap<GroupKey, ScopedResult>,
+    pub coverage: BTreeMap<ObligationKey, CoverageResult>,
     /// Compact domain of legal groups, including trivially proved zero/one-member
     /// groups. Empty when none are selected or preparation did not finish.
     pub group_domains: BTreeMap<ObligationKey, KeyedGroups>,
@@ -501,6 +503,9 @@ impl ScopedResults {
         }
         let domain = self.group_domains.get(&key.obligation)?;
         domain.key(&key.obligation, key.tuple.clone()).ok()?;
+        if let Some(coverage) = self.coverage.get(&key.obligation) {
+            return coverage.proved().then_some(ScopedResult::Proved);
+        }
         if domain.members.get(&key.tuple).map_or(0, BTreeSet::len) <= 1 {
             Some(ScopedResult::Proved)
         } else {
@@ -675,11 +680,39 @@ impl PreparedCheck<'_> {
         let mut out = ScopedResults {
             context: self.request.clone(),
             groups: BTreeMap::new(),
+            coverage: BTreeMap::new(),
             group_domains: self.keys.groups.clone(),
             regions: BTreeMap::new(),
             incomplete: BTreeMap::new(),
             unfinished: None,
         };
+        for (id, coverage) in &report.coverage {
+            out.coverage.insert(
+                keys.obligation(*id).map_err(CheckError::Keys)?.clone(),
+                CoverageResult {
+                    examined: coverage.examined,
+                    missing: coverage.missing,
+                    unsupported: coverage.unsupported,
+                    inconclusive: coverage.inconclusive,
+                    no_groups: coverage.no_groups,
+                    examples: coverage
+                        .examples
+                        .iter()
+                        .map(|e| {
+                            Ok(CoverageExample {
+                                group: e
+                                    .group
+                                    .iter()
+                                    .map(|id| keys.constant(*id).cloned().map_err(CheckError::Keys))
+                                    .collect::<Result<_>>()?,
+                                observation: candidate(&e.observation)?,
+                                replay_scope: e.replay_scope,
+                            })
+                        })
+                        .collect::<Result<_>>()?,
+                },
+            );
+        }
         for g in &report.groups {
             let key = GroupKey {
                 obligation: keys

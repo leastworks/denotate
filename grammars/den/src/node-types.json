@@ -105,6 +105,20 @@
           }
         ]
       },
+      "kind": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "at_least_one",
+            "named": false
+          },
+          {
+            "type": "at_most_one",
+            "named": false
+          }
+        ]
+      },
       "relation": {
         "multiple": false,
         "required": true,
@@ -1136,6 +1150,10 @@
   },
   {
     "type": "assumptions",
+    "named": false
+  },
+  {
+    "type": "at_least_one",
     "named": false
   },
   {

@@ -31,6 +31,7 @@ pub(crate) enum Decl {
     Contract {
         name: Name,
         assumption: bool,
+        coverage: bool,
         relation: Name,
         columns: Vec<Name>,
         message: String,
@@ -526,6 +527,7 @@ fn scope(
                 Decl::Contract {
                     name: name(source, field(source, node, "name")?)?,
                     assumption: node.kind() == "assumption",
+                    coverage: text(source, field(source, card, "kind")?) == "at_least_one",
                     relation: name(source, field(source, card, "relation")?)?,
                     columns: card
                         .children_by_field_name("column", &mut card.walk())

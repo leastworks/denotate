@@ -4,6 +4,7 @@
   "patterns": [
     { "name": "comment.line.double-slash.denotate", "begin": "//", "end": "$" },
     { "name": "keyword.control.denotate", "match": "\\b(module|namespace|use|sort|const|relation|input|domain|obligation|assumption|verification|source)\\b" },
+    { "name": "support.function.denotate", "match": "\\b(at_most_one|at_least_one)(?=[ \\t]*\\()" },
     { "match": "(:)([ \\t]*)([A-Za-z][A-Za-z0-9_]*)", "captures": {
       "1": { "name": "punctuation.separator.denotate" },
       "3": { "name": "entity.name.type.denotate" }

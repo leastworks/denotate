@@ -33,7 +33,8 @@ verification single_value {
   Variables are uppercase identifiers or `?'any name'`; `_` in a positive body is a
   fresh variable. Integers are typed constants (`01` canonicalizes to `1`).
 - **Contracts.** `obligation name: at_most_one(rel, group_by: (cols))` is a property to
-  check; `assumption name: at_most_one(input, group_by: (cols))` restricts input
+  check; `obligation name: at_least_one(rel, group_by: (cols))` checks coverage.
+  `assumption name: at_most_one(input, group_by: (cols))` restricts input
   worlds. Only input `at_most_one` assumptions are supported. Neither does anything on
   its own: a [verification](#verifications) selects which are checked, and under which
   assumptions.
@@ -41,6 +42,37 @@ verification single_value {
   Escapes: `\\`, `\'`, `\n`, `\r`, `\t`. Parameter names and `group_by` columns accept
   reserved words unquoted. `$condition_N` is a generated helper (zero-arity, derived),
   distinct from a frontend relation spelled `'$condition_N'`.
+
+## Coverage obligations
+
+`at_least_one` requires a tuple for every grouping tuple in every permitted input
+world. Groups come from the program's resolved domains, including `domain S = [...]`
+overrides. They include combinations with no possible producing tuples: checking
+only existing facts would miss the omissions that coverage is meant to detect.
+
+```den
+obligation complete_assignment: at_least_one(assignment, group_by: (customer));
+```
+
+This requires an assignment for every customer in the resolved customer domain.
+`group_by: ()` instead creates one global group and requires a nonempty relation.
+If a grouping column's domain is empty, there are no groups: coverage is proved,
+with an Information note on the obligation, “no groups: the grouping domain is
+empty”. The global group is always present, even if the relation has no possible
+result tuples, and never receives that note. Duplicate derivations count as one tuple.
+
+Coverage failures are aggregated per obligation and verification. The diagnostic
+shows a bounded sample of missing groups, each with its own replayed input world,
+and a count of distinct groups that fail in at least one permitted world. Counts
+are exact only when checking is complete; otherwise they are lower bounds and the
+incompleteness is explicit. Limits bound enumeration as well as checking, preserving
+failures already established. Unknown or blocked facts never count as absence.
+An independent guaranteed tuple can establish coverage despite other unsupported
+producers; a settled failure remains a failure alongside unresolved worlds.
+
+Coverage is currently an obligation form only. `exactly_one`, `empty` and richer
+assumption forms remain future work. Coverage declarations use the same verification
+selection, unchecked-obligation notices, names, origins and editor services as uniqueness.
 
 ## Verifications
 

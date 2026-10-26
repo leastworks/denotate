@@ -371,10 +371,12 @@ impl Retained for QueryKey {
         match self {
             Self::Preparation
             | Self::Admission
+            | Self::CoverageMeaning
             | Self::Symbolic
             | Self::ConeIndex
             | Self::FindingContext => {}
             Self::Grounding(k) => k.heap(p),
+            Self::Coverage(k) => k.heap(p),
             Self::ConeDiscovery(k)
             | Self::ConeEvaluation(k)
             | Self::FindingConversion(k)

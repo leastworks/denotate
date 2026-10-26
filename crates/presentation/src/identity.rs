@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 /// structural correspondence; publication uses explicit semantic keys below.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Identity {
+    Coverage(ObligationId),
     Group {
         obligation: ObligationId,
         tuple: Vec<ConstantId>,
@@ -82,6 +83,9 @@ impl Identity {
     /// messages or ambiguous joined namespace/name strings.
     pub fn data(&self, keys: &SemanticKeys) -> Result<Value> {
         Ok(match self {
+            Self::Coverage(id) => {
+                json!({"obligation":qualified(&keys.obligation(*id)?.0), "component":"coverage"})
+            }
             Self::Group { obligation, tuple } => {
                 json!({"group":{"obligation":qualified(&keys.obligation(*obligation)?.0),"tuple":tuple.iter().map(|c| Ok(constant(keys.constant(*c)?))).collect::<Result<Vec<_>>>()?}})
             }
@@ -106,20 +110,31 @@ pub fn summary(results: &ScopedResults) -> Value {
     };
     let complete = results.unfinished.is_none()
         && results.incomplete.is_empty()
+        && results.coverage.values().all(CoverageResult::proved)
         && results.regions.is_empty()
         && results
             .groups
             .values()
             .all(|r| matches!(r, ScopedResult::Proved));
-    json!({
-        "state":if complete { "proved" } else if results.groups.values().any(|r| matches!(r,ScopedResult::Counterexample(..))) || results.regions.values().any(|r| matches!(r.completion,RegionCompletion::NoMeaning{..})) { "findings" } else { "incomplete" },
+    let mut summary = json!({
+        "state":if complete { "proved" } else if results.coverage.values().any(|c| c.missing > 0) || results.groups.values().any(|r| matches!(r,ScopedResult::Counterexample(..))) || results.regions.values().any(|r| matches!(r.completion,RegionCompletion::NoMeaning{..})) { "findings" } else { "incomplete" },
         "backend":{"backend":results.context.backend.backend,"configuration":results.context.backend.configuration},
         "activeAssumptions":results.context.constraints.iter().map(|c| match c { InputConstraint::AtMostOne{relation:r,group_by} => json!({"kind":"at-most-one","relation":relation(r),"groupBy":group_by}) }).collect::<Vec<_>>(),
         "groups":results.groups.iter().map(|(k,v)|json!({"identity":{"obligation":qualified(&k.obligation.0),"tuple":k.tuple.iter().map(constant).collect::<Vec<_>>()} ,"outcome":kinds(v),"reason":result_reason(v)})).collect::<Vec<_>>(),
         "regions":results.regions.iter().map(|(k,v)|json!({"identity":k.0.iter().map(atom_data).collect::<Vec<_>>(),"outcome":kinds(&v.outcome),"reason":result_reason(&v.outcome),"completionReason":match &v.completion { RegionCompletion::Inconclusive(r)=>Some(json!({"phase":r.phase,"resource":r.resource})),_=>None },"completion":match v.completion { RegionCompletion::NoContradiction => "no-contradiction", RegionCompletion::NoMeaning{..} => "no-meaning",RegionCompletion::Deferred(_) => "deferred",RegionCompletion::Inconclusive(_) => "inconclusive" }})).collect::<Vec<_>>(),
         "unfinished":results.unfinished.as_ref().map(|r|json!({"phase":r.phase,"resource":r.resource})),
         "incomplete":results.incomplete.iter().map(|(k,r)|json!({"region":k.0.iter().map(atom_data).collect::<Vec<_>>(),"phase":r.phase,"resource":r.resource})).collect::<Vec<_>>()
-    })
+    });
+    if !results.coverage.is_empty() {
+        summary["coverage"] = json!(results.coverage.iter().map(|(key,c)| json!({
+            "identity":{"obligation":qualified(&key.0),"component":"coverage"},
+            "outcome":if c.missing > 0 {"counterexample"} else if c.proved() {"proved"} else if c.inconclusive.is_some() {"inconclusive"} else {"unsupported"},
+            "examinedGroups":c.examined,"missingGroups":{"count":c.missing,"exact":c.complete()},
+            "complete":c.complete(),"noGroups":c.no_groups,"unsupportedGroups":c.unsupported,
+            "reason":c.inconclusive.map(|r|json!({"phase":r.phase,"resource":r.resource}))
+        })).collect::<Vec<_>>());
+    }
+    summary
 }
 
 /// Witnesses carry their own observation and producing occurrences. The world
@@ -149,6 +164,17 @@ pub fn evidence_data(finding: &crate::Finding<'_>, keys: &SemanticKeys) -> Resul
         );
     }
     Ok(match &finding.evidence {
+        crate::Evidence::Coverage(c) => json!({
+            "kind":if c.missing > 0 {"replayed-coverage-counterexamples"} else {"no-witness"},
+            "component":"coverage", "missingGroups":{"count":c.missing,"exact":c.complete()},
+            "complete":c.complete(), "unsupportedGroups":c.unsupported,
+            "reason":c.inconclusive.map(|r|json!({"phase":r.phase,"resource":r.resource})),
+            "examples":c.examples.iter().map(|e| Ok(json!({
+                "group":e.group.iter().map(|id|Ok(constant(keys.constant(*id)?))).collect::<Result<Vec<_>>>()?,
+                "observation":observation(&e.observation)?,
+                "scope": match e.replay_scope { ReplayScope::WholeProgram=>"whole-program",ReplayScope::ConeOnly=>"cone-only" }
+            }))).collect::<Result<Vec<_>>>()?
+        }),
         crate::Evidence::Group(g) => match &g.outcome {
             VerifiedOutcome::Counterexample(c) => {
                 json!({"kind":"replayed-counterexample","observation":observation(&c.observation)?,"tuples":c.tuples.iter().map(|a|Ok(atom_data(&AtomKey::from_atom(keys,a)?))).collect::<Result<Vec<_>>>()?,"scope":match c.replay_scope {ReplayScope::WholeProgram=>"whole-program",ReplayScope::ConeOnly=>"cone-only"},"producers":producers})

@@ -9,7 +9,10 @@ participating occurrences, and places them on source locations. It depends only 
   no-meaning regions, unsupported groups and regions, and inconclusive outcomes. With
   semantic keys and scoped results it also tags SAT's unfounded-support world, which
   is never presented as a replayed overlap.
-- `Identity` encodes a group, region or rewrite finding from semantic keys
+- Coverage produces one primary per obligation/verification, bounded missing-group
+  examples with separate observations, and exact or lower-bound counts. Empty grouping
+  domains produce an Information note without turning a proof into a failure.
+- `Identity` encodes a group, coverage component, region or rewrite finding from semantic keys
   (`data(keys)`), never arena IDs or message text.
 - `Placement` chooses primary locations from the checked program's **own** files
   (producing rules first, then contributing occurrences, declarations, the

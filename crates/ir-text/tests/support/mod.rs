@@ -176,18 +176,15 @@ pub fn compare(
             .find(|y| y.name == x.name && a.namespace(x.id) == b.namespace(y.id))
             .unwrap();
         assert_eq!(x.message_template, y.message_template);
-        let (
-            Requirement::AtMostOne {
-                relation: ra,
-                group_by: ga,
-            },
-            Requirement::AtMostOne {
-                relation: rb,
-                group_by: gb,
-            },
-        ) = (&x.requirement, &y.requirement);
-        assert_eq!(ids[&(*ra).into()], (*rb).into());
-        assert_eq!(ga, gb);
+        assert_eq!(
+            std::mem::discriminant(&x.requirement),
+            std::mem::discriminant(&y.requirement)
+        );
+        assert_eq!(
+            ids[&x.requirement.relation().into()],
+            y.requirement.relation().into()
+        );
+        assert_eq!(x.requirement.group_by(), y.requirement.group_by());
         bind(&mut ids, x.id.into(), y.id.into());
     }
     for x in a.assumptions() {

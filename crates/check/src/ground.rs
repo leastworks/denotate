@@ -137,6 +137,7 @@ pub struct GroundProgram {
     pub(crate) component_rules: Vec<Vec<usize>>,
     pub(crate) dependencies: Vec<Dependency>,
     groups: Vec<AtMostOneGroup>,
+    pub(crate) coverage: BTreeMap<ObligationId, crate::coverage::CoverageShape>,
     // Keep the selection even when all its groups are trivial, and through admission.
     pub(crate) obligations: BTreeSet<ObligationId>,
     pub(crate) input_groups: Vec<Vec<GroundAtom>>,
@@ -264,6 +265,7 @@ impl GroundProgram {
             component_rules: vec![],
             dependencies: vec![],
             groups: vec![],
+            coverage: BTreeMap::new(),
             obligations: corpus.obligations().map(|o| o.id).collect(),
             input_groups: vec![],
             metrics: PreparationMetrics::default(),
@@ -302,7 +304,28 @@ impl GroundProgram {
             .filter(|o| self.obligations.contains(&o.id))
         {
             budget.tick("obligation groups")?;
-            let Requirement::AtMostOne { relation, group_by } = &obligation.requirement;
+            let relation = &obligation.requirement.relation();
+            let group_by = obligation.requirement.group_by();
+            if matches!(obligation.requirement, Requirement::AtLeastOne { .. }) {
+                let signature = &self.signatures[relation];
+                let mut domains = Vec::new();
+                for column in group_by {
+                    let values = &self.domains[&signature[*column]];
+                    budget.charge(values.len(), "coverage domains")?;
+                    let mut values = values.clone();
+                    values.sort_by_key(|id| &corpus.constant(*id).unwrap().name);
+                    domains.push(values);
+                }
+                self.coverage.insert(
+                    obligation.id,
+                    crate::coverage::CoverageShape {
+                        relation: *relation,
+                        columns: group_by.to_vec(),
+                        domains,
+                    },
+                );
+                continue;
+            }
             let mut groups = BTreeMap::<Vec<ConstantId>, Vec<GroundAtom>>::new();
             if let Some(atoms) = by_relation.get(relation) {
                 for atom in atoms {
