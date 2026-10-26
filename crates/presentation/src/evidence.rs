@@ -137,11 +137,23 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
         let obligation = corpus
             .obligation(group.group.obligation)
             .ok_or(Error::InvalidFinding("foreign obligation"))?;
-        let identity = Identity::Group {
-            obligation: group.group.obligation,
-            tuple: group.group.key.clone(),
+        let combined = obligation.requirement.kind() == denotate_ir::Cardinality::ExactlyOne;
+        let identity = if combined {
+            Identity::Uniqueness {
+                obligation: group.group.obligation,
+                tuple: group.group.key.clone(),
+            }
+        } else {
+            Identity::Group {
+                obligation: group.group.obligation,
+                tuple: group.group.key.clone(),
+            }
         };
-        let subject = format!("Obligation {}", obligation.name);
+        let subject = format!(
+            "Obligation {}{}",
+            obligation.name,
+            if combined { " (uniqueness)" } else { "" }
+        );
         let mut contributions = vec![Contribution {
             occurrence: obligation.id.into(),
             role: Role::Obligation,
@@ -267,7 +279,15 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
         let obligation = corpus
             .obligation(*id)
             .ok_or(Error::InvalidFinding("foreign coverage obligation"))?;
-        let subject = format!("Obligation {}", obligation.name);
+        let subject = format!(
+            "Obligation {}{}",
+            obligation.name,
+            if obligation.requirement.kind() == denotate_ir::Cardinality::ExactlyOne {
+                " (coverage)"
+            } else {
+                ""
+            }
+        );
         let (kind, message) = if coverage.missing > 0 {
             (
                 Kind::Counterexample,

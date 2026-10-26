@@ -52,6 +52,12 @@ real program that the current choice serves badly.
   Coverage therefore retains a bounded sample and an exact count or explicit lower
   bound. Its identity depends on the obligation, component and verification, never
   on sample selection. Each example retains its own input world.
+- **Exactly one is one declaration with independent parts.** Splitting it into hidden
+  authored obligations would complicate selection, rename and source identity. Instead,
+  the same obligation runs coverage and uniqueness under the same selected assumptions;
+  neither part constrains the other. Component identities keep both findings visible,
+  and a failure survives an inconclusive result in the other part. Existing standalone
+  coverage and uniqueness identities remain unchanged.
 - **Correctness and usability before performance.** Performance policies are
   provisional until re-scored on real programs ([checker policies](checker-policies.md)).
 - **Budgets, receipts, timings and witness choices are not goldens.** They change

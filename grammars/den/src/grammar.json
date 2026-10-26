@@ -1179,6 +1179,10 @@
               {
                 "type": "STRING",
                 "value": "at_least_one"
+              },
+              {
+                "type": "STRING",
+                "value": "exactly_one"
               }
             ]
           }

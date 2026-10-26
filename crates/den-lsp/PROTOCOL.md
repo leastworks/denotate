@@ -150,6 +150,23 @@ domain is empty`. This note does not invalidate the proof. `group_by: ()` always
 one global group and never gets this note. Normal unselected-obligation notices and
 consistency-only handling also apply unchanged.
 
+### Exactly-one results
+
+An exactly-one declaration uses the same coverage identity and payload as above. Its
+uniqueness findings use the existing group object plus a top-level discriminator:
+`{"verification": [namespaceKey, name], "group": {"obligation": [namespaceKey, name], "tuple": [...]}, "component": "uniqueness"}`.
+Both identities refer to the same authored obligation. Program ownership remains
+`data.program`; neither identity depends on the witness. Standalone `at_most_one`
+findings keep their existing group identity without a component field; standalone
+`at_least_one` findings are unchanged.
+
+For exactly-one, `summary.groups[].identity` also includes `component: "uniqueness"`;
+`summary.coverage` describes the coverage part independently. Uniqueness counterexamples
+retain `replayed-counterexample` evidence and per-group reporting. A failed part keeps
+the verification in `findings` even if the other is incomplete; the other part's reason
+and diagnostic remain visible. A proof requires both parts to prove. Shared selection
+notices and the empty-grouping-domain Information note apply unchanged.
+
 ### Configuration
 
 `initializationOptions.denotate` or

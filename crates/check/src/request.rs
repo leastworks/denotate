@@ -487,14 +487,21 @@ pub struct ScopedResults {
 }
 
 impl ScopedResults {
+    /// The uniqueness result for uniqueness-bearing obligations (including
+    /// exactly-one), not a combined coverage/uniqueness verdict. Coverage is
+    /// reported separately in `coverage`.
     pub fn group(&self, key: &GroupKey) -> Option<ScopedResult> {
         if let Some(result) = self.groups.get(key) {
             return Some(result.clone());
         }
         let domain = self.group_domains.get(&key.obligation)?;
         domain.key(&key.obligation, key.tuple.clone()).ok()?;
-        if let Some(coverage) = self.coverage.get(&key.obligation) {
-            return coverage.proved().then_some(ScopedResult::Proved);
+        if !domain.kind.has_uniqueness() {
+            return self
+                .coverage
+                .get(&key.obligation)?
+                .proved()
+                .then_some(ScopedResult::Proved);
         }
         if domain.members.get(&key.tuple).map_or(0, BTreeSet::len) <= 1 {
             Some(ScopedResult::Proved)

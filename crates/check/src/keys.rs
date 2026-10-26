@@ -57,6 +57,7 @@ pub struct GroundInstance {
 /// of grouping domains. Every legal tuple has a GroupKey, even when not in members.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct KeyedGroups {
+    pub kind: Cardinality,
     pub relation: RelationKey,
     pub columns: Vec<usize>,
     pub domains: Vec<BTreeSet<ConstantKey>>,
@@ -299,6 +300,7 @@ impl GroundKeyIndex {
                 );
             }
             let mut groups = KeyedGroups {
+                kind: o.requirement.kind(),
                 relation: keys.relation(*relation)?.clone(),
                 columns: group_by.to_vec(),
                 domains,

@@ -10,7 +10,10 @@ participating occurrences, and places them on source locations. It depends only 
 - Coverage produces one primary per obligation/verification, bounded missing-group
   examples with separate observations, and exact or lower-bound counts. Empty grouping
   domains produce an Information note without turning a proof into a failure.
-- `Identity` encodes a group, coverage component, region or rewrite finding from semantic keys
+- Exactly-one uses `Identity::Coverage` and `Identity::Uniqueness` for its two parts;
+  component labels distinguish their messages. Uniqueness remains per group. Standalone
+  at-most-one retains `Identity::Group` and its existing protocol shape.
+- `Identity` encodes a group, coverage/uniqueness component, region or rewrite finding from semantic keys
   (`data(keys)`), never arena IDs or message text.
 - `Placement` chooses primary locations from the checked program's **own** files
   (producing rules first, then contributing occurrences, declarations, the

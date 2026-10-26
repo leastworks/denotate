@@ -679,6 +679,7 @@ fn unambiguous_witness_keeps_exact_primary_and_related_generic_origins() {
 enum FindingIdentity {
     Coverage(usize),
     Group(usize, Vec<usize>),
+    Uniqueness(usize, Vec<usize>),
     Region(Vec<AtomIdentity>),
 }
 fn finding_identity(
@@ -692,6 +693,13 @@ fn finding_identity(
             FindingIdentity::Coverage(index.obligations[keys.obligation(*id).unwrap()])
         }
         Identity::Group { obligation, tuple } => FindingIdentity::Group(
+            index.obligations[keys.obligation(*obligation).unwrap()],
+            tuple
+                .iter()
+                .map(|c| index.constants[keys.constant(*c).unwrap()])
+                .collect(),
+        ),
+        Identity::Uniqueness { obligation, tuple } => FindingIdentity::Uniqueness(
             index.obligations[keys.obligation(*obligation).unwrap()],
             tuple
                 .iter()

@@ -377,8 +377,9 @@ fn coverage_is_obligation_only_and_grouping_validation_is_shared() {
 #[test]
 fn included_coverage_uses_each_consumers_facts_domains_and_context_identity() {
     use std::collections::{BTreeMap, BTreeSet};
-    let library = "namespace lib; sort S; const a,b:S; relation p(x:S); obligation covered: at_least_one(p, group_by: (x)); verification checks { assumptions: []; obligations: [covered]; }";
-    {
+    let source = "namespace lib; sort S; const a,b:S; relation p(x:S); obligation covered: at_least_one(p, group_by: (x)); verification checks { assumptions: []; obligations: [covered]; }";
+    for kind in ["at_least_one", "exactly_one"] {
+        let library = source.replace("at_least_one", kind);
         let roots = BTreeMap::from([
             (
                 "lib".into(),
@@ -401,10 +402,10 @@ fn included_coverage_uses_each_consumers_facts_domains_and_context_identity() {
             ("app", "domain lib::S=[lib::a]; lib::p(lib::a);", 0),
         ] {
             let documents = if root == "lib" {
-                vec![SourceFile::new("file:///lib.den", 1, library)]
+                vec![SourceFile::new("file:///lib.den", 1, library.as_str())]
             } else {
                 vec![
-                    SourceFile::new("file:///lib.den", 1, library),
+                    SourceFile::new("file:///lib.den", 1, library.as_str()),
                     SourceFile::new("file:///app.den", 1, app),
                 ]
             };

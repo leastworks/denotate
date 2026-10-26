@@ -34,7 +34,8 @@ verification single_value {
   fresh variable. Integers are typed constants (`01` canonicalizes to `1`).
 - **Contracts.** `obligation name: at_most_one(rel, group_by: (cols))` is a property to
   check; `obligation name: at_least_one(rel, group_by: (cols))` checks coverage.
-  `assumption name: at_most_one(input, group_by: (cols))` restricts input
+  `obligation name: exactly_one(rel, group_by: (cols))` requires both coverage and
+  uniqueness. `assumption name: at_most_one(input, group_by: (cols))` restricts input
   worlds. Only input `at_most_one` assumptions are supported. Neither does anything on
   its own: a [verification](#verifications) selects which are checked, and under which
   assumptions.
@@ -70,9 +71,33 @@ failures already established. Unknown or blocked facts never count as absence.
 An independent guaranteed tuple can establish coverage despite other unsupported
 producers; a settled failure remains a failure alongside unresolved worlds.
 
-Coverage is currently an obligation form only. `exactly_one`, `empty` and richer
-assumption forms remain future work. Coverage declarations use the same verification
+Coverage is currently an obligation form only. `empty` and richer assumption forms
+remain future work. Coverage declarations use the same verification
 selection, unchecked-obligation notices, names, origins and editor services as uniqueness.
+
+## Exactly-one obligations
+
+```den
+obligation one_assignment: exactly_one(assignment, group_by: (customer));
+```
+
+This is one declaration with two independent checks: every customer in the program's
+resolved domain has at least one assignment, and no customer has more than one distinct
+assignment. Both checks use the verification's selected assumptions; neither check is
+assumed while proving the other. `group_by: ()` requires exactly one tuple overall.
+
+Both parts must prove for the obligation to be proved. Both failures are reported,
+even when they occur in different input worlds. Coverage failures are aggregated as
+above; uniqueness retains one finding per overlapping group. A known failure remains
+a failure if the other part is unsupported or inconclusive, and that incompleteness
+remains visible. Findings label their coverage or uniqueness component.
+
+With an empty grouping-column domain, both parts are vacuously satisfied and the
+coverage Information note remains. With a zero-arity relation or grouping by every
+column, uniqueness is trivial because tuples are distinct; coverage still has to prove.
+Duplicate derivations never create a second tuple. Exactly-one assumptions are not
+supported. Names, selection, origins, printing and editor services use the same shared
+paths as other obligations.
 
 ## Verifications
 

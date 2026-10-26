@@ -5,9 +5,9 @@ directly in `.den`.
 
 ## Contract vocabulary
 
-`at_least_one` coverage is implemented through the IR, BDD checking, `.den`,
-CLI and editor, with bounded enumeration and aggregated diagnostics. Next add
-`exactly_one` and `empty` through those same paths. They are checked like
+`at_least_one` coverage and `exactly_one` are implemented through the IR, BDD checking,
+`.den`, CLI and editor, with bounded coverage enumeration and aggregated coverage
+diagnostics. Next add `empty` through those same paths. They are checked like
 `at_most_one`, inside [verifications](den-format.md#verifications): which input worlds
 count as permitted is decisive for coverage.
 

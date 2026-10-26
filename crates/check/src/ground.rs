@@ -306,7 +306,7 @@ impl GroundProgram {
             budget.tick("obligation groups")?;
             let relation = &obligation.requirement.relation();
             let group_by = obligation.requirement.group_by();
-            if matches!(obligation.requirement, Requirement::AtLeastOne { .. }) {
+            if obligation.requirement.kind().has_coverage() {
                 let signature = &self.signatures[relation];
                 let mut domains = Vec::new();
                 for column in group_by {
@@ -324,6 +324,8 @@ impl GroundProgram {
                         domains,
                     },
                 );
+            }
+            if !obligation.requirement.kind().has_uniqueness() {
                 continue;
             }
             let mut groups = BTreeMap::<Vec<ConstantId>, Vec<GroundAtom>>::new();

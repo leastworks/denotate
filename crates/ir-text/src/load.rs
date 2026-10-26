@@ -726,7 +726,7 @@ pub fn load_with_resolver(
                 Decl::Contract {
                     name,
                     assumption,
-                    coverage,
+                    kind,
                     relation,
                     columns,
                     message,
@@ -756,11 +756,18 @@ pub fn load_with_resolver(
                         grouping.push(index);
                     }
                     if *assumption {
-                        if *coverage {
+                        if *kind != Cardinality::AtMostOne {
                             return Err(diagnostic(
                                 m,
                                 s.span.clone(),
-                                "at_least_one is supported only for obligations",
+                                format!(
+                                    "{} is supported only for obligations",
+                                    if *kind == Cardinality::ExactlyOne {
+                                        "exactly_one"
+                                    } else {
+                                        "at_least_one"
+                                    }
+                                ),
                             ));
                         }
                         if declaration.role != RelationRole::Input {
@@ -798,22 +805,28 @@ pub fn load_with_resolver(
                         let oid = ir_construction(
                             m,
                             s.span.clone(),
-                            if *coverage {
-                                b.program.corpus.at_least_one_in(
+                            match kind {
+                                Cardinality::AtLeastOne => b.program.corpus.at_least_one_in(
                                     module,
                                     &name.text,
                                     id,
                                     grouping.into_iter().map(Column::Index),
                                     message,
-                                )
-                            } else {
-                                b.program.corpus.at_most_one_in(
+                                ),
+                                Cardinality::AtMostOne => b.program.corpus.at_most_one_in(
                                     module,
                                     &name.text,
                                     id,
                                     grouping.into_iter().map(Column::Index),
                                     message,
-                                )
+                                ),
+                                Cardinality::ExactlyOne => b.program.corpus.exactly_one_in(
+                                    module,
+                                    &name.text,
+                                    id,
+                                    grouping.into_iter().map(Column::Index),
+                                    message,
+                                ),
                             },
                             &b.program.corpus,
                         )?;

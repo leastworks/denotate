@@ -377,6 +377,23 @@ mod tests {
         }
     }
     #[test]
+    fn exactly_one_cli_reports_both_parts_and_requires_both_for_success() {
+        for (facts, code, coverage, uniqueness) in [
+            ("", 1, true, false),
+            ("p(a);", 0, false, false),
+            ("p(a); p(b);", 1, false, true),
+            ("p(X) :- i(X);", 1, true, true),
+        ] {
+            let f = Fixture::new(&format!(
+                "sort S; const a,b:S; input i(x:S); relation p(x:S); {facts} obligation one: exactly_one(p, group_by: ()); verification checks {{ assumptions: []; obligations: [one]; }}"
+            ));
+            let (actual, output) = f.run(&[]);
+            assert_eq!(actual, code, "{output}");
+            assert_eq!(output.contains("(coverage)"), coverage, "{output}");
+            assert_eq!(output.contains("(uniqueness)"), uniqueness, "{output}");
+        }
+    }
+    #[test]
     fn invalid_input_and_operational_failure_have_distinct_codes() {
         let (code, output) = Fixture::new("").run(&["--sat"]);
         assert_eq!(code, 2);

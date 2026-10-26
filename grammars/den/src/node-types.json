@@ -116,6 +116,10 @@
           {
             "type": "at_most_one",
             "named": false
+          },
+          {
+            "type": "exactly_one",
+            "named": false
           }
         ]
       },
@@ -1175,6 +1179,10 @@
   },
   {
     "type": "domain",
+    "named": false
+  },
+  {
+    "type": "exactly_one",
     "named": false
   },
   {

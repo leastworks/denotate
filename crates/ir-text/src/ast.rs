@@ -31,7 +31,7 @@ pub(crate) enum Decl {
     Contract {
         name: Name,
         assumption: bool,
-        coverage: bool,
+        kind: denotate_ir::Cardinality,
         relation: Name,
         columns: Vec<Name>,
         message: String,
@@ -527,7 +527,12 @@ fn scope(
                 Decl::Contract {
                     name: name(source, field(source, node, "name")?)?,
                     assumption: node.kind() == "assumption",
-                    coverage: text(source, field(source, card, "kind")?) == "at_least_one",
+                    kind: match text(source, field(source, card, "kind")?) {
+                        "at_most_one" => denotate_ir::Cardinality::AtMostOne,
+                        "at_least_one" => denotate_ir::Cardinality::AtLeastOne,
+                        "exactly_one" => denotate_ir::Cardinality::ExactlyOne,
+                        _ => return Err(error(source, card.byte_range(), "Unknown cardinality")),
+                    },
                     relation: name(source, field(source, card, "relation")?)?,
                     columns: card
                         .children_by_field_name("column", &mut card.walk())

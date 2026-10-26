@@ -514,6 +514,7 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
         let kind = match o.requirement {
             Requirement::AtMostOne { .. } => "at_most_one",
             Requirement::AtLeastOne { .. } => "at_least_one",
+            Requirement::ExactlyOne { .. } => "exactly_one",
         };
         add(
             o.id.into(),

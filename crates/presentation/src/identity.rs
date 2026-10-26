@@ -9,6 +9,10 @@ use std::collections::BTreeSet;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Identity {
     Coverage(ObligationId),
+    Uniqueness {
+        obligation: ObligationId,
+        tuple: Vec<ConstantId>,
+    },
     Group {
         obligation: ObligationId,
         tuple: Vec<ConstantId>,
@@ -86,6 +90,15 @@ impl Identity {
             Self::Coverage(id) => {
                 json!({"obligation":qualified(&keys.obligation(*id)?.0), "component":"coverage"})
             }
+            Self::Uniqueness { obligation, tuple } => {
+                let mut data = Self::Group {
+                    obligation: *obligation,
+                    tuple: tuple.clone(),
+                }
+                .data(keys)?;
+                data["component"] = json!("uniqueness");
+                data
+            }
             Self::Group { obligation, tuple } => {
                 json!({"group":{"obligation":qualified(&keys.obligation(*obligation)?.0),"tuple":tuple.iter().map(|c| Ok(constant(keys.constant(*c)?))).collect::<Result<Vec<_>>>()?}})
             }
@@ -97,6 +110,19 @@ impl Identity {
             }
         })
     }
+}
+
+fn group_identity(key: &GroupKey, results: &ScopedResults) -> Value {
+    let mut identity = json!({"obligation":qualified(&key.obligation.0),
+        "tuple":key.tuple.iter().map(constant).collect::<Vec<_>>()});
+    if results
+        .group_domains
+        .get(&key.obligation)
+        .is_some_and(|d| d.kind == Cardinality::ExactlyOne)
+    {
+        identity["component"] = json!("uniqueness");
+    }
+    identity
 }
 
 /// Includes request backend/W even when checking exhausted before a report.
@@ -120,7 +146,7 @@ pub fn summary(results: &ScopedResults) -> Value {
         "state":if complete { "proved" } else if results.coverage.values().any(|c| c.missing > 0) || results.groups.values().any(|r| matches!(r,ScopedResult::Counterexample(..))) || results.regions.values().any(|r| matches!(r.completion,RegionCompletion::NoMeaning{..})) { "findings" } else { "incomplete" },
         "backend":{"backend":results.context.backend.backend,"configuration":results.context.backend.configuration},
         "activeAssumptions":results.context.constraints.iter().map(|c| match c { InputConstraint::AtMostOne{relation:r,group_by} => json!({"kind":"at-most-one","relation":relation(r),"groupBy":group_by}) }).collect::<Vec<_>>(),
-        "groups":results.groups.iter().map(|(k,v)|json!({"identity":{"obligation":qualified(&k.obligation.0),"tuple":k.tuple.iter().map(constant).collect::<Vec<_>>()} ,"outcome":kinds(v),"reason":result_reason(v)})).collect::<Vec<_>>(),
+        "groups":results.groups.iter().map(|(k,v)|json!({"identity":group_identity(k, results) ,"outcome":kinds(v),"reason":result_reason(v)})).collect::<Vec<_>>(),
         "regions":results.regions.iter().map(|(k,v)|json!({"identity":k.0.iter().map(atom_data).collect::<Vec<_>>(),"outcome":kinds(&v.outcome),"reason":result_reason(&v.outcome),"completionReason":match &v.completion { RegionCompletion::Inconclusive(r)=>Some(json!({"phase":r.phase,"resource":r.resource})),_=>None },"completion":match v.completion { RegionCompletion::NoContradiction => "no-contradiction", RegionCompletion::NoMeaning{..} => "no-meaning",RegionCompletion::Deferred(_) => "deferred",RegionCompletion::Inconclusive(_) => "inconclusive" }})).collect::<Vec<_>>(),
         "unfinished":results.unfinished.as_ref().map(|r|json!({"phase":r.phase,"resource":r.resource})),
         "incomplete":results.incomplete.iter().map(|(k,r)|json!({"region":k.0.iter().map(atom_data).collect::<Vec<_>>(),"phase":r.phase,"resource":r.resource})).collect::<Vec<_>>()

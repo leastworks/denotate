@@ -207,6 +207,22 @@ impl From<&str> for Column {
     }
 }
 
+/// Independent checks required by a cardinality obligation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Cardinality {
+    AtMostOne,
+    AtLeastOne,
+    ExactlyOne,
+}
+impl Cardinality {
+    pub fn has_coverage(self) -> bool {
+        self != Self::AtMostOne
+    }
+    pub fn has_uniqueness(self) -> bool {
+        self != Self::AtLeastOne
+    }
+}
+
 /// Count distinct tuples in the remaining columns, per grouping tuple.
 /// This is a requirement over settled meaning, not behavior or an input assumption.
 #[derive(Debug, PartialEq, Eq)]
@@ -219,17 +235,32 @@ pub enum Requirement {
         relation: RelationId,
         group_by: Vec<usize>,
     },
+    ExactlyOne {
+        relation: RelationId,
+        group_by: Vec<usize>,
+    },
 }
 
 impl Requirement {
+    pub fn kind(&self) -> Cardinality {
+        match self {
+            Self::AtMostOne { .. } => Cardinality::AtMostOne,
+            Self::AtLeastOne { .. } => Cardinality::AtLeastOne,
+            Self::ExactlyOne { .. } => Cardinality::ExactlyOne,
+        }
+    }
     pub fn relation(&self) -> RelationId {
         match self {
-            Self::AtMostOne { relation, .. } | Self::AtLeastOne { relation, .. } => *relation,
+            Self::AtMostOne { relation, .. }
+            | Self::AtLeastOne { relation, .. }
+            | Self::ExactlyOne { relation, .. } => *relation,
         }
     }
     pub fn group_by(&self) -> &[usize] {
         match self {
-            Self::AtMostOne { group_by, .. } | Self::AtLeastOne { group_by, .. } => group_by,
+            Self::AtMostOne { group_by, .. }
+            | Self::AtLeastOne { group_by, .. }
+            | Self::ExactlyOne { group_by, .. } => group_by,
         }
     }
 }
@@ -748,7 +779,7 @@ impl Corpus {
             relation,
             group_by,
             message_template.into(),
-            false,
+            Cardinality::AtMostOne,
         )
     }
     pub fn at_least_one(
@@ -780,7 +811,39 @@ impl Corpus {
             relation,
             group_by,
             message_template.into(),
-            true,
+            Cardinality::AtLeastOne,
+        )
+    }
+    pub fn exactly_one(
+        &mut self,
+        name: impl Into<String>,
+        relation: RelationId,
+        group_by: impl IntoIterator<Item = Column>,
+        message_template: impl Into<String>,
+    ) -> Result<ObligationId> {
+        self.exactly_one_in(
+            Namespace::default(),
+            name,
+            relation,
+            group_by,
+            message_template,
+        )
+    }
+    pub fn exactly_one_in(
+        &mut self,
+        namespace: impl Into<Namespace>,
+        name: impl Into<String>,
+        relation: RelationId,
+        group_by: impl IntoIterator<Item = Column>,
+        message_template: impl Into<String>,
+    ) -> Result<ObligationId> {
+        self.cardinality_in(
+            namespace.into(),
+            name.into(),
+            relation,
+            group_by,
+            message_template.into(),
+            Cardinality::ExactlyOne,
         )
     }
     fn cardinality_in(
@@ -790,7 +853,7 @@ impl Corpus {
         relation: RelationId,
         group_by: impl IntoIterator<Item = Column>,
         message_template: String,
-        coverage: bool,
+        kind: Cardinality,
     ) -> Result<ObligationId> {
         named(&name, "obligation")?;
         if self
@@ -809,16 +872,19 @@ impl Corpus {
             Obligation {
                 id,
                 name,
-                requirement: if coverage {
-                    Requirement::AtLeastOne {
+                requirement: match kind {
+                    Cardinality::AtMostOne => Requirement::AtMostOne {
                         relation,
                         group_by: indices,
-                    }
-                } else {
-                    Requirement::AtMostOne {
+                    },
+                    Cardinality::AtLeastOne => Requirement::AtLeastOne {
                         relation,
                         group_by: indices,
-                    }
+                    },
+                    Cardinality::ExactlyOne => Requirement::ExactlyOne {
+                        relation,
+                        group_by: indices,
+                    },
                 },
                 message_template: message_template.into(),
             },

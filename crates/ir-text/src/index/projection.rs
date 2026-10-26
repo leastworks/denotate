@@ -484,14 +484,16 @@ impl Projection {
                         .filter(|n| n.kind() == "cardinality")
                     {
                         if node.kind() == "assumption"
-                            && field(card, "kind").is_some_and(|n| {
-                                &self.source.text[n.byte_range()] == "at_least_one"
-                            })
+                            && field(card, "kind")
+                                .is_some_and(|n| &self.source.text[n.byte_range()] != "at_most_one")
                         {
                             self.issues.push(Issue {
                                 span: node.byte_range(),
                                 code: "assumption-kind".into(),
-                                message: "at_least_one is supported only for obligations".into(),
+                                message: format!(
+                                    "{} is supported only for obligations",
+                                    &self.source.text[field(card, "kind").unwrap().byte_range()]
+                                ),
                                 warning: false,
                             });
                         }
@@ -737,7 +739,10 @@ impl Projection {
             .is_some_and(|t| matches!(t.text.as_str(), "obligation" | "assumption"))
         {
             if let Some(card) = statement.windows(2).position(|ts| {
-                matches!(ts[0].text.as_str(), "at_most_one" | "at_least_one") && ts[1].text == "("
+                matches!(
+                    ts[0].text.as_str(),
+                    "at_most_one" | "at_least_one" | "exactly_one"
+                ) && ts[1].text == "("
             }) {
                 let args = &statement[card + 2..];
                 if !args.iter().any(|t| t.text == ",") {

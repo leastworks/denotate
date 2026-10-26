@@ -450,3 +450,36 @@ fn coverage_uses_the_same_namespaces_and_grouping_validation_as_uniqueness() {
     ));
     assert!(c.at_least_one("global", r, [], "").is_ok());
 }
+
+#[test]
+fn exactly_one_is_one_authored_declaration_with_shared_validation() {
+    let mut c = Corpus::new();
+    let s = c.declare_sort("S").unwrap();
+    let r = unary(&mut c, "r", s, RelationRole::Derived);
+    let ns = Namespace::new(["lib"]).unwrap();
+    let id = c
+        .exactly_one_in(ns.clone(), "one", r, ["value".into()], "one tuple")
+        .unwrap();
+    assert_eq!(c.namespace(id), Some(&ns));
+    assert_eq!(
+        c.obligation(id).unwrap().requirement,
+        Requirement::ExactlyOne {
+            relation: r,
+            group_by: vec![0]
+        }
+    );
+    assert_eq!(c.obligations().count(), 1);
+    assert!(matches!(
+        c.at_least_one_in(ns, "one", r, [], ""),
+        Err(ConstructionError::DuplicateName { .. })
+    ));
+    assert!(matches!(
+        c.exactly_one("bad", r, ["missing".into()], ""),
+        Err(ConstructionError::InvalidGroupColumn { .. })
+    ));
+    assert!(matches!(
+        c.exactly_one("bad", r, ["value".into(), Column::Index(0)], ""),
+        Err(ConstructionError::DuplicateGroupColumn { .. })
+    ));
+    assert!(c.exactly_one("global", r, [], "").is_ok());
+}

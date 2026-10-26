@@ -1614,3 +1614,152 @@ fn coverage_publication_services_and_empty_domain_notices_follow_verifications()
     );
     c.shutdown();
 }
+
+#[test]
+fn exactly_one_components_share_one_declaration_and_all_editor_services() {
+    let mut c = Client::start("ir-text/standalone");
+    let (uri, _) = c.open("example.den");
+    let body = "namespace lib { sort S; const a,b:S; input i(x:S); relation p(x:S); p(X) :- i(X); assumption allowed: at_most_one(i, group_by: ()); obligation one: exactly_one(p, group_by: ( )); } use lib;";
+    let text = format!("{body} verification checks {{ assumptions: []; obligations: [one]; }}");
+    c.change(&uri, 2, &text);
+    checking_idle(&mut c);
+    let components = |diagnostics: &Value| {
+        diagnostics
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["code"] == "counterexample")
+            .map(|d| {
+                d["data"]["finding"]["component"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect::<std::collections::BTreeSet<_>>()
+    };
+    assert_eq!(
+        components(&c.diagnostics(&uri)),
+        ["coverage".into(), "uniqueness".into()].into()
+    );
+    let definition = query(
+        &mut c,
+        "textDocument/definition",
+        &uri,
+        &text,
+        "exactly_one(p",
+        12,
+    );
+    assert_eq!(
+        definition[0]["targetSelectionRange"]["start"],
+        position(&text, "relation p", 9)
+    );
+    let hover = query(&mut c, "textDocument/hover", &uri, &text, "one];", 0);
+    assert_eq!(hover["contents"]["value"], "obligation one");
+    let references = query(&mut c, "textDocument/references", &uri, &text, "one];", 0);
+    assert_eq!(references.as_array().unwrap().len(), 2);
+    let completion = query(
+        &mut c,
+        "textDocument/completion",
+        &uri,
+        &text,
+        "group_by: ( )",
+        11,
+    );
+    assert!(completion["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|i| i["label"] == "x"));
+    let outline = c.request(
+        "textDocument/documentSymbol",
+        json!({"textDocument":{"uri":uri}}),
+    );
+    assert!(outline[0]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["name"]
+            .as_str()
+            .is_some_and(|s| s.contains("exactly_one"))));
+    let event = c.capabilities["semanticTokensProvider"]["legend"]["tokenTypes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|v| v == "event")
+        .unwrap() as u64;
+    let tokens = c.request(
+        "textDocument/semanticTokens/full",
+        json!({"textDocument":{"uri":uri}}),
+    );
+    assert_eq!(
+        tokens["data"]
+            .as_array()
+            .unwrap()
+            .chunks(5)
+            .filter(|t| t[3] == event)
+            .count(),
+        4
+    );
+    let rename = c.request("textDocument/rename", json!({"textDocument":{"uri":uri},"position":position(&text,"one];",0),"newName":"the one"}));
+    let renamed = support::apply_edits(
+        &text,
+        rename["documentChanges"][0]["edits"].as_array().unwrap(),
+    );
+    assert!(renamed.contains("obligation 'the one': exactly_one"));
+    assert!(renamed.contains("obligations: ['the one']"));
+    c.change(&uri, 3, &renamed);
+    checking_idle(&mut c);
+    assert_eq!(components(&c.diagnostics(&uri)).len(), 2);
+    let edits = c.request(
+        "textDocument/formatting",
+        json!({"textDocument":{"uri":uri},"options":{"tabSize":4,"insertSpaces":true}}),
+    );
+    let formatted = support::apply_edits(&renamed, edits.as_array().unwrap());
+    c.change(&uri, 4, &formatted);
+    checking_idle(&mut c);
+    assert_eq!(components(&c.diagnostics(&uri)).len(), 2);
+    assert_eq!(
+        c.request(
+            "textDocument/formatting",
+            json!({"textDocument":{"uri":uri},"options":{"tabSize":4,"insertSpaces":true}})
+        ),
+        json!([])
+    );
+    let two =
+        format!("{text} verification restricted {{ assumptions: [allowed]; obligations: [one]; }}");
+    c.change(&uri, 5, &two);
+    checking_idle(&mut c);
+    let diagnostics = c.diagnostics(&uri);
+    let identities = diagnostics
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["code"] == "counterexample")
+        .map(|d| d["data"]["finding"].to_string())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(identities.len(), 3, "{diagnostics}");
+    let proved = text
+        .replace("assumptions: []", "assumptions: [allowed]")
+        .replace("p(X) :- i(X);", "p(a);");
+    c.change(&uri, 6, &proved);
+    checking_idle(&mut c);
+    assert_eq!(
+        c.request("denotate/roots", json!({"uri":uri}))["summary"]["state"],
+        "proved"
+    );
+    assert!(components(&c.diagnostics(&uri)).is_empty());
+    c.change(
+        &uri,
+        7,
+        &text.replace("obligations: [one]", "obligations: []"),
+    );
+    checking_idle(&mut c);
+    let unchecked = c.diagnostics(&uri);
+    assert!(unchecked
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "unchecked-obligation"));
+    assert!(components(&unchecked).is_empty());
+    c.shutdown();
+}

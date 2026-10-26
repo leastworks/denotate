@@ -2,7 +2,7 @@
 
 The finite relational checker. It grounds a `Corpus` over explicit finite domains,
 checks admissibility, replays concrete input worlds, and proves or refutes
-`at_most_one` and `at_least_one` obligations symbolically (BDD), returning
+`at_most_one`, `at_least_one` and `exactly_one` obligations symbolically (BDD), returning
 only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
 `biodivine-lib-bdd`.
 
@@ -90,6 +90,20 @@ condition, then replays the concrete observation. Sessions reuse preparation but
 recompute coverage evaluation and summaries each check; a separate coverage verdict cache
 is deferred until measurements justify it. BDD is the only backend; the retirement and
 reintroduction criteria are in [checker policies](../../docs/checker-policies.md#backend-retirement).
+
+## Exactly one
+
+An exactly-one obligation contributes its domain factors to coverage and its possible
+multi-tuple groups to uniqueness. Both use the same selected input assumptions; neither
+result is used as a restriction for the other. The existing evaluation, replay, budgets
+and caches implement each part without a second authored obligation.
+
+`ScopedResults.coverage` retains the coverage summary and `groups` retains uniqueness
+results under the same obligation key. `KeyedGroups.kind` identifies the authored form;
+`ScopedResults::group` queries uniqueness for exactly-one, not the combined obligation.
+The overall verification proves only when both parts prove (and context-wide checks
+succeed). An established failure survives exhaustion of the other part; both outcomes
+remain available. The fresh global and cached local paths follow the same rule.
 
 ## Rewrites
 
