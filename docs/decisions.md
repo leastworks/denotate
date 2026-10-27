@@ -64,6 +64,14 @@ real program that the current choice serves badly.
   Unknown facts are neither presence nor proof of emptiness. A replayed failure is
   retained alongside unresolved analysis. Like coverage, it reuses session preparation
   but recomputes its verdict under bounded work rather than adding a verdict cache.
+- **Emptiness placement follows its retained derivation, as uniqueness does.** A
+  replayed present tuple already has grounded support, so use its producing rules
+  and facts instead of introducing author syntax for diagnostic targets. Certified
+  presence uses the certified derivation. One derivation per tuple is retained;
+  placement may depend on that choice, but finding identity does not. Attribution
+  runs after semantic checking under a fresh bounded allowance; exhaustion is
+  reported separately and falls back to the obligation without changing the verdict
+  or semantic completeness. Explicit narrowing and coverage targets remain deferred.
 - **Correctness and usability before performance.** Performance policies are
   provisional until re-scored on real programs ([checker policies](checker-policies.md)).
 - **Budgets, receipts, timings and witness choices are not goldens.** They change

@@ -678,6 +678,27 @@ impl PreparedCheck<'_> {
             out.emptiness.insert(
                 keys.obligation(*id).map_err(CheckError::Keys)?.clone(),
                 EmptinessResult {
+                    attribution: e
+                        .attribution
+                        .as_ref()
+                        .map(|a| -> Result<_> {
+                            Ok(match a {
+                                Attribution::Incomplete(c) => Attribution::Incomplete(*c),
+                                Attribution::Complete(steps) => {
+                                    // Stable placement evidence; semantic proof/provider
+                                    // validation happened in the attribution replay.
+                                    let mut evidence = EvidenceKeys::default();
+                                    for step in steps.values() {
+                                        if let GroundEvidence::Derived { rule, .. } = &step.evidence
+                                        {
+                                            self.rule_evidence(rule, keys, &mut evidence)?;
+                                        }
+                                    }
+                                    Attribution::Complete(evidence)
+                                }
+                            })
+                        })
+                        .transpose()?,
                     inconclusive: e.inconclusive,
                     unresolved: e.unresolved,
                     example: e

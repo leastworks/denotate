@@ -1,7 +1,7 @@
 # Obligation diagnostic placement
 
-Status: proposed, not implemented. Recorded 2026-10-27. The first increment needs no
-new syntax; explicit diagnostic targets are deferred.
+Status: first increment implemented 2026-10-27, with no new syntax. Explicit
+diagnostic targets remain deferred.
 
 ## Problem
 
@@ -26,7 +26,7 @@ obligation allowed_labels: empty(invalid_label);
 The useful primary location is the authored `node_label` occurrence. In a `.den`
 editor, highlighting it makes Go to Origin available at the relevant fact. A bespoke
 DSL editor can use that occurrence's upstream provenance to highlight the original
-label declaration directly. Today an `empty` finding has one primary at the
+label declaration directly. Previously an `empty` finding had one primary at the
 obligation, using the labeled fallback for library declarations.
 
 ## What already works: uniqueness follows its derivation
@@ -158,16 +158,15 @@ that work starts.
 ## Current implementation and owning documentation
 
 `PresenceExample` in [the emptiness checker](../../crates/check/src/emptiness.rs)
-retains the tuple, observation and replay scope; it gains the derivation evidence,
-including its keyed session form for cold/warm agreement. [Shared
-presentation](../../crates/presentation/src/evidence.rs) reuses the uniqueness
-contribution code. The [development CLI](../../crates/ir-text/examples/check.rs) prints
+retains the tuple, observation and replay scope. Its `EmptinessSummary` now carries
+separate attribution evidence/status, including keyed placement evidence for
+cold/warm agreement. [Shared presentation](../../crates/presentation/src/evidence.rs)
+reuses the uniqueness contribution code. The [development CLI](../../crates/ir-text/examples/check.rs) prints
 only the status summary, not diagnostics and notes; printing them is a separate,
 small improvement.
 
-This changes a documented decision: emptiness placement is currently "at the
-obligation, independent of the selected example" ([format](../den-format.md#emptiness-obligations),
-[protocol](../../crates/den-lsp/PROTOCOL.md), [decisions](../decisions.md)). Update all
-three. Identity stays independent of the example; placement follows it. Keep
-implementation sequencing and handoffs in local `plans/`. The
-[roadmap](../roadmap.md#authoring-robustness) needs only a short pointer.
+The [format](../den-format.md#emptiness-obligations),
+[protocol](../../crates/den-lsp/PROTOCOL.md) and [decisions](../decisions.md) now record
+the change from obligation-only placement. Identity stays independent of the example;
+placement follows it. Keep implementation sequencing and handoffs in local `plans/`.
+The [roadmap](../roadmap.md#authoring-robustness) needs only a short pointer.

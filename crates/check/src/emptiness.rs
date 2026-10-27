@@ -6,7 +6,7 @@ use crate::{
     *,
 };
 use denotate_ir::{ObligationId, RelationId};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PresenceExample<A, W> {
@@ -14,25 +14,35 @@ pub struct PresenceExample<A, W> {
     pub observation: W,
     pub replay_scope: ReplayScope,
 }
+/// Optional source attribution, separate from semantic completeness.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct EmptinessSummary<A, W> {
+pub enum Attribution<E> {
+    Complete(E),
+    Incomplete(Inconclusive),
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmptinessSummary<A, W, E> {
     pub example: Option<PresenceExample<A, W>>,
+    /// None when there is no example (or before the post-check attribution pass).
+    pub attribution: Option<Attribution<E>>,
     /// Some permitted worlds could not be settled or certified.
     pub unresolved: bool,
     pub inconclusive: Option<Inconclusive>,
 }
-pub type EmptinessReport = EmptinessSummary<GroundAtom, Observation>;
-pub type EmptinessResult = EmptinessSummary<AtomKey, Candidate>;
-impl<A, W> Default for EmptinessSummary<A, W> {
+pub type EmptinessReport =
+    EmptinessSummary<GroundAtom, Observation, BTreeMap<GroundAtom, EvidenceStep>>;
+pub type EmptinessResult = EmptinessSummary<AtomKey, Candidate, EvidenceKeys>;
+impl<A, W, E> Default for EmptinessSummary<A, W, E> {
     fn default() -> Self {
         Self {
             example: None,
+            attribution: None,
             unresolved: false,
             inconclusive: None,
         }
     }
 }
-impl<A, W> EmptinessSummary<A, W> {
+impl<A, W, E> EmptinessSummary<A, W, E> {
     pub fn complete(&self) -> bool {
         !self.unresolved && self.inconclusive.is_none()
     }
@@ -173,5 +183,119 @@ impl SymbolicMeaning<'_> {
             }
         }
         Ok(())
+    }
+}
+
+impl GroundProgram {
+    /// Run only after semantic checking, with a fresh allowance per example.
+    /// Attribution exhaustion never consumes a semantic query's budget or alters
+    /// its completeness. Cancellation and invalid evidence remain hard errors.
+    pub(crate) fn attribute_emptiness(
+        &self,
+        reports: &mut BTreeMap<ObligationId, EmptinessReport>,
+        limits: &Limits,
+    ) -> Result<()> {
+        for report in reports.values_mut() {
+            let Some(example) = &report.example else {
+                continue;
+            };
+            let mut budget = Budget::new(limits);
+            let result = self.presence_evidence(example, &mut budget);
+            report.attribution = Some(match result {
+                Ok(evidence) => Attribution::Complete(evidence),
+                Err(error) => Attribution::Incomplete(Inconclusive::from_error(error)?),
+            });
+        }
+        Ok(())
+    }
+
+    fn presence_evidence(
+        &self,
+        example: &PresenceExample<GroundAtom, Observation>,
+        budget: &mut Budget<'_>,
+    ) -> Result<BTreeMap<GroundAtom, EvidenceStep>> {
+        let replay =
+            self.evaluate_selected(example.observation.present.iter().cloned(), None, budget)?;
+        let roots = BTreeSet::from([example.tuple.clone()]);
+        match replay.fact(&example.tuple)? {
+            FactState::Settled(true) => crate::findings::collect_evidence(&replay, &roots, budget),
+            FactState::Blocked(_) => match self
+                .certify_with_budget(example.observation.present.iter().cloned(), budget)?
+            {
+                CertificationOutcome::Certified(certified)
+                    if certified.facts.contains(&example.tuple) =>
+                {
+                    crate::certification::certified_evidence(&certified, &roots, budget)
+                }
+                CertificationOutcome::Inconclusive(c) => Err(CheckError::LimitExceeded {
+                    phase: c.phase,
+                    resource: c.resource,
+                }),
+                _ => Err(CheckError::Internal("presence attribution did not certify")),
+            },
+            FactState::Settled(false) => {
+                Err(CheckError::Internal("presence attribution did not replay"))
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use denotate_ir::*;
+
+    #[test]
+    fn optional_attribution_limits_do_not_change_presence_or_completeness() {
+        for unresolved in [false, true] {
+            let mut c = Corpus::new();
+            let s = c.declare_sort("S").unwrap();
+            let a = c.declare_constant("a", s).unwrap();
+            let b = c.declare_constant("b", s).unwrap();
+            let r = c
+                .declare_relation("r", RelationRole::Derived, [Parameter::new("x", s)])
+                .unwrap();
+            let fact = c.atom(r, [Term::Constant(a)]).unwrap();
+            c.add_fact(fact).unwrap();
+            if unresolved {
+                let head = c.atom(r, [Term::Constant(b)]).unwrap();
+                let body = c.atom(r, [Term::Constant(b)]).unwrap();
+                c.add_rule(head, [Literal::Negative(body)]).unwrap();
+            }
+            c.empty("none", r, "").unwrap();
+            let limits = Limits::default();
+            let program =
+                GroundProgram::prepare(&c, &Domains::from([(s, vec![a, b])]), &limits).unwrap();
+            let meaning = program.symbolic(&limits).unwrap();
+            let original = meaning.check_emptiness(&limits, None).unwrap();
+            assert!(original.values().all(|r| r.example.is_some()));
+            assert_eq!(original.values().next().unwrap().complete(), !unresolved);
+            for max_work in [0, limits.max_work] {
+                let mut attributed = original.clone();
+                program
+                    .attribute_emptiness(
+                        &mut attributed,
+                        &Limits {
+                            max_work,
+                            ..limits.clone()
+                        },
+                    )
+                    .unwrap();
+                for (id, report) in &mut attributed {
+                    match report.attribution.take().unwrap() {
+                        Attribution::Incomplete(_) => assert_eq!(max_work, 0),
+                        Attribution::Complete(steps) => assert!(!steps.is_empty()),
+                    }
+                    assert_eq!(report, &original[id]);
+                }
+            }
+            let mut attributed = original;
+            let cancelled = Limits::default();
+            cancelled.cancellation.cancel();
+            assert_eq!(
+                program.attribute_emptiness(&mut attributed, &cancelled),
+                Err(CheckError::Cancelled)
+            );
+        }
     }
 }

@@ -109,6 +109,31 @@ fn atom_contributions(atom: &GroundAtom, out: &mut Vec<Contribution>) {
         role: Role::Declaration,
     }));
 }
+/// Use the same retained derivation for emptiness and uniqueness placement.
+fn derivation_contributions(
+    evidence: &std::collections::BTreeMap<GroundAtom, EvidenceStep>,
+    contributions: &mut Vec<Contribution>,
+) {
+    for (atom, step) in evidence {
+        atom_contributions(atom, contributions);
+        if let GroundEvidence::Derived { rule, premises } = &step.evidence {
+            rule_contributions(rule, contributions);
+            for premise in premises {
+                let occurrence = match premise {
+                    PremiseEvidence::Positive { occurrence, .. }
+                    | PremiseEvidence::Absent { occurrence, .. } => *occurrence,
+                    PremiseEvidence::Discharged {
+                        literal_occurrence, ..
+                    } => *literal_occurrence,
+                };
+                contributions.push(Contribution {
+                    occurrence,
+                    role: Role::Contributor,
+                });
+            }
+        }
+    }
+}
 fn region_contributions(region: &UnresolvedRegion, out: &mut Vec<Contribution>) {
     for rule in &region.rules {
         rule_contributions(rule, out);
@@ -172,25 +197,7 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
                 {
                     return Err(Error::InvalidFinding("invalid replayed tuples"));
                 }
-                for (atom, step) in &example.evidence {
-                    atom_contributions(atom, &mut contributions);
-                    if let GroundEvidence::Derived { rule, premises } = &step.evidence {
-                        rule_contributions(rule, &mut contributions);
-                        for premise in premises {
-                            let occurrence = match premise {
-                                PremiseEvidence::Positive { occurrence, .. }
-                                | PremiseEvidence::Absent { occurrence, .. } => *occurrence,
-                                PremiseEvidence::Discharged {
-                                    literal_occurrence, ..
-                                } => *literal_occurrence,
-                            };
-                            contributions.push(Contribution {
-                                occurrence,
-                                role: Role::Contributor,
-                            });
-                        }
-                    }
-                }
+                derivation_contributions(&example.evidence, &mut contributions);
                 notes.push(match example.replay_scope {
                     ReplayScope::WholeProgram if !report.whole_program_admitted() => "Counterexample replayed on the whole program for this observation only; whole-program admissibility across all inputs remains incomplete.",
                     ReplayScope::WholeProgram => "Counterexample replayed on the whole program.",
@@ -303,6 +310,22 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
                     .unwrap_or_else(|| " (unresolved permitted worlds)".into())
             )
         };
+        let mut contributions = vec![Contribution {
+            occurrence: (*id).into(),
+            role: Role::Obligation,
+        }];
+        let mut notes = Vec::new();
+        match &emptiness.attribution {
+            Some(Attribution::Complete(evidence)) => {
+                derivation_contributions(evidence, &mut contributions);
+                notes.push("Locations follow the retained grounded derivation of the present tuple.".into());
+            }
+            Some(Attribution::Incomplete(c)) => notes.push(format!(
+                "Source attribution is incomplete ({}: {}); the counterexample is unchanged. Locations fall back to the obligation.",
+                c.phase, c.resource,
+            )),
+            None => {}
+        }
         findings.push(Finding {
             identity: Identity::Emptiness(*id),
             kind: if emptiness.example.is_some() {
@@ -311,11 +334,8 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
                 Kind::Inconclusive
             },
             message,
-            notes: vec![],
-            contributions: vec![Contribution {
-                occurrence: (*id).into(),
-                role: Role::Obligation,
-            }],
+            notes,
+            contributions,
             cycle_rules: vec![],
             evidence: Evidence::Emptiness(emptiness),
         });

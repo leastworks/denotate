@@ -405,6 +405,8 @@ impl PreparedCheck<'_> {
                 }
             }
         }
+        self.program
+            .attribute_emptiness(&mut verification.emptiness, &limits)?;
         let mut value = self.project(&verification, self.semantic_keys)?;
         for (scope, artifact) in &artifacts {
             if let (

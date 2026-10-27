@@ -1916,3 +1916,39 @@ fn emptiness_publication_and_language_services_use_the_shared_obligation_path() 
     assert!(ds.as_array().unwrap().iter().any(|d| d["severity"] == 1));
     c.shutdown();
 }
+
+#[test]
+fn emptiness_derivation_highlights_move_with_unsaved_facts_under_one_identity() {
+    let mut c = Client::start("ir-text/standalone");
+    let (uri, _) = c.open("example.den");
+    let mut identity = None;
+    for (version, padding) in [(2, ""), (3, "\n\n")] {
+        let text = format!(
+            "relation label(); relation allowed(); relation bad();\n{padding}label();\nbad() :- label(), !allowed();\nobligation none: empty(bad);\nverification checks {{ assumptions: []; obligations: [none]; }}"
+        );
+        c.change(&uri, version, &text);
+        checking_idle(&mut c);
+        let diagnostics = c.diagnostics(&uri);
+        let findings = diagnostics
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["data"]["finding"]["component"] == "emptiness")
+            .collect::<Vec<_>>();
+        assert_eq!(findings.len(), 2);
+        for expected in ["\nlabel();", "\nbad() :-"] {
+            assert!(findings
+                .iter()
+                .any(|d| d["range"]["start"] == position(&text, expected, 1)));
+        }
+        for d in findings {
+            assert_eq!(d["data"]["evidence"]["attribution"]["state"], "complete");
+            if let Some(old) = &identity {
+                assert_eq!(&d["data"]["finding"], old)
+            } else {
+                identity = Some(d["data"]["finding"].clone());
+            }
+        }
+    }
+    c.shutdown();
+}

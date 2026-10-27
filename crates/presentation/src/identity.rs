@@ -161,6 +161,7 @@ pub fn summary(results: &ScopedResults) -> Value {
             "identity":{"obligation":qualified(&key.0),"component":"emptiness"},
             "outcome":if e.example.is_some() {"counterexample"} else if e.proved() {"proved"} else {"inconclusive"},
             "complete":e.complete(), "unresolved":e.unresolved,
+            "attribution":attribution_data(e.attribution.as_ref()),
             "reason":e.inconclusive.map(|r|json!({"phase":r.phase,"resource":r.resource}))
         })).collect::<Vec<_>>());
     }
@@ -201,6 +202,7 @@ pub fn evidence_data(finding: &crate::Finding<'_>, keys: &SemanticKeys) -> Resul
         crate::Evidence::Emptiness(e) => {
             let mut data = json!({"kind":if e.example.is_some() {"replayed-counterexample"} else {"no-witness"},
                 "component":"emptiness", "complete":e.complete(), "unresolved":e.unresolved,
+                "attribution":attribution_data(e.attribution.as_ref()), "producers":producers,
                 "reason":e.inconclusive.map(|r|json!({"phase":r.phase,"resource":r.resource}))});
             if let Some(e) = &e.example {
                 data["observation"] = observation(&e.observation)?;
@@ -248,5 +250,15 @@ fn result_reason(result: &ScopedResult) -> Option<Value> {
             json!({"kind":"unsettled-dependencies","regions":regions.iter().map(|r|r.0.iter().map(atom_data).collect::<Vec<_>>()).collect::<Vec<_>>()}),
         ),
         _ => None,
+    }
+}
+
+fn attribution_data<E>(attribution: Option<&Attribution<E>>) -> Value {
+    match attribution {
+        None => Value::Null,
+        Some(Attribution::Complete(_)) => json!({"state":"complete"}),
+        Some(Attribution::Incomplete(c)) => json!({
+            "state":"incomplete", "reason":{"phase":c.phase,"resource":c.resource}
+        }),
     }
 }

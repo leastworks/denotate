@@ -46,6 +46,8 @@ extern crate self as denotate_check;
 pub mod test_support;
 
 mod emptiness;
-pub use emptiness::{EmptinessReport, EmptinessResult, EmptinessSummary, PresenceExample};
+pub use emptiness::{
+    Attribution, EmptinessReport, EmptinessResult, EmptinessSummary, PresenceExample,
+};
 mod coverage;
 pub use coverage::{CoverageExample, CoverageReport, CoverageResult, CoverageSummary};

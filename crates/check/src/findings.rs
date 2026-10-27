@@ -164,6 +164,8 @@ impl<'p> SymbolicMeaning<'p> {
         )?;
         verified.coverage = coverage;
         verified.emptiness = emptiness;
+        self.program
+            .attribute_emptiness(&mut verified.emptiness, limits)?;
         Ok(verified)
     }
     pub(crate) fn verify_report(

@@ -1,6 +1,7 @@
 use denotate_check::*;
 use denotate_check_session::Session;
 use denotate_ir::top_level;
+use denotate_ir_text::origins::{SourceIdentity, content_hash};
 use denotate_ir_text::*;
 use denotate_presentation::{Identity, Kind};
 mod support;
@@ -70,7 +71,12 @@ fn empty_relations_zero_arity_inputs_recursion_and_duplicate_derivations() {
             .iter()
             .filter(|d| matches!(d.identity, Identity::Emptiness(_)))
             .collect();
-        assert_eq!(diagnostics.len(), usize::from(!proved));
+        assert_eq!(diagnostics.is_empty(), proved);
+        assert!(
+            diagnostics
+                .iter()
+                .all(|d| d.identity == diagnostics[0].identity)
+        );
         if let Some(d) = diagnostics.first() {
             assert_eq!(d.evidence["kind"], "replayed-counterexample");
             assert_eq!(d.evidence["tuples"].as_array().unwrap().len(), 1);
@@ -406,7 +412,7 @@ fn library_verifications_use_consumer_facts_and_domains_with_labeled_fallback() 
             .collect();
         assert_eq!(ds.len(), usize::from(!proved));
         if let Some(d) = ds.first() {
-            assert_eq!(d.fallback, root == "app");
+            assert_eq!(d.fallback, root == "app" && app.is_empty());
             let key = d
                 .identity
                 .data_in(&p.keys, r.context.verification.as_ref())
@@ -414,5 +420,214 @@ fn library_verifications_use_consumer_facts_and_domains_with_labeled_fallback() 
             assert_eq!(key["component"], "emptiness");
             assert!(!key["verification"].is_null());
         }
+    }
+}
+
+fn placement_snapshot(
+    p: &LoadedProgram,
+    out: &presentation::Presentation,
+) -> Vec<serde_json::Value> {
+    use serde_json::json;
+    let span = |s: denotate_ir::SourceSpan| {
+        json!({"uri":p.sources.snapshot(s.snapshot()).unwrap().uri,
+            "range":[s.byte_range().start,s.byte_range().end]})
+    };
+    let mut values = out.diagnostics.iter().map(|d| json!({
+        "data": d.data(&p.keys).unwrap(), "primary":span(d.primary),
+        "related": d.related.iter().map(|r| json!({"span":span(r.span),"label":r.label})).collect::<Vec<_>>(),
+        "message":d.message, "notes":d.notes,
+    })).collect::<Vec<_>>();
+    values.sort_by_key(|v| v.to_string());
+    values
+}
+
+#[test]
+fn emptiness_locations_follow_only_the_replayed_derivation_and_keep_negation_related() {
+    let p = load_text(&format!(
+        "input i(); input j(); input forbidden(); relation guard(); relation p();
+         guard() :- i(); guard() :- j(); p() :- guard(), !forbidden();
+         obligation one: empty(p); {V}"
+    ));
+    let mut session = Session::default();
+    let (cold, out) = run(&p, &mut session, &Limits::default());
+    let (warm, warm_out) = run(&p, &mut session, &Limits::default());
+    assert_eq!(cold, warm);
+    assert_eq!(
+        placement_snapshot(&p, &out),
+        placement_snapshot(&p, &warm_out)
+    );
+    let ds = out
+        .diagnostics
+        .iter()
+        .filter(|d| matches!(d.identity, Identity::Emptiness(_)))
+        .collect::<Vec<_>>();
+    assert_eq!(ds.len(), 2); // p's rule and the retained guard branch
+    let example = cold
+        .emptiness
+        .values()
+        .next()
+        .unwrap()
+        .example
+        .as_ref()
+        .unwrap();
+    for d in ds {
+        let text = p.sources.text(d.primary).unwrap();
+        assert!(text.starts_with("p() :-") || text.starts_with("guard() :-"));
+        if text.starts_with("guard() :-") {
+            let input_name = if text.contains("i()") { "i" } else { "j" };
+            let input = p.corpus.relations().find(|r| r.name == input_name).unwrap();
+            assert!(
+                example
+                    .observation
+                    .present
+                    .iter()
+                    .any(|a| &a.relation == p.keys.relation(input.id).unwrap())
+            );
+        }
+        assert!(
+            d.related
+                .iter()
+                .any(|r| r.label == "contributing occurrence"
+                    && p.sources.text(r.span).unwrap().contains("forbidden"))
+        );
+        assert!(d.related.iter().any(|r| r.label == "checked obligation"));
+        assert_eq!(d.evidence["attribution"]["state"], "complete");
+    }
+}
+
+#[test]
+fn certified_presence_uses_the_certified_derivation_not_the_blocked_replay() {
+    let p = load_text(&format!(
+        "input i(); relation p(); relation q(); relation out();
+         p() :- i(), !p(); q() :- p(), !q(); out() :- !q();
+         obligation one: empty(out); {V}"
+    ));
+    let limits = Limits::default();
+    let ops = OperationalLimits::from(&limits);
+    let request = p.verification_requests(&limits).unwrap().remove(0).1;
+    let RequestPreparation::Complete(prepared) = request.prepare(&p.corpus, &p.keys, &ops).unwrap()
+    else {
+        panic!()
+    };
+    let prepared = prepared.admit(&ops).unwrap();
+    let CheckOutcome::Complete(report) = prepared.verify(&ops).unwrap() else {
+        panic!()
+    };
+    let e = report.verification.emptiness.values().next().unwrap();
+    let example = e.example.as_ref().unwrap();
+    let replay = prepared
+        .program()
+        .evaluate(example.observation.present.iter().cloned(), &limits)
+        .unwrap();
+    assert!(matches!(
+        replay.fact(&example.tuple).unwrap(),
+        FactState::Blocked(_)
+    ));
+    assert!(matches!(e.attribution, Some(Attribution::Complete(_))));
+    let out = presentation::present(&p, &report).unwrap();
+    let d = out
+        .diagnostics
+        .iter()
+        .find(|d| matches!(d.identity, Identity::Emptiness(_)))
+        .unwrap();
+    assert_eq!(p.sources.text(d.primary).unwrap(), "out() :- !q();");
+    let mut session = Session::default();
+    let (cold, cold_out) = run(&p, &mut session, &limits);
+    let (warm, warm_out) = run(&p, &mut session, &limits);
+    assert_eq!(cold, warm);
+    assert_eq!(
+        placement_snapshot(&p, &cold_out),
+        placement_snapshot(&p, &warm_out)
+    );
+    assert_eq!(
+        placement_snapshot(&p, &out),
+        placement_snapshot(&p, &cold_out)
+    );
+}
+
+#[test]
+fn attribution_fallback_preserves_semantic_summary_and_uses_obligation_location() {
+    let p = load_text(&format!("relation p(); p(); obligation one: empty(p); {V}"));
+    let limits = Limits::default();
+    let ops = OperationalLimits::from(&limits);
+    let request = p.verification_requests(&limits).unwrap().remove(0).1;
+    let RequestPreparation::Complete(prepared) = request.prepare(&p.corpus, &p.keys, &ops).unwrap()
+    else {
+        panic!()
+    };
+    let prepared = prepared.admit(&ops).unwrap();
+    let CheckOutcome::Complete(mut report) = prepared.verify(&ops).unwrap() else {
+        panic!()
+    };
+    // The checker unit test forces real attribution exhaustion. Exercise its
+    // reporting contract here independently of the provisional work allowance.
+    let cause = Inconclusive {
+        phase: "attribution",
+        resource: "work",
+    };
+    for e in report.verification.emptiness.values_mut() {
+        e.attribution = Some(Attribution::Incomplete(cause));
+    }
+    for e in report.results.value.emptiness.values_mut() {
+        e.attribution = Some(Attribution::Incomplete(cause));
+    }
+    let out = presentation::present(&p, &report).unwrap();
+    assert_eq!(out.status["state"], "findings");
+    assert_eq!(out.status["emptiness"][0]["complete"], true);
+    assert!(out.status["emptiness"][0]["reason"].is_null());
+    let d = &out.diagnostics[0];
+    assert_eq!(p.sources.text(d.primary).unwrap(), "one");
+    assert_eq!(d.kind, Kind::Counterexample);
+    assert_eq!(d.evidence["attribution"]["state"], "incomplete");
+    assert!(
+        d.notes
+            .iter()
+            .any(|n| n.contains("counterexample is unchanged"))
+    );
+}
+
+#[test]
+fn warm_fact_and_embedded_origin_edits_refresh_placement_without_changing_identity() {
+    let mut session = Session::default();
+    let mut prior = None;
+    for (padding, column) in [("", 1), ("\n\n", 1), ("\n\n", 2)] {
+        let text = format!(
+            "relation p();{padding}\np() loc(#s 1:{column} to 1:{});\nobligation one: empty(p); {V}\n#s = source(\"file:///source.dsl\", view: \"dsl\", hash: \"{}\");",
+            column + 1,
+            content_hash("abc")
+        );
+        let doc = SourceFile::new("file:///program.den", 1, text.clone());
+        let membership = ProgramMembership::single("root", [doc.uri.clone()]);
+        let mut resolver = |_: &SourceIdentity| Ok(std::sync::Arc::<str>::from("abc"));
+        let p = load_with_resolver(&membership, &[doc], Some(&mut resolver)).unwrap();
+        let (warm, out) = run(&p, &mut session, &Limits::default());
+        let (cold, cold_out) = run(&p, &mut Session::default(), &Limits::default());
+        assert_eq!(cold, warm);
+        assert_eq!(
+            placement_snapshot(&p, &out),
+            placement_snapshot(&p, &cold_out)
+        );
+        let d = &out.diagnostics[0];
+        assert!(p.sources.text(d.primary).unwrap().starts_with("p() loc("));
+        let upstream = d
+            .related
+            .iter()
+            .find(|r| r.label == "upstream source origin")
+            .unwrap();
+        assert_eq!(upstream.span.byte_range(), column - 1..column);
+        let origins = p.origins_at("file:///program.den", d.primary.byte_range().start);
+        assert_eq!(origins.len(), 1);
+        assert_eq!(origins[0].start.column, column);
+        let identity = d.data(&p.keys).unwrap()["finding"].clone();
+        let range = d.primary.byte_range();
+        if let Some((old_identity, old_range, old_column)) = prior {
+            assert_eq!(identity, old_identity);
+            if column == old_column {
+                assert_ne!(range, old_range)
+            } else {
+                assert_eq!(range, old_range)
+            }
+        }
+        prior = Some((identity, range, column));
     }
 }

@@ -171,8 +171,11 @@ notices and the empty-grouping-domain Information note apply unchanged.
 
 An `empty(R)` finding uses
 `{"verification": [namespaceKey, name], "obligation": [namespaceKey, name], "component": "emptiness"}`.
-It has one primary at the obligation (with the usual library fallback), independent
-of the selected example. Program ownership remains `data.program`.
+A replayed failure has primaries on the retained derivation's producing rules and
+facts, with premise occurrences and the obligation related, as uniqueness does.
+Normal program ownership and library fallback apply. Multiple diagnostics share the
+same finding identity, independent of the example and derivation. Program ownership
+remains `data.program`. Findings without a witness stay at the obligation.
 
 `summary.emptiness` is present only when emptiness obligations are selected. Entries
 contain `identity` (obligation and component), `outcome` (`proved`, `counterexample`,
@@ -187,7 +190,16 @@ Evidence uses `replayed-counterexample`, component `emptiness`, one present atom
 a witness the evidence kind is `no-witness`, with those completeness fields. Blocked
 facts never serve as witness tuples. Diagnostic codes are `counterexample` for a
 replayed failure and `inconclusive` otherwise; no diagnostic is emitted for proof.
-Existing group and coverage payloads are unchanged.
+For emptiness, both the summary entry and evidence also carry `attribution`: null
+without an example, `{"state":"complete"}` when its derivation was retained, or
+`{"state":"incomplete","reason":{"phase":...,"resource":...}}` when bounded
+attribution could not finish. This status is independent of semantic `complete`,
+`unresolved` and `reason`; attribution exhaustion retains the failure and falls back
+to the obligation with a note. Evidence also includes `producers`, the semantic
+occurrence keys of retained producing rules. Attribution completeness describes
+evidence collection, not the availability of source spans or upstream origins.
+Current `.den` spans remain primary; embedded origins remain related and available
+through Go to Origin. Existing group and coverage payloads are unchanged.
 
 ### Configuration
 

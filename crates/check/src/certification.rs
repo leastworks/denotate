@@ -304,6 +304,23 @@ fn certified_finding(
     certified: Box<CertifiedObservation>,
     budget: &mut Budget<'_>,
 ) -> Result<Counterexample> {
+    let evidence = certified_evidence(&certified, &tuples, budget)?;
+    Ok(Counterexample {
+        observation,
+        replay_scope: ReplayScope::WholeProgram,
+        tuples,
+        evidence,
+        certification: Some(CertificationOutcome::Certified(certified)),
+        confined_to_no_meaning: vec![],
+    })
+}
+
+/// Extract only the roots' positive support from the replay that certified them.
+pub(crate) fn certified_evidence(
+    certified: &CertifiedObservation,
+    tuples: &BTreeSet<GroundAtom>,
+    budget: &mut Budget<'_>,
+) -> Result<BTreeMap<GroundAtom, EvidenceStep>> {
     // Copy the conflict's grounded proof from THIS replay,
     // never from the absent-first candidate's old evidence.
     let mut evidence = BTreeMap::new();
@@ -330,12 +347,5 @@ fn certified_finding(
         }
         evidence.insert(fact, step.clone());
     }
-    Ok(Counterexample {
-        observation,
-        replay_scope: ReplayScope::WholeProgram,
-        tuples,
-        evidence,
-        certification: Some(CertificationOutcome::Certified(certified)),
-        confined_to_no_meaning: vec![],
-    })
+    Ok(evidence)
 }

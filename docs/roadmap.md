@@ -15,9 +15,9 @@ eligibility, and assumption forms beyond input `at_most_one`.
 Error recovery while rules are incomplete, latency at realistic sizes, and `.den`
 formatting, driven by what goes wrong in the first real programs. Known items:
 
-- [Obligation diagnostic placement](proposals/obligation-diagnostic-placement.md): place
-  `empty` failures on their derivation, as uniqueness already does; explicit blame
-  targets later for coverage.
+- [Obligation diagnostic placement](proposals/obligation-diagnostic-placement.md):
+  emptiness now follows its derivation, as uniqueness does. Follow-ups are explicit
+  targets for coverage or narrower placement, and bounded counterexample enumeration.
 - Exported DSL libraries can show singleton-variable warnings that the user cannot act
   on; print singletons as `_` or skip style lints on generated/library files.
 - Each Go to Origin and rename request rebuilds snapshots and reloads programs

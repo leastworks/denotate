@@ -116,8 +116,16 @@ and its input world. The identity has component `emptiness` and does not depend 
 which tuple or world is shown. Blocked or unknown facts never count as presence.
 Unresolved worlds and exhausted limits make checking inconclusive, never proved.
 A known counterexample survives that incompleteness, which remains visible in the
-message and result. The diagnostic is placed at the obligation, using the normal
-labeled fallback for library declarations.
+message and result. Failure locations follow one grounded derivation of the reported
+tuple in its replayed world, as for uniqueness: producing rules (including facts)
+are primary, premise occurrences and the obligation are related. Normal program
+ownership and labeled library fallback apply. Multiple locations share one finding
+identity; neither all invalid tuples nor all alternative derivations are enumerated.
+
+Attribution runs after checking with a separate bounded allowance. If it cannot
+finish, the failure falls back to the obligation with an attribution notice; its
+verdict and checking completeness are unchanged. Current `.den` locations and
+upstream origins remain separate. Findings without a witness stay at the obligation.
 
 `empty` is an obligation form only. Selection, unchecked-obligation notices,
 consistency-only verifications, origins, printing and editor services work as for
