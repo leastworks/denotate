@@ -3,29 +3,12 @@
 Ordered roughly by priority. The first real programs are expected to be written
 directly in `.den`.
 
-## Contract vocabulary
+## Contract vocabulary: follow-ups
 
-`at_least_one`, `exactly_one` and `empty` are implemented through the IR, BDD checking,
-`.den`, CLI and editor, with bounded coverage enumeration and aggregated coverage
-diagnostics. They are checked like
-`at_most_one`, inside [verifications](den-format.md#verifications): which input worlds
-count as permitted is decisive for coverage.
-
-- **Groups.** Coverage groups range over every combination of grouping-column domain
-  values, including groups with no possible producer; never infer eligible groups
-  from facts. `group_by: ()` is one global group over the whole relation. No grouping
-  combinations (an empty domain) means no groups.
-- **`exactly_one`** has separate coverage and uniqueness results: neither is assumed
-  while checking the other, a known failure stays a failure when the other part is
-  inconclusive, and the obligation is proved only when both are.
-- **`empty(R)`** takes no `group_by`; its counterexample is a replay-confirmed present
-  tuple. Unresolved worlds remain inconclusive and never prove emptiness.
-- **Coverage counterexamples** name the missing group and a permitted world with
-  replay-confirmed absence of every matching tuple; blocked or unknown facts never
-  count as absent. With no possible producer, the finding sits at the obligation.
-- Cover zero-arity relations, grouping by all columns and duplicate derivations.
-  Deferred: "why not derived" explanations, conditional eligibility, new assumption
-  forms.
+`at_most_one`, `at_least_one`, `exactly_one` and `empty` are implemented; see
+[the format](den-format.md#coverage-obligations). Deferred until real programs ask
+for them: "why not derived" explanations for coverage failures, conditional group
+eligibility, and assumption forms beyond input `at_most_one`.
 
 ## Authoring robustness
 
