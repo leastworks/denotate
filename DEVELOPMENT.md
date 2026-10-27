@@ -21,6 +21,10 @@ To try the `.den` editor, open `editors/den/` in VS Code and run **Run Denotate 
 checking** (F5); see [editors/den/README.md](editors/den/README.md). The test DSL editor
 is in [editors/test-dsl/](editors/test-dsl/README.md).
 
+To work on `.den` programs kept outside this repository, run `just edit-den <folder>`:
+it builds the editor and opens that folder in VS Code with the extension from this
+checkout. Open the folder containing all of a program's `den.root` roots.
+
 ## Verification
 
 ```sh

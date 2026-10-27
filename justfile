@@ -16,6 +16,11 @@ score-test-dsl +args:
 export-test-dsl +args:
     cargo +1.93.0 run --locked -p denotate-test-dsl --example export -- "$@"
 
+# Build the .den editor and open FOLDER (relative to where you run just) in VS Code with it.
+edit-den folder: _check-node
+    npm run build --prefix editors/den
+    code --extensionDevelopmentPath="{{justfile_directory()}}/editors/den" "$(cd "{{invocation_directory()}}" && cd "{{folder}}" && pwd)"
+
 # Load and check a folder-rooted .den program: ROOT_FOLDER_OR_DEN.ROOT.
 [positional-arguments]
 check-den +args:
