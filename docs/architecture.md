@@ -53,6 +53,16 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
 - **Provenance is separate from identity.** Semantic keys never contain file names
   or source offsets; provenance maps occurrences to source spans per view.
   Current `.den` text and upstream DSL origins are separate tables.
+- **Keep computation suitable for incremental queries.** Semantic results depend on
+  explicit inputs, including logical limits, rather than hidden state or incidental
+  hash iteration order. Arena handles are local to one construction; reusable semantic
+  artifacts use stable keys and bind back to the current corpus. Operational deadlines
+  and cancellation abort work and are not retained as semantic results. Logical
+  exhaustion is reported explicitly without erasing established findings; attribution
+  limits remain separate from checking completeness. Cache boundaries are chosen from
+  measurements: sessions already reuse planning and optionally relation-SCC grounding,
+  while coverage and emptiness verdicts are recomputed. New cached stages must
+  preserve cold/warm behavior and current-snapshot provenance.
 
 ## Programs and checking in the editor
 
