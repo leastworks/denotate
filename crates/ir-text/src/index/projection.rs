@@ -741,14 +741,14 @@ impl Projection {
             if let Some(card) = statement.windows(2).position(|ts| {
                 matches!(
                     ts[0].text.as_str(),
-                    "at_most_one" | "at_least_one" | "exactly_one"
+                    "at_most_one" | "at_least_one" | "exactly_one" | "empty"
                 ) && ts[1].text == "("
             }) {
                 let args = &statement[card + 2..];
                 if !args.iter().any(|t| t.text == ",") {
                     return Some((Lookup::Name(Kind::Relation), scope, span));
                 }
-                if args.iter().any(|t| t.text == "group_by") {
+                if statement[card].text != "empty" && args.iter().any(|t| t.text == "group_by") {
                     let relation = parse_name(&args.first()?.text).ok()?;
                     return Some((Lookup::Parameter(relation), scope, span));
                 }

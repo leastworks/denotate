@@ -109,7 +109,7 @@ consistency-only verification.` Its code is `consistency-only`. It carries no
 per-program semantic finding identity.
 
 Each semantic diagnostic's `data` holds `program`, `finding` (an object containing `verification: [namespaceKey, name]` alongside
-either a `group`, `region` or `rewrite` identity, or an `obligation`/`component` coverage identity, all built from semantic
+either a `group`, `region` or `rewrite` identity, or an `obligation`/`component` coverage or emptiness identity, all built from semantic
 keys, never arena IDs or message text),
 `kind`, `fallback`, `evidence`, `checkRevision` and `locations` (URI, view, SHA-256
 and byte range for primary and related spans). Counterexamples may produce several
@@ -166,6 +166,28 @@ retain `replayed-counterexample` evidence and per-group reporting. A failed part
 the verification in `findings` even if the other is incomplete; the other part's reason
 and diagnostic remain visible. A proof requires both parts to prove. Shared selection
 notices and the empty-grouping-domain Information note apply unchanged.
+
+### Emptiness results
+
+An `empty(R)` finding uses
+`{"verification": [namespaceKey, name], "obligation": [namespaceKey, name], "component": "emptiness"}`.
+It has one primary at the obligation (with the usual library fallback), independent
+of the selected example. Program ownership remains `data.program`.
+
+`summary.emptiness` is present only when emptiness obligations are selected. Entries
+contain `identity` (obligation and component), `outcome` (`proved`, `counterexample`,
+`inconclusive`), `complete`, `unresolved` and `reason` (null or `{phase, resource}`).
+`unresolved` means some permitted world could not be settled or certified; `reason`
+records resource exhaustion. Either prevents proof. A known failure remains a
+`counterexample` with `complete: false` when analysis elsewhere is unresolved.
+
+Evidence uses `replayed-counterexample`, component `emptiness`, one present atom in
+`tuples`, its `observation: {present, absent}`, and `scope` (`whole-program` or
+`cone-only`). It also carries `complete`, `unresolved` and `reason` as above. Without
+a witness the evidence kind is `no-witness`, with those completeness fields. Blocked
+facts never serve as witness tuples. Diagnostic codes are `counterexample` for a
+replayed failure and `inconclusive` otherwise; no diagnostic is emitted for proof.
+Existing group and coverage payloads are unchanged.
 
 ### Configuration
 

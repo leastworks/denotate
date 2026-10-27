@@ -483,3 +483,28 @@ fn exactly_one_is_one_authored_declaration_with_shared_validation() {
     ));
     assert!(c.exactly_one("global", r, [], "").is_ok());
 }
+
+#[test]
+fn empty_is_ungrouped_with_shared_declaration_validation() {
+    let mut c = Corpus::new();
+    let s = c.declare_sort("S").unwrap();
+    let r = unary(&mut c, "r", s, RelationRole::Derived);
+    let ns = Namespace::new(["lib"]).unwrap();
+    let id = c.empty_in(ns.clone(), "none", r, "no tuples").unwrap();
+    assert_eq!(c.namespace(id), Some(&ns));
+    assert_eq!(
+        c.obligation(id).unwrap().requirement,
+        Requirement::Empty { relation: r }
+    );
+    assert!(!Cardinality::Empty.has_coverage() && !Cardinality::Empty.has_uniqueness());
+    assert!(matches!(
+        c.at_most_one_in(ns, "none", r, [], ""),
+        Err(ConstructionError::DuplicateName { .. })
+    ));
+    assert!(c.empty("", r, "").is_err());
+    let mut foreign = Corpus::new();
+    let unknown = foreign
+        .declare_relation("r", RelationRole::Derived, [])
+        .unwrap();
+    assert!(c.empty("foreign", unknown, "").is_err());
+}

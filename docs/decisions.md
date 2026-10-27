@@ -58,6 +58,12 @@ real program that the current choice serves badly.
   neither part constrains the other. Component identities keep both findings visible,
   and a failure survives an inconclusive result in the other part. Existing standalone
   coverage and uniqueness identities remain unchanged.
+- **Emptiness is ungrouped and requires replayed presence to fail.** `empty(R)` has
+  no grouping argument and one result per obligation/verification. Its finding identity
+  uses component `emptiness`, independent of the selected example tuple or world.
+  Unknown facts are neither presence nor proof of emptiness. A replayed failure is
+  retained alongside unresolved analysis. Like coverage, it reuses session preparation
+  but recomputes its verdict under bounded work rather than adding a verdict cache.
 - **Correctness and usability before performance.** Performance policies are
   provisional until re-scored on real programs ([checker policies](checker-policies.md)).
 - **Budgets, receipts, timings and witness choices are not goldens.** They change

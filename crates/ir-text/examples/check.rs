@@ -203,6 +203,7 @@ fn run(args: impl IntoIterator<Item = String>, output: &mut String) -> Result<u8
                 incomplete |= result.unfinished.is_some()
                     || !result.incomplete.is_empty()
                     || result.coverage.values().any(|c| !c.complete())
+                    || result.emptiness.values().any(|e| !e.complete())
                     || result.groups.values().any(|r| {
                         matches!(
                             r,
@@ -392,6 +393,34 @@ mod tests {
             assert_eq!(output.contains("(coverage)"), coverage, "{output}");
             assert_eq!(output.contains("(uniqueness)"), uniqueness, "{output}");
         }
+    }
+    #[test]
+    fn empty_cli_proof_presence_and_unresolved_worlds() {
+        for (body, code, failure) in [
+            ("relation p();", 0, false),
+            ("relation p(); p();", 1, true),
+            ("input p();", 1, true),
+            ("relation p(); p() :- !p();", 2, false),
+            (
+                "sort S; const a,b:S; relation p(x:S); p(a); p(b) :- !p(b);",
+                2,
+                true,
+            ),
+        ] {
+            let f = Fixture::new(&format!(
+                "{body} obligation one: empty(p); verification checks {{ assumptions: []; obligations: [one]; }}"
+            ));
+            let (actual, output) = f.run(&[]);
+            assert_eq!(actual, code, "{output}");
+            assert_eq!(
+                output.contains("relation is not empty"),
+                failure,
+                "{output}"
+            );
+        }
+        let (code, _) =
+            Fixture::new("relation p(); obligation one: empty(p, group_by: ());").run(&[]);
+        assert_eq!(code, 2);
     }
     #[test]
     fn invalid_input_and_operational_failure_have_distinct_codes() {

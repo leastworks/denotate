@@ -334,6 +334,7 @@ impl CheckRequest {
             context: self.clone(),
             groups: BTreeMap::new(),
             coverage: BTreeMap::new(),
+            emptiness: BTreeMap::new(),
             group_domains: BTreeMap::new(),
             regions: BTreeMap::new(),
             incomplete: BTreeMap::new(),
@@ -476,6 +477,7 @@ pub struct RegionResult {
 pub struct ScopedResults {
     pub context: CheckRequest,
     pub groups: BTreeMap<GroupKey, ScopedResult>,
+    pub emptiness: BTreeMap<ObligationKey, EmptinessResult>,
     pub coverage: BTreeMap<ObligationKey, CoverageResult>,
     /// Compact domain of legal groups, including trivially proved zero/one-member
     /// groups. Empty when none are selected or preparation did not finish.
@@ -666,11 +668,33 @@ impl PreparedCheck<'_> {
             context: self.request.clone(),
             groups: BTreeMap::new(),
             coverage: BTreeMap::new(),
+            emptiness: BTreeMap::new(),
             group_domains: self.keys.groups.clone(),
             regions: BTreeMap::new(),
             incomplete: BTreeMap::new(),
             unfinished: None,
         };
+        for (id, e) in &report.emptiness {
+            out.emptiness.insert(
+                keys.obligation(*id).map_err(CheckError::Keys)?.clone(),
+                EmptinessResult {
+                    inconclusive: e.inconclusive,
+                    unresolved: e.unresolved,
+                    example: e
+                        .example
+                        .as_ref()
+                        .map(|e| {
+                            Ok(PresenceExample {
+                                tuple: AtomKey::from_atom(keys, &e.tuple)
+                                    .map_err(CheckError::Keys)?,
+                                observation: candidate(&e.observation)?,
+                                replay_scope: e.replay_scope,
+                            })
+                        })
+                        .transpose()?,
+                },
+            );
+        }
         for (id, coverage) in &report.coverage {
             out.coverage.insert(
                 keys.obligation(*id).map_err(CheckError::Keys)?.clone(),

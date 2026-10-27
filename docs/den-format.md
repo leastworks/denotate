@@ -35,9 +35,10 @@ verification single_value {
 - **Contracts.** `obligation name: at_most_one(rel, group_by: (cols))` is a property to
   check; `obligation name: at_least_one(rel, group_by: (cols))` checks coverage.
   `obligation name: exactly_one(rel, group_by: (cols))` requires both coverage and
-  uniqueness. `assumption name: at_most_one(input, group_by: (cols))` restricts input
-  worlds. Only input `at_most_one` assumptions are supported. Neither does anything on
-  its own: a [verification](#verifications) selects which are checked, and under which
+  uniqueness; `obligation name: empty(rel)` requires no tuples.
+  `assumption name: at_most_one(input, group_by: (cols))` restricts input
+  worlds. Only input `at_most_one` assumptions are supported. Declarations take
+  effect through selection: a [verification](#verifications) selects which are checked, and under which
   assumptions.
 - **Names.** Quote any non-identifier or reserved word: `'007'`, `'module'`.
   Escapes: `\\`, `\'`, `\n`, `\r`, `\t`. Parameter names and `group_by` columns accept
@@ -71,8 +72,7 @@ failures already established. Unknown or blocked facts never count as absence.
 An independent guaranteed tuple can establish coverage despite other unsupported
 producers; a settled failure remains a failure alongside unresolved worlds.
 
-Coverage is currently an obligation form only. `empty` and richer assumption forms
-remain future work. Coverage declarations use the same verification
+Coverage is an obligation form only. Richer assumption forms remain future work. Coverage declarations use the same verification
 selection, unchecked-obligation notices, names, origins and editor services as uniqueness.
 
 ## Exactly-one obligations
@@ -98,6 +98,30 @@ column, uniqueness is trivial because tuples are distinct; coverage still has to
 Duplicate derivations never create a second tuple. Exactly-one assumptions are not
 supported. Names, selection, origins, printing and editor services use the same shared
 paths as other obligations.
+
+## Emptiness obligations
+
+```den
+obligation no_conflicts: empty(conflict);
+```
+
+`empty(R)` requires no tuple of `R` in any permitted input world, using the program's
+resolved domains and the verification's selected assumptions. It has no grouping;
+even `empty(R, group_by: ())` is rejected. A relation with no possible tuples is
+proved empty; a zero-arity relation fails as soon as its single tuple is present.
+Duplicate derivations do not change this.
+
+One finding per obligation and verification reports a replay-confirmed present tuple
+and its input world. The identity has component `emptiness` and does not depend on
+which tuple or world is shown. Blocked or unknown facts never count as presence.
+Unresolved worlds and exhausted limits make checking inconclusive, never proved.
+A known counterexample survives that incompleteness, which remains visible in the
+message and result. The diagnostic is placed at the obligation, using the normal
+labeled fallback for library declarations.
+
+`empty` is an obligation form only. Selection, unchecked-obligation notices,
+consistency-only verifications, origins, printing and editor services work as for
+other obligations.
 
 ## Verifications
 

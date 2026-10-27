@@ -15,6 +15,7 @@ pub enum QueryKey {
     Symbolic,
     CoverageMeaning,
     Coverage(denotate_ir::ObligationKey),
+    Emptiness(denotate_ir::ObligationKey),
     ConeIndex,
     ConeDiscovery(GroupKey),
     RegionDiscovery(ComponentKey),

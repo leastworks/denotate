@@ -213,20 +213,24 @@ pub enum Cardinality {
     AtMostOne,
     AtLeastOne,
     ExactlyOne,
+    Empty,
 }
 impl Cardinality {
     pub fn has_coverage(self) -> bool {
-        self != Self::AtMostOne
+        matches!(self, Self::AtLeastOne | Self::ExactlyOne)
     }
     pub fn has_uniqueness(self) -> bool {
-        self != Self::AtLeastOne
+        matches!(self, Self::AtMostOne | Self::ExactlyOne)
     }
 }
 
-/// Count distinct tuples in the remaining columns, per grouping tuple.
+/// Cardinality of distinct tuples, grouped where the requirement has grouping.
 /// This is a requirement over settled meaning, not behavior or an input assumption.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Requirement {
+    Empty {
+        relation: RelationId,
+    },
     AtMostOne {
         relation: RelationId,
         group_by: Vec<usize>,
@@ -247,17 +251,22 @@ impl Requirement {
             Self::AtMostOne { .. } => Cardinality::AtMostOne,
             Self::AtLeastOne { .. } => Cardinality::AtLeastOne,
             Self::ExactlyOne { .. } => Cardinality::ExactlyOne,
+            Self::Empty { .. } => Cardinality::Empty,
         }
     }
     pub fn relation(&self) -> RelationId {
         match self {
             Self::AtMostOne { relation, .. }
             | Self::AtLeastOne { relation, .. }
-            | Self::ExactlyOne { relation, .. } => *relation,
+            | Self::ExactlyOne { relation, .. }
+            | Self::Empty { relation } => *relation,
         }
     }
+    /// Grouping columns; empty for the ungrouped emptiness requirement as well
+    /// as globally grouped requirements. Use `kind()` to distinguish them.
     pub fn group_by(&self) -> &[usize] {
         match self {
+            Self::Empty { .. } => &[],
             Self::AtMostOne { group_by, .. }
             | Self::AtLeastOne { group_by, .. }
             | Self::ExactlyOne { group_by, .. } => group_by,
@@ -846,6 +855,31 @@ impl Corpus {
             Cardinality::ExactlyOne,
         )
     }
+    /// Require no tuple in any permitted world. This obligation has no grouping.
+    pub fn empty(
+        &mut self,
+        name: impl Into<String>,
+        relation: RelationId,
+        message_template: impl Into<String>,
+    ) -> Result<ObligationId> {
+        self.empty_in(Namespace::default(), name, relation, message_template)
+    }
+    pub fn empty_in(
+        &mut self,
+        namespace: impl Into<Namespace>,
+        name: impl Into<String>,
+        relation: RelationId,
+        message_template: impl Into<String>,
+    ) -> Result<ObligationId> {
+        self.cardinality_in(
+            namespace.into(),
+            name.into(),
+            relation,
+            [],
+            message_template.into(),
+            Cardinality::Empty,
+        )
+    }
     fn cardinality_in(
         &mut self,
         namespace: Namespace,
@@ -873,6 +907,7 @@ impl Corpus {
                 id,
                 name,
                 requirement: match kind {
+                    Cardinality::Empty => Requirement::Empty { relation },
                     Cardinality::AtMostOne => Requirement::AtMostOne {
                         relation,
                         group_by: indices,

@@ -50,8 +50,9 @@ record; API callers declare both contracts in the corpus before exporting.
 `spelling(name, NameKind)` is the kind-aware spelling used by the printer; editors must
 use it for replacement names (rename), not display quoting.
 
-`at_least_one` and `exactly_one` obligations load and print through the ordinary
-contract declarations; both are rejected as assumptions. Exactly-one remains one
+`at_least_one`, `exactly_one` and `empty` obligations load and print through ordinary
+contract declarations; all are rejected as assumptions. `empty(R)` has no grouping
+argument, and supplying one is a syntax error. Exactly-one remains one
 declaration and selection through printing and reloading. Grouping uses resolved domains, including
 explicit overrides. Coverage results and diagnostics are described in the
 [format](../../docs/den-format.md#coverage-obligations).

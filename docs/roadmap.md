@@ -5,9 +5,9 @@ directly in `.den`.
 
 ## Contract vocabulary
 
-`at_least_one` coverage and `exactly_one` are implemented through the IR, BDD checking,
+`at_least_one`, `exactly_one` and `empty` are implemented through the IR, BDD checking,
 `.den`, CLI and editor, with bounded coverage enumeration and aggregated coverage
-diagnostics. Next add `empty` through those same paths. They are checked like
+diagnostics. They are checked like
 `at_most_one`, inside [verifications](den-format.md#verifications): which input worlds
 count as permitted is decisive for coverage.
 
@@ -18,7 +18,8 @@ count as permitted is decisive for coverage.
 - **`exactly_one`** has separate coverage and uniqueness results: neither is assumed
   while checking the other, a known failure stays a failure when the other part is
   inconclusive, and the obligation is proved only when both are.
-- **`empty(R)`** takes no `group_by`; its counterexample is a present tuple.
+- **`empty(R)`** takes no `group_by`; its counterexample is a replay-confirmed present
+  tuple. Unresolved worlds remain inconclusive and never prove emptiness.
 - **Coverage counterexamples** name the missing group and a permitted world with
   replay-confirmed absence of every matching tuple; blocked or unknown facts never
   count as absent. With no possible producer, the finding sits at the obligation.

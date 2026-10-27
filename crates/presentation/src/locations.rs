@@ -126,7 +126,7 @@ impl Placement<'_> {
                 fallback,
                 evidence: Value::Null,
             });
-            if matches!(identity, Identity::Coverage(_))
+            if matches!(identity, Identity::Coverage(_) | Identity::Emptiness(_))
                 || matches!(
                     kind,
                     Kind::Inconclusive | Kind::UnsupportedGroup | Kind::UnsupportedRegion

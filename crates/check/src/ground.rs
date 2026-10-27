@@ -137,6 +137,7 @@ pub struct GroundProgram {
     pub(crate) component_rules: Vec<Vec<usize>>,
     pub(crate) dependencies: Vec<Dependency>,
     groups: Vec<AtMostOneGroup>,
+    pub(crate) emptiness: BTreeMap<ObligationId, RelationId>,
     pub(crate) coverage: BTreeMap<ObligationId, crate::coverage::CoverageShape>,
     // Keep the selection even when all its groups are trivial, and through admission.
     pub(crate) obligations: BTreeSet<ObligationId>,
@@ -266,6 +267,7 @@ impl GroundProgram {
             dependencies: vec![],
             groups: vec![],
             coverage: BTreeMap::new(),
+            emptiness: BTreeMap::new(),
             obligations: corpus.obligations().map(|o| o.id).collect(),
             input_groups: vec![],
             metrics: PreparationMetrics::default(),
@@ -306,6 +308,9 @@ impl GroundProgram {
             budget.tick("obligation groups")?;
             let relation = &obligation.requirement.relation();
             let group_by = obligation.requirement.group_by();
+            if obligation.requirement.kind() == denotate_ir::Cardinality::Empty {
+                self.emptiness.insert(obligation.id, *relation);
+            }
             if obligation.requirement.kind().has_coverage() {
                 let signature = &self.signatures[relation];
                 let mut domains = Vec::new();

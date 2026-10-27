@@ -67,6 +67,7 @@ pub struct Contribution {
 }
 #[derive(Debug)]
 pub enum Evidence<'a> {
+    Emptiness(&'a EmptinessReport),
     Coverage(&'a CoverageReport),
     Group(&'a VerifiedGroup),
     Region(&'a UnresolvedRegion),
@@ -275,6 +276,50 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
             evidence: Evidence::Group(group),
         });
     }
+    for (id, emptiness) in &report.emptiness {
+        if emptiness.proved() {
+            continue;
+        }
+        let obligation = corpus
+            .obligation(*id)
+            .ok_or(Error::InvalidFinding("foreign emptiness obligation"))?;
+        let message = if emptiness.example.is_some() {
+            format!(
+                "Obligation {}: relation is not empty{}",
+                obligation.name,
+                if emptiness.complete() {
+                    "."
+                } else {
+                    "; checking incomplete."
+                }
+            )
+        } else {
+            format!(
+                "Obligation {}: emptiness checking incomplete{}.",
+                obligation.name,
+                emptiness
+                    .inconclusive
+                    .map(|c| format!(" ({}: {})", c.phase, c.resource))
+                    .unwrap_or_else(|| " (unresolved permitted worlds)".into())
+            )
+        };
+        findings.push(Finding {
+            identity: Identity::Emptiness(*id),
+            kind: if emptiness.example.is_some() {
+                Kind::Counterexample
+            } else {
+                Kind::Inconclusive
+            },
+            message,
+            notes: vec![],
+            contributions: vec![Contribution {
+                occurrence: (*id).into(),
+                role: Role::Obligation,
+            }],
+            cycle_rules: vec![],
+            evidence: Evidence::Emptiness(emptiness),
+        });
+    }
     for (id, coverage) in &report.coverage {
         let obligation = corpus
             .obligation(*id)
@@ -440,6 +485,14 @@ pub fn generic_details(corpus: &Corpus, finding: &Finding<'_>) -> Result<Vec<Str
     };
     let mut details = Vec::new();
     let observation = match &finding.evidence {
+        Evidence::Emptiness(e) => {
+            if let Some(e) = &e.example {
+                details.push(format!("Replayed present tuple: {}.", atom(&e.tuple)?));
+                Some(&e.observation)
+            } else {
+                None
+            }
+        }
         Evidence::Coverage(c) => {
             for e in &c.examples {
                 let group = e

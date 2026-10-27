@@ -283,6 +283,9 @@ impl GroundKeyIndex {
             .obligations()
             .filter(|o| program.obligations.contains(&o.id))
         {
+            if o.requirement.kind() == denotate_ir::Cardinality::Empty {
+                continue;
+            }
             let relation = &o.requirement.relation();
             let group_by = o.requirement.group_by();
             let signature = corpus

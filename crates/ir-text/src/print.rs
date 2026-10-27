@@ -495,6 +495,9 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
         add(r.id.into(), text, rule_positions(r))?;
     }
     let contract = |kind: &str, relation: RelationId, columns: &[usize], context: &Namespace| {
+        if kind == "empty" {
+            return format!("empty({})", reference(relation.into(), context));
+        }
         format!(
             "{kind}({}, group_by: ({}))",
             reference(relation.into(), context),
@@ -515,6 +518,7 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
             Requirement::AtMostOne { .. } => "at_most_one",
             Requirement::AtLeastOne { .. } => "at_least_one",
             Requirement::ExactlyOne { .. } => "exactly_one",
+            Requirement::Empty { .. } => "empty",
         };
         add(
             o.id.into(),

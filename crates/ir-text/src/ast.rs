@@ -530,6 +530,7 @@ fn scope(
                     kind: match text(source, field(source, card, "kind")?) {
                         "at_most_one" => denotate_ir::Cardinality::AtMostOne,
                         "at_least_one" => denotate_ir::Cardinality::AtLeastOne,
+                        "empty" => denotate_ir::Cardinality::Empty,
                         "exactly_one" => denotate_ir::Cardinality::ExactlyOne,
                         _ => return Err(error(source, card.byte_range(), "Unknown cardinality")),
                     },

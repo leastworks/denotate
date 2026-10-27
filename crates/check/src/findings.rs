@@ -84,6 +84,7 @@ pub struct FindingMetrics {
 pub struct Verification<'p> {
     program: &'p GroundProgram,
     pub groups: Vec<VerifiedGroup>,
+    pub emptiness: BTreeMap<denotate_ir::ObligationId, EmptinessReport>,
     pub coverage: BTreeMap<denotate_ir::ObligationId, CoverageReport>,
     pub unresolved: Vec<UnresolvedRegion>,
     pub property_metrics: SymbolicMetrics,
@@ -102,6 +103,7 @@ impl Verification<'_> {
     pub fn all_obligations_proved(&self) -> bool {
         self.whole_program_admitted()
             && self.incomplete_evaluation.is_empty()
+            && self.emptiness.values().all(EmptinessReport::proved)
             && self.coverage.values().all(CoverageReport::proved)
             && self
                 .groups
@@ -150,6 +152,7 @@ impl<'p> SymbolicMeaning<'p> {
     ) -> Result<Verification<'p>> {
         limits.cancellation.check()?;
         let report = self.check_queries(limits, queries.as_deref_mut())?;
+        let emptiness = self.check_emptiness(limits, queries.as_deref_mut())?;
         let coverage = self.check_coverage(limits, queries.as_deref_mut())?;
         let mut verified = self.verify_report(
             limits,
@@ -160,6 +163,7 @@ impl<'p> SymbolicMeaning<'p> {
             None,
         )?;
         verified.coverage = coverage;
+        verified.emptiness = emptiness;
         Ok(verified)
     }
     pub(crate) fn verify_report(
@@ -446,6 +450,7 @@ impl<'p> SymbolicMeaning<'p> {
             program: self.program,
             groups,
             coverage: BTreeMap::new(),
+            emptiness: BTreeMap::new(),
             unresolved,
             property_metrics: report.metrics,
             finding_metrics: metrics,

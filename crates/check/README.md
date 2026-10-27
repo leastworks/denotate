@@ -2,7 +2,7 @@
 
 The finite relational checker. It grounds a `Corpus` over explicit finite domains,
 checks admissibility, replays concrete input worlds, and proves or refutes
-`at_most_one`, `at_least_one` and `exactly_one` obligations symbolically (BDD), returning
+`at_most_one`, `at_least_one`, `exactly_one` and `empty` obligations symbolically (BDD), returning
 only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
 `biodivine-lib-bdd`.
 
@@ -126,3 +126,13 @@ cargo +1.93.0 test --locked -p denotate-check
 Tests include independent oracles: a Cartesian-grounded stable-model oracle for
 rewrites and grounding, exhaustive small-world comparisons, and portable-condition
 regression tests.
+
+## Emptiness
+
+`empty` has one ungrouped `EmptinessReport` per selected obligation (keyed as
+`EmptinessResult` in `ScopedResults.emptiness`). `example` retains at most one
+replayed present tuple and observation. `unresolved` and `inconclusive` keep unknown
+worlds and resource exhaustion visible independently of a known failure. `proved()`
+requires complete analysis and no example. The BDD checks settled presence conditions;
+blocked facts require world replay/certification, with enumeration and evidence charged
+to the obligation's allowance. Sessions reuse preparation and recompute these verdicts.

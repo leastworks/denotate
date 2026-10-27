@@ -7,8 +7,9 @@ provenance and semantic keys. Plain Rust; its only workspace dependency is
 ## Construction
 
 `Corpus` builds sorts, constants, named-parameter input and derived relations,
-conjunctive signed rules, facts and `at_most_one` / `at_least_one` / `exactly_one` obligations (grouping columns by
-name or index, with a message template that the IR does not render). Constructors
+conjunctive signed rules, facts, grouped `at_most_one` / `at_least_one` / `exactly_one`
+obligations and ungrouped `empty` obligations. Grouping columns are selected by name
+or index; message templates are not rendered by the IR. Constructors
 return `ConstructionError` for foreign handles, duplicate or empty names, arity and
 sort mismatches, inconsistent variable sorts, unsafe head or negative variables,
 input definitions and invalid grouping columns. Variables are rule-local; duplicate
@@ -27,6 +28,9 @@ authored facts keep separate occurrences.
   fresh occurrence maps; `transfer` attaches frontend-chosen provenance. The same
   cached recipe installs into any namespace.
 - `top_level(&corpus)` enumerates the occurrences that need file placement on export.
+
+`empty` / `empty_in` create an ungrouped `Requirement::Empty`; the construction API
+takes no grouping argument.
 
 `exactly_one` / `exactly_one_in` create one `Requirement::ExactlyOne` declaration.
 `Requirement::kind()` exposes its `Cardinality`; its coverage and uniqueness parts are

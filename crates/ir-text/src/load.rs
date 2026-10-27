@@ -762,7 +762,9 @@ pub fn load_with_resolver(
                                 s.span.clone(),
                                 format!(
                                     "{} is supported only for obligations",
-                                    if *kind == Cardinality::ExactlyOne {
+                                    if *kind == Cardinality::Empty {
+                                        "empty"
+                                    } else if *kind == Cardinality::ExactlyOne {
                                         "exactly_one"
                                     } else {
                                         "at_least_one"
@@ -806,6 +808,9 @@ pub fn load_with_resolver(
                             m,
                             s.span.clone(),
                             match kind {
+                                Cardinality::Empty => {
+                                    b.program.corpus.empty_in(module, &name.text, id, message)
+                                }
                                 Cardinality::AtLeastOne => b.program.corpus.at_least_one_in(
                                     module,
                                     &name.text,

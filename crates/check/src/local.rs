@@ -360,7 +360,7 @@ impl PreparedCheck<'_> {
             report,
             Some(completions),
         )?;
-        if !self.program.coverage.is_empty() {
+        if !self.program.coverage.is_empty() || !self.program.emptiness.is_empty() {
             let mut coverage_budget = Budget::tracked(&limits);
             let meaning = self.program.symbolic_impl(&mut coverage_budget, true);
             if let Err(e) = &meaning {
@@ -378,10 +378,21 @@ impl PreparedCheck<'_> {
                         ground: &self.keys,
                         receipts: &mut receipts,
                     };
+                    verification.emptiness =
+                        meaning.check_emptiness(&limits, Some(&mut queries))?;
                     verification.coverage = meaning.check_coverage(&limits, Some(&mut queries))?;
                 }
                 Err(e) => {
                     let reason = Inconclusive::from_error(e)?;
+                    for id in self.program.emptiness.keys() {
+                        verification.emptiness.insert(
+                            *id,
+                            EmptinessReport {
+                                inconclusive: Some(reason),
+                                ..EmptinessReport::default()
+                            },
+                        );
+                    }
                     for id in self.program.coverage.keys() {
                         verification.coverage.insert(
                             *id,

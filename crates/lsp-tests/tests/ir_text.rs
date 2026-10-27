@@ -1763,3 +1763,156 @@ fn exactly_one_components_share_one_declaration_and_all_editor_services() {
     assert!(components(&unchecked).is_empty());
     c.shutdown();
 }
+
+#[test]
+fn emptiness_publication_and_language_services_use_the_shared_obligation_path() {
+    let mut c = Client::start("ir-text/standalone");
+    let (uri, _) = c.open("example.den");
+    let body = "namespace lib { sort S; const a,b:S; input i(x:S); relation p(x:S); p(a) :- i(a), i(b); assumption allowed: at_most_one(i, group_by: ()); obligation none: empty(p); } use lib;";
+    let text = format!("{body} verification checks {{ assumptions: []; obligations: [none]; }}");
+    c.change(&uri, 2, &text);
+    checking_idle(&mut c);
+    let findings = |diagnostics: &Value| {
+        diagnostics
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["data"]["finding"]["component"] == "emptiness")
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let ds = findings(&c.diagnostics(&uri));
+    assert_eq!(ds.len(), 1);
+    assert_eq!(ds[0]["code"], "counterexample");
+    assert_eq!(ds[0]["data"]["evidence"]["kind"], "replayed-counterexample");
+    assert_eq!(
+        ds[0]["data"]["evidence"]["tuples"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    let identity = ds[0]["data"]["finding"].clone();
+    let definition = query(&mut c, "textDocument/definition", &uri, &text, "empty(p", 6);
+    assert_eq!(
+        definition[0]["targetSelectionRange"]["start"],
+        position(&text, "relation p", 9)
+    );
+    assert_eq!(
+        query(&mut c, "textDocument/hover", &uri, &text, "none];", 0)["contents"]["value"],
+        "obligation none"
+    );
+    assert_eq!(
+        query(&mut c, "textDocument/references", &uri, &text, "none];", 0)
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    let completion = query(&mut c, "textDocument/completion", &uri, &text, "empty(p", 6);
+    let items = completion["items"].as_array().unwrap();
+    assert!(items.iter().any(|i| i["label"] == "p"));
+    assert!(!items
+        .iter()
+        .any(|i| i["label"] == "x" || i["label"] == "allowed"));
+    let outline = c.request(
+        "textDocument/documentSymbol",
+        json!({"textDocument":{"uri":uri}}),
+    );
+    assert!(outline[0]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["name"].as_str().is_some_and(|s| s.contains("empty"))));
+    let event = c.capabilities["semanticTokensProvider"]["legend"]["tokenTypes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|v| v == "event")
+        .unwrap() as u64;
+    let tokens = c.request(
+        "textDocument/semanticTokens/full",
+        json!({"textDocument":{"uri":uri}}),
+    );
+    assert_eq!(
+        tokens["data"]
+            .as_array()
+            .unwrap()
+            .chunks(5)
+            .filter(|t| t[3] == event)
+            .count(),
+        4
+    );
+    // Renaming the target relation must include empty's reference.
+    let rename = c.request("textDocument/rename",json!({"textDocument":{"uri":uri},"position":position(&text,"empty(p",6),"newName":"the relation"}));
+    let renamed = support::apply_edits(
+        &text,
+        rename["documentChanges"][0]["edits"].as_array().unwrap(),
+    );
+    assert!(renamed.contains("empty('the relation')"));
+    c.change(&uri, 3, &renamed);
+    checking_idle(&mut c);
+    assert_eq!(
+        findings(&c.diagnostics(&uri))[0]["data"]["finding"],
+        identity
+    );
+    let rename = c.request("textDocument/rename",json!({"textDocument":{"uri":uri},"position":position(&renamed,"none];",0),"newName":"no tuples"}));
+    let renamed = support::apply_edits(
+        &renamed,
+        rename["documentChanges"][0]["edits"].as_array().unwrap(),
+    );
+    assert!(renamed.contains("obligation 'no tuples': empty"));
+    assert!(renamed.contains("obligations: ['no tuples']"));
+    c.change(&uri, 4, &renamed);
+    checking_idle(&mut c);
+    let edits = c.request(
+        "textDocument/formatting",
+        json!({"textDocument":{"uri":uri},"options":{"tabSize":4,"insertSpaces":true}}),
+    );
+    let formatted = support::apply_edits(&renamed, edits.as_array().unwrap());
+    c.change(&uri, 5, &formatted);
+    checking_idle(&mut c);
+    assert_eq!(findings(&c.diagnostics(&uri)).len(), 1);
+    assert_eq!(
+        c.request(
+            "textDocument/formatting",
+            json!({"textDocument":{"uri":uri},"options":{"tabSize":4,"insertSpaces":true}})
+        ),
+        json!([])
+    );
+    let two = format!("{text} verification other {{ assumptions: []; obligations: [none]; }}");
+    c.change(&uri, 6, &two);
+    checking_idle(&mut c);
+    let ds = findings(&c.diagnostics(&uri));
+    assert_eq!(ds.len(), 2);
+    assert_ne!(ds[0]["data"]["finding"], ds[1]["data"]["finding"]);
+    c.change(
+        &uri,
+        7,
+        &text.replace("assumptions: []", "assumptions: [allowed]"),
+    );
+    checking_idle(&mut c);
+    assert!(findings(&c.diagnostics(&uri)).is_empty());
+    assert_eq!(
+        c.request("denotate/roots", json!({"uri":uri}))["summary"]["state"],
+        "proved"
+    );
+    c.change(
+        &uri,
+        8,
+        &text.replace("obligations: [none]", "obligations: []"),
+    );
+    checking_idle(&mut c);
+    let ds = c.diagnostics(&uri);
+    assert!(ds
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "unchecked-obligation"));
+    assert!(findings(&ds).is_empty());
+    c.change(&uri, 9, &text.replace("empty(p)", "empty(p, group_by: ())"));
+    checking_idle(&mut c);
+    let ds = c.diagnostics(&uri);
+    assert!(ds.as_array().unwrap().iter().any(|d| d["severity"] == 1));
+    c.shutdown();
+}

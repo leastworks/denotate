@@ -374,7 +374,7 @@ impl Retained for QueryKey {
             | Self::ConeIndex
             | Self::FindingContext => {}
             Self::Grounding(k) => k.heap(p),
-            Self::Coverage(k) => k.heap(p),
+            Self::Coverage(k) | Self::Emptiness(k) => k.heap(p),
             Self::ConeDiscovery(k)
             | Self::ConeEvaluation(k)
             | Self::FindingConversion(k)

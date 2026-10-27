@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Identity {
     Coverage(ObligationId),
+    Emptiness(ObligationId),
     Uniqueness {
         obligation: ObligationId,
         tuple: Vec<ConstantId>,
@@ -87,6 +88,9 @@ impl Identity {
     /// messages or ambiguous joined namespace/name strings.
     pub fn data(&self, keys: &SemanticKeys) -> Result<Value> {
         Ok(match self {
+            Self::Emptiness(id) => {
+                json!({"obligation":qualified(&keys.obligation(*id)?.0),"component":"emptiness"})
+            }
             Self::Coverage(id) => {
                 json!({"obligation":qualified(&keys.obligation(*id)?.0), "component":"coverage"})
             }
@@ -136,6 +140,7 @@ pub fn summary(results: &ScopedResults) -> Value {
     };
     let complete = results.unfinished.is_none()
         && results.incomplete.is_empty()
+        && results.emptiness.values().all(EmptinessResult::proved)
         && results.coverage.values().all(CoverageResult::proved)
         && results.regions.is_empty()
         && results
@@ -143,7 +148,7 @@ pub fn summary(results: &ScopedResults) -> Value {
             .values()
             .all(|r| matches!(r, ScopedResult::Proved));
     let mut summary = json!({
-        "state":if complete { "proved" } else if results.coverage.values().any(|c| c.missing > 0) || results.groups.values().any(|r| matches!(r,ScopedResult::Counterexample(..))) || results.regions.values().any(|r| matches!(r.completion,RegionCompletion::NoMeaning{..})) { "findings" } else { "incomplete" },
+        "state":if complete { "proved" } else if results.emptiness.values().any(|e| e.example.is_some()) || results.coverage.values().any(|c| c.missing > 0) || results.groups.values().any(|r| matches!(r,ScopedResult::Counterexample(..))) || results.regions.values().any(|r| matches!(r.completion,RegionCompletion::NoMeaning{..})) { "findings" } else { "incomplete" },
         "backend":{"backend":results.context.backend.backend,"configuration":results.context.backend.configuration},
         "activeAssumptions":results.context.constraints.iter().map(|c| match c { InputConstraint::AtMostOne{relation:r,group_by} => json!({"kind":"at-most-one","relation":relation(r),"groupBy":group_by}) }).collect::<Vec<_>>(),
         "groups":results.groups.iter().map(|(k,v)|json!({"identity":group_identity(k, results) ,"outcome":kinds(v),"reason":result_reason(v)})).collect::<Vec<_>>(),
@@ -151,6 +156,14 @@ pub fn summary(results: &ScopedResults) -> Value {
         "unfinished":results.unfinished.as_ref().map(|r|json!({"phase":r.phase,"resource":r.resource})),
         "incomplete":results.incomplete.iter().map(|(k,r)|json!({"region":k.0.iter().map(atom_data).collect::<Vec<_>>(),"phase":r.phase,"resource":r.resource})).collect::<Vec<_>>()
     });
+    if !results.emptiness.is_empty() {
+        summary["emptiness"] = json!(results.emptiness.iter().map(|(key,e)| json!({
+            "identity":{"obligation":qualified(&key.0),"component":"emptiness"},
+            "outcome":if e.example.is_some() {"counterexample"} else if e.proved() {"proved"} else {"inconclusive"},
+            "complete":e.complete(), "unresolved":e.unresolved,
+            "reason":e.inconclusive.map(|r|json!({"phase":r.phase,"resource":r.resource}))
+        })).collect::<Vec<_>>());
+    }
     if !results.coverage.is_empty() {
         summary["coverage"] = json!(results.coverage.iter().map(|(key,c)| json!({
             "identity":{"obligation":qualified(&key.0),"component":"coverage"},
@@ -185,6 +198,20 @@ pub fn evidence_data(finding: &crate::Finding<'_>, keys: &SemanticKeys) -> Resul
         .map(|c| Ok(occurrence(keys.bindings().key(c.occurrence)?)))
         .collect::<Result<Vec<_>>>()?;
     Ok(match &finding.evidence {
+        crate::Evidence::Emptiness(e) => {
+            let mut data = json!({"kind":if e.example.is_some() {"replayed-counterexample"} else {"no-witness"},
+                "component":"emptiness", "complete":e.complete(), "unresolved":e.unresolved,
+                "reason":e.inconclusive.map(|r|json!({"phase":r.phase,"resource":r.resource}))});
+            if let Some(e) = &e.example {
+                data["observation"] = observation(&e.observation)?;
+                data["tuples"] = json!([atom_data(&AtomKey::from_atom(keys, &e.tuple)?)]);
+                data["scope"] = json!(match e.replay_scope {
+                    ReplayScope::WholeProgram => "whole-program",
+                    ReplayScope::ConeOnly => "cone-only",
+                });
+            }
+            data
+        }
         crate::Evidence::Coverage(c) => json!({
             "kind":if c.missing > 0 {"replayed-coverage-counterexamples"} else {"no-witness"},
             "component":"coverage", "missingGroups":{"count":c.missing,"exact":c.complete()},
