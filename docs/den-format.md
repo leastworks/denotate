@@ -111,21 +111,31 @@ even `empty(R, group_by: ())` is rejected. A relation with no possible tuples is
 proved empty; a zero-arity relation fails as soon as its single tuple is present.
 Duplicate derivations do not change this.
 
-One finding per obligation and verification reports a replay-confirmed present tuple
-and its input world. The identity has component `emptiness` and does not depend on
-which tuple or world is shown. Blocked or unknown facts never count as presence.
-Unresolved worlds and exhausted limits make checking inconclusive, never proved.
-A known counterexample survives that incompleteness, which remains visible in the
-message and result. Failure locations follow one grounded derivation of the reported
-tuple in its replayed world, as for uniqueness: producing rules (including facts)
-are primary, premise occurrences and the obligation are related. Normal program
-ownership and labeled library fallback apply. Multiple locations share one finding
-identity; neither all invalid tuples nor all alternative derivations are enumerated.
+One finding per obligation and verification reports up to three distinct,
+replay-confirmed present tuples. Each retains its own input world, replay scope and
+derivation. The count includes every confirmed tuple, including those beyond the
+sample: it is exact when checking completes and a lower bound otherwise. This is a
+count across permitted worlds, not a claim that all the tuples occur together.
+Repeated derivations or worlds for the same tuple count only once. The sample keeps
+the smallest confirmed tuples by semantic key, independently of checking order.
 
-Attribution runs after checking with a separate bounded allowance. If it cannot
-finish, the failure falls back to the obligation with an attribution notice; its
-verdict and checking completeness are unchanged. Current `.den` locations and
-upstream origins remain separate. Findings without a witness stay at the obligation.
+The identity has component `emptiness` and does not depend on the tuples or worlds
+shown. Blocked or unknown facts never count as presence. Unresolved worlds and
+exhausted limits make checking inconclusive, never proved. Known counterexamples
+survive that incompleteness, which remains visible in the message and result.
+
+Failure locations are the union of the retained tuples' derivations: producing
+rules (including facts) are primary, premise occurrences and the obligation are
+related. Normal program ownership and labeled library fallback apply separately
+to each tuple. Each primary has a note naming its tuple and world; shared locations
+merge those notes. Multiple locations still share one finding identity. Alternative
+derivations of a tuple are not enumerated.
+
+Attribution runs after checking with a fresh bounded allowance per retained tuple.
+If it cannot finish, that tuple falls back to the obligation with an attribution
+notice; other tuples keep their own attribution allowances. Verdict and checking
+completeness are unchanged. Current `.den` locations and upstream origins remain
+separate. Findings without a witness stay at the obligation.
 
 `empty` is an obligation form only. Selection, unchecked-obligation notices,
 consistency-only verifications, origins, printing and editor services work as for

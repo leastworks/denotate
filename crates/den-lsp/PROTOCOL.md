@@ -171,11 +171,14 @@ notices and the empty-grouping-domain Information note apply unchanged.
 
 An `empty(R)` finding uses
 `{"verification": [namespaceKey, name], "obligation": [namespaceKey, name], "component": "emptiness"}`.
-A replayed failure has primaries on the retained derivation's producing rules and
-facts, with premise occurrences and the obligation related, as uniqueness does.
-Normal program ownership and library fallback apply. Multiple diagnostics share the
-same finding identity, independent of the example and derivation. Program ownership
-remains `data.program`. Findings without a witness stay at the obligation.
+A replayed failure has primaries on the retained tuples' producing rules and facts,
+with premise occurrences and the obligation related, as uniqueness does. Each tuple
+is placed separately under normal program ownership and library fallback, then
+shared primary locations are merged. Per-location notes name the tuple, its input
+observation and replay scope; a shared location has each applicable tuple's note.
+All diagnostics share the same finding identity, independent of examples and
+derivations. Program ownership remains `data.program`. Findings without a witness
+stay at the obligation.
 
 `summary.emptiness` is present only when emptiness obligations are selected. Entries
 contain `identity` (obligation and component), `outcome` (`proved`, `counterexample`,
@@ -184,22 +187,37 @@ contain `identity` (obligation and component), `outcome` (`proved`, `counterexam
 records resource exhaustion. Either prevents proof. A known failure remains a
 `counterexample` with `complete: false` when analysis elsewhere is unresolved.
 
-Evidence uses `replayed-counterexample`, component `emptiness`, one present atom in
-`tuples`, its `observation: {present, absent}`, and `scope` (`whole-program` or
-`cone-only`). It also carries `complete`, `unresolved` and `reason` as above. Without
-a witness the evidence kind is `no-witness`, with those completeness fields. Blocked
-facts never serve as witness tuples. Diagnostic codes are `counterexample` for a
-replayed failure and `inconclusive` otherwise; no diagnostic is emitted for proof.
-For emptiness, both the summary entry and evidence also carry `attribution`: null
-without an example, `{"state":"complete"}` when its derivation was retained, or
-`{"state":"incomplete","reason":{"phase":...,"resource":...}}` when bounded
-attribution could not finish. This status is independent of semantic `complete`,
-`unresolved` and `reason`; attribution exhaustion retains the failure and falls back
-to the obligation with a note. Evidence also includes `producers`, the semantic
-occurrence keys of retained producing rules. Attribution completeness describes
-evidence collection, not the availability of source spans or upstream origins.
+Evidence uses `replayed-counterexample` with component `emptiness`, or `no-witness`
+if there is no confirmed tuple. It carries the same `complete`, `unresolved` and
+`reason` fields. Both the summary entry and evidence contain:
+
+- `presentTuples: {count, exact}`: the number of distinct tuples confirmed present in
+  at least one permitted world. Different tuples may require different worlds.
+  `exact` equals `complete`; otherwise the count is a lower bound. Repeated worlds
+  and derivations of the same tuple do not increase it.
+- `examplesTruncated`: true when the confirmed count exceeds the retained sample.
+  False does not assert completeness; consult `presentTuples.exact`.
+- `examples`: up to three entries, the smallest confirmed tuples by semantic key.
+  Each contains `tuple` (one keyed atom), its own `observation: {present, absent}`,
+  `scope` (`whole-program` or `cone-only`), `producers` (retained producing-rule
+  occurrence keys) and `attribution`. Empty when no tuple was confirmed.
+
+The former singleton `tuples`, `observation`, `scope` and `attribution` evidence
+fields are replaced by those per-example fields. Evidence also retains top-level
+`producers` for the whole finding. Other obligation kinds' payloads are unchanged.
+
+Per-example `attribution` is `{"state":"complete"}` when its derivation was retained,
+or `{"state":"incomplete","reason":{"phase":...,"resource":...}}` when bounded
+attribution could not finish (null before the attribution pass). Each tuple has a
+fresh attribution allowance. Exhaustion falls back to the obligation for that tuple,
+with a note; it never changes semantic `complete`, `unresolved`, `reason` or the
+count, and does not consume another tuple's allowance. Attribution completeness
+describes evidence collection, not availability of source spans or upstream origins.
+
+Blocked facts never serve as witness tuples. Diagnostic codes are `counterexample`
+for a replayed failure and `inconclusive` otherwise; proof emits no diagnostic.
 Current `.den` spans remain primary; embedded origins remain related and available
-through Go to Origin. Existing group and coverage payloads are unchanged.
+through Go to Origin.
 
 ### Configuration
 

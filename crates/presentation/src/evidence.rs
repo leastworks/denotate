@@ -72,6 +72,13 @@ pub enum Evidence<'a> {
     Group(&'a VerifiedGroup),
     Region(&'a UnresolvedRegion),
 }
+/// Independently placed evidence sharing a finding identity. Keeping these
+/// groups separate preserves a tuple's fallback even if another has producers.
+#[derive(Debug)]
+pub struct PlacementGroup {
+    pub contributions: Vec<Contribution>,
+    pub notes: Vec<String>,
+}
 #[derive(Debug)]
 pub struct Finding<'a> {
     pub identity: Identity,
@@ -79,6 +86,7 @@ pub struct Finding<'a> {
     pub message: String,
     pub notes: Vec<String>,
     pub contributions: Vec<Contribution>,
+    pub placement_groups: Vec<PlacementGroup>,
     pub cycle_rules: Vec<RuleId>,
     /// Original checked evidence, for optional frontend wording and attribution.
     pub evidence: Evidence<'a>,
@@ -279,6 +287,7 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
             message,
             notes,
             contributions,
+            placement_groups: vec![],
             cycle_rules: cycle_rules.into_iter().collect(),
             evidence: Evidence::Group(group),
         });
@@ -290,10 +299,17 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
         let obligation = corpus
             .obligation(*id)
             .ok_or(Error::InvalidFinding("foreign emptiness obligation"))?;
-        let message = if emptiness.example.is_some() {
+        let message = if emptiness.present > 0 {
             format!(
-                "Obligation {}: relation is not empty{}",
+                "Obligation {}: relation is not empty; {}{} distinct tuples can be present; showing {} examples{}",
                 obligation.name,
+                if emptiness.complete() {
+                    ""
+                } else {
+                    "at least "
+                },
+                emptiness.present,
+                emptiness.examples.len(),
                 if emptiness.complete() {
                     "."
                 } else {
@@ -314,21 +330,41 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
             occurrence: (*id).into(),
             role: Role::Obligation,
         }];
-        let mut notes = Vec::new();
-        match &emptiness.attribution {
-            Some(Attribution::Complete(evidence)) => {
-                derivation_contributions(evidence, &mut contributions);
-                notes.push("Locations follow the retained grounded derivation of the present tuple.".into());
+        let notes = Vec::new();
+        let mut placement_groups = Vec::new();
+        for example in &emptiness.examples {
+            let mut group = PlacementGroup {
+                contributions: vec![Contribution {
+                    occurrence: (*id).into(),
+                    role: Role::Obligation,
+                }],
+                notes: vec![format!(
+                    "Replayed present tuple: {}. Example input observation — present: {}; absent: {}. Scope: {}.",
+                    atom_name(corpus, &example.tuple)?,
+                    world_atoms(corpus, &example.observation.present)?,
+                    world_atoms(corpus, &example.observation.absent)?,
+                    match example.replay_scope {
+                        ReplayScope::WholeProgram => "whole-program",
+                        ReplayScope::ConeOnly => "cone-only",
+                    },
+                )],
+            };
+            match &example.attribution {
+                Some(Attribution::Complete(evidence)) => {
+                    derivation_contributions(evidence, &mut group.contributions);
+                }
+                Some(Attribution::Incomplete(c)) => group.notes.push(format!(
+                    "Source attribution for {} is incomplete ({}: {}); its counterexample is unchanged. Locations fall back to the obligation.",
+                    atom_name(corpus, &example.tuple)?, c.phase, c.resource,
+                )),
+                None => {}
             }
-            Some(Attribution::Incomplete(c)) => notes.push(format!(
-                "Source attribution is incomplete ({}: {}); the counterexample is unchanged. Locations fall back to the obligation.",
-                c.phase, c.resource,
-            )),
-            None => {}
+            contributions.extend(group.contributions.iter().copied());
+            placement_groups.push(group);
         }
         findings.push(Finding {
             identity: Identity::Emptiness(*id),
-            kind: if emptiness.example.is_some() {
+            kind: if emptiness.present > 0 {
                 Kind::Counterexample
             } else {
                 Kind::Inconclusive
@@ -336,6 +372,7 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
             message,
             notes,
             contributions,
+            placement_groups,
             cycle_rules: vec![],
             evidence: Evidence::Emptiness(emptiness),
         });
@@ -403,6 +440,7 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
                 occurrence: (*id).into(),
                 role: Role::Obligation,
             }],
+            placement_groups: vec![],
             cycle_rules: vec![],
             evidence: Evidence::Coverage(coverage),
         });
@@ -441,6 +479,7 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
             message,
             notes,
             contributions,
+            placement_groups: vec![],
             cycle_rules: rules.into_iter().collect(),
             evidence: Evidence::Region(region),
         });
@@ -458,61 +497,12 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
 /// Default IR vocabulary. A DSL can instead decode the same observation into
 /// its own value model without replacing the shared interpretation above.
 pub fn generic_details(corpus: &Corpus, finding: &Finding<'_>) -> Result<Vec<String>> {
-    let name = |id: OccurrenceId, name: &str| {
-        let spelling = |name: &str| {
-            if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-                name.to_owned()
-            } else {
-                format!("{name:?}")
-            }
-        };
-        corpus
-            .namespace(id)
-            .into_iter()
-            .flat_map(|n| n.segments())
-            .map(|s| spelling(s))
-            .chain(std::iter::once(spelling(name)))
-            .collect::<Vec<_>>()
-            .join("::")
-    };
-    let atom = |a: &GroundAtom| -> Result<String> {
-        let relation = corpus
-            .relation(a.relation)
-            .ok_or(Error::InvalidFinding("unknown witness relation"))?;
-        let args = a
-            .arguments
-            .iter()
-            .map(|id| {
-                let c = corpus
-                    .constant(*id)
-                    .ok_or(Error::InvalidFinding("unknown witness constant"))?;
-                Ok(name((*id).into(), &c.name))
-            })
-            .collect::<Result<Vec<_>>>()?;
-        Ok(format!(
-            "{}({})",
-            name(a.relation.into(), &relation.name),
-            args.join(", ")
-        ))
-    };
-    let show = |atoms: &BTreeSet<GroundAtom>| -> Result<String> {
-        let names = atoms.iter().map(&atom).collect::<Result<BTreeSet<_>>>()?;
-        Ok(if names.is_empty() {
-            "(none)".into()
-        } else {
-            names.into_iter().collect::<Vec<_>>().join(", ")
-        })
-    };
+    let name = |id, name: &str| occurrence_name(corpus, id, name);
+    let show = |atoms| world_atoms(corpus, atoms);
     let mut details = Vec::new();
     let observation = match &finding.evidence {
-        Evidence::Emptiness(e) => {
-            if let Some(e) = &e.example {
-                details.push(format!("Replayed present tuple: {}.", atom(&e.tuple)?));
-                Some(&e.observation)
-            } else {
-                None
-            }
-        }
+        // Tuple/world notes are attached only to that example's locations.
+        Evidence::Emptiness(_) => None,
         Evidence::Coverage(c) => {
             for e in &c.examples {
                 let group = e
@@ -554,4 +544,52 @@ pub fn generic_details(corpus: &Corpus, finding: &Finding<'_>) -> Result<Vec<Str
         ));
     }
     Ok(details)
+}
+
+fn occurrence_name(corpus: &Corpus, id: OccurrenceId, name: &str) -> String {
+    let spelling = |name: &str| {
+        if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
+            name.to_owned()
+        } else {
+            format!("{name:?}")
+        }
+    };
+    corpus
+        .namespace(id)
+        .into_iter()
+        .flat_map(|n| n.segments())
+        .map(|s| spelling(s))
+        .chain(std::iter::once(spelling(name)))
+        .collect::<Vec<_>>()
+        .join("::")
+}
+fn atom_name(corpus: &Corpus, a: &GroundAtom) -> Result<String> {
+    let name = |id, name: &str| occurrence_name(corpus, id, name);
+    let relation = corpus
+        .relation(a.relation)
+        .ok_or(Error::InvalidFinding("unknown witness relation"))?;
+    let args = a
+        .arguments
+        .iter()
+        .map(|id| {
+            let c = corpus
+                .constant(*id)
+                .ok_or(Error::InvalidFinding("unknown witness constant"))?;
+            Ok(name((*id).into(), &c.name))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(format!(
+        "{}({})",
+        name(a.relation.into(), &relation.name),
+        args.join(", ")
+    ))
+}
+fn world_atoms(corpus: &Corpus, atoms: &BTreeSet<GroundAtom>) -> Result<String> {
+    let atom = |a| atom_name(corpus, a);
+    let names = atoms.iter().map(&atom).collect::<Result<BTreeSet<_>>>()?;
+    Ok(if names.is_empty() {
+        "(none)".into()
+    } else {
+        names.into_iter().collect::<Vec<_>>().join(", ")
+    })
 }

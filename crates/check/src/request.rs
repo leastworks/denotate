@@ -678,41 +678,48 @@ impl PreparedCheck<'_> {
             out.emptiness.insert(
                 keys.obligation(*id).map_err(CheckError::Keys)?.clone(),
                 EmptinessResult {
-                    attribution: e
-                        .attribution
-                        .as_ref()
-                        .map(|a| -> Result<_> {
-                            Ok(match a {
-                                Attribution::Incomplete(c) => Attribution::Incomplete(*c),
-                                Attribution::Complete(steps) => {
-                                    // Stable placement evidence; semantic proof/provider
-                                    // validation happened in the attribution replay.
-                                    let mut evidence = EvidenceKeys::default();
-                                    for step in steps.values() {
-                                        if let GroundEvidence::Derived { rule, .. } = &step.evidence
-                                        {
-                                            self.rule_evidence(rule, keys, &mut evidence)?;
-                                        }
-                                    }
-                                    Attribution::Complete(evidence)
-                                }
-                            })
-                        })
-                        .transpose()?,
+                    present: e.present,
                     inconclusive: e.inconclusive,
                     unresolved: e.unresolved,
-                    example: e
-                        .example
-                        .as_ref()
-                        .map(|e| {
+                    examples: e
+                        .examples
+                        .iter()
+                        .map(|e| -> Result<_> {
                             Ok(PresenceExample {
                                 tuple: AtomKey::from_atom(keys, &e.tuple)
                                     .map_err(CheckError::Keys)?,
                                 observation: candidate(&e.observation)?,
                                 replay_scope: e.replay_scope,
+                                attribution: e
+                                    .attribution
+                                    .as_ref()
+                                    .map(|a| -> Result<_> {
+                                        Ok(match a {
+                                            Attribution::Incomplete(c) => {
+                                                Attribution::Incomplete(*c)
+                                            }
+                                            Attribution::Complete(steps) => {
+                                                let mut evidence = EvidenceKeys::default();
+                                                for step in steps.values() {
+                                                    if let GroundEvidence::Derived {
+                                                        rule, ..
+                                                    } = &step.evidence
+                                                    {
+                                                        self.rule_evidence(
+                                                            rule,
+                                                            keys,
+                                                            &mut evidence,
+                                                        )?;
+                                                    }
+                                                }
+                                                Attribution::Complete(evidence)
+                                            }
+                                        })
+                                    })
+                                    .transpose()?,
                             })
                         })
-                        .transpose()?,
+                        .collect::<Result<_>>()?,
                 },
             );
         }

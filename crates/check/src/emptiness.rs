@@ -1,6 +1,6 @@
 //! Ungrouped absence obligations. Presence is evidence only after concrete replay;
-//! unresolved facts never prove emptiness. Retain one example, independently of
-//! the amount of unresolved analysis in the rest of the relation.
+//! unresolved facts never prove emptiness. Retain a bounded, keyed sample without
+//! changing semantic enumeration or its allowance.
 use crate::{
     limits::{Budget, Result},
     *,
@@ -8,11 +8,15 @@ use crate::{
 use denotate_ir::{ObligationId, RelationId};
 use std::collections::{BTreeMap, BTreeSet};
 
+pub const EMPTINESS_EXAMPLE_LIMIT: usize = 3;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PresenceExample<A, W> {
+pub struct PresenceExample<A, W, E> {
     pub tuple: A,
     pub observation: W,
     pub replay_scope: ReplayScope,
+    /// Populated by the separate post-check attribution pass.
+    pub attribution: Option<Attribution<E>>,
 }
 /// Optional source attribution, separate from semantic completeness.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -22,9 +26,10 @@ pub enum Attribution<E> {
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EmptinessSummary<A, W, E> {
-    pub example: Option<PresenceExample<A, W>>,
-    /// None when there is no example (or before the post-check attribution pass).
-    pub attribution: Option<Attribution<E>>,
+    /// Distinct tuples confirmed present in at least one permitted world.
+    /// Exact when complete(); otherwise a lower bound, not a simultaneous count.
+    pub present: usize,
+    pub examples: Vec<PresenceExample<A, W, E>>,
     /// Some permitted worlds could not be settled or certified.
     pub unresolved: bool,
     pub inconclusive: Option<Inconclusive>,
@@ -35,8 +40,8 @@ pub type EmptinessResult = EmptinessSummary<AtomKey, Candidate, EvidenceKeys>;
 impl<A, W, E> Default for EmptinessSummary<A, W, E> {
     fn default() -> Self {
         Self {
-            example: None,
-            attribution: None,
+            present: 0,
+            examples: vec![],
             unresolved: false,
             inconclusive: None,
         }
@@ -47,7 +52,7 @@ impl<A, W, E> EmptinessSummary<A, W, E> {
         !self.unresolved && self.inconclusive.is_none()
     }
     pub fn proved(&self) -> bool {
-        self.complete() && self.example.is_none()
+        self.complete() && self.present == 0
     }
 }
 impl SymbolicMeaning<'_> {
@@ -64,7 +69,13 @@ impl SymbolicMeaning<'_> {
         for (id, relation) in ordered {
             let mut budget = Budget::tracked(limits);
             let mut report = EmptinessReport::default();
-            if let Err(error) = self.empty_relation(*relation, &mut budget, &mut report) {
+            if let Err(error) = self.empty_relation(
+                *relation,
+                queries.as_ref().map(|q| q.keys),
+                EMPTINESS_EXAMPLE_LIMIT,
+                &mut budget,
+                &mut report,
+            ) {
                 budget.failure(&error);
                 report.inconclusive = Some(Inconclusive::from_error(error)?);
             }
@@ -87,6 +98,8 @@ impl SymbolicMeaning<'_> {
     fn empty_relation(
         &self,
         relation: RelationId,
+        keys: Option<&denotate_ir::SemanticKeys>,
+        example_limit: usize,
         budget: &mut Budget<'_>,
         report: &mut EmptinessReport,
     ) -> Result<()> {
@@ -106,6 +119,7 @@ impl SymbolicMeaning<'_> {
                     continue;
                 }
             };
+            let mut counted = false;
             loop {
                 budget.tick("emptiness search")?;
                 let Some(observation) = context.witness_with_budget(&remaining, budget)? else {
@@ -142,13 +156,15 @@ impl SymbolicMeaning<'_> {
                         }
                     },
                 };
-                if present && report.example.is_none() {
-                    budget.charge(atom.arguments.len() + 1, "emptiness evidence")?;
-                    report.example = Some(PresenceExample {
-                        tuple: atom.clone(),
-                        observation: observation.clone(),
-                        replay_scope: scope,
-                    });
+                if present && !counted {
+                    // Preserve the historical first-witness charge exactly. Extra
+                    // sample retention does not spend the semantic allowance.
+                    if report.present == 0 {
+                        budget.charge(atom.arguments.len() + 1, "emptiness evidence")?;
+                    }
+                    report.present += 1;
+                    counted = true;
+                    retain_example(report, atom, &observation, scope, keys, example_limit)?;
                 }
                 if !blocked {
                     // A settled symbolic presence must agree with replay.
@@ -186,6 +202,50 @@ impl SymbolicMeaning<'_> {
     }
 }
 
+// A bounded top-k sample, independent of semantic traversal order. In particular,
+// sorting all candidates before checking would change resource-limited outcomes.
+// Keyless low-level callers use preparation-local atom order, as coverage does.
+fn retain_example(
+    report: &mut EmptinessReport,
+    atom: &GroundAtom,
+    observation: &Observation,
+    replay_scope: ReplayScope,
+    keys: Option<&denotate_ir::SemanticKeys>,
+    limit: usize,
+) -> Result<()> {
+    let mut index = 0;
+    let key = keys
+        .map(|keys| AtomKey::from_atom(keys, atom))
+        .transpose()
+        .map_err(CheckError::Keys)?;
+    for existing in &report.examples {
+        let before = if let (Some(keys), Some(key)) = (keys, &key) {
+            key < &AtomKey::from_atom(keys, &existing.tuple).map_err(CheckError::Keys)?
+        } else {
+            atom < &existing.tuple
+        };
+        if before {
+            break;
+        }
+        index += 1;
+    }
+    if index < limit {
+        if report.examples.len() == limit {
+            report.examples.pop();
+        }
+        report.examples.insert(
+            index,
+            PresenceExample {
+                tuple: atom.clone(),
+                observation: observation.clone(),
+                replay_scope,
+                attribution: None,
+            },
+        );
+    }
+    Ok(())
+}
+
 impl GroundProgram {
     /// Run only after semantic checking, with a fresh allowance per example.
     /// Attribution exhaustion never consumes a semantic query's budget or alters
@@ -196,22 +256,21 @@ impl GroundProgram {
         limits: &Limits,
     ) -> Result<()> {
         for report in reports.values_mut() {
-            let Some(example) = &report.example else {
-                continue;
-            };
-            let mut budget = Budget::new(limits);
-            let result = self.presence_evidence(example, &mut budget);
-            report.attribution = Some(match result {
-                Ok(evidence) => Attribution::Complete(evidence),
-                Err(error) => Attribution::Incomplete(Inconclusive::from_error(error)?),
-            });
+            for example in &mut report.examples {
+                let mut budget = Budget::new(limits);
+                let result = self.presence_evidence(example, &mut budget);
+                example.attribution = Some(match result {
+                    Ok(evidence) => Attribution::Complete(evidence),
+                    Err(error) => Attribution::Incomplete(Inconclusive::from_error(error)?),
+                });
+            }
         }
         Ok(())
     }
 
     fn presence_evidence(
         &self,
-        example: &PresenceExample<GroundAtom, Observation>,
+        example: &PresenceExample<GroundAtom, Observation, BTreeMap<GroundAtom, EvidenceStep>>,
         budget: &mut Budget<'_>,
     ) -> Result<BTreeMap<GroundAtom, EvidenceStep>> {
         let replay =
@@ -268,7 +327,7 @@ mod tests {
                 GroundProgram::prepare(&c, &Domains::from([(s, vec![a, b])]), &limits).unwrap();
             let meaning = program.symbolic(&limits).unwrap();
             let original = meaning.check_emptiness(&limits, None).unwrap();
-            assert!(original.values().all(|r| r.example.is_some()));
+            assert!(original.values().all(|r| r.present > 0));
             assert_eq!(original.values().next().unwrap().complete(), !unresolved);
             for max_work in [0, limits.max_work] {
                 let mut attributed = original.clone();
@@ -282,9 +341,11 @@ mod tests {
                     )
                     .unwrap();
                 for (id, report) in &mut attributed {
-                    match report.attribution.take().unwrap() {
-                        Attribution::Incomplete(_) => assert_eq!(max_work, 0),
-                        Attribution::Complete(steps) => assert!(!steps.is_empty()),
+                    for example in &mut report.examples {
+                        match example.attribution.take().unwrap() {
+                            Attribution::Incomplete(_) => assert_eq!(max_work, 0),
+                            Attribution::Complete(steps) => assert!(!steps.is_empty()),
+                        }
                     }
                     assert_eq!(report, &original[id]);
                 }
@@ -297,5 +358,128 @@ mod tests {
                 Err(CheckError::Cancelled)
             );
         }
+    }
+    #[test]
+    fn retaining_more_examples_preserves_bounded_semantic_outcomes() {
+        let mut c = Corpus::new();
+        let s = c.declare_sort("S").unwrap();
+        let r = c
+            .declare_relation("r", RelationRole::Derived, [Parameter::new("x", s)])
+            .unwrap();
+        let mut constants = vec![];
+        for name in ["a", "b", "c", "d", "e"] {
+            let value = c.declare_constant(name, s).unwrap();
+            let fact = c.atom(r, [Term::Constant(value)]).unwrap();
+            c.add_fact(fact).unwrap();
+            constants.push(value);
+        }
+        c.empty("none", r, "").unwrap();
+        let limits = Limits::default();
+        let program =
+            GroundProgram::prepare(&c, &Domains::from([(s, constants)]), &limits).unwrap();
+        let meaning = program.symbolic(&limits).unwrap();
+        let mut saw_partial = false;
+        let mut saw_complete = false;
+        for max_work in 0..2000 {
+            let limited = Limits {
+                max_work,
+                ..limits.clone()
+            };
+            let check = |cap| {
+                let mut report = EmptinessReport::default();
+                if let Err(error) =
+                    meaning.empty_relation(r, None, cap, &mut Budget::new(&limited), &mut report)
+                {
+                    report.inconclusive = Some(Inconclusive::from_error(error).unwrap());
+                }
+                report
+            };
+            let one = check(1);
+            let several = check(EMPTINESS_EXAMPLE_LIMIT);
+            assert_eq!(
+                (one.present, one.unresolved, one.inconclusive, one.proved()),
+                (
+                    several.present,
+                    several.unresolved,
+                    several.inconclusive,
+                    several.proved()
+                )
+            );
+            saw_partial |= several.present > 0 && !several.complete();
+            if several.complete() {
+                assert_eq!(several.present, 5);
+                assert_eq!(several.examples.len(), EMPTINESS_EXAMPLE_LIMIT);
+                saw_complete = true;
+                break;
+            }
+        }
+        assert!(saw_partial && saw_complete);
+    }
+
+    #[test]
+    fn one_tuples_attribution_exhaustion_does_not_spend_anothers_allowance() {
+        let mut c = Corpus::new();
+        let s = c.declare_sort("S").unwrap();
+        let a = c.declare_constant("a", s).unwrap();
+        let b = c.declare_constant("b", s).unwrap();
+        let r = c
+            .declare_relation("r", RelationRole::Derived, [Parameter::new("x", s)])
+            .unwrap();
+        let mut prior = c
+            .declare_relation("seed", RelationRole::Derived, [])
+            .unwrap();
+        let fact = c.atom(prior, []).unwrap();
+        c.add_fact(fact).unwrap();
+        for i in 0..12 {
+            let next = c
+                .declare_relation(format!("step{i}"), RelationRole::Derived, [])
+                .unwrap();
+            let head = c.atom(next, []).unwrap();
+            let body = c.atom(prior, []).unwrap();
+            c.add_rule(head, [Literal::Positive(body)]).unwrap();
+            prior = next;
+        }
+        let head = c.atom(r, [Term::Constant(a)]).unwrap();
+        let body = c.atom(prior, []).unwrap();
+        c.add_rule(head, [Literal::Positive(body)]).unwrap();
+        let fact = c.atom(r, [Term::Constant(b)]).unwrap();
+        c.add_fact(fact).unwrap();
+        c.empty("none", r, "").unwrap();
+        let limits = Limits::default();
+        let program =
+            GroundProgram::prepare(&c, &Domains::from([(s, vec![a, b])]), &limits).unwrap();
+        let meaning = program.symbolic(&limits).unwrap();
+        let original = meaning.check_emptiness(&limits, None).unwrap();
+        let mut saw_independent = false;
+        for max_work in 0..5000 {
+            let mut attributed = original.clone();
+            program
+                .attribute_emptiness(
+                    &mut attributed,
+                    &Limits {
+                        max_work,
+                        ..limits.clone()
+                    },
+                )
+                .unwrap();
+            let report = attributed.values_mut().next().unwrap();
+            let states = report
+                .examples
+                .iter()
+                .map(|e| matches!(e.attribution, Some(Attribution::Complete(_))))
+                .collect::<Vec<_>>();
+            if states == [false, true] {
+                for e in &mut report.examples {
+                    e.attribution = None;
+                }
+                assert_eq!(&attributed, &original);
+                saw_independent = true;
+                break;
+            }
+        }
+        assert!(
+            saw_independent,
+            "a long derivation must not consume the next tuple's attribution allowance"
+        );
     }
 }

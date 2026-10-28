@@ -79,7 +79,10 @@ fn empty_relations_zero_arity_inputs_recursion_and_duplicate_derivations() {
         );
         if let Some(d) = diagnostics.first() {
             assert_eq!(d.evidence["kind"], "replayed-counterexample");
-            assert_eq!(d.evidence["tuples"].as_array().unwrap().len(), 1);
+            assert_eq!(
+                d.evidence["examples"].as_array().unwrap().len(),
+                e.examples.len()
+            );
             assert_eq!(d.evidence["component"], "emptiness");
         }
     }
@@ -116,7 +119,13 @@ fn independent_small_world_oracle_and_replayed_presence_cold_warm_and_global() {
             let e = cold.emptiness.values().next().unwrap();
             assert!(e.complete());
             assert_eq!(e.proved(), expected);
-            if let Some(e) = &e.example {
+            assert_eq!(
+                e.present,
+                (0..2)
+                    .filter(|column| worlds.iter().any(|w| truth(*w)[*column]))
+                    .count()
+            );
+            for e in &e.examples {
                 let a = p
                     .keys
                     .constant(p.corpus.constants().find(|c| c.name == "a").unwrap().id)
@@ -142,13 +151,13 @@ fn independent_small_world_oracle_and_replayed_presence_cold_warm_and_global() {
                 panic!()
             };
             assert_eq!(global.verification.all_obligations_proved(), expected);
-            if let Some(e) = &global
+            for e in &global
                 .verification
                 .emptiness
                 .values()
                 .next()
                 .unwrap()
-                .example
+                .examples
             {
                 let replay = prepared
                     .program()
@@ -188,7 +197,7 @@ fn unresolved_worlds_are_not_presence_or_a_proof_and_do_not_erase_known_failure(
         let e = r.emptiness.values().next().unwrap();
         assert!(e.unresolved, "{body}: {e:?}");
         assert!(!e.complete() && !e.proved());
-        assert_eq!(e.example.is_some(), failure, "{body}");
+        assert_eq!(e.present, usize::from(failure), "{body}");
         let d = out
             .diagnostics
             .iter()
@@ -229,7 +238,7 @@ fn limits_never_prove_unknown_facts_and_preserve_earlier_presence() {
         assert_eq!(r, run(&p, &mut session, &limits).0);
         let e = r.emptiness.values().next().unwrap();
         assert!(e.inconclusive.is_some() && !e.proved(), "{e:?}");
-        assert_eq!(e.example.is_some(), !fact.is_empty());
+        assert_eq!(e.examples.first().is_some(), !fact.is_empty());
     }
     // A second case forces bounded enumeration of unresolved worlds while an
     // independent fact already refutes the obligation.
@@ -242,9 +251,26 @@ fn limits_never_prove_unknown_facts_and_preserve_earlier_presence() {
     };
     let (r, out) = run(&p, &mut Session::default(), &limits);
     let e = r.emptiness.values().next().unwrap();
-    assert!(e.example.is_some() && e.inconclusive.is_some(), "{e:?}");
+    assert!(
+        e.examples.first().is_some() && e.inconclusive.is_some(),
+        "{e:?}"
+    );
     assert!(!e.complete());
     assert_eq!(out.status["state"], "findings");
+    assert_eq!(
+        out.status["emptiness"][0]["presentTuples"],
+        serde_json::json!({"count":e.present,"exact":false})
+    );
+    let d = out
+        .diagnostics
+        .iter()
+        .find(|d| matches!(d.identity, Identity::Emptiness(_)))
+        .unwrap();
+    assert_eq!(
+        d.evidence["presentTuples"],
+        out.status["emptiness"][0]["presentTuples"]
+    );
+    assert!(d.message.contains("at least"));
 }
 
 #[test]
@@ -326,7 +352,8 @@ fn round_trip_preserves_ungrouped_requirement_selection_and_origins() {
                 .values()
                 .next()
                 .unwrap()
-                .example
+                .examples
+                .first()
                 .is_some()
         );
     }
@@ -467,8 +494,8 @@ fn emptiness_locations_follow_only_the_replayed_derivation_and_keep_negation_rel
         .values()
         .next()
         .unwrap()
-        .example
-        .as_ref()
+        .examples
+        .first()
         .unwrap();
     for d in ds {
         let text = p.sources.text(d.primary).unwrap();
@@ -491,7 +518,10 @@ fn emptiness_locations_follow_only_the_replayed_derivation_and_keep_negation_rel
                     && p.sources.text(r.span).unwrap().contains("forbidden"))
         );
         assert!(d.related.iter().any(|r| r.label == "checked obligation"));
-        assert_eq!(d.evidence["attribution"]["state"], "complete");
+        assert_eq!(
+            d.evidence["examples"][0]["attribution"]["state"],
+            "complete"
+        );
     }
 }
 
@@ -514,7 +544,7 @@ fn certified_presence_uses_the_certified_derivation_not_the_blocked_replay() {
         panic!()
     };
     let e = report.verification.emptiness.values().next().unwrap();
-    let example = e.example.as_ref().unwrap();
+    let example = e.examples.first().unwrap();
     let replay = prepared
         .program()
         .evaluate(example.observation.present.iter().cloned(), &limits)
@@ -523,7 +553,10 @@ fn certified_presence_uses_the_certified_derivation_not_the_blocked_replay() {
         replay.fact(&example.tuple).unwrap(),
         FactState::Blocked(_)
     ));
-    assert!(matches!(e.attribution, Some(Attribution::Complete(_))));
+    assert!(matches!(
+        e.examples[0].attribution,
+        Some(Attribution::Complete(_))
+    ));
     let out = presentation::present(&p, &report).unwrap();
     let d = out
         .diagnostics
@@ -566,10 +599,10 @@ fn attribution_fallback_preserves_semantic_summary_and_uses_obligation_location(
         resource: "work",
     };
     for e in report.verification.emptiness.values_mut() {
-        e.attribution = Some(Attribution::Incomplete(cause));
+        e.examples[0].attribution = Some(Attribution::Incomplete(cause));
     }
     for e in report.results.value.emptiness.values_mut() {
-        e.attribution = Some(Attribution::Incomplete(cause));
+        e.examples[0].attribution = Some(Attribution::Incomplete(cause));
     }
     let out = presentation::present(&p, &report).unwrap();
     assert_eq!(out.status["state"], "findings");
@@ -578,7 +611,10 @@ fn attribution_fallback_preserves_semantic_summary_and_uses_obligation_location(
     let d = &out.diagnostics[0];
     assert_eq!(p.sources.text(d.primary).unwrap(), "one");
     assert_eq!(d.kind, Kind::Counterexample);
-    assert_eq!(d.evidence["attribution"]["state"], "incomplete");
+    assert_eq!(
+        d.evidence["examples"][0]["attribution"]["state"],
+        "incomplete"
+    );
     assert!(
         d.notes
             .iter()
@@ -630,4 +666,231 @@ fn warm_fact_and_embedded_origin_edits_refresh_placement_without_changing_identi
         }
         prior = Some((identity, range, column));
     }
+}
+
+#[test]
+fn bounded_examples_are_key_ordered_and_count_all_distinct_tuples() {
+    let count = EMPTINESS_EXAMPLE_LIMIT + 2;
+    let names = (0..count).map(|i| format!("n{i}")).collect::<Vec<_>>();
+    let facts = names
+        .iter()
+        .rev()
+        .map(|n| format!("p({n}); p({n});"))
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        );
+    let p = load_text(&format!(
+        "sort S; const {}:S; relation p(x:S); {facts} obligation one: empty(p); {V}",
+        names.iter().rev().cloned().collect::<Vec<_>>().join(",")
+    ));
+    let mut session = Session::default();
+    let (cold, out) = run(&p, &mut session, &Limits::default());
+    let (warm, warm_out) = run(&p, &mut session, &Limits::default());
+    assert_eq!(cold, warm);
+    assert_eq!(
+        placement_snapshot(&p, &out),
+        placement_snapshot(&p, &warm_out)
+    );
+    let e = cold.emptiness.values().next().unwrap();
+    assert!(e.complete());
+    assert_eq!(e.present, count);
+    assert_eq!(e.examples.len(), EMPTINESS_EXAMPLE_LIMIT);
+    let selected = e
+        .examples
+        .iter()
+        .map(|e| &e.tuple.arguments[0])
+        .collect::<Vec<_>>();
+    let expected = names[..EMPTINESS_EXAMPLE_LIMIT]
+        .iter()
+        .map(|name| {
+            p.keys
+                .constant(p.corpus.constants().find(|c| &c.name == name).unwrap().id)
+                .unwrap()
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(selected, expected);
+    let ds = out
+        .diagnostics
+        .iter()
+        .filter(|d| matches!(d.identity, Identity::Emptiness(_)))
+        .collect::<Vec<_>>();
+    assert_eq!(ds.len(), EMPTINESS_EXAMPLE_LIMIT);
+    for d in ds {
+        let source = p.sources.text(d.primary).unwrap();
+        let notes = d
+            .notes
+            .iter()
+            .filter(|n| n.starts_with("Replayed present tuple:"))
+            .collect::<Vec<_>>();
+        assert_eq!(notes.len(), 1);
+        assert!(notes[0].contains(source.trim_end_matches(';')));
+        assert_eq!(
+            d.evidence["presentTuples"],
+            serde_json::json!({"count":count,"exact":true})
+        );
+        assert_eq!(d.evidence["examplesTruncated"], true);
+        assert_eq!(
+            d.evidence["examples"],
+            out.status["emptiness"][0]["examples"]
+        );
+    }
+}
+
+#[test]
+fn fixing_one_independent_error_leaves_other_locations_and_finding_identity() {
+    let mut session = Session::default();
+    let mut identity = None;
+    for facts in ["p(a); p(b); p(c);", "p(b); p(c);"] {
+        let p = load_text(&format!(
+            "sort S; const a,b,c:S; relation p(x:S); {facts} obligation one: empty(p); {V}"
+        ));
+        let (warm, out) = run(&p, &mut session, &Limits::default());
+        assert_eq!(warm, run(&p, &mut Session::default(), &Limits::default()).0);
+        let ds = out
+            .diagnostics
+            .iter()
+            .filter(|d| matches!(d.identity, Identity::Emptiness(_)))
+            .collect::<Vec<_>>();
+        let located = ds
+            .iter()
+            .map(|d| p.sources.text(d.primary).unwrap())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(located, facts.split_inclusive(';').map(str::trim).collect());
+        for d in ds {
+            let key = d.data(&p.keys).unwrap()["finding"].clone();
+            if let Some(prior) = &identity {
+                assert_eq!(&key, prior);
+            } else {
+                identity = Some(key);
+            }
+        }
+    }
+}
+
+#[test]
+fn different_worlds_stay_with_their_own_tuples_and_shared_locations_merge_notes() {
+    let p = load_text(&format!(
+        "sort S; const a,b:S; input i(); relation seed(x:S); relation p(x:S);
+         seed(a) :- i(); seed(b) :- !i(); p(X) :- seed(X);
+         obligation one: empty(p); {V}"
+    ));
+    let (r, out) = run(&p, &mut Session::default(), &Limits::default());
+    let e = r.emptiness.values().next().unwrap();
+    assert_eq!(e.present, 2);
+    assert!(e.complete());
+    for example in &e.examples {
+        assert_eq!(
+            !example.observation.present.is_empty(),
+            &example.tuple.arguments[0]
+                == p.keys
+                    .constant(p.corpus.constants().find(|c| c.name == "a").unwrap().id)
+                    .unwrap()
+        );
+        assert_eq!(
+            !example.observation.absent.is_empty(),
+            &example.tuple.arguments[0]
+                == p.keys
+                    .constant(p.corpus.constants().find(|c| c.name == "b").unwrap().id)
+                    .unwrap()
+        );
+    }
+    let ds = out
+        .diagnostics
+        .iter()
+        .filter(|d| matches!(d.identity, Identity::Emptiness(_)))
+        .collect::<Vec<_>>();
+    assert_eq!(ds.len(), 3); // shared rule, plus each world-specific seed rule
+    for d in ds {
+        let source = p.sources.text(d.primary).unwrap();
+        let notes = d
+            .notes
+            .iter()
+            .filter(|n| n.starts_with("Replayed present tuple:"))
+            .collect::<Vec<_>>();
+        if source.starts_with("p(X)") {
+            assert_eq!(notes.len(), 2);
+        } else {
+            assert_eq!(notes.len(), 1);
+            assert!(notes[0].contains(if source.starts_with("seed(a)") {
+                "p(a)"
+            } else {
+                "p(b)"
+            }));
+        }
+    }
+}
+
+#[test]
+fn one_attribution_fallback_is_not_hidden_by_another_tuples_derivation() {
+    let p = load_text(&format!(
+        "sort S; const a,b:S; relation p(x:S); p(a); p(b); obligation one: empty(p); {V}"
+    ));
+    let limits = Limits::default();
+    let ops = OperationalLimits::from(&limits);
+    let request = p.verification_requests(&limits).unwrap().remove(0).1;
+    let RequestPreparation::Complete(prepared) = request.prepare(&p.corpus, &p.keys, &ops).unwrap()
+    else {
+        panic!()
+    };
+    let prepared = prepared.admit(&ops).unwrap();
+    let CheckOutcome::Complete(mut report) = prepared.verify(&ops).unwrap() else {
+        panic!()
+    };
+    let cause = Inconclusive {
+        phase: "attribution",
+        resource: "work",
+    };
+    report
+        .verification
+        .emptiness
+        .values_mut()
+        .next()
+        .unwrap()
+        .examples[0]
+        .attribution = Some(Attribution::Incomplete(cause));
+    report
+        .results
+        .value
+        .emptiness
+        .values_mut()
+        .next()
+        .unwrap()
+        .examples[0]
+        .attribution = Some(Attribution::Incomplete(cause));
+    let out = presentation::present(&p, &report).unwrap();
+    let ds = out
+        .diagnostics
+        .iter()
+        .filter(|d| matches!(d.identity, Identity::Emptiness(_)))
+        .collect::<Vec<_>>();
+    assert_eq!(ds.len(), 2);
+    for d in &ds {
+        let source = p.sources.text(d.primary).unwrap();
+        assert!(source == "one" || source == "p(b);");
+        let tuple = if source == "one" { "p(a)" } else { "p(b)" };
+        assert!(
+            d.notes
+                .iter()
+                .any(|n| n.starts_with("Replayed present tuple:") && n.contains(tuple))
+        );
+        assert_eq!(d.evidence["complete"], true);
+        assert_eq!(
+            d.evidence["presentTuples"],
+            serde_json::json!({"count":2,"exact":true})
+        );
+        assert_eq!(
+            d.evidence["examples"][0]["attribution"]["state"],
+            "incomplete"
+        );
+        assert_eq!(
+            d.evidence["examples"][1]["attribution"]["state"],
+            "complete"
+        );
+    }
+    assert_eq!(
+        ds[0].data(&p.keys).unwrap()["finding"],
+        ds[1].data(&p.keys).unwrap()["finding"]
+    );
 }

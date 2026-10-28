@@ -1,7 +1,8 @@
 # Obligation diagnostic placement
 
-Status: first increment implemented 2026-10-27, with no new syntax. Explicit
-diagnostic targets remain deferred.
+Status: derivation placement and bounded emptiness enumeration implemented
+2026-10-27, with no new syntax. Ownership-frontier narrowing and explicit diagnostic
+targets remain deferred.
 
 ## Problem
 
@@ -102,9 +103,32 @@ Known limits of this increment:
   `invalid(N, L) :- node_label(N, L), node_kind(N, K), !allowed(K, L);` also places
   the `node_kind` fact as a primary. This noise is accepted for now; see the
   ownership frontier below for the next narrowing candidate.
-- `empty` reports one example tuple. Locating it well does not report every invalid
-  tuple; bounded enumeration of present tuples (like coverage's retained examples) is
-  a separate usability follow-up, likely soon after this increment.
+
+## Implemented: several emptiness tuples per finding
+
+`empty` now retains up to three distinct replay-confirmed tuples, ordered by semantic
+key, each with its own world, replay scope and attribution. Checking continues to
+count confirmed tuples beyond the retained sample. The count is exact when checking
+completes and a lower bound otherwise; it counts tuples across permitted worlds,
+not tuples necessarily present together.
+
+Retention preserves semantic scan order and work charges. Attribution runs after
+checking with a fresh bounded allowance per tuple. One tuple exhausting attribution
+does not affect another tuple or semantic completeness. Place each tuple separately,
+then union the locations; notes name the tuple and its world, merging at shared
+locations. A tuple's obligation fallback remains visible even when another tuple
+has producing-rule locations.
+
+Finding identity stays at obligation/component/verification. Fixing one error does
+not replace the remaining errors' finding. Per-tuple identity is deferred until
+suppressions, waivers or another consumer needs it; see [decisions](../decisions.md).
+The cap bounds the number of retained tuples, not the number of locations in their
+derivations. Ownership-frontier narrowing and explicit targets are still separate.
+
+Behavioral checks cover the cap and exact/lower-bound counts, key order, separate
+worlds, fixes preserving identity, shared locations, independent attribution
+exhaustion, and cold/warm agreement. Existing uniqueness, coverage and test DSL
+expectations remain unchanged.
 
 ## Next candidate: narrowing at the ownership frontier
 
@@ -212,8 +236,8 @@ library-declared obligations):
 ## Current implementation and owning documentation
 
 `PresenceExample` in [the emptiness checker](../../crates/check/src/emptiness.rs)
-retains the tuple, observation and replay scope. Its `EmptinessSummary` now carries
-separate attribution evidence/status, including keyed placement evidence for
+retains each tuple, observation, replay scope and separate attribution evidence/status.
+Its `EmptinessSummary` carries the bounded examples and count, with keyed evidence for
 cold/warm agreement. [Shared presentation](../../crates/presentation/src/evidence.rs)
 reuses the uniqueness contribution code. The [development CLI](../../crates/ir-text/examples/check.rs) prints
 only the status summary, not diagnostics and notes; printing them is a separate,

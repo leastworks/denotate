@@ -1786,7 +1786,7 @@ fn emptiness_publication_and_language_services_use_the_shared_obligation_path() 
     assert_eq!(ds[0]["code"], "counterexample");
     assert_eq!(ds[0]["data"]["evidence"]["kind"], "replayed-counterexample");
     assert_eq!(
-        ds[0]["data"]["evidence"]["tuples"]
+        ds[0]["data"]["evidence"]["examples"]
             .as_array()
             .unwrap()
             .len(),
@@ -1942,9 +1942,58 @@ fn emptiness_derivation_highlights_move_with_unsaved_facts_under_one_identity() 
                 .any(|d| d["range"]["start"] == position(&text, expected, 1)));
         }
         for d in findings {
-            assert_eq!(d["data"]["evidence"]["attribution"]["state"], "complete");
+            assert_eq!(
+                d["data"]["evidence"]["examples"][0]["attribution"]["state"],
+                "complete"
+            );
             if let Some(old) = &identity {
                 assert_eq!(&d["data"]["finding"], old)
+            } else {
+                identity = Some(d["data"]["finding"].clone());
+            }
+        }
+    }
+    c.shutdown();
+}
+
+#[test]
+fn several_empty_errors_publish_tuple_notes_and_survive_individual_fixes() {
+    let mut c = Client::start("ir-text/standalone");
+    let (uri, _) = c.open("example.den");
+    let mut identity = None;
+    for (version, facts, count) in [(2, "p(a);\np(b);", 2), (3, "p(b);", 1)] {
+        let text = format!(
+            "sort S; const a,b:S; relation p(x:S);\n{facts}\nobligation none: empty(p);\nverification checks {{ assumptions: []; obligations: [none]; }}"
+        );
+        c.change(&uri, version, &text);
+        checking_idle(&mut c);
+        let diagnostics = c.diagnostics(&uri);
+        let findings = diagnostics
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["data"]["finding"]["component"] == "emptiness")
+            .collect::<Vec<_>>();
+        assert_eq!(findings.len(), count);
+        for fact in facts.lines() {
+            let d = findings
+                .iter()
+                .find(|d| d["range"]["start"] == position(&text, fact, 0))
+                .unwrap();
+            assert!(d["message"]
+                .as_str()
+                .unwrap()
+                .contains(fact.trim_end_matches(';')));
+            assert_eq!(
+                d["data"]["evidence"]["presentTuples"],
+                json!({"count":count,"exact":true})
+            );
+            assert_eq!(
+                d["data"]["evidence"]["examples"].as_array().unwrap().len(),
+                count
+            );
+            if let Some(old) = &identity {
+                assert_eq!(&d["data"]["finding"], old);
             } else {
                 identity = Some(d["data"]["finding"].clone());
             }

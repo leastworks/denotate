@@ -148,7 +148,7 @@ pub fn summary(results: &ScopedResults) -> Value {
             .values()
             .all(|r| matches!(r, ScopedResult::Proved));
     let mut summary = json!({
-        "state":if complete { "proved" } else if results.emptiness.values().any(|e| e.example.is_some()) || results.coverage.values().any(|c| c.missing > 0) || results.groups.values().any(|r| matches!(r,ScopedResult::Counterexample(..))) || results.regions.values().any(|r| matches!(r.completion,RegionCompletion::NoMeaning{..})) { "findings" } else { "incomplete" },
+        "state":if complete { "proved" } else if results.emptiness.values().any(|e| e.present > 0) || results.coverage.values().any(|c| c.missing > 0) || results.groups.values().any(|r| matches!(r,ScopedResult::Counterexample(..))) || results.regions.values().any(|r| matches!(r.completion,RegionCompletion::NoMeaning{..})) { "findings" } else { "incomplete" },
         "backend":{"backend":results.context.backend.backend,"configuration":results.context.backend.configuration},
         "activeAssumptions":results.context.constraints.iter().map(|c| match c { InputConstraint::AtMostOne{relation:r,group_by} => json!({"kind":"at-most-one","relation":relation(r),"groupBy":group_by}) }).collect::<Vec<_>>(),
         "groups":results.groups.iter().map(|(k,v)|json!({"identity":group_identity(k, results) ,"outcome":kinds(v),"reason":result_reason(v)})).collect::<Vec<_>>(),
@@ -159,9 +159,21 @@ pub fn summary(results: &ScopedResults) -> Value {
     if !results.emptiness.is_empty() {
         summary["emptiness"] = json!(results.emptiness.iter().map(|(key,e)| json!({
             "identity":{"obligation":qualified(&key.0),"component":"emptiness"},
-            "outcome":if e.example.is_some() {"counterexample"} else if e.proved() {"proved"} else {"inconclusive"},
+            "outcome":if e.present > 0 {"counterexample"} else if e.proved() {"proved"} else {"inconclusive"},
             "complete":e.complete(), "unresolved":e.unresolved,
-            "attribution":attribution_data(e.attribution.as_ref()),
+            "presentTuples":{"count":e.present,"exact":e.complete()},
+            "examplesTruncated":e.present > e.examples.len(),
+            "examples":e.examples.iter().map(|example| json!({
+                "tuple":atom_data(&example.tuple),
+                "observation":{"present":example.observation.present.iter().map(atom_data).collect::<Vec<_>>(),
+                    "absent":example.observation.absent.iter().map(atom_data).collect::<Vec<_>>()},
+                "scope":match example.replay_scope { ReplayScope::WholeProgram=>"whole-program",ReplayScope::ConeOnly=>"cone-only" },
+                "producers":match &example.attribution {
+                    Some(Attribution::Complete(evidence)) => evidence.instances.iter().map(|i| &i.rule).collect::<BTreeSet<_>>().into_iter().map(|r| occurrence(&OccurrenceKey::Rule(r.clone()))).collect::<Vec<_>>(),
+                    _ => vec![],
+                },
+                "attribution":attribution_data(example.attribution.as_ref())
+            })).collect::<Vec<_>>(),
             "reason":e.inconclusive.map(|r|json!({"phase":r.phase,"resource":r.resource}))
         })).collect::<Vec<_>>());
     }
@@ -200,19 +212,26 @@ pub fn evidence_data(finding: &crate::Finding<'_>, keys: &SemanticKeys) -> Resul
         .collect::<Result<Vec<_>>>()?;
     Ok(match &finding.evidence {
         crate::Evidence::Emptiness(e) => {
-            let mut data = json!({"kind":if e.example.is_some() {"replayed-counterexample"} else {"no-witness"},
+            json!({"kind":if e.present > 0 {"replayed-counterexample"} else {"no-witness"},
                 "component":"emptiness", "complete":e.complete(), "unresolved":e.unresolved,
-                "attribution":attribution_data(e.attribution.as_ref()), "producers":producers,
-                "reason":e.inconclusive.map(|r|json!({"phase":r.phase,"resource":r.resource}))});
-            if let Some(e) = &e.example {
-                data["observation"] = observation(&e.observation)?;
-                data["tuples"] = json!([atom_data(&AtomKey::from_atom(keys, &e.tuple)?)]);
-                data["scope"] = json!(match e.replay_scope {
-                    ReplayScope::WholeProgram => "whole-program",
-                    ReplayScope::ConeOnly => "cone-only",
-                });
-            }
-            data
+                "presentTuples":{"count":e.present,"exact":e.complete()},
+                "examplesTruncated":e.present > e.examples.len(),
+                "producers":producers,
+                "reason":e.inconclusive.map(|r|json!({"phase":r.phase,"resource":r.resource})),
+                "examples":e.examples.iter().map(|example| Ok(json!({
+                    "tuple":atom_data(&AtomKey::from_atom(keys, &example.tuple)?),
+                    "observation":observation(&example.observation)?,
+                    "scope":match example.replay_scope { ReplayScope::WholeProgram=>"whole-program",ReplayScope::ConeOnly=>"cone-only" },
+                    "producers":match &example.attribution {
+                        Some(Attribution::Complete(evidence)) => evidence.values().filter_map(|step| match &step.evidence {
+                            GroundEvidence::Derived { rule, .. } => Some(keys.rule(rule.source).cloned()),
+                            _ => None,
+                        }).collect::<std::result::Result<BTreeSet<_>,_>>()?.into_iter().map(|r| occurrence(&OccurrenceKey::Rule(r))).collect::<Vec<_>>(),
+                        _ => vec![],
+                    },
+                    "attribution":attribution_data(example.attribution.as_ref())
+                }))).collect::<Result<Vec<_>>>()?
+            })
         }
         crate::Evidence::Coverage(c) => json!({
             "kind":if c.missing > 0 {"replayed-coverage-counterexamples"} else {"no-witness"},

@@ -139,6 +139,37 @@ impl Placement<'_> {
         Ok(out)
     }
     pub fn finding(&self, finding: &Finding<'_>) -> Result<Vec<Diagnostic>> {
+        if !finding.placement_groups.is_empty() {
+            let mut out: Vec<Diagnostic> = Vec::new();
+            for group in &finding.placement_groups {
+                let mut notes = finding.notes.clone();
+                notes.extend(group.notes.iter().cloned());
+                for diagnostic in self.place(
+                    &finding.identity,
+                    finding.kind,
+                    &finding.message,
+                    &notes,
+                    &group.contributions,
+                )? {
+                    if let Some(existing) = out.iter_mut().find(|d| d.primary == diagnostic.primary)
+                    {
+                        for note in diagnostic.notes {
+                            if !existing.notes.contains(&note) {
+                                existing.notes.push(note);
+                            }
+                        }
+                        for related in diagnostic.related {
+                            if !existing.related.contains(&related) {
+                                existing.related.push(related);
+                            }
+                        }
+                    } else {
+                        out.push(diagnostic);
+                    }
+                }
+            }
+            return Ok(out);
+        }
         self.place(
             &finding.identity,
             finding.kind,

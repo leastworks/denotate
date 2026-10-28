@@ -72,6 +72,17 @@ real program that the current choice serves badly.
   runs after semantic checking under a fresh bounded allowance; exhaustion is
   reported separately and falls back to the obligation without changing the verdict
   or semantic completeness. Explicit narrowing and coverage targets remain deferred.
+- **Several emptiness examples belong to one finding.** Independent invalid tuples
+  should be visible together, without changing the obligation/verification identity
+  when an author fixes one. Retain up to three confirmed tuples in semantic-key
+  order, each with its own world, replay scope and bounded attribution. Count
+  distinct tuples across worlds, exactly when checking completes and as a lower
+  bound otherwise. Keep the semantic scan order and its existing work charges;
+  sample retention does not spend the semantic allowance. Attribute each retained
+  tuple after checking with a fresh allowance, then union its locations and label
+  them with the tuple. Per-tuple identities are deferred until suppressions, waivers
+  or another consumer needs to track individual errors; introducing them now would
+  add identity and publication machinery without a consumer.
 - **Correctness and usability before performance.** Performance policies are
   provisional until re-scored on real programs ([checker policies](checker-policies.md)).
 - **Budgets, receipts, timings and witness choices are not goldens.** They change
