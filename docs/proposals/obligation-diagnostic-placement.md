@@ -100,11 +100,42 @@ Known limits of this increment:
   kinds.
 - Positive premises are all part of the derivation. A rule such as
   `invalid(N, L) :- node_label(N, L), node_kind(N, K), !allowed(K, L);` also places
-  the `node_kind` fact as a primary. This noise is accepted for now; narrowing is
-  what explicit targets are for.
+  the `node_kind` fact as a primary. This noise is accepted for now; see the
+  ownership frontier below for the next narrowing candidate.
 - `empty` reports one example tuple. Locating it well does not report every invalid
   tuple; bounded enumeration of present tuples (like coverage's retained examples) is
   a separate usability follow-up, likely soon after this increment.
+
+## Next candidate: narrowing at the ownership frontier
+
+Evidence from the first real library: it decodes finite observation codes into values
+and lowers guards as helper rules in the consumer. One conditional conflict between two
+consumer mapping rules produced nine primaries sharing one finding identity: the two
+producing rules (essential), four guard helpers that fired (useful context), and three
+decoding and type-declaration facts reached through the library's decoding rule
+(noise). Value-matched explicit targets would be the wrong fix here: they would point
+at mapping declarations rather than the producing rules, lose which guard fired, and
+highlight every matching declaration rather than the active one.
+
+Proposed narrowing, with no syntax: walk the retained derivation from each reported
+tuple. On each path, the first occurrence outside the program or library that
+declares the obligation is primary; everything deeper on that path is related, not
+dropped. The boundary between the obligation's owner and the code it checks is where
+the author's code meets the library contract.
+
+- In the conflict above, the two consumer mapping rules are primary; the fired guards
+  and the decoding facts become related locations.
+- For `empty`, a path through library rules reaches the consumer's authored fact,
+  which stays primary, as today.
+- When the obligation and all occurrences share one owner (a single program that
+  declares both rules and facts), there is no frontier and placement is unchanged.
+- Placement only, from the same retained derivation: no new evidence, verdict,
+  identity or attribution status. Paths that never leave the obligation's owner keep
+  the existing fallback.
+
+Several frontier occurrences on one path step remain possible, for example a library
+rule with two positive consumer premises. Choosing among those is left to explicit
+targets.
 
 ## Deferred: explicit diagnostic targets
 
@@ -115,8 +146,8 @@ Explicit targets (**blame facts**) remain useful where derivations do not help:
   author could target present uses such as `edge(n1, _)`, matching existing tuples
   without inventing values. Coverage still ranges over resolved grouping domains;
   targets never change which groups require coverage.
-- **Narrowing noisy derivations,** when positive declaration premises should not be
-  primaries.
+- **Choosing among frontier occurrences,** when several consumer premises of one
+  library rule reach the frontier and only some are actionable.
 
 Contract to keep when they are built:
 
