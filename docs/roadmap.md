@@ -18,6 +18,10 @@ formatting, driven by what goes wrong in the first real programs. Known items:
 - [Obligation diagnostic placement](proposals/obligation-diagnostic-placement.md):
   emptiness now follows its derivation, as uniqueness does. Follow-ups are explicit
   targets for coverage or narrower placement, and bounded counterexample enumeration.
+- Explain unsupported negation cycles. When a redundancy proof fails, show the
+  permitted world where the guards overlap and the consistent answers it allows, and
+  suggest the fixes (an assumption that excludes the inputs, or giving one case
+  priority). Today the diagnostic only says the cycle is unsupported.
 - Exported DSL libraries can show singleton-variable warnings that the user cannot act
   on; print singletons as `_` or skip style lints on generated/library files.
 - Each Go to Origin and rename request rebuilds snapshots and reloads programs
