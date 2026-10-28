@@ -108,34 +108,41 @@ Known limits of this increment:
 
 ## Next candidate: narrowing at the ownership frontier
 
-Evidence from the first real library: it decodes finite observation codes into values
-and lowers guards as helper rules in the consumer. One conditional conflict between two
-consumer mapping rules produced nine primaries sharing one finding identity: the two
-producing rules (essential), four guard helpers that fired (useful context), and three
-decoding and type-declaration facts reached through the library's decoding rule
-(noise). Value-matched explicit targets would be the wrong fix here: they would point
-at mapping declarations rather than the producing rules, lose which guard fired, and
-highlight every matching declaration rather than the active one.
+Evidence from the first real library: it decodes finite observation codes into values,
+and the consumer lowers guards as helper rules. One conditional conflict between two
+consumer rules that each produce `labelled(n1, _)` placed nine primaries under one
+finding identity: the two producing rules (essential), four guard helpers that fired
+(useful context), and three decoding and type-declaration facts reached through the
+library's decoding rule (noise). Value-matched explicit targets would be the wrong fix:
+they would point at declarations rather than the producing rules, lose which guard
+fired, and highlight every matching declaration rather than the active one.
 
-Proposed narrowing, with no syntax: walk the retained derivation from each reported
-tuple. On each path, the first occurrence outside the program or library that
-declares the obligation is primary; everything deeper on that path is related, not
-dropped. The boundary between the obligation's owner and the code it checks is where
-the author's code meets the library contract.
+Proposed narrowing, with no syntax. It applies only to obligations declared in a
+library; obligations declared in the checked program's own files keep current
+placement. The boundary is the checked program's own files versus its whole library
+dependency closure, using the ownership information presentation already receives;
+the checker stays independent of program roots.
 
-- In the conflict above, the two consumer mapping rules are primary; the fired guards
-  and the decoding facts become related locations.
-- For `empty`, a path through library rules reaches the consumer's authored fact,
-  which stays primary, as today.
-- When the obligation and all occurrences share one owner (a single program that
-  declares both rules and facts), there is no frontier and placement is unchanged.
-- Placement only, from the same retained derivation: no new evidence, verdict,
-  identity or attribution status. Paths that never leave the obligation's owner keep
-  the existing fallback.
+- **Traverse producers, not contributions.** Walk the positive-support edges of the
+  retained proof from each reported tuple, deduplicating shared support rather than
+  enumerating paths. Inspect the source occurrence of each producing rule, including
+  empty-body facts. Relation declarations, constants and premise literals never stop
+  the walk; negative premises stay related.
+- **Frontier.** On each branch, the first producer that is in the program's own files
+  and locatable is primary. An unlocated generated rule does not stop the search for a
+  deeper locatable consumer producer. Everything else in the derivation stays
+  related, not dropped.
+- **Union across roots.** A producer that is the frontier for one reported tuple is
+  primary even if it lies below the frontier for another.
+- **Fallback.** If a reported tuple reaches no locatable consumer producer, including
+  branches that end in input leaves, its placement stays as today.
+- **Placement only,** from the same retained derivation: no new evidence, verdict,
+  identity or attribution status.
 
-Several frontier occurrences on one path step remain possible, for example a library
-rule with two positive consumer premises. Choosing among those is left to explicit
-targets.
+In the conflict above, the two consumer rules are primary and the fired guards and
+decoding facts are related. For `empty`, library rules lead to the consumer's authored
+fact, which stays primary, as today. A library rule with two positive consumer
+premises still makes both primary; choosing among those is left to explicit targets.
 
 ## Deferred: explicit diagnostic targets
 
@@ -183,8 +190,24 @@ that work starts.
 - An attribution limit keeps the counterexample, falls back to the obligation and
   leaves completeness unchanged; checking completeness is the same with and without
   attribution.
-- Existing uniqueness, coverage and test DSL behavior is unchanged. Tests compare
-  outcomes, identities and placement, never budgets or timings as goldens.
+- First increment: existing uniqueness, coverage and test DSL behavior is unchanged.
+  Tests compare outcomes, identities and placement, never budgets or timings as
+  goldens.
+
+Ownership-frontier increment (it intentionally changes uniqueness placement for
+library-declared obligations):
+
+- Two consumer producers of a conflict are primary; guard helpers and declarations
+  below them are related.
+- A library rule with two positive consumer premises keeps both primary.
+- Transitive libraries: an intermediate library rule does not become the frontier;
+  the consumer producer below it does.
+- Shared support: a producer that is the frontier for one tuple stays primary when it
+  is deeper for another.
+- Input leaves and missing spans fall back to current placement; an unlocated
+  generated rule does not hide a deeper locatable consumer producer.
+- Obligations declared in the checked program's own files keep current placement.
+- Cold and warm sessions agree, and placement follows current provenance after edits.
 
 ## Current implementation and owning documentation
 
