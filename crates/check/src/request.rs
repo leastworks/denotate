@@ -690,6 +690,26 @@ impl PreparedCheck<'_> {
                                     .map_err(CheckError::Keys)?,
                                 observation: candidate(&e.observation)?,
                                 replay_scope: e.replay_scope,
+                                dependency_inputs: e
+                                    .dependency_inputs
+                                    .as_ref()
+                                    .map(|scope| -> Result<_> {
+                                        Ok(match scope {
+                                            Attribution::Incomplete(c) => {
+                                                Attribution::Incomplete(*c)
+                                            }
+                                            Attribution::Complete(inputs) => Attribution::Complete(
+                                                inputs
+                                                    .iter()
+                                                    .map(|a| {
+                                                        AtomKey::from_atom(keys, a)
+                                                            .map_err(CheckError::Keys)
+                                                    })
+                                                    .collect::<Result<_>>()?,
+                                            ),
+                                        })
+                                    })
+                                    .transpose()?,
                                 attribution: e
                                     .attribution
                                     .as_ref()

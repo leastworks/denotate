@@ -94,7 +94,9 @@ Contract:
 Known limits of this increment:
 
 - One grounded derivation per tuple: the first found in replay. It names an exact
-  producer in that world, not every alternative derivation.
+  producer in that world, not every alternative derivation. Several authored
+  declarations producing the same invalid tuple therefore need not all be
+  highlighted.
 - Repeated identical authored facts are separate rule occurrences with separate
   origins, but the derivation selects one, as for uniqueness. Showing the other
   occurrences of the same ground fact is a separate, bounded enhancement for both
@@ -115,9 +117,15 @@ not tuples necessarily present together.
 Retention preserves semantic scan order and work charges. Attribution runs after
 checking with a fresh bounded allowance per tuple. One tuple exhausting attribution
 does not affect another tuple or semantic completeness. Place each tuple separately,
-then union the locations; notes name the tuple and its world, merging at shared
-locations. A tuple's obligation fallback remains visible even when another tuple
-has producing-rule locations.
+then union the locations; notes name the tuple, merging at shared locations.
+Input notes show the observation restricted to each tuple's structural dependency-cone
+inputs, supplied by the checker and projected to semantic keys for sessions. Unlike
+the retained proof's leaves, this scope includes inputs behind derived absences and
+alternative producers. Omit the input note for a cone with no inputs. Cone collection
+runs under its own bounded allowance; exhaustion falls back explicitly to the full
+world without changing checking completeness or attribution. Structured evidence
+retains the full world and the separate scope status. A tuple's obligation fallback
+remains visible even when another tuple has producing-rule locations.
 
 Finding identity stays at obligation/component/verification. Fixing one error does
 not replace the remaining errors' finding. Per-tuple identity is deferred until

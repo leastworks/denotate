@@ -83,6 +83,14 @@ real program that the current choice serves badly.
   them with the tuple. Per-tuple identities are deferred until suppressions, waivers
   or another consumer needs to track individual errors; introducing them now would
   add identity and publication machinery without a consumer.
+- **Emptiness world notes use structural input cones.** Filtering to retained proof
+  leaves hides inputs behind negative derived premises: `violation() :- order(),
+  !approved(); approved() :- signed();` still depends on `signed()`. The checker
+  collects each retained tuple's ground dependency-cone inputs, including alternative
+  producers, after semantic checking under a separate bounded allowance. Session
+  projection uses semantic keys; presentation only restricts the observation to that
+  supplied scope. Empty cones omit the note; unavailable cones explicitly fall back
+  to the full world. The complete replay witness remains in structured evidence.
 - **Correctness and usability before performance.** Performance policies are
   provisional until re-scored on real programs ([checker policies](checker-policies.md)).
 - **Budgets, receipts, timings and witness choices are not goldens.** They change

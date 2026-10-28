@@ -172,6 +172,10 @@ pub fn summary(results: &ScopedResults) -> Value {
                     Some(Attribution::Complete(evidence)) => evidence.instances.iter().map(|i| &i.rule).collect::<BTreeSet<_>>().into_iter().map(|r| occurrence(&OccurrenceKey::Rule(r.clone()))).collect::<Vec<_>>(),
                     _ => vec![],
                 },
+                "dependencyInputs":match &example.dependency_inputs {
+                    Some(Attribution::Complete(inputs)) => json!({"state":"complete","inputs":inputs.iter().map(atom_data).collect::<Vec<_>>()}),
+                    other => attribution_data(other.as_ref()),
+                },
                 "attribution":attribution_data(example.attribution.as_ref())
             })).collect::<Vec<_>>(),
             "reason":e.inconclusive.map(|r|json!({"phase":r.phase,"resource":r.resource}))
@@ -228,6 +232,10 @@ pub fn evidence_data(finding: &crate::Finding<'_>, keys: &SemanticKeys) -> Resul
                             _ => None,
                         }).collect::<std::result::Result<BTreeSet<_>,_>>()?.into_iter().map(|r| occurrence(&OccurrenceKey::Rule(r))).collect::<Vec<_>>(),
                         _ => vec![],
+                    },
+                    "dependencyInputs":match &example.dependency_inputs {
+                        Some(Attribution::Complete(inputs)) => json!({"state":"complete","inputs":inputs.iter().map(|a| AtomKey::from_atom(keys,a)).collect::<std::result::Result<BTreeSet<_>,_>>()?.iter().map(atom_data).collect::<Vec<_>>()}),
+                        other => attribution_data(other.as_ref()),
                     },
                     "attribution":attribution_data(example.attribution.as_ref())
                 }))).collect::<Result<Vec<_>>>()?

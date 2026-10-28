@@ -174,8 +174,13 @@ An `empty(R)` finding uses
 A replayed failure has primaries on the retained tuples' producing rules and facts,
 with premise occurrences and the obligation related, as uniqueness does. Each tuple
 is placed separately under normal program ownership and library fallback, then
-shared primary locations are merged. Per-location notes name the tuple, its input
-observation and replay scope; a shared location has each applicable tuple's note.
+shared primary locations are merged. Per-location notes name the tuple; a shared
+location has each applicable tuple's note. "Inputs in tuple dependency cone" shows
+the observation restricted to the checker-supplied structural cone inputs, with
+replay scope. This includes inputs behind negative derived premises and alternative
+producers. A complete cone with no inputs omits the input note. If cone collection
+is unavailable, a labeled fallback shows the full observation. The structured
+observation and replay scope below remain complete and unchanged.
 All diagnostics share the same finding identity, independent of examples and
 derivations. Program ownership remains `data.program`. Findings without a witness
 stay at the obligation.
@@ -200,7 +205,12 @@ if there is no confirmed tuple. It carries the same `complete`, `unresolved` and
 - `examples`: up to three entries, the smallest confirmed tuples by semantic key.
   Each contains `tuple` (one keyed atom), its own `observation: {present, absent}`,
   `scope` (`whole-program` or `cone-only`), `producers` (retained producing-rule
-  occurrence keys) and `attribution`. Empty when no tuple was confirmed.
+  occurrence keys), `attribution` and `dependencyInputs`. Empty when no tuple was confirmed.
+  `dependencyInputs` is `{"state":"complete","inputs":[...keyed atoms...]}`,
+  `{"state":"incomplete","reason":{"phase":...,"resource":...}}`, or null before
+  collection. Its inputs are ordered by semantic key. Collection runs after
+  semantic checking with a separate bounded allowance per tuple, independent of
+  source attribution; it never changes the verdict or checking completeness.
 
 The former singleton `tuples`, `observation`, `scope` and `attribution` evidence
 fields are replaced by those per-example fields. Evidence also retains top-level

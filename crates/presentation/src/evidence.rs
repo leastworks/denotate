@@ -338,16 +338,7 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
                     occurrence: (*id).into(),
                     role: Role::Obligation,
                 }],
-                notes: vec![format!(
-                    "Replayed present tuple: {}. Example input observation — present: {}; absent: {}. Scope: {}.",
-                    atom_name(corpus, &example.tuple)?,
-                    world_atoms(corpus, &example.observation.present)?,
-                    world_atoms(corpus, &example.observation.absent)?,
-                    match example.replay_scope {
-                        ReplayScope::WholeProgram => "whole-program",
-                        ReplayScope::ConeOnly => "cone-only",
-                    },
-                )],
+                notes: vec![presence_note(corpus, example)?],
             };
             match &example.attribution {
                 Some(Attribution::Complete(evidence)) => {
@@ -592,4 +583,64 @@ fn world_atoms(corpus: &Corpus, atoms: &BTreeSet<GroundAtom>) -> Result<String> 
     } else {
         names.into_iter().collect::<Vec<_>>().join(", ")
     })
+}
+
+/// Restrict the displayed world to the checker-supplied structural input scope.
+/// The complete replay witness remains in structured evidence.
+fn presence_note(
+    corpus: &Corpus,
+    example: &PresenceExample<
+        GroundAtom,
+        Observation,
+        std::collections::BTreeMap<GroundAtom, EvidenceStep>,
+    >,
+) -> Result<String> {
+    let mut note = format!(
+        "Replayed present tuple: {}.",
+        atom_name(corpus, &example.tuple)?
+    );
+    let (present, absent, label) = match &example.dependency_inputs {
+        Some(Attribution::Complete(inputs)) => {
+            if inputs.is_empty() {
+                return Ok(note);
+            }
+            (
+                example
+                    .observation
+                    .present
+                    .intersection(inputs)
+                    .cloned()
+                    .collect(),
+                example
+                    .observation
+                    .absent
+                    .intersection(inputs)
+                    .cloned()
+                    .collect(),
+                "Inputs in tuple dependency cone",
+            )
+        }
+        scope => {
+            note.push_str(" Dependency-cone inputs unavailable");
+            if let Some(Attribution::Incomplete(c)) = scope {
+                note.push_str(&format!(" ({}: {})", c.phase, c.resource));
+            }
+            note.push_str("; showing the full observation.");
+            (
+                example.observation.present.clone(),
+                example.observation.absent.clone(),
+                "Example input observation",
+            )
+        }
+    };
+    note.push_str(&format!(
+        " {label} — present: {}; absent: {}. Scope: {}.",
+        world_atoms(corpus, &present)?,
+        world_atoms(corpus, &absent)?,
+        match example.replay_scope {
+            ReplayScope::WholeProgram => "whole-program",
+            ReplayScope::ConeOnly => "cone-only",
+        },
+    ));
+    Ok(note)
 }

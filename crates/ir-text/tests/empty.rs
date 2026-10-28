@@ -894,3 +894,192 @@ fn one_attribution_fallback_is_not_hidden_by_another_tuples_derivation() {
         ds[1].data(&p.keys).unwrap()["finding"]
     );
 }
+
+#[test]
+fn empty_notes_show_structural_dependency_inputs_including_derived_absences() {
+    for (rules, expected_inputs) in [
+        ("p();", None),
+        ("relation allowed(); p() :- !allowed();", None),
+        (
+            "p() :- !excluded();",
+            Some("present: (none); absent: excluded()"),
+        ),
+        (
+            "p() :- selected(), !excluded();",
+            Some("present: selected(); absent: excluded()"),
+        ),
+        (
+            "relation guard(); guard() :- selected(); p() :- guard(), !excluded();",
+            Some("present: selected(); absent: excluded()"),
+        ),
+        // A negative derived premise still depends on the inputs of its provider.
+        (
+            "relation guard(); guard() :- selected(); p() :- !guard();",
+            Some("present: (none); absent: selected()"),
+        ),
+        (
+            "input order(); input signed(); relation approved(); approved() :- signed(); p() :- order(), !approved();",
+            Some("present: order(); absent: signed()"),
+        ),
+    ] {
+        let p = load_text(&format!(
+            "input selected(); input excluded(); input unrelated(); relation p();
+             {rules} obligation one: empty(p); {V}"
+        ));
+        let mut session = Session::default();
+        let (cold, out) = run(&p, &mut session, &Limits::default());
+        let (warm, warm_out) = run(&p, &mut session, &Limits::default());
+        assert_eq!(cold, warm);
+        assert_eq!(
+            placement_snapshot(&p, &out),
+            placement_snapshot(&p, &warm_out)
+        );
+        for d in out
+            .diagnostics
+            .iter()
+            .filter(|d| matches!(d.identity, Identity::Emptiness(_)))
+        {
+            let note = d
+                .notes
+                .iter()
+                .find(|n| n.starts_with("Replayed present tuple:"))
+                .unwrap();
+            if let Some(inputs) = expected_inputs {
+                assert!(note.contains("Inputs in tuple dependency cone"), "{note}");
+                assert!(note.contains(inputs), "{note}");
+            } else {
+                assert_eq!(note, "Replayed present tuple: p().");
+            }
+            assert!(!note.contains("unrelated"));
+            // Display filtering never shrinks the replayable observation.
+            let observation = &d.evidence["examples"][0]["observation"];
+            assert_eq!(
+                observation["present"].as_array().unwrap().len()
+                    + observation["absent"].as_array().unwrap().len(),
+                p.corpus
+                    .relations()
+                    .filter(|r| r.role == denotate_ir::RelationRole::Input)
+                    .count()
+            );
+            assert_eq!(
+                d.evidence["examples"][0]["dependencyInputs"],
+                out.status["emptiness"][0]["examples"][0]["dependencyInputs"]
+            );
+        }
+    }
+}
+
+#[test]
+fn empty_input_scope_is_structural_grounded_and_refreshed_after_warm_edits() {
+    let mut session = Session::default();
+    for input in ["selected", "excluded", "selected"] {
+        let p = load_text(&format!(
+            "sort S; const a,b:S; input selected(x:S); input excluded(x:S);
+             relation p(x:S); p(a); p(a) :- {input}(a);
+             obligation one: empty(p); {V}"
+        ));
+        let (warm, out) = run(&p, &mut session, &Limits::default());
+        let (cold, cold_out) = run(&p, &mut Session::default(), &Limits::default());
+        assert_eq!(cold, warm);
+        assert_eq!(
+            placement_snapshot(&p, &out),
+            placement_snapshot(&p, &cold_out)
+        );
+        let example = &warm.emptiness.values().next().unwrap().examples[0];
+        let Some(Attribution::Complete(inputs)) = &example.dependency_inputs else {
+            panic!()
+        };
+        // Even when the retained proof is the unconditional fact, the alternative
+        // producer belongs to the structural cone. Only its grounded a input does.
+        assert_eq!(inputs.len(), 1);
+        let atom = inputs.first().unwrap();
+        assert_eq!(
+            &atom.relation,
+            p.keys
+                .relation(p.corpus.relations().find(|r| r.name == input).unwrap().id)
+                .unwrap()
+        );
+        assert_eq!(
+            &atom.arguments[0],
+            p.keys
+                .constant(p.corpus.constants().find(|c| c.name == "a").unwrap().id)
+                .unwrap()
+        );
+        for d in out
+            .diagnostics
+            .iter()
+            .filter(|d| matches!(d.identity, Identity::Emptiness(_)))
+        {
+            let note = d
+                .notes
+                .iter()
+                .find(|n| n.starts_with("Replayed present tuple:"))
+                .unwrap();
+            assert!(note.contains(&format!("{input}(a)")));
+            assert!(!note.contains("(b)"));
+        }
+    }
+}
+
+#[test]
+fn unavailable_empty_input_scope_falls_back_to_full_world_without_affecting_failure() {
+    let p = load_text(&format!(
+        "input selected(); relation p(); p(); obligation one: empty(p); {V}"
+    ));
+    let limits = Limits::default();
+    let ops = OperationalLimits::from(&limits);
+    let request = p.verification_requests(&limits).unwrap().remove(0).1;
+    let RequestPreparation::Complete(prepared) = request.prepare(&p.corpus, &p.keys, &ops).unwrap()
+    else {
+        panic!()
+    };
+    let prepared = prepared.admit(&ops).unwrap();
+    let CheckOutcome::Complete(mut report) = prepared.verify(&ops).unwrap() else {
+        panic!()
+    };
+    let cause = Inconclusive {
+        phase: "dependency cones",
+        resource: "work",
+    };
+    report
+        .verification
+        .emptiness
+        .values_mut()
+        .next()
+        .unwrap()
+        .examples[0]
+        .dependency_inputs = Some(Attribution::Incomplete(cause));
+    report
+        .results
+        .value
+        .emptiness
+        .values_mut()
+        .next()
+        .unwrap()
+        .examples[0]
+        .dependency_inputs = Some(Attribution::Incomplete(cause));
+    let out = presentation::present(&p, &report).unwrap();
+    let d = out
+        .diagnostics
+        .iter()
+        .find(|d| matches!(d.identity, Identity::Emptiness(_)))
+        .unwrap();
+    assert!(
+        d.notes
+            .iter()
+            .any(|n| n.contains("Dependency-cone inputs unavailable") && n.contains("selected()"))
+    );
+    assert_eq!(d.evidence["complete"], true);
+    assert_eq!(
+        d.evidence["examples"][0]["attribution"]["state"],
+        "complete"
+    );
+    assert_eq!(
+        d.evidence["examples"][0]["dependencyInputs"]["state"],
+        "incomplete"
+    );
+    assert_eq!(
+        out.status["emptiness"][0]["examples"][0]["dependencyInputs"],
+        d.evidence["examples"][0]["dependencyInputs"]
+    );
+}

@@ -127,9 +127,16 @@ survive that incompleteness, which remains visible in the message and result.
 Failure locations are the union of the retained tuples' derivations: producing
 rules (including facts) are primary, premise occurrences and the obligation are
 related. Normal program ownership and labeled library fallback apply separately
-to each tuple. Each primary has a note naming its tuple and world; shared locations
-merge those notes. Multiple locations still share one finding identity. Alternative
-derivations of a tuple are not enumerated.
+to each tuple. Each primary has a note naming its tuple; shared locations merge
+those notes. Input notes restrict the replayed observation to the tuple's structural
+dependency-cone inputs, collected by the checker from the ground dependency graph.
+This includes inputs behind negated derived relations and alternative producers,
+even when absent from the selected derivation. A cone with no inputs has no input
+note. Cone collection has a separate bounded allowance; if unavailable, presentation
+explicitly falls back to the full observation without changing checking or source
+attribution. Structured evidence always retains the full replayed world and the
+separate cone-input status. Multiple locations still share one finding identity.
+Alternative derivations of a tuple are not enumerated.
 
 Attribution runs after checking with a fresh bounded allowance per retained tuple.
 If it cannot finish, that tuple falls back to the obligation with an attribution

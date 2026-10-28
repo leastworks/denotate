@@ -15,10 +15,13 @@ pub struct PresenceExample<A, W, E> {
     pub tuple: A,
     pub observation: W,
     pub replay_scope: ReplayScope,
+    /// Structural dependency-cone inputs, collected after checking under a
+    /// separate allowance. Incomplete is distinct from a cone with no inputs.
+    pub dependency_inputs: Option<Attribution<BTreeSet<A>>>,
     /// Populated by the separate post-check attribution pass.
     pub attribution: Option<Attribution<E>>,
 }
-/// Optional source attribution, separate from semantic completeness.
+/// Optional diagnostic evidence, separate from semantic completeness.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Attribution<E> {
     Complete(E),
@@ -239,6 +242,7 @@ fn retain_example(
                 tuple: atom.clone(),
                 observation: observation.clone(),
                 replay_scope,
+                dependency_inputs: None,
                 attribution: None,
             },
         );
@@ -263,9 +267,34 @@ impl GroundProgram {
                     Ok(evidence) => Attribution::Complete(evidence),
                     Err(error) => Attribution::Incomplete(Inconclusive::from_error(error)?),
                 });
+                // Display scope must include negative dependencies and alternative
+                // producers, not only the selected positive proof. Its own budget
+                // cannot change attribution or checking completeness.
+                let mut budget = Budget::new(limits);
+                let result = self.presence_dependency_inputs(&example.tuple, &mut budget);
+                example.dependency_inputs = Some(match result {
+                    Ok(inputs) => Attribution::Complete(inputs),
+                    Err(error) => Attribution::Incomplete(Inconclusive::from_error(error)?),
+                });
             }
         }
         Ok(())
+    }
+
+    fn presence_dependency_inputs(
+        &self,
+        tuple: &GroundAtom,
+        budget: &mut Budget<'_>,
+    ) -> Result<BTreeSet<GroundAtom>> {
+        let cone = self.dependency_cone_with_budget([tuple.clone()], budget)?;
+        let mut inputs = BTreeSet::new();
+        for atom in cone.facts {
+            budget.tick("emptiness dependency inputs")?;
+            if self.inputs.contains(&atom) {
+                inputs.insert(atom);
+            }
+        }
+        Ok(inputs)
     }
 
     fn presence_evidence(
@@ -342,6 +371,10 @@ mod tests {
                     .unwrap();
                 for (id, report) in &mut attributed {
                     for example in &mut report.examples {
+                        match example.dependency_inputs.take().unwrap() {
+                            Attribution::Incomplete(_) => assert_eq!(max_work, 0),
+                            Attribution::Complete(inputs) => assert!(inputs.is_empty()),
+                        }
                         match example.attribution.take().unwrap() {
                             Attribution::Incomplete(_) => assert_eq!(max_work, 0),
                             Attribution::Complete(steps) => assert!(!steps.is_empty()),
@@ -471,6 +504,7 @@ mod tests {
             if states == [false, true] {
                 for e in &mut report.examples {
                     e.attribution = None;
+                    e.dependency_inputs = None;
                 }
                 assert_eq!(&attributed, &original);
                 saw_independent = true;
