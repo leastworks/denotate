@@ -109,6 +109,26 @@ Duplicate derivations never create a second tuple. Exactly-one assumptions are n
 supported. Names, selection, origins, printing and editor services use the same shared
 paths as other obligations.
 
+## Counterexample placement
+
+For a library-declared emptiness or uniqueness obligation, each reported tuple's
+retained proof is followed along positive support. The first locatable producer
+in the checked program's own files on each branch is primary. Producers include
+empty-body facts. Unlocated generated rules do not stop the search; declarations,
+argument tokens and negative premises never form the frontier. The rest of the
+derivation remains related, including guard helpers below a primary producer.
+
+Frontiers are unioned across tuples: a producer needed for one tuple remains primary
+even when it is below another tuple's frontier. A tuple with no locatable consumer
+producer keeps its previous placement, including labeled library fallback. The
+boundary includes all transitive libraries. Obligations declared in the program's
+own files, or with no current declaration location to establish ownership, keep
+their previous placement. Only current provenance supplies primaries; upstream
+origins remain related.
+
+This changes placement only, not verdicts, finding identities, retained derivations
+or attribution status. Coverage uses its separate missing-group constant placement.
+
 ## Counterexample world notes
 
 Uniqueness notes restrict the observation to the union of the structural input cones
@@ -147,8 +167,9 @@ exhausted limits make checking inconclusive, never proved. Known counterexamples
 survive that incompleteness, which remains visible in the message and result.
 
 Failure locations are the union of the retained tuples' derivations: producing
-rules (including facts) are primary, premise occurrences and the obligation are
-related. Normal program ownership and labeled library fallback apply separately
+rules (including facts) are primary, narrowed to the ownership frontier for
+library-declared obligations as described above. Premise occurrences and the
+obligation are related. Normal ownership and labeled library fallback apply separately
 to each tuple. Each primary has a note naming its tuple; shared locations merge
 those notes. Input notes restrict the replayed observation to the tuple's structural
 dependency-cone inputs, collected by the checker from the ground dependency graph.

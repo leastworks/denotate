@@ -1,8 +1,8 @@
 # Obligation diagnostic placement
 
 Status: derivation placement, bounded emptiness enumeration, dependency-cone
-world notes and coverage placement on missing-group constants implemented
-2026-10-27/28, with no new syntax. Next: ownership-frontier narrowing. Explicit
+world notes, coverage placement on missing-group constants and ownership-frontier
+narrowing implemented 2026-10-27/28, with no new syntax. Explicit
 targets, alternative derivations and per-tuple identity are deferred, with reasons
 below.
 
@@ -168,7 +168,7 @@ fact clears it; a library-declared constant and `group_by: ()` keep current plac
 several missing groups union their locations; cold and warm sessions agree; renaming
 or moving the constant moves the diagnostic. Emptiness and uniqueness are unchanged.
 
-## Next increment: narrowing at the ownership frontier
+## Implemented: narrowing at the ownership frontier (2026-10-28)
 
 Evidence from the first real library: it decodes finite observation codes into values,
 and the consumer lowers guards as helper rules. One conditional conflict between two
@@ -179,11 +179,12 @@ library's decoding rule (noise). Value-matched explicit targets would be the wro
 they would point at declarations rather than the producing rules, lose which guard
 fired, and highlight every matching declaration rather than the active one.
 
-Proposed narrowing, with no syntax. It applies only to obligations declared in a
+Implemented narrowing, with no syntax. It applies only to obligations declared in a
 library; obligations declared in the checked program's own files keep current
 placement. The boundary is the checked program's own files versus its whole library
 dependency closure, using the ownership information presentation already receives;
-the checker stays independent of program roots.
+the checker stays independent of program roots. Current provenance must establish
+library ownership; an unlocated obligation keeps its previous placement.
 
 - **Traverse producers, not contributions.** Walk the positive-support edges of the
   retained proof from each reported tuple, deduplicating shared support rather than

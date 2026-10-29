@@ -2067,3 +2067,72 @@ fn several_empty_errors_publish_tuple_notes_and_survive_individual_fixes() {
     }
     c.shutdown();
 }
+
+#[test]
+fn library_frontier_keeps_guard_support_related_and_follows_open_buffer_edits() {
+    let mut c = Client::start("ir-text/standalone");
+    let base = c.workspace.path().to_owned();
+    let lib_text = "namespace lib; sort S; const a,b:S; relation p(x:S); obligation unique: at_most_one(p, group_by: ()); verification checks { assumptions: []; obligations: [unique]; }";
+    let app_text = "use lib; relation seed(); relation guard(); seed(); guard() :- seed(); p(a) :- guard(); p(b) :- guard();";
+    for (file, text) in [
+        ("app/den.root", r#"{"libraries":["../lib/den.root"]}"#),
+        ("lib/den.root", "{}"),
+        ("app/code.den", app_text),
+        ("lib/code.den", lib_text),
+    ] {
+        let path = base.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    watched(&mut c, &support::file_uri(&base.join("app/den.root")), 1);
+    let (app, _) = c.open("app/code.den");
+    let (lib, _) = c.open("lib/code.den");
+    let mut identity = None;
+    for (version, text) in [
+        (2, app_text.to_owned()),
+        (3, format!("\n\n{app_text}")),
+        (4, app_text.replace("p(b) :- guard();", "")),
+        (5, app_text.to_owned()),
+    ] {
+        c.change(&app, version, &text);
+        checking_idle(&mut c);
+        let ds = c.diagnostics(&app);
+        let failures = ds
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["code"] == "counterexample")
+            .collect::<Vec<_>>();
+        if version == 4 {
+            assert!(failures.is_empty(), "{ds}");
+            continue;
+        }
+        assert_eq!(failures.len(), 2, "{ds}");
+        for (d, producer) in failures
+            .iter()
+            .zip(["p(a) :- guard();", "p(b) :- guard();"])
+        {
+            assert_eq!(d["range"]["start"], position(&text, producer, 0));
+            assert_eq!(d["data"]["fallback"], false);
+            assert!(d["relatedInformation"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["message"] == "producing rule"
+                    && r["location"]["uri"] == app
+                    && r["location"]["range"]["start"]
+                        == position(&text, "guard() :- seed();", 0)));
+            assert!(d["relatedInformation"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["message"] == "checked obligation" && r["location"]["uri"] == lib));
+            if let Some(prior) = &identity {
+                assert_eq!(&d["data"]["finding"], prior);
+            } else {
+                identity = Some(d["data"]["finding"].clone());
+            }
+        }
+    }
+    c.shutdown();
+}

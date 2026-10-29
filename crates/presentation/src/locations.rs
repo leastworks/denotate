@@ -1,7 +1,8 @@
 use crate::*;
+use denotate_check::{EvidenceStep, GroundAtom, GroundEvidence, PremiseEvidence, VerifiedOutcome};
 use denotate_ir::*;
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RelatedLocation {
@@ -67,31 +68,7 @@ impl Placement<'_> {
         contributions: &[Contribution],
         coverage_constants: bool,
     ) -> Result<Vec<Diagnostic>> {
-        let mut current = Vec::new();
-        let mut related = Vec::new();
-        for contribution in contributions {
-            for origin in self.current.origins(contribution.occurrence) {
-                self.sources.text(origin.span)?;
-                if contribution.role != Role::RelatedOnly {
-                    if let Some((_, role)) = current.iter_mut().find(|(s, _)| *s == origin.span) {
-                        *role = std::cmp::min(*role, contribution.role);
-                    } else {
-                        current.push((origin.span, contribution.role));
-                    }
-                }
-                let location = RelatedLocation::new(origin.span, contribution.role.label());
-                if !related.contains(&location) {
-                    related.push(location);
-                }
-            }
-            for origin in self.upstream.origins(contribution.occurrence) {
-                self.sources.text(origin.span)?;
-                let location = RelatedLocation::new(origin.span, "upstream source origin");
-                if !related.contains(&location) {
-                    related.push(location);
-                }
-            }
-        }
+        let (current, related) = self.contribution_locations(contributions)?;
         let own = current
             .iter()
             .filter(|(s, _)| {
@@ -150,7 +127,146 @@ impl Placement<'_> {
         // Unlocated builder IR still remains in the root's finding inventory.
         Ok(out)
     }
+    fn contribution_locations(
+        &self,
+        contributions: &[Contribution],
+    ) -> Result<(Vec<(SourceSpan, Role)>, Vec<RelatedLocation>)> {
+        let mut current = Vec::new();
+        let mut related = Vec::new();
+        for contribution in contributions {
+            for origin in self.current.origins(contribution.occurrence) {
+                self.sources.text(origin.span)?;
+                if contribution.role != Role::RelatedOnly {
+                    if let Some((_, role)) = current.iter_mut().find(|(s, _)| *s == origin.span) {
+                        *role = std::cmp::min(*role, contribution.role);
+                    } else {
+                        current.push((origin.span, contribution.role));
+                    }
+                }
+                let location = RelatedLocation::new(origin.span, contribution.role.label());
+                if !related.contains(&location) {
+                    related.push(location);
+                }
+            }
+            for origin in self.upstream.origins(contribution.occurrence) {
+                self.sources.text(origin.span)?;
+                let location = RelatedLocation::new(origin.span, "upstream source origin");
+                if !related.contains(&location) {
+                    related.push(location);
+                }
+            }
+        }
+        Ok((current, related))
+    }
+
+    fn has_own_location(&self, occurrence: OccurrenceId) -> Result<bool> {
+        for origin in self.current.origins(occurrence) {
+            self.sources.text(origin.span)?;
+            if self
+                .user_files
+                .contains(&self.sources.snapshot(origin.span.snapshot())?.uri)
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
+    fn library_obligation(&self, contributions: &[Contribution]) -> Result<bool> {
+        let mut located = false;
+        for c in contributions.iter().filter(|c| c.role == Role::Obligation) {
+            if self.has_own_location(c.occurrence)? {
+                return Ok(false);
+            }
+            located |= !self.current.origins(c.occurrence).is_empty();
+        }
+        // Unlocated declarations have unknown ownership; preserve their placement.
+        Ok(located)
+    }
+
+    /// Walk retained positive support, never declarations or negative premises.
+    /// Each root has its own fallback; shared support is visited once per root.
+    fn frontier<'a>(
+        &self,
+        finding: &Finding<'_>,
+        notes: &[String],
+        contributions: &[Contribution],
+        roots: impl IntoIterator<Item = &'a GroundAtom>,
+        steps: &BTreeMap<GroundAtom, EvidenceStep>,
+    ) -> Result<Vec<Diagnostic>> {
+        let (_, related) = self.contribution_locations(contributions)?;
+        let mut out = Vec::new();
+        for root in roots {
+            let mut pending = vec![root];
+            let mut visited = BTreeSet::new();
+            let mut frontier = Vec::new();
+            let mut fallback = contributions
+                .iter()
+                .filter(|c| c.role == Role::Obligation)
+                .copied()
+                .collect::<Vec<_>>();
+            while let Some(atom) = pending.pop() {
+                if !visited.insert(atom) {
+                    continue;
+                }
+                let step = steps
+                    .get(atom)
+                    .ok_or(Error::InvalidFinding("missing retained proof step"))?;
+                step_contributions(atom, step, &mut fallback);
+                if let GroundEvidence::Derived { rule, premises } = &step.evidence {
+                    if self.has_own_location(rule.source.into())? {
+                        frontier.push(Contribution {
+                            occurrence: rule.source.into(),
+                            role: Role::Producer,
+                        });
+                        continue;
+                    }
+                    for premise in premises {
+                        if let PremiseEvidence::Positive { fact, .. } = premise {
+                            pending.push(fact);
+                        }
+                    }
+                }
+            }
+            let candidates = if frontier.is_empty() {
+                &fallback
+            } else {
+                &frontier
+            };
+            for mut diagnostic in self.place(
+                &finding.identity,
+                finding.kind,
+                &finding.message,
+                notes,
+                candidates,
+            )? {
+                // Narrow primaries only: keep original roles/labels and every
+                // participating occurrence, including support below the frontier.
+                diagnostic.related = related
+                    .iter()
+                    .filter(|r| r.span != diagnostic.primary || r.label == "upstream source origin")
+                    .cloned()
+                    .collect();
+                merge_diagnostic(&mut out, diagnostic);
+            }
+        }
+        Ok(out)
+    }
     pub fn finding(&self, finding: &Finding<'_>) -> Result<Vec<Diagnostic>> {
+        let narrow = self.library_obligation(&finding.contributions)?;
+        if narrow {
+            if let Evidence::Group(group) = &finding.evidence {
+                if let VerifiedOutcome::Counterexample(example) = &group.outcome {
+                    return self.frontier(
+                        finding,
+                        &finding.notes,
+                        &finding.contributions,
+                        &example.tuples,
+                        &example.evidence,
+                    );
+                }
+            }
+        }
         if !finding.placement_groups.is_empty() {
             let mut out: Vec<Diagnostic> = Vec::new();
             for group in &finding.placement_groups {
@@ -176,29 +292,27 @@ impl Placement<'_> {
                         contributions.retain(|c| c.role == Role::Obligation);
                     }
                 }
-                for diagnostic in self.place_with_coverage_constants(
-                    &finding.identity,
-                    finding.kind,
-                    &finding.message,
-                    &notes,
-                    &contributions,
-                    coverage_constants,
-                )? {
-                    if let Some(existing) = out.iter_mut().find(|d| d.primary == diagnostic.primary)
-                    {
-                        for note in diagnostic.notes {
-                            if !existing.notes.contains(&note) {
-                                existing.notes.push(note);
-                            }
-                        }
-                        for related in diagnostic.related {
-                            if !existing.related.contains(&related) {
-                                existing.related.push(related);
-                            }
-                        }
-                    } else {
-                        out.push(diagnostic);
-                    }
+                let placed = if let Some(derivation) = group.derivation.as_ref().filter(|_| narrow)
+                {
+                    self.frontier(
+                        finding,
+                        &notes,
+                        &contributions,
+                        [derivation.tuple],
+                        derivation.steps,
+                    )?
+                } else {
+                    self.place_with_coverage_constants(
+                        &finding.identity,
+                        finding.kind,
+                        &finding.message,
+                        &notes,
+                        &contributions,
+                        coverage_constants,
+                    )?
+                };
+                for diagnostic in placed {
+                    merge_diagnostic(&mut out, diagnostic);
                 }
             }
             return Ok(out);
@@ -210,6 +324,23 @@ impl Placement<'_> {
             &finding.notes,
             &finding.contributions,
         )
+    }
+}
+
+fn merge_diagnostic(out: &mut Vec<Diagnostic>, diagnostic: Diagnostic) {
+    if let Some(existing) = out.iter_mut().find(|d| d.primary == diagnostic.primary) {
+        for note in diagnostic.notes {
+            if !existing.notes.contains(&note) {
+                existing.notes.push(note);
+            }
+        }
+        for related in diagnostic.related {
+            if !existing.related.contains(&related) {
+                existing.related.push(related);
+            }
+        }
+    } else {
+        out.push(diagnostic);
     }
 }
 

@@ -72,10 +72,17 @@ pub enum Evidence<'a> {
     Group(&'a VerifiedGroup),
     Region(&'a UnresolvedRegion),
 }
-/// Independently placed evidence sharing a finding identity. Keeping these
-/// groups separate preserves a tuple's fallback even if another has producers.
+/// Borrow the retained proof; placement never reconstructs a derivation.
 #[derive(Debug)]
-pub struct PlacementGroup {
+pub struct PlacementDerivation<'a> {
+    pub tuple: &'a GroundAtom,
+    pub steps: &'a std::collections::BTreeMap<GroundAtom, EvidenceStep>,
+}
+/// Independently placed evidence sharing a finding identity. Keeping these
+/// groups separate preserves an example's fallback when another is locatable.
+#[derive(Debug)]
+pub struct PlacementGroup<'a> {
+    pub derivation: Option<PlacementDerivation<'a>>,
     pub contributions: Vec<Contribution>,
     pub notes: Vec<String>,
 }
@@ -86,7 +93,7 @@ pub struct Finding<'a> {
     pub message: String,
     pub notes: Vec<String>,
     pub contributions: Vec<Contribution>,
-    pub placement_groups: Vec<PlacementGroup>,
+    pub placement_groups: Vec<PlacementGroup<'a>>,
     pub cycle_rules: Vec<RuleId>,
     /// Original checked evidence, for optional frontend wording and attribution.
     pub evidence: Evidence<'a>,
@@ -123,25 +130,33 @@ fn derivation_contributions(
     contributions: &mut Vec<Contribution>,
 ) {
     for (atom, step) in evidence {
-        atom_contributions(atom, contributions);
-        if let GroundEvidence::Derived { rule, premises } = &step.evidence {
-            rule_contributions(rule, contributions);
-            for premise in premises {
-                let occurrence = match premise {
-                    PremiseEvidence::Positive { occurrence, .. }
-                    | PremiseEvidence::Absent { occurrence, .. } => *occurrence,
-                    PremiseEvidence::Discharged {
-                        literal_occurrence, ..
-                    } => *literal_occurrence,
-                };
-                contributions.push(Contribution {
-                    occurrence,
-                    role: Role::Contributor,
-                });
-            }
+        step_contributions(atom, step, contributions);
+    }
+}
+pub(crate) fn step_contributions(
+    atom: &GroundAtom,
+    step: &EvidenceStep,
+    contributions: &mut Vec<Contribution>,
+) {
+    atom_contributions(atom, contributions);
+    if let GroundEvidence::Derived { rule, premises } = &step.evidence {
+        rule_contributions(rule, contributions);
+        for premise in premises {
+            let occurrence = match premise {
+                PremiseEvidence::Positive { occurrence, .. }
+                | PremiseEvidence::Absent { occurrence, .. } => *occurrence,
+                PremiseEvidence::Discharged {
+                    literal_occurrence, ..
+                } => *literal_occurrence,
+            };
+            contributions.push(Contribution {
+                occurrence,
+                role: Role::Contributor,
+            });
         }
     }
 }
+
 fn region_contributions(region: &UnresolvedRegion, out: &mut Vec<Contribution>) {
     for rule in &region.rules {
         rule_contributions(rule, out);
@@ -334,6 +349,7 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
         let mut placement_groups = Vec::new();
         for example in &emptiness.examples {
             let mut group = PlacementGroup {
+                derivation: None,
                 contributions: vec![Contribution {
                     occurrence: (*id).into(),
                     role: Role::Obligation,
@@ -342,6 +358,10 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
             };
             match &example.attribution {
                 Some(Attribution::Complete(evidence)) => {
+                    group.derivation = Some(PlacementDerivation {
+                        tuple: &example.tuple,
+                        steps: evidence,
+                    });
                     derivation_contributions(evidence, &mut group.contributions);
                 }
                 Some(Attribution::Incomplete(c)) => group.notes.push(format!(
@@ -429,6 +449,7 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
         let mut placement_groups = Vec::new();
         for example in &coverage.examples {
             let mut group = PlacementGroup {
+                derivation: None,
                 contributions: vec![obligation_contribution],
                 notes: vec![coverage_note(corpus, example)?],
             };

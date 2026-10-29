@@ -32,6 +32,11 @@ participating occurrences, and places them on source locations. It depends only 
   obligation), with library occurrences and upstream origins as related locations.
   If no own occurrence participates, it produces the labeled fallback
   (`in <program>: …`). Current-text and upstream provenance are separate inputs.
+- Library-declared emptiness and uniqueness counterexamples narrow primaries to the
+  first locatable own-file producers along retained positive support. Walk through
+  unlocated generated rules; never stop at declarations or premise tokens. Union
+  per-tuple frontiers, retaining each tuple's fallback independently and keeping
+  the full derivation related. Own-file and unlocated obligations keep old placement.
 - `rewrites` groups proven rewrite warnings and their coverage; they never carry edits.
 - `summary` builds root-level outcome summaries (backend, selected assumptions, group
   and region outcomes, resource reasons).

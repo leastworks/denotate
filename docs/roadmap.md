@@ -17,8 +17,9 @@ formatting, driven by what goes wrong in the first real programs. Known items:
 
 - [Obligation diagnostic placement](proposals/obligation-diagnostic-placement.md):
   emptiness reports a bounded set of tuples, each on its own derivation; coverage
-  failures highlight the missing group's consumer constants. Next: ownership-frontier
-  narrowing. Explicit targets, alternative derivations and per-tuple identity are
+  failures highlight the missing group's consumer constants. Library counterexamples
+  narrow primaries to the first consumer producers along retained support.
+  Explicit targets, alternative derivations and per-tuple identity are
   deferred until a real program needs them.
 - Explain unsupported negation cycles. When a redundancy proof fails, show the
   permitted world where the guards overlap and the consistent answers it allows, and

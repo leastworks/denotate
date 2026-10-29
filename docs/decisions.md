@@ -71,7 +71,17 @@ real program that the current choice serves badly.
   placement may depend on that choice, but finding identity does not. Attribution
   runs after semantic checking under a fresh bounded allowance; exhaustion is
   reported separately and falls back to the obligation without changing the verdict
-  or semantic completeness. Explicit narrowing and coverage targets remain deferred.
+  or semantic completeness. Explicit diagnostic targets remain deferred.
+- **Library counterexamples stop at the first consumer producers.** Traversing the
+  retained proof's positive support gives a useful ownership frontier without
+  author syntax: the consumer rule or fact that supplies the library's result is
+  primary, while its guards and supporting declarations stay related. Traverse
+  unlocated generated rules and the full transitive library closure; declaration
+  or literal locations cannot stop the walk. Deduplicate shared support rather than
+  enumerating proof paths. Union frontiers per reported tuple and preserve each
+  tuple's fallback independently. Locally authored obligations keep their existing
+  detail; unknown ownership also keeps existing placement. This is presentation
+  over the same proof, with no new checker policy, evidence or attribution budget.
 - **Several emptiness examples belong to one finding.** Independent invalid tuples
   should be visible together, without changing the obligation/verification identity
   when an author fixes one. Retain up to three confirmed tuples in semantic-key

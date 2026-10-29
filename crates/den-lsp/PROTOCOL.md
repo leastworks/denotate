@@ -121,6 +121,24 @@ primary with the other producers related. Evidence kinds are
 `replayed-counterexample`, `replayed-coverage-counterexamples`, `no-meaning-observation`, `rewrite-proof` and `no-witness`. Rewrite proofs do not
 authorize edits.
 
+### Ownership-frontier placement
+
+For library-declared emptiness and uniqueness counterexamples, primaries are the
+first locatable consumer producers on each positive branch of each retained tuple's
+proof. Facts count as producers; unlocated generated rules are traversed. Relation
+and constant declarations, premise occurrences and negative premises never stop the
+walk. All participating occurrences remain available as related locations with
+their existing labels, including support below the frontier and upstream origins.
+
+Union frontiers across tuples and merge shared locations. A tuple without a locatable
+consumer producer keeps its old placement and labeled library fallback independently
+of the other tuples. Ownership uses the checked program's own files versus its
+entire library closure, not namespaces. Current provenance must establish library
+ownership; own-file or unlocated obligations retain existing placement.
+
+No evidence, identity, count, completeness or attribution-status fields change.
+Coverage, unsupported/inconclusive findings and no-meaning placement are unchanged.
+
 ### Filtered world notes
 
 Uniqueness and coverage retain their full observations in structured evidence.
@@ -201,7 +219,8 @@ notices and the empty-grouping-domain Information note apply unchanged.
 An `empty(R)` finding uses
 `{"verification": [namespaceKey, name], "obligation": [namespaceKey, name], "component": "emptiness"}`.
 A replayed failure has primaries on the retained tuples' producing rules and facts,
-with premise occurrences and the obligation related, as uniqueness does. Each tuple
+narrowed to the ownership frontier for library obligations, as uniqueness does.
+Premise occurrences and the obligation are related. Each tuple
 is placed separately under normal program ownership and library fallback, then
 shared primary locations are merged. Per-location notes name the tuple; a shared
 location has each applicable tuple's note. "Inputs in dependency cone" shows
