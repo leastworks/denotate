@@ -7,9 +7,11 @@ participating occurrences, and places them on source locations. It depends only 
 
 - `interpret(corpus, verification)` returns `Finding`s for counterexamples,
   no-meaning regions, unsupported groups and regions, and inconclusive outcomes.
-- Coverage produces one primary per obligation/verification, bounded missing-group
-  examples with separate observations, and exact or lower-bound counts. Empty grouping
-  domains produce an Information note without turning a proof into a failure.
+- Coverage produces one finding per obligation/verification, with bounded missing-group
+  examples, separate observations, and exact or lower-bound counts. Each example is
+  placed on its locatable grouping-constant declarations in the program's own files,
+  with obligation fallback if none qualify. Shared primary locations merge group notes.
+  Empty grouping domains produce an Information note without turning a proof into a failure.
 - Exactly-one uses `Identity::Coverage` and `Identity::Uniqueness` for its two parts;
   component labels distinguish their messages. Uniqueness remains per group. Standalone
   at-most-one retains `Identity::Group` and its existing protocol shape.

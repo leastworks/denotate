@@ -1,8 +1,8 @@
 # Obligation diagnostic placement
 
-Status: derivation placement, bounded emptiness enumeration and dependency-cone
-world notes implemented 2026-10-27/28, with no new syntax. Next: coverage failures
-on the missing group's constants, then ownership-frontier narrowing. Explicit
+Status: derivation placement, bounded emptiness enumeration, dependency-cone
+world notes and coverage placement on missing-group constants implemented
+2026-10-27/28, with no new syntax. Next: ownership-frontier narrowing. Explicit
 targets, alternative derivations and per-tuple identity are deferred, with reasons
 below.
 
@@ -140,17 +140,16 @@ worlds, fixes preserving identity, shared locations, independent attribution
 exhaustion, and cold/warm agreement. Existing uniqueness, coverage and test DSL
 expectations remain unchanged.
 
-## Next increment: coverage failures on the missing group's constants
+## Implemented: coverage failures on the missing group's constants (2026-10-28)
 
-A coverage failure has no violating tuple, so it is placed at the obligation, through
-the labeled fallback when a library declares it. The missing group, however, consists
-of constants that usually have authored declarations in the consumer. For
+A coverage failure has no violating tuple. Previously it was placed at the obligation,
+through the labeled fallback when a library declared it. The missing group, however,
+consists of constants that usually have authored declarations in the consumer. For
 `exactly_one(node_label, group_by: node)` missing `n1`, the actionable location is
-`const n1: Node;`; today the author must read the note and find `n1` themselves. In
-the first real library, a missing type annotation is the most common authoring
-mistake and lands in the library file.
+`const n1: Node;`; previously the author had to read the note and find `n1`
+themselves. A missing annotation in a consumer could land in the library file.
 
-Proposed placement, with no syntax:
+Implemented placement, with no syntax:
 
 - For each retained missing-group example, the declarations of the group's constants
   that are in the checked program's own files and locatable are primary; the
@@ -161,15 +160,15 @@ Proposed placement, with no syntax:
   constants declared only in libraries, or missing spans.
 - Placement only, from the group already in the evidence: no new checking, no change
   to which groups require coverage, and finding identity stays one coverage finding
-  per obligation/verification. The current one-primary restriction for coverage
-  findings is lifted for this case.
+  per obligation/verification. The one-primary restriction for coverage
+  findings is lifted only for this case.
 
 Acceptance: a missing group highlights its constant's declaration; adding the missing
 fact clears it; a library-declared constant and `group_by: ()` keep current placement;
 several missing groups union their locations; cold and warm sessions agree; renaming
 or moving the constant moves the diagnostic. Emptiness and uniqueness are unchanged.
 
-## Then: narrowing at the ownership frontier
+## Next increment: narrowing at the ownership frontier
 
 Evidence from the first real library: it decodes finite observation codes into values,
 and the consumer lowers guards as helper rules. One conditional conflict between two

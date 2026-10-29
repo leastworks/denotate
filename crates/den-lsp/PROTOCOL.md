@@ -143,8 +143,20 @@ locations are unchanged. No-meaning world notes keep their existing behavior.
 A coverage finding uses
 `{"verification": [namespaceKey, name], "obligation": [namespaceKey, name], "component": "coverage"}`.
 Program ownership remains `data.program`. Its identity is independent of displayed groups
-and witnesses. Coverage failures have one primary diagnostic per obligation/verification;
-uniqueness retains its existing per-overlap-group reporting and identities.
+and witnesses. Each retained missing-group example is placed on the locatable current
+declarations of its constants in the checked program's own files; the obligation is
+related. Several grouping columns and examples can produce several primaries with the
+same `data.finding`. Shared locations merge their group/world notes and related
+locations. When an example has no qualifying constant declaration (`group_by: ()`,
+library-only constants or missing current spans), it keeps the obligation placement,
+including the labeled library fallback. Upstream origins never supply primaries.
+Only this constant placement lifts coverage's one-primary restriction; unsupported
+and inconclusive coverage results still use the obligation. Uniqueness retains its
+existing per-overlap-group reporting and identities.
+
+Every diagnostic carries the same complete finding evidence, including all retained
+examples, even though its visible notes describe only the groups placed there.
+The finding inventory and summary remain one entry per obligation/verification.
 
 `summary.coverage` (present when coverage is selected) lists entries with `identity`,
 `outcome` (`proved`, `counterexample`, `unsupported`, `inconclusive`), `examinedGroups`,

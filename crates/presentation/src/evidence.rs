@@ -421,17 +421,33 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
         } else {
             continue;
         };
-        let notes = Vec::new();
+        let obligation_contribution = Contribution {
+            occurrence: (*id).into(),
+            role: Role::Obligation,
+        };
+        let mut contributions = vec![obligation_contribution];
+        let mut placement_groups = Vec::new();
+        for example in &coverage.examples {
+            let mut group = PlacementGroup {
+                contributions: vec![obligation_contribution],
+                notes: vec![coverage_note(corpus, example)?],
+            };
+            group
+                .contributions
+                .extend(example.group.iter().map(|id| Contribution {
+                    occurrence: (*id).into(),
+                    role: Role::Declaration,
+                }));
+            contributions.extend(group.contributions.iter().copied());
+            placement_groups.push(group);
+        }
         findings.push(Finding {
             identity: Identity::Coverage(*id),
             kind,
             message,
-            notes,
-            contributions: vec![Contribution {
-                occurrence: (*id).into(),
-                role: Role::Obligation,
-            }],
-            placement_groups: vec![],
+            notes: vec![],
+            contributions,
+            placement_groups,
             cycle_rules: vec![],
             evidence: Evidence::Coverage(coverage),
         });
@@ -488,36 +504,13 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
 /// Default IR vocabulary. A DSL can instead decode the same observation into
 /// its own value model without replacing the shared interpretation above.
 pub fn generic_details(corpus: &Corpus, finding: &Finding<'_>) -> Result<Vec<String>> {
-    let name = |id, name: &str| occurrence_name(corpus, id, name);
     let show = |atoms| world_atoms(corpus, atoms);
     let mut details = Vec::new();
     let observation = match &finding.evidence {
         // Tuple/world notes are attached only to that example's locations.
         Evidence::Emptiness(_) => None,
-        Evidence::Coverage(c) => {
-            for e in &c.examples {
-                let group = e
-                    .group
-                    .iter()
-                    .map(|id| {
-                        let c = corpus
-                            .constant(*id)
-                            .ok_or(Error::InvalidFinding("unknown grouping constant"))?;
-                        Ok(name((*id).into(), &c.name))
-                    })
-                    .collect::<Result<Vec<_>>>()?
-                    .join(", ");
-                let mut note = format!("Missing group ({group}).");
-                note.push_str(&input_note(
-                    corpus,
-                    &e.observation,
-                    e.replay_scope,
-                    e.dependency_inputs.as_ref(),
-                )?);
-                details.push(note);
-            }
-            None
-        }
+        // Missing-group notes are attached only to that group's locations.
+        Evidence::Coverage(_) => None,
         Evidence::Group(g) => match &g.outcome {
             VerifiedOutcome::Counterexample(c) => {
                 details.push(format!("Replayed tuples: {}.", show(&c.tuples)?));
@@ -660,5 +653,27 @@ fn input_note(
             ReplayScope::ConeOnly => "cone-only",
         },
     ));
+    Ok(note)
+}
+
+fn coverage_note(corpus: &Corpus, example: &CoverageExample) -> Result<String> {
+    let group = example
+        .group
+        .iter()
+        .map(|id| {
+            let constant = corpus
+                .constant(*id)
+                .ok_or(Error::InvalidFinding("unknown grouping constant"))?;
+            Ok(occurrence_name(corpus, (*id).into(), &constant.name))
+        })
+        .collect::<Result<Vec<_>>>()?
+        .join(", ");
+    let mut note = format!("Missing group ({group}).");
+    note.push_str(&input_note(
+        corpus,
+        &example.observation,
+        example.replay_scope,
+        example.dependency_inputs.as_ref(),
+    )?);
     Ok(note)
 }

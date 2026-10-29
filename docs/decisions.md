@@ -93,6 +93,16 @@ real program that the current choice serves badly.
   projection uses semantic keys; presentation only restricts the observation to that
   supplied scope. Empty cones omit the note; unavailable cones explicitly fall back
   to the full world. The complete replay witness remains in structured evidence.
+- **Coverage failures point to the missing group's authored constants.** A missing
+  tuple has no derivation to blame, but its grouping constants are already in the
+  checked evidence. Their locatable current declarations in the program's own files
+  provide useful primary locations without new syntax or checker work; the obligation
+  becomes related. Union retained examples and merge notes at shared locations.
+  A group with no qualifying declaration keeps obligation placement, including
+  library fallback: neither library-only constants nor upstream origins should
+  displace it. Multiple diagnostics still represent one coverage finding per
+  obligation and verification. This is placement, not a change to group eligibility
+  or an explanation of why no tuple was derived.
 - **Correctness and usability before performance.** Performance policies are
   provisional until re-scored on real programs ([checker policies](checker-policies.md)).
 - **Budgets, receipts, timings and witness choices are not goldens.** They change

@@ -1426,6 +1426,59 @@ fn verification_navigation_hover_outline_highlighting_and_typed_completion() {
 }
 
 #[test]
+fn coverage_constant_placement_follows_buffer_edits_and_clears_when_covered() {
+    let mut c = Client::start("ir-text/standalone");
+    let (uri, _) = c.open("example.den");
+    let mut identity = None;
+    for (i, (padding, name, fact)) in [
+        ("", "a", false),
+        ("\n\n", "a", false),
+        ("\n\n", "renamed", false),
+        ("\n\n", "renamed", true),
+        ("", "a", false),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let text = format!("{padding}sort S; const {name}:S; relation p(x:S); obligation covered: at_least_one(p, group_by: (x)); verification checks {{ assumptions: []; obligations: [covered]; }} {}", if fact { format!("p({name});") } else { String::new() });
+        c.change(&uri, i as i64 + 2, &text);
+        checking_idle(&mut c);
+        let diagnostics = c.diagnostics(&uri);
+        let failures = diagnostics
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["code"] == "counterexample")
+            .collect::<Vec<_>>();
+        assert_eq!(failures.len(), usize::from(!fact), "{diagnostics}");
+        if let Some(d) = failures.first() {
+            assert_eq!(
+                d["range"]["start"],
+                position(&text, &format!("const {name}"), 6)
+            );
+            assert_eq!(d["data"]["fallback"], false);
+            if let Some(prior) = &identity {
+                assert_eq!(&d["data"]["finding"], prior);
+            } else {
+                identity = Some(d["data"]["finding"].clone());
+            }
+            assert!(d["relatedInformation"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r["message"] == "checked obligation"));
+        } else {
+            assert!(diagnostics.as_array().unwrap().is_empty());
+            assert_eq!(
+                c.request("denotate/roots", json!({"uri":uri}))["summary"]["state"],
+                "proved"
+            );
+        }
+    }
+    c.shutdown();
+}
+
+#[test]
 fn coverage_publication_services_and_empty_domain_notices_follow_verifications() {
     let mut c = Client::start("ir-text/standalone");
     let (uri, _) = c.open("example.den");
@@ -1441,7 +1494,15 @@ fn coverage_publication_services_and_empty_domain_notices_follow_verifications()
         .iter()
         .filter(|d| d["code"] == "counterexample")
         .collect::<Vec<_>>();
-    assert_eq!(failures.len(), 1, "{diagnostics}");
+    assert_eq!(failures.len(), 3, "{diagnostics}");
+    for (failure, constant) in failures.iter().zip(["a", "b", "c"]) {
+        // Publication may sort by ranges; each retained group has one declaration.
+        assert_eq!(
+            failure["range"]["start"],
+            position(&text, &format!("{constant},"), 0)
+        );
+        assert_eq!(failure["data"]["finding"], failures[0]["data"]["finding"]);
+    }
     let original_identity = failures[0]["data"]["finding"].clone();
     assert_eq!(original_identity["component"], "coverage");
     assert_eq!(original_identity["obligation"], json!(["lib", "covered"]));
@@ -1544,7 +1605,7 @@ fn coverage_publication_services_and_empty_domain_notices_follow_verifications()
             .iter()
             .filter(|d| d["code"] == "counterexample")
             .count(),
-        1
+        3
     );
     let two = format!("{text} {}", verification.replace("checks", "again"));
     c.change(&uri, 4, &two);
@@ -1556,7 +1617,7 @@ fn coverage_publication_services_and_empty_domain_notices_follow_verifications()
             .iter()
             .filter(|d| d["code"] == "counterexample")
             .count(),
-        2
+        6
     );
     c.change(&uri, 5, &format!("{text} p(a); p(b); p(c); p(d);"));
     checking_idle(&mut c);
@@ -1603,8 +1664,13 @@ fn coverage_publication_services_and_empty_domain_notices_follow_verifications()
         .all(|d| d["code"] != "counterexample"));
     c.change(&uri, 9, &formatted);
     checking_idle(&mut c);
-    assert_eq!(c.diagnostics(&uri).as_array().unwrap().len(), 1);
-    assert_eq!(c.diagnostics(&uri)[0]["data"]["finding"], original_identity);
+    assert_eq!(c.diagnostics(&uri).as_array().unwrap().len(), 3);
+    assert!(c
+        .diagnostics(&uri)
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|d| d["data"]["finding"] == original_identity));
     assert_eq!(
         c.request(
             "textDocument/formatting",

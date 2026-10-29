@@ -63,14 +63,24 @@ with an Information note on the obligation, “no groups: the grouping domain is
 empty”. The global group is always present, even if the relation has no possible
 result tuples, and never receives that note. Duplicate derivations count as one tuple.
 
-Coverage failures are aggregated per obligation and verification. The diagnostic
-shows a bounded sample of missing groups, each with its own replayed input world,
-and a count of distinct groups that fail in at least one permitted world. Counts
+Coverage failures are aggregated into one finding per obligation and verification.
+The finding retains a bounded sample of missing groups, each with its own replayed
+input world, and a count of distinct groups that fail in at least one permitted world. Counts
 are exact only when checking is complete; otherwise they are lower bounds and the
 incompleteness is explicit. Limits bound enumeration as well as checking, preserving
 failures already established. Unknown or blocked facts never count as absence.
 An independent guaranteed tuple can establish coverage despite other unsupported
 producers; a settled failure remains a failure alongside unresolved worlds.
+
+Each retained missing group is placed on the declarations of its constants that
+are locatable in the checked program's own files, with the obligation related.
+Several grouping columns can therefore give several primary locations for one
+group. Locations are unioned across retained examples; shared locations merge their
+group and world notes. If a group has no qualifying declaration (`group_by: ()`,
+library-only constants or missing current spans), it keeps the obligation placement,
+with the labeled library fallback when needed. Upstream origins remain related.
+Placement uses only the retained examples; counts, checking and finding identity
+are unchanged.
 
 Coverage is an obligation form only. Richer assumption forms remain future work. Coverage declarations use the same verification
 selection, unchecked-obligation notices, names, origins and editor services as uniqueness.

@@ -110,7 +110,8 @@ fn resolved_domains_empty_domains_global_and_zero_arity() {
                 .iter()
                 .filter(|d| d.kind == Kind::Counterexample)
                 .collect::<Vec<_>>();
-            assert_eq!(failures.len(), usize::from(missing > 0));
+            assert_eq!(failures.is_empty(), missing == 0);
+            assert!(failures.iter().all(|d| d.identity == failures[0].identity));
             if missing > 0 {
                 assert!(matches!(failures[0].identity, Identity::Coverage(_)));
             }
@@ -264,7 +265,17 @@ fn bounded_enumeration_preserves_failure_and_aggregates_with_stable_identity() {
         assert!(c.inconclusive.is_some());
         assert!(!c.complete());
         assert!(c.examples.len() <= 3);
-        assert_eq!(out.diagnostics.len(), 1);
+        let constants = c
+            .examples
+            .iter()
+            .flat_map(|e| e.group.iter())
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(out.diagnostics.len(), constants.len());
+        assert!(
+            out.diagnostics
+                .iter()
+                .all(|d| d.identity == out.diagnostics[0].identity)
+        );
         assert!(out.diagnostics[0].message.contains("at least"));
         assert_eq!(out.status["state"], "findings");
         assert_eq!(out.diagnostics[0].evidence["missingGroups"]["exact"], false);
@@ -420,7 +431,7 @@ fn included_coverage_uses_each_consumers_facts_domains_and_context_identity() {
             let (result, out) = run(&p, &mut Session::default(), &Limits::default());
             assert_eq!(result.coverage.values().next().unwrap().missing, missing);
             if missing > 0 {
-                assert_eq!(out.diagnostics.len(), 1);
+                assert_eq!(out.diagnostics.len(), if root == "lib" { 2 } else { 1 });
                 let data = out.diagnostics[0].data(&p.keys).unwrap();
                 assert_eq!(data["program"], root);
                 assert_eq!(

@@ -148,29 +148,31 @@ fn coverage_notes_include_all_candidates_and_alternative_producers_in_the_missin
             5
         );
     }
-    let d = out
-        .diagnostics
-        .iter()
-        .find(|d| matches!(d.identity, denotate_presentation::Identity::Coverage(_)))
-        .unwrap();
-    let g_note = d
-        .notes
-        .iter()
-        .find(|n| n.starts_with("Missing group (g)"))
-        .unwrap();
+    let group_diagnostic = |name| {
+        let d = out
+            .diagnostics
+            .iter()
+            .find(|d| p.sources.text(d.primary).unwrap() == name)
+            .unwrap();
+        assert_eq!(d.notes.len(), 1);
+        d
+    };
+    let g_diagnostic = group_diagnostic("g");
+    let h_diagnostic = group_diagnostic("h");
+    assert_eq!(g_diagnostic.identity, h_diagnostic.identity);
+    assert_eq!(g_diagnostic.evidence, h_diagnostic.evidence);
+    let g_note = &g_diagnostic.notes[0];
+    assert!(g_note.starts_with("Missing group (g)"));
     assert!(
         g_note.contains("present: right(); absent: alternate(), left()"),
         "{g_note}"
     );
     assert!(!g_note.contains("other()") && !g_note.contains("unrelated()"));
-    let h_note = d
-        .notes
-        .iter()
-        .find(|n| n.starts_with("Missing group (h)"))
-        .unwrap();
+    let h_note = &h_diagnostic.notes[0];
+    assert!(h_note.starts_with("Missing group (h)"));
     assert!(h_note.contains("absent: other()"));
     assert!(!h_note.contains("left()") && !h_note.contains("right()"));
-    for example in d.evidence["examples"].as_array().unwrap() {
+    for example in g_diagnostic.evidence["examples"].as_array().unwrap() {
         assert_eq!(
             example["observation"]["present"].as_array().unwrap().len()
                 + example["observation"]["absent"].as_array().unwrap().len(),

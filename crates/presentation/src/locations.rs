@@ -55,6 +55,18 @@ impl Placement<'_> {
         notes: &[String],
         contributions: &[Contribution],
     ) -> Result<Vec<Diagnostic>> {
+        self.place_with_coverage_constants(identity, kind, message, notes, contributions, false)
+    }
+
+    fn place_with_coverage_constants(
+        &self,
+        identity: &Identity,
+        kind: Kind,
+        message: &str,
+        notes: &[String],
+        contributions: &[Contribution],
+        coverage_constants: bool,
+    ) -> Result<Vec<Diagnostic>> {
         let mut current = Vec::new();
         let mut related = Vec::new();
         for contribution in contributions {
@@ -126,7 +138,7 @@ impl Placement<'_> {
                 fallback,
                 evidence: Value::Null,
             });
-            if matches!(identity, Identity::Coverage(_))
+            if (matches!(identity, Identity::Coverage(_)) && !coverage_constants)
                 || matches!(
                     kind,
                     Kind::Inconclusive | Kind::UnsupportedGroup | Kind::UnsupportedRegion
@@ -144,12 +156,33 @@ impl Placement<'_> {
             for group in &finding.placement_groups {
                 let mut notes = finding.notes.clone();
                 notes.extend(group.notes.iter().cloned());
-                for diagnostic in self.place(
+                let mut coverage_constants = false;
+                let mut contributions = group.contributions.clone();
+                if matches!(finding.identity, Identity::Coverage(_)) {
+                    // Only current, locatable declarations in this program can
+                    // replace the obligation. Upstream-only origins do not qualify.
+                    for contribution in &contributions {
+                        if contribution.role == Role::Declaration {
+                            for origin in self.current.origins(contribution.occurrence) {
+                                self.sources.text(origin.span)?;
+                                let source = self.sources.snapshot(origin.span.snapshot())?;
+                                coverage_constants |= self.user_files.contains(&source.uri);
+                            }
+                        }
+                    }
+                    if !coverage_constants {
+                        // Keep the original obligation placement for this example;
+                        // library constants must not become fallback primaries.
+                        contributions.retain(|c| c.role == Role::Obligation);
+                    }
+                }
+                for diagnostic in self.place_with_coverage_constants(
                     &finding.identity,
                     finding.kind,
                     &finding.message,
                     &notes,
-                    &group.contributions,
+                    &contributions,
+                    coverage_constants,
                 )? {
                     if let Some(existing) = out.iter_mut().find(|d| d.primary == diagnostic.primary)
                     {

@@ -289,7 +289,7 @@ fn coverage_aggregates_but_uniqueness_stays_per_group_and_old_identities_stay_un
             .iter()
             .filter(|d| matches!(d.identity, Identity::Coverage(_)))
             .count(),
-        2
+        4
     );
 }
 
