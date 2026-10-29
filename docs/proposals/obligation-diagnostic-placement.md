@@ -1,8 +1,10 @@
 # Obligation diagnostic placement
 
-Status: derivation placement and bounded emptiness enumeration implemented
-2026-10-27, with no new syntax. Ownership-frontier narrowing and explicit diagnostic
-targets remain deferred.
+Status: derivation placement, bounded emptiness enumeration and dependency-cone
+world notes implemented 2026-10-27/28, with no new syntax. Next: coverage failures
+on the missing group's constants, then ownership-frontier narrowing. Explicit
+targets, alternative derivations and per-tuple identity are deferred, with reasons
+below.
 
 ## Problem
 
@@ -138,7 +140,36 @@ worlds, fixes preserving identity, shared locations, independent attribution
 exhaustion, and cold/warm agreement. Existing uniqueness, coverage and test DSL
 expectations remain unchanged.
 
-## Next candidate: narrowing at the ownership frontier
+## Next increment: coverage failures on the missing group's constants
+
+A coverage failure has no violating tuple, so it is placed at the obligation, through
+the labeled fallback when a library declares it. The missing group, however, consists
+of constants that usually have authored declarations in the consumer. For
+`exactly_one(node_label, group_by: node)` missing `n1`, the actionable location is
+`const n1: Node;`; today the author must read the note and find `n1` themselves. In
+the first real library, a missing type annotation is the most common authoring
+mistake and lands in the library file.
+
+Proposed placement, with no syntax:
+
+- For each retained missing-group example, the declarations of the group's constants
+  that are in the checked program's own files and locatable are primary; the
+  obligation is related. With several grouping columns, each such constant's
+  declaration is primary. Retained examples are unioned, merging their notes at
+  shared locations.
+- Fallback to current placement when no group constant qualifies: `group_by: ()`,
+  constants declared only in libraries, or missing spans.
+- Placement only, from the group already in the evidence: no new checking, no change
+  to which groups require coverage, and finding identity stays one coverage finding
+  per obligation/verification. The current one-primary restriction for coverage
+  findings is lifted for this case.
+
+Acceptance: a missing group highlights its constant's declaration; adding the missing
+fact clears it; a library-declared constant and `group_by: ()` keep current placement;
+several missing groups union their locations; cold and warm sessions agree; renaming
+or moving the constant moves the diagnostic. Emptiness and uniqueness are unchanged.
+
+## Then: narrowing at the ownership frontier
 
 Evidence from the first real library: it decodes finite observation codes into values,
 and the consumer lowers guards as helper rules. One conditional conflict between two
@@ -176,17 +207,26 @@ decoding facts are related. For `empty`, library rules lead to the consumer's au
 fact, which stays primary, as today. A library rule with two positive consumer
 premises still makes both primary; choosing among those is left to explicit targets.
 
-## Deferred: explicit diagnostic targets
+## Deferred, with reasons
 
-Explicit targets (**blame facts**) remain useful where derivations do not help:
+These are deferred until a real program shows the need, not scheduled.
 
-- **Coverage.** A missing group has a witness of absence but no violating tuple to
-  derive. If `exactly_one(node_label, group_by: node)` fails coverage for `n1`, an
-  author could target present uses such as `edge(n1, _)`, matching existing tuples
-  without inventing values. Coverage still ranges over resolved grouping domains;
-  targets never change which groups require coverage.
+### Explicit diagnostic targets
+
+Explicit targets (**blame facts**) were motivated mainly by coverage. Placing coverage
+failures on the missing group's constants covers the observed case without syntax.
+What remains:
+
+- **Coverage where the constant's declaration is the wrong place,** for example when
+  the actionable location is a use such as `edge(n1, _)`. A target could match
+  existing tuples without inventing values; coverage still ranges over resolved
+  grouping domains, and targets never change which groups require coverage.
 - **Choosing among frontier occurrences,** when several consumer premises of one
   library rule reach the frontier and only some are actionable.
+
+Neither has appeared in a real program, while the cost is high: syntax, IR
+representation, shared resolution and rename, validation, bounds and truncation
+reporting. They may never be needed.
 
 Contract to keep when they are built:
 
@@ -207,6 +247,22 @@ Contract to keep when they are built:
 
 Syntax, the IR representation and the incomplete-location payload are settled before
 that work starts.
+
+### Alternative derivations and repeated authored occurrences
+
+One derivation per tuple is retained, so other declarations producing the same tuple
+(a bidirectional declaration contributing both directions, or a repeated identical
+fact) are not all highlighted. In practice this corrects itself: fixing the
+highlighted occurrence leaves the tuple present, and the next check points at the
+remaining one; when the real fix is a shared declaration, it clears all of them.
+Expansion would need bounds and interacts with frontier narrowing.
+
+### Per-tuple finding identity
+
+One finding per obligation already gives one diagnostic per located tuple, and
+fixing one error leaves the others' identity intact. Per-tuple identity pays off only
+when something tracks individual errors, such as suppressions or approved
+exceptions; introduce it with that feature ([decisions](../decisions.md)).
 
 ## Acceptance examples
 

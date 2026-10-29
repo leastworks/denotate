@@ -16,9 +16,10 @@ Error recovery while rules are incomplete, latency at realistic sizes, and `.den
 formatting, driven by what goes wrong in the first real programs. Known items:
 
 - [Obligation diagnostic placement](proposals/obligation-diagnostic-placement.md):
-  emptiness now reports a bounded set of tuples, each on its own derivation.
-  Follow-ups: narrowing at the ownership frontier (the next candidate, motivated by
-  the first real library) and explicit targets for coverage.
+  emptiness reports a bounded set of tuples, each on its own derivation. Next:
+  coverage failures on the missing group's constants, then ownership-frontier
+  narrowing. Explicit targets, alternative derivations and per-tuple identity are
+  deferred until a real program needs them.
 - Explain unsupported negation cycles. When a redundancy proof fails, show the
   permitted world where the guards overlap and the consistent answers it allows, and
   suggest the fixes (an assumption that excludes the inputs, or giving one case
