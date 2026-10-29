@@ -271,7 +271,8 @@ impl GroundProgram {
                 // producers, not only the selected positive proof. Its own budget
                 // cannot change attribution or checking completeness.
                 let mut budget = Budget::new(limits);
-                let result = self.presence_dependency_inputs(&example.tuple, &mut budget);
+                let result =
+                    self.dependency_inputs_with_budget([example.tuple.clone()], &mut budget);
                 example.dependency_inputs = Some(match result {
                     Ok(inputs) => Attribution::Complete(inputs),
                     Err(error) => Attribution::Incomplete(Inconclusive::from_error(error)?),
@@ -279,22 +280,6 @@ impl GroundProgram {
             }
         }
         Ok(())
-    }
-
-    fn presence_dependency_inputs(
-        &self,
-        tuple: &GroundAtom,
-        budget: &mut Budget<'_>,
-    ) -> Result<BTreeSet<GroundAtom>> {
-        let cone = self.dependency_cone_with_budget([tuple.clone()], budget)?;
-        let mut inputs = BTreeSet::new();
-        for atom in cone.facts {
-            budget.tick("emptiness dependency inputs")?;
-            if self.inputs.contains(&atom) {
-                inputs.insert(atom);
-            }
-        }
-        Ok(inputs)
     }
 
     fn presence_evidence(

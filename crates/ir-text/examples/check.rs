@@ -10,7 +10,8 @@ use denotate_ir_text::{
 use std::{collections::BTreeSet, fmt::Write};
 
 type Failure = (u8, String);
-const USAGE: &str = "Usage: check ROOT_FOLDER_OR_DEN.ROOT [--verification QUALIFIED_NAME] [--json]";
+const USAGE: &str =
+    "Usage: check ROOT_FOLDER_OR_DEN.ROOT [--verification QUALIFIED_NAME] [--json] [--verbose]";
 
 fn format_errors(ds: Vec<denotate_ir_text::Diagnostic>) -> String {
     ds.iter()
@@ -38,6 +39,7 @@ fn print_diagnostics(
     p: &LoadedProgram,
     presented: &presentation::Presentation,
     output: &mut String,
+    verbose: bool,
 ) -> Result<(), Failure> {
     let location = |span: denotate_ir::SourceSpan| -> Result<_, Failure> {
         let source = p
@@ -72,13 +74,26 @@ fn print_diagnostics(
         for note in notes {
             writeln!(output, "  note: {note}").unwrap();
         }
+        let mut hidden = 0;
         for ((uri, at), label) in related {
+            if !verbose
+                && !matches!(
+                    label,
+                    "producing rule" | "checked obligation" | "upstream source origin"
+                )
+            {
+                hidden += 1;
+                continue;
+            }
             writeln!(
                 output,
                 "  related: {uri}:{}:{}: {label}",
                 at.line, at.column
             )
             .unwrap();
+        }
+        if hidden > 0 {
+            writeln!(output, "  +{hidden} more related locations (use --verbose)").unwrap();
         }
     }
     Ok(())
@@ -90,9 +105,11 @@ fn run(args: impl IntoIterator<Item = String>, output: &mut String) -> Result<u8
     let backend = BackendIdentity::bdd();
     let mut selection = None;
     let mut json = false;
+    let mut verbose = false;
     while let Some(option) = args.next() {
         match option.as_str() {
             "--json" if !json => json = true,
+            "--verbose" if !verbose => verbose = true,
             "--verification" if selection.is_none() => {
                 selection = Some(args.next().ok_or((2, USAGE.into()))?)
             }
@@ -279,7 +296,7 @@ fn run(args: impl IntoIterator<Item = String>, output: &mut String) -> Result<u8
                 if json {
                     writeln!(output, "Results: {:#}", presented.status).unwrap();
                 } else {
-                    print_diagnostics(&p, &presented, output)?;
+                    print_diagnostics(&p, &presented, output, verbose)?;
                     writeln!(
                         output,
                         "Result: {}",
@@ -645,7 +662,7 @@ verification a {{ assumptions: []; obligations: [one]; }}",
         };
         let mut presented = presentation::present(&p, &report).unwrap();
         let mut first = String::new();
-        print_diagnostics(&p, &presented, &mut first).unwrap();
+        print_diagnostics(&p, &presented, &mut first, true).unwrap();
         for d in &presented.diagnostics {
             assert!(first.contains(&d.message));
             for note in &d.notes {
@@ -661,7 +678,69 @@ verification a {{ assumptions: []; obligations: [one]; }}",
             d.related.reverse();
         }
         let mut reordered = String::new();
-        print_diagnostics(&p, &presented, &mut reordered).unwrap();
+        print_diagnostics(&p, &presented, &mut reordered, true).unwrap();
         assert_eq!(first, reordered);
+    }
+    #[test]
+    fn concise_related_locations_are_cli_only_and_verbose_restores_the_full_list() {
+        let f = Fixture::new(
+            "relation p(); p(); obligation one: empty(p); verification checks { assumptions: []; obligations: [one]; }",
+        );
+        let (membership, sources) = filesystem::discover_classified(&f.0).unwrap();
+        let p = load_with_resolver(&membership, &sources, None).unwrap();
+        let snapshot = p.sources.snapshots().next().unwrap();
+        let span = p.sources.span(snapshot.id, 0..1).unwrap();
+        let obligation = p.corpus.obligations().next().unwrap().id;
+        // Exercise exactly the presenter's label vocabulary, independently of
+        // which proof/source locations any particular witness happens to choose.
+        let labels = [
+            "producing rule",
+            "checked obligation",
+            "upstream source origin",
+            "contributing occurrence",
+            "participating declaration",
+            "supporting rewrite proof",
+        ];
+        let presented = presentation::Presentation {
+            diagnostics: vec![denotate_presentation::Diagnostic {
+                program: p.root.clone(),
+                verification: None,
+                identity: denotate_presentation::Identity::Emptiness(obligation),
+                kind: denotate_presentation::Kind::Counterexample,
+                message: "kept message".into(),
+                notes: vec!["kept note".into()],
+                primary: span,
+                related: labels
+                    .iter()
+                    .map(|label| denotate_presentation::RelatedLocation::new(span, *label))
+                    .collect(),
+                fallback: false,
+                evidence: serde_json::Value::Null,
+            }],
+            status: serde_json::Value::Null,
+        };
+        let mut concise = String::new();
+        let mut verbose = String::new();
+        print_diagnostics(&p, &presented, &mut concise, false).unwrap();
+        print_diagnostics(&p, &presented, &mut verbose, true).unwrap();
+        assert!(concise.contains("+3 more related locations (use --verbose)"));
+        assert!(!verbose.contains("+3 more"));
+        for (i, label) in labels.iter().enumerate() {
+            assert_eq!(concise.contains(label), i < 3);
+            assert!(verbose.contains(label));
+        }
+        for text in ["kept message", "kept note"] {
+            assert!(concise.contains(text) && verbose.contains(text));
+        }
+        assert_eq!(presented.diagnostics[0].related.len(), labels.len());
+
+        let (code, normal) = f.run(&[]);
+        let (verbose_code, full) = f.run(&["--verbose"]);
+        assert_eq!(code, verbose_code);
+        assert!(normal.contains("more related locations"));
+        assert!(full.contains("contributing occurrence"));
+        assert!(!full.contains("more related locations"));
+        assert_eq!(f.run(&["--json"]), f.run(&["--verbose", "--json"]));
+        assert_eq!(f.run(&["--verbose", "--verbose"]).0, 2);
     }
 }

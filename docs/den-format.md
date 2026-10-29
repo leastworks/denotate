@@ -99,6 +99,18 @@ Duplicate derivations never create a second tuple. Exactly-one assumptions are n
 supported. Names, selection, origins, printing and editor services use the same shared
 paths as other obligations.
 
+## Counterexample world notes
+
+Uniqueness notes restrict the observation to the union of the structural input cones
+of the conflicting tuples. Coverage notes use the union of the cones of all candidate
+tuples in the missing group, since there is no present violating tuple. Both include
+negative dependencies and alternative producers, and omit the input note when the
+cone has no inputs. These scopes come from the checker after semantic checking with
+an independent bounded allowance per witness. If collection exhausts its allowance,
+the note explicitly falls back to the full world. The full replayed observation
+always remains in structured evidence. This filtering changes neither verdicts nor
+primary/related source placement.
+
 ## Emptiness obligations
 
 ```den
@@ -278,22 +290,28 @@ origins still reloads with full current-text provenance.
 ## Commands
 
 ```sh
-just check-den <folder-or-den.root> [--verification QUALIFIED_NAME] [--json]
+just check-den <folder-or-den.root> [--verification QUALIFIED_NAME] [--json] [--verbose]
 just export-test-dsl <out-dir> <file.testdsl>…   # export a DSL program as .den
 ```
 
 `check-den` runs each verification declared in the program and its reachable libraries,
 printing its name, selected assumptions and presented diagnostics. Each diagnostic
 shows its source URI, one-based line and Unicode-scalar column, kind, message, notes
-and labeled related locations. Verifications follow semantic-key order; diagnostics
-and related locations follow source URI and numeric coordinate order, with content
+and labeled related locations. By default, related locations show producing rules,
+the checked obligation and upstream origins. Other related entries collapse to
+"+N more related locations"; `--verbose` prints the full list. Primary locations,
+messages and notes are unchanged by this option. This is a CLI layout choice;
+the editor keeps all related information.
+
+Verifications follow semantic-key order; diagnostics and related locations follow
+source URI and numeric coordinate order, with content
 as a tie-breaker. Notes are sorted by text. Library fallback messages retain their
 `in <program>:` label. Each verification ends with its status.
 
 `--json` retains the previous per-verification `Results: {...}` status summary
 instead of human diagnostics. Root/verification headers and configuration notices
 remain, so this mode is not a single JSON document. Exit codes are the same in both
-modes. With no verification it prints
+modes. `--verbose` has no effect with `--json`. With no verification it prints
 `No verification configured` and runs no semantic checks. `--verification` selects one
 declaration using the usual quoted/qualified name syntax; a bare name must be unique
 across the closure. Unknown or ambiguous names are errors. Every filtered run is labeled

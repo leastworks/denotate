@@ -5,7 +5,7 @@ use crate::{
     *,
 };
 use denotate_ir::{ConstantId, ConstantKey, ObligationId, RelationId, SemanticKeys};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub const COVERAGE_EXAMPLE_LIMIT: usize = 3;
 #[derive(Debug, Clone)]
@@ -15,23 +15,24 @@ pub(crate) struct CoverageShape {
     pub domains: Vec<Vec<ConstantId>>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CoverageExample<T = ConstantId, W = Observation> {
+pub struct CoverageExample<T = ConstantId, W = Observation, A = GroundAtom> {
     pub group: Vec<T>,
     pub observation: W,
     pub replay_scope: ReplayScope,
+    pub dependency_inputs: Option<Attribution<BTreeSet<A>>>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CoverageSummary<T, W> {
+pub struct CoverageSummary<T, W, A> {
     pub examined: usize,
     pub missing: usize,
     pub unsupported: usize,
     pub inconclusive: Option<Inconclusive>,
     pub no_groups: bool,
-    pub examples: Vec<CoverageExample<T, W>>,
+    pub examples: Vec<CoverageExample<T, W, A>>,
 }
-pub type CoverageReport = CoverageSummary<ConstantId, Observation>;
-pub type CoverageResult = CoverageSummary<ConstantKey, Candidate>;
-impl<T, W> Default for CoverageSummary<T, W> {
+pub type CoverageReport = CoverageSummary<ConstantId, Observation, GroundAtom>;
+pub type CoverageResult = CoverageSummary<ConstantKey, Candidate, AtomKey>;
+impl<T, W, A> Default for CoverageSummary<T, W, A> {
     fn default() -> Self {
         Self {
             examined: 0,
@@ -43,7 +44,7 @@ impl<T, W> Default for CoverageSummary<T, W> {
         }
     }
 }
-impl<T, W> CoverageSummary<T, W> {
+impl<T, W, A> CoverageSummary<T, W, A> {
     pub fn complete(&self) -> bool {
         self.unsupported == 0 && self.inconclusive.is_none()
     }
@@ -151,6 +152,7 @@ impl SymbolicMeaning<'_> {
                         group,
                         observation,
                         replay_scope,
+                        dependency_inputs: None,
                     });
                 }
             }

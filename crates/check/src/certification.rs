@@ -308,6 +308,7 @@ fn certified_finding(
     Ok(Counterexample {
         observation,
         replay_scope: ReplayScope::WholeProgram,
+        dependency_inputs: None,
         tuples,
         evidence,
         certification: Some(CertificationOutcome::Certified(certified)),

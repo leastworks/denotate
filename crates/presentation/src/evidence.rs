@@ -507,18 +507,30 @@ pub fn generic_details(corpus: &Corpus, finding: &Finding<'_>) -> Result<Vec<Str
                     })
                     .collect::<Result<Vec<_>>>()?
                     .join(", ");
-                details.push(format!(
-                    "Missing group ({group}). Example input observation — present: {}; absent: {}.",
-                    show(&e.observation.present)?,
-                    show(&e.observation.absent)?
-                ));
+                let mut note = format!("Missing group ({group}).");
+                note.push_str(&input_note(
+                    corpus,
+                    &e.observation,
+                    e.replay_scope,
+                    e.dependency_inputs.as_ref(),
+                )?);
+                details.push(note);
             }
             None
         }
         Evidence::Group(g) => match &g.outcome {
             VerifiedOutcome::Counterexample(c) => {
                 details.push(format!("Replayed tuples: {}.", show(&c.tuples)?));
-                Some(&c.observation)
+                let note = input_note(
+                    corpus,
+                    &c.observation,
+                    c.replay_scope,
+                    c.dependency_inputs.as_ref(),
+                )?;
+                if !note.is_empty() {
+                    details.push(note.trim_start().into());
+                }
+                None
             }
             _ => None,
         },
@@ -599,25 +611,31 @@ fn presence_note(
         "Replayed present tuple: {}.",
         atom_name(corpus, &example.tuple)?
     );
-    let (present, absent, label) = match &example.dependency_inputs {
+    note.push_str(&input_note(
+        corpus,
+        &example.observation,
+        example.replay_scope,
+        example.dependency_inputs.as_ref(),
+    )?);
+    Ok(note)
+}
+
+fn input_note(
+    corpus: &Corpus,
+    observation: &Observation,
+    replay_scope: ReplayScope,
+    dependency_inputs: Option<&Attribution<BTreeSet<GroundAtom>>>,
+) -> Result<String> {
+    let mut note = String::new();
+    let (present, absent, label) = match dependency_inputs {
         Some(Attribution::Complete(inputs)) => {
             if inputs.is_empty() {
                 return Ok(note);
             }
             (
-                example
-                    .observation
-                    .present
-                    .intersection(inputs)
-                    .cloned()
-                    .collect(),
-                example
-                    .observation
-                    .absent
-                    .intersection(inputs)
-                    .cloned()
-                    .collect(),
-                "Inputs in tuple dependency cone",
+                observation.present.intersection(inputs).cloned().collect(),
+                observation.absent.intersection(inputs).cloned().collect(),
+                "Inputs in dependency cone",
             )
         }
         scope => {
@@ -627,8 +645,8 @@ fn presence_note(
             }
             note.push_str("; showing the full observation.");
             (
-                example.observation.present.clone(),
-                example.observation.absent.clone(),
+                observation.present.clone(),
+                observation.absent.clone(),
                 "Example input observation",
             )
         }
@@ -637,7 +655,7 @@ fn presence_note(
         " {label} — present: {}; absent: {}. Scope: {}.",
         world_atoms(corpus, &present)?,
         world_atoms(corpus, &absent)?,
-        match example.replay_scope {
+        match replay_scope {
             ReplayScope::WholeProgram => "whole-program",
             ReplayScope::ConeOnly => "cone-only",
         },

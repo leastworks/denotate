@@ -130,3 +130,80 @@ fn scoped_replay_cannot_claim_absence_outside_its_completed_components() {
         Err(CheckError::OutsideReplay(b))
     );
 }
+
+#[test]
+fn diagnostic_input_scope_exhaustion_keeps_uniqueness_and_coverage_results() {
+    let mut c = Corpus::new();
+    let s = c.declare_sort("S").unwrap();
+    let a = c.declare_constant("a", s).unwrap();
+    let b = c.declare_constant("b", s).unwrap();
+    let input = c
+        .declare_relation("input", RelationRole::Input, [])
+        .unwrap();
+    let r = c
+        .declare_relation("r", RelationRole::Derived, [Parameter::new("x", s)])
+        .unwrap();
+    for constant in [a, b] {
+        let head = c.atom(r, [Term::Constant(constant)]).unwrap();
+        let body = c.atom(input, []).unwrap();
+        c.add_rule(head, [Literal::Positive(body)]).unwrap();
+    }
+    c.exactly_one("one", r, [], "").unwrap();
+    let limits = Limits::default();
+    let program = GroundProgram::prepare(&c, &Domains::from([(s, vec![a, b])]), &limits).unwrap();
+    let meaning = program.symbolic(&limits).unwrap();
+    let mut report = meaning.verify_at_most_one(&limits).unwrap();
+    let witnesses = |r: &Verification<'_>| {
+        r.groups
+            .iter()
+            .filter_map(|g| {
+                if let VerifiedOutcome::Counterexample(c) = &g.outcome {
+                    Some((
+                        c.observation.clone(),
+                        c.tuples.clone(),
+                        c.replay_scope,
+                        c.evidence.clone(),
+                    ))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    let before = witnesses(&report);
+    assert_eq!(before.len(), 1);
+    let mut coverage_before = report.coverage.clone();
+    assert_eq!(coverage_before.values().next().unwrap().missing, 1);
+    program
+        .annotate_diagnostic_inputs(
+            &mut report,
+            &Limits {
+                max_work: 0,
+                ..limits
+            },
+        )
+        .unwrap();
+    assert_eq!(before, witnesses(&report));
+    for group in &report.groups {
+        if let VerifiedOutcome::Counterexample(c) = &group.outcome {
+            assert!(matches!(
+                c.dependency_inputs,
+                Some(Attribution::Incomplete(_))
+            ));
+        }
+    }
+    for coverage in report.coverage.values_mut() {
+        for e in &mut coverage.examples {
+            assert!(matches!(
+                e.dependency_inputs.take(),
+                Some(Attribution::Incomplete(_))
+            ));
+        }
+    }
+    for coverage in coverage_before.values_mut() {
+        for e in &mut coverage.examples {
+            e.dependency_inputs = None;
+        }
+    }
+    assert_eq!(coverage_before, report.coverage);
+}

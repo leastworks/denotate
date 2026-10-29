@@ -250,6 +250,14 @@ cold/warm agreement. [Shared presentation](../../crates/presentation/src/evidenc
 reuses the uniqueness contribution code. The [development CLI](../../crates/ir-text/examples/check.rs)
 now prints these presented diagnostics, notes and labeled related locations by
 default, grouped by verification; `--json` retains its status-summary output.
+Default CLI related-location output expands producing rules, the checked obligation
+and upstream origins; `--verbose` expands the rest. This CLI layout does not change
+placement or the editor's related information.
+
+Uniqueness and coverage world notes now use structural input-cone filtering too:
+conflicting tuples for uniqueness, all candidate tuples of each missing group for
+coverage. Full replayed worlds remain in evidence. This reduces world-note noise
+independently of the still-deferred ownership-frontier narrowing.
 
 The [format](../den-format.md#emptiness-obligations),
 [protocol](../../crates/den-lsp/PROTOCOL.md) and [decisions](../decisions.md) now record

@@ -233,10 +233,7 @@ pub fn evidence_data(finding: &crate::Finding<'_>, keys: &SemanticKeys) -> Resul
                         }).collect::<std::result::Result<BTreeSet<_>,_>>()?.into_iter().map(|r| occurrence(&OccurrenceKey::Rule(r))).collect::<Vec<_>>(),
                         _ => vec![],
                     },
-                    "dependencyInputs":match &example.dependency_inputs {
-                        Some(Attribution::Complete(inputs)) => json!({"state":"complete","inputs":inputs.iter().map(|a| AtomKey::from_atom(keys,a)).collect::<std::result::Result<BTreeSet<_>,_>>()?.iter().map(atom_data).collect::<Vec<_>>()}),
-                        other => attribution_data(other.as_ref()),
-                    },
+                    "dependencyInputs":dependency_inputs_data(example.dependency_inputs.as_ref(), keys)?,
                     "attribution":attribution_data(example.attribution.as_ref())
                 }))).collect::<Result<Vec<_>>>()?
             })
@@ -249,12 +246,13 @@ pub fn evidence_data(finding: &crate::Finding<'_>, keys: &SemanticKeys) -> Resul
             "examples":c.examples.iter().map(|e| Ok(json!({
                 "group":e.group.iter().map(|id|Ok(constant(keys.constant(*id)?))).collect::<Result<Vec<_>>>()?,
                 "observation":observation(&e.observation)?,
+                "dependencyInputs":dependency_inputs_data(e.dependency_inputs.as_ref(), keys)?,
                 "scope": match e.replay_scope { ReplayScope::WholeProgram=>"whole-program",ReplayScope::ConeOnly=>"cone-only" }
             }))).collect::<Result<Vec<_>>>()?
         }),
         crate::Evidence::Group(g) => match &g.outcome {
             VerifiedOutcome::Counterexample(c) => {
-                json!({"kind":"replayed-counterexample","observation":observation(&c.observation)?,"tuples":c.tuples.iter().map(|a|Ok(atom_data(&AtomKey::from_atom(keys,a)?))).collect::<Result<Vec<_>>>()?,"scope":match c.replay_scope {ReplayScope::WholeProgram=>"whole-program",ReplayScope::ConeOnly=>"cone-only"},"producers":producers})
+                json!({"kind":"replayed-counterexample","observation":observation(&c.observation)?,"dependencyInputs":dependency_inputs_data(c.dependency_inputs.as_ref(), keys)?,"tuples":c.tuples.iter().map(|a|Ok(atom_data(&AtomKey::from_atom(keys,a)?))).collect::<Result<Vec<_>>>()?,"scope":match c.replay_scope {ReplayScope::WholeProgram=>"whole-program",ReplayScope::ConeOnly=>"cone-only"},"producers":producers})
             }
             _ => json!({"kind":"no-witness","producers":producers}),
         },
@@ -288,4 +286,16 @@ fn attribution_data<E>(attribution: Option<&Attribution<E>>) -> Value {
             "state":"incomplete", "reason":{"phase":c.phase,"resource":c.resource}
         }),
     }
+}
+
+fn dependency_inputs_data(
+    scope: Option<&Attribution<BTreeSet<GroundAtom>>>,
+    keys: &SemanticKeys,
+) -> Result<Value> {
+    Ok(match scope {
+        Some(Attribution::Complete(inputs)) => json!({"state":"complete","inputs":inputs.iter()
+            .map(|a| AtomKey::from_atom(keys, a)).collect::<std::result::Result<BTreeSet<_>,_>>()?
+            .iter().map(atom_data).collect::<Vec<_>>()}),
+        other => attribution_data(other),
+    })
 }

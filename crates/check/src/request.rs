@@ -448,6 +448,7 @@ pub enum CertificationScope {
 pub struct CertifiedCandidate {
     pub candidate: Candidate,
     pub tuples: BTreeSet<AtomKey>,
+    pub dependency_inputs: Option<Attribution<BTreeSet<AtomKey>>>,
     pub scope: CertificationScope,
     pub confined_to_no_meaning: BTreeSet<ComponentKey>,
 }
@@ -690,26 +691,10 @@ impl PreparedCheck<'_> {
                                     .map_err(CheckError::Keys)?,
                                 observation: candidate(&e.observation)?,
                                 replay_scope: e.replay_scope,
-                                dependency_inputs: e
-                                    .dependency_inputs
-                                    .as_ref()
-                                    .map(|scope| -> Result<_> {
-                                        Ok(match scope {
-                                            Attribution::Incomplete(c) => {
-                                                Attribution::Incomplete(*c)
-                                            }
-                                            Attribution::Complete(inputs) => Attribution::Complete(
-                                                inputs
-                                                    .iter()
-                                                    .map(|a| {
-                                                        AtomKey::from_atom(keys, a)
-                                                            .map_err(CheckError::Keys)
-                                                    })
-                                                    .collect::<Result<_>>()?,
-                                            ),
-                                        })
-                                    })
-                                    .transpose()?,
+                                dependency_inputs: project_dependency_inputs(
+                                    e.dependency_inputs.as_ref(),
+                                    keys,
+                                )?,
                                 attribution: e
                                     .attribution
                                     .as_ref()
@@ -764,6 +749,10 @@ impl PreparedCheck<'_> {
                                     .collect::<Result<_>>()?,
                                 observation: candidate(&e.observation)?,
                                 replay_scope: e.replay_scope,
+                                dependency_inputs: project_dependency_inputs(
+                                    e.dependency_inputs.as_ref(),
+                                    keys,
+                                )?,
                             })
                         })
                         .collect::<Result<_>>()?,
@@ -872,6 +861,10 @@ impl PreparedCheck<'_> {
                         CertifiedCandidate {
                             candidate: candidate(&c.observation)?,
                             tuples: c.tuples.iter().map(&atom).collect::<Result<_>>()?,
+                            dependency_inputs: project_dependency_inputs(
+                                c.dependency_inputs.as_ref(),
+                                keys,
+                            )?,
                             scope: match c.replay_scope {
                                 ReplayScope::WholeProgram => CertificationScope::WholeProgram,
                                 ReplayScope::ConeOnly => CertificationScope::ConeOnly,
@@ -963,4 +956,23 @@ impl PreparedCheck<'_> {
         }
         Ok(())
     }
+}
+
+fn project_dependency_inputs(
+    scope: Option<&Attribution<BTreeSet<GroundAtom>>>,
+    keys: &SemanticKeys,
+) -> Result<Option<Attribution<BTreeSet<AtomKey>>>> {
+    scope
+        .map(|scope| {
+            Ok(match scope {
+                Attribution::Incomplete(c) => Attribution::Incomplete(*c),
+                Attribution::Complete(inputs) => Attribution::Complete(
+                    inputs
+                        .iter()
+                        .map(|a| AtomKey::from_atom(keys, a).map_err(CheckError::Keys))
+                        .collect::<Result<_>>()?,
+                ),
+            })
+        })
+        .transpose()
 }

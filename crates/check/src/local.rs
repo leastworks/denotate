@@ -407,6 +407,8 @@ impl PreparedCheck<'_> {
         }
         self.program
             .attribute_emptiness(&mut verification.emptiness, &limits)?;
+        self.program
+            .annotate_diagnostic_inputs(&mut verification, &limits)?;
         let mut value = self.project(&verification, self.semantic_keys)?;
         for (scope, artifact) in &artifacts {
             if let (

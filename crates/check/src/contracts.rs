@@ -285,3 +285,73 @@ impl SymbolicMeaning<'_> {
         })
     }
 }
+
+impl GroundProgram {
+    pub(crate) fn dependency_inputs_with_budget(
+        &self,
+        roots: impl IntoIterator<Item = GroundAtom>,
+        budget: &mut Budget<'_>,
+    ) -> Result<BTreeSet<GroundAtom>> {
+        let cone = self.dependency_cone_with_budget(roots, budget)?;
+        let mut inputs = BTreeSet::new();
+        for atom in cone.facts {
+            budget.tick("diagnostic dependency inputs")?;
+            if self.inputs.contains(&atom) {
+                inputs.insert(atom);
+            }
+        }
+        Ok(inputs)
+    }
+
+    /// Optional display scopes are collected only after checking. Each witness has
+    /// its own allowance, independent of verdicts and source attribution.
+    pub(crate) fn annotate_diagnostic_inputs(
+        &self,
+        report: &mut Verification<'_>,
+        limits: &Limits,
+    ) -> Result<()> {
+        let scope = |result: Result<BTreeSet<GroundAtom>>| -> Result<_> {
+            Ok(Some(match result {
+                Ok(inputs) => Attribution::Complete(inputs),
+                Err(error) => Attribution::Incomplete(Inconclusive::from_error(error)?),
+            }))
+        };
+        for group in &mut report.groups {
+            if let VerifiedOutcome::Counterexample(example) = &mut group.outcome {
+                example.dependency_inputs = scope(self.dependency_inputs_with_budget(
+                    example.tuples.iter().cloned(),
+                    &mut Budget::new(limits),
+                ))?;
+            }
+        }
+        for (id, report) in &mut report.coverage {
+            let shape = self
+                .coverage
+                .get(id)
+                .ok_or(CheckError::Internal("missing coverage shape"))?;
+            for example in &mut report.examples {
+                let mut budget = Budget::new(limits);
+                let result = (|| {
+                    // An absent group has no witness tuple. Include every possible
+                    // candidate in the group, including alternative producers.
+                    let mut roots = Vec::new();
+                    for atom in self.atoms() {
+                        budget.tick("coverage diagnostic members")?;
+                        if atom.relation == shape.relation
+                            && shape
+                                .columns
+                                .iter()
+                                .zip(&example.group)
+                                .all(|(column, value)| atom.arguments[*column] == *value)
+                        {
+                            roots.push(atom.clone());
+                        }
+                    }
+                    self.dependency_inputs_with_budget(roots, &mut budget)
+                })();
+                example.dependency_inputs = scope(result)?;
+            }
+        }
+        Ok(())
+    }
+}

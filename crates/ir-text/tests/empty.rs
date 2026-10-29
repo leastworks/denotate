@@ -945,7 +945,7 @@ fn empty_notes_show_structural_dependency_inputs_including_derived_absences() {
                 .find(|n| n.starts_with("Replayed present tuple:"))
                 .unwrap();
             if let Some(inputs) = expected_inputs {
-                assert!(note.contains("Inputs in tuple dependency cone"), "{note}");
+                assert!(note.contains("Inputs in dependency cone"), "{note}");
                 assert!(note.contains(inputs), "{note}");
             } else {
                 assert_eq!(note, "Replayed present tuple: p().");

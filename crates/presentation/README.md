@@ -19,6 +19,10 @@ participating occurrences, and places them on source locations. It depends only 
   behind derived absences. The full world stays in structured evidence.
   Incomplete analysis stays visible alongside a failure; unknown worlds without a
   witness produce an inconclusive finding.
+- Uniqueness and coverage world notes use checker-supplied structural input cones.
+  Uniqueness includes the conflicting tuples; coverage includes all candidates of
+  each missing group. Empty scopes omit the note; unavailable scopes explicitly
+  show the full world. Structured evidence always retains the original observation.
 - `Identity` encodes a group, coverage/uniqueness/emptiness component, region or rewrite finding from semantic keys
   (`data(keys)`), never arena IDs or message text.
 - `Placement` chooses primary locations from the checked program's **own** files

@@ -121,6 +121,23 @@ primary with the other producers related. Evidence kinds are
 `replayed-counterexample`, `replayed-coverage-counterexamples`, `no-meaning-observation`, `rewrite-proof` and `no-witness`. Rewrite proofs do not
 authorize edits.
 
+### Filtered world notes
+
+Uniqueness and coverage retain their full observations in structured evidence.
+Their human notes restrict those observations to checker-supplied structural
+dependency-cone inputs: the union for the conflicting tuples in a uniqueness
+finding, or for every candidate tuple of the missing coverage group.
+
+Uniqueness evidence and each coverage example carry an additive
+`dependencyInputs` field, using the same shape as emptiness below:
+`{"state":"complete","inputs":[...keyed atoms...]}`,
+`{"state":"incomplete","reason":{"phase":...,"resource":...}}`,
+or null before collection. Complete empty scopes omit the input note; unavailable
+scopes explicitly show the full observation. Collection has a separate allowance
+per witness, so it cannot change semantic completeness. Inputs are projected to
+semantic keys for session equality. This affects notes only; primary and related
+locations are unchanged. No-meaning world notes keep their existing behavior.
+
 ### Coverage results
 
 A coverage finding uses
@@ -175,7 +192,7 @@ A replayed failure has primaries on the retained tuples' producing rules and fac
 with premise occurrences and the obligation related, as uniqueness does. Each tuple
 is placed separately under normal program ownership and library fallback, then
 shared primary locations are merged. Per-location notes name the tuple; a shared
-location has each applicable tuple's note. "Inputs in tuple dependency cone" shows
+location has each applicable tuple's note. "Inputs in dependency cone" shows
 the observation restricted to the checker-supplied structural cone inputs, with
 replay scope. This includes inputs behind negative derived premises and alternative
 producers. A complete cone with no inputs omits the input note. If cone collection

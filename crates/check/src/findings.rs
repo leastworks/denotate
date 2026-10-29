@@ -32,6 +32,7 @@ pub struct EvidenceStep {
 pub struct Counterexample {
     pub observation: Observation,
     pub replay_scope: ReplayScope,
+    pub dependency_inputs: Option<Attribution<BTreeSet<GroundAtom>>>,
     /// Every distinct group tuple true in the selected observation, not duplicate
     /// derivations of one tuple. At least two, confirmed by concrete replay.
     pub tuples: BTreeSet<GroundAtom>,
@@ -166,6 +167,8 @@ impl<'p> SymbolicMeaning<'p> {
         verified.emptiness = emptiness;
         self.program
             .attribute_emptiness(&mut verified.emptiness, limits)?;
+        self.program
+            .annotate_diagnostic_inputs(&mut verified, limits)?;
         Ok(verified)
     }
     pub(crate) fn verify_report(
@@ -237,6 +240,7 @@ impl<'p> SymbolicMeaning<'p> {
                         VerifiedOutcome::Counterexample(Counterexample {
                             observation,
                             replay_scope,
+                            dependency_inputs: None,
                             tuples,
                             evidence,
                             certification: None,
