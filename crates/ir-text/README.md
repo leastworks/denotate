@@ -83,10 +83,16 @@ user files are the program's own documents.
 ## Commands and tests
 
 ```sh
-just check-den crates/ir-text/fixtures [--verification library::default_checks]
+just check-den crates/ir-text/fixtures [--verification library::default_checks] [--json]
 cargo +1.93.0 test --locked -p denotate-ir-text
 ```
 
-`examples/check.rs` backs `just check-den`. The round trip of the test DSL
+`examples/check.rs` backs `just check-den`. By default it prints shared presented
+diagnostics grouped by verification: source URI, one-based line/Unicode-scalar column,
+kind, message, notes and labeled related locations. `--json` retains the previous
+`Results: {...}` status summaries with their existing headers and notices.
+See the [command contract](../../docs/den-format.md#commands) for ordering and exit codes.
+
+The round trip of the test DSL
 regression programs through printing and loading lives in
 `crates/test-dsl/tests/ir_text_roundtrip.rs`.

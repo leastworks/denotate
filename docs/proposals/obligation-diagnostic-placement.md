@@ -247,9 +247,9 @@ library-declared obligations):
 retains each tuple, observation, replay scope and separate attribution evidence/status.
 Its `EmptinessSummary` carries the bounded examples and count, with keyed evidence for
 cold/warm agreement. [Shared presentation](../../crates/presentation/src/evidence.rs)
-reuses the uniqueness contribution code. The [development CLI](../../crates/ir-text/examples/check.rs) prints
-only the status summary, not diagnostics and notes; printing them is a separate,
-small improvement.
+reuses the uniqueness contribution code. The [development CLI](../../crates/ir-text/examples/check.rs)
+now prints these presented diagnostics, notes and labeled related locations by
+default, grouped by verification; `--json` retains its status-summary output.
 
 The [format](../den-format.md#emptiness-obligations),
 [protocol](../../crates/den-lsp/PROTOCOL.md) and [decisions](../decisions.md) now record

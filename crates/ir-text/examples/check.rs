@@ -4,11 +4,13 @@ use denotate_check::{
     RequestPreparation, ScopedResult,
 };
 use denotate_check_session::Session;
-use denotate_ir_text::{filesystem, index, load_with_resolver};
+use denotate_ir_text::{
+    LoadedProgram, filesystem, index, load_with_resolver, origins, presentation,
+};
 use std::{collections::BTreeSet, fmt::Write};
 
 type Failure = (u8, String);
-const USAGE: &str = "Usage: check ROOT_FOLDER_OR_DEN.ROOT [--verification QUALIFIED_NAME]";
+const USAGE: &str = "Usage: check ROOT_FOLDER_OR_DEN.ROOT [--verification QUALIFIED_NAME] [--json]";
 
 fn format_errors(ds: Vec<denotate_ir_text::Diagnostic>) -> String {
     ds.iter()
@@ -30,13 +32,67 @@ fn name(namespace: &denotate_ir::Namespace, text: &str) -> String {
     .spelling()
 }
 
+/// Render the shared presenter's output only; semantic interpretation and
+/// source-placement policy stay in presentation.
+fn print_diagnostics(
+    p: &LoadedProgram,
+    presented: &presentation::Presentation,
+    output: &mut String,
+) -> Result<(), Failure> {
+    let location = |span: denotate_ir::SourceSpan| -> Result<_, Failure> {
+        let source = p
+            .sources
+            .snapshot(span.snapshot())
+            .map_err(|e| (2, e.to_string()))?;
+        let coordinate = origins::coordinate(&source.text, span.byte_range().start)
+            .ok_or((2, "Invalid diagnostic source coordinate".into()))?;
+        Ok((source.uri.clone(), coordinate))
+    };
+    let mut diagnostics = Vec::new();
+    for d in &presented.diagnostics {
+        let mut notes = d.notes.iter().map(String::as_str).collect::<Vec<_>>();
+        notes.sort();
+        let mut related = d
+            .related
+            .iter()
+            .map(|r| Ok((location(r.span)?, r.label.as_str())))
+            .collect::<Result<Vec<_>, Failure>>()?;
+        related.sort();
+        diagnostics.push((
+            location(d.primary)?,
+            d.kind.code(),
+            d.message.as_str(),
+            notes,
+            related,
+        ));
+    }
+    diagnostics.sort();
+    for ((uri, at), kind, message, notes, related) in diagnostics {
+        writeln!(output, "{uri}:{}:{}: {kind}: {message}", at.line, at.column).unwrap();
+        for note in notes {
+            writeln!(output, "  note: {note}").unwrap();
+        }
+        for ((uri, at), label) in related {
+            writeln!(
+                output,
+                "  related: {uri}:{}:{}: {label}",
+                at.line, at.column
+            )
+            .unwrap();
+        }
+    }
+    Ok(())
+}
+
 fn run(args: impl IntoIterator<Item = String>, output: &mut String) -> Result<u8, Failure> {
     let mut args = args.into_iter();
     let root = args.next().ok_or((2, USAGE.into()))?;
     let backend = BackendIdentity::bdd();
     let mut selection = None;
+    let mut json = false;
     while let Some(option) = args.next() {
         match option.as_str() {
+            "--json" if !json => json = true,
             "--verification" if selection.is_none() => {
                 selection = Some(args.next().ok_or((2, USAGE.into()))?)
             }
@@ -220,7 +276,17 @@ fn run(args: impl IntoIterator<Item = String>, output: &mut String) -> Result<u8
                     f.iter()
                         .any(|finding| finding["kind"] != "empty-grouping-domain")
                 });
-                writeln!(output, "Results: {:#}", presented.status).unwrap();
+                if json {
+                    writeln!(output, "Results: {:#}", presented.status).unwrap();
+                } else {
+                    print_diagnostics(&p, &presented, output)?;
+                    writeln!(
+                        output,
+                        "Result: {}",
+                        presented.status["state"].as_str().unwrap()
+                    )
+                    .unwrap();
+                }
             }
             LocalCheckOutcome::Inconclusive { reason, .. } => {
                 writeln!(output, "Inconclusive: {reason:?}").unwrap();
@@ -295,8 +361,7 @@ mod tests {
     const RESTRICTED: &str = "verification v { assumptions: [a]; obligations: [o]; }";
     #[test]
     fn codes_distinguish_proofs_findings_incomplete_and_unconfigured() {
-        {
-            let backend: Vec<&str> = vec![];
+        for backend in [vec![], vec!["--json"]] {
             let proved = Fixture::new(&format!("{BODY} {RESTRICTED}"));
             let (code, output) = proved.run(&backend);
             assert_eq!(code, 0, "{output}");
@@ -342,7 +407,7 @@ mod tests {
         assert!(output.contains("Partial run:"));
         // The other namespace's obligation is selected by a verification not run here.
         assert!(!output.contains("Unchecked obligation"), "{output}");
-        assert_eq!(output.matches("Results:").count(), 1);
+        assert_eq!(output.matches("Result:").count(), 1);
         assert!(output.contains("Verification 'a::b'::v"));
         assert!(
             f.run(&["--verification", "absent"])
@@ -370,7 +435,11 @@ mod tests {
                 ));
                 let (actual, output) = fixture.run(args);
                 assert_eq!(actual, code, "{output}");
-                assert!(output.contains("coverage"));
+                if code == 1 {
+                    assert!(output.contains("coverage"));
+                } else {
+                    assert!(output.contains("Result: proved"));
+                }
                 if !body.contains("const") {
                     assert!(output.contains("empty-grouping-domain"));
                 }
@@ -390,6 +459,7 @@ mod tests {
             ));
             let (actual, output) = f.run(&[]);
             assert_eq!(actual, code, "{output}");
+            assert_eq!(f.run(&["--json"]).0, code);
             assert_eq!(output.contains("(coverage)"), coverage, "{output}");
             assert_eq!(output.contains("(uniqueness)"), uniqueness, "{output}");
         }
@@ -412,6 +482,7 @@ mod tests {
             ));
             let (actual, output) = f.run(&[]);
             assert_eq!(actual, code, "{output}");
+            assert_eq!(f.run(&["--json"]).0, code);
             assert_eq!(
                 output.contains("relation is not empty"),
                 failure,
@@ -433,5 +504,164 @@ mod tests {
         assert_eq!(invalid.run(&[]).0, 2);
         fs::remove_file(invalid.0.join("den.root")).unwrap();
         assert_eq!(invalid.run(&[]).0, 3);
+    }
+    #[test]
+    fn human_output_prints_presented_location_kind_notes_and_related_labels() {
+        let f = Fixture::new(
+            "relation p();\r\nrelation '😀'(); p();\r\nobligation one: empty(p);\r\nverification checks { assumptions: []; obligations: [one]; }",
+        );
+        let uri = filesystem::uri(&fs::canonicalize(f.0.join("program.den")).unwrap());
+        let (code, output) = f.run(&[]);
+        assert_eq!(code, 1, "{output}");
+        assert!(
+            output.contains(&format!("{uri}:2:17: counterexample: Obligation one:")),
+            "{output}"
+        );
+        assert!(
+            output.contains("  note: Replayed present tuple: p()."),
+            "{output}"
+        );
+        assert!(
+            output.contains(&format!("  related: {uri}:3:12: checked obligation")),
+            "{output}"
+        );
+        assert!(output.contains("Verification ::checks"));
+        assert!(output.contains("Result: findings"));
+        assert!(!output.contains("Results:"));
+        let (json_code, json_output) = f.run(&["--json"]);
+        assert_eq!(json_code, code);
+        let status: serde_json::Value =
+            serde_json::from_str(json_output.split_once("Results: ").unwrap().1).unwrap();
+        assert_eq!(status["state"], "findings");
+        assert_eq!(
+            status["emptiness"][0]["examples"][0]["tuple"]["arguments"],
+            serde_json::json!([])
+        );
+        assert!(!json_output.contains("  note:"));
+        assert_eq!(f.run(&["--json", "--json"]).0, 2);
+    }
+
+    #[test]
+    fn library_fallback_keeps_the_presenters_program_label() {
+        let f = Fixture::new("");
+        fs::create_dir(f.0.join("library")).unwrap();
+        fs::write(f.0.join("library/den.root"), "{}").unwrap();
+        fs::write(
+            f.0.join("den.root"),
+            r#"{"libraries":["library/den.root"]}"#,
+        )
+        .unwrap();
+        fs::write(
+            f.0.join("library/lib.den"),
+            "relation p();
+p();
+obligation one: empty(p);
+verification checks { assumptions: []; obligations: [one]; }",
+        )
+        .unwrap();
+        let library = filesystem::uri(&fs::canonicalize(f.0.join("library/lib.den")).unwrap());
+        let root = filesystem::uri(&fs::canonicalize(f.0.join("den.root")).unwrap());
+        let (code, output) = f.run(&[]);
+        assert_eq!(code, 1, "{output}");
+        assert!(
+            output.contains(&format!(
+                "{library}:2:1: counterexample: in {root}: Obligation one:"
+            )),
+            "{output}"
+        );
+        assert!(
+            output.contains(&format!("related: {library}:3:12: checked obligation")),
+            "{output}"
+        );
+        assert!(output.contains("note: Replayed present tuple: p()."));
+        assert_eq!(f.run(&["--json"]).0, code);
+    }
+
+    #[test]
+    fn several_empty_tuples_are_located_in_numeric_source_order_under_each_verification() {
+        let f = Fixture::new(&format!(
+            "sort S;
+const c,b,a:S;
+relation p(x:S);
+{}p(c);
+p(b);
+p(a);
+obligation one: empty(p);
+verification z {{ assumptions: []; obligations: [one]; }}
+verification a {{ assumptions: []; obligations: [one]; }}",
+            "\n".repeat(5)
+        ));
+        let uri = filesystem::uri(&fs::canonicalize(f.0.join("program.den")).unwrap());
+        let (code, output) = f.run(&[]);
+        assert_eq!(code, 1, "{output}");
+        assert_eq!(output, f.run(&[]).1);
+        let a = output.find("Verification ::a\n").unwrap();
+        let z = output.find("Verification ::z\n").unwrap();
+        assert!(a < z); // semantic name order, despite reverse declaration order
+        for group in [&output[a..z], &output[z..]] {
+            let headers = group
+                .lines()
+                .filter(|line| line.starts_with(&uri) && line.contains(": counterexample:"))
+                .collect::<Vec<_>>();
+            assert_eq!(headers.len(), 3, "{group}");
+            for (header, line) in headers.iter().zip([9, 10, 11]) {
+                assert!(header.starts_with(&format!("{uri}:{line}:1:")), "{header}");
+            }
+            for tuple in ["p(a)", "p(b)", "p(c)"] {
+                assert!(
+                    group.contains(&format!("note: Replayed present tuple: {tuple}.")),
+                    "{group}"
+                );
+            }
+            assert_eq!(group.matches("Result: findings").count(), 1);
+        }
+        assert_eq!(f.run(&["--json"]).0, code);
+    }
+
+    #[test]
+    fn rendering_orders_presented_diagnostics_without_changing_their_contents() {
+        let f = Fixture::new(
+            "sort S; const a,b:S; relation p(x:S); relation q(x:S); p(a); p(b); q(X) :- p(X); obligation one: empty(q); verification checks { assumptions: []; obligations: [one]; }",
+        );
+        let (membership, sources) = filesystem::discover_classified(&f.0).unwrap();
+        let p = load_with_resolver(
+            &membership,
+            &sources,
+            Some(&mut filesystem::FileOriginResolver),
+        )
+        .unwrap();
+        let limits = Limits::default();
+        let operations = OperationalLimits::from(&limits);
+        let request = p.verification_requests(&limits).unwrap().remove(0).1;
+        let RequestPreparation::Complete(prepared) =
+            request.prepare(&p.corpus, &p.keys, &operations).unwrap()
+        else {
+            panic!()
+        };
+        let admitted = prepared.admit(&operations).unwrap();
+        let denotate_check::CheckOutcome::Complete(report) = admitted.verify(&operations).unwrap()
+        else {
+            panic!()
+        };
+        let mut presented = presentation::present(&p, &report).unwrap();
+        let mut first = String::new();
+        print_diagnostics(&p, &presented, &mut first).unwrap();
+        for d in &presented.diagnostics {
+            assert!(first.contains(&d.message));
+            for note in &d.notes {
+                assert!(first.contains(note));
+            }
+            for related in &d.related {
+                assert!(first.contains(&related.label));
+            }
+        }
+        presented.diagnostics.reverse();
+        for d in &mut presented.diagnostics {
+            d.notes.reverse();
+            d.related.reverse();
+        }
+        let mut reordered = String::new();
+        print_diagnostics(&p, &presented, &mut reordered).unwrap();
+        assert_eq!(first, reordered);
     }
 }

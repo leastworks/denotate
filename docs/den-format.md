@@ -278,12 +278,22 @@ origins still reloads with full current-text provenance.
 ## Commands
 
 ```sh
-just check-den <folder-or-den.root> [--verification QUALIFIED_NAME]
+just check-den <folder-or-den.root> [--verification QUALIFIED_NAME] [--json]
 just export-test-dsl <out-dir> <file.testdsl>…   # export a DSL program as .den
 ```
 
 `check-den` runs each verification declared in the program and its reachable libraries,
-printing its name, selected assumptions and results. With no verification it prints
+printing its name, selected assumptions and presented diagnostics. Each diagnostic
+shows its source URI, one-based line and Unicode-scalar column, kind, message, notes
+and labeled related locations. Verifications follow semantic-key order; diagnostics
+and related locations follow source URI and numeric coordinate order, with content
+as a tie-breaker. Notes are sorted by text. Library fallback messages retain their
+`in <program>:` label. Each verification ends with its status.
+
+`--json` retains the previous per-verification `Results: {...}` status summary
+instead of human diagnostics. Root/verification headers and configuration notices
+remain, so this mode is not a single JSON document. Exit codes are the same in both
+modes. With no verification it prints
 `No verification configured` and runs no semantic checks. `--verification` selects one
 declaration using the usual quoted/qualified name syntax; a bare name must be unique
 across the closure. Unknown or ambiguous names are errors. Every filtered run is labeled
