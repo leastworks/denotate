@@ -4,7 +4,7 @@ module.exports = grammar({
   name: 'denotate',
   extras: $ => [/[ \t\r\n]+/, $.comment],
   word: $ => $.identifier,
-  reserved: { global: $ => ['module', 'namespace', 'use', 'sort', 'const', 'relation', 'input', 'domain', 'obligation', 'assumption', 'verification', 'source'], parameter_names: _ => [] },
+  reserved: { global: $ => ['module', 'namespace', 'use', 'sort', 'const', 'relation', 'input', 'within', 'domain', 'obligation', 'assumption', 'verification', 'source'], parameter_names: _ => [] },
   rules: {
     // A file-scoped header may follow only imports (and whitespace/comments).
     // Once a global declaration or namespace block starts, no header can follow.
@@ -21,7 +21,7 @@ module.exports = grammar({
     import: $ => seq('use', field('name', $._namespace_path), ';'),
     sort: $ => seq('sort', field('name', $._name), optional($.location), ';'),
     constants: $ => seq('const', field('name', $._constant), repeat(seq(',', field('name', $._constant))), ':', field('sort', $._reference), optional($.location), ';'),
-    relation: $ => seq(field('kind', choice('relation', 'input')), field('name', choice($._name, $.generated_identifier)), '(', optional(seq($.parameter, repeat(seq(',', $.parameter)))), ')', optional($.location), ';'),
+    relation: $ => seq(field('kind', choice('relation', 'input')), field('name', choice($._name, $.generated_identifier)), '(', optional(seq($.parameter, repeat(seq(',', $.parameter)))), ')', optional(seq('within', field('domain', $._reference))), optional($.location), ';'),
     parameter: $ => seq(field('name', $._parameter_name), ':', field('sort', $._reference)),
     statement: $ => seq(field('head', $.atom), optional(seq(':-', $._literal, repeat(seq(',', $._literal)))), optional($.location), ';'),
     _literal: $ => choice($.positive_atom, $.negative_atom),

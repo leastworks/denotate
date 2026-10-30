@@ -510,12 +510,14 @@ fn grounding_retractions_alternative_supports_scc_merge_split_and_negative_edits
 fn singleton(n: usize) -> GroundingInput {
     let relation = RelationKey::Named(QualifiedKey::new("grounding-retention", format!("i{n}")));
     GroundingInput {
+        input_domains: BTreeMap::new(),
         key: GroundingKey(BTreeSet::from([relation.clone()])),
         providers: BTreeSet::new(),
         relations: BTreeMap::from([(
             relation,
             RelationSchema {
                 input: true,
+                input_domain: None,
                 parameters: vec![],
             },
         )]),

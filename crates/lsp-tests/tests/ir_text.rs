@@ -2136,3 +2136,134 @@ fn library_frontier_keeps_guard_support_related_and_follows_open_buffer_edits() 
     }
     c.shutdown();
 }
+
+#[test]
+fn restricted_input_provider_services_and_unsaved_domain_edits() {
+    let mut c = Client::start("ir-text/standalone");
+    let (uri, _) = c.open("example.den");
+    let text = "namespace lib { sort S; const a,b:S; relation allowed(x:S); allowed(a); } use lib; input i(x:S) within lib::allowed; obligation vacant: empty(i); verification checks { assumptions:[]; obligations:[vacant]; }";
+    c.change(&uri, 2, text);
+    checking_idle(&mut c);
+    let definition = query(
+        &mut c,
+        "textDocument/definition",
+        &uri,
+        text,
+        "within lib::allowed",
+        12,
+    );
+    assert_eq!(
+        definition[0]["targetSelectionRange"]["start"],
+        position(text, "relation allowed", 9)
+    );
+    let references = query(
+        &mut c,
+        "textDocument/references",
+        &uri,
+        text,
+        "within lib::allowed",
+        12,
+    );
+    assert_eq!(references.as_array().unwrap().len(), 3);
+    let hover = query(
+        &mut c,
+        "textDocument/hover",
+        &uri,
+        text,
+        "within lib::allowed",
+        12,
+    );
+    assert!(hover["contents"]["value"]
+        .as_str()
+        .unwrap()
+        .contains("allowed"));
+    let completion = query(
+        &mut c,
+        "textDocument/completion",
+        &uri,
+        text,
+        "within lib::allowed",
+        19,
+    );
+    assert!(completion["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|i| i["textEdit"]["newText"] == "lib::allowed"));
+    let renamed = c.request("textDocument/rename",json!({"textDocument":{"uri":uri},"position":position(text,"within lib::allowed",12),"newName":"eligible"}));
+    let renamed = support::apply_edits(
+        text,
+        renamed["documentChanges"][0]["edits"].as_array().unwrap(),
+    );
+    assert!(renamed.contains("within lib::eligible"));
+    assert!(renamed.contains("relation eligible") && renamed.contains("eligible(a)"));
+    c.change(&uri, 3, &renamed);
+    let edits = c.request(
+        "textDocument/formatting",
+        json!({"textDocument":{"uri":uri},"options":{"tabSize":4,"insertSpaces":true}}),
+    );
+    let formatted = support::apply_edits(&renamed, edits.as_array().unwrap());
+    assert!(formatted.contains("input i(x: S) within lib::eligible;"));
+    c.change(&uri, 4, &formatted);
+    checking_idle(&mut c);
+    let diagnostic = c
+        .diagnostics(&uri)
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["data"]["finding"]["component"] == "emptiness")
+        .unwrap()
+        .clone();
+    let finding = diagnostic["data"]["finding"].clone();
+    let with_two = formatted.replace("eligible(a);", "eligible(a); eligible(b);");
+    c.change(&uri, 5, &with_two);
+    checking_idle(&mut c);
+    let ds = c.diagnostics(&uri);
+    let diagnostic = ds
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["data"]["finding"] == finding)
+        .unwrap();
+    assert_eq!(diagnostic["data"]["evidence"]["presentTuples"]["count"], 2);
+    let empty = formatted.replace("eligible(a);", "");
+    c.change(&uri, 6, &empty);
+    checking_idle(&mut c);
+    assert!(!c
+        .diagnostics(&uri)
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["data"]["finding"] == finding));
+    for (version, typed) in [(7, ""), (8, "lib::"), (9, "lib::al")] {
+        let incomplete = format!("namespace lib {{ sort S; relation allowed(x:S); }} use lib; input i(x:S) within {typed}");
+        c.change(&uri, version, &incomplete);
+        let completion = query(
+            &mut c,
+            "textDocument/completion",
+            &uri,
+            &incomplete,
+            "within ",
+            7 + typed.len(),
+        );
+        let expected = if typed.is_empty() {
+            "allowed"
+        } else {
+            "lib::allowed"
+        };
+        assert!(
+            completion["items"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|i| i["textEdit"]["newText"] == expected),
+            "{typed}: {completion}"
+        );
+        assert!(!completion["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["label"] == "S"));
+    }
+    c.shutdown();
+}

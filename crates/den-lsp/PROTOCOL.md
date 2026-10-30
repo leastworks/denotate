@@ -141,6 +141,13 @@ Coverage, unsupported/inconclusive findings and no-meaning placement are unchang
 
 ### Filtered world notes
 
+Input observations range over the checked program's eligible input atoms. A
+`within` provider excludes tuples from that universe entirely, including the absent
+list; an authored negative premise on an excluded atom can still appear in proof
+evidence. Restricted-domain preparation exhaustion uses the existing inconclusive
+shape with phase `input domains` and the exhausted resource. No evidence schema or
+finding identity changes.
+
 Uniqueness and coverage retain their full observations in structured evidence.
 Their human notes restrict those observations to checker-supplied structural
 dependency-cone inputs: the union for the conflicting tuples in a uniqueness

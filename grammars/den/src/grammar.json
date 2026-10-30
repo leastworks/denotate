@@ -474,6 +474,31 @@
           "type": "CHOICE",
           "members": [
             {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "within"
+                },
+                {
+                  "type": "FIELD",
+                  "name": "domain",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "_reference"
+                  }
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
               "type": "SYMBOL",
               "name": "location"
             },
@@ -1857,6 +1882,10 @@
       {
         "type": "STRING",
         "value": "input"
+      },
+      {
+        "type": "STRING",
+        "value": "within"
       },
       {
         "type": "STRING",

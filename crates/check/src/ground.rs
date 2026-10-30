@@ -13,6 +13,8 @@ use std::{
 #[cfg(any(test, feature = "test-support"))]
 #[path = "cartesian_oracle.rs"]
 mod cartesian_oracle;
+#[path = "input_domains.rs"]
+mod input_domains;
 #[path = "planning.rs"]
 mod planning;
 #[path = "sparse.rs"]
@@ -129,6 +131,7 @@ pub struct GroundProgram {
     pub(crate) atoms: Vec<GroundAtom>,
     pub(crate) atom_index: BTreeMap<GroundAtom, usize>,
     pub(crate) inputs: BTreeSet<GroundAtom>,
+    pub(crate) input_domains: BTreeMap<RelationId, BTreeSet<GroundAtom>>,
     pub(crate) input_order: Option<Vec<GroundAtom>>,
     pub(crate) rules: Vec<GroundRule>,
     pub(crate) rewrites: crate::rewrite::Rewrites,
@@ -183,7 +186,9 @@ impl GroundProgram {
         limits.cancellation.check()?;
         let start = Instant::now();
         let domains = validate_domains(corpus, domains, budget)?;
+        let restricted = input_domains::evaluate(corpus, &domains, budget)?;
         let mut p = Self::empty(corpus, domains);
+        p.input_domains = restricted;
         p.obligations = obligations.clone();
         if let Some((keys, store)) = cache {
             sparse::populate_cached(corpus, &mut p, budget, keys, store)?;
@@ -259,6 +264,7 @@ impl GroundProgram {
             atoms: vec![],
             atom_index: BTreeMap::new(),
             inputs: BTreeSet::new(),
+            input_domains: BTreeMap::new(),
             input_order: None,
             rules: vec![],
             components: vec![],

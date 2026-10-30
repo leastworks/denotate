@@ -70,6 +70,7 @@ pub fn reserved_word(name: &str) -> bool {
             | "const"
             | "relation"
             | "input"
+            | "within"
             | "domain"
             | "obligation"
             | "assumption"

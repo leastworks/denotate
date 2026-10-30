@@ -8,8 +8,22 @@ real program that the current choice serves badly.
 
 ## Meaning and checking
 
-- **Negation is admitted by justification, not by stratification.** Business DSLs
-  naturally define mutually exclusive cases that negate each other. Relation-level
+- **Input domains define the universe; assumptions constrain its worlds.** A
+  restricted input names an input-free, stratified derived provider. We evaluate
+  that provider exactly before grounding inputs, independently of verifications,
+  over the checked program's closure and resolved sort domains. Using the possible
+  grounding closure would wrongly include tuples excluded by negation; using a
+  partial evaluation after exhaustion could hide real counterexamples. Preparation
+  therefore fails inconclusively as a whole when domain evaluation exhausts its
+  limits. The all-absent assignment is still possible, but an empty provider can
+  make uniqueness or emptiness trivially true; coverage continues to enumerate
+  groups from sort domains. A sort-correct excluded atom is false in rule bodies,
+  and invalid as a supplied present observation. Observation lists omit it.
+  This is an explicit declaration constraint, not an imported implicit assumption
+  ([syntax and meaning](den-format.md#restricted-input-domains)).
+
+- **Ordinary rule negation is admitted by justification, not by stratification.**
+  Business DSLs naturally define mutually exclusive cases that negate each other. Relation-level
   stratification would reject them, so the checker proves such negations redundant
   under the assumptions, or certifies a world, and reports everything else as
   unsupported or no-meaning ([meaning](den-format.md#meaning)).

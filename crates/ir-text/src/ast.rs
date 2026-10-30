@@ -26,7 +26,7 @@ pub(crate) struct Atom {
 pub(crate) enum Decl {
     Sort(Name),
     Constants(Vec<Name>, Name),
-    Relation(Name, bool, Vec<(Name, Name)>),
+    Relation(Name, bool, Vec<(Name, Name)>, Option<Name>),
     Rule(Atom, Vec<(bool, Atom)>),
     Contract {
         name: Name,
@@ -496,6 +496,9 @@ fn scope(
                     name(source, field(source, node, "name")?)?,
                     text(source, field(source, node, "kind")?) == "input",
                     params,
+                    node.child_by_field_name("domain")
+                        .map(|n| name(source, n))
+                        .transpose()?,
                 )
             }
             "statement" => {

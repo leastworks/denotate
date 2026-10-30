@@ -429,6 +429,9 @@ impl Projection {
                     d.input = field(node, "kind")
                         .is_some_and(|n| &self.source.text[n.byte_range()] == "input");
                     d.parameters = (!node.has_error()).then_some(parameters);
+                    if let Some(provider) = field(node, "domain") {
+                        self.reference(provider, &scope, Lookup::Name(Kind::Relation));
+                    }
                 }
                 "statement" => self.rule(node, &scope),
                 "domain" => {
@@ -659,6 +662,25 @@ impl Projection {
             .iter()
             .filter(|t| !t.comment)
             .collect::<Vec<_>>();
+        // Keep the full provider spelling during recovery, including a trailing
+        // namespace separator (e.g. `within lib::`).
+        if let Some(within) = tokens
+            .iter()
+            .rposition(|t| t.span.end <= byte && t.text == "within")
+        {
+            let after = &tokens[within + 1..];
+            let boundary = |t: &&Token| matches!(t.text.as_str(), ";" | "{" | "}" | "loc");
+            if !after.iter().any(|t| t.span.end <= byte && boundary(t)) {
+                let name: Vec<_> = after.iter().take_while(|t| !boundary(t)).collect();
+                let span = match (name.first(), name.last()) {
+                    (Some(first), Some(last)) if first.span.start <= byte => {
+                        first.span.start..last.span.end
+                    }
+                    _ => byte..byte,
+                };
+                return Some((Lookup::Name(Kind::Relation), self.scope_at(byte), span));
+            }
+        }
         if let Some(open) = tokens
             .iter()
             .rposition(|t| t.span.end <= byte && t.text == "[")
@@ -729,6 +751,9 @@ impl Projection {
                 "relation" | "input" | "const" | "sort" | "namespace" | "module"
             )
         }) {
+            if statement.iter().any(|t| t.text == "within") {
+                return Some((Lookup::Name(Kind::Relation), scope, span));
+            }
             return statement
                 .last()
                 .filter(|t| t.text == ":")

@@ -444,8 +444,13 @@ impl Retained for WorkReceipts {
     }
 }
 
-fields!(RelationSchema { input, parameters });
+fields!(RelationSchema {
+    input,
+    parameters,
+    input_domain
+});
 fields!(GroundingInput {
+    input_domains,
     key,
     providers,
     relations,

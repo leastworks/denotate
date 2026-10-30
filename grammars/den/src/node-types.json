@@ -763,6 +763,28 @@
     "type": "relation",
     "named": true,
     "fields": {
+      "domain": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "generated_identifier",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "quoted_identifier",
+            "named": true
+          }
+        ]
+      },
       "kind": {
         "multiple": false,
         "required": true,
@@ -1291,6 +1313,10 @@
   },
   {
     "type": "view",
+    "named": false
+  },
+  {
+    "type": "within",
     "named": false
   },
   {

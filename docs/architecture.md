@@ -64,6 +64,12 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
   while coverage and emptiness verdicts are recomputed. New cached stages must
   preserve cold/warm behavior and current-snapshot provenance.
 
+Restricted input domains follow the same boundaries: `Corpus` validates provider
+signatures and their static, stratified dependency cones; the checker evaluates them
+before seeding input atoms. Complete eligible tuple sets are explicit semantic-keyed
+inputs to session grounding. Provider evaluation itself is currently fresh on each
+preparation; no partial result can enter the grounding cache.
+
 ## Programs and checking in the editor
 
 A `.den` program is a `den.root` folder plus its referenced libraries; a file outside

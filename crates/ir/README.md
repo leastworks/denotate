@@ -37,6 +37,13 @@ takes no grouping argument.
 checked independently. The same namespace, name and grouping validation applies to all
 three constructors.
 
+`Corpus::restrict_input(input, provider)` attaches a derived domain provider after
+both signatures are declared. It checks arity and positional sorts immediately;
+`validate_input_domains()` checks the completed rule graph for input dependencies
+and cycles through negation. The checker repeats this validation with bounded work
+before evaluation. The attachment is `Relation::input_domain`; semantic schemas
+carry the provider's relation key. Parameter names need not match.
+
 Construction validity does not imply admissibility; checking is `denotate-check`.
 
 ## Occurrences, sources and provenance

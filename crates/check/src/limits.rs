@@ -14,6 +14,7 @@ use std::{
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckError {
     Keys(denotate_ir::KeyError),
+    Construction(denotate_ir::ConstructionError),
     /// Superseded work, not a resource limit or a semantic result.
     Cancelled,
     Deadline {
@@ -282,5 +283,11 @@ impl<'a> Budget<'a> {
             return Err(CheckError::LimitExceeded { phase, resource });
         }
         Ok(())
+    }
+}
+
+impl From<denotate_ir::ConstructionError> for CheckError {
+    fn from(e: denotate_ir::ConstructionError) -> Self {
+        Self::Construction(e)
     }
 }

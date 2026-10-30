@@ -45,6 +45,53 @@ verification single_value {
   reserved words unquoted. `$condition_N` is a generated helper (zero-arity, derived),
   distinct from a frontend relation spelled `'$condition_N'`.
 
+## Restricted input domains
+
+An input normally has one possible atom for every combination of its parameters'
+resolved sort values. `within` instead names a derived relation whose true tuples
+are its entire input universe:
+
+```den
+sort S;
+const a, b: S;
+relation candidate(x: S);
+relation excluded(x: S);
+relation eligible(x: S);
+candidate(a);
+candidate(b);
+excluded(b);
+eligible(X) :- candidate(X), !excluded(X);
+input selected(x: S) within eligible;
+```
+
+Here only `selected(a)` can be supplied. The provider must have the same arity and
+positional sorts as the input (parameter names may differ). Its whole dependency
+cone must be input-free and stratified: positive recursion and layered negation are
+allowed, but a cycle through negation is rejected, even if some verification's
+assumptions could discharge it. Provider references follow ordinary relation lookup,
+including namespaces, `use` and forward references. Only inputs can carry `within`;
+the clause precedes an optional `loc(...)`.
+
+The checker evaluates this cone exactly before creating input atoms. It uses the
+checked program's library closure and resolved sort domains, including `domain`
+overrides. Consumers can supply different provider facts to a library input. Domain
+evaluation is bounded preparation work; exhaustion yields an inconclusive result
+with phase `input domains` and a resource, never a partially restricted universe.
+
+An excluded atom has no Boolean variable. Supplying it as a present observation is
+an error. Sort-correct rule references remain valid: positive references are false,
+negative references are true. Excluded atoms do not appear in observations, even in
+the absent list; derivations may still show an authored negative premise about one.
+An empty provider gives zero input atoms. For a zero-arity input, a true provider
+tuple gives one atom and a false provider gives none.
+
+Restrictions belong to the input declaration and apply in every verification.
+Assumptions constrain assignments within that universe; they do not affect domain
+evaluation. The all-absent world remains possible. Coverage groups still range over
+the grouping columns' resolved sort domains: an empty provider with sort values
+`a` and `b` gives two failing groups for `at_least_one(selected, group_by: x)`.
+It does not remove those groups or prove coverage.
+
 ## Coverage obligations
 
 `at_least_one` requires a tuple for every grouping tuple in every permitted input
@@ -202,9 +249,9 @@ verification normal_operation {
 
 - A verification names the assumptions that define its permitted input worlds and the
   obligations checked in them. Both lists are required, in this order; either may be
-  `[]`. `assumptions: []` means unrestricted inputs. `obligations: []` is a
-  consistency-only verification: semantic analysis still runs, but no obligation is
-  checked, and the declaration gets a warning.
+  `[]`. `assumptions: []` permits every assignment over the declared input universe.
+  `obligations: []` is a consistency-only verification: semantic analysis still runs,
+  but no obligation is checked, and the declaration gets a warning.
 - References follow the usual namespace lookup and resolve only to their own kind; an
   unknown, wrong-kind, ambiguous or repeated reference is an error. `verification` is a
   reserved word; `assumptions` and `obligations` are not.
@@ -223,12 +270,12 @@ verification normal_operation {
 ## Meaning
 
 A program's meaning is defined separately for each **permitted input world**: a choice
-of input tuples over the finite domains that satisfies the assumptions selected by the
-verification being checked. In each world, the derived relations hold exactly the
-least fixed point of the rules. Admission, rewrites, no-meaning and unsupported
-findings below are therefore per verification: the same program can be admitted under
-one verification and unsupported under another, while the meaning of a fixed world
-never depends on the verification.
+of eligible input tuples over the finite domains that satisfies the assumptions
+selected by the verification being checked. In each world, the derived relations hold
+exactly the least fixed point of the rules. Admission, rewrites, no-meaning and
+unsupported findings below are therefore per verification: the same program can be
+admitted under one verification and unsupported under another, while the meaning of
+a fixed world never depends on the verification.
 
 - Positive recursion is admitted.
 - A cycle through negation is admitted only with a justification: a proof that the

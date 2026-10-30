@@ -10,6 +10,8 @@ pub struct GroundingInput {
     pub key: GroundingKey,
     pub providers: BTreeSet<GroundingKey>,
     pub relations: BTreeMap<RelationKey, RelationSchema>,
+    /// Complete, freshly evaluated restrictions for this unit's owned inputs.
+    pub input_domains: BTreeMap<RelationKey, BTreeSet<AtomKey>>,
     pub domains: BTreeMap<SortKey, BTreeSet<ConstantKey>>,
     pub rules: BTreeMap<RuleKey, RuleSchema>,
     pub plans: BTreeMap<RuleKey, Arc<OwnedJoinPlan>>,
@@ -54,6 +56,7 @@ impl GroundingGraph {
         corpus: &Corpus,
         keys: &SemanticKeys,
         domains: &Domains,
+        restricted: &BTreeMap<RelationId, BTreeSet<GroundAtom>>,
         budget: &mut Budget<'_>,
         plans: &mut dyn JoinPlanStore,
     ) -> Result<Self> {
@@ -221,12 +224,27 @@ impl GroundingGraph {
                     .map_or_else(|| OwnedJoinPlan::compute(shape).map(Arc::new), Ok)?;
                 prepared_plans.insert(k.clone(), p);
             }
+            let mut input_domains = BTreeMap::new();
+            for (id, tuples) in restricted {
+                budget.tick("grounding input domains")?;
+                let relation = keys.relation(*id).map_err(CheckError::Keys)?;
+                if !key.0.contains(relation) {
+                    continue;
+                }
+                let mut allowed = BTreeSet::new();
+                for atom in tuples {
+                    budget.charge(atom.arguments.len() + 1, "grounding input domains")?;
+                    allowed.insert(AtomKey::from_atom(keys, atom).map_err(CheckError::Keys)?);
+                }
+                input_domains.insert(relation.clone(), allowed);
+            }
             inputs.insert(
                 key.clone(),
                 Arc::new(GroundingInput {
-                    key,
+                    key: key.clone(),
                     providers,
                     relations: selected,
+                    input_domains,
                     domains: selected_domains,
                     rules: own_rules,
                     plans: prepared_plans,
@@ -459,6 +477,35 @@ pub fn ground_owned_unit(
             }
         }
         let mut p = GroundProgram::empty(&corpus, domains);
+        for (key, tuples) in &input.input_domains {
+            if !input.key.0.contains(key) || !input.relations[key].input {
+                return Err(CheckError::Internal("foreign restricted input"));
+            }
+            let id = relations[key];
+            let mut allowed = BTreeSet::new();
+            for atom in tuples {
+                budget.tick("grounding input domains")?;
+                if &atom.relation != key {
+                    return Err(CheckError::Internal("foreign input domain tuple"));
+                }
+                let atom = GroundAtom::new(
+                    id,
+                    atom.arguments
+                        .iter()
+                        .map(|c| {
+                            constants
+                                .get(c)
+                                .copied()
+                                .ok_or(CheckError::Internal("input domain outside sort domain"))
+                        })
+                        .collect::<Result<Vec<_>>>()?,
+                );
+                p.validate_atom(&atom)?;
+                allowed.insert(atom);
+            }
+            p.input_domains.insert(id, allowed);
+        }
+
         metrics.reconstruction_ns += nanos(start);
         let start = Instant::now();
         sparse::populate_seeded(
@@ -568,7 +615,8 @@ impl GroundProgram {
     ) -> Result<Self> {
         let start = Instant::now();
         let domains = validate_domains(corpus, domains, budget)?;
-        let graph = GroundingGraph::project(corpus, keys, &domains, budget, plans)?;
+        let restricted = input_domains::evaluate(corpus, &domains, budget)?;
+        let graph = GroundingGraph::project(corpus, keys, &domains, &restricted, budget, plans)?;
         let projection = start.elapsed();
         let query_start = Instant::now();
         let operations = OperationalLimits::from(budget.limits);

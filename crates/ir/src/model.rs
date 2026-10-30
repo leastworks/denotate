@@ -46,6 +46,11 @@ pub enum ConstructionError {
     AssumptionOverDerived(RelationId),
     UnknownAssumption(AssumptionId),
     UnknownObligation(ObligationId),
+    InvalidInputDomain {
+        input: RelationId,
+        provider: RelationId,
+        reason: &'static str,
+    },
     DuplicateReference {
         verification: String,
         reference: OccurrenceId,
@@ -102,6 +107,8 @@ pub struct Relation {
     pub name: String,
     pub role: RelationRole,
     pub parameters: Vec<Parameter>,
+    /// Optional fact-derived eligibility relation; matching positional signature.
+    pub input_domain: Option<RelationId>,
 }
 
 /// Names identify variables within a rule, never across rules. Reusing a Term
@@ -502,6 +509,26 @@ impl Corpus {
         Ok(id)
     }
 
+    pub(crate) fn set_input_domain(
+        &mut self,
+        input: RelationId,
+        provider: RelationId,
+    ) -> Result<()> {
+        let relation = self
+            .relations
+            .get_mut(&input)
+            .ok_or(ConstructionError::UnknownRelation(input))?;
+        if relation.input_domain.is_some() {
+            return Err(ConstructionError::InvalidInputDomain {
+                input,
+                provider,
+                reason: "input already has a domain provider",
+            });
+        }
+        relation.input_domain = Some(provider);
+        Ok(())
+    }
+
     pub fn declare_relation(
         &mut self,
         name: impl Into<String>,
@@ -550,6 +577,7 @@ impl Corpus {
                 name,
                 role,
                 parameters,
+                input_domain: None,
             },
         );
         self.occurrences.insert(id.into());
@@ -602,6 +630,7 @@ impl Corpus {
                 name,
                 role: RelationRole::Derived,
                 parameters: vec![],
+                input_domain: None,
             },
         );
         self.generated_relations.insert(id);

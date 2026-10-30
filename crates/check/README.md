@@ -10,7 +10,10 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
 
 1. **Domains.** `Domains` maps every sort to its typed constants. The checker never
    infers domains from rules; constants used by rules must be in their domain. Empty
-   domains are allowed.
+   domains are allowed. An input's optional `within` provider is evaluated exactly
+   over its input-free, stratified cone before input atoms are seeded. This shares
+   preparation limits and fails all-or-nothing with phase `input domains`. Grounding
+   uses the complete eligible tuple set; coverage still uses the sort domains.
 2. **Preparation.** `GroundProgram::prepare` computes possible atoms and rule
    instances and builds provider-first ground components, keeping original rule, atom
    and argument occurrence IDs. `prepare_with_input_groups` adds input assumptions W

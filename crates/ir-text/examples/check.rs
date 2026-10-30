@@ -511,6 +511,22 @@ mod tests {
         assert_eq!(code, 2);
     }
     #[test]
+    fn restricted_inputs_use_the_evaluated_domain_in_human_and_json_output() {
+        for (facts, expected) in [("", 0), ("allowed(a);", 1)] {
+            let f = Fixture::new(&format!(
+                "sort S; const a,b:S; relation allowed(x:S); input i(x:S) within allowed; {facts} obligation vacant: empty(i); verification checks {{ assumptions:[]; obligations:[vacant]; }}"
+            ));
+            assert_eq!(f.run(&[]).0, expected);
+            assert_eq!(f.run(&["--json"]).0, expected);
+        }
+        let (code, message) = Fixture::new(
+            "input i(); relation allowed(); allowed() :- i(); input j() within allowed;",
+        )
+        .run(&[]);
+        assert_eq!(code, 2);
+        assert!(message.contains("domain provider depends on an input"));
+    }
+    #[test]
     fn invalid_input_and_operational_failure_have_distinct_codes() {
         let (code, output) = Fixture::new("").run(&["--sat"]);
         assert_eq!(code, 2);

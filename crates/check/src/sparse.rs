@@ -378,7 +378,7 @@ fn populate_with_delta(
     budget: &mut Budget<'_>,
     mut next: impl FnMut(&mut VecDeque<usize>) -> Option<usize>,
 ) -> Result<()> {
-    populate_using(corpus, p, budget, &mut next, None, &[])
+    populate_using(corpus, p, budget, &mut next, None, &[], None)
 }
 
 pub(super) fn populate_cached(
@@ -395,6 +395,7 @@ pub(super) fn populate_cached(
         &mut VecDeque::pop_front,
         Some((keys, store)),
         &[],
+        None,
     )
 }
 
@@ -413,6 +414,24 @@ pub(super) fn populate_seeded(
         &mut VecDeque::pop_front,
         Some((keys, store)),
         external,
+        None,
+    )
+}
+
+pub(super) fn populate_domain_cone(
+    corpus: &Corpus,
+    p: &mut GroundProgram,
+    budget: &mut Budget<'_>,
+    cone: &BTreeSet<RelationId>,
+) -> Result<()> {
+    populate_using(
+        corpus,
+        p,
+        budget,
+        &mut VecDeque::pop_front,
+        None,
+        &[],
+        Some(cone),
     )
 }
 
@@ -423,6 +442,7 @@ fn populate_using(
     next: &mut impl FnMut(&mut VecDeque<usize>) -> Option<usize>,
     mut cache: Option<(&SemanticKeys, &mut dyn JoinPlanStore)>,
     external: &[GroundAtom],
+    cone: Option<&BTreeSet<RelationId>>,
 ) -> Result<()> {
     let mut tuples = Tuples::default();
     let mut instances = Instances::default();
@@ -434,6 +454,9 @@ fn populate_using(
     let plan_start = Instant::now();
     for rule in corpus.rules() {
         budget.tick("grounding plans")?;
+        if cone.is_some_and(|c| !c.contains(&rule.head.relation())) {
+            continue;
+        }
         let mut positives = Vec::new();
         for literal in &rule.body {
             budget.tick("grounding plans")?;
@@ -544,7 +567,15 @@ fn populate_using(
     }
     for relation in corpus.relations() {
         budget.tick("grounding")?;
-        if relation.role != RelationRole::Input {
+        if relation.role != RelationRole::Input || cone.is_some() {
+            continue;
+        }
+        if let Some(allowed) = p.input_domains.get(&relation.id) {
+            for atom in allowed {
+                budget.tick("grounding")?;
+                p.inputs.insert(atom.clone());
+                tuples.insert(atom.clone(), budget)?;
+            }
             continue;
         }
         let columns: Vec<_> = relation
@@ -624,7 +655,9 @@ impl GroundProgram {
     ) -> Result<Self> {
         let mut budget = Budget::new(limits);
         let domains = validate_domains(corpus, domains, &mut budget)?;
+        let restricted = input_domains::evaluate(corpus, &domains, &mut budget)?;
         let mut p = Self::empty(corpus, domains);
+        p.input_domains = restricted;
         populate_with_delta(corpus, &mut p, &mut budget, VecDeque::pop_back)?;
         p.build_groups(corpus, &mut budget)?;
         graph::analyze(&mut p, &mut budget)?;

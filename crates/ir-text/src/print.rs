@@ -446,13 +446,19 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
         add(
             r.id.into(),
             format!(
-                "{} {}({params})",
+                "{} {}({params}){}",
                 if r.role == RelationRole::Input {
                     "input"
                 } else {
                     "relation"
                 },
-                symbols[&r.id.into()].text
+                symbols[&r.id.into()].text,
+                r.input_domain
+                    .map(|id| format!(
+                        " within {}",
+                        reference(id.into(), c.namespace(r.id).unwrap())
+                    ))
+                    .unwrap_or_default()
             ),
             single(r.id.into()),
         )?;

@@ -164,6 +164,10 @@ pub fn compare(
             .find(|r| OccurrenceId::from(r.id) == ids[&x.id.into()])
             .unwrap();
         assert_eq!(x.role, y.role);
+        assert_eq!(
+            x.input_domain.map(|id| ids[&id.into()]),
+            y.input_domain.map(Into::into)
+        );
         assert_eq!(x.parameters.len(), y.parameters.len());
         for (x, y) in x.parameters.iter().zip(&y.parameters) {
             assert_eq!(x.name, y.name);

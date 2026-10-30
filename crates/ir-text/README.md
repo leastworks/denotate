@@ -34,6 +34,11 @@ fabricated spans.
 root; `ProgramMembership::single` builds an in-memory one-root program.
 `filesystem::discover` resolves `den.root` folders on disk for the CLI.
 
+Input declarations may name a provider with `within relation`. Loading resolves it
+through the shared relation resolver and delegates signature and dependency-cone
+validation to `Corpus`. The provider reference participates in navigation, rename
+and completion; export prints it from `Relation::input_domain`.
+
 ## Printing
 
 `print(&ExportProgram, PrintOptions) -> Result<ExportBundle, ExportError>` is pure. It

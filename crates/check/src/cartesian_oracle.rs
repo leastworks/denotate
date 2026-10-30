@@ -5,7 +5,9 @@ impl GroundProgram {
     pub fn prepare_cartesian(corpus: &Corpus, domains: &Domains, limits: &Limits) -> Result<Self> {
         let mut budget = Budget::new(limits);
         let domains = validate_domains(corpus, domains, &mut budget)?;
+        let restricted = input_domains::evaluate(corpus, &domains, &mut budget)?;
         let mut p = Self::empty(corpus, domains);
+        p.input_domains = restricted;
         let domains = &p.domains;
         let preparation = p.preparation;
         for relation in corpus.relations() {
@@ -19,6 +21,12 @@ impl GroundProgram {
                 budget.room(p.atoms.len(), limits.max_atoms, "grounding", "atoms")?;
                 let atom = GroundAtom::new(relation.id, args.iter().copied());
                 if relation.role == RelationRole::Input {
+                    if p.input_domains
+                        .get(&relation.id)
+                        .is_some_and(|allowed| !allowed.contains(&atom))
+                    {
+                        return Ok(());
+                    }
                     p.inputs.insert(atom.clone());
                 }
                 p.atom_index.insert(atom.clone(), p.atoms.len());

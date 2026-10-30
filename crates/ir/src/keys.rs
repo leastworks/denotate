@@ -185,6 +185,7 @@ pub struct RuleSchema {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RelationSchema {
     pub input: bool,
+    pub input_domain: Option<RelationKey>,
     pub parameters: Vec<(Arc<str>, SortKey)>,
 }
 
@@ -278,6 +279,10 @@ impl SemanticKeys {
         self.relation(relation.id)?;
         Ok(RelationSchema {
             input: relation.role == RelationRole::Input,
+            input_domain: relation
+                .input_domain
+                .map(|id| self.relation(id).cloned())
+                .transpose()?,
             parameters: relation
                 .parameters
                 .iter()

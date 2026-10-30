@@ -114,6 +114,9 @@ fn ir_construction<T>(
             }
             ConstructionError::UnknownSort(_) => "Unknown sort in IR construction".into(),
             ConstructionError::UnknownConstant(_) => "Unknown constant in IR construction".into(),
+            ConstructionError::InvalidInputDomain { reason, .. } => {
+                format!("Invalid input domain: {reason}")
+            }
             ConstructionError::UnknownRelation(_) => "Unknown relation in IR construction".into(),
             ConstructionError::ForeignAtom(_) => "Atom belongs to a different program".into(),
             ConstructionError::Arity {
@@ -613,7 +616,7 @@ pub fn load_with_resolver(
                         b.origin(m, id, n.span.clone())?;
                     }
                 }
-                Decl::Relation(n, input, parameters) => {
+                Decl::Relation(n, input, parameters, _) => {
                     let lookup = (module.clone(), n.text.clone(), n.generated);
                     if b.relations.contains_key(&lookup) {
                         return Err(diagnostic(
@@ -697,6 +700,22 @@ pub fn load_with_resolver(
         );
     }
     let mut explicit_domains = BTreeSet::new();
+    let mut input_domain_sites = BTreeMap::new();
+    for m in &scopes {
+        for s in &m.statements {
+            if let Decl::Relation(n, _, _, Some(provider)) = &s.decl {
+                let input = b.relation(m, n)?;
+                let provider_id = b.relation(m, provider)?;
+                ir_construction(
+                    m,
+                    provider.span.clone(),
+                    b.program.corpus.restrict_input(input, provider_id),
+                    &b.program.corpus,
+                )?;
+                input_domain_sites.insert(input, (m, provider.span.clone()));
+            }
+        }
+    }
     let mut duplicates = BTreeMap::new();
     for m in &scopes {
         let module = &m.namespace;
@@ -994,6 +1013,13 @@ pub fn load_with_resolver(
                 }
             }
         }
+    }
+    if let Err(e) = b.program.corpus.validate_input_domains() {
+        let ConstructionError::InvalidInputDomain { input, .. } = &e else {
+            unreachable!("provider signatures were validated before rules")
+        };
+        let (m, span) = &input_domain_sites[input];
+        ir_construction::<()>(m, span.clone(), Err(e), &b.program.corpus)?;
     }
     b.program.keys.validate(&b.program.corpus).map_err(|e| {
         vec![Diagnostic {
