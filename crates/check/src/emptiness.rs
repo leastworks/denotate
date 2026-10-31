@@ -2,6 +2,7 @@
 //! unresolved facts never prove emptiness. Retain a bounded, keyed sample without
 //! changing semantic enumeration or its allowance.
 use crate::{
+    certification::CertificationDependencies,
     limits::{Budget, Result},
     *,
 };
@@ -123,6 +124,7 @@ impl SymbolicMeaning<'_> {
                 }
             };
             let mut counted = false;
+            let mut dependencies = None;
             loop {
                 budget.tick("emptiness search")?;
                 let Some(observation) = context.witness_with_budget(&remaining, budget)? else {
@@ -180,23 +182,17 @@ impl SymbolicMeaning<'_> {
                 }
                 // Certification can vary by world. Keep unresolved worlds visible,
                 // and continue looking for a replayed presence under the same budget.
-                let mut world = context.true_condition();
-                for input in context.inputs() {
-                    let mut literal = context.input_with_budget(input, budget)?;
-                    if !observation.present.contains(input) {
-                        literal = context.apply(
-                            &context.true_condition(),
-                            &literal,
-                            |_, b| b.map(|v| !v),
-                            budget,
-                        )?;
-                    }
-                    world = context.apply(&world, &literal, op_function::and, budget)?;
+                if dependencies.is_none() {
+                    dependencies = Some(CertificationDependencies::new(
+                        self.program,
+                        [atom.clone()],
+                        budget,
+                    )?);
                 }
-                remaining = context.apply(
+                remaining = dependencies.as_ref().unwrap().exclude(
+                    context,
                     &remaining,
-                    &world,
-                    |a, b| op_function::and(a, b.map(|v| !v)),
+                    &observation,
                     budget,
                 )?;
             }

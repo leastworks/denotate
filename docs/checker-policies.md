@@ -151,3 +151,26 @@ constraints invalidate the absent-extension argument for projecting W into a loc
 query. Their verdicts are recomputed; grounding and plan reuse remain available.
 A future optimization must retain or correctly quantify every external constraint
 input and preserve cold/warm results, replay, consistency and cancellation behavior.
+
+## Certification search
+
+Emptiness and coverage can encounter atoms blocked by an unsupported component.
+Their search replays a permitted world and may attempt whole-program observation
+certification. After processing a world, it excludes all worlds agreeing on the
+inputs of the target's structural dependency cone **and every initially blocked
+component's cone**. Coverage uses all candidate tuples of the group. Certification
+only prunes rules, so later rounds cannot introduce dependencies outside these cones.
+An unrelated blocked component can prevent certification; its inputs cannot be
+omitted simply because they do not affect the target tuple directly.
+
+This avoids enumerating unrelated inputs for an input-independent blocked cycle.
+It does not prove that cycle or change certification's whole-program requirement.
+Uncertified worlds remain unresolved. The remaining search condition stays inside
+the selected W, including correlations with inputs outside the dependency set.
+
+Dependencies reuse the existing cone analysis, are computed lazily under the
+obligation's allowance, and are local to this check. Failure to finish computing
+them is explicit inconclusive; a partial set is never used. Diagnostic cone
+annotations retain their separate optional allowance. No limits are raised and the
+uniqueness path's two-candidate certification policy is unchanged. Search can still
+be exponential in the retained dependencies; failure-specific narrowing is deferred.

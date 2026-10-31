@@ -240,10 +240,11 @@ fn limits_never_prove_unknown_facts_and_preserve_earlier_presence() {
         assert!(e.inconclusive.is_some() && !e.proved(), "{e:?}");
         assert_eq!(e.examples.first().is_some(), !fact.is_empty());
     }
-    // A second case forces bounded enumeration of unresolved worlds while an
-    // independent fact already refutes the obligation.
+    // A second case forces bounded search over inputs that actually guard the
+    // cycle, while an independent fact already refutes the obligation. Unrelated
+    // inputs no longer force exhaustion: equivalent worlds are skipped.
     let p = load_text(&format!(
-        "sort S; const {names}:S; input i(x:S); relation p(x:S); p(a0); p(a1) :- !p(a1); obligation one: empty(p); {V}"
+        "sort S; const {names}:S; input i(x:S); relation p(x:S); p(a0); p(a1) :- i(a0), i(a1), i(a2), i(a3), !p(a1); obligation one: empty(p); {V}"
     ));
     let limits = Limits {
         max_work: 2000,

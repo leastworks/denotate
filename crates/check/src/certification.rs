@@ -6,6 +6,9 @@ use crate::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
+mod search;
+pub(crate) use search::CertificationDependencies;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ObservationPruning {
     pub round: usize,

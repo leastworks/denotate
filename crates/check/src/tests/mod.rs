@@ -1,5 +1,6 @@
 mod cancellation;
 mod certification;
+mod certification_search;
 mod completion;
 mod core;
 mod findings;

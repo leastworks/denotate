@@ -36,6 +36,9 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    or `ConeOnly` when the whole program is not admitted).
 7. **Certification.** `certify_observation` can establish one world's meaning in an
    otherwise unsupported program, upgrading `ConeOnly` replay for that observation.
+   It still requires the whole program to complete. Emptiness and coverage searches
+   skip worlds equivalent on all target and certification dependencies, preserving
+   unresolved outcomes; see [checker policies](../../docs/checker-policies.md#certification-search).
 8. **No-meaning findings.** For remaining negative-cycle components, completed
    equations identify permitted inputs with no consistent result. This is a sufficient
    failure check, not admission: a consistent equation solution does not establish
@@ -136,10 +139,10 @@ regression tests.
 ## Emptiness
 
 `empty` has one ungrouped `EmptinessReport` per selected obligation (keyed as
-`EmptinessResult` in `ScopedResults.emptiness`). `example` retains at most one
-replayed present tuple and observation. `unresolved` and `inconclusive` keep unknown
+`EmptinessResult` in `ScopedResults.emptiness`). `examples` retains at most three
+distinct replayed present tuples, each with its own observation. `unresolved` and `inconclusive` keep unknown
 worlds and resource exhaustion visible independently of a known failure. `proved()`
-requires complete analysis and no example. The BDD checks settled presence conditions;
+requires complete analysis and zero present tuples. The BDD checks settled presence conditions;
 blocked facts require world replay/certification, with enumeration and evidence charged
 to the obligation's allowance. Sessions reuse preparation and recompute these verdicts.
 

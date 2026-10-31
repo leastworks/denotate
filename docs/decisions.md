@@ -46,6 +46,14 @@ real program that the current choice serves badly.
   misleads the author; an explicit inconclusive or unsupported outcome does not. Hence
   counterexamples only after concrete replay (or certification); blocked or unknown
   facts are never evidence of absence.
+- **Certification search preserves whole-program certification.** Emptiness and
+  coverage may exclude equivalent input worlds using the target cones plus every
+  blocked component's cone. Using only the target would miss cases where an unrelated
+  component decides certification; certifying just the target would change existing
+  results. Complete dependency discovery is required, selected assumptions still
+  constrain witnesses, and an unresolved outcome stays unresolved. This removes
+  repeated attempts across irrelevant inputs without changing admission or limits
+  ([policy](checker-policies.md#certification-search)).
 - **BDD is the only backend.** The SAT experiment had synthetic/test-DSL performance
   wins but no demonstrated need on real programs. It increased implementation and test
   work for every obligation kind and made diagnostics depend on a setting. We retired

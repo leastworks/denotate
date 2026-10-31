@@ -1,6 +1,7 @@
 //! Coverage ranges over resolved grouping domains, never just producing tuples.
 //! Results retain bounded examples; enumeration and replay share a work allowance.
 use crate::{
+    certification::CertificationDependencies,
     limits::{Budget, Result},
     *,
 };
@@ -198,6 +199,7 @@ impl SymbolicMeaning<'_> {
             budget,
         )?;
         let mut unresolved = false;
+        let mut dependencies = None;
         loop {
             budget.tick("coverage search")?;
             let observation = context.witness_with_budget(&remaining, budget)?;
@@ -257,23 +259,17 @@ impl SymbolicMeaning<'_> {
             }
             // An unresolved world is not absence. Keep searching for a settled
             // counterexample; bounded exhaustion preserves incompleteness.
-            let mut world = context.true_condition();
-            for atom in context.inputs() {
-                let mut literal = context.input_with_budget(atom, budget)?;
-                if !observation.present.contains(atom) {
-                    literal = context.apply(
-                        &context.true_condition(),
-                        &literal,
-                        |_, b| b.map(|v| !v),
-                        budget,
-                    )?;
-                }
-                world = context.apply(&world, &literal, op_function::and, budget)?;
+            if dependencies.is_none() {
+                dependencies = Some(CertificationDependencies::new(
+                    self.program,
+                    tuples.iter().cloned(),
+                    budget,
+                )?);
             }
-            remaining = context.apply(
+            remaining = dependencies.as_ref().unwrap().exclude(
+                context,
                 &remaining,
-                &world,
-                |a, b| op_function::and(a, b.map(|v| !v)),
+                &observation,
                 budget,
             )?;
         }
