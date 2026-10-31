@@ -26,6 +26,24 @@ formatting, driven by what goes wrong in the first real programs. Known items:
   permitted world where the guards overlap and the consistent answers it allows, and
   suggest the fixes (an assumption that excludes the inputs, or giving one case
   priority). Today the diagnostic only says the cycle is unsupported.
+- Generated helpers can change recursive meaning. The normalizer cancels double
+  negation within one expression, but a relation boundary stops it: `t :- not not t`
+  is `t :- t`, whereas `w :- not t; t :- not w; t :- t` is an unsupported negative
+  cycle. Today's rule is to normalize each whole formula before introducing helpers
+  and to share only identical normalized output. Two prospective options, if real
+  programs need more; both change meaning for some programs, so each is a semantic
+  decision to review against today's behavior, not merely stronger admission:
+  - Normalize to negation normal form so generated helpers never appear negated
+    (Lloyd–Topor currently negates helpers for negated conjunctions). Compare all
+    affected programs with today's normalizer before adopting it.
+  - Treat certain helpers as transparent expression structure, inlined for
+    admission under the same classical convention. Today `$` only marks a
+    generated zero-arity relation; it does not certify that inlining preserves
+    recursive meaning. Transparency would need an explicit construction contract
+    identifying such helpers; a `$` name alone must not authorize it.
+
+  Authored relations, including named DSL terms, remain real boundaries either way;
+  document that for DSL authors.
 - Exported DSL libraries can show singleton-variable warnings that the user cannot act
   on; print singletons as `_` or skip style lints on generated/library files.
 - Each Go to Origin and rename request rebuilds snapshots and reloads programs
