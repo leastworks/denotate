@@ -94,6 +94,26 @@ the bounds only prove that a unique two-valued meaning exists.
   against the stable-model oracle and certification. Background: approximation
   fixpoint theory (Denecker, Marek, Truszczyński).
 
+## BDD backend: shared manager
+
+`biodivine-lib-bdd` gives every BDD its own node vector. Nodes are shared within one
+condition, and a `Condition` shares its whole BDD by `Arc`, but there is no unique
+table across conditions and no operation cache across applies: facts with common
+sub-functions store and compute them separately, and equal formulas installed twice
+are evaluated twice. A shared-manager library (for example OxiDD) provides a unique
+table, an apply cache and constant-time equivalence.
+
+- **Approach:** a time-boxed spike behind the existing `Condition`/`ConditionContext`
+  boundary, measured on the test DSL regression programs and a larger example. Check
+  memory bounding, cancellation, determinism of results and of any logical limits
+  (including under parallel operations), witness extraction, variable ordering,
+  licence and maintenance.
+- **Limits:** node budgets move from per-condition sizes to manager-level storage;
+  re-derive the limit set rather than translating it one-to-one (see
+  [checker policies](checker-policies.md)).
+- **Acceptance:** default-limit outcomes, witnesses-as-behaviour and cold/warm
+  agreement unchanged; no BDD node counts or timings as goldens.
+
 ## Small items
 
 - General-assumption contexts use fresh whole-program evaluation. If a real program
