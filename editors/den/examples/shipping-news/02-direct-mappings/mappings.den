@@ -1,0 +1,7 @@
+use shipping;
+namespace routes;
+inbound_mapping(carrier::mass, shipment::weight);
+inbound_mapping(carrier::destination, shipment::country);
+outbound_mapping(shipment::country, carrier::destination);
+// Intentionally wrong: a Number field cannot directly populate Text.
+inbound_mapping(carrier::mass, shipment::country);

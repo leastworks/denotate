@@ -1,0 +1,25 @@
+use shipping;
+namespace authoring {
+    // Downstream observations: these do not define terms or mapping guards.
+    relation customs();
+    customs() :- toggle_active(options::'customs-checks');
+    relation express();
+    express() :- toggle_active(options::'express-service');
+    relation enclosing();
+    enclosing() :- customs(), express();
+    relation not_customs();
+    not_customs() :- !toggle_active(options::'customs-checks');
+    relation unreachable();
+    unreachable() :- enclosing(), not_customs();
+    notice outer: varies(customs);
+    notice nested: varies(express, within: customs);
+    // A deeper condition must retain BOTH ancestors, not only express.
+    notice repeated: varies(customs, within: enclosing);
+    notice impossible: varies(not_customs, within: enclosing);
+    notice suppressed: varies(express, within: unreachable);
+    verification conditions {
+        assumptions: [one_field_value, one_element_value, predicate_contracts];
+        obligations: [];
+        notices: [outer, nested, repeated, impossible, suppressed];
+    }
+}

@@ -1,0 +1,23 @@
+use shipping;
+namespace checks {
+    const domestic, international: Predicate;
+    predicate_type(domestic, text);
+    predicate_type(international, text);
+    const geography: DisjointFamily;
+    disjoint_member(geography, domestic);
+    disjoint_member(geography, international);
+    predicate_use(shipment::country, domestic);
+    predicate_use(shipment::country, international);
+}
+namespace label { const routing: Field; field_type(routing, text); }
+namespace checked_routes {
+    const local_note, customs_note: Mapping;
+    outbound_mapping(local_note, shipment::handling_note, label::routing);
+    outbound_mapping(customs_note, shipment::routing_note, label::routing);
+    relation $domestic();
+    $domestic() :- predicate_holds(shipment::country, checks::domestic);
+    relation $international();
+    $international() :- predicate_holds(shipment::country, checks::international);
+    applicable_outbound_mapping(local_note) :- $domestic();
+    applicable_outbound_mapping(customs_note) :- $international();
+}

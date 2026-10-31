@@ -1,0 +1,11 @@
+use shipping;
+namespace carrier {
+    const mass, destination: Field;
+    field_type(mass, number);
+    // Intentionally missing: field_type(destination, text);
+}
+namespace shipment {
+    const weight, country: Element;
+    element_type(weight, number);
+    element_type(country, text);
+}

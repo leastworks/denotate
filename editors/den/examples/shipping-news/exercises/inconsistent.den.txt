@@ -1,0 +1,9 @@
+namespace experiments;
+relation both_checks();
+both_checks() :- shipping::predicate_holds(shipment::country, checks::domestic),
+    shipping::predicate_holds(shipment::country, checks::international);
+assumption require_both: at_least_one(both_checks, group_by: ());
+verification impossible_context {
+    assumptions: [shipping::predicate_contracts, require_both];
+    obligations: [shipping::one_outbound_source];
+}

@@ -1,0 +1,62 @@
+// Valid runtime values are abstracted by compared literals plus an unnamed value.
+// The unnamed marker is endpoint-relative; it does not establish value equality.
+namespace shipping;
+sort Value;
+relation value_type(value: Value, type: DataType);
+relation known_type(type: DataType);
+known_type(number);
+known_type(text);
+relation closed_type(type: DataType);
+relation unnamed(type: DataType, value: Value);
+relation field_comparison(field: Field, value: Value);
+relation element_comparison(element: Element, value: Value);
+relation field_presence_test(field: Field);
+relation element_presence_test(element: Element);
+relation compatible_field_value(field: Field, value: Value);
+relation compatible_element_value(element: Element, value: Value);
+compatible_field_value(F, V) :- field_type(F, T), value_type(V, T);
+compatible_element_value(E, V) :- element_type(E, T), value_type(V, T);
+relation field_candidates(field: Field, value: Value);
+relation element_candidates(element: Element, value: Value);
+field_candidates(F, V) :- field_comparison(F, V), compatible_field_value(F, V);
+element_candidates(E, V) :- element_comparison(E, V), compatible_element_value(E, V);
+field_candidates(F, V) :- field_type(F, T), unnamed(T, V);
+element_candidates(E, V) :- element_type(E, T), unnamed(T, V);
+field_candidates(F, V) :- field_type(F, T), closed_type(T), value_type(V, T);
+element_candidates(E, V) :- element_type(E, T), closed_type(T), value_type(V, T);
+input field_value(field: Field, value: Value) within field_candidates;
+input element_value(element: Element, value: Value) within element_candidates;
+relation field_present(field: Field);
+relation element_present(element: Element);
+field_present(F) :- field_value(F, _);
+element_present(E) :- element_value(E, _);
+assumption one_field_value: at_most_one(field_value, group_by: field);
+assumption one_element_value: at_most_one(element_value, group_by: element);
+
+// Invalid metadata is reported separately; eligibility must not hide it.
+relation invalid_field_comparison(field: Field, value: Value);
+relation invalid_element_comparison(element: Element, value: Value);
+invalid_field_comparison(F, V) :- field_comparison(F, V), !compatible_field_value(F, V);
+invalid_element_comparison(E, V) :- element_comparison(E, V), !compatible_element_value(E, V);
+invalid_field_comparison(F, V) :- field_comparison(F, V), unnamed(_, V);
+invalid_element_comparison(E, V) :- element_comparison(E, V), unnamed(_, V);
+relation has_unnamed(type: DataType);
+has_unnamed(T) :- unnamed(T, _);
+relation missing_unnamed(type: DataType);
+missing_unnamed(T) :- known_type(T), !closed_type(T), !has_unnamed(T);
+relation invalid_unnamed(type: DataType, value: Value);
+invalid_unnamed(T, V) :- unnamed(T, V), !value_type(V, T);
+invalid_unnamed(T, V) :- unnamed(T, V), closed_type(T);
+obligation registered_types: at_least_one(known_type, group_by: type);
+obligation typed_values: exactly_one(value_type, group_by: value);
+obligation unique_unnamed: at_most_one(unnamed, group_by: type);
+obligation open_types_have_other: empty(missing_unnamed);
+obligation valid_other_values: empty(invalid_unnamed);
+obligation valid_field_comparisons: empty(invalid_field_comparison);
+obligation valid_element_comparisons: empty(invalid_element_comparison);
+verification value_declarations {
+    assumptions: [];
+    obligations: [registered_types, typed_values, unique_unnamed,
+        open_types_have_other, valid_other_values,
+        valid_field_comparisons, valid_element_comparisons];
+}

@@ -1,0 +1,31 @@
+use shipping;
+namespace options { const 'express-service', 'customs-checks': Toggle; }
+namespace shipment {
+    const fragile, handling_note, routing_note: Element;
+    element_type(fragile, flag);
+    element_type(handling_note, text);
+    element_type(routing_note, text);
+}
+namespace label { const handling: Field; field_type(handling, text); }
+namespace feature_routes {
+    const plain_mass, careful, ordinary: Mapping;
+    outbound_mapping(plain_mass, shipment::display_weight, label::mass);
+    outbound_mapping(careful, shipment::handling_note, label::handling);
+    outbound_mapping(ordinary, shipment::routing_note, label::handling);
+    element_comparison(shipment::fragile, shipping::flags::true);
+    element_comparison(shipment::fragile, shipping::flags::false);
+    relation $express();
+    $express() :- toggle_active(options::'express-service');
+    relation $ordinary_service();
+    $ordinary_service() :- !toggle_active(options::'express-service');
+    applicable_outbound_mapping(conversions::render) :- $express();
+    applicable_outbound_mapping(plain_mass) :- $ordinary_service();
+    relation $fragile();
+    $fragile() :- element_value(shipment::fragile, shipping::flags::true);
+    relation $not_fragile();
+    $not_fragile() :- !element_value(shipment::fragile, shipping::flags::true);
+    relation $explicit_false();
+    $explicit_false() :- element_value(shipment::fragile, shipping::flags::false);
+    applicable_outbound_mapping(careful) :- $fragile();
+    applicable_outbound_mapping(ordinary) :- $not_fragile();
+}

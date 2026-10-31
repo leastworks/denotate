@@ -852,3 +852,7 @@ verification a {{ assumptions: []; obligations: [one]; }}",
         assert_eq!(f.run(&["--verbose", "--verbose"]).0, 2);
     }
 }
+
+#[cfg(test)]
+#[path = "check/shipping_news.rs"]
+mod shipping_news;

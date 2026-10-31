@@ -1,0 +1,15 @@
+// Literal encoding is a lowerer invariant: this Flag vocabulary has only true
+// and false. The name "flag" has no built-in meaning or sealed enum in the IR.
+use shipping;
+namespace shipping {
+const flag: DataType;
+known_type(flag);
+closed_type(flag);
+sort Toggle;
+input toggle_active(toggle: Toggle);
+}
+namespace shipping::flags {
+    const true, false: Value;
+    value_type(true, flag);
+    value_type(false, flag);
+}

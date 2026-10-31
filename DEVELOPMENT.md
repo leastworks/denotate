@@ -51,6 +51,10 @@ that they are current.
 
 ## Documentation
 
+Start with [Shipping News](editors/den/examples/shipping-news/README.md) for a runnable,
+nine-step tutorial on lowering a DSL to `.den`. Its final step is a complete example;
+the illustrative DSL has no parser or UDF runtime.
+
 - [Architecture](docs/architecture.md): layers and what belongs where.
 - [The `.den` format](docs/den-format.md): syntax, namespaces, program roots, origins.
 - [Decisions](docs/decisions.md): settled design choices and why.

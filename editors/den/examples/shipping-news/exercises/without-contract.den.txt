@@ -1,0 +1,6 @@
+// Copy into step 06 as probe.den: this context permits both opaque checks to hold.
+namespace experiments;
+verification without_contract {
+    assumptions: [shipping::one_field_value, shipping::one_element_value];
+    obligations: [shipping::one_outbound_source];
+}

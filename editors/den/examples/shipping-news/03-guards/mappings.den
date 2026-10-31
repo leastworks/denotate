@@ -1,0 +1,29 @@
+use shipping;
+namespace carrier {
+    const service, estimated_mass: Field;
+    field_type(service, text);
+    field_type(estimated_mass, number);
+}
+namespace literals {
+    const express, standard: Value;
+    value_type(express, text);
+    value_type(standard, text);
+}
+namespace routes {
+    field_comparison(carrier::service, literals::express);
+    field_comparison(carrier::service, literals::standard);
+    relation $express_service();
+    $express_service() :- field_value(carrier::service, literals::express);
+    relation $fallback_service();
+    $fallback_service() :- !field_value(carrier::service, literals::standard);
+    inbound_mapping(carrier::mass, shipment::weight);
+    inbound_mapping(carrier::estimated_mass, shipment::weight);
+    inbound_mapping(carrier::destination, shipment::country);
+    outbound_mapping(shipment::country, carrier::destination);
+    outbound_mapping(shipment::weight, carrier::mass);
+    applicable_inbound_mapping(carrier::mass, shipment::weight) :- $express_service();
+    applicable_inbound_mapping(carrier::estimated_mass, shipment::weight) :- $fallback_service();
+    applicable_inbound_mapping(carrier::destination, shipment::country);
+    applicable_outbound_mapping(shipment::country, carrier::destination);
+    applicable_outbound_mapping(shipment::weight, carrier::mass);
+}

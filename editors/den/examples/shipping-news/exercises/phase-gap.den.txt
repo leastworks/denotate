@@ -1,0 +1,10 @@
+// Input-phase field values and output-phase workspace values are independent.
+namespace experiments;
+relation unpropagated();
+unpropagated() :- shipping::field_present(carrier::destination),
+    !shipping::element_present(shipment::country);
+obligation value_flow: empty(unpropagated);
+verification phase_correlation {
+    assumptions: [shipping::one_field_value, shipping::one_element_value];
+    obligations: [value_flow];
+}

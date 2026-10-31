@@ -1,0 +1,9 @@
+// A named recursive term is a real relation boundary, not a textual macro.
+namespace boundary;
+relation decision();
+relation negative_decision();
+negative_decision() :- !decision();
+decision() :- !negative_decision();
+decision() :- decision();
+obligation absent: empty(decision);
+verification extracted_term { assumptions: []; obligations: [absent]; }

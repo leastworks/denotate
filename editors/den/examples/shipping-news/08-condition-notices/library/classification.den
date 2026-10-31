@@ -1,0 +1,14 @@
+// Source-use identities and observation bridges, not a generic formula evaluator.
+namespace shipping;
+sort Term;
+sort When;
+sort ConstraintUse;
+relation term_constraint(term: Term, constraint: ConstraintUse);
+relation constraint_when(constraint: ConstraintUse, scope: When);
+relation when_parent(scope: When, parent: When);
+relation classified(term: Term);
+relation when_applicable(scope: When);
+// Lowerer invariants: nonempty terms; each constraint use has one owner and at
+// most one enclosing When; lexical When containment is acyclic. Term references
+// may recurse. Substitute all ancestor guards into the whole term formula before
+// normalizing it; observation bridges must never feed term definitions.

@@ -1,0 +1,8 @@
+use shipping;
+namespace other_values {
+    const number_other, text_other: Value;
+    value_type(number_other, number);
+    value_type(text_other, text);
+    unnamed(number, number_other);
+    unnamed(text, text_other);
+}

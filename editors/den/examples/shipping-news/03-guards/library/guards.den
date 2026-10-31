@@ -1,0 +1,11 @@
+namespace shipping;
+relation applicable_inbound_mapping(field: Field, element: Element);
+relation applicable_outbound_mapping(element: Element, field: Field);
+obligation one_inbound_source: at_most_one(applicable_inbound_mapping, group_by: element)
+    message "Only one inbound mapping may apply to a shipment element.";
+obligation one_outbound_source: at_most_one(applicable_outbound_mapping, group_by: field)
+    message "Only one outbound mapping may apply to a message field.";
+verification mappings {
+    assumptions: [one_field_value, one_element_value];
+    obligations: [one_inbound_source, one_outbound_source];
+}

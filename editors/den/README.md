@@ -41,6 +41,9 @@ source; **Denotate: Go to Origin** jumps there (hash-checked; a changed source i
 reported, not navigated). Do not commit generated exports: they contain absolute
 `file://` URIs.
 
+The [Shipping News tutorial](examples/shipping-news/README.md) builds a complete
+message-mapping and classification example in nine runnable steps.
+
 ## What the editor does
 
 - **Programs.** Discovers every `den.root` in the workspace and referenced libraries;

@@ -1,0 +1,35 @@
+// One opaque bit per authored endpoint/predicate use, shared by repeated calls.
+namespace shipping;
+sort Predicate;
+sort DisjointFamily;
+relation predicate_type(predicate: Predicate, type: DataType);
+relation predicate_use(element: Element, predicate: Predicate);
+relation compatible_predicate(element: Element, predicate: Predicate);
+compatible_predicate(E, P) :- element_type(E, T), predicate_type(P, T);
+relation invalid_predicate_use(element: Element, predicate: Predicate);
+invalid_predicate_use(E, P) :- predicate_use(E, P), !compatible_predicate(E, P);
+relation predicate_candidates(element: Element, predicate: Predicate);
+predicate_candidates(E, P) :- predicate_use(E, P), compatible_predicate(E, P);
+input predicate_result(element: Element, predicate: Predicate) within predicate_candidates;
+relation predicate_holds(element: Element, predicate: Predicate);
+predicate_holds(E, P) :- element_present(E), predicate_result(E, P);
+// Absence makes predicate_holds false; negating it includes absence.
+relation disjoint_member(family: DisjointFamily, predicate: Predicate);
+relation same_predicate(left: Predicate, right: Predicate);
+same_predicate(P, P) :- predicate_type(P, _);
+relation family_has_pair(family: DisjointFamily);
+family_has_pair(F) :- disjoint_member(F, P), disjoint_member(F, Q), !same_predicate(P, Q);
+relation forbidden_check_results(element: Element, family: DisjointFamily);
+forbidden_check_results(E, F) :- disjoint_member(F, P), disjoint_member(F, Q),
+    !same_predicate(P, Q), predicate_holds(E, P), predicate_holds(E, Q);
+assumption predicate_contracts: empty(forbidden_check_results);
+// Family membership derives all distinct pairs; no separate pair-emission API.
+// Overlapping families do not make disjointness transitive. Duplicate authored
+// member occurrences are a lowerer error: duplicate tuples have only one truth.
+obligation typed_predicates: exactly_one(predicate_type, group_by: predicate);
+obligation compatible_predicates: empty(invalid_predicate_use);
+obligation nontrivial_families: at_least_one(family_has_pair, group_by: family);
+verification predicate_declarations {
+    assumptions: [];
+    obligations: [typed_predicates, compatible_predicates, nontrivial_families];
+}

@@ -1,0 +1,86 @@
+use shipping;
+namespace shipment {
+    // Independent output-phase input supplied by opaque middle processing.
+    const assessed_weight: Element;
+    element_type(assessed_weight, number);
+}
+namespace term_ids { const dispatch_rules, ready, attention, follow_up, self_guard: Term; }
+namespace scopes {
+    const customs, express, self_guard: When;
+    when_parent(express, customs);
+}
+namespace requirements {
+    const country, route_class, careful, has_weight, rules, seed, repeat, self: ConstraintUse;
+    term_constraint(term_ids::dispatch_rules, country);
+    term_constraint(term_ids::dispatch_rules, route_class);
+    term_constraint(term_ids::dispatch_rules, careful);
+    constraint_when(country, scopes::customs);
+    constraint_when(route_class, scopes::customs);
+    constraint_when(careful, scopes::express);
+    term_constraint(term_ids::ready, has_weight);
+    term_constraint(term_ids::ready, rules);
+    term_constraint(term_ids::attention, seed);
+    term_constraint(term_ids::follow_up, repeat);
+    term_constraint(term_ids::self_guard, self);
+    constraint_when(self, scopes::self_guard);
+}
+namespace terms {
+    predicate_use(shipment::country, checks::domestic);
+    predicate_use(shipment::country, checks::international);
+    element_comparison(shipment::fragile, shipping::flags::true);
+    element_comparison(shipment::fragile, shipping::flags::false);
+    element_presence_test(shipment::assessed_weight);
+    element_presence_test(shipment::country);
+    // One formula: (!customs OR country_present) AND
+    // (!customs OR domestic OR international) AND
+    // (!(customs AND express) OR fragile_false).
+    // Helpers below are normalization OUTPUT, not pre-normalization boundaries.
+    relation $country_requirement();
+    $country_requirement() :- !toggle_active(options::'customs-checks');
+    $country_requirement() :- element_present(shipment::country);
+    relation $route_requirement();
+    $route_requirement() :- !toggle_active(options::'customs-checks');
+    $route_requirement() :- predicate_holds(shipment::country, checks::domestic);
+    $route_requirement() :- predicate_holds(shipment::country, checks::international);
+    relation $both_guards();
+    $both_guards() :- toggle_active(options::'customs-checks'), toggle_active(options::'express-service');
+    relation $care_requirement();
+    $care_requirement() :- !$both_guards();
+    $care_requirement() :- element_value(shipment::fragile, shipping::flags::false);
+    relation dispatch_rules();
+    dispatch_rules() :- $country_requirement(), $route_requirement(), $care_requirement();
+    // With customs disabled, every implication is true, including when absent.
+    relation ready();
+    ready() :- element_present(shipment::assessed_weight), dispatch_rules();
+    // Positive mutual recursion needs a seed; absence does not seed the cycle.
+    relation attention();
+    relation follow_up();
+    attention() :- element_value(shipment::fragile, shipping::flags::true);
+    attention() :- follow_up();
+    follow_up() :- attention();
+    // "when NOT self_guard -> self_guard" is NOT NOT T OR T.
+    // Normalize the complete formula first: positive recursion, false at the LFP.
+    relation self_guard();
+    self_guard() :- self_guard();
+    self_guard() :- self_guard();
+    classified(term_ids::dispatch_rules) :- dispatch_rules();
+    classified(term_ids::ready) :- ready();
+    classified(term_ids::attention) :- attention();
+    classified(term_ids::follow_up) :- follow_up();
+    classified(term_ids::self_guard) :- self_guard();
+    when_applicable(scopes::self_guard) :- !self_guard();
+    when_applicable(scopes::customs) :- toggle_active(options::'customs-checks');
+    when_applicable(scopes::express) :- toggle_active(options::'customs-checks'), toggle_active(options::'express-service');
+}
+namespace label { const assessed_mass: Field; field_type(assessed_mass, number); }
+namespace classified_routes {
+    const assessed, fallback: Mapping;
+    outbound_mapping(assessed, shipment::assessed_weight, label::assessed_mass);
+    outbound_mapping(fallback, shipment::weight, label::assessed_mass);
+    relation $ready();
+    $ready() :- terms::ready();
+    relation $not_ready();
+    $not_ready() :- !terms::ready();
+    applicable_outbound_mapping(assessed) :- $ready();
+    applicable_outbound_mapping(fallback) :- $not_ready();
+}

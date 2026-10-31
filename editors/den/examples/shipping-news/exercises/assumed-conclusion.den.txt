@@ -1,0 +1,7 @@
+// Proving the same relation that an assumption constrains is not a UDF audit.
+namespace experiments;
+obligation audit: empty(shipping::forbidden_check_results);
+verification circular_audit {
+    assumptions: [shipping::predicate_contracts];
+    obligations: [audit];
+}

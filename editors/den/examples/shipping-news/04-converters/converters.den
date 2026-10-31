@@ -1,0 +1,44 @@
+use shipping;
+namespace carrier { const mass_unit: Field; field_type(mass_unit, text); }
+namespace shipment {
+    const normalized_weight, display_weight: Element;
+    element_type(normalized_weight, number);
+    element_type(display_weight, text);
+}
+namespace label {
+    const mass, unit: Field;
+    field_type(mass, text);
+    field_type(unit, text);
+}
+namespace unpack_mass {
+    const convert: Converter;
+    const amount, unit, normalized, display: Port;
+    converter_argument(convert, amount, number);
+    converter_argument(convert, unit, text);
+    converter_result(convert, normalized, number);
+    converter_result(convert, display, text);
+}
+namespace render_mass {
+    // The reverse direction is a separate UDF, not an inferred inverse.
+    const convert: Converter;
+    const normalized, display, amount, unit: Port;
+    converter_argument(convert, normalized, number);
+    converter_argument(convert, display, text);
+    converter_result(convert, amount, text);
+    converter_result(convert, unit, text);
+}
+namespace conversions {
+    const unpack, render: Mapping;
+    inbound_converter(unpack, unpack_mass::convert);
+    inbound_argument(unpack, unpack_mass::amount, carrier::mass);
+    inbound_argument(unpack, unpack_mass::unit, carrier::mass_unit);
+    inbound_result(unpack, unpack_mass::normalized, shipment::normalized_weight);
+    inbound_result(unpack, unpack_mass::display, shipment::display_weight);
+    applicable_inbound_mapping(unpack);
+    outbound_converter(render, render_mass::convert);
+    outbound_argument(render, render_mass::normalized, shipment::normalized_weight);
+    outbound_argument(render, render_mass::display, shipment::display_weight);
+    outbound_result(render, render_mass::amount, label::mass);
+    outbound_result(render, render_mass::unit, label::unit);
+    applicable_outbound_mapping(render);
+}

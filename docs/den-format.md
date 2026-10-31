@@ -135,8 +135,9 @@ with the labeled library fallback when needed. Upstream origins remain related.
 Placement uses only the retained examples; counts, checking and finding identity
 are unchanged.
 
-Coverage is an obligation form only. Richer assumption forms remain future work. Coverage declarations use the same verification
-selection, unchecked-obligation notices, names, origins and editor services as uniqueness.
+Coverage also constrains worlds when used as a [selected assumption](#selected-assumptions).
+Coverage obligations use the same verification selection, unchecked-obligation notices,
+names, origins and editor services as uniqueness.
 
 ## Exactly-one obligations
 
@@ -240,7 +241,8 @@ notice; other tuples keep their own attribution allowances. Verdict and checking
 completeness are unchanged. Current `.den` locations and upstream origins remain
 separate. Findings without a witness stay at the obligation.
 
-`empty` is an obligation form only. Selection, unchecked-obligation notices,
+`empty` also constrains worlds as a [selected assumption](#selected-assumptions).
+For obligations, selection, unchecked-obligation notices,
 consistency-only verifications, origins, printing and editor services work as for
 other obligations.
 

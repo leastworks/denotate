@@ -1,0 +1,38 @@
+use shipping;
+namespace carrier {
+    const service, estimated_mass: Field;
+    field_type(service, text);
+    field_type(estimated_mass, number);
+}
+namespace literals {
+    const express, standard: Value;
+    value_type(express, text);
+    value_type(standard, text);
+}
+namespace routes {
+    const measured, estimated, country_in, country_out, weight_out: Mapping;
+    field_comparison(carrier::service, literals::express);
+    relation $express_service();
+    $express_service() :- field_value(carrier::service, literals::express);
+    relation $fallback_service();
+    $fallback_service() :- !field_value(carrier::service, literals::express);
+    inbound_mapping(measured, carrier::mass, shipment::weight);
+    inbound_mapping(estimated, carrier::estimated_mass, shipment::weight);
+    inbound_mapping(country_in, carrier::destination, shipment::country);
+    outbound_mapping(country_out, shipment::country, carrier::destination);
+    outbound_mapping(weight_out, shipment::weight, carrier::mass);
+    applicable_inbound_mapping(measured) :- $express_service();
+    applicable_inbound_mapping(estimated) :- $fallback_service();
+    applicable_inbound_mapping(country_in);
+    applicable_outbound_mapping(country_out);
+    applicable_outbound_mapping(weight_out);
+}
+namespace repeated_route {
+    use shipping;
+    // A second authored occurrence of exactly the same directional mapping.
+    inbound_mapping(routes::measured, carrier::mass, shipment::weight);
+    field_presence_test(carrier::mass);
+    relation $express_with_mass();
+    $express_with_mass() :- field_value(carrier::service, literals::express), field_present(carrier::mass);
+    applicable_inbound_mapping(routes::measured) :- $express_with_mass();
+}

@@ -1,0 +1,47 @@
+// Identity = direction + endpoints; for a converter include its name and all
+// named port bindings in canonical order. Guards and source positions are excluded.
+namespace shipping;
+sort Mapping;
+sort Converter;
+sort Port;
+relation inbound_mapping(mapping: Mapping, field: Field, element: Element);
+relation outbound_mapping(mapping: Mapping, element: Element, field: Field);
+relation mapping_endpoints(field: Field, element: Element);
+mapping_endpoints(F, E) :- inbound_mapping(_, F, E);
+mapping_endpoints(F, E) :- outbound_mapping(_, E, F);
+relation same_type(field: Field, element: Element);
+same_type(F, E) :- field_type(F, T), element_type(E, T);
+relation invalid_mapping(field: Field, element: Element);
+invalid_mapping(F, E) :- mapping_endpoints(F, E), !same_type(F, E);
+obligation compatible_mappings: empty(invalid_mapping);
+verification mapping_types { assumptions: []; obligations: [compatible_mappings]; }
+
+// Signatures describe opaque functions, not executable bodies or inverse laws.
+relation converter_argument(converter: Converter, port: Port, type: DataType);
+relation converter_result(converter: Converter, port: Port, type: DataType);
+relation inbound_converter(mapping: Mapping, converter: Converter);
+relation inbound_argument(mapping: Mapping, port: Port, field: Field);
+relation inbound_result(mapping: Mapping, port: Port, element: Element);
+relation outbound_converter(mapping: Mapping, converter: Converter);
+relation outbound_argument(mapping: Mapping, port: Port, element: Element);
+relation outbound_result(mapping: Mapping, port: Port, field: Field);
+relation applicable_inbound_mapping(mapping: Mapping);
+relation applicable_outbound_mapping(mapping: Mapping);
+relation inbound_destination(mapping: Mapping, element: Element);
+relation outbound_destination(mapping: Mapping, field: Field);
+inbound_destination(M, E) :- applicable_inbound_mapping(M), inbound_mapping(M, _, E);
+inbound_destination(M, E) :- applicable_inbound_mapping(M), inbound_converter(M, _), inbound_result(M, _, E);
+outbound_destination(M, F) :- applicable_outbound_mapping(M), outbound_mapping(M, _, F);
+outbound_destination(M, F) :- applicable_outbound_mapping(M), outbound_converter(M, _), outbound_result(M, _, F);
+// Lowerer invariants, NOT checked here: phase-correct guard operands;
+// one mapping shape and direction per key;
+// typed, complete, unique bindings of declared signature ports; each destination
+// bound through at most one result port per application. This projection drops
+// ports, so the overlap checks cannot discover a repeated destination within M.
+// Missing runtime arguments are nil. They never add an implicit presence guard.
+obligation one_inbound_source: at_most_one(inbound_destination, group_by: element);
+obligation one_outbound_source: at_most_one(outbound_destination, group_by: field);
+verification mappings {
+    assumptions: [one_field_value, one_element_value];
+    obligations: [one_inbound_source, one_outbound_source];
+}
