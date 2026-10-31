@@ -160,8 +160,12 @@ real program that the current choice serves badly.
   separately from obligations. A reachable parent with only a false condition gives
   Warning; one with only a true condition gives Information. Both reachable sides
   require replayed witnesses. An unreachable parent suppresses child noise, and
-  unsupported or incomplete meaning stays unknown. Inconsistent assumptions never
-  produce notices by vacuity. The author supplies the complete enclosing scope;
+  unsupported or incomplete meaning stays unknown, with one Information diagnostic
+  at the notice declaration. This distinguishes unanalysed conditions from quiet,
+  varying ones without changing verdicts or exit codes. The checker retains keyed
+  blockers and cycle rules or the phase/resource cause; presentation does not infer
+  dependencies again. Inconsistent assumptions keep only the existing context Error
+  and never produce notices by vacuity. The author supplies the complete enclosing scope;
   conclusions and siblings are not implicit assumptions. This keeps contextual
   authoring advice out of business-rule verdicts and avoids DSL-specific metadata
   interpretation in the checker. Each notice gets an independent bounded query after

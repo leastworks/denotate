@@ -155,11 +155,12 @@ impl Run {
             Some(false) => "inconsistent",
             None => "unknown",
         };
-        if results
-            .notices
-            .values()
-            .any(|n| matches!(n.state, NoticeState::Unknown(NoticeUnknown::Deadline)))
-        {
+        if results.notices.values().any(|n| {
+            matches!(
+                n.state,
+                NoticeState::Unknown(NoticeUnknown::Deadline { .. })
+            )
+        }) {
             self.row["error"] = json!({"stage":"notices","detail":"notice deadline"});
         }
         self.row["outcomes"] = outcomes.json();

@@ -2467,6 +2467,39 @@ fn notices_navigate_highlight_complete_and_follow_unsaved_context_edits() {
         .unwrap()
         .iter()
         .any(|d| d["code"] == "always-true-condition" || d["code"] == "impossible-condition"));
+    let unknown = text.replace(
+        "parent():-a();",
+        "parent():-!peer(); relation peer(); peer():-!parent();",
+    );
+    c.change(&uri, 5, &unknown);
+    checking_idle(&mut c);
+    let ds = c.diagnostics(&uri);
+    let ds = ds
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["code"] == "unanalysed-condition")
+        .collect::<Vec<_>>();
+    assert_eq!(ds.len(), 1);
+    assert_eq!(ds[0]["severity"], 3);
+    assert_eq!(ds[0]["data"]["finding"], identity);
+    assert_eq!(
+        ds[0]["range"]["start"],
+        position(&unknown, "notice inner", 7)
+    );
+    assert!(ds[0]["relatedInformation"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|r| r["message"] == "blocking dependency cycle"));
+    c.change(&uri, 6, text);
+    checking_idle(&mut c);
+    assert!(!c
+        .diagnostics(&uri)
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "unanalysed-condition"));
     let prefix="namespace lib{input a(); relation parent(); notice inner:varies(a); assumption allowed:empty(a); obligation none:empty(a);}";
     for (i, (suffix, needle, delta, expected)) in [
         (
@@ -2492,7 +2525,7 @@ fn notices_navigate_highlight_complete_and_follow_unsaved_context_edits() {
     .enumerate()
     {
         let source = format!("{prefix}{suffix}");
-        c.change(&uri, 5 + i as i64, &source);
+        c.change(&uri, 7 + i as i64, &source);
         let result = query(
             &mut c,
             "textDocument/completion",

@@ -6,6 +6,7 @@ use crate::{
 };
 use biodivine_lib_bdd::op_function;
 use denotate_ir::RelationId;
+use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NoticeState {
@@ -30,7 +31,7 @@ impl NoticeState {
 pub enum NoticeUnknown {
     Unsupported,
     Inconclusive(Inconclusive),
-    Deadline,
+    Deadline { phase: &'static str },
     InconsistentAssumptions,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,6 +42,8 @@ pub struct NoticeWitness {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConditionAnalysis {
     pub state: NoticeState,
+    /// The blocking roots returned by symbolic meaning, not a new cone analysis.
+    pub blocked_by: BTreeSet<ComponentId>,
     pub when_true: Option<NoticeWitness>,
     pub when_false: Option<NoticeWitness>,
 }
@@ -48,6 +51,7 @@ impl ConditionAnalysis {
     fn state(state: NoticeState) -> Self {
         Self {
             state,
+            blocked_by: BTreeSet::new(),
             when_true: None,
             when_false: None,
         }
@@ -64,6 +68,8 @@ pub struct NoticeExample {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoticeResult {
     pub state: NoticeState,
+    /// Keyed blocking regions and their retained cycle rules, for source locations.
+    pub blockers: BTreeMap<ComponentKey, BTreeSet<denotate_ir::RuleKey>>,
     pub when_true: Option<NoticeExample>,
     pub when_false: Option<NoticeExample>,
 }
@@ -98,18 +104,26 @@ impl GroundProgram {
         let run = (|| {
             let meaning = self.symbolic_impl(budget, true)?;
             let ctx = meaning.context();
-            let settled =
+            let mut blocked_by = BTreeSet::new();
+            let mut settled =
                 |a: &GroundAtom| -> Result<std::result::Result<Condition, NoticeUnknown>> {
                     Ok(match meaning.fact(a)? {
                         SymbolicFact::Settled(c) => Ok(c),
-                        SymbolicFact::Blocked(_) => Err(NoticeUnknown::Unsupported),
+                        SymbolicFact::Blocked(regions) => {
+                            blocked_by = regions;
+                            Err(NoticeUnknown::Unsupported)
+                        }
                         SymbolicFact::Inconclusive(c) => Err(NoticeUnknown::Inconclusive(c)),
                     })
                 };
-            let p = match parent.as_ref().map(&settled).transpose()? {
+            let p = match parent.as_ref().map(&mut settled).transpose()? {
                 None => ctx.true_condition(),
                 Some(Ok(c)) => c,
-                Some(Err(reason)) => return Ok(ConditionAnalysis::unknown(reason)),
+                Some(Err(reason)) => {
+                    let mut result = ConditionAnalysis::unknown(reason);
+                    result.blocked_by = blocked_by;
+                    return Ok(result);
+                }
             };
             let p = ctx.restrict(&p, budget)?;
             if p.is_false() {
@@ -117,7 +131,11 @@ impl GroundProgram {
             }
             let g = match settled(&condition)? {
                 Ok(c) => c,
-                Err(reason) => return Ok(ConditionAnalysis::unknown(reason)),
+                Err(reason) => {
+                    let mut result = ConditionAnalysis::unknown(reason);
+                    result.blocked_by = blocked_by;
+                    return Ok(result);
+                }
             };
             let yes = ctx.apply(&p, &g, op_function::and, budget)?;
             let no = ctx.apply(&p, &g, op_function::and_not, budget)?;
@@ -160,6 +178,7 @@ impl GroundProgram {
             };
             Ok(ConditionAnalysis {
                 state,
+                blocked_by: BTreeSet::new(),
                 when_true,
                 when_false,
             })
@@ -171,8 +190,10 @@ impl GroundProgram {
                     Inconclusive::from_error(e)?,
                 )))
             }
-            Err(CheckError::Deadline { .. }) => {
-                Ok(ConditionAnalysis::unknown(NoticeUnknown::Deadline))
+            Err(CheckError::Deadline { phase }) => {
+                Ok(ConditionAnalysis::unknown(NoticeUnknown::Deadline {
+                    phase,
+                }))
             }
             other => other,
         }

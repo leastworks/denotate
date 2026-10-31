@@ -98,7 +98,7 @@ impl Outcomes {
                     let reason = match &n.state {
                         NoticeState::Unknown(NoticeUnknown::Inconclusive(r)) => limit(*r),
                         NoticeState::Unknown(other) => {
-                            json!({"kind":match other {NoticeUnknown::Unsupported=>"unsupported",NoticeUnknown::Deadline=>"deadline",NoticeUnknown::InconsistentAssumptions=>"inconsistent-assumptions",NoticeUnknown::Inconclusive(_)=>unreachable!()}})
+                            json!({"kind":match other {NoticeUnknown::Unsupported=>"unsupported",NoticeUnknown::Deadline { .. }=>"deadline",NoticeUnknown::InconsistentAssumptions=>"inconsistent-assumptions",NoticeUnknown::Inconclusive(_)=>unreachable!()}})
                         }
                         _ => Value::Null,
                     };

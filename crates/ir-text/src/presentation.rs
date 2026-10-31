@@ -71,7 +71,7 @@ pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Pr
         for d in &mut placed {
             d.evidence = match &finding.identity {
                 denotate_presentation::Identity::Notice(id) => {
-                    denotate_presentation::notice_result_data(
+                    denotate_presentation::notice_evidence_data(
                         &report.results.value.notices[program.keys.notice(*id)?],
                     )
                 }

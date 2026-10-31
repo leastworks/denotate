@@ -316,7 +316,7 @@ condition being inspected. W must be consistent before any notice can be conclud
 | `always-true` | P has a replayed permitted witness, but P AND NOT G has none; Information. |
 | `varying` | Both sides have replayed permitted witnesses; no diagnostic. |
 | `parent-unreachable` | No permitted world satisfies P; no child diagnostic. |
-| `unknown` | Required meaning or checking work is unsupported or incomplete; no condition diagnostic. |
+| `unknown` | Required meaning or checking work is unsupported or incomplete; Information (`unanalysed-condition`). Inconsistent assumptions produce only the context Error. |
 
 `within` must describe **all** enclosing conditions, not just the immediate parent's
 own condition. The author/lowerer supplies this relation; the checker does not infer
@@ -329,6 +329,14 @@ relation. Findings identify both notice and verification. The notice's declarati
 is primary, its condition and enclosing-scope declarations are related, and upstream
 origins remain available. Normal program ownership and labeled library fallback
 apply. A lowerer can attach the authored condition's origin to the notice.
+
+An unknown notice produces one Information diagnostic at that declaration. Unsupported
+dependencies include the blocking cycle's rules as related locations; exhausted limits
+name the phase and resource, and deadlines name the phase and deadline. The checker
+retains this cause. An inconsistent context gets only its existing Error, and a query
+not reached because prerequisite checking failed produces no extra condition diagnostic.
+These advisory findings do not change verdicts, completeness, aggregate status or CLI
+exit codes. A notice that later becomes decidable keeps the same finding identity.
 
 Selected notices appear in the status summary, including quiet and unknown results.
 Each is a separately bounded checker query after obligation checking; exhausting a

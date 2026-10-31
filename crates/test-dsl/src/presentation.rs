@@ -19,6 +19,9 @@ pub enum DiagnosticKind {
     NoMeaning,
     UnsupportedGroup,
     Inconclusive,
+    ImpossibleCondition,
+    AlwaysTrueCondition,
+    UnanalysedCondition,
 }
 pub use denotate_presentation::Severity as DiagnosticSeverity;
 impl DiagnosticKind {
@@ -30,6 +33,9 @@ impl DiagnosticKind {
             Self::NoMeaning => Kind::NoMeaning,
             Self::UnsupportedGroup => Kind::UnsupportedGroup,
             Self::Inconclusive => Kind::Inconclusive,
+            Self::ImpossibleCondition => Kind::ImpossibleCondition,
+            Self::AlwaysTrueCondition => Kind::AlwaysTrueCondition,
+            Self::UnanalysedCondition => Kind::UnanalysedCondition,
         }
     }
     pub fn severity(self) -> DiagnosticSeverity {
@@ -106,13 +112,67 @@ pub fn present_checked(
     sources: &Sources,
     view: &str,
 ) -> Result<Vec<Diagnostic>> {
-    present_using(
+    let mut diagnostics = present_using(
         lowered,
         &report.verification,
         sources,
         view,
         Some(&report.results.value),
-    )
+    )?;
+    let view = SourceView::try_from(view)?;
+    // Notice semantics, wording and blocking evidence come from the shared
+    // presenter. This adapter only selects the current DSL source view.
+    for finding in denotate_presentation::context_findings(&lowered.corpus, &lowered.keys, report)?
+    {
+        let denotate_presentation::Identity::Notice(id) = finding.identity else {
+            continue;
+        };
+        let primary = lowered.attribution.origin(id, sources, view)?.ok_or(
+            PresentationError::MissingOrigin {
+                occurrence: id.into(),
+                view,
+            },
+        )?;
+        let kind = match finding.kind {
+            denotate_presentation::Kind::ImpossibleCondition => DiagnosticKind::ImpossibleCondition,
+            denotate_presentation::Kind::AlwaysTrueCondition => DiagnosticKind::AlwaysTrueCondition,
+            denotate_presentation::Kind::UnanalysedCondition => DiagnosticKind::UnanalysedCondition,
+            _ => {
+                return Err(PresentationError::InvalidFinding(
+                    "unexpected notice classification",
+                ));
+            }
+        };
+        let mut related = Vec::new();
+        for contribution in &finding.contributions {
+            if let Some(span) =
+                lowered
+                    .attribution
+                    .origin(contribution.occurrence, sources, view)?
+            {
+                let location = RelatedLocation::new(span, contribution.role.label());
+                if span != primary && !related.contains(&location) {
+                    related.push(location);
+                }
+            }
+        }
+        diagnostics.push(Diagnostic {
+            identity: finding.identity,
+            evidence: denotate_presentation::notice_evidence_data(
+                &report.results.value.notices[lowered
+                    .keys
+                    .notice(id)
+                    .map_err(denotate_presentation::Error::Keys)?],
+            ),
+            kind,
+            message: finding.message,
+            primary,
+            related,
+            notes: vec![],
+            cycle_rules: vec![],
+        });
+    }
+    Ok(diagnostics)
 }
 fn present_using(
     lowered: &LoweredProgram,

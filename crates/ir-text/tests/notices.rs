@@ -2,7 +2,7 @@ use denotate_check::*;
 use denotate_check_session::Session;
 use denotate_ir::*;
 use denotate_ir_text::*;
-use denotate_presentation::Identity;
+use denotate_presentation::{Identity, Kind, Severity};
 use std::collections::BTreeMap;
 mod support;
 
@@ -182,7 +182,7 @@ fn assumptions_selection_and_inconsistent_context_never_make_vacuous_notices() {
 #[test]
 fn recursive_unsupported_conditions_are_unknown_but_unreachable_parents_suppress_children() {
     let p = single(
-        "relation a(); relation b(); a() :- !b(); b() :- !a(); relation never(); notice n: varies(a); notice child: varies(a, within: never); verification v { assumptions: []; obligations: []; notices: [n,child]; }",
+        "relation a(); relation b(); a() :- !b(); b() :- !a(); relation c(); relation d(); c():-!d(); d():-!c(); input i(); relation parent(); parent():-a(); relation never(); notice n: varies(a); notice scoped: varies(i,within:parent); notice child: varies(a, within: never); verification v { assumptions: []; obligations: []; notices: [n,scoped,child]; }",
     );
     let (result, out) = run(&p, &mut Session::default()).remove(0);
     assert_eq!(
@@ -190,11 +190,151 @@ fn recursive_unsupported_conditions_are_unknown_but_unreachable_parents_suppress
         NoticeState::Unknown(NoticeUnknown::Unsupported)
     );
     assert_eq!(states(&result)["child"], NoticeState::ParentUnreachable);
-    assert!(
-        !out.diagnostics
+    let notices = out
+        .diagnostics
+        .iter()
+        .filter(|d| matches!(d.identity, Identity::Notice(_)))
+        .collect::<Vec<_>>();
+    assert_eq!(notices.len(), 2);
+    assert_eq!(
+        out.diagnostics
             .iter()
-            .any(|d| matches!(d.identity, Identity::Notice(_)))
+            .filter(|d| d.kind == Kind::UnsupportedRegion)
+            .count(),
+        2
     );
+    for d in notices {
+        assert_eq!(d.kind, Kind::UnanalysedCondition);
+        assert_eq!(d.kind.severity(), Severity::Information);
+        assert!(matches!(p.sources.text(d.primary).unwrap(), "n" | "scoped"));
+        let rules = d
+            .related
+            .iter()
+            .filter(|r| r.label == "blocking dependency cycle")
+            .map(|r| p.sources.text(r.span).unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(rules.len(), 2);
+        assert!(rules.iter().any(|r| r.contains("a() :- !b()")));
+        assert!(rules.iter().any(|r| r.contains("b() :- !a()")));
+        assert_eq!(d.evidence["reason"]["kind"], "unsupported");
+        assert_eq!(
+            d.evidence["reason"]["blockingRegions"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+    }
+    // Summary shape and the parent's suppression policy are unchanged.
+    assert_eq!(out.status["state"], "incomplete");
+    let summary = out.status["notices"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|n| n["identity"]["notice"][1] == "n")
+        .unwrap();
+    assert_eq!(
+        summary["result"]["reason"],
+        serde_json::json!({"kind":"unsupported"})
+    );
+}
+
+#[test]
+fn exhausted_notice_is_information_without_changing_obligations_or_summary_status() {
+    let p = single(
+        "input a(); relation no(); obligation o:empty(no); notice n:varies(a); verification v{assumptions:[];obligations:[o];notices:[n];}",
+    );
+    let mut found = false;
+    // Find a notice-only storage failure, without pinning an implementation budget.
+    for max_condition_nodes in 0..128 {
+        let limits = Limits {
+            max_condition_nodes,
+            ..Limits::default()
+        };
+        let ops = (&limits).into();
+        let request = p.verification_requests(&limits).unwrap().remove(0).1;
+        let RequestPreparation::Complete(prepared) =
+            request.prepare(&p.corpus, &p.keys, &ops).unwrap()
+        else {
+            continue;
+        };
+        let prepared = prepared.admit(&ops).unwrap();
+        let CheckOutcome::Complete(report) = prepared.verify(&ops).unwrap() else {
+            continue;
+        };
+        let notice = report.results.value.notices.values().next().unwrap();
+        let NoticeState::Unknown(NoticeUnknown::Inconclusive(reason)) = notice.state else {
+            continue;
+        };
+        if !report.results.value.emptiness.values().all(|e| e.proved()) {
+            continue;
+        }
+        let out = presentation::present(&p, &report).unwrap();
+        assert_eq!(out.status["state"], "proved");
+        let ds = out
+            .diagnostics
+            .iter()
+            .filter(|d| matches!(d.identity, Identity::Notice(_)))
+            .collect::<Vec<_>>();
+        assert_eq!(ds.len(), 1);
+        let d = ds[0];
+        assert_eq!(d.kind, Kind::UnanalysedCondition);
+        assert_eq!(d.kind.severity(), Severity::Information);
+        assert!(d.message.contains(reason.phase) && d.message.contains(reason.resource));
+        assert_eq!(d.evidence["reason"]["phase"], reason.phase);
+        assert_eq!(d.evidence["reason"]["resource"], reason.resource);
+        assert_eq!(p.sources.text(d.primary).unwrap(), "n");
+        found = true;
+        break;
+    }
+    assert!(
+        found,
+        "fixture must exhaust the notice while its obligation remains proved"
+    );
+}
+
+#[test]
+fn notice_deadline_retains_phase_and_presents_advisory_detail_only() {
+    let p = single(&format!("input a(); notice n:varies(a); {VERIFY}"));
+    let limits = Limits::default();
+    let ops = (&limits).into();
+    let request = p.verification_requests(&limits).unwrap().remove(0).1;
+    let RequestPreparation::Complete(prepared) = request.prepare(&p.corpus, &p.keys, &ops).unwrap()
+    else {
+        panic!()
+    };
+    let prepared = prepared.admit(&ops).unwrap();
+    let CheckOutcome::Complete(mut report) = prepared.verify(&ops).unwrap() else {
+        panic!()
+    };
+    // Inject expiry at the notice boundary, without depending on scheduling or sleep.
+    let limited = Limits {
+        timeout: std::time::Duration::ZERO,
+        ..limits
+    };
+    let analysis = prepared
+        .program()
+        .analyze_condition(p.corpus.notices().next().unwrap().condition, None, &limited)
+        .unwrap();
+    let NoticeState::Unknown(NoticeUnknown::Deadline { phase }) = analysis.state else {
+        panic!()
+    };
+    let result = report.results.value.notices.values_mut().next().unwrap();
+    result.state = analysis.state;
+    result.when_true = None;
+    result.when_false = None;
+    let out = presentation::present(&p, &report).unwrap();
+    assert_eq!(out.status["state"], "proved");
+    assert_eq!(
+        out.status["notices"][0]["result"]["reason"],
+        serde_json::json!({"kind":"deadline"})
+    );
+    assert_eq!(out.diagnostics.len(), 1);
+    let d = &out.diagnostics[0];
+    assert_eq!(d.kind, Kind::UnanalysedCondition);
+    assert!(d.message.contains(phase) && d.message.contains("deadline"));
+    assert_eq!(d.evidence["reason"]["phase"], phase);
+    assert_eq!(d.evidence["reason"]["resource"], "deadline");
 }
 
 #[test]

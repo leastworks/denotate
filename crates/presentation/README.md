@@ -28,6 +28,11 @@ participating occurrences, and places them on source locations. It depends only 
   Uniqueness includes the conflicting tuples; coverage includes all candidates of
   each missing group. Empty scopes omit the note; unavailable scopes explicitly
   show the full world. Structured evidence always retains the original observation.
+- `context_findings` presents selected condition notices, including an Information
+  `unanalysed-condition` for unsupported meaning, limits or deadlines. Each notice
+  has one declaration primary and a stable notice/verification identity; blocking
+  cycle locations come from checker-retained rule keys. Inconsistent contexts get
+  only their context finding. Advisory notice findings never change summary status.
 - `Identity` encodes a group, coverage/uniqueness/emptiness component, region or rewrite finding from semantic keys
   (`data(keys)`), never arena IDs or message text.
 - `Placement` chooses primary locations from the checked program's **own** files

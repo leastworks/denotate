@@ -171,3 +171,191 @@ fn interruption_never_returns_a_semantic_result() {
             .is_none()
     );
 }
+
+#[test]
+fn selected_notice_findings_reach_both_editor_adapters_with_the_same_identity() {
+    use denotate_ir::*;
+    use denotate_ir_text::{ExportFile, ExportLayout, ExportProgram, Ownership, PrintOptions};
+
+    // The test DSL has no notice syntax. Exercise the editor path by attaching a
+    // notice through the construction API, as a lowerer would for this guard.
+    let mut p = program("input i; slot a; a <- i when not available(a);");
+    let span = p.sources.span(p.snapshot, 28..44).unwrap();
+    let c = &mut p.lowered.corpus;
+    let relation = c
+        .declare_relation_in(
+            Namespace::new(["test"]).unwrap(),
+            "observed",
+            RelationRole::Derived,
+            [],
+        )
+        .unwrap();
+    let head = c.atom(relation, []).unwrap();
+    let body = c
+        .atom(
+            p.lowered.library.available,
+            [Term::variable("S", p.lowered.library.slot)],
+        )
+        .unwrap();
+    let rule = c.add_rule(head, [Literal::Positive(body)]).unwrap();
+    let notice = c
+        .notice_varies_in(
+            Namespace::new(["test"]).unwrap(),
+            "guard",
+            relation,
+            None,
+            "Guard",
+        )
+        .unwrap();
+    let verification = c
+        .verification_with_notices_in(
+            Namespace::new(["test"]).unwrap(),
+            "checks",
+            [p.lowered.library.one_value_per_input],
+            [p.lowered.library.unique_input],
+            [notice],
+        )
+        .unwrap();
+    p.lowered.library.default_checks = verification;
+    let keys = &mut p.lowered.keys;
+    keys.bind_relation(
+        c,
+        relation,
+        RelationKey::Named(QualifiedKey::new("test", "observed")),
+    )
+    .unwrap();
+    keys.bind_notice(c, notice, NoticeKey(QualifiedKey::new("test", "guard")))
+        .unwrap();
+    keys.bind_verification(
+        c,
+        verification,
+        VerificationKey(QualifiedKey::new("test", "checks")),
+    )
+    .unwrap();
+    let key = RuleKey::Library(QualifiedKey::new("test", "observer"));
+    keys.bind_rule(c, rule, key.clone()).unwrap();
+    let rule_data = c.rule(rule).unwrap();
+    for (atom, occurrence) in std::iter::once(&rule_data.head)
+        .chain(rule_data.body.iter().map(Literal::atom))
+        .enumerate()
+    {
+        keys.bind_occurrence(
+            c,
+            occurrence.id(),
+            OccurrenceKey::Library {
+                rule: key.clone(),
+                atom,
+                argument: None,
+            },
+        )
+        .unwrap();
+        for (argument, term) in occurrence.arguments().iter().enumerate() {
+            keys.bind_occurrence(
+                c,
+                term.id(),
+                OccurrenceKey::Library {
+                    rule: key.clone(),
+                    atom,
+                    argument: Some(argument),
+                },
+            )
+            .unwrap();
+        }
+    }
+    for id in [
+        OccurrenceId::from(relation),
+        rule.into(),
+        notice.into(),
+        verification.into(),
+    ] {
+        p.lowered
+            .attribution
+            .provenance
+            .attach(c, &p.sources, id, [Origin::new(span)])
+            .unwrap();
+    }
+    p.lowered.attribution.validate(c, &p.sources).unwrap();
+    let limits = Limits::default();
+    let mut session = denotate_check_session::Session::default();
+    let cold = p.check(&limits, || {}).unwrap();
+    for _ in 0..2 {
+        let warm = p.check_cached(&limits, || {}, &mut session).unwrap();
+        assert_eq!(cold.diagnostics, warm.diagnostics);
+    }
+    let notice_diagnostics = cold
+        .diagnostics
+        .iter()
+        .filter(|d| d.data.as_ref().unwrap()["kind"] == "unanalysed-condition")
+        .collect::<Vec<_>>();
+    assert_eq!(notice_diagnostics.len(), 1);
+    let d = notice_diagnostics[0];
+    assert_eq!(d.severity, Some(lsp_types::DiagnosticSeverity::INFORMATION));
+    assert_eq!(d.range.start.character, 28);
+    assert!(
+        d.related_information
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|r| r.message == "blocking dependency cycle")
+    );
+
+    // Export the same construction and compare the actual .den adapter result.
+    let layout = ExportLayout {
+        files: vec![ExportFile {
+            path: "program.den".into(),
+            ownership: Ownership::User,
+        }],
+        placements: top_level(&p.lowered.corpus)
+            .into_iter()
+            .map(|id| (id, 0))
+            .collect(),
+    };
+    let bundle = denotate_ir_text::print(
+        &ExportProgram {
+            corpus: &p.lowered.corpus,
+            domains: &p.lowered.domains(),
+            sources: &p.sources,
+            provenance: &p.lowered.attribution.provenance,
+            layout: &layout,
+        },
+        PrintOptions::default(),
+    )
+    .unwrap();
+    let (membership, documents) = bundle.documents("file:///notice-export");
+    let loaded = denotate_ir_text::load(&membership, &documents).unwrap();
+    let (_, request) = loaded
+        .verification_requests(&limits)
+        .unwrap()
+        .into_iter()
+        .find(|(key, _)| key.0.name.as_ref() == "checks")
+        .unwrap();
+    let ops = (&limits).into();
+    let RequestPreparation::Complete(prepared) =
+        request.prepare(&loaded.corpus, &loaded.keys, &ops).unwrap()
+    else {
+        panic!()
+    };
+    let prepared = prepared.admit(&ops).unwrap();
+    let CheckOutcome::Complete(report) = prepared.verify(&ops).unwrap() else {
+        panic!()
+    };
+    let presented = denotate_ir_text::presentation::present(&loaded, &report).unwrap();
+    let notices = presented
+        .diagnostics
+        .iter()
+        .filter(|d| d.kind == denotate_presentation::Kind::UnanalysedCondition)
+        .collect::<Vec<_>>();
+    assert_eq!(notices.len(), 1);
+    assert_eq!(notices[0].message, d.message);
+    assert_eq!(
+        notices[0].data(&loaded.keys).unwrap()["finding"],
+        d.data.as_ref().unwrap()["finding"]
+    );
+    assert_eq!(notices[0].evidence["reason"]["kind"], "unsupported");
+    assert!(
+        notices[0]
+            .related
+            .iter()
+            .any(|r| r.label == "blocking dependency cycle")
+    );
+}

@@ -856,7 +856,10 @@ impl PreparedCheck<'_> {
                 self.program
                     .analyze_condition_with_budget(n.condition, n.within, &mut budget)?;
             // Deadlines are operational outcomes, never recorded as semantic work.
-            if !matches!(result.state, NoticeState::Unknown(NoticeUnknown::Deadline)) {
+            if !matches!(
+                result.state,
+                NoticeState::Unknown(NoticeUnknown::Deadline { .. })
+            ) {
                 let dependency = if receipts.get(&QueryKey::Admission).is_some() {
                     QueryKey::Admission
                 } else {
@@ -886,10 +889,40 @@ impl PreparedCheck<'_> {
                     replay_scope: w.replay_scope,
                 })
             };
+            let mut blockers = BTreeMap::new();
+            for id in &result.blocked_by {
+                let key = self
+                    .keys
+                    .components
+                    .get(id)
+                    .ok_or(CheckError::Internal("missing notice blocker key"))?
+                    .clone();
+                let cycle = self
+                    .program
+                    .component(*id)
+                    .and_then(|c| c.cycle.as_ref())
+                    .ok_or(CheckError::Internal("missing notice blocking cycle"))?;
+                let rules = cycle
+                    .edges
+                    .iter()
+                    .map(|edge| {
+                        let rule = self
+                            .program
+                            .rule(edge.rule)
+                            .ok_or(CheckError::Internal("missing notice blocking rule"))?;
+                        self.semantic_keys
+                            .rule(rule.source)
+                            .cloned()
+                            .map_err(CheckError::Keys)
+                    })
+                    .collect::<Result<BTreeSet<_>>>()?;
+                blockers.insert(key, rules);
+            }
             out.insert(
                 key.clone(),
                 NoticeResult {
                     state: result.state,
+                    blockers,
                     when_true: result.when_true.map(example).transpose()?,
                     when_false: result.when_false.map(example).transpose()?,
                 },

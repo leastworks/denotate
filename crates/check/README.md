@@ -155,6 +155,10 @@ validates and retains that selection. `ScopedResults.notices` returns keyed resu
 admitted program: impossible, always true, varying, parent unreachable, or unknown.
 The query uses W, symbolic settled conditions and independent concrete replays; it
 never assumes the conclusion. Both sides of varying have their own full observation.
+Unknown results retain the cause: `ConditionAnalysis.blocked_by` records the blocking
+components returned by symbolic meaning; `NoticeResult.blockers` projects these to
+semantic component and cycle-rule keys for presentation. Deadline reasons retain the
+phase. Collecting this evidence does not perform additional checking or charge budgets.
 
 Each selected notice runs after ordinary checking with a fresh deterministic and
 operational allowance. Its receipts use `QueryKey::Notice`; a deadline is unknown

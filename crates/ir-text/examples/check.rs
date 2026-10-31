@@ -82,6 +82,7 @@ fn print_diagnostics(
                     "producing rule"
                         | "checked obligation"
                         | "upstream source origin"
+                        | "blocking dependency cycle"
                         | "condition being inspected"
                         | "complete enclosing scope"
                 )
@@ -104,6 +105,13 @@ fn print_diagnostics(
 }
 
 fn run(args: impl IntoIterator<Item = String>, output: &mut String) -> Result<u8, Failure> {
+    run_with_limits(args, output, Limits::default())
+}
+fn run_with_limits(
+    args: impl IntoIterator<Item = String>,
+    output: &mut String,
+    limits: Limits,
+) -> Result<u8, Failure> {
     let mut args = args.into_iter();
     let root = args.next().ok_or((2, USAGE.into()))?;
     let backend = BackendIdentity::bdd();
@@ -156,7 +164,6 @@ fn run(args: impl IntoIterator<Item = String>, output: &mut String) -> Result<u8
         )
         .unwrap();
     }
-    let limits = Limits::default();
     let operations = OperationalLimits::from(&limits);
     let mut requests = p
         .verification_requests(&limits)
@@ -301,6 +308,7 @@ fn run(args: impl IntoIterator<Item = String>, output: &mut String) -> Result<u8
                                 "empty-grouping-domain"
                                     | "impossible-condition"
                                     | "always-true-condition"
+                                    | "unanalysed-condition"
                             )
                         )
                     })
@@ -412,6 +420,58 @@ mod tests {
         assert_eq!(f.run(&[]).0, 1);
     }
     #[test]
+    fn unknown_notice_diagnostics_do_not_change_exit_codes() {
+        let unsupported = Fixture::new(
+            "relation a(); relation b(); a():-!b(); b():-!a(); notice n:varies(a); verification v{assumptions:[];obligations:[];notices:[n];}",
+        );
+        let inconsistent = Fixture::new(
+            "input a(); assumption yes:at_least_one(a,group_by:()); assumption no:empty(a); notice n:varies(a); verification v{assumptions:[yes,no];obligations:[];notices:[n];}",
+        );
+        for options in [&[][..], &["--json"][..]] {
+            let (code, text) = unsupported.run(options);
+            assert_eq!(code, 2);
+            assert!(text.contains("unanalysed-condition") && text.contains("unsupported-region"));
+            if options.is_empty() {
+                assert!(text.contains("blocking dependency cycle"));
+            }
+            let (code, text) = inconsistent.run(options);
+            assert_eq!(code, 1);
+            assert!(!text.contains("unanalysed-condition"));
+        }
+        let f = Fixture::new(
+            "input a(); relation no(); obligation o:empty(no); notice n:varies(a); verification v{assumptions:[];obligations:[o];notices:[n];}",
+        );
+        let mut found = false;
+        for max_condition_nodes in 0..128 {
+            let limits = Limits {
+                max_condition_nodes,
+                ..Limits::default()
+            };
+            let mut output = String::new();
+            let args = [f.0.to_str().unwrap().to_owned()];
+            let code = run_with_limits(args.clone(), &mut output, limits.clone()).unwrap();
+            if !output.contains("unanalysed-condition") || !output.contains("Result: proved") {
+                continue;
+            }
+            assert_eq!(code, 0, "{output}");
+            assert!(output.contains("Result: proved"));
+            output.clear();
+            assert_eq!(
+                run_with_limits(
+                    args.into_iter().chain(["--json".into()]),
+                    &mut output,
+                    limits
+                )
+                .unwrap(),
+                0
+            );
+            assert!(output.contains("unanalysed-condition"));
+            found = true;
+            break;
+        }
+        assert!(found);
+    }
+    #[test]
     fn notice_library_fallback_is_labeled_and_advisory() {
         let f = Fixture::new("");
         fs::create_dir(f.0.join("library")).unwrap();
@@ -426,6 +486,13 @@ mod tests {
         assert_eq!(code, 0, "{text}");
         assert!(text.contains("impossible-condition: in "), "{text}");
         assert!(!text.contains("consistency-only"), "{text}");
+        fs::write(f.0.join("library/lib.den"), "relation a(); relation b(); a():-!b(); b():-!a(); notice n:varies(a); verification v{assumptions:[];obligations:[];notices:[n];}").unwrap();
+        let (code, text) = f.run(&[]);
+        assert_eq!(code, 2, "{text}");
+        assert_eq!(text.matches("unanalysed-condition:").count(), 1, "{text}");
+        assert!(text.contains("unanalysed-condition: in "), "{text}");
+        assert!(text.contains("library/lib.den:1:"), "{text}");
+        assert!(text.contains("blocking dependency cycle"), "{text}");
     }
     #[test]
     fn codes_distinguish_proofs_findings_incomplete_and_unconfigured() {

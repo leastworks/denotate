@@ -9,6 +9,7 @@ pub enum Kind {
     AssumedConclusion,
     ImpossibleCondition,
     AlwaysTrueCondition,
+    UnanalysedCondition,
     EmptyGroupingDomain,
     Counterexample,
     NoMeaning,
@@ -24,6 +25,7 @@ impl Kind {
             Self::AssumedConclusion => "assumed-conclusion",
             Self::ImpossibleCondition => "impossible-condition",
             Self::AlwaysTrueCondition => "always-true-condition",
+            Self::UnanalysedCondition => "unanalysed-condition",
             Self::Counterexample => "counterexample",
             Self::EmptyGroupingDomain => "empty-grouping-domain",
             Self::NoMeaning => "no-meaning",
@@ -45,7 +47,8 @@ impl Kind {
             Self::UnsupportedGroup
             | Self::Inconclusive
             | Self::EmptyGroupingDomain
-            | Self::AlwaysTrueCondition => Severity::Information,
+            | Self::AlwaysTrueCondition
+            | Self::UnanalysedCondition => Severity::Information,
         }
     }
 }
@@ -64,6 +67,7 @@ pub enum Role {
     RelatedOnly,
     Condition,
     EnclosingScope,
+    BlockingCycle,
 }
 impl Role {
     pub fn label(self) -> &'static str {
@@ -75,6 +79,7 @@ impl Role {
             Self::RelatedOnly => "supporting rewrite proof",
             Self::Condition => "condition being inspected",
             Self::EnclosingScope => "complete enclosing scope",
+            Self::BlockingCycle => "blocking dependency cycle",
         }
     }
 }
@@ -764,11 +769,26 @@ pub fn context_findings(
         let (kind, explanation) = match result.state {
             NoticeState::Impossible => (
                 Kind::ImpossibleCondition,
-                "Condition is impossible in this scope.",
+                "Condition is impossible in this scope.".to_owned(),
             ),
             NoticeState::AlwaysTrue => (
                 Kind::AlwaysTrueCondition,
-                "Condition is always true in this scope.",
+                "Condition is always true in this scope.".to_owned(),
+            ),
+            NoticeState::Unknown(NoticeUnknown::Unsupported) => (
+                Kind::UnanalysedCondition,
+                "Condition could not be analysed: it depends on an unsupported cycle.".into(),
+            ),
+            NoticeState::Unknown(NoticeUnknown::Inconclusive(c)) => (
+                Kind::UnanalysedCondition,
+                format!(
+                    "Condition could not be analysed: {} exhausted its {} budget.",
+                    c.phase, c.resource
+                ),
+            ),
+            NoticeState::Unknown(NoticeUnknown::Deadline { phase }) => (
+                Kind::UnanalysedCondition,
+                format!("Condition could not be analysed: {phase} reached its deadline."),
             ),
             _ => continue,
         };
@@ -790,6 +810,17 @@ pub fn context_findings(
             contributions.push(Contribution {
                 occurrence: parent.into(),
                 role: Role::EnclosingScope,
+            });
+        }
+        let blocking_rules = result.blockers.values().flatten().collect::<BTreeSet<_>>();
+        for key in blocking_rules {
+            let rule = corpus
+                .rules()
+                .find(|r| keys.rule(r.id).is_ok_and(|k| k == key))
+                .ok_or(Error::InvalidFinding("unknown notice blocking rule"))?;
+            contributions.push(Contribution {
+                occurrence: rule.id.into(),
+                role: Role::BlockingCycle,
             });
         }
         findings.push(ContextFinding {

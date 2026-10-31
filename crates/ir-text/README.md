@@ -113,6 +113,9 @@ Selected contextual condition notices load and print as ordinary IR declarations
 `notice n: varies(condition, within: scope);` and the optional verification field
 `notices: [n];`. Both relations are zero-arity; omitting `within` means the full
 permitted context. Origins and the shared editor resolver apply normally. CLI human
-output includes advisory diagnostics; JSON includes quiet/unknown notice results.
+output includes advisory diagnostics, including Information when a selected condition
+could not be analysed (unsupported dependencies or exhausted limits/deadlines).
+JSON also includes quiet notice results. Inconsistent contexts keep only their context
+Error; notice findings do not change exit codes.
 Notice outcomes do not change exit codes. See the
 [format documentation](../../docs/den-format.md#contextual-condition-notices).

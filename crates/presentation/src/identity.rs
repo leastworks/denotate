@@ -151,10 +151,32 @@ pub fn notice_result_data(result: &NoticeResult) -> Value {
         "reason":match &result.state {
             NoticeState::Unknown(NoticeUnknown::Unsupported)=>json!({"kind":"unsupported"}),
             NoticeState::Unknown(NoticeUnknown::Inconclusive(c))=>json!({"kind":"inconclusive","phase":c.phase,"resource":c.resource}),
-            NoticeState::Unknown(NoticeUnknown::Deadline)=>json!({"kind":"deadline"}),
+            NoticeState::Unknown(NoticeUnknown::Deadline { .. })=>json!({"kind":"deadline"}),
             NoticeState::Unknown(NoticeUnknown::InconsistentAssumptions)=>json!({"kind":"inconsistent-assumptions"}),
             _=>Value::Null,
         }, "whenTrue":result.when_true.as_ref().map(example), "whenFalse":result.when_false.as_ref().map(example)})
+}
+
+/// Diagnostic-only detail leaves the existing notice status summary unchanged.
+pub fn notice_evidence_data(result: &NoticeResult) -> Value {
+    let mut data = notice_result_data(result);
+    match result.state {
+        NoticeState::Unknown(NoticeUnknown::Unsupported) => {
+            data["reason"]["blockingRegions"] = json!(
+                result
+                    .blockers
+                    .keys()
+                    .map(|k| k.0.iter().map(atom_data).collect::<Vec<_>>())
+                    .collect::<Vec<_>>()
+            );
+        }
+        NoticeState::Unknown(NoticeUnknown::Deadline { phase }) => {
+            data["reason"]["phase"] = json!(phase);
+            data["reason"]["resource"] = json!("deadline");
+        }
+        _ => {}
+    }
+    data
 }
 
 /// Includes request backend/W even when checking exhausted before a report.

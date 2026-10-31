@@ -170,12 +170,15 @@ Evidence kind is `assumed-conclusion`; it is not a witness or a failed obligatio
 ### Contextual condition notices
 
 Selected `notice n: varies(condition, within: scope)` declarations produce advisory
-findings: `impossible-condition` (Warning) or `always-true-condition` (Information).
+findings: `impossible-condition` (Warning), `always-true-condition` (Information), or
+`unanalysed-condition` (Information).
 Their `data.finding` is `{ "verification": [namespace, name], "notice": [namespace, name] }`.
 Distinct uses and verifications remain distinct even when their condition is shared.
-The declaration is primary; `condition being inspected` and `complete enclosing scope`
-label related declarations. Upstream origins, home-program publication and labeled
-library fallback work normally. These notices do not alter `summary.state`, obligation
+Each finding has one primary at the notice declaration; `condition being inspected`
+and `complete enclosing scope` label related declarations. Unsupported notices also
+include the checker-retained cycle rules as `blocking dependency cycle` related
+locations. Upstream origins, home-program publication and labeled library fallback
+work normally. These notices do not alter `summary.state`, obligation
 completeness, or program aggregate results.
 
 When notices are selected, `summary.notices` contains entries in notice-key order:
@@ -193,17 +196,33 @@ When notices are selected, `summary.notices` contains entries in notice-key orde
 }
 ```
 
-`result` is also the diagnostic's `data.evidence`. States are `impossible`,
-`always-true`, `varying`, `parent-unreachable`, and `unknown`. The two examples are
+`result` supplies the diagnostic's `data.evidence`, with the additional unknown-cause
+details below. States are `impossible`, `always-true`, `varying`, `parent-unreachable`,
+and `unknown`. The two examples are
 full keyed input observations: each independently replays the parent as true and the
 condition with the indicated truth value. Scope is `whole-program` or `cone-only`.
 There is no witness for an empty side. `parent-unreachable` suppresses child noise;
-`varying` and `unknown` also produce no condition diagnostic. `unknown.reason.kind`
+`varying` also produces no condition diagnostic. `unknown.reason.kind`
 is `unsupported`, `inconclusive` (with phase/resource), `deadline`,
 `inconsistent-assumptions`, or `not-checked` when prerequisite work produced no report.
 Missing example fields in an unperformed query must not be treated as absence proofs.
 An inconsistent context still emits its existing context finding, never vacuous
 condition notices. Cancellation withdraws the obsolete job.
+
+Unknown results caused by unsupported meaning, limits or deadlines produce one
+`unanalysed-condition` finding with the same `(verification, notice)` identity as
+the other notice kinds. The message says the condition could not be analysed and
+names the cause. Diagnostic `data.evidence.reason` retains `kind` and adds:
+
+- `unsupported`: `blockingRegions`, an array of keyed components, each an array of
+  atoms (`relation`, `arguments`). These are the blockers retained by the checker
+  for the condition or enclosing scope, not all unsupported regions in the program.
+- `inconclusive`: `phase` and `resource`, as in the summary.
+- `deadline`: `phase` and `resource: "deadline"`.
+
+`summary.notices` retains its existing shape: unsupported and deadline reasons have
+only `kind`. Neither `inconsistent-assumptions` nor `not-checked` produces this finding.
+All notice diagnostics remain advisory, including for CLI exit classification.
 
 The optional `notices` selection list uses the shared resolver and permits only
 notice names. Notice names and their relation references support navigation, hover,

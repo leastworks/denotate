@@ -87,7 +87,7 @@ impl Placement<'_> {
             Role::Contributor => 1,
             Role::Declaration => 2,
             Role::Obligation => 3,
-            Role::RelatedOnly | Role::Condition | Role::EnclosingScope => {
+            Role::RelatedOnly | Role::Condition | Role::EnclosingScope | Role::BlockingCycle => {
                 unreachable!("related-only origins cannot be primary")
             }
         };
@@ -117,7 +117,8 @@ impl Placement<'_> {
                 fallback,
                 evidence: Value::Null,
             });
-            if (matches!(identity, Identity::Coverage(_)) && !coverage_constants)
+            if matches!(identity, Identity::Notice(_))
+                || (matches!(identity, Identity::Coverage(_)) && !coverage_constants)
                 || matches!(
                     kind,
                     Kind::Inconclusive | Kind::UnsupportedGroup | Kind::UnsupportedRegion
@@ -140,7 +141,10 @@ impl Placement<'_> {
                 self.sources.text(origin.span)?;
                 if !matches!(
                     contribution.role,
-                    Role::RelatedOnly | Role::Condition | Role::EnclosingScope
+                    Role::RelatedOnly
+                        | Role::Condition
+                        | Role::EnclosingScope
+                        | Role::BlockingCycle
                 ) {
                     if let Some((_, role)) = current.iter_mut().find(|(s, _)| *s == origin.span) {
                         *role = std::cmp::min(*role, contribution.role);
