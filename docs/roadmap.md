@@ -94,25 +94,37 @@ the bounds only prove that a unique two-valued meaning exists.
   against the stable-model oracle and certification. Background: approximation
   fixpoint theory (Denecker, Marek, Truszczyński).
 
-## BDD backend: shared manager
+## Limits, then a shared-manager BDD backend
 
-`biodivine-lib-bdd` gives every BDD its own node vector. Nodes are shared within one
-condition, and a `Condition` shares its whole BDD by `Arc`, but there is no unique
-table across conditions and no operation cache across applies: facts with common
-sub-functions store and compute them separately, and equal formulas installed twice
-are evaluated twice. A shared-manager library (for example OxiDD) provides a unique
-table, an apply cache and constant-time equivalence.
+Two steps, in this order.
+
+**1. Simplify limits.** `Limits` has ten fields (cancellation, timeout, atoms, rules,
+dependencies, work, BDD variables, BDD nodes, BDD tasks, retained condition nodes),
+charged at many sites. Keep the discipline: exhaustion is an explicit inconclusive
+result with phase and resource, never a hang, a crash or a proof from partial work.
+Keep the operational pair, cancellation and deadline. Collapse the logical limits to
+one deterministic **work** counter and one **memory** cap, so exhaustion stays
+reproducible cold/warm and in CI. Do this on the current backend first, so the
+backend swap is measured against a simple, stable limit model.
+
+**2. Shared-manager backend.** `biodivine-lib-bdd` gives every BDD its own node
+vector. Nodes are shared within one condition, and a `Condition` shares its whole BDD
+by `Arc`, but there is no unique table across conditions and no operation cache
+across applies: facts with common sub-functions store and compute them separately,
+and equal formulas installed twice are evaluated twice. A shared-manager library
+(for example OxiDD) provides a unique table, an apply cache and constant-time
+equivalence.
 
 - **Approach:** a time-boxed spike behind the existing `Condition`/`ConditionContext`
   boundary, measured on the test DSL regression programs and a larger example. Check
-  memory bounding, cancellation, determinism of results and of any logical limits
+  memory bounding, cancellation, determinism of results and of the work counter
   (including under parallel operations), witness extraction, variable ordering,
   licence and maintenance.
-- **Limits:** node budgets move from per-condition sizes to manager-level storage;
-  re-derive the limit set rather than translating it one-to-one (see
-  [checker policies](checker-policies.md)).
-- **Acceptance:** default-limit outcomes, witnesses-as-behaviour and cold/warm
-  agreement unchanged; no BDD node counts or timings as goldens.
+- **Limits:** the memory cap maps to manager-level storage rather than per-condition
+  sizes (see [checker policies](checker-policies.md)).
+
+**Acceptance for both:** default-limit outcomes, witnesses-as-behaviour and
+cold/warm agreement unchanged; no node counts, budgets or timings as goldens.
 
 ## Small items
 
