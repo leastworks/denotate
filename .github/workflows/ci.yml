@@ -7,6 +7,12 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    env:
+      # The runner's disk filled up while linking test binaries. Line tables keep
+      # panic backtraces readable; incremental caches only help local rebuilds.
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: line-tables-only
+      CARGO_PROFILE_TEST_DEBUG: line-tables-only
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
