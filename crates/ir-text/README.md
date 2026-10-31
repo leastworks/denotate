@@ -53,7 +53,11 @@ top-level layout placements and provenance. There is no separate export assumpti
 record; API callers declare both contracts in the corpus before exporting.
 
 `spelling(name, NameKind)` is the kind-aware spelling used by the printer; editors must
-use it for replacement names (rename), not display quoting.
+use it for replacement names (rename). `presentation::diagnostic_names(corpus)`
+provides the same kind-aware spelling and qualified names to the shared presenter.
+Generated helper labels share the exporter's allocator, including replacements for
+invalid or duplicate API labels. Both frontends use this callback for shared tuple
+notes; the test DSL retains its own decoded observation vocabulary.
 
 `at_least_one`, `exactly_one` and `empty` obligations load and print through ordinary
 contract declarations; all are rejected as assumptions. `empty(R)` has no grouping

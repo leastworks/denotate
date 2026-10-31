@@ -121,7 +121,11 @@ fn present_using(
     view: &str,
     results: Option<&ScopedResults>,
 ) -> Result<Vec<Diagnostic>> {
-    let shared = denotate_presentation::interpret(&lowered.corpus, report)?;
+    let shared = denotate_presentation::interpret(
+        &lowered.corpus,
+        report,
+        &denotate_ir_text::presentation::diagnostic_names(&lowered.corpus),
+    )?;
     let view = SourceView::try_from(view)?;
     lowered.attribution.validate(&lowered.corpus, sources)?;
     let origins = |id: OccurrenceId| -> Result<Vec<RelatedLocation>> {

@@ -139,6 +139,11 @@ ownership; own-file or unlocated obligations retain existing placement.
 No evidence, identity, count, completeness or attribution-status fields change.
 Coverage, unsupported/inconclusive findings and no-meaning placement are unchanged.
 
+Human-readable tuples and missing-group arguments use canonical `.den` name
+spelling, including qualified namespaces, quoted uppercase constants, reserved
+words and escapes. Generated `$helper` names remain distinct from authored
+`'$helper'` names. Structured keys and finding identities are unchanged.
+
 ### Filtered world notes
 
 Input observations range over the checked program's eligible input atoms. A

@@ -113,28 +113,14 @@ impl Name {
     }
 }
 pub fn quote(text: &str) -> String {
-    if !text.is_empty()
-        && !crate::reserved_word(text)
-        && (text.as_bytes()[0].is_ascii_alphabetic() || text.starts_with('$'))
-        && text
-            .trim_start_matches('$')
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_')
-    {
+    if crate::print::helper_label(text) {
         text.into()
     } else {
-        quoted(text)
+        crate::spelling(text, crate::NameKind::Identifier)
     }
 }
 pub fn quoted(text: &str) -> String {
-    format!(
-        "'{}'",
-        text.replace('\\', "\\\\")
-            .replace('\'', "\\'")
-            .replace('\n', "\\n")
-            .replace('\r', "\\r")
-            .replace('\t', "\\t")
-    )
+    crate::print::quote(text)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]

@@ -295,7 +295,7 @@ fn descriptors(sources: &Sources, origins: &[Origin]) -> Result<Vec<OriginDescri
         .collect::<Result<BTreeSet<_>>>()?;
     Ok(values.into_iter().collect())
 }
-fn helper_label(name: &str) -> bool {
+pub(crate) fn helper_label(name: &str) -> bool {
     name.strip_prefix('$').is_some_and(|name| {
         name.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
             && name.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_')
@@ -317,28 +317,8 @@ fn position_order(position: &str) -> (u8, Vec<usize>) {
             .collect(),
     )
 }
-pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundle> {
-    validate(p)?;
-    let c = p.corpus;
-    let mut symbols = BTreeMap::<OccurrenceId, Symbol>::new();
-    for s in c.sorts() {
-        symbols.insert(
-            s.id.into(),
-            Symbol {
-                text: spelling(&s.name, NameKind::Identifier),
-                kind: SymbolKind::Sort,
-            },
-        );
-    }
-    for k in c.constants() {
-        symbols.insert(
-            k.id.into(),
-            Symbol {
-                text: spelling(&k.name, NameKind::Constant),
-                kind: SymbolKind::Constant(k.sort),
-            },
-        );
-    }
+pub(crate) fn relation_names(c: &Corpus) -> BTreeMap<RelationId, String> {
+    let mut names = BTreeMap::new();
     // Reserve every legal authored helper label before allocating replacements,
     // so an earlier invalid/duplicate label cannot steal a later valid one.
     let mut used = c
@@ -365,10 +345,38 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
         } else {
             spelling(&r.name, NameKind::Identifier)
         };
+        names.insert(r.id, name);
+    }
+    names
+}
+
+pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundle> {
+    validate(p)?;
+    let c = p.corpus;
+    let mut symbols = BTreeMap::<OccurrenceId, Symbol>::new();
+    for s in c.sorts() {
         symbols.insert(
-            r.id.into(),
+            s.id.into(),
             Symbol {
-                text: name,
+                text: spelling(&s.name, NameKind::Identifier),
+                kind: SymbolKind::Sort,
+            },
+        );
+    }
+    for k in c.constants() {
+        symbols.insert(
+            k.id.into(),
+            Symbol {
+                text: spelling(&k.name, NameKind::Constant),
+                kind: SymbolKind::Constant(k.sort),
+            },
+        );
+    }
+    for (id, text) in relation_names(c) {
+        symbols.insert(
+            id.into(),
+            Symbol {
+                text,
                 kind: SymbolKind::Relation,
             },
         );

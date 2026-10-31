@@ -292,7 +292,12 @@ fn phase_exhaustion_and_rewrite_proofs_remain_distinct() {
     let report = meaning
         .verify_with_phase_limits(&limits, &exhausted, &limits)
         .unwrap();
-    let findings = denotate_presentation::interpret(&p.corpus, &report).unwrap();
+    let findings = denotate_presentation::interpret(
+        &p.corpus,
+        &report,
+        &presentation::diagnostic_names(&p.corpus),
+    )
+    .unwrap();
     assert!(
         findings
             .iter()

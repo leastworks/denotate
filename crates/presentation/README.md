@@ -5,8 +5,11 @@ Frontend-independent interpretation of checked evidence. It turns a checker
 participating occurrences, and places them on source locations. It depends only on
 `denotate-ir` and `denotate-check`: no LSP, DSL vocabulary, filesystem or scheduling.
 
-- `interpret(corpus, verification)` returns `Finding`s for counterexamples,
+- `interpret(corpus, verification, names)` returns `Finding`s for counterexamples,
   no-meaning regions, unsupported groups and regions, and inconclusive outcomes.
+  The caller supplies `names`, a relation/constant declaration-to-name callback;
+  `generic_details` uses the same callback. Text syntax stays with the caller,
+  while finding identities and structured evidence remain independent of spelling.
 - Coverage produces one finding per obligation/verification, with bounded missing-group
   examples, separate observations, and exact or lower-bound counts. Each example is
   placed on its locatable grouping-constant declarations in the program's own files,

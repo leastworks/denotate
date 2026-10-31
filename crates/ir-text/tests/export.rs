@@ -141,6 +141,14 @@ fn export_preserves_origins_domains_helpers_ownership_and_file_rule_sequences() 
         let loaded = load_with_resolver(&membership, &documents, Some(&mut &sources))
             .unwrap_or_else(|e| panic!("{e:?}\n{:#?}", bundle.files));
         assert!(loaded.embedded.notices.is_empty());
+        let diagnostic_name = presentation::diagnostic_names(&c);
+        for relation in c.relations() {
+            let name = index::parse_name(&diagnostic_name(relation.id.into())).unwrap();
+            assert!(loaded.corpus.relations().any(|r| r.name == name.text
+                && loaded.corpus.namespace(r.id)
+                    == Some(&name.namespace.clone().unwrap_or_default())
+                && loaded.corpus.is_generated_relation(r.id) == name.generated));
+        }
         support::compare(&p, &loaded, "file:///export", embedded_origins);
         assert_eq!(loaded.corpus.rules().count(), 3);
         assert_eq!(loaded.corpus.constants().count(), 2);

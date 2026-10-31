@@ -180,7 +180,13 @@ fn linked_region<'a>(
 
 /// Interpret outcomes once. Frontends may replace wording/choose highlights, but
 /// retain each finding's identity, classification and checked evidence.
-pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Vec<Finding<'a>>> {
+/// `names` spells relation and constant declarations for the caller's text format.
+/// It is used only for visible notes, never finding identity or structured evidence.
+pub fn interpret<'a>(
+    corpus: &Corpus,
+    report: &'a Verification<'_>,
+    names: &dyn Fn(OccurrenceId) -> String,
+) -> Result<Vec<Finding<'a>>> {
     let mut findings = Vec::new();
     for group in &report.groups {
         let obligation = corpus
@@ -354,7 +360,7 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
                     occurrence: (*id).into(),
                     role: Role::Obligation,
                 }],
-                notes: vec![presence_note(corpus, example)?],
+                notes: vec![presence_note(corpus, names, example)?],
             };
             match &example.attribution {
                 Some(Attribution::Complete(evidence)) => {
@@ -366,7 +372,7 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
                 }
                 Some(Attribution::Incomplete(c)) => group.notes.push(format!(
                     "Source attribution for {} is incomplete ({}: {}); its counterexample is unchanged. Locations fall back to the obligation.",
-                    atom_name(corpus, &example.tuple)?, c.phase, c.resource,
+                    atom_name(corpus, names, &example.tuple)?, c.phase, c.resource,
                 )),
                 None => {}
             }
@@ -451,7 +457,7 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
             let mut group = PlacementGroup {
                 derivation: None,
                 contributions: vec![obligation_contribution],
-                notes: vec![coverage_note(corpus, example)?],
+                notes: vec![coverage_note(corpus, names, example)?],
             };
             group
                 .contributions
@@ -524,8 +530,12 @@ pub fn interpret<'a>(corpus: &Corpus, report: &'a Verification<'_>) -> Result<Ve
 
 /// Default IR vocabulary. A DSL can instead decode the same observation into
 /// its own value model without replacing the shared interpretation above.
-pub fn generic_details(corpus: &Corpus, finding: &Finding<'_>) -> Result<Vec<String>> {
-    let show = |atoms| world_atoms(corpus, atoms);
+pub fn generic_details(
+    corpus: &Corpus,
+    finding: &Finding<'_>,
+    names: &dyn Fn(OccurrenceId) -> String,
+) -> Result<Vec<String>> {
+    let show = |atoms| world_atoms(corpus, names, atoms);
     let mut details = Vec::new();
     let observation = match &finding.evidence {
         // Tuple/world notes are attached only to that example's locations.
@@ -537,6 +547,7 @@ pub fn generic_details(corpus: &Corpus, finding: &Finding<'_>) -> Result<Vec<Str
                 details.push(format!("Replayed tuples: {}.", show(&c.tuples)?));
                 let note = input_note(
                     corpus,
+                    names,
                     &c.observation,
                     c.replay_scope,
                     c.dependency_inputs.as_ref(),
@@ -563,46 +574,32 @@ pub fn generic_details(corpus: &Corpus, finding: &Finding<'_>) -> Result<Vec<Str
     Ok(details)
 }
 
-fn occurrence_name(corpus: &Corpus, id: OccurrenceId, name: &str) -> String {
-    let spelling = |name: &str| {
-        if !name.is_empty() && name.chars().all(|c| c.is_alphanumeric() || c == '_') {
-            name.to_owned()
-        } else {
-            format!("{name:?}")
-        }
-    };
+fn atom_name(
+    corpus: &Corpus,
+    names: &dyn Fn(OccurrenceId) -> String,
+    a: &GroundAtom,
+) -> Result<String> {
     corpus
-        .namespace(id)
-        .into_iter()
-        .flat_map(|n| n.segments())
-        .map(|s| spelling(s))
-        .chain(std::iter::once(spelling(name)))
-        .collect::<Vec<_>>()
-        .join("::")
-}
-fn atom_name(corpus: &Corpus, a: &GroundAtom) -> Result<String> {
-    let name = |id, name: &str| occurrence_name(corpus, id, name);
-    let relation = corpus
         .relation(a.relation)
         .ok_or(Error::InvalidFinding("unknown witness relation"))?;
     let args = a
         .arguments
         .iter()
         .map(|id| {
-            let c = corpus
+            corpus
                 .constant(*id)
                 .ok_or(Error::InvalidFinding("unknown witness constant"))?;
-            Ok(name((*id).into(), &c.name))
+            Ok(names((*id).into()))
         })
         .collect::<Result<Vec<_>>>()?;
-    Ok(format!(
-        "{}({})",
-        name(a.relation.into(), &relation.name),
-        args.join(", ")
-    ))
+    Ok(format!("{}({})", names(a.relation.into()), args.join(", ")))
 }
-fn world_atoms(corpus: &Corpus, atoms: &BTreeSet<GroundAtom>) -> Result<String> {
-    let atom = |a| atom_name(corpus, a);
+fn world_atoms(
+    corpus: &Corpus,
+    names: &dyn Fn(OccurrenceId) -> String,
+    atoms: &BTreeSet<GroundAtom>,
+) -> Result<String> {
+    let atom = |a| atom_name(corpus, names, a);
     let names = atoms.iter().map(&atom).collect::<Result<BTreeSet<_>>>()?;
     Ok(if names.is_empty() {
         "(none)".into()
@@ -615,6 +612,7 @@ fn world_atoms(corpus: &Corpus, atoms: &BTreeSet<GroundAtom>) -> Result<String> 
 /// The complete replay witness remains in structured evidence.
 fn presence_note(
     corpus: &Corpus,
+    names: &dyn Fn(OccurrenceId) -> String,
     example: &PresenceExample<
         GroundAtom,
         Observation,
@@ -623,10 +621,11 @@ fn presence_note(
 ) -> Result<String> {
     let mut note = format!(
         "Replayed present tuple: {}.",
-        atom_name(corpus, &example.tuple)?
+        atom_name(corpus, names, &example.tuple)?
     );
     note.push_str(&input_note(
         corpus,
+        names,
         &example.observation,
         example.replay_scope,
         example.dependency_inputs.as_ref(),
@@ -636,6 +635,7 @@ fn presence_note(
 
 fn input_note(
     corpus: &Corpus,
+    names: &dyn Fn(OccurrenceId) -> String,
     observation: &Observation,
     replay_scope: ReplayScope,
     dependency_inputs: Option<&Attribution<BTreeSet<GroundAtom>>>,
@@ -667,8 +667,8 @@ fn input_note(
     };
     note.push_str(&format!(
         " {label} — present: {}; absent: {}. Scope: {}.",
-        world_atoms(corpus, &present)?,
-        world_atoms(corpus, &absent)?,
+        world_atoms(corpus, names, &present)?,
+        world_atoms(corpus, names, &absent)?,
         match replay_scope {
             ReplayScope::WholeProgram => "whole-program",
             ReplayScope::ConeOnly => "cone-only",
@@ -677,21 +677,26 @@ fn input_note(
     Ok(note)
 }
 
-fn coverage_note(corpus: &Corpus, example: &CoverageExample) -> Result<String> {
+fn coverage_note(
+    corpus: &Corpus,
+    names: &dyn Fn(OccurrenceId) -> String,
+    example: &CoverageExample,
+) -> Result<String> {
     let group = example
         .group
         .iter()
         .map(|id| {
-            let constant = corpus
+            corpus
                 .constant(*id)
                 .ok_or(Error::InvalidFinding("unknown grouping constant"))?;
-            Ok(occurrence_name(corpus, (*id).into(), &constant.name))
+            Ok(names((*id).into()))
         })
         .collect::<Result<Vec<_>>>()?
         .join(", ");
     let mut note = format!("Missing group ({group}).");
     note.push_str(&input_note(
         corpus,
+        names,
         &example.observation,
         example.replay_scope,
         example.dependency_inputs.as_ref(),

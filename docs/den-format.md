@@ -44,6 +44,10 @@ verification single_value {
   Escapes: `\\`, `\'`, `\n`, `\r`, `\t`. Parameter names and `group_by` columns accept
   reserved words unquoted. `$condition_N` is a generated helper (zero-arity, derived),
   distinct from a frontend relation spelled `'$condition_N'`.
+  Diagnostic tuple notes use canonical `.den` spelling too: uppercase constants
+  such as `'F3'` stay quoted, as do hyphenated names such as `flags::'new-mode'`.
+  Unnecessary source quotes need not be preserved. This affects display only,
+  not semantic keys or finding identity.
 
 ## Restricted input domains
 

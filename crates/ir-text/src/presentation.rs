@@ -24,7 +24,8 @@ pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Pr
         current: &program.provenance,
         upstream: &program.embedded.provenance,
     };
-    let findings = interpret(&program.corpus, &report.verification)?;
+    let names = diagnostic_names(&program.corpus);
+    let findings = interpret(&program.corpus, &report.verification, &names)?;
     let mut diagnostics = Vec::new();
     let mut inventory = Vec::new();
     for finding in findings {
@@ -35,6 +36,7 @@ pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Pr
             d.notes.extend(denotate_presentation::generic_details(
                 &program.corpus,
                 &finding,
+                &names,
             )?);
         }
         inventory.push(json!({"identity":finding.identity.data_in(&program.keys, report.results.value.context.verification.as_ref())?,"kind":finding.kind.code(),
@@ -64,4 +66,46 @@ pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Pr
         diagnostics,
         status,
     })
+}
+
+/// Canonical, qualified `.den` names for the relations and constants in tuple
+/// diagnostics. Generated relations use the exporter's allocated labels, keeping
+/// `$helper` distinct from an authored `'$helper'`. The shared presenter receives
+/// this callback and remains independent of text syntax.
+///
+/// The callback accepts only relation and constant declarations in this corpus.
+pub fn diagnostic_names(
+    corpus: &denotate_ir::Corpus,
+) -> impl Fn(denotate_ir::OccurrenceId) -> String {
+    use crate::{NameKind, spelling};
+    use denotate_ir::OccurrenceId;
+    let qualify = |id: OccurrenceId, text: String| {
+        corpus
+            .namespace(id)
+            .into_iter()
+            .flat_map(|ns| ns.segments())
+            .map(|part| spelling(part, NameKind::Identifier))
+            .chain(std::iter::once(text))
+            .collect::<Vec<_>>()
+            .join("::")
+    };
+    let mut names = std::collections::BTreeMap::<OccurrenceId, String>::new();
+    for (id, text) in crate::print::relation_names(corpus) {
+        names.insert(id.into(), qualify(id.into(), text));
+    }
+    for constant in corpus.constants() {
+        names.insert(
+            constant.id.into(),
+            qualify(
+                constant.id.into(),
+                spelling(&constant.name, NameKind::Constant),
+            ),
+        );
+    }
+    move |id| {
+        names
+            .get(&id)
+            .expect("diagnostic relation or constant belongs to corpus")
+            .clone()
+    }
 }

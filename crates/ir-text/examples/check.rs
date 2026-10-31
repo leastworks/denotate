@@ -539,6 +539,23 @@ mod tests {
         assert_eq!(invalid.run(&[]).0, 3);
     }
     #[test]
+    fn human_tuple_notes_use_den_name_spelling() {
+        let f = Fixture::new(
+            "sort S; namespace flags { const 'new-mode', 'F3':S; } relation 'bad-result'(x:S); 'bad-result'(flags::'new-mode'); 'bad-result'(flags::'F3'); obligation one: empty('bad-result'); verification checks { assumptions:[]; obligations:[one]; }",
+        );
+        let (code, output) = f.run(&[]);
+        assert_eq!(code, 1, "{output}");
+        for name in ["'new-mode'", "'F3'"] {
+            assert!(
+                output.contains(&format!(
+                    "Replayed present tuple: 'bad-result'(flags::{name})."
+                )),
+                "{output}"
+            );
+        }
+        assert_eq!(f.run(&["--json"]).0, code);
+    }
+    #[test]
     fn human_output_prints_presented_location_kind_notes_and_related_labels() {
         let f = Fixture::new(
             "relation p();\r\nrelation '😀'(); p();\r\nobligation one: empty(p);\r\nverification checks { assumptions: []; obligations: [one]; }",
