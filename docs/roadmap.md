@@ -125,6 +125,17 @@ the bounds only prove that a unique two-valued meaning exists.
   a :- b.` has one stable model but a non-total well-founded model), so it
   complements discharge rewrites and certification. It proposes no edit, so it needs
   its own evidence kind and wording, and a recorded admission decision.
+- **Alternative: completion plus loop formulas** (Lin and Zhao). Clark completion
+  already backs the no-meaning check; adding a loop formula for each positive loop
+  makes the propositional models exactly the stable models. With BDDs, "exactly one
+  stable model in this world" is a quantified query, so admission would be exact
+  (necessary and sufficient), not only sufficient. A component can have
+  exponentially many loops; elementary loops or lazily added loop formulas, as in
+  SAT-based answer-set solvers, are the usual mitigations. Compare both approaches
+  when this is picked up.
+- **Evidence:** per-world certification of an unsupported cycle inside a larger
+  example program was slow and hit the wall-clock deadline intermittently, because
+  it settles one world at a time. A symbolic method would decide all worlds at once.
 - **Trigger:** real programs with unsupported regions that their input guards
   resolve per world but discharge cannot. Prototype on one component and validate
   against the stable-model oracle and certification. Background: approximation
@@ -141,7 +152,10 @@ result with phase and resource, never a hang, a crash or a proof from partial wo
 Keep the operational pair, cancellation and deadline. Collapse the logical limits to
 one deterministic **work** counter and one **memory** cap, so exhaustion stays
 reproducible cold/warm and in CI. Do this on the current backend first, so the
-backend swap is measured against a simple, stable limit model.
+backend swap is measured against a simple, stable limit model. Evidence: a small
+unsupported cycle composed with a larger example program finished certification in
+about 11 seconds on one run and hit the wall-clock deadline on another; the same
+program and limits gave different results.
 
 **2. Shared-manager backend.** `biodivine-lib-bdd` gives every BDD its own node
 vector. Nodes are shared within one condition, and a `Condition` shares its whole BDD
