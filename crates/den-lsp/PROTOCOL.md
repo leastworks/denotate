@@ -75,13 +75,17 @@ verification-key order:
 
 Names are qualified `.den` spellings (`::checks` for a global name). `mode` is
 `normal` or `consistency-only`; the latter selects no obligations but still runs
-context-wide semantic analysis. `consistency: "consistent"` follows from the
-all-absent input world permitted by every currently supported assumption; it is
-not an admission or obligation proof. `summary` is null until that verification has
+context-wide semantic analysis. `consistency` is `unknown`, `consistent` or
+`inconsistent`. General selections stay unknown until W is computed; input-only
+at-most-one selections are known consistent even before checking. A consistent
+context is not an admission or obligation proof. `summary` is null until that verification has
 a current result, then contains the shared checker summary (backend, lowered input
 restrictions, groups, regions, incomplete work and finding inventory).
 `complete` means execution finished, including conclusive findings or explicitly
-inconclusive scopes; `summary.state` is `proved`, `findings` or `incomplete`.
+inconclusive scopes; `summary.state` is `proved`, `findings`, `incomplete` or `inconsistent-assumptions`.
+The shared summary includes `consistency`; exhaustion before a report leaves a
+general selection unknown (input-only at-most-one selections remain known consistent). An inconsistent context contributes findings to the program aggregate,
+checks no obligations, and does not prevent other verifications from running.
 Operational deadlines/failures are recorded on the affected verification; independent
 verifications still run. Cancellation withdraws the obsolete program job.
 
@@ -143,6 +147,25 @@ Human-readable tuples and missing-group arguments use canonical `.den` name
 spelling, including qualified namespaces, quoted uppercase constants, reserved
 words and escapes. Generated `$helper` names remain distinct from authored
 `'$helper'` names. Structured keys and finding identities are unchanged.
+
+### Assumption context diagnostics
+
+General `activeAssumptions` entries retain the existing `relation` and `groupBy`
+fields and use kind `at-most-one`, `at-least-one`, `exactly-one` or `empty` (empty
+has `groupBy: []`). Semantic keys are unchanged.
+
+An inconsistent context produces an Error with code/evidence kind
+`inconsistent-assumptions`, finding identity
+`{"verification": [namespaceKey, name], "context": "inconsistent-assumptions"}`.
+Its selecting verification is primary and selected assumption declarations are
+related; ordinary labeled library fallback applies. No unsatisfiable core is claimed.
+
+A directional `assumed-conclusion` Warning uses identity
+`{"verification": [...], "assumption": [...], "obligation": [...], "notice": "assumed-conclusion"}`.
+It is primary on the selecting verification, with both declarations related. It
+warns only when the assumption relation is or depends on the checked relation,
+not when the obligation depends on an assumed premise or merely shares an input.
+Evidence kind is `assumed-conclusion`; it is not a witness or a failed obligation.
 
 ### Filtered world notes
 

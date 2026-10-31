@@ -59,6 +59,21 @@ pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Pr
             "message":rewrite.message,"fallback":placed.iter().any(|d|d.fallback),"located":!placed.is_empty()}));
         diagnostics.extend(placed);
     }
+    for finding in denotate_presentation::context_findings(&program.corpus, &program.keys, report)?
+    {
+        let mut placed = placement.place(
+            &finding.identity,
+            finding.kind,
+            &finding.message,
+            &[],
+            &finding.contributions,
+        )?;
+        for d in &mut placed {
+            d.evidence = json!({"kind":finding.kind.code()});
+        }
+        inventory.push(json!({"identity":finding.identity.data_in(&program.keys, report.results.value.context.verification.as_ref())?,"kind":finding.kind.code(),"message":finding.message,"fallback":placed.iter().any(|d|d.fallback),"located":!placed.is_empty()}));
+        diagnostics.extend(placed);
+    }
     let mut status = summary(&report.results.value);
     status["program"] = json!(program.root);
     status["findings"] = json!(inventory);

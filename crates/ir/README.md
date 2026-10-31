@@ -65,3 +65,10 @@ Construction validity does not imply admissibility; checking is `denotate-check`
 ```sh
 cargo +1.93.0 test --locked -p denotate-ir
 ```
+
+Named assumptions use the same `Restriction` cardinality shape as `Requirement`:
+`assume_at_most_one_in`, `assume_at_least_one_in`, `assume_exactly_one_in` and
+`assume_empty_in` (or `assume_in`). Input and derived targets are allowed. Once rules
+are complete, `validate_assumptions` rejects dependency cycles through negation;
+positive recursion and input dependencies are allowed. This validation cannot use
+the assumptions it validates. The checker owns evaluation and consistency.

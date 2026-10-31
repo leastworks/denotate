@@ -365,8 +365,8 @@ fn invalid_programs_return_current_source_diagnostics_without_partial_ir() {
             "cannot be defined by a rule",
         ),
         (
-            "relation r(); assumption a: at_most_one(r, group_by: ());",
-            "only input relations",
+            "relation r(); r() :- !r(); assumption a: at_most_one(r, group_by: ());",
+            "cycle through negation",
         ),
         (
             "input p(); obligation a: at_most_one(p, group_by: missing);",
@@ -521,9 +521,13 @@ fn reserved_words_are_allowed_as_parameter_and_grouping_names() {
             "module m; sort S; const a,b:S; input p({word}:S); assumption w: at_most_one(p, group_by: {word}); obligation unique: at_most_one(p, group_by: ({word}));"
         ));
         assert_eq!(
-            match &program.corpus.assumptions().next().unwrap().restriction {
-                denotate_ir::Restriction::AtMostOne { group_by, .. } => group_by.clone(),
-            },
+            program
+                .corpus
+                .assumptions()
+                .next()
+                .unwrap()
+                .restriction
+                .group_by(),
             vec![0]
         );
         assert_eq!(

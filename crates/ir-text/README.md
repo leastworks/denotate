@@ -60,10 +60,11 @@ invalid or duplicate API labels. Both frontends use this callback for shared tup
 notes; the test DSL retains its own decoded observation vocabulary.
 
 `at_least_one`, `exactly_one` and `empty` obligations load and print through ordinary
-contract declarations; all are rejected as assumptions. `empty(R)` has no grouping
-argument, and supplying one is a syntax error. Exactly-one remains one
-declaration and selection through printing and reloading. Grouping uses resolved domains, including
-explicit overrides. Coverage results and diagnostics are described in the
+contract declarations and named assumptions. Assumption dependency cones must be
+independently stratified; loading and construction requests share IR validation.
+`empty(R)` has no grouping argument, and supplying one is a syntax error. Exactly-one
+remains one declaration and selection through printing and reloading. Grouping uses
+resolved domains, including explicit overrides. Coverage results and diagnostics are described in the
 [format](../../docs/den-format.md#coverage-obligations).
 
 ## Editor index

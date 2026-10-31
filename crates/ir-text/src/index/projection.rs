@@ -486,20 +486,6 @@ impl Projection {
                         .named_children(&mut node.walk())
                         .filter(|n| n.kind() == "cardinality")
                     {
-                        if node.kind() == "assumption"
-                            && field(card, "kind")
-                                .is_some_and(|n| &self.source.text[n.byte_range()] != "at_most_one")
-                        {
-                            self.issues.push(Issue {
-                                span: node.byte_range(),
-                                code: "assumption-kind".into(),
-                                message: format!(
-                                    "{} is supported only for obligations",
-                                    &self.source.text[field(card, "kind").unwrap().byte_range()]
-                                ),
-                                warning: false,
-                            });
-                        }
                         if let Some(rel) = field(card, "relation")
                             .and_then(|n| self.reference(n, &scope, Lookup::Name(Kind::Relation)))
                         {

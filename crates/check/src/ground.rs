@@ -126,8 +126,8 @@ pub struct InputAtMostOne {
 pub struct GroundProgram {
     pub(crate) preparation: u64,
     pub(crate) graph_revision: u64,
-    signatures: BTreeMap<RelationId, Vec<SortId>>,
-    domains: Domains,
+    pub(crate) signatures: BTreeMap<RelationId, Vec<SortId>>,
+    pub(crate) domains: Domains,
     pub(crate) atoms: Vec<GroundAtom>,
     pub(crate) atom_index: BTreeMap<GroundAtom, usize>,
     pub(crate) inputs: BTreeSet<GroundAtom>,
@@ -145,6 +145,7 @@ pub struct GroundProgram {
     // Keep the selection even when all its groups are trivial, and through admission.
     pub(crate) obligations: BTreeSet<ObligationId>,
     pub(crate) input_groups: Vec<Vec<GroundAtom>>,
+    pub(crate) assumption_condition: Option<Condition>,
     metrics: PreparationMetrics,
 }
 impl GroundProgram {
@@ -276,6 +277,7 @@ impl GroundProgram {
             emptiness: BTreeMap::new(),
             obligations: corpus.obligations().map(|o| o.id).collect(),
             input_groups: vec![],
+            assumption_condition: None,
             metrics: PreparationMetrics::default(),
         }
     }
@@ -408,6 +410,14 @@ impl GroundProgram {
         present: &BTreeSet<GroundAtom>,
         budget: &mut Budget<'_>,
     ) -> Result<()> {
+        if self.assumption_condition.is_some() {
+            let context = ConditionContext::build(self, budget)?;
+            context.evaluate_with_budget(
+                &context.true_condition(),
+                present.iter().cloned(),
+                budget,
+            )?;
+        }
         for group in &self.input_groups {
             let mut found = false;
             for atom in group {

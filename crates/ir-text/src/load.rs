@@ -170,10 +170,7 @@ fn ir_construction<T>(
                 index + 1,
                 relation(id)
             ),
-            ConstructionError::AssumptionOverDerived(id) => format!(
-                "Assumptions restrict inputs; relation {:?} is not an input",
-                relation(id)
-            ),
+            ConstructionError::InvalidAssumption { reason, .. } => reason.into(),
             ConstructionError::UnknownAssumption(_) => {
                 "Unknown assumption in IR construction".into()
             }
@@ -775,35 +772,13 @@ pub fn load_with_resolver(
                         grouping.push(index);
                     }
                     if *assumption {
-                        if *kind != Cardinality::AtMostOne {
-                            return Err(diagnostic(
-                                m,
-                                s.span.clone(),
-                                format!(
-                                    "{} is supported only for obligations",
-                                    if *kind == Cardinality::Empty {
-                                        "empty"
-                                    } else if *kind == Cardinality::ExactlyOne {
-                                        "exactly_one"
-                                    } else {
-                                        "at_least_one"
-                                    }
-                                ),
-                            ));
-                        }
-                        if declaration.role != RelationRole::Input {
-                            return Err(diagnostic(
-                                m,
-                                relation.span.clone(),
-                                "Assumptions may constrain only input relations",
-                            ));
-                        }
                         let aid = ir_construction(
                             m,
                             s.span.clone(),
-                            b.program.corpus.assume_at_most_one_in(
+                            b.program.corpus.assume_in(
                                 module,
                                 &name.text,
+                                *kind,
                                 id,
                                 grouping.into_iter().map(Column::Index),
                             ),
@@ -1020,6 +995,28 @@ pub fn load_with_resolver(
         };
         let (m, span) = &input_domain_sites[input];
         ir_construction::<()>(m, span.clone(), Err(e), &b.program.corpus)?;
+    }
+    if let Err(ConstructionError::InvalidAssumption { relation, reason }) =
+        b.program.corpus.validate_assumptions()
+    {
+        let assumption = b
+            .program
+            .corpus
+            .assumptions()
+            .find(|a| a.restriction.relation() == relation)
+            .expect("validated declared assumption")
+            .id;
+        let origins = b.program.provenance.origins(assumption);
+        let span = origins
+            .first()
+            .expect("loaded assumption has an origin")
+            .span;
+        let snapshot = b.program.sources.snapshot(span.snapshot()).unwrap();
+        return Err(vec![Diagnostic {
+            uri: snapshot.uri.clone(),
+            range: span.byte_range(),
+            message: reason.into(),
+        }]);
     }
     b.program.keys.validate(&b.program.corpus).map_err(|e| {
         vec![Diagnostic {

@@ -75,9 +75,9 @@ impl Condition {
 
 /// Boolean conditions over ground input facts.
 /// Raw Boolean algebra is unrestricted; semantic queries and witnesses respect
-/// the preparation's input-only at-most-one constraints.
-/// Creating this context does not require evaluating the rules. Conditions for
-/// derived facts come from SymbolicMeaning.
+/// the preparation's selected constraints. General restrictions were evaluated
+/// independently during preparation. Creating this context only installs their W;
+/// derived fact conditions for checking come from SymbolicMeaning.
 #[derive(Debug)]
 pub struct ConditionContext {
     universe: (u64, u64),
@@ -164,6 +164,13 @@ impl ConditionContext {
         selected: Option<&BTreeSet<GroundAtom>>,
         budget: &mut Budget<'_>,
     ) -> Result<Self> {
+        // General constraints can couple a cone to any input. Preserve the full
+        // universe; never use the input-at-most-one absent-extension shortcut.
+        let selected = if program.assumption_condition.is_some() {
+            None
+        } else {
+            selected
+        };
         use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT_LOCAL: AtomicU64 = AtomicU64::new(1);
         let universe = (
@@ -224,11 +231,15 @@ impl ConditionContext {
                 seen = context.apply(&seen, &value, op_function::or, budget)?;
             }
         }
+        if let Some(condition) = &program.assumption_condition {
+            context.permitted =
+                context.apply(&context.permitted, condition, op_function::and, budget)?;
+        }
         crate::symbolic::retain(0, 0, context.permitted.node_count(), budget)?;
         Ok(context)
     }
 
-    /// W, independent of the rules; the all-absent world is always permitted.
+    /// W, computed independently before assumption-based admission.
     pub fn permitted_worlds(&self) -> Condition {
         self.permitted.clone()
     }
@@ -425,7 +436,7 @@ impl ConditionContext {
         budget.charge(self.permitted.node_count(), "permitted observation")?;
         if !self.permitted.bdd.eval_in(&valuation) {
             return Err(CheckError::InvalidInputGroup(
-                "observation violates input exclusivity",
+                "observation violates selected assumptions",
             ));
         }
         let result = condition.bdd.eval_in(&valuation);

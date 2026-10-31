@@ -92,7 +92,23 @@ pub struct Verification<'p> {
     pub finding_metrics: FindingMetrics,
     pub incomplete_evaluation: BTreeMap<ComponentId, Inconclusive>,
 }
-impl Verification<'_> {
+impl<'p> Verification<'p> {
+    pub(crate) fn inconsistent(program: &'p GroundProgram) -> Self {
+        Self {
+            program,
+            groups: vec![],
+            emptiness: BTreeMap::new(),
+            coverage: BTreeMap::new(),
+            unresolved: vec![],
+            property_metrics: SymbolicMetrics {
+                elapsed: Duration::ZERO,
+                work: 0,
+                retained_condition_nodes: 0,
+            },
+            finding_metrics: FindingMetrics::default(),
+            incomplete_evaluation: BTreeMap::new(),
+        }
+    }
     pub fn program(&self) -> &GroundProgram {
         self.program
     }
@@ -102,7 +118,8 @@ impl Verification<'_> {
     /// Includes trivially discharged groups (zero/one possible tuple). A blocked
     /// program is never a global pass, even if its independent groups are proved.
     pub fn all_obligations_proved(&self) -> bool {
-        self.whole_program_admitted()
+        self.program.assumptions_consistent()
+            && self.whole_program_admitted()
             && self.incomplete_evaluation.is_empty()
             && self.emptiness.values().all(EmptinessReport::proved)
             && self.coverage.values().all(CoverageReport::proved)
@@ -152,6 +169,9 @@ impl<'p> SymbolicMeaning<'p> {
         mut queries: Option<&mut QueryRun<'_>>,
     ) -> Result<Verification<'p>> {
         limits.cancellation.check()?;
+        if !self.program.assumptions_consistent() {
+            return Ok(Verification::inconsistent(self.program));
+        }
         let report = self.check_queries(limits, queries.as_deref_mut())?;
         let emptiness = self.check_emptiness(limits, queries.as_deref_mut())?;
         let coverage = self.check_coverage(limits, queries.as_deref_mut())?;

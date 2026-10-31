@@ -191,6 +191,9 @@ impl GroundProgram {
         let limits = budget.limits;
         limits.cancellation.check()?;
         self.rewrites.inconclusive = None;
+        if !self.assumptions_consistent() {
+            return Ok(self);
+        }
         let result = self.rewrite_loop(budget);
         if let Err(error) = result {
             budget.failure(&error);
@@ -202,7 +205,10 @@ impl GroundProgram {
 
     fn rewrite_loop(&mut self, budget: &mut Budget<'_>) -> Result<()> {
         loop {
-            if self.is_admitted() && self.input_groups.is_empty() {
+            if self.is_admitted()
+                && self.input_groups.is_empty()
+                && self.assumption_condition.is_none()
+            {
                 return Ok(());
             }
             budget.tick("rewrite snapshot")?;

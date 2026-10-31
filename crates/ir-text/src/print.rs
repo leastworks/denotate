@@ -546,18 +546,20 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
         )?;
     }
     for a in c.assumptions() {
-        let Restriction::AtMostOne { relation, group_by } = &a.restriction;
+        let relation = a.restriction.relation();
+        let group_by = a.restriction.group_by();
+        let kind = match a.restriction.kind() {
+            Cardinality::Empty => "empty",
+            Cardinality::AtMostOne => "at_most_one",
+            Cardinality::AtLeastOne => "at_least_one",
+            Cardinality::ExactlyOne => "exactly_one",
+        };
         add(
             a.id.into(),
             format!(
                 "assumption {}: {}",
                 spelling(&a.name, NameKind::Identifier),
-                contract(
-                    "at_most_one",
-                    *relation,
-                    group_by,
-                    c.namespace(a.id).unwrap()
-                )
+                contract(kind, relation, group_by, c.namespace(a.id).unwrap())
             ),
             single(a.id.into()),
         )?;

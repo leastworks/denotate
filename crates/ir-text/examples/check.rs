@@ -527,6 +527,30 @@ mod tests {
         assert!(message.contains("domain provider depends on an input"));
     }
     #[test]
+    fn general_assumption_consistency_is_a_finding_not_a_vacuous_proof() {
+        for (kind, bad, good) in [
+            ("empty", "r(x);", ""),
+            ("at_most_one", "r(x);r(y);", "r(x);"),
+            ("at_least_one", "", "r(x);"),
+            ("exactly_one", "r(x);r(y);", "r(x);"),
+        ] {
+            for (facts, code) in [(bad, 1), (good, 0)] {
+                let group = if kind == "empty" { "" } else { ",group_by:()" };
+                let f = Fixture::new(&format!(
+                    "sort S; const x,y:S; relation r(x:S); {facts} assumption a:{kind}(r{group}); relation q(); obligation o:empty(q); verification v{{assumptions:[a];obligations:[o];}}"
+                ));
+                let (actual, output) = f.run(&[]);
+                assert_eq!(actual, code, "{output}");
+                assert_eq!(
+                    output.contains("inconsistent-assumptions"),
+                    code == 1,
+                    "{output}"
+                );
+                assert_eq!(f.run(&["--json"]).0, code);
+            }
+        }
+    }
+    #[test]
     fn invalid_input_and_operational_failure_have_distinct_codes() {
         let (code, output) = Fixture::new("").run(&["--sat"]);
         assert_eq!(code, 2);

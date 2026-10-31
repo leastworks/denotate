@@ -21,6 +21,9 @@ pub enum CheckError {
         phase: &'static str,
     },
     InvalidRequest(&'static str),
+    /// Low-level property queries cannot report vacuous proofs. Request checking
+    /// represents this as an inconsistent context with no obligation results.
+    InconsistentAssumptions,
     Receipts(crate::ReceiptError),
     InvalidDomain {
         sort: SortId,

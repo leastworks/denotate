@@ -134,6 +134,11 @@ fn check(
         };
         let entry = &mut publication.status["verifications"][i];
         entry["checking"] = json!(checking);
+        entry["consistency"] = result
+            .status
+            .get("consistency")
+            .cloned()
+            .unwrap_or(json!("unknown"));
         entry["summary"] = result.status.clone();
         for (uri, diagnostics) in result.diagnostics {
             publication
@@ -171,10 +176,9 @@ fn check(
             .any(|v| v["summary"]["state"] == "incomplete")
     {
         "incomplete"
-    } else if verifications
-        .iter()
-        .any(|v| v["summary"]["state"] == "findings")
-    {
+    } else if verifications.iter().any(|v| {
+        v["summary"]["state"] == "findings" || v["summary"]["state"] == "inconsistent-assumptions"
+    }) {
         "findings"
     } else {
         "proved"

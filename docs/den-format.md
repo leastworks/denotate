@@ -37,9 +37,10 @@ verification single_value {
   `obligation name: exactly_one(rel, group_by: (cols))` requires both coverage and
   uniqueness; `obligation name: empty(rel)` requires no tuples.
   `assumption name: at_most_one(input, group_by: (cols))` restricts input
-  worlds. Only input `at_most_one` assumptions are supported. Declarations take
-  effect through selection: a [verification](#verifications) selects which are checked, and under which
-  assumptions.
+  worlds. Assumptions support all four cardinality forms over input or independently
+  stratified derived relations (see [selected assumptions](#selected-assumptions)).
+  Declarations take effect through selection: a [verification](#verifications)
+  selects which are checked, and under which assumptions.
 - **Names.** Quote any non-identifier or reserved word: `'007'`, `'module'`.
   Escapes: `\\`, `\'`, `\n`, `\r`, `\t`. Parameter names and `group_by` columns accept
   reserved words unquoted. `$condition_N` is a generated helper (zero-arity, derived),
@@ -91,7 +92,8 @@ tuple gives one atom and a false provider gives none.
 
 Restrictions belong to the input declaration and apply in every verification.
 Assumptions constrain assignments within that universe; they do not affect domain
-evaluation. The all-absent world remains possible. Coverage groups still range over
+evaluation. Eligibility alone permits the all-absent world; selected assumptions may
+exclude it. Coverage groups still range over
 the grouping columns' resolved sort domains: an empty provider with sort values
 `a` and `b` gives two failing groups for `at_least_one(selected, group_by: x)`.
 It does not remove those groups or prove coverage.
@@ -156,9 +158,9 @@ remains visible. Findings label their coverage or uniqueness component.
 With an empty grouping-column domain, both parts are vacuously satisfied and the
 coverage Information note remains. With a zero-arity relation or grouping by every
 column, uniqueness is trivial because tuples are distinct; coverage still has to prove.
-Duplicate derivations never create a second tuple. Exactly-one assumptions are not
-supported. Names, selection, origins, printing and editor services use the same shared
-paths as other obligations.
+Duplicate derivations never create a second tuple. Exactly-one assumptions constrain
+both parts together. Names, selection, origins, printing and editor services use the
+same shared paths as other obligations.
 
 ## Counterexample placement
 
@@ -270,6 +272,43 @@ verification normal_operation {
   type errors are still reported, but no implicit context is ever assumed. An
   obligation that no verification in the program selects gets a notice, also when it
   is declared in a library.
+
+## Selected assumptions
+
+Assumptions have the same cardinality vocabulary as obligations: `at_most_one`,
+`at_least_one`, `exactly_one`, and `empty`. Grouping uses the program's resolved
+sort domains, including overrides. `group_by: ()` has one global group; an empty
+grouping domain has no groups. `empty` takes no grouping argument.
+
+```den
+input selected();
+relation missing();
+missing() :- !selected();
+assumption required: empty(missing);
+verification check_presence { assumptions: [required]; obligations: []; }
+```
+
+The full dependency cone of an assumption relation must be stratified independently
+of assumptions: positive recursion and stratified negation are allowed, cycles
+through negation are declaration errors even if a selected context could discharge
+them. These rules may depend on inputs. This differs from `within` providers, which
+must be input-free. Construction clients call `Corpus::validate_assumptions` after
+building rules; text loading and request preparation perform the same validation.
+
+Before admission, the checker evaluates these cones without assumptions or rewrites
+and conjoins their cardinality conditions into the permitted-world condition W.
+W must allow at least one world. Otherwise that verification reports
+`inconsistent-assumptions` and checks no obligations; a consistency-only verification
+uses the same test. Exhaustion is inconclusive and cancellation aborts the run.
+Admission, rewrites, no-meaning analysis, obligation checks, replay and certification
+all use this W. Input eligibility and grouping domains do not change with selection.
+
+An `assumed-conclusion` warning appears on the selecting verification when an
+assumption constrains an obligation's relation or a relation transitively derived
+from it. The assumption and obligation declarations are related locations. The
+reverse direction is ordinary assume-guarantee reasoning and does not warn; sharing
+inputs, fixed facts or another derived intermediate does not by itself warn.
+Warnings do not alter the selected context or its results.
 
 ## Meaning
 

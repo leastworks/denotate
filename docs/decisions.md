@@ -15,12 +15,26 @@ real program that the current choice serves badly.
   grounding closure would wrongly include tuples excluded by negation; using a
   partial evaluation after exhaustion could hide real counterexamples. Preparation
   therefore fails inconclusively as a whole when domain evaluation exhausts its
-  limits. The all-absent assignment is still possible, but an empty provider can
-  make uniqueness or emptiness trivially true; coverage continues to enumerate
+  limits. Input eligibility alone still permits the all-absent assignment, but an
+  empty provider can make uniqueness or emptiness trivially true; coverage continues to enumerate
   groups from sort domains. A sort-correct excluded atom is false in rule bodies,
   and invalid as a supplied present observation. Observation lists omit it.
   This is an explicit declaration constraint, not an imported implicit assumption
   ([syntax and meaning](den-format.md#restricted-input-domains)).
+
+- **Assumptions stay named and selected; all four cardinality forms are supported.**
+  Trusted library contracts can constrain independently stratified input-dependent
+  relations. Global activation would silently change a consumer's declared context;
+  library verifications instead select reusable assumptions over consumer metadata.
+  Restricting the new vocabulary to `empty` would make authors encode ordinary
+  cardinality contracts indirectly. We therefore allow `empty`, `at_most_one`,
+  `at_least_one` and `exactly_one`, with the same grouping domains as obligations.
+  Constraint meaning is computed before assumption-based admission, with no cycle
+  through negation in a constraint cone. A real consistency check prevents vacuous
+  proofs; exhaustion cannot discard constraints. No unsatisfiable-core explanation
+  is attempted yet. A directional warning catches assumptions of a checked conclusion
+  without warning on ordinary assume-guarantee use. Sharing a derived intermediate
+  alone is not enough to warn, because it is common in valid assume-guarantee models.
 
 - **Ordinary rule negation is admitted by justification, not by stratification.**
   Business DSLs naturally define mutually exclusive cases that negate each other. Relation-level

@@ -69,7 +69,7 @@ pub fn configuration(program: &LoadedProgram) -> Result<Publication, String> {
         "verification": name(v.id.into(), &v.name),
         "assumptions": v.assumptions.iter().map(|id| name((*id).into(), &program.corpus.assumption(*id).unwrap().name)).collect::<Vec<_>>(),
         "mode": if v.obligations.is_empty() { "consistency-only" } else { "normal" },
-        "consistency": "consistent", "checking": "pending", "summary": null,
+        "consistency": if v.assumptions.iter().all(|id| { let r=&program.corpus.assumption(*id).unwrap().restriction; r.kind()==denotate_ir::Cardinality::AtMostOne && program.corpus.relation(r.relation()).unwrap().role==denotate_ir::RelationRole::Input }) { "consistent" } else { "unknown" }, "checking": "pending", "summary": null,
     })).collect::<Vec<_>>();
     let mut unchecked = vec![];
     let mut diagnostics = BTreeMap::<_, Vec<_>>::new();

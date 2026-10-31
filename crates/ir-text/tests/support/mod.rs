@@ -196,18 +196,12 @@ pub fn compare(
             .assumptions()
             .find(|y| y.name == x.name && a.namespace(x.id) == b.namespace(y.id))
             .unwrap();
-        let (
-            Restriction::AtMostOne {
-                relation: ra,
-                group_by: ga,
-            },
-            Restriction::AtMostOne {
-                relation: rb,
-                group_by: gb,
-            },
-        ) = (&x.restriction, &y.restriction);
-        assert_eq!(ids[&(*ra).into()], (*rb).into());
-        assert_eq!(ga, gb);
+        assert_eq!(x.restriction.kind(), y.restriction.kind());
+        assert_eq!(
+            ids[&x.restriction.relation().into()],
+            y.restriction.relation().into()
+        );
+        assert_eq!(x.restriction.group_by(), y.restriction.group_by());
         bind(&mut ids, x.id.into(), y.id.into());
     }
     assert_eq!(a.verifications().count(), b.verifications().count());

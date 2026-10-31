@@ -50,8 +50,11 @@ is a top-level inconclusive outcome, never an empty success.
 selected assumptions constrain permitted worlds, and only its selected obligations
 produce groups (including the compact domains for trivial groups). Preparation
 rejects unknown obligation or verification keys and requests whose constraints or
-obligations do not match their named verification. Current input `at_most_one`
-assumptions are jointly consistent because they permit all inputs to be absent.
+obligations do not match their named verification. Input-only `at_most_one` contexts
+retain their local checking path. General input/derived cardinality constraints
+compute W independently during preparation, then use whole-program checking.
+An empty W reports `inconsistent_assumptions` with no obligation results. Unknown W
+is inconclusive. The IR validates stratified constraint cones before this evaluation.
 
 Admission, rewrite proofs and no-meaning/unsupported analysis use that request's
 constraints even when no obligations are selected. Unselected assumptions have no
@@ -86,7 +89,7 @@ group; an empty grouping-column domain has none. Counterexamples require replay-
 absence of all possible members. When replay is blocked, observation certification may
 establish absence or presence; uncertified worlds remain unsupported while bounded search
 continues for a settled counterexample. A known-present tuple can prove coverage without
-settling other producers. All-absent inputs witness consistency of the current assumptions.
+settling other producers. Selected assumptions must be consistent before coverage runs.
 
 Coverage uses symbolic BDD fixed-point evaluation and searches the resulting absence
 condition, then replays the concrete observation. Sessions reuse preparation but

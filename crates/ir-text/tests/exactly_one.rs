@@ -427,9 +427,9 @@ fn round_trip_keeps_one_declaration_both_parts_selection_and_origins() {
 }
 
 #[test]
-fn exactly_one_is_obligation_only_and_reuses_group_validation() {
+fn exactly_one_assumptions_and_obligations_share_grouping_validation() {
     for declaration in [
-        "assumption a: exactly_one(p, group_by: (x));",
+        "assumption a: exactly_one(p, group_by: (missing));",
         "obligation a: exactly_one(p, group_by: (missing));",
         "obligation a: exactly_one(p, group_by: (x,x));",
     ] {

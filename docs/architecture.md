@@ -70,6 +70,13 @@ before seeding input atoms. Complete eligible tuple sets are explicit semantic-k
 inputs to session grounding. Provider evaluation itself is currently fresh on each
 preparation; no partial result can enter the grounding cache.
 
+Selected general assumptions are another preparation boundary. The IR validates their
+independent stratified dependency cones; the checker computes W before admission.
+Input-only at-most-one contexts retain local memoized queries. General contexts use
+whole-program BDD evaluation and fresh W, while retaining grounding/plan reuse:
+local absent-extension and constraint-projection shortcuts are not sound for general
+constraints. No context-dependent BDD or verdict is reused across selections.
+
 ## Programs and checking in the editor
 
 A `.den` program is a `den.root` folder plus its referenced libraries; a file outside

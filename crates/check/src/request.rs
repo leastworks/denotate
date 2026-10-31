@@ -87,6 +87,29 @@ pub enum InputConstraint {
         relation: RelationKey,
         group_by: Vec<usize>,
     },
+    Cardinality {
+        kind: Cardinality,
+        relation: RelationKey,
+        group_by: Vec<usize>,
+    },
+}
+impl InputConstraint {
+    pub fn relation(&self) -> &RelationKey {
+        match self {
+            Self::AtMostOne { relation, .. } | Self::Cardinality { relation, .. } => relation,
+        }
+    }
+    pub fn group_by(&self) -> &[usize] {
+        match self {
+            Self::AtMostOne { group_by, .. } | Self::Cardinality { group_by, .. } => group_by,
+        }
+    }
+    pub fn kind(&self) -> Cardinality {
+        match self {
+            Self::AtMostOne { .. } => Cardinality::AtMostOne,
+            Self::Cardinality { kind, .. } => *kind,
+        }
+    }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckRequest {
@@ -113,8 +136,6 @@ impl CheckRequest {
                 .map_err(CheckError::Keys)?
                 .clone(),
         );
-        // All current restrictions are input at-most-one constraints: the world
-        // with every input absent witnesses their joint consistency.
         request.constraints = constraints;
         request.obligations = obligations;
         Ok(request)
@@ -263,6 +284,10 @@ impl CheckRequest {
         let constraints = self
             .constraints
             .iter()
+            .filter_map(|c| match c {
+                InputConstraint::AtMostOne { .. } => Some(c),
+                _ => None,
+            })
             .map(|c| match c {
                 InputConstraint::AtMostOne { relation, group_by } => Ok(InputAtMostOne {
                     relation: *relations
@@ -270,33 +295,47 @@ impl CheckRequest {
                         .ok_or(CheckError::InvalidRequest("unknown constraint relation"))?,
                     group_by: group_by.clone(),
                 }),
+                _ => unreachable!(),
             })
             .collect::<Result<Vec<_>>>()?;
         let limits = self.limits.with_operations(operations);
         let mut budget = Budget::tracked(&limits);
         let mut receipts = WorkReceipts::default();
-        let result = if let Some(store) = grounding {
-            GroundProgram::prepare_grounding(
-                corpus,
-                keys,
-                &domains,
-                &constraints,
-                &obligations,
-                &mut budget,
-                plans.expect("grounding requires a plan provider"),
-                store,
-                &mut receipts,
-            )
-        } else {
-            GroundProgram::prepare_using(
-                corpus,
-                &domains,
-                &constraints,
-                &obligations,
-                &mut budget,
-                plans.map(|store| (keys, store)),
-            )
-        };
+        let result = (|| {
+            corpus.validate_assumption_relations_with(
+                corpus
+                    .assumptions()
+                    .map(|a| a.restriction.relation())
+                    .chain(
+                        self.constraints
+                            .iter()
+                            .filter_map(|c| relations.get(c.relation()).copied()),
+                    ),
+                || budget.tick("assumptions"),
+            )?;
+            if let Some(store) = grounding {
+                GroundProgram::prepare_grounding(
+                    corpus,
+                    keys,
+                    &domains,
+                    &constraints,
+                    &obligations,
+                    &mut budget,
+                    plans.expect("grounding requires a plan provider"),
+                    store,
+                    &mut receipts,
+                )
+            } else {
+                GroundProgram::prepare_using(
+                    corpus,
+                    &domains,
+                    &constraints,
+                    &obligations,
+                    &mut budget,
+                    plans.map(|store| (keys, store)),
+                )
+            }
+        })();
         if let Err(error) = &result {
             Inconclusive::from_error(error.clone())?;
             budget.failure(error);
@@ -305,10 +344,10 @@ impl CheckRequest {
             .entries()
             .map(|(k, _)| k.clone())
             .collect::<Vec<_>>();
-        budget.record(&mut receipts, QueryKey::Preparation, dependencies)?;
         let program = match result {
             Ok(p) => p,
             Err(error) => {
+                budget.record(&mut receipts, QueryKey::Preparation, dependencies)?;
                 return Ok(RequestPreparation::Inconclusive {
                     reason: Inconclusive::from_error(error)?,
                     receipts,
@@ -316,21 +355,60 @@ impl CheckRequest {
             }
         };
         let key_start = Instant::now();
-        let program = program.with_atom_key_order(keys)?;
+        let mut program = program.with_atom_key_order(keys)?;
+        let key_order_time = key_start.elapsed();
+        let general = self
+            .constraints
+            .iter()
+            .filter_map(|c| match c {
+                InputConstraint::Cardinality {
+                    kind,
+                    relation,
+                    group_by,
+                } => Some((kind, relation, group_by)),
+                _ => None,
+            })
+            .map(|(kind, key, group)| {
+                let relation = *relations
+                    .get(key)
+                    .ok_or(CheckError::InvalidRequest("unknown constraint relation"))?;
+                let group_by = group.clone();
+                Ok(match kind {
+                    Cardinality::Empty if group.is_empty() => Restriction::Empty { relation },
+                    Cardinality::Empty => {
+                        return Err(CheckError::InvalidRequest("empty assumption has grouping"));
+                    }
+                    Cardinality::AtMostOne => Restriction::AtMostOne { relation, group_by },
+                    Cardinality::AtLeastOne => Restriction::AtLeastOne { relation, group_by },
+                    Cardinality::ExactlyOne => Restriction::ExactlyOne { relation, group_by },
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if !general.is_empty() {
+            if let Err(error) = program.install_assumptions(&general, &mut budget) {
+                budget.failure(&error);
+                let reason = Inconclusive::from_error(error)?;
+                budget.record(&mut receipts, QueryKey::Preparation, dependencies)?;
+                return Ok(RequestPreparation::Inconclusive { reason, receipts });
+            }
+        }
+        budget.record(&mut receipts, QueryKey::Preparation, dependencies)?;
         let index = GroundKeyIndex::build(corpus, keys, &program).map_err(CheckError::Keys)?;
         operations.cancellation.check()?;
+        let key_computation = key_order_time + index.elapsed;
         Ok(RequestPreparation::Complete(PreparedCheck {
             request: self.clone(),
             program,
             keys: index,
             corpus,
             semantic_keys: keys,
-            key_computation: key_start.elapsed(),
+            key_computation,
             receipts,
         }))
     }
     pub fn exhausted(&self, reason: Inconclusive) -> ScopedResults {
         ScopedResults {
+            inconsistent_assumptions: false,
             context: self.clone(),
             groups: BTreeMap::new(),
             coverage: BTreeMap::new(),
@@ -343,7 +421,8 @@ impl CheckRequest {
     }
 }
 
-/// Lower the selected IR restrictions for keyed requests and direct preparation.
+/// Legacy adapter for direct input-at-most-one preparation. General restrictions
+/// require `CheckRequest::for_verification`; they are rejected here, never omitted.
 /// A foreign verification is rejected; unselected assumptions never contribute.
 pub fn verification_constraints(
     corpus: &Corpus,
@@ -360,10 +439,17 @@ pub fn verification_constraints(
                 .assumption(*id)
                 .ok_or(CheckError::InvalidRequest("unknown assumption"))?;
             match &assumption.restriction {
-                Restriction::AtMostOne { relation, group_by } => Ok(InputAtMostOne {
-                    relation: *relation,
-                    group_by: group_by.clone(),
-                }),
+                Restriction::AtMostOne { relation, group_by }
+                    if corpus.relation(*relation).unwrap().role == RelationRole::Input =>
+                {
+                    Ok(InputAtMostOne {
+                        relation: *relation,
+                        group_by: group_by.clone(),
+                    })
+                }
+                _ => Err(CheckError::InvalidRequest(
+                    "use CheckRequest::for_verification for general assumptions",
+                )),
             }
         })
         .collect()
@@ -377,13 +463,32 @@ fn verification_selection(
     let declaration = corpus
         .verification(verification)
         .ok_or(CheckError::InvalidRequest("unknown verification"))?;
-    let constraints = verification_constraints(corpus, verification)?
-        .into_iter()
-        .map(|c| {
-            Ok(InputConstraint::AtMostOne {
-                relation: keys.relation(c.relation).map_err(CheckError::Keys)?.clone(),
-                group_by: c.group_by,
-            })
+    let constraints = declaration
+        .assumptions
+        .iter()
+        .map(|id| {
+            let r = &corpus
+                .assumption(*id)
+                .ok_or(CheckError::InvalidRequest("unknown assumption"))?
+                .restriction;
+            let relation = keys
+                .relation(r.relation())
+                .map_err(CheckError::Keys)?
+                .clone();
+            let group_by = r.group_by().to_vec();
+            Ok(
+                if r.kind() == Cardinality::AtMostOne
+                    && corpus.relation(r.relation()).unwrap().role == RelationRole::Input
+                {
+                    InputConstraint::AtMostOne { relation, group_by }
+                } else {
+                    InputConstraint::Cardinality {
+                        kind: r.kind(),
+                        relation,
+                        group_by,
+                    }
+                },
+            )
         })
         .collect::<Result<_>>()?;
     let obligations = declaration
@@ -476,6 +581,7 @@ pub struct RegionResult {
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScopedResults {
+    pub inconsistent_assumptions: bool,
     pub context: CheckRequest,
     pub groups: BTreeMap<GroupKey, ScopedResult>,
     pub emptiness: BTreeMap<ObligationKey, EmptinessResult>,
@@ -494,6 +600,9 @@ impl ScopedResults {
     /// exactly-one), not a combined coverage/uniqueness verdict. Coverage is
     /// reported separately in `coverage`.
     pub fn group(&self, key: &GroupKey) -> Option<ScopedResult> {
+        if self.inconsistent_assumptions {
+            return None;
+        }
         if let Some(result) = self.groups.get(key) {
             return Some(result.clone());
         }
@@ -592,6 +701,19 @@ impl PreparedCheck<'_> {
     }
     pub fn verify(&self, operations: &OperationalLimits) -> Result<CheckOutcome<'_>> {
         let limits = self.request.limits.with_operations(operations);
+        if !self.program.assumptions_consistent() {
+            operations.cancellation.check()?;
+            let verification = Verification::inconsistent(&self.program);
+            let mut results = self.project(&verification, self.semantic_keys)?;
+            results.group_domains.clear();
+            return Ok(CheckOutcome::Complete(CheckedReport {
+                verification,
+                results: Accounted {
+                    value: results,
+                    receipts: self.receipts.clone(),
+                },
+            }));
+        }
         let mut receipts = self.receipts.clone();
         let mut budget = Budget::tracked(&limits);
         let meaning = self.program.symbolic_impl(&mut budget, true);
@@ -666,6 +788,7 @@ impl PreparedCheck<'_> {
                 .ok_or(CheckError::Internal("missing committed component key"))
         };
         let mut out = ScopedResults {
+            inconsistent_assumptions: !self.program.assumptions_consistent(),
             context: self.request.clone(),
             groups: BTreeMap::new(),
             coverage: BTreeMap::new(),

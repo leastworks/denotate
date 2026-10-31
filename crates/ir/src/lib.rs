@@ -4,6 +4,7 @@
 //! diagnostics to publish against a DSL user's source. Source attribution lives
 //! separately in [`Provenance`], keyed by occurrences rather than semantic values.
 
+mod assumptions;
 mod ids;
 mod input_domains;
 pub mod installation;

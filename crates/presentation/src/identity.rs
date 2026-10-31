@@ -8,6 +8,8 @@ use std::collections::BTreeSet;
 /// structural correspondence; publication uses explicit semantic keys below.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Identity {
+    InconsistentAssumptions,
+    AssumedConclusion(AssumptionId, ObligationId),
     Coverage(ObligationId),
     Emptiness(ObligationId),
     Uniqueness {
@@ -88,6 +90,10 @@ impl Identity {
     /// messages or ambiguous joined namespace/name strings.
     pub fn data(&self, keys: &SemanticKeys) -> Result<Value> {
         Ok(match self {
+            Self::InconsistentAssumptions => json!({"context":"inconsistent-assumptions"}),
+            Self::AssumedConclusion(a, o) => {
+                json!({"assumption":qualified(&keys.assumption(*a)?.0),"obligation":qualified(&keys.obligation(*o)?.0),"notice":"assumed-conclusion"})
+            }
             Self::Emptiness(id) => {
                 json!({"obligation":qualified(&keys.obligation(*id)?.0),"component":"emptiness"})
             }
@@ -138,7 +144,8 @@ pub fn summary(results: &ScopedResults) -> Value {
         ScopedResult::Unsupported(_) => "unsupported",
         ScopedResult::Inconclusive(_) => "inconclusive",
     };
-    let complete = results.unfinished.is_none()
+    let complete = !results.inconsistent_assumptions
+        && results.unfinished.is_none()
         && results.incomplete.is_empty()
         && results.emptiness.values().all(EmptinessResult::proved)
         && results.coverage.values().all(CoverageResult::proved)
@@ -148,9 +155,10 @@ pub fn summary(results: &ScopedResults) -> Value {
             .values()
             .all(|r| matches!(r, ScopedResult::Proved));
     let mut summary = json!({
-        "state":if complete { "proved" } else if results.emptiness.values().any(|e| e.present > 0) || results.coverage.values().any(|c| c.missing > 0) || results.groups.values().any(|r| matches!(r,ScopedResult::Counterexample(..))) || results.regions.values().any(|r| matches!(r.completion,RegionCompletion::NoMeaning{..})) { "findings" } else { "incomplete" },
+        "state":if results.inconsistent_assumptions { "inconsistent-assumptions" } else if complete { "proved" } else if results.emptiness.values().any(|e| e.present > 0) || results.coverage.values().any(|c| c.missing > 0) || results.groups.values().any(|r| matches!(r,ScopedResult::Counterexample(..))) || results.regions.values().any(|r| matches!(r.completion,RegionCompletion::NoMeaning{..})) { "findings" } else { "incomplete" },
+        "consistency": if results.inconsistent_assumptions { "inconsistent" } else if results.unfinished.is_some() && results.context.constraints.iter().any(|c| matches!(c, InputConstraint::Cardinality {..})) { "unknown" } else { "consistent" },
         "backend":{"backend":results.context.backend.backend,"configuration":results.context.backend.configuration},
-        "activeAssumptions":results.context.constraints.iter().map(|c| match c { InputConstraint::AtMostOne{relation:r,group_by} => json!({"kind":"at-most-one","relation":relation(r),"groupBy":group_by}) }).collect::<Vec<_>>(),
+        "activeAssumptions":results.context.constraints.iter().map(|c| json!({"kind":match c.kind() {Cardinality::AtMostOne=>"at-most-one",Cardinality::AtLeastOne=>"at-least-one",Cardinality::ExactlyOne=>"exactly-one",Cardinality::Empty=>"empty"},"relation":relation(c.relation()),"groupBy":c.group_by()})).collect::<Vec<_>>(),
         "groups":results.groups.iter().map(|(k,v)|json!({"identity":group_identity(k, results) ,"outcome":kinds(v),"reason":result_reason(v)})).collect::<Vec<_>>(),
         "regions":results.regions.iter().map(|(k,v)|json!({"identity":k.0.iter().map(atom_data).collect::<Vec<_>>(),"outcome":kinds(&v.outcome),"reason":result_reason(&v.outcome),"completionReason":match &v.completion { RegionCompletion::Inconclusive(r)=>Some(json!({"phase":r.phase,"resource":r.resource})),_=>None },"completion":match v.completion { RegionCompletion::NoContradiction => "no-contradiction", RegionCompletion::NoMeaning{..} => "no-meaning",RegionCompletion::Deferred(_) => "deferred",RegionCompletion::Inconclusive(_) => "inconclusive" }})).collect::<Vec<_>>(),
         "unfinished":results.unfinished.as_ref().map(|r|json!({"phase":r.phase,"resource":r.resource})),

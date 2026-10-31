@@ -360,11 +360,11 @@ fn round_trip_preserves_ungrouped_requirement_selection_and_origins() {
 }
 
 #[test]
-fn grouping_and_assumption_forms_are_rejected_by_loader_and_index() {
+fn empty_grouping_and_unknown_relations_are_rejected_by_loader_and_index() {
     for declaration in [
         "obligation one: empty(p, group_by: ());",
         "obligation one: empty(p, group_by: (x));",
-        "assumption one: empty(p);",
+        "assumption one: empty(p, group_by: ());",
         "obligation one: empty(missing);",
     ] {
         let source = SourceFile::new(

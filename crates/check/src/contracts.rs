@@ -124,7 +124,8 @@ pub struct PropertyReport {
 
 impl SymbolicMeaning<'_> {
     /// Check all represented at_most_one obligations over every input assignment.
-    /// Assumptions are not supported yet; rules never restrict the input worlds.
+    /// Uses the selected permitted-world condition; an inconsistent context is
+    /// an explicit error at this low-level property-query boundary.
     /// Budget exhaustion is explicit per group once indexing succeeds. Earlier
     /// completed groups are retained; internal failures still return an error.
     pub fn check_at_most_one(&self, limits: &Limits) -> Result<PropertyReport> {
@@ -136,6 +137,9 @@ impl SymbolicMeaning<'_> {
         mut queries: Option<&mut QueryRun<'_>>,
     ) -> Result<PropertyReport> {
         limits.cancellation.check()?;
+        if !self.program.assumptions_consistent() {
+            return Err(CheckError::InconsistentAssumptions);
+        }
         let start = Instant::now();
         let mut budget = if queries.is_some() {
             Budget::tracked(limits)

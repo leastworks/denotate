@@ -132,6 +132,11 @@ pub fn validate_local_constraints(constraints: &[InputConstraint]) -> Result<()>
     for constraint in constraints {
         match constraint {
             InputConstraint::AtMostOne { .. } => {}
+            InputConstraint::Cardinality { .. } => {
+                return Err(CheckError::InvalidRequest(
+                    "general assumptions require whole-program evaluation",
+                ));
+            }
         }
     }
     Ok(())
@@ -318,7 +323,8 @@ impl PreparedCheck<'_> {
                 .constraints
                 .iter()
                 .filter(|c| match c {
-                    InputConstraint::AtMostOne { relation, .. } => relations.contains(relation),
+                    InputConstraint::AtMostOne { relation, .. }
+                    | InputConstraint::Cardinality { relation, .. } => relations.contains(relation),
                 })
                 .cloned()
                 .collect(),

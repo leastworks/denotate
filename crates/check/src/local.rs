@@ -28,6 +28,20 @@ impl PreparedCheck<'_> {
         cache: &mut dyn LocalMemoStore,
     ) -> Result<LocalCheckOutcome<'_>> {
         operations.cancellation.check()?;
+        if self.program.assumption_condition.is_some() {
+            return Ok(match self.verify(operations)? {
+                CheckOutcome::Complete(checked) => {
+                    LocalCheckOutcome::Complete(LocalCheckedReport {
+                        checked,
+                        queries: BTreeMap::new(),
+                        metrics: LocalMetrics::default(),
+                    })
+                }
+                CheckOutcome::Inconclusive {
+                    reason, receipts, ..
+                } => LocalCheckOutcome::Inconclusive { reason, receipts },
+            });
+        }
         validate_local_constraints(&self.request.constraints)?;
         let limits = self.request.limits.with_operations(operations);
         let mut receipts = self.receipts.clone();

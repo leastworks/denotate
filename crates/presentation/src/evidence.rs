@@ -5,6 +5,8 @@ use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Kind {
+    InconsistentAssumptions,
+    AssumedConclusion,
     EmptyGroupingDomain,
     Counterexample,
     NoMeaning,
@@ -16,6 +18,8 @@ pub enum Kind {
 impl Kind {
     pub fn code(self) -> &'static str {
         match self {
+            Self::InconsistentAssumptions => "inconsistent-assumptions",
+            Self::AssumedConclusion => "assumed-conclusion",
             Self::Counterexample => "counterexample",
             Self::EmptyGroupingDomain => "empty-grouping-domain",
             Self::NoMeaning => "no-meaning",
@@ -27,8 +31,10 @@ impl Kind {
     }
     pub fn severity(self) -> Severity {
         match self {
-            Self::Counterexample | Self::NoMeaning => Severity::Error,
-            Self::UnsupportedRegion | Self::Rewrite => Severity::Warning,
+            Self::Counterexample | Self::NoMeaning | Self::InconsistentAssumptions => {
+                Severity::Error
+            }
+            Self::UnsupportedRegion | Self::Rewrite | Self::AssumedConclusion => Severity::Warning,
             Self::UnsupportedGroup | Self::Inconclusive | Self::EmptyGroupingDomain => {
                 Severity::Information
             }
@@ -702,4 +708,50 @@ fn coverage_note(
         example.dependency_inputs.as_ref(),
     )?);
     Ok(note)
+}
+
+/// Context diagnostics concern the selection, not a witness or checked group.
+pub struct ContextFinding {
+    pub identity: Identity,
+    pub kind: Kind,
+    pub message: String,
+    pub contributions: Vec<Contribution>,
+}
+pub fn context_findings(
+    corpus: &Corpus,
+    keys: &SemanticKeys,
+    report: &CheckedReport<'_>,
+) -> Result<Vec<ContextFinding>> {
+    let Some(key) = &report.results.value.context.verification else {
+        return Ok(vec![]);
+    };
+    let v = corpus
+        .verifications()
+        .find(|v| keys.verification(v.id).is_ok_and(|k| k == key))
+        .ok_or(Error::InvalidFinding("unknown verification"))?;
+    let primary = Contribution {
+        occurrence: v.id.into(),
+        role: Role::Declaration,
+    };
+    let mut findings = Vec::new();
+    if report.results.value.inconsistent_assumptions {
+        let mut contributions = vec![primary];
+        contributions.extend(v.assumptions.iter().map(|a| Contribution {
+            occurrence: (*a).into(),
+            role: Role::RelatedOnly,
+        }));
+        findings.push(ContextFinding {
+            identity: Identity::InconsistentAssumptions,
+            kind: Kind::InconsistentAssumptions,
+            message: "Selected assumptions permit no input world; obligations were not checked."
+                .into(),
+            contributions,
+        });
+    }
+    for (a, o) in corpus.assumption_conclusions(v.id) {
+        findings.push(ContextFinding {identity:Identity::AssumedConclusion(a,o),kind:Kind::AssumedConclusion,
+            message:format!("Assumption {} constrains the conclusion of obligation {} (directly or through its dependencies).", corpus.assumption(a).unwrap().name,corpus.obligation(o).unwrap().name),
+            contributions:vec![Contribution {occurrence:v.id.into(),role:Role::Declaration},Contribution {occurrence:a.into(),role:Role::RelatedOnly},Contribution {occurrence:o.into(),role:Role::RelatedOnly}] });
+    }
+    Ok(findings)
 }

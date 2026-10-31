@@ -43,7 +43,10 @@ pub enum ConstructionError {
         index: usize,
     },
     /// Assumptions restrict permitted input worlds, so they name input relations.
-    AssumptionOverDerived(RelationId),
+    InvalidAssumption {
+        relation: RelationId,
+        reason: &'static str,
+    },
     UnknownAssumption(AssumptionId),
     UnknownObligation(ObligationId),
     InvalidInputDomain {
@@ -232,8 +235,9 @@ impl Cardinality {
 }
 
 /// Cardinality of distinct tuples, grouped where the requirement has grouping.
-/// This is a requirement over settled meaning, not behavior or an input assumption.
-#[derive(Debug, PartialEq, Eq)]
+/// Obligations require this of settled meaning; restrictions use the same shape
+/// to constrain independently evaluated input/derived meaning.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Requirement {
     Empty {
         relation: RelationId,
@@ -291,15 +295,9 @@ pub struct Obligation {
     pub message_template: String,
 }
 
-/// Restrict permitted input worlds: distinct tuples in the remaining columns, per
-/// grouping tuple, of an input relation. An assumption, not a requirement on meaning.
-#[derive(Debug, PartialEq, Eq)]
-pub enum Restriction {
-    AtMostOne {
-        relation: RelationId,
-        group_by: Vec<usize>,
-    },
-}
+/// A selected restriction on independently evaluated input/derived meaning.
+/// It shares cardinality vocabulary with obligations, but constrains worlds.
+pub type Restriction = Requirement;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Assumption {
@@ -984,11 +982,13 @@ impl Corpus {
         Ok(indices)
     }
 
-    /// Declare a named input assumption. It restricts no world until selected.
-    pub fn assume_at_most_one_in(
+    /// Declare a named restriction. Validate the completed rule graph with
+    /// `validate_assumptions`; checking and text loading also do this.
+    pub fn assume_in(
         &mut self,
         namespace: impl Into<Namespace>,
         name: impl Into<String>,
+        kind: Cardinality,
         relation: RelationId,
         group_by: impl IntoIterator<Item = Column>,
     ) -> Result<AssumptionId> {
@@ -1004,28 +1004,76 @@ impl Corpus {
                 name,
             });
         }
-        let declaration = self
-            .relation(relation)
-            .ok_or(ConstructionError::UnknownRelation(relation))?;
-        if declaration.role != RelationRole::Input {
-            return Err(ConstructionError::AssumptionOverDerived(relation));
-        }
         let indices = self.group_columns(relation, group_by)?;
+        if kind == Cardinality::Empty && !indices.is_empty() {
+            return Err(ConstructionError::InvalidGroupColumn {
+                relation,
+                column: Column::Index(indices[0]),
+            });
+        }
+        let restriction = match kind {
+            Cardinality::AtMostOne => Restriction::AtMostOne {
+                relation,
+                group_by: indices,
+            },
+            Cardinality::AtLeastOne => Restriction::AtLeastOne {
+                relation,
+                group_by: indices,
+            },
+            Cardinality::ExactlyOne => Restriction::ExactlyOne {
+                relation,
+                group_by: indices,
+            },
+            Cardinality::Empty => Restriction::Empty { relation },
+        };
         let id = AssumptionId(self.fresh());
         self.assumptions.insert(
             id,
             Assumption {
                 id,
                 name,
-                restriction: Restriction::AtMostOne {
-                    relation,
-                    group_by: indices,
-                },
+                restriction,
             },
         );
         self.occurrences.insert(id.into());
         self.namespaces.insert(id.into(), namespace);
         Ok(id)
+    }
+
+    pub fn assume_at_most_one_in(
+        &mut self,
+        namespace: impl Into<Namespace>,
+        name: impl Into<String>,
+        relation: RelationId,
+        group_by: impl IntoIterator<Item = Column>,
+    ) -> Result<AssumptionId> {
+        self.assume_in(namespace, name, Cardinality::AtMostOne, relation, group_by)
+    }
+    pub fn assume_at_least_one_in(
+        &mut self,
+        namespace: impl Into<Namespace>,
+        name: impl Into<String>,
+        relation: RelationId,
+        group_by: impl IntoIterator<Item = Column>,
+    ) -> Result<AssumptionId> {
+        self.assume_in(namespace, name, Cardinality::AtLeastOne, relation, group_by)
+    }
+    pub fn assume_exactly_one_in(
+        &mut self,
+        namespace: impl Into<Namespace>,
+        name: impl Into<String>,
+        relation: RelationId,
+        group_by: impl IntoIterator<Item = Column>,
+    ) -> Result<AssumptionId> {
+        self.assume_in(namespace, name, Cardinality::ExactlyOne, relation, group_by)
+    }
+    pub fn assume_empty_in(
+        &mut self,
+        namespace: impl Into<Namespace>,
+        name: impl Into<String>,
+        relation: RelationId,
+    ) -> Result<AssumptionId> {
+        self.assume_in(namespace, name, Cardinality::Empty, relation, [])
     }
 
     /// Declare a verification selecting assumptions and obligations of this corpus.

@@ -154,7 +154,7 @@ fn distinct_contract_kinds_and_field_words_can_share_names() {
 #[test]
 fn ir_contracts_round_trip_with_selected_keys_and_origins() {
     let text = format!(
-        "namespace 'a::b' {{ {BODY} verification 'check name' {{ assumptions: [a]; obligations: [o]; }} }} namespace app {{ verification local {{ assumptions: ['a::b'::a]; obligations: ['a::b'::o]; }} }}"
+        "namespace 'a::b' {{ {BODY} assumption derived:at_most_one(q,group_by:()); assumption covered:at_least_one(q,group_by:()); assumption exact:exactly_one(q,group_by:()); relation none(); assumption vacant:empty(none); verification 'check name' {{ assumptions: [a,derived,covered,exact,vacant]; obligations: [o]; }} }} namespace app {{ verification local {{ assumptions: ['a::b'::a]; obligations: ['a::b'::o]; }} }}"
     );
     let p = single(&text);
     let layout = ExportLayout {

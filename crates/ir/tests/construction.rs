@@ -353,10 +353,9 @@ fn assumptions_restrict_inputs_and_verifications_select_declarations() {
     let a = c
         .assume_at_most_one_in(ns.clone(), "one_value", input, [])
         .unwrap();
-    assert_eq!(
-        c.assume_at_most_one_in(ns.clone(), "over_derived", derived, []),
-        Err(ConstructionError::AssumptionOverDerived(derived))
-    );
+    c.assume_at_most_one_in(ns.clone(), "over_derived", derived, [])
+        .unwrap();
+    c.validate_assumptions().unwrap();
     assert!(matches!(
         c.assume_at_most_one_in(ns.clone(), "bad_column", input, ["missing".into()]),
         Err(ConstructionError::InvalidGroupColumn { .. })

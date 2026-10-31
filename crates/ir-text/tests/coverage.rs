@@ -357,9 +357,9 @@ fn sessions_refresh_domains_facts_and_selected_assumptions_without_changing_iden
 }
 
 #[test]
-fn coverage_is_obligation_only_and_grouping_validation_is_shared() {
+fn coverage_assumptions_and_obligations_share_grouping_validation() {
     for declaration in [
-        "assumption a: at_least_one(p, group_by: (x));",
+        "assumption a: at_least_one(p, group_by: (missing));",
         "obligation a: at_least_one(p, group_by: (missing));",
         "obligation a: at_least_one(p, group_by: (x,x));",
     ] {

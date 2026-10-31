@@ -1270,7 +1270,13 @@ fn a_consumer_ambiguity_in_a_library_verification_is_located_on_the_consumer() {
         .unwrap()
         .iter()
         .any(|r| r["location"]["uri"] == lib));
-    assert!(c.diagnostics(&lib).as_array().unwrap().is_empty());
+    let library_diagnostics = c.diagnostics(&lib);
+    assert!(!library_diagnostics.as_array().unwrap().is_empty());
+    assert!(library_diagnostics
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|d| d["code"] == "assumed-conclusion" && d["severity"] == 2));
     assert_eq!(
         c.request("denotate/roots", json!({"uri":lib}))["summary"]["state"],
         "proved"
@@ -2265,5 +2271,80 @@ fn restricted_input_provider_services_and_unsaved_domain_edits() {
             .iter()
             .any(|i| i["label"] == "S"));
     }
+    c.shutdown();
+}
+
+#[test]
+fn derived_assumption_services_unsaved_consistency_and_selection_are_current() {
+    let mut c = Client::start("ir-text/standalone");
+    let (uri, _) = c.open("example.den");
+    let text="input i(); relation required(); required():-i(); assumption some:at_least_one(required,group_by:()); assumption none:empty(required); relation q(); obligation vacant:empty(q); verification v{assumptions:[some,none];obligations:[vacant];}";
+    c.change(&uri, 2, text);
+    checking_idle(&mut c);
+    let status = c.request("denotate/roots", json!({"uri":uri}));
+    assert_eq!(
+        status["verifications"][0]["consistency"], "inconsistent",
+        "{status}"
+    );
+    assert!(c
+        .diagnostics(&uri)
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "inconsistent-assumptions"));
+    let definition = query(
+        &mut c,
+        "textDocument/definition",
+        &uri,
+        text,
+        "at_least_one(required",
+        14,
+    );
+    assert_eq!(
+        definition[0]["targetSelectionRange"]["start"],
+        position(text, "relation required", 9)
+    );
+    let hover = query(&mut c, "textDocument/hover", &uri, text, "[some,none]", 2);
+    assert!(hover.to_string().contains("some"));
+    let references = query(
+        &mut c,
+        "textDocument/references",
+        &uri,
+        text,
+        "assumption some",
+        12,
+    );
+    assert_eq!(references.as_array().unwrap().len(), 2);
+    let edit=c.request("textDocument/rename",json!({"textDocument":{"uri":uri},"position":position(text,"assumption some",12),"newName":"present"}));
+    let renamed = support::apply_edits(
+        text,
+        edit["documentChanges"][0]["edits"].as_array().unwrap(),
+    );
+    assert!(renamed.contains("assumption present") && renamed.contains("[present,none]"));
+    c.change(&uri, 3, &renamed.replace("[present,none]", "[present]"));
+    checking_idle(&mut c);
+    let status = c.request("denotate/roots", json!({"uri":uri}));
+    assert_eq!(
+        status["verifications"][0]["consistency"], "consistent",
+        "{status}"
+    );
+    assert_eq!(status["verifications"][0]["summary"]["state"], "proved");
+    assert!(!c
+        .diagnostics(&uri)
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "inconsistent-assumptions"));
+    // The declaration shape edit changes the context without a renamed key.
+    c.change(
+        &uri,
+        4,
+        &renamed
+            .replace("[present,none]", "[present]")
+            .replace("required():-i();", ""),
+    );
+    checking_idle(&mut c);
+    let status = c.request("denotate/roots", json!({"uri":uri}));
+    assert_eq!(status["verifications"][0]["consistency"], "inconsistent");
     c.shutdown();
 }

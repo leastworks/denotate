@@ -219,7 +219,10 @@ fields!(RewriteEvidenceKey {
 impl Retained for InputConstraint {
     fn heap(&self, p: &mut Payload) {
         match self {
-            Self::AtMostOne { relation, group_by } => {
+            Self::AtMostOne { relation, group_by }
+            | Self::Cardinality {
+                relation, group_by, ..
+            } => {
                 relation.heap(p);
                 group_by.heap(p);
             }

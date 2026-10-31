@@ -2,6 +2,7 @@
 //! Observation certificates are scoped to one input snapshot. Frontends own presentation.
 
 mod accounting;
+mod assumptions;
 mod boolean;
 mod certification;
 mod completion;

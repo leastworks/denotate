@@ -5,10 +5,11 @@ directly in `.den`.
 
 ## Contract vocabulary: follow-ups
 
-`at_most_one`, `at_least_one`, `exactly_one` and `empty` are implemented; see
-[the format](den-format.md#coverage-obligations). Deferred until real programs ask
-for them: "why not derived" explanations for coverage failures, conditional group
-eligibility, and assumption forms beyond input `at_most_one`.
+`at_most_one`, `at_least_one`, `exactly_one` and `empty` are implemented for obligations
+and [selected assumptions](den-format.md#selected-assumptions), including independently
+stratified derived constraints and consistency checking. Deferred until real programs
+ask for them: "why not derived" coverage explanations, conditional group eligibility,
+and explanations of which selected assumptions conflict.
 
 ## Authoring robustness
 
@@ -95,9 +96,10 @@ the bounds only prove that a unique two-valued meaning exists.
 
 ## Small items
 
-- Richer assumption forms (beyond input `at_most_one`) must establish that the selected
-  assumptions permit some world before checking, reporting `inconsistent-assumptions`
-  otherwise; today every assumption permits the all-absent world.
+- General-assumption contexts use fresh whole-program evaluation. If a real program
+  demonstrates unacceptable cost, re-score before adding constraint-aware local cones
+  or proving which restrictions permit the existing absent-extension shortcut; see
+  [checker policies](checker-policies.md).
 - Let library authors mark obligations as offered but not checked by default, to quiet
   per-consumer notices for menu-style libraries.
 - Per-verification scope (domains); today every verification uses its program's domains.
