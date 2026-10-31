@@ -11,6 +11,20 @@ stratified derived constraints and consistency checking. Deferred until real pro
 ask for them: "why not derived" coverage explanations, conditional group eligibility,
 and explanations of which selected assumptions conflict.
 
+- **Severity on obligations.** Every obligation failure is an Error today. Let a
+  declaration choose Error, Warning or Information, where Warning and Information do
+  not fail the verification or the exit code: for library rules that should warn
+  rather than fail (style rules, deprecations, suspicious but legal choices).
+  Trigger: a real library needing a warning-level rule.
+- **Existential obligations.** All current forms are universal ("in every permitted
+  world"). A `possible(R)` form would require R to hold in some permitted world, the
+  negation of `empty(R)`: for example, every decision-table row or mapping must be
+  able to apply (dead-rule detection). A failure has no counterexample world to
+  replay, so it needs "why not derived" explanations (which premise or constraint
+  always blocks it) and usually Warning severity. With both in place, condition
+  notices (`varies`) could be defined in terms of them without changing their
+  behavior. Trigger: a real program needing reachability requirements.
+
 ## Authoring robustness
 
 Error recovery while rules are incomplete, latency at realistic sizes, and `.den`
