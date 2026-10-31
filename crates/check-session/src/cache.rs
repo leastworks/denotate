@@ -380,6 +380,25 @@ impl Session {
         prepared: &'p PreparedCheck<'_>,
         operations: &OperationalLimits,
     ) -> Result<LocalCheckOutcome<'p>, CheckError> {
+        self.verify_observed(prepared, operations, None)
+    }
+    /// As `verify`, with timings kept outside cached values and deterministic receipts.
+    /// Metrics reset before cancellation/deadline checks, including on cache hits.
+    pub fn verify_with_metrics<'p>(
+        &mut self,
+        prepared: &'p PreparedCheck<'_>,
+        operations: &OperationalLimits,
+        metrics: &mut VerificationMetrics,
+    ) -> Result<LocalCheckOutcome<'p>, CheckError> {
+        *metrics = VerificationMetrics::default();
+        self.verify_observed(prepared, operations, Some(metrics))
+    }
+    fn verify_observed<'p>(
+        &mut self,
+        prepared: &'p PreparedCheck<'_>,
+        operations: &OperationalLimits,
+        metrics: Option<&mut VerificationMetrics>,
+    ) -> Result<LocalCheckOutcome<'p>, CheckError> {
         self.stats = CacheStats::default();
         self.refresh();
         operations.cancellation.check()?;
@@ -389,7 +408,10 @@ impl Session {
             });
         }
         *self.db.operations.lock().unwrap() = operations.clone();
-        let result = prepared.verify_local_with(operations, self);
+        let result = match metrics {
+            Some(metrics) => prepared.verify_local_with_metrics(operations, self, metrics),
+            None => prepared.verify_local_with(operations, self),
+        };
         operations.cancellation.check()?;
         result
     }

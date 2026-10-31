@@ -99,12 +99,13 @@ built, extract the `.den` editor's validated-rename engine into shared code, des
 against both editors, and generalize the root catalog when test DSL programs
 become multi-file.
 
-## `.den` scorecard support
+## `.den` scorecard support — implemented
 
-Accept `.den` programs in the scorecard, to re-score the provisional
-[checker policies](checker-policies.md) on real programs. It runs verifications
-through the same request API as `check-den`, comparing variants only within the same
-verification.
+`just score-den ROOT [--edit ROOT] [--json FILE]` re-scores the provisional
+[checker policies](checker-policies.md#re-scoring) on real programs, per verification.
+It reports checker phases, size, BDD accounting, outcomes and cache reuse, with fresh
+controls and keyed comparisons. Use the measurements to assess the policies below;
+private results stay with their programs. Diagnostic quality stays with `check-den`.
 
 ## Research: admission by well-founded totality
 

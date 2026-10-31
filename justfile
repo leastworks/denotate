@@ -11,6 +11,11 @@ test-crates:
 score-test-dsl +args:
     cargo +1.93.0 run --release --locked -p denotate-check-session --features test-support --example scorecard -- "$@"
 
+# Re-score explicit .den verifications: ROOT [--edit ROOT] [--samples N] [--json FILE].
+[positional-arguments]
+score-den +args:
+    cargo +1.93.0 run --release --locked -p denotate-check-session --features test-support --example score_den -- "$@"
+
 # Export one combined test DSL program: OUT_DIR FILE... [--without-origins].
 [positional-arguments]
 export-test-dsl +args:

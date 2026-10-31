@@ -27,33 +27,105 @@ when that evaluation exhausted. The implementation, dependency and selectors are
 Git history retains the experiment.
 
 Revisit only for a real program that exhausts BDD evaluation within reasonable limits,
-re-scored with the `.den` scorecard. That scorecard is still on the roadmap and is a
-prerequisite to this decision. An alternative must demonstrate better conclusive outcomes
-under comparable limits, while matching the independent semantic oracles; inconclusive
-or unsupported answers are not wins. A second backend is not a standing feature-parity
-requirement.
+re-scored with the `.den` scorecard below. An alternative must demonstrate better
+conclusive outcomes under comparable limits, while matching the independent semantic
+oracles; inconclusive or unsupported answers are not wins. A second backend is not a
+standing feature-parity requirement.
 
 ## Re-scoring
 
 ```sh
+just score-den path/to/program/den.root \
+    --edit path/to/edited-program --json /tmp/den-scorecard.json
 just score-test-dsl path/to/program.testdsl \
-    --edit path/to/edited.testdsl --json /tmp/scorecard.json
+    --edit path/to/edited.testdsl --json /tmp/test-dsl-scorecard.json
 ```
 
-Only the first file is required. Without `--edit`, the command appends an unrelated
-mapping as a labeled, reproducible fallback edit; supply a real edited program for
-meaningful numbers. `--samples N` (default 5, after one warm-up), `--timeout-ms N`
-(default 60,000), and `--unconstrained` (lifts session retention limits only) are
-available. Run it alone for useful timings.
+Only the first root/file is required. `.den` accepts a folder or `den.root`, runs
+all explicit verifications through the same request API as `check-den`, and omits
+edit measurements unless `--edit` supplies another root. The test DSL command
+retains its labeled fallback edit: it appends an unrelated mapping. Supply a real
+edit for meaningful edit numbers.
 
-It reports cold, trivia-warm and semantic-edit timings for uncached global BDD, fresh
-local BDD, cached BDD (with optional relation-SCC grounding),
-and controls for planning and grounding reuse. It measures lowering and checker reuse,
-**not** parser or LSP scheduling latency. Results are compared against a same-run
-global control; conclusive contradictions, warm mismatches and operational errors
-fail the command. Unsupported or incomplete checks are never speed wins.
+Both commands support `--samples N` (default 5, after one discarded warm-up),
+`--timeout-ms N` (default 60,000 per operation), and `--unconstrained` (lifts session
+retention limits only; fresh-local remains uncached). Run them alone for useful
+timings. The logical limits remain the checker defaults, and `.den` reports the
+effective limits and retention configuration in JSON. The scorecards compare global
+BDD, fresh local BDD, cached BDD, optional relation-SCC grounding, and controls for
+planning and grounding reuse. General assumptions force global verification even
+in a session; the `.den` report labels that fallback. Preparation reuse may still
+apply, but the variant's name does not imply verdict-cache reuse.
 
-`.den` input support for the scorecard is on the [roadmap](roadmap.md).
+### `.den` measurements
+
+Each sample and variant starts fresh for each verification, then reuses that session
+through cold → warm → edit. Warm reloads the same sources with an added comment into
+a fresh corpus. Declaration matching uses semantic keys, so file moves do not change
+identity. Added verifications have only edit measurements; removed ones have no edit.
+Roots without verifications are **unconfigured**, and unselected obligations are
+listed. A consistent verification with neither obligations nor notices is a
+consistency-only result; a selection containing only notices is labeled separately.
+
+The human table gives median milliseconds and maximum BDD observations across samples.
+`--json FILE` also retains every sample, size, outcome, comparison and cache counter.
+Checker timing has four non-overlapping phases:
+
+- **Preparation:** including selected-assumption evaluation and key construction.
+- **Admission:** admission and refreshed ground keys after rewrites.
+- **Checking:** verification, replay, attribution and session bookkeeping, minus the
+  notice pass. `verification_call_ns` records that enclosing call: checking plus
+  notices, not an additional phase.
+- **Notices:** the actual selected-notice pass inside verification, run once.
+
+Loading, rendering, size inspection and fresh-control runs are outside those timings.
+Unreached phases and a missing notice pass are `null`, not zero. Sizes are sampled
+after preparation, before admission rewrites: input atoms, ground atoms, rule instances,
+components and the largest five by atoms then rules. Counts of selected assumptions,
+obligations and notices are included separately. No parser or LSP latency is measured.
+
+BDD figures have distinct meanings:
+
+- `max_per_query_bdd_nodes` is the maximum logical BDD-size observation in the
+  available receipts, not a simultaneous memory peak.
+- `max_per_query_retained_condition_nodes` is the maximum logical retained-condition
+  observation for a query. Shared conditions can be counted conservatively.
+- `cache.retained_condition_nodes` counts payload retained in the session's local
+  cache after verification. Cache byte counts are also conservative payload accounting,
+  not measured heap usage or RSS. Planning and grounding have separate retained bytes.
+
+Receipts may describe reused work and include rejected attempts. These figures are
+neither fresh allocation counts nor sums presented as memory peaks. Missing observations
+remain `null`. Plan, grounding and local-cache statistics expose execution, reuse,
+eviction, bypass and retention, with their internal timing counters. Those counters are
+subsets of the checker phases, not extra time to add to the total.
+
+Each authored obligation is counted once by kind and verdict, including implicit
+trivial uniqueness proofs. Its components and findings are separate: `exactly_one`
+can have both a coverage and a uniqueness failure. A known failure remains visible
+when checking is incomplete; coverage and emptiness counts are then lower bounds.
+Unsupported and no-meaning region counts can overlap. Notices are counted by state
+and never become obligation failures. Inconclusive outcomes include phase and resource.
+Statistics do not enumerate uniqueness's Cartesian grouping domain; an overflowing
+group-total count is `null`, with the verdict still derived from the queried groups.
+
+Comparisons use keyed obligation/component, uniqueness-group, region and notice
+outcomes, excluding witnesses. Cold controls warm; an edit also gets a fresh control
+of the same variant. Global BDD is an additional fresh control for each snapshot.
+Same-path mismatches, conclusive contradictions across paths and operational errors
+fail the command. Cross-path differences without a contradiction remain visible in
+JSON; unsupported/incomplete runs are never speed wins. Ordinary findings do not fail
+the scorecard command: it measures them. Use `check-den` for diagnostics and checking
+exit codes.
+
+Run private programs and inspect results in their own work environment. Output uses
+ordinary names and paths and is **not an anonymised export**. Bring feature requests
+and deliberately abstracted reproductions elsewhere, rather than raw results. The
+scorecard does not embed full sources, diagnostic messages or witnesses; diagnostic
+quality remains the job of `check-den`.
+
+The existing test DSL scorecard additionally measures lowering reuse and retains its
+historical detailed result output and comparison rules.
 
 ## Editor latency smoke
 

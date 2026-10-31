@@ -170,6 +170,7 @@ dependencies = [
  "denotate-check",
  "denotate-editor",
  "denotate-ir",
+ "denotate-ir-text",
  "denotate-normalize",
  "denotate-test-dsl",
  "salsa",

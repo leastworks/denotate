@@ -1,8 +1,9 @@
 //! File-based BDD re-scoring. See docs/checker-policies.md for timing boundaries.
 use denotate_check::{Limits, ScopedResult};
-use denotate_check_session::{Retention, Session};
+mod scorecard_support;
 use denotate_editor::Document;
 use denotate_test_dsl::{analysis, lowering, syntax};
+use scorecard_support::{MODES, session};
 use serde_json::{Value, json};
 use std::{
     path::PathBuf,
@@ -11,14 +12,6 @@ use std::{
 };
 
 const USAGE: &str = "scorecard PROGRAM [--edit FILE] [--samples N] [--json FILE] [--unconstrained] [--timeout-ms N]";
-const MODES: [&str; 6] = [
-    "global-bdd",
-    "fresh-local-bdd",
-    "cached-bdd",
-    "grounding-bdd",
-    "bdd-no-plans",
-    "fresh-grounding-bdd",
-];
 const PHASES: [&str; 3] = ["cold", "warm", "edit"];
 
 struct Config {
@@ -81,28 +74,6 @@ fn default_edit(source: &str) -> String {
         }
     }
     unreachable!()
-}
-
-fn session(mode: &str, unconstrained: bool) -> Option<Session> {
-    let s = match mode {
-        "global-bdd" => return None,
-        "fresh-local-bdd" => {
-            return Some(Session::new(Retention {
-                max_entries: 0,
-                max_bytes: 0,
-                max_condition_nodes: 0,
-            }));
-        }
-        "grounding-bdd" => Session::with_grounding(),
-        "fresh-grounding-bdd" => Session::with_fresh_grounding(),
-        "bdd-no-plans" => Session::with_fresh_planning(),
-        _ => Session::default(),
-    };
-    Some(if unconstrained {
-        s.without_retention_limits()
-    } else {
-        s
-    })
 }
 
 fn prepare(

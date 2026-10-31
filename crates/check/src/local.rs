@@ -27,9 +27,28 @@ impl PreparedCheck<'_> {
         operations: &OperationalLimits,
         cache: &mut dyn LocalMemoStore,
     ) -> Result<LocalCheckOutcome<'_>> {
+        self.verify_local_observed(operations, cache, None)
+    }
+    /// As `verify_local_with`, recording only work performed by this invocation.
+    /// General-assumption fallback uses the same instrumented global pass.
+    pub fn verify_local_with_metrics(
+        &self,
+        operations: &OperationalLimits,
+        cache: &mut dyn LocalMemoStore,
+        metrics: &mut VerificationMetrics,
+    ) -> Result<LocalCheckOutcome<'_>> {
+        *metrics = VerificationMetrics::default();
+        self.verify_local_observed(operations, cache, Some(metrics))
+    }
+    fn verify_local_observed(
+        &self,
+        operations: &OperationalLimits,
+        cache: &mut dyn LocalMemoStore,
+        observations: Option<&mut VerificationMetrics>,
+    ) -> Result<LocalCheckOutcome<'_>> {
         operations.cancellation.check()?;
         if self.program.assumption_condition.is_some() {
-            return Ok(match self.verify(operations)? {
+            return Ok(match self.verify_observed(operations, observations)? {
                 CheckOutcome::Complete(checked) => {
                     LocalCheckOutcome::Complete(LocalCheckedReport {
                         checked,
@@ -424,7 +443,7 @@ impl PreparedCheck<'_> {
         self.program
             .annotate_diagnostic_inputs(&mut verification, &limits)?;
         let mut value = self.project(&verification, self.semantic_keys)?;
-        value.notices = self.check_notices(operations, &mut receipts)?;
+        value.notices = self.check_notices(operations, &mut receipts, observations)?;
         for (scope, artifact) in &artifacts {
             if let (
                 LocalScope::Group(key),

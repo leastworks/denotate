@@ -687,6 +687,13 @@ pub enum CheckOutcome<'p> {
         receipts: WorkReceipts,
     },
 }
+/// Optional observations of this invocation, never cached or compared as meaning.
+#[derive(Debug, Default)]
+pub struct VerificationMetrics {
+    /// Time in the selected-notice pass, including projection to semantic keys.
+    /// None means that pass was not reached or no notices were selected.
+    pub notices: Option<Duration>,
+}
 pub struct CheckedReport<'p> {
     /// Fresh snapshot-owned presentation/replay detail; never memoized.
     pub verification: Verification<'p>,
@@ -727,6 +734,22 @@ impl PreparedCheck<'_> {
         Ok(self)
     }
     pub fn verify(&self, operations: &OperationalLimits) -> Result<CheckOutcome<'_>> {
+        self.verify_observed(operations, None)
+    }
+    /// As `verify`, with observational timings reset even if this call fails early.
+    pub fn verify_with_metrics(
+        &self,
+        operations: &OperationalLimits,
+        metrics: &mut VerificationMetrics,
+    ) -> Result<CheckOutcome<'_>> {
+        *metrics = VerificationMetrics::default();
+        self.verify_observed(operations, Some(metrics))
+    }
+    pub(crate) fn verify_observed(
+        &self,
+        operations: &OperationalLimits,
+        metrics: Option<&mut VerificationMetrics>,
+    ) -> Result<CheckOutcome<'_>> {
         let limits = self.request.limits.with_operations(operations);
         if !self.program.assumptions_consistent() {
             operations.cancellation.check()?;
@@ -785,7 +808,7 @@ impl PreparedCheck<'_> {
             }
         };
         let mut results = self.project(&verification, self.semantic_keys)?;
-        results.notices = self.check_notices(operations, &mut receipts)?;
+        results.notices = self.check_notices(operations, &mut receipts, metrics)?;
         receipts.total().map_err(CheckError::Receipts)?;
         operations.cancellation.check()?;
         Ok(CheckOutcome::Complete(CheckedReport {
@@ -797,6 +820,22 @@ impl PreparedCheck<'_> {
         }))
     }
     pub(crate) fn check_notices(
+        &self,
+        operations: &OperationalLimits,
+        receipts: &mut WorkReceipts,
+        metrics: Option<&mut VerificationMetrics>,
+    ) -> Result<BTreeMap<NoticeKey, NoticeResult>> {
+        let start = metrics
+            .as_ref()
+            .filter(|_| !self.request.notices.is_empty() && self.program.assumptions_consistent())
+            .map(|_| Instant::now());
+        let result = self.check_notices_inner(operations, receipts);
+        if let Some(metrics) = metrics {
+            metrics.notices = start.map(|start| start.elapsed());
+        }
+        result
+    }
+    fn check_notices_inner(
         &self,
         operations: &OperationalLimits,
         receipts: &mut WorkReceipts,
