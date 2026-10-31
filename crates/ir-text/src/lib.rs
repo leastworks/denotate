@@ -75,6 +75,7 @@ pub fn reserved_word(name: &str) -> bool {
             | "obligation"
             | "assumption"
             | "verification"
+            | "notice"
             | "source"
     )
 }

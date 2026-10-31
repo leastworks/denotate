@@ -163,6 +163,7 @@ pub struct Declaration {
 pub enum ContractKind {
     Assumption,
     Obligation,
+    Notice,
     Verification,
 }
 impl ContractKind {
@@ -170,6 +171,7 @@ impl ContractKind {
         match self {
             Self::Assumption => "assumption",
             Self::Obligation => "obligation",
+            Self::Notice => "notice",
             Self::Verification => "verification",
         }
     }
@@ -180,6 +182,7 @@ pub struct VerificationReferences {
     pub scope: Scope,
     pub assumptions: Vec<(Name, Range<usize>)>,
     pub obligations: Vec<(Name, Range<usize>)>,
+    pub notices: Vec<(Name, Range<usize>)>,
 }
 
 fn matching_contracts<'a, T>(

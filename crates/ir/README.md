@@ -72,3 +72,9 @@ Named assumptions use the same `Restriction` cardinality shape as `Requirement`:
 are complete, `validate_assumptions` rejects dependency cycles through negation;
 positive recursion and input dependencies are allowed. This validation cannot use
 the assumptions it validates. The checker owns evaluation and consistency.
+
+Contextual condition notices are separate declarations: `notice_varies_in` takes a
+zero-arity condition, optional zero-arity enclosing scope, and a message label.
+`verification_with_notices_in` selects them alongside assumptions and obligations;
+`verification_in` continues to select no notices. Bind `NoticeKey` like other named
+declarations. A notice carries no assertion and does not alter relational meaning.

@@ -108,3 +108,11 @@ See the [command contract](../../docs/den-format.md#commands) for ordering and e
 The round trip of the test DSL
 regression programs through printing and loading lives in
 `crates/test-dsl/tests/ir_text_roundtrip.rs`.
+
+Selected contextual condition notices load and print as ordinary IR declarations:
+`notice n: varies(condition, within: scope);` and the optional verification field
+`notices: [n];`. Both relations are zero-arity; omitting `within` means the full
+permitted context. Origins and the shared editor resolver apply normally. CLI human
+output includes advisory diagnostics; JSON includes quiet/unknown notice results.
+Notice outcomes do not change exit codes. See the
+[format documentation](../../docs/den-format.md#contextual-condition-notices).

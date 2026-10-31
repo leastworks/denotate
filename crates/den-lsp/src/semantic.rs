@@ -497,6 +497,8 @@ impl Semantics {
                     "domain",
                     "obligation",
                     "assumption",
+                    "verification",
+                    "notice",
                 ] {
                     if keyword.starts_with(prefix) {
                         items.push(json!({"label":keyword,"kind":14,"textEdit":{"range":range(doc,&span),"newText":keyword}}));

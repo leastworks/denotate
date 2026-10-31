@@ -48,6 +48,8 @@ pub enum ConstructionError {
         reason: &'static str,
     },
     UnknownAssumption(AssumptionId),
+    UnknownNotice(NoticeId),
+    InvalidNoticeRelation(RelationId),
     UnknownObligation(ObligationId),
     InvalidInputDomain {
         input: RelationId,
@@ -306,6 +308,17 @@ pub struct Assumption {
     pub restriction: Restriction,
 }
 
+/// Advisory variability query over zero-arity relations. No effect on meaning or
+/// obligation verdicts; `within: None` denotes the whole permitted context.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Notice {
+    pub id: NoticeId,
+    pub name: String,
+    pub condition: RelationId,
+    pub within: Option<RelationId>,
+    pub message: String,
+}
+
 /// A named verification context: the assumptions that define permitted input worlds
 /// and the obligations checked under them. Declaring an assumption activates nothing;
 /// only a verification's selection does. References keep their authored order.
@@ -315,6 +328,7 @@ pub struct VerificationDeclaration {
     pub name: String,
     pub assumptions: Vec<AssumptionId>,
     pub obligations: Vec<ObligationId>,
+    pub notices: Vec<NoticeId>,
 }
 
 /// Assembled relational declarations and rules. No source spans or domain-specific
@@ -331,6 +345,7 @@ pub struct Corpus {
     rules: BTreeMap<RuleId, Rule>,
     obligations: BTreeMap<ObligationId, Obligation>,
     assumptions: BTreeMap<AssumptionId, Assumption>,
+    notices: BTreeMap<NoticeId, Notice>,
     verifications: BTreeMap<VerificationId, VerificationDeclaration>,
     occurrences: BTreeSet<OccurrenceId>,
     namespaces: BTreeMap<OccurrenceId, Namespace>,
@@ -346,6 +361,7 @@ pub fn top_level(c: &Corpus) -> Vec<OccurrenceId> {
         .chain(c.rules().map(|x| x.id.into()))
         .chain(c.obligations().map(|x| x.id.into()))
         .chain(c.assumptions().map(|x| x.id.into()))
+        .chain(c.notices().map(|x| x.id.into()))
         .chain(c.verifications().map(|x| x.id.into()))
         .collect()
 }
@@ -361,6 +377,7 @@ impl Default for Corpus {
             rules: BTreeMap::new(),
             obligations: BTreeMap::new(),
             assumptions: BTreeMap::new(),
+            notices: BTreeMap::new(),
             verifications: BTreeMap::new(),
             occurrences: BTreeSet::new(),
             namespaces: BTreeMap::new(),
@@ -430,6 +447,57 @@ impl Corpus {
     pub fn assumption(&self, id: AssumptionId) -> Option<&Assumption> {
         self.assumptions.get(&id)
     }
+    pub fn notices(&self) -> impl Iterator<Item = &Notice> {
+        self.notices.values()
+    }
+    pub fn notice(&self, id: NoticeId) -> Option<&Notice> {
+        self.notices.get(&id)
+    }
+
+    pub fn notice_varies_in(
+        &mut self,
+        namespace: impl Into<Namespace>,
+        name: impl Into<String>,
+        condition: RelationId,
+        within: Option<RelationId>,
+        message: impl Into<String>,
+    ) -> Result<NoticeId> {
+        let namespace = namespace.into();
+        let name = name.into();
+        named(&name, "notice")?;
+        if self
+            .notices()
+            .any(|n| n.name == name && self.namespace(n.id) == Some(&namespace))
+        {
+            return Err(ConstructionError::DuplicateName {
+                kind: "notice",
+                name,
+            });
+        }
+        for id in std::iter::once(condition).chain(within) {
+            let r = self
+                .relation(id)
+                .ok_or(ConstructionError::UnknownRelation(id))?;
+            if !r.parameters.is_empty() {
+                return Err(ConstructionError::InvalidNoticeRelation(id));
+            }
+        }
+        let id = NoticeId(self.fresh());
+        self.notices.insert(
+            id,
+            Notice {
+                id,
+                name,
+                condition,
+                within,
+                message: message.into(),
+            },
+        );
+        self.occurrences.insert(id.into());
+        self.namespaces.insert(id.into(), namespace);
+        Ok(id)
+    }
+
     pub fn verifications(&self) -> impl Iterator<Item = &VerificationDeclaration> {
         self.verifications.values()
     }
@@ -1084,6 +1152,17 @@ impl Corpus {
         assumptions: impl IntoIterator<Item = AssumptionId>,
         obligations: impl IntoIterator<Item = ObligationId>,
     ) -> Result<VerificationId> {
+        self.verification_with_notices_in(namespace, name, assumptions, obligations, [])
+    }
+
+    pub fn verification_with_notices_in(
+        &mut self,
+        namespace: impl Into<Namespace>,
+        name: impl Into<String>,
+        assumptions: impl IntoIterator<Item = AssumptionId>,
+        obligations: impl IntoIterator<Item = ObligationId>,
+        notices: impl IntoIterator<Item = NoticeId>,
+    ) -> Result<VerificationId> {
         let namespace = namespace.into();
         let name = name.into();
         named(&name, "verification")?;
@@ -1098,6 +1177,7 @@ impl Corpus {
         }
         let assumptions: Vec<_> = assumptions.into_iter().collect();
         let obligations: Vec<_> = obligations.into_iter().collect();
+        let notices: Vec<_> = notices.into_iter().collect();
         let mut seen = BTreeSet::new();
         for &a in &assumptions {
             if self.assumption(a).is_none() {
@@ -1121,6 +1201,17 @@ impl Corpus {
                 });
             }
         }
+        for &n in &notices {
+            if self.notice(n).is_none() {
+                return Err(ConstructionError::UnknownNotice(n));
+            }
+            if !seen.insert(OccurrenceId::from(n)) {
+                return Err(ConstructionError::DuplicateReference {
+                    verification: name,
+                    reference: n.into(),
+                });
+            }
+        }
         let id = VerificationId(self.fresh());
         self.verifications.insert(
             id,
@@ -1129,6 +1220,7 @@ impl Corpus {
                 name,
                 assumptions,
                 obligations,
+                notices,
             },
         );
         self.occurrences.insert(id.into());

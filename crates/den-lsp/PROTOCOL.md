@@ -55,7 +55,7 @@ consumer declaration, with the library location related.
 `checking` is `pending`, `checking`, `complete`, `unconfigured`, `blocked`,
 `deadline`, `cancelled` or `failed`. `unconfigured` means the complete program has no
 verification declarations: it publishes no admission, obligation, no-meaning,
-unsupported-region or rewrite findings. Syntax, resolution, type and structural
+unsupported-region, rewrite or condition-notice findings. Syntax, resolution, type and structural
 checks remain available. Invalid verification syntax or references block checking;
 they never trigger an implicit verification.
 
@@ -74,8 +74,8 @@ verification-key order:
 ```
 
 Names are qualified `.den` spellings (`::checks` for a global name). `mode` is
-`normal` or `consistency-only`; the latter selects no obligations but still runs
-context-wide semantic analysis. `consistency` is `unknown`, `consistent` or
+`normal` (selects obligations), `notices-only` (selects notices but no obligations),
+or `consistency-only` (selects neither). All run context-wide semantic analysis. `consistency` is `unknown`, `consistent` or
 `inconsistent`. General selections stay unknown until W is computed; input-only
 at-most-one selections are known consistent even before checking. A consistent
 context is not an admission or obligation proof. `summary` is null until that verification has
@@ -166,6 +166,48 @@ It is primary on the selecting verification, with both declarations related. It
 warns only when the assumption relation is or depends on the checked relation,
 not when the obligation depends on an assumed premise or merely shares an input.
 Evidence kind is `assumed-conclusion`; it is not a witness or a failed obligation.
+
+### Contextual condition notices
+
+Selected `notice n: varies(condition, within: scope)` declarations produce advisory
+findings: `impossible-condition` (Warning) or `always-true-condition` (Information).
+Their `data.finding` is `{ "verification": [namespace, name], "notice": [namespace, name] }`.
+Distinct uses and verifications remain distinct even when their condition is shared.
+The declaration is primary; `condition being inspected` and `complete enclosing scope`
+label related declarations. Upstream origins, home-program publication and labeled
+library fallback work normally. These notices do not alter `summary.state`, obligation
+completeness, or program aggregate results.
+
+When notices are selected, `summary.notices` contains entries in notice-key order:
+
+```json
+{
+  "identity": {"notice": ["demo", "inner"]},
+  "result": {
+    "kind": "condition-variability",
+    "state": "always-true",
+    "reason": null,
+    "whenTrue": {"observation": {"present": [], "absent": []}, "scope": "whole-program"},
+    "whenFalse": null
+  }
+}
+```
+
+`result` is also the diagnostic's `data.evidence`. States are `impossible`,
+`always-true`, `varying`, `parent-unreachable`, and `unknown`. The two examples are
+full keyed input observations: each independently replays the parent as true and the
+condition with the indicated truth value. Scope is `whole-program` or `cone-only`.
+There is no witness for an empty side. `parent-unreachable` suppresses child noise;
+`varying` and `unknown` also produce no condition diagnostic. `unknown.reason.kind`
+is `unsupported`, `inconclusive` (with phase/resource), `deadline`,
+`inconsistent-assumptions`, or `not-checked` when prerequisite work produced no report.
+Missing example fields in an unperformed query must not be treated as absence proofs.
+An inconsistent context still emits its existing context finding, never vacuous
+condition notices. Cancellation withdraws the obsolete job.
+
+The optional `notices` selection list uses the shared resolver and permits only
+notice names. Notice names and their relation references support navigation, hover,
+outline, highlighting, formatting and validated rename across affected programs.
 
 ### Filtered world notes
 

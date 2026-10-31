@@ -242,6 +242,7 @@ impl Projection {
         let contract = match node.parent().map(|p| p.kind()) {
             Some("assumption") => Some(ContractKind::Assumption),
             Some("obligation") => Some(ContractKind::Obligation),
+            Some("notice") => Some(ContractKind::Notice),
             Some("verification") => Some(ContractKind::Verification),
             _ => None,
         };
@@ -447,7 +448,7 @@ impl Projection {
                         }
                     }
                 }
-                "obligation" | "assumption" | "verification" => {
+                "obligation" | "assumption" | "notice" | "verification" => {
                     if let Some(n) = field(node, "name") {
                         self.declare(n, &scope, Kind::Contract, None, previous);
                     }
@@ -462,10 +463,12 @@ impl Projection {
                         };
                         let assumptions = names("assumption", ContractKind::Assumption);
                         let obligations: Vec<_> = names("obligation", ContractKind::Obligation);
+                        let notices: Vec<_> = names("notice", ContractKind::Notice);
                         if node
                             .children_by_field_name("obligation", &mut node.walk())
                             .next()
                             .is_none()
+                            && notices.is_empty()
                             && !node.has_error()
                             && !node.is_missing()
                         {
@@ -480,7 +483,15 @@ impl Projection {
                             scope: scope.clone(),
                             assumptions,
                             obligations,
+                            notices,
                         });
+                    }
+                    if node.kind() == "notice" {
+                        for key in ["condition", "within"] {
+                            if let Some(n) = field(node, key) {
+                                self.reference(n, &scope, Lookup::Name(Kind::Relation));
+                            }
+                        }
                     }
                     for card in node
                         .named_children(&mut node.walk())
@@ -655,7 +666,12 @@ impl Projection {
             .rposition(|t| t.span.end <= byte && t.text == "within")
         {
             let after = &tokens[within + 1..];
-            let boundary = |t: &&Token| matches!(t.text.as_str(), ";" | "{" | "}" | "loc");
+            let after = if after.first().is_some_and(|t| t.text == ":") {
+                &after[1..]
+            } else {
+                after
+            };
+            let boundary = |t: &&Token| matches!(t.text.as_str(), ";" | "{" | "}" | "loc" | ")");
             if !after.iter().any(|t| t.span.end <= byte && boundary(t)) {
                 let name: Vec<_> = after.iter().take_while(|t| !boundary(t)).collect();
                 let span = match (name.first(), name.last()) {
@@ -675,6 +691,7 @@ impl Projection {
             let kind = match label {
                 Some("assumptions") => Some(ContractKind::Assumption),
                 Some("obligations") => Some(ContractKind::Obligation),
+                Some("notices") => Some(ContractKind::Notice),
                 _ => None,
             };
             if let Some(kind) = kind.filter(|_| tokens[open - 1].text == ":") {
@@ -747,12 +764,12 @@ impl Projection {
         }
         if statement
             .first()
-            .is_some_and(|t| matches!(t.text.as_str(), "obligation" | "assumption"))
+            .is_some_and(|t| matches!(t.text.as_str(), "obligation" | "assumption" | "notice"))
         {
             if let Some(card) = statement.windows(2).position(|ts| {
                 matches!(
                     ts[0].text.as_str(),
-                    "at_most_one" | "at_least_one" | "exactly_one" | "empty"
+                    "at_most_one" | "at_least_one" | "exactly_one" | "empty" | "varies"
                 ) && ts[1].text == "("
             }) {
                 let args = &statement[card + 2..];

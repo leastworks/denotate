@@ -555,6 +555,7 @@ impl Index {
             for (kind, names) in [
                 (ContractKind::Assumption, &v.assumptions),
                 (ContractKind::Obligation, &v.obligations),
+                (ContractKind::Notice, &v.notices),
             ] {
                 if let Err(errors) =
                     resolve_contract_list(&v.scope, names.clone(), kind, &contracts)

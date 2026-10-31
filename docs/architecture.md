@@ -26,7 +26,7 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
 | --- | --- | --- |
 | `denotate-ir` (`crates/ir`) | Typed relational construction (`Corpus`), namespaces, occurrence identities, `Sources`/`Provenance`, semantic keys, recipe installation | Syntax, checking, wording |
 | `denotate-normalize` | Boolean normalization recipes (double-negation cancellation, Lloyd–Topor with linear helpers); no dependencies | Spans, IR handles |
-| `denotate-check` | Finite grounding, admissibility, concrete replay, BDD property checks, no-meaning and rewrite findings, limits and cancellation | Editors, sessions, wording |
+| `denotate-check` | Finite grounding, admissibility, concrete replay, BDD property checks, contextual condition queries, no-meaning and rewrite findings, limits and cancellation | Editors, sessions, wording |
 | `denotate-check-session` | Reusable checker sessions: plan, grounding and verdict caches, retention, warm/cold equivalence | Scheduling, LSP |
 | `denotate-presentation` | Frontend-independent interpretation of checked evidence: finding identity, kind, severity, notes, primary/related placement, labeled fallback | LSP types, DSL vocabulary, filesystem |
 | `denotate-editor` | Language-independent LSP mechanics: documents, synchronization, transport, the checking scheduler and server loop, lifecycle, publication, workspace edits, LSP positions | Roots, manifests, ownership, DSL concepts |
@@ -76,6 +76,14 @@ Input-only at-most-one contexts retain local memoized queries. General contexts 
 whole-program BDD evaluation and fresh W, while retaining grounding/plan reuse:
 local absent-extension and constraint-projection shortcuts are not sound for general
 constraints. No context-dependent BDD or verdict is reused across selections.
+
+Contextual condition notices are ordinary keyed IR declarations selected by a
+verification. The checker decides reachability and variation under that context and
+replays witnesses; presentation supplies advisory wording and source-use placement.
+A frontend supplies a zero-arity condition and the complete enclosing-scope relation.
+No layer infers a DSL's lexical structure, assumes its conclusions, or treats a
+notice as a business obligation. Notice queries currently recompute in warm sessions,
+with independent bounded allowances and fresh presentation from current provenance.
 
 ## Programs and checking in the editor
 

@@ -116,6 +116,7 @@ pub struct CheckRequest {
     pub verification: Option<VerificationKey>,
     pub constraints: Vec<InputConstraint>,
     pub obligations: BTreeSet<ObligationKey>,
+    pub notices: BTreeSet<NoticeKey>,
     pub scope: RequestScope,
     pub domains: BTreeMap<SortKey, Vec<ConstantKey>>,
     pub backend: BackendIdentity,
@@ -138,6 +139,13 @@ impl CheckRequest {
         );
         request.constraints = constraints;
         request.obligations = obligations;
+        request.notices = corpus
+            .verification(verification)
+            .unwrap()
+            .notices
+            .iter()
+            .map(|id| keys.notice(*id).cloned().map_err(CheckError::Keys))
+            .collect::<Result<_>>()?;
         Ok(request)
     }
 
@@ -173,6 +181,7 @@ impl CheckRequest {
                 .obligations()
                 .map(|o| keys.obligation(o.id).cloned().map_err(CheckError::Keys))
                 .collect::<Result<_>>()?,
+            notices: BTreeSet::new(),
             scope: RequestScope::WholeProgram,
             domains: keyed_domains,
             backend: BackendIdentity::bdd(),
@@ -238,13 +247,29 @@ impl CheckRequest {
                     .ok_or(CheckError::InvalidRequest("unknown obligation key"))
             })
             .collect::<Result<BTreeSet<_>>>()?;
+        for key in &self.notices {
+            if !corpus
+                .notices()
+                .any(|n| keys.notice(n.id).is_ok_and(|k| k == key))
+            {
+                return Err(CheckError::InvalidRequest("unknown notice key"));
+            }
+        }
         if let Some(verification) = &self.verification {
             let declaration = corpus
                 .verifications()
                 .find(|v| keys.verification(v.id).is_ok_and(|key| key == verification))
                 .ok_or(CheckError::InvalidRequest("unknown verification key"))?;
             let (constraints, selected) = verification_selection(corpus, keys, declaration.id)?;
-            if self.constraints != constraints || self.obligations != selected {
+            let notices = declaration
+                .notices
+                .iter()
+                .map(|id| keys.notice(*id).cloned().map_err(CheckError::Keys))
+                .collect::<Result<BTreeSet<_>>>()?;
+            if self.constraints != constraints
+                || self.obligations != selected
+                || self.notices != notices
+            {
                 return Err(CheckError::InvalidRequest(
                     "request does not match its verification",
                 ));
@@ -409,6 +434,7 @@ impl CheckRequest {
     pub fn exhausted(&self, reason: Inconclusive) -> ScopedResults {
         ScopedResults {
             inconsistent_assumptions: false,
+            notices: BTreeMap::new(),
             context: self.clone(),
             groups: BTreeMap::new(),
             coverage: BTreeMap::new(),
@@ -582,6 +608,7 @@ pub struct RegionResult {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScopedResults {
     pub inconsistent_assumptions: bool,
+    pub notices: BTreeMap<NoticeKey, NoticeResult>,
     pub context: CheckRequest,
     pub groups: BTreeMap<GroupKey, ScopedResult>,
     pub emptiness: BTreeMap<ObligationKey, EmptinessResult>,
@@ -757,7 +784,8 @@ impl PreparedCheck<'_> {
                 });
             }
         };
-        let results = self.project(&verification, self.semantic_keys)?;
+        let mut results = self.project(&verification, self.semantic_keys)?;
+        results.notices = self.check_notices(operations, &mut receipts)?;
         receipts.total().map_err(CheckError::Receipts)?;
         operations.cancellation.check()?;
         Ok(CheckOutcome::Complete(CheckedReport {
@@ -767,6 +795,68 @@ impl PreparedCheck<'_> {
                 receipts,
             },
         }))
+    }
+    pub(crate) fn check_notices(
+        &self,
+        operations: &OperationalLimits,
+        receipts: &mut WorkReceipts,
+    ) -> Result<BTreeMap<NoticeKey, NoticeResult>> {
+        let limits = self.request.limits.with_operations(operations);
+        let mut out = BTreeMap::new();
+        if !self.program.assumptions_consistent() {
+            return Ok(out);
+        }
+        for key in &self.request.notices {
+            let n = self
+                .corpus
+                .notices()
+                .find(|n| self.semantic_keys.notice(n.id).is_ok_and(|k| k == key))
+                .ok_or(CheckError::InvalidRequest("unknown notice key"))?;
+            let mut budget = Budget::tracked(&limits);
+            let result =
+                self.program
+                    .analyze_condition_with_budget(n.condition, n.within, &mut budget)?;
+            // Deadlines are operational outcomes, never recorded as semantic work.
+            if !matches!(result.state, NoticeState::Unknown(NoticeUnknown::Deadline)) {
+                let dependency = if receipts.get(&QueryKey::Admission).is_some() {
+                    QueryKey::Admission
+                } else {
+                    QueryKey::Preparation
+                };
+                budget.record(receipts, QueryKey::Notice(key.clone()), [dependency])?;
+            }
+            let example = |w: NoticeWitness| -> Result<NoticeExample> {
+                let convert = |a: &GroundAtom| {
+                    AtomKey::from_atom(self.semantic_keys, a).map_err(CheckError::Keys)
+                };
+                Ok(NoticeExample {
+                    observation: Candidate {
+                        present: w
+                            .observation
+                            .present
+                            .iter()
+                            .map(convert)
+                            .collect::<Result<_>>()?,
+                        absent: w
+                            .observation
+                            .absent
+                            .iter()
+                            .map(convert)
+                            .collect::<Result<_>>()?,
+                    },
+                    replay_scope: w.replay_scope,
+                })
+            };
+            out.insert(
+                key.clone(),
+                NoticeResult {
+                    state: result.state,
+                    when_true: result.when_true.map(example).transpose()?,
+                    when_false: result.when_false.map(example).transpose()?,
+                },
+            );
+        }
+        Ok(out)
     }
     pub(crate) fn project(
         &self,
@@ -789,6 +879,7 @@ impl PreparedCheck<'_> {
         };
         let mut out = ScopedResults {
             inconsistent_assumptions: !self.program.assumptions_consistent(),
+            notices: BTreeMap::new(),
             context: self.request.clone(),
             groups: BTreeMap::new(),
             coverage: BTreeMap::new(),

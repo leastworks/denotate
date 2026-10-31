@@ -147,6 +147,22 @@ real program that the current choice serves badly.
   whenever a provisional policy changes. Tests compare outcomes, identities,
   diagnostics and cold/warm equality.
 
+- **Contextual condition notices are selected advisory queries.** `notice n:
+  varies(condition, within: scope)` references zero-arity relations and is selected
+  separately from obligations. A reachable parent with only a false condition gives
+  Warning; one with only a true condition gives Information. Both reachable sides
+  require replayed witnesses. An unreachable parent suppresses child noise, and
+  unsupported or incomplete meaning stays unknown. Inconsistent assumptions never
+  produce notices by vacuity. The author supplies the complete enclosing scope;
+  conclusions and siblings are not implicit assumptions. This keeps contextual
+  authoring advice out of business-rule verdicts and avoids DSL-specific metadata
+  interpretation in the checker. Each notice gets an independent bounded query after
+  ordinary checking; exhaustion cannot change obligation results. Results use stable
+  notice/verification keys. The current implementation recomputes notice queries in
+  warm sessions; no cached result may capture stale source locations. Full worlds
+  stay in evidence, declaration origins support source-use placement, and no automatic
+  rewrites or formula interning are implied.
+
 ## The `.den` format
 
 - **`.den` is both an authoring and an export format**, MLIR-style: plain files with

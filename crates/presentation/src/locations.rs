@@ -87,7 +87,9 @@ impl Placement<'_> {
             Role::Contributor => 1,
             Role::Declaration => 2,
             Role::Obligation => 3,
-            Role::RelatedOnly => unreachable!("related-only origins cannot be primary"),
+            Role::RelatedOnly | Role::Condition | Role::EnclosingScope => {
+                unreachable!("related-only origins cannot be primary")
+            }
         };
         let best = candidates.iter().map(|(_, r)| rank(*r)).min();
         let mut out = Vec::new();
@@ -136,7 +138,10 @@ impl Placement<'_> {
         for contribution in contributions {
             for origin in self.current.origins(contribution.occurrence) {
                 self.sources.text(origin.span)?;
-                if contribution.role != Role::RelatedOnly {
+                if !matches!(
+                    contribution.role,
+                    Role::RelatedOnly | Role::Condition | Role::EnclosingScope
+                ) {
                     if let Some((_, role)) = current.iter_mut().find(|(s, _)| *s == origin.span) {
                         *role = std::cmp::min(*role, contribution.role);
                     } else {

@@ -204,6 +204,17 @@ pub fn compare(
         assert_eq!(x.restriction.group_by(), y.restriction.group_by());
         bind(&mut ids, x.id.into(), y.id.into());
     }
+    assert_eq!(a.notices().count(), b.notices().count());
+    for x in a.notices() {
+        let y = b
+            .notices()
+            .find(|y| y.name == x.name && a.namespace(x.id) == b.namespace(y.id))
+            .unwrap();
+        assert_eq!(x.message, y.message);
+        assert_eq!(ids[&x.condition.into()], y.condition.into());
+        assert_eq!(x.within.map(|id| ids[&id.into()]), y.within.map(Into::into));
+        bind(&mut ids, x.id.into(), y.id.into());
+    }
     assert_eq!(a.verifications().count(), b.verifications().count());
     for x in a.verifications() {
         let y = b
@@ -226,6 +237,16 @@ pub fn compare(
                 .map(|id| ids[&(*id).into()])
                 .collect::<Vec<_>>(),
             y.obligations
+                .iter()
+                .map(|id| (*id).into())
+                .collect::<Vec<OccurrenceId>>()
+        );
+        assert_eq!(
+            x.notices
+                .iter()
+                .map(|id| ids[&(*id).into()])
+                .collect::<Vec<_>>(),
+            y.notices
                 .iter()
                 .map(|id| (*id).into())
                 .collect::<Vec<OccurrenceId>>()

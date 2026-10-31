@@ -2348,3 +2348,165 @@ fn derived_assumption_services_unsaved_consistency_and_selection_are_current() {
     assert_eq!(status["verifications"][0]["consistency"], "inconsistent");
     c.shutdown();
 }
+
+#[test]
+fn notices_navigate_highlight_complete_and_follow_unsaved_context_edits() {
+    let mut c = Client::start("ir-text/standalone");
+    let (uri, _) = c.open("example.den");
+    let text = "namespace lib { input a(); relation parent(); parent():-a(); notice inner:varies(a, within:parent); } verification v{assumptions:[];obligations:[];notices:[lib::inner];}";
+    c.change(&uri, 2, text);
+    checking_idle(&mut c);
+    let diagnostics = c.diagnostics(&uri);
+    let d = diagnostics
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["code"] == "always-true-condition")
+        .unwrap();
+    assert_eq!(d["severity"], 3);
+    assert_eq!(d["range"]["start"], position(text, "notice inner", 7));
+    assert_eq!(d["data"]["evidence"]["state"], "always-true");
+    let identity = d["data"]["finding"].clone();
+    checking_idle(&mut c);
+    let status = c.request("denotate/roots", json!({"uri":uri}));
+    assert_eq!(status["verifications"][0]["mode"], "notices-only");
+    assert_eq!(status["verifications"][0]["summary"]["state"], "proved");
+    assert_eq!(
+        status["verifications"][0]["summary"]["notices"][0]["result"]["state"],
+        "always-true"
+    );
+    let def = query(
+        &mut c,
+        "textDocument/definition",
+        &uri,
+        text,
+        "lib::inner",
+        0,
+    );
+    assert_eq!(
+        def[0]["targetSelectionRange"]["start"],
+        position(text, "notice inner", 7)
+    );
+    assert_eq!(
+        query(&mut c, "textDocument/hover", &uri, text, "lib::inner", 0)["contents"]["value"],
+        "notice inner"
+    );
+    assert_eq!(
+        query(
+            &mut c,
+            "textDocument/references",
+            &uri,
+            text,
+            "lib::inner",
+            0
+        )
+        .as_array()
+        .unwrap()
+        .len(),
+        2
+    );
+    let def = query(
+        &mut c,
+        "textDocument/definition",
+        &uri,
+        text,
+        "within:parent",
+        7,
+    );
+    assert_eq!(
+        def[0]["targetSelectionRange"]["start"],
+        position(text, "relation parent", 9)
+    );
+    let outline = c.request(
+        "textDocument/documentSymbol",
+        json!({"textDocument":{"uri":uri}}),
+    );
+    assert!(outline[0]["children"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|s| s["name"]
+            .as_str()
+            .is_some_and(|name| name.starts_with("notice inner:"))));
+    let tokens = c.request(
+        "textDocument/semanticTokens/full",
+        json!({"textDocument":{"uri":uri}}),
+    );
+    let event = c.capabilities["semanticTokensProvider"]["legend"]["tokenTypes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .position(|v| v == "event")
+        .unwrap() as u64;
+    assert_eq!(
+        tokens["data"]
+            .as_array()
+            .unwrap()
+            .chunks(5)
+            .filter(|t| t[3] == event)
+            .count(),
+        3
+    );
+    let impossible = text.replace("parent():-a()", "parent():-!a()");
+    c.change(&uri, 3, &impossible);
+    checking_idle(&mut c);
+    let diagnostics = c.diagnostics(&uri);
+    let d = diagnostics
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["code"] == "impossible-condition")
+        .unwrap();
+    assert_eq!(d["severity"], 2);
+    assert_eq!(d["data"]["finding"], identity);
+    c.change(&uri, 4, &text.replace("parent():-a();", ""));
+    checking_idle(&mut c);
+    assert!(!c
+        .diagnostics(&uri)
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "always-true-condition" || d["code"] == "impossible-condition"));
+    let prefix="namespace lib{input a(); relation parent(); notice inner:varies(a); assumption allowed:empty(a); obligation none:empty(a);}";
+    for (i, (suffix, needle, delta, expected)) in [
+        (
+            "verification v{assumptions:[];obligations:[];notices:[lib::];}",
+            "[lib::]",
+            6,
+            "lib::inner",
+        ),
+        (
+            "notice n:varies(lib::a,within:lib::par);",
+            "within:lib::par",
+            15,
+            "lib::parent",
+        ),
+        (
+            "notice n:varies(lib::par",
+            "varies(lib::par",
+            14,
+            "lib::parent",
+        ),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let source = format!("{prefix}{suffix}");
+        c.change(&uri, 5 + i as i64, &source);
+        let result = query(
+            &mut c,
+            "textDocument/completion",
+            &uri,
+            &source,
+            needle,
+            delta,
+        );
+        assert_eq!(
+            result["items"].as_array().unwrap().len(),
+            1,
+            "{source}: {result}"
+        );
+        assert_eq!(result["items"][0]["textEdit"]["newText"], expected);
+    }
+    c.shutdown();
+}

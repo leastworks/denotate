@@ -53,3 +53,6 @@ pub use emptiness::{
 };
 mod coverage;
 pub use coverage::{CoverageExample, CoverageReport, CoverageResult, CoverageSummary};
+
+mod notices;
+pub use notices::*;

@@ -171,6 +171,10 @@ fn ir_construction<T>(
                 relation(id)
             ),
             ConstructionError::InvalidAssumption { reason, .. } => reason.into(),
+            ConstructionError::InvalidNoticeRelation(_) => {
+                "Notice conditions and scopes must be zero-arity relations".into()
+            }
+            ConstructionError::UnknownNotice(_) => "Unknown notice".into(),
             ConstructionError::UnknownAssumption(_) => {
                 "Unknown assumption in IR construction".into()
             }
@@ -848,6 +852,45 @@ pub fn load_with_resolver(
             }
         }
     }
+    for m in &scopes {
+        for s in &m.statements {
+            if let Decl::Notice {
+                name,
+                condition,
+                within,
+                message,
+            } = &s.decl
+            {
+                let condition = b.relation(m, condition)?;
+                let within = within.as_ref().map(|n| b.relation(m, n)).transpose()?;
+                let id = ir_construction(
+                    m,
+                    s.span.clone(),
+                    b.program.corpus.notice_varies_in(
+                        &m.namespace,
+                        &name.text,
+                        condition,
+                        within,
+                        message,
+                    ),
+                    &b.program.corpus,
+                )?;
+                construction(
+                    m,
+                    name.span.clone(),
+                    b.program.keys.bind_notice(
+                        &b.program.corpus,
+                        id,
+                        NoticeKey(QualifiedKey::new(
+                            namespace_key(&m.namespace),
+                            name.text.as_str(),
+                        )),
+                    ),
+                )?;
+                b.origin(m, id, name.span.clone())?;
+            }
+        }
+    }
     // Resolve only after every contract in the closure has been declared.
     let mut entries = b
         .program
@@ -867,6 +910,14 @@ pub fn load_with_resolver(
                 o.name.clone(),
                 crate::index::ContractKind::Obligation,
                 Some(OccurrenceId::from(o.id)),
+            )
+        }))
+        .chain(b.program.corpus.notices().map(|n| {
+            (
+                b.program.corpus.namespace(n.id).unwrap().clone(),
+                n.name.clone(),
+                crate::index::ContractKind::Notice,
+                Some(OccurrenceId::from(n.id)),
             )
         }))
         .collect::<Vec<_>>();
@@ -889,6 +940,7 @@ pub fn load_with_resolver(
                 name,
                 assumptions,
                 obligations,
+                notices,
             } = &s.decl
             {
                 let scope = crate::index::Scope {
@@ -920,6 +972,18 @@ pub fn load_with_resolver(
                 };
                 let selected_a = resolve(assumptions, crate::index::ContractKind::Assumption)?;
                 let selected_o = resolve(obligations, crate::index::ContractKind::Obligation)?;
+                let selected_n = resolve(notices, crate::index::ContractKind::Notice)?;
+                let n = selected_n
+                    .iter()
+                    .map(|id| {
+                        b.program
+                            .corpus
+                            .notices()
+                            .find(|n| Some(OccurrenceId::from(n.id)) == *id)
+                            .unwrap()
+                            .id
+                    })
+                    .collect::<Vec<_>>();
                 let a = selected_a
                     .iter()
                     .map(|id| {
@@ -945,9 +1009,13 @@ pub fn load_with_resolver(
                 let id = ir_construction(
                     m,
                     s.span.clone(),
-                    b.program
-                        .corpus
-                        .verification_in(&m.namespace, &name.text, a, o),
+                    b.program.corpus.verification_with_notices_in(
+                        &m.namespace,
+                        &name.text,
+                        a,
+                        o,
+                        n,
+                    ),
                     &b.program.corpus,
                 )?;
                 construction(

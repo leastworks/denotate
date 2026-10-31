@@ -142,3 +142,19 @@ worlds and resource exhaustion visible independently of a known failure. `proved
 requires complete analysis and no example. The BDD checks settled presence conditions;
 blocked facts require world replay/certification, with enumeration and evidence charged
 to the obligation's allowance. Sessions reuse preparation and recompute these verdicts.
+
+## Advisory condition queries
+
+`Corpus::notice_varies_in` declares a zero-arity condition and optional enclosing
+scope; `verification_with_notices_in` selects notices. `CheckRequest::for_verification`
+validates and retains that selection. `ScopedResults.notices` returns keyed results.
+`GroundProgram::analyze_condition` is the corresponding low-level query on a prepared,
+admitted program: impossible, always true, varying, parent unreachable, or unknown.
+The query uses W, symbolic settled conditions and independent concrete replays; it
+never assumes the conclusion. Both sides of varying have their own full observation.
+
+Each selected notice runs after ordinary checking with a fresh deterministic and
+operational allowance. Its receipts use `QueryKey::Notice`; a deadline is unknown
+without a semantic receipt, while cancellation aborts. Sessions currently recompute
+these queries. They do not affect obligation verdicts/completeness. No implicit
+notice selection is added to the legacy `all_obligations` constructor.

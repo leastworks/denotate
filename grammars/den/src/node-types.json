@@ -559,6 +559,10 @@
           "named": true
         },
         {
+          "type": "notice",
+          "named": true
+        },
+        {
           "type": "obligation",
           "named": true
         },
@@ -595,6 +599,90 @@
       "types": [
         {
           "type": "atom",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "notice",
+    "named": true,
+    "fields": {
+      "condition": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "generated_identifier",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "quoted_identifier",
+            "named": true
+          }
+        ]
+      },
+      "message": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "string",
+            "named": true
+          }
+        ]
+      },
+      "name": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "quoted_identifier",
+            "named": true
+          }
+        ]
+      },
+      "within": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "generated_identifier",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "quoted_identifier",
+            "named": true
+          }
+        ]
+      }
+    },
+    "children": {
+      "multiple": false,
+      "required": false,
+      "types": [
+        {
+          "type": "location",
           "named": true
         }
       ]
@@ -901,6 +989,10 @@
           "named": true
         },
         {
+          "type": "notice",
+          "named": true
+        },
+        {
           "type": "obligation",
           "named": true
         },
@@ -1088,6 +1180,28 @@
           }
         ]
       },
+      "notice": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "generated_identifier",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "quoted_identifier",
+            "named": true
+          }
+        ]
+      },
       "obligation": {
         "multiple": true,
         "required": false,
@@ -1264,6 +1378,14 @@
     "named": true
   },
   {
+    "type": "notice",
+    "named": false
+  },
+  {
+    "type": "notices",
+    "named": false
+  },
+  {
     "type": "obligation",
     "named": false
   },
@@ -1305,6 +1427,10 @@
   },
   {
     "type": "use",
+    "named": false
+  },
+  {
+    "type": "varies",
     "named": false
   },
   {

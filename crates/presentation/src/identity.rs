@@ -9,6 +9,7 @@ use std::collections::BTreeSet;
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Identity {
     InconsistentAssumptions,
+    Notice(NoticeId),
     AssumedConclusion(AssumptionId, ObligationId),
     Coverage(ObligationId),
     Emptiness(ObligationId),
@@ -59,6 +60,7 @@ fn occurrence(k: &OccurrenceKey) -> Value {
         OccurrenceKey::Rule(k) => json!({"rule":rule(k)}),
         OccurrenceKey::Obligation(k) => json!({"obligation":qualified(&k.0)}),
         OccurrenceKey::Assumption(k) => json!({"assumption":qualified(&k.0)}),
+        OccurrenceKey::Notice(k) => json!({"notice":qualified(&k.0)}),
         OccurrenceKey::Verification(k) => json!({"verification":qualified(&k.0)}),
         OccurrenceKey::Installed { owner: o, local } => {
             json!({"installed":{"owner":owner(o),"local":local}})
@@ -90,6 +92,7 @@ impl Identity {
     /// messages or ambiguous joined namespace/name strings.
     pub fn data(&self, keys: &SemanticKeys) -> Result<Value> {
         Ok(match self {
+            Self::Notice(id) => json!({"notice":qualified(&keys.notice(*id)?.0)}),
             Self::InconsistentAssumptions => json!({"context":"inconsistent-assumptions"}),
             Self::AssumedConclusion(a, o) => {
                 json!({"assumption":qualified(&keys.assumption(*a)?.0),"obligation":qualified(&keys.obligation(*o)?.0),"notice":"assumed-conclusion"})
@@ -135,6 +138,25 @@ fn group_identity(key: &GroupKey, results: &ScopedResults) -> Value {
     identity
 }
 
+/// Checked advisory state and full replayed observations, shared by summaries
+/// and diagnostic evidence.
+pub fn notice_result_data(result: &NoticeResult) -> Value {
+    let example = |e: &NoticeExample| {
+        json!({
+            "observation": {"present": e.observation.present.iter().map(atom_data).collect::<Vec<_>>(), "absent": e.observation.absent.iter().map(atom_data).collect::<Vec<_>>()},
+            "scope": match e.replay_scope { ReplayScope::WholeProgram => "whole-program", ReplayScope::ConeOnly => "cone-only" },
+        })
+    };
+    json!({"kind":"condition-variability", "state":result.state.label(),
+        "reason":match &result.state {
+            NoticeState::Unknown(NoticeUnknown::Unsupported)=>json!({"kind":"unsupported"}),
+            NoticeState::Unknown(NoticeUnknown::Inconclusive(c))=>json!({"kind":"inconclusive","phase":c.phase,"resource":c.resource}),
+            NoticeState::Unknown(NoticeUnknown::Deadline)=>json!({"kind":"deadline"}),
+            NoticeState::Unknown(NoticeUnknown::InconsistentAssumptions)=>json!({"kind":"inconsistent-assumptions"}),
+            _=>Value::Null,
+        }, "whenTrue":result.when_true.as_ref().map(example), "whenFalse":result.when_false.as_ref().map(example)})
+}
+
 /// Includes request backend/W even when checking exhausted before a report.
 /// Proved groups remain status data, never diagnostic locations.
 pub fn summary(results: &ScopedResults) -> Value {
@@ -164,6 +186,12 @@ pub fn summary(results: &ScopedResults) -> Value {
         "unfinished":results.unfinished.as_ref().map(|r|json!({"phase":r.phase,"resource":r.resource})),
         "incomplete":results.incomplete.iter().map(|(k,r)|json!({"region":k.0.iter().map(atom_data).collect::<Vec<_>>(),"phase":r.phase,"resource":r.resource})).collect::<Vec<_>>()
     });
+    if !results.context.notices.is_empty() {
+        summary["notices"] = json!(results.context.notices.iter().map(|key| {
+            let result = results.notices.get(key).map(notice_result_data).unwrap_or_else(|| json!({"kind":"condition-variability","state":"unknown","reason":{"kind":if results.inconsistent_assumptions {"inconsistent-assumptions"} else {"not-checked"}}}));
+            json!({"identity":{"notice":qualified(&key.0)},"result":result})
+        }).collect::<Vec<_>>());
+    }
     if !results.emptiness.is_empty() {
         summary["emptiness"] = json!(results.emptiness.iter().map(|(key,e)| json!({
             "identity":{"obligation":qualified(&key.0),"component":"emptiness"},

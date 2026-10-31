@@ -253,6 +253,7 @@ fn collect<'a>(n: Node<'a>, aliases: &mut Vec<Node<'a>>, suffixes: &mut Vec<(Nod
             | "obligation"
             | "assumption"
             | "verification"
+            | "notice"
     ) {
         if let Some(loc) = children(n).into_iter().find(|c| c.kind() == "location") {
             suffixes.push((n, loc));

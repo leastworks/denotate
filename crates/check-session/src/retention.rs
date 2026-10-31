@@ -130,6 +130,7 @@ wrapped!(
     ObligationKey,
     AssumptionKey,
     VerificationKey,
+    NoticeKey,
     ComponentKey,
     GroundingKey
 );
@@ -168,6 +169,7 @@ impl Retained for OccurrenceKey {
             Self::Obligation(k) => k.heap(p),
             Self::Assumption(k) => k.heap(p),
             Self::Verification(k) => k.heap(p),
+            Self::Notice(k) => k.heap(p),
             Self::Installed { owner, local: _ } => owner.heap(p),
             Self::Library {
                 rule,
@@ -378,6 +380,7 @@ impl Retained for QueryKey {
             | Self::FindingContext => {}
             Self::Grounding(k) => k.heap(p),
             Self::Coverage(k) | Self::Emptiness(k) => k.heap(p),
+            Self::Notice(k) => k.heap(p),
             Self::ConeDiscovery(k)
             | Self::ConeEvaluation(k)
             | Self::FindingConversion(k)

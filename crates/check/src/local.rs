@@ -424,6 +424,7 @@ impl PreparedCheck<'_> {
         self.program
             .annotate_diagnostic_inputs(&mut verification, &limits)?;
         let mut value = self.project(&verification, self.semantic_keys)?;
+        value.notices = self.check_notices(operations, &mut receipts)?;
         for (scope, artifact) in &artifacts {
             if let (
                 LocalScope::Group(key),

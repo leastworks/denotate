@@ -1,0 +1,21 @@
+// A condition's result belongs to its use and its complete enclosing scope.
+input selected();
+input eligible();
+relation parent_scope();
+parent_scope() :- selected(), eligible();
+relation not_selected();
+not_selected() :- !selected();
+relation unreachable();
+
+notice outer: varies(selected);
+notice repeated: varies(selected, within: parent_scope)
+    message "Repeated nested condition";
+notice incompatible: varies(not_selected, within: parent_scope)
+    message "Incompatible nested condition";
+notice suppressed: varies(selected, within: unreachable);
+
+verification authoring {
+    assumptions: [];
+    obligations: [];
+    notices: [outer, repeated, incompatible, suppressed];
+}

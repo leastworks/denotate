@@ -36,6 +36,7 @@ declaration_id!(
     RuleId,
     ObligationId,
     AssumptionId,
+    NoticeId,
     VerificationId
 );
 

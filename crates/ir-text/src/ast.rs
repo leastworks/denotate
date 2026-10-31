@@ -36,10 +36,17 @@ pub(crate) enum Decl {
         columns: Vec<Name>,
         message: String,
     },
+    Notice {
+        name: Name,
+        condition: Name,
+        within: Option<Name>,
+        message: String,
+    },
     Verification {
         name: Name,
         assumptions: Vec<Name>,
         obligations: Vec<Name>,
+        notices: Vec<Name>,
     },
     Domain(Name, Vec<Name>),
 }
@@ -552,6 +559,22 @@ fn scope(
                         .unwrap_or_default(),
                 }
             }
+            "notice" => Decl::Notice {
+                name: name(source, field(source, node, "name")?)?,
+                condition: name(source, field(source, node, "condition")?)?,
+                within: node
+                    .child_by_field_name("within")
+                    .map(|n| name(source, n))
+                    .transpose()?,
+                message: node
+                    .child_by_field_name("message")
+                    .map(|n| {
+                        serde_json::from_str(text(source, n))
+                            .map_err(|e| error(source, n.byte_range(), e.to_string()))
+                    })
+                    .transpose()?
+                    .unwrap_or_default(),
+            },
             "verification" => Decl::Verification {
                 name: name(source, field(source, node, "name")?)?,
                 assumptions: node
@@ -560,6 +583,10 @@ fn scope(
                     .collect::<Result<_>>()?,
                 obligations: node
                     .children_by_field_name("obligation", &mut node.walk())
+                    .map(|n| name(source, n))
+                    .collect::<Result<_>>()?,
+                notices: node
+                    .children_by_field_name("notice", &mut node.walk())
                     .map(|n| name(source, n))
                     .collect::<Result<_>>()?,
             },

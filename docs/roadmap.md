@@ -14,7 +14,10 @@ and explanations of which selected assumptions conflict.
 ## Authoring robustness
 
 Error recovery while rules are incomplete, latency at realistic sizes, and `.den`
-formatting, driven by what goes wrong in the first real programs. Known items:
+formatting, driven by what goes wrong in the first real programs.
+[Contextual condition notices](den-format.md#contextual-condition-notices) now report
+impossible and always-true conditions within an explicit scope. Formula sharing and
+proved simplification remain separate work. Known items:
 
 - [Obligation diagnostic placement](proposals/obligation-diagnostic-placement.md):
   emptiness reports a bounded set of tuples, each on its own derivation; coverage

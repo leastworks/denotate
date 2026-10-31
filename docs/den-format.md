@@ -256,11 +256,13 @@ verification normal_operation {
 - A verification names the assumptions that define its permitted input worlds and the
   obligations checked in them. Both lists are required, in this order; either may be
   `[]`. `assumptions: []` permits every assignment over the declared input universe.
-  `obligations: []` is a consistency-only verification: semantic analysis still runs,
-  but no obligation is checked, and the declaration gets a warning.
+  An optional `notices: [...]` list follows `obligations`. With no obligations or
+  notices selected, the verification is consistency-only: semantic analysis still
+  runs and the declaration gets a warning. Selecting only notices is allowed and
+  gets no consistency-only warning.
 - References follow the usual namespace lookup and resolve only to their own kind; an
   unknown, wrong-kind, ambiguous or repeated reference is an error. `verification` is a
-  reserved word; `assumptions` and `obligations` are not.
+  reserved word; `assumptions`, `obligations` and `notices` are not.
 - Declaring or importing an assumption activates nothing. The same obligation can be
   checked under several verifications, each with its own results.
 - Every verification in a program's closure runs in that program: a library's
@@ -272,6 +274,66 @@ verification normal_operation {
   type errors are still reported, but no implicit context is ever assumed. An
   obligation that no verification in the program selects gets a notice, also when it
   is declared in a library.
+
+## Contextual condition notices
+
+A runnable [editor example](../editors/den/examples/condition-notices/README.md)
+shows each conclusive case.
+
+A notice asks whether a Boolean condition varies within a specified scope, under
+one verification's selected assumptions. It is advisory: it does not assert an
+obligation or change the verification's verdict.
+
+```den
+input selected();
+input eligible();
+relation parent_scope();
+parent_scope() :- selected(), eligible();
+notice repeated_selection: varies(selected, within: parent_scope)
+    message "Nested condition";
+verification authoring {
+    assumptions: [];
+    obligations: [];
+    notices: [repeated_selection];
+}
+```
+
+This reports Information: the condition is always true whenever `parent_scope`
+holds. `varies` takes a zero-arity input or derived relation; optional `within`
+takes another zero-arity relation and defaults to true. References use ordinary
+relation lookup. `notice` and `within` are reserved; `varies` and `notices` are contextual
+words. The declaration supports `loc(...)` origins. An optional message prefixes the
+explanation; it is a label, not a replacement for the checked result.
+
+Let W be the permitted-world condition, P the complete enclosing scope, and G the
+condition being inspected. W must be consistent before any notice can be concluded.
+
+| Result | Meaning |
+| --- | --- |
+| `impossible` | P has a replayed permitted witness, but P AND G has none; Warning. |
+| `always-true` | P has a replayed permitted witness, but P AND NOT G has none; Information. |
+| `varying` | Both sides have replayed permitted witnesses; no diagnostic. |
+| `parent-unreachable` | No permitted world satisfies P; no child diagnostic. |
+| `unknown` | Required meaning or checking work is unsupported or incomplete; no condition diagnostic. |
+
+`within` must describe **all** enclosing conditions, not just the immediate parent's
+own condition. The author/lowerer supplies this relation; the checker does not infer
+lexical nesting or assume a containing conclusion or sibling requirements. Give an
+ancestor its own notice to report its impossibility; children with unreachable
+parents then remain quiet. Recursive relations keep their existing meaning.
+
+Each notice has its own semantic identity, even when two notices inspect the same
+relation. Findings identify both notice and verification. The notice's declaration
+is primary, its condition and enclosing-scope declarations are related, and upstream
+origins remain available. Normal program ownership and labeled library fallback
+apply. A lowerer can attach the authored condition's origin to the notice.
+
+Selected notices appear in the status summary, including quiet and unknown results.
+Each is a separately bounded checker query after obligation checking; exhausting a
+notice's allowance cannot spend an obligation's allowance or turn an unknown into a
+proof. Its evidence retains complete replayed worlds; ordinary messages omit world
+lists. Notices make no automatic rewrite suggestions. Unselected notices are inert
+and do not generate unchecked-obligation warnings.
 
 ## Selected assumptions
 

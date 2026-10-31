@@ -507,3 +507,62 @@ fn empty_is_ungrouped_with_shared_declaration_validation() {
         .unwrap();
     assert!(c.empty("foreign", unknown, "").is_err());
 }
+
+#[test]
+fn condition_notices_validate_arity_ownership_selection_and_semantic_bindings() {
+    let mut c = Corpus::new();
+    let ns = Namespace::new(["lib"]).unwrap();
+    let r = c.declare_relation("r", RelationRole::Derived, []).unwrap();
+    let n = c
+        .notice_varies_in(ns.clone(), "n", r, Some(r), "use")
+        .unwrap();
+    assert_eq!(c.namespace(n), Some(&ns));
+    assert!(top_level(&c).contains(&n.into()));
+    assert!(c.notice_varies_in(ns.clone(), "n", r, None, "").is_err());
+    let s = c.declare_sort("S").unwrap();
+    let unary = unary(&mut c, "unary", s, RelationRole::Derived);
+    assert!(matches!(
+        c.notice_varies_in(ns.clone(), "bad", unary, None, ""),
+        Err(ConstructionError::InvalidNoticeRelation(_))
+    ));
+    assert!(matches!(
+        c.notice_varies_in(ns.clone(), "bad", r, Some(unary), ""),
+        Err(ConstructionError::InvalidNoticeRelation(_))
+    ));
+    assert!(
+        c.verification_with_notices_in(ns.clone(), "bad", [], [], [n, n])
+            .is_err()
+    );
+    let v = c
+        .verification_with_notices_in(ns.clone(), "v", [], [], [n])
+        .unwrap();
+    assert_eq!(c.verification(v).unwrap().notices, [n]);
+    let mut foreign = Corpus::new();
+    let other = foreign
+        .declare_relation("r", RelationRole::Derived, [])
+        .unwrap();
+    assert!(
+        c.notice_varies_in(ns.clone(), "bad", other, None, "")
+            .is_err()
+    );
+    let other = foreign
+        .notice_varies_in(ns.clone(), "n", other, None, "")
+        .unwrap();
+    assert!(matches!(
+        c.verification_with_notices_in(ns, "foreign", [], [], [other]),
+        Err(ConstructionError::UnknownNotice(_))
+    ));
+    let mut keys = SemanticKeys::default();
+    keys.bind_sort(&c, s, SortKey(QualifiedKey::new("", "S")))
+        .unwrap();
+    for (id, name) in [(r, "r"), (unary, "unary")] {
+        keys.bind_relation(&c, id, RelationKey::Named(QualifiedKey::new("", name)))
+            .unwrap();
+    }
+    keys.bind_verification(&c, v, VerificationKey(QualifiedKey::new("lib", "v")))
+        .unwrap();
+    assert_eq!(keys.validate(&c), Err(KeyError::MissingBinding(n.into())));
+    keys.bind_notice(&c, n, NoticeKey(QualifiedKey::new("lib", "n")))
+        .unwrap();
+    keys.validate(&c).unwrap();
+}

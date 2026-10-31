@@ -766,3 +766,40 @@ fn contract_rename_follows_typed_selections_in_every_consumer_and_rejects_captur
     assert!(apply_file(b, &result, &b_uri).contains("'\\'library\\''::same"));
     c.shutdown();
 }
+
+#[test]
+fn notice_rename_updates_every_consumer_and_rejects_capture() {
+    let mut c = Client::start("base/00-valid");
+    let lib="namespace lib; input p(); notice guard:varies(p); verification checks{assumptions:[];obligations:[];notices:[guard];}";
+    let app="use lib; notice occupied:varies(p); verification local{assumptions:[];obligations:[];notices:[guard,occupied];}";
+    root_files(
+        &mut c,
+        &[
+            ("lib/den.root", "{}"),
+            ("lib/code.den", lib),
+            ("a/den.root", r#"{"libraries":["../lib/den.root"]}"#),
+            ("a/code.den", app),
+            ("b/den.root", r#"{"libraries":["../lib/den.root"]}"#),
+            ("b/code.den", app),
+        ],
+    );
+    let (uri, _) = c.open("lib/code.den");
+    let (a_uri, _) = c.open("a/code.den");
+    let b_uri = support::file_uri(&c.workspace.path().join("b/code.den"));
+    let unsaved = app.replace("[guard,", "[lib::guard,");
+    c.change(&a_uri, 2, &unsaved);
+    let result = c.request(
+        "textDocument/rename",
+        params(&uri, lib, "guard:", "renamed"),
+    );
+    assert!(apply_file(lib, &result, &uri).contains("notices:[renamed]"));
+    assert!(apply_file(&unsaved, &result, &a_uri).contains("notices:[lib::renamed,occupied]"));
+    assert!(apply_file(app, &result, &b_uri).contains("notices:[renamed,occupied]"));
+    rejected(
+        &mut c,
+        "textDocument/rename",
+        params(&uri, lib, "guard:", "occupied"),
+        "capture",
+    );
+    c.shutdown();
+}

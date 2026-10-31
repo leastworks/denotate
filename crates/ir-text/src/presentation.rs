@@ -69,7 +69,14 @@ pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Pr
             &finding.contributions,
         )?;
         for d in &mut placed {
-            d.evidence = json!({"kind":finding.kind.code()});
+            d.evidence = match &finding.identity {
+                denotate_presentation::Identity::Notice(id) => {
+                    denotate_presentation::notice_result_data(
+                        &report.results.value.notices[program.keys.notice(*id)?],
+                    )
+                }
+                _ => json!({"kind":finding.kind.code()}),
+            };
         }
         inventory.push(json!({"identity":finding.identity.data_in(&program.keys, report.results.value.context.verification.as_ref())?,"kind":finding.kind.code(),"message":finding.message,"fallback":placed.iter().any(|d|d.fallback),"located":!placed.is_empty()}));
         diagnostics.extend(placed);

@@ -268,8 +268,8 @@ mod tests {
 
     #[test]
     fn verification_blocks_format_with_quoted_names_comments_and_attached_origins() {
-        let source = "namespace lib{verification 'check me'{assumptions:[::'a::b'::allowed, ::other];obligations:[unique];}loc(#origin)\nverification empty{assumptions:[];obligations:[];}\n}\n";
-        let expected = "namespace lib {\n    verification 'check me' {\n        assumptions: [::'a::b'::allowed, ::other];\n        obligations: [unique];\n    } loc(#origin)\n    verification empty {\n        assumptions: [];\n        obligations: [];\n    }\n}\n";
+        let source = "namespace lib{notice n:varies(g,within:p);verification 'check me'{assumptions:[::'a::b'::allowed, ::other];obligations:[unique];notices:[n];}loc(#origin)\nverification empty{assumptions:[];obligations:[];}\n}\n";
+        let expected = "namespace lib {\n    notice n: varies(g, within: p);\n    verification 'check me' {\n        assumptions: [::'a::b'::allowed, ::other];\n        obligations: [unique];\n        notices: [n];\n    } loc(#origin)\n    verification empty {\n        assumptions: [];\n        obligations: [];\n    }\n}\n";
         for (source, expected) in [
             (source.to_string(), expected.to_string()),
             (source.replace('\n', "\r\n"), expected.replace('\n', "\r\n")),

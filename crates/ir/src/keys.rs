@@ -78,6 +78,8 @@ pub struct AssumptionKey(pub QualifiedKey);
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct VerificationKey(pub QualifiedKey);
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct NoticeKey(pub QualifiedKey);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum OccurrenceKey {
     Sort(SortKey),
     Constant(ConstantKey),
@@ -86,6 +88,7 @@ pub enum OccurrenceKey {
     Obligation(ObligationKey),
     Assumption(AssumptionKey),
     Verification(VerificationKey),
+    Notice(NoticeKey),
     Installed {
         owner: OwnerKey,
         local: usize,
@@ -220,6 +223,7 @@ impl SemanticKeys {
         rule, bind_rule, RuleId, RuleKey, Rule, rule;
         obligation, bind_obligation, ObligationId, ObligationKey, Obligation, obligation;
         assumption, bind_assumption, AssumptionId, AssumptionKey, Assumption, assumption;
+        notice, bind_notice, NoticeId, NoticeKey, Notice, notice;
         verification, bind_verification, VerificationId, VerificationKey, Verification, verification;
     }
     pub fn bind_occurrence(
@@ -339,6 +343,9 @@ impl SemanticKeys {
         }
         for a in corpus.assumptions() {
             self.assumption(a.id)?;
+        }
+        for n in corpus.notices() {
+            self.notice(n.id)?;
         }
         for v in corpus.verifications() {
             self.verification(v.id)?;

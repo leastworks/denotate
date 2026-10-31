@@ -7,6 +7,8 @@ use std::collections::BTreeSet;
 pub enum Kind {
     InconsistentAssumptions,
     AssumedConclusion,
+    ImpossibleCondition,
+    AlwaysTrueCondition,
     EmptyGroupingDomain,
     Counterexample,
     NoMeaning,
@@ -20,6 +22,8 @@ impl Kind {
         match self {
             Self::InconsistentAssumptions => "inconsistent-assumptions",
             Self::AssumedConclusion => "assumed-conclusion",
+            Self::ImpossibleCondition => "impossible-condition",
+            Self::AlwaysTrueCondition => "always-true-condition",
             Self::Counterexample => "counterexample",
             Self::EmptyGroupingDomain => "empty-grouping-domain",
             Self::NoMeaning => "no-meaning",
@@ -34,10 +38,14 @@ impl Kind {
             Self::Counterexample | Self::NoMeaning | Self::InconsistentAssumptions => {
                 Severity::Error
             }
-            Self::UnsupportedRegion | Self::Rewrite | Self::AssumedConclusion => Severity::Warning,
-            Self::UnsupportedGroup | Self::Inconclusive | Self::EmptyGroupingDomain => {
-                Severity::Information
-            }
+            Self::UnsupportedRegion
+            | Self::Rewrite
+            | Self::AssumedConclusion
+            | Self::ImpossibleCondition => Severity::Warning,
+            Self::UnsupportedGroup
+            | Self::Inconclusive
+            | Self::EmptyGroupingDomain
+            | Self::AlwaysTrueCondition => Severity::Information,
         }
     }
 }
@@ -54,6 +62,8 @@ pub enum Role {
     Declaration,
     Obligation,
     RelatedOnly,
+    Condition,
+    EnclosingScope,
 }
 impl Role {
     pub fn label(self) -> &'static str {
@@ -63,6 +73,8 @@ impl Role {
             Self::Declaration => "participating declaration",
             Self::Obligation => "checked obligation",
             Self::RelatedOnly => "supporting rewrite proof",
+            Self::Condition => "condition being inspected",
+            Self::EnclosingScope => "complete enclosing scope",
         }
     }
 }
@@ -745,6 +757,49 @@ pub fn context_findings(
             kind: Kind::InconsistentAssumptions,
             message: "Selected assumptions permit no input world; obligations were not checked."
                 .into(),
+            contributions,
+        });
+    }
+    for (key, result) in &report.results.value.notices {
+        let (kind, explanation) = match result.state {
+            NoticeState::Impossible => (
+                Kind::ImpossibleCondition,
+                "Condition is impossible in this scope.",
+            ),
+            NoticeState::AlwaysTrue => (
+                Kind::AlwaysTrueCondition,
+                "Condition is always true in this scope.",
+            ),
+            _ => continue,
+        };
+        let n = corpus
+            .notices()
+            .find(|n| keys.notice(n.id).is_ok_and(|k| k == key))
+            .ok_or(Error::InvalidFinding("unknown notice"))?;
+        let mut contributions = vec![
+            Contribution {
+                occurrence: n.id.into(),
+                role: Role::Declaration,
+            },
+            Contribution {
+                occurrence: n.condition.into(),
+                role: Role::Condition,
+            },
+        ];
+        if let Some(parent) = n.within {
+            contributions.push(Contribution {
+                occurrence: parent.into(),
+                role: Role::EnclosingScope,
+            });
+        }
+        findings.push(ContextFinding {
+            identity: Identity::Notice(n.id),
+            kind,
+            message: if n.message.is_empty() {
+                explanation.into()
+            } else {
+                format!("{}: {explanation}", n.message)
+            },
             contributions,
         });
     }

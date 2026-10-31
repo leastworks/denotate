@@ -143,6 +143,7 @@ enum SymbolKind {
     Relation,
     Assumption,
     Obligation,
+    Notice,
 }
 struct Symbol {
     text: String,
@@ -399,6 +400,15 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
             },
         );
     }
+    for n in c.notices() {
+        symbols.insert(
+            n.id.into(),
+            Symbol {
+                text: spelling(&n.name, NameKind::Identifier),
+                kind: SymbolKind::Notice,
+            },
+        );
+    }
     let reference = |id, context: &Namespace| reference(c, &symbols, id, context);
     let mut lines: Vec<Vec<Line>> = p.layout.files.iter().map(|_| Vec::new()).collect();
     let mut add =
@@ -564,6 +574,27 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
             single(a.id.into()),
         )?;
     }
+    for n in c.notices() {
+        let context = c.namespace(n.id).unwrap();
+        let within = n
+            .within
+            .map(|r| format!(", within: {}", reference(r.into(), context)))
+            .unwrap_or_default();
+        let message = if n.message.is_empty() {
+            String::new()
+        } else {
+            format!(" message {}", serde_json::to_string(&n.message).unwrap())
+        };
+        add(
+            n.id.into(),
+            format!(
+                "notice {}: varies({}{within}){message}",
+                spelling(&n.name, NameKind::Identifier),
+                reference(n.condition.into(), context)
+            ),
+            single(n.id.into()),
+        )?;
+    }
     for v in c.verifications() {
         let context = c.namespace(v.id).unwrap();
         let assumptions = v
@@ -578,10 +609,22 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
             .map(|id| reference((*id).into(), context))
             .collect::<Vec<_>>()
             .join(", ");
+        let notices = if v.notices.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " notices: [{}];",
+                v.notices
+                    .iter()
+                    .map(|id| reference((*id).into(), context))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        };
         add(
             v.id.into(),
             format!(
-                "verification {} {{ assumptions: [{assumptions}]; obligations: [{obligations}]; }}",
+                "verification {} {{ assumptions: [{assumptions}]; obligations: [{obligations}];{notices} }}",
                 spelling(&v.name, NameKind::Identifier)
             ),
             single(v.id.into()),

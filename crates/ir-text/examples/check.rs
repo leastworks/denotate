@@ -79,7 +79,11 @@ fn print_diagnostics(
             if !verbose
                 && !matches!(
                     label,
-                    "producing rule" | "checked obligation" | "upstream source origin"
+                    "producing rule"
+                        | "checked obligation"
+                        | "upstream source origin"
+                        | "condition being inspected"
+                        | "complete enclosing scope"
                 )
             {
                 hidden += 1;
@@ -246,7 +250,7 @@ fn run(args: impl IntoIterator<Item = String>, output: &mut String) -> Result<u8
             })
             .collect::<Vec<_>>();
         writeln!(output, "Selected assumptions: [{}]", assumptions.join(", ")).unwrap();
-        if declaration.obligations.is_empty() {
+        if declaration.obligations.is_empty() && declaration.notices.is_empty() {
             writeln!(
                 output,
                 "No obligations selected; this is a consistency-only verification."
@@ -290,8 +294,16 @@ fn run(args: impl IntoIterator<Item = String>, output: &mut String) -> Result<u8
                 let presented = denotate_ir_text::presentation::present(&p, &report.checked)
                     .map_err(|e| (2, e.to_string()))?;
                 findings |= presented.status["findings"].as_array().is_some_and(|f| {
-                    f.iter()
-                        .any(|finding| finding["kind"] != "empty-grouping-domain")
+                    f.iter().any(|finding| {
+                        !matches!(
+                            finding["kind"].as_str(),
+                            Some(
+                                "empty-grouping-domain"
+                                    | "impossible-condition"
+                                    | "always-true-condition"
+                            )
+                        )
+                    })
                 });
                 if json {
                     writeln!(output, "Results: {:#}", presented.status).unwrap();
@@ -376,6 +388,45 @@ mod tests {
     }
     const BODY: &str = "sort S; const x, y: S; input p(x:S); relation q(x:S); q(X) :- p(X); assumption a: at_most_one(p, group_by: ()); obligation o: at_most_one(q, group_by: ());";
     const RESTRICTED: &str = "verification v { assumptions: [a]; obligations: [o]; }";
+    #[test]
+    fn advisory_notices_print_locations_without_failing_obligations() {
+        let f = Fixture::new(
+            "input a(); relation no(); notice never:varies(no); notice always:varies(a,within:a); obligation o:empty(no); verification v{assumptions:[];obligations:[o];notices:[never,always];}",
+        );
+        let (code, text) = f.run(&[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(
+            text.contains("impossible-condition: Condition is impossible in this scope."),
+            "{text}"
+        );
+        assert!(
+            text.contains("always-true-condition: Condition is always true in this scope."),
+            "{text}"
+        );
+        let (code, text) = f.run(&["--json"]);
+        assert_eq!(code, 0);
+        assert!(text.contains("condition-variability"));
+        let f = Fixture::new(
+            "relation yes(); yes(); notice n:varies(yes); obligation o:empty(yes); verification v{assumptions:[];obligations:[o];notices:[n];}",
+        );
+        assert_eq!(f.run(&[]).0, 1);
+    }
+    #[test]
+    fn notice_library_fallback_is_labeled_and_advisory() {
+        let f = Fixture::new("");
+        fs::create_dir(f.0.join("library")).unwrap();
+        fs::write(f.0.join("library/den.root"), "{}").unwrap();
+        fs::write(
+            f.0.join("den.root"),
+            r#"{"libraries":["library/den.root"]}"#,
+        )
+        .unwrap();
+        fs::write(f.0.join("library/lib.den"),"relation no(); notice n:varies(no); verification v{assumptions:[];obligations:[];notices:[n];}").unwrap();
+        let (code, text) = f.run(&[]);
+        assert_eq!(code, 0, "{text}");
+        assert!(text.contains("impossible-condition: in "), "{text}");
+        assert!(!text.contains("consistency-only"), "{text}");
+    }
     #[test]
     fn codes_distinguish_proofs_findings_incomplete_and_unconfigured() {
         for backend in [vec![], vec!["--json"]] {
