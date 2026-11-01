@@ -38,14 +38,14 @@ See [checker policies](../../docs/checker-policies.md). Both need the `test-supp
 feature, which their recipes enable. Their tests:
 
 ```sh
-cargo +1.93.0 test --release --locked -p denotate-check-session --features test-support --example scorecard
-cargo +1.93.0 test --release --locked -p denotate-check-session --features test-support --example score_den
+just test-score-test-dsl
+just test-score-den
 ```
 
 ## Tests
 
 ```sh
-cargo +1.93.0 test --locked -p denotate-check-session
+just test-crate denotate-check-session
 ```
 
 Regression inputs live in `fixtures/regression/` (semantic outcomes and edit pairs,

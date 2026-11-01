@@ -8,18 +8,24 @@ and [`just`](https://github.com/casey/just). The VS Code smoke tests need a loca
 VS Code.
 
 ```sh
-just                                      # list every recipe
-just test-crates                          # IR, checker, sessions, .den library, test DSL
-npm ci --prefix editors/den && just test-den    # .den editor components and LSP scenarios
+just                         # list every recipe
+just setup                   # prepare the pinned Rust toolchain and both editors
+just test-crates             # IR, checker, sessions, .den library, test DSL
+just test-den                # prepares dependencies, then tests the .den editor
 just check-den editors/den/examples/library-and-app/app   # check a .den program from the CLI
 ```
 
 The repository root is one Cargo workspace (`Cargo.toml`, `Cargo.lock`, `target/`)
 covering every crate in `crates/`.
 
-To try the `.den` editor, open `editors/den/` in VS Code and run **Run Denotate semantic
-checking** (F5); see [editors/den/README.md](editors/den/README.md). The test DSL editor
-is in [editors/test-dsl/](editors/test-dsl/README.md).
+Editor commands install the pinned npm dependencies when missing or changed; repeat
+runs reuse them. `just setup-den --force` and `just setup-test-dsl --force` reinstall
+an editor's dependencies if needed. No separate npm commands are required.
+
+Try `just edit-den editors/den/examples/semantic-checking` or
+`just edit-test-dsl editors/test-dsl/examples`; see the
+[`.den` editor](editors/den/README.md) and [test DSL editor](editors/test-dsl/README.md)
+for their example workspaces.
 
 To work on `.den` programs kept outside this repository, run `just edit-den <folder>`:
 it builds the editor and opens that folder in VS Code with the extension from this
@@ -30,16 +36,19 @@ Open the folder containing all of a program's `den.root` roots.
 ## Verification
 
 ```sh
-just test-crates
-npm ci --prefix editors/den && just test-den
-just test-dsl-lsp
-just test-den-vscode && just test-dsl-vscode   # needs local VS Code
-cargo +1.93.0 fmt --all --check
+just verify          # Rust, editor/LSP/package tests and formatting; no GUI
+just verify-vscode   # both installed VS Code smokes, one at a time
 ```
 
-If a grammar changes, regenerate with the pinned CLI (`npm run generate --prefix
-editors/den`, `just generate-test-dsl`) and commit the generated files; CI checks
-that they are current.
+The individual recipes (`just test-crates`, `just test-den`, `just test-dsl-lsp`,
+`just test-dsl-extension`, `just fmt-check`) remain available for focused work.
+Use `just test-crate denotate-check` for one crate and `just fmt` to format Rust.
+The scorecards' own tests are release builds outside `verify`; run them with
+`just test-scorecards` when changing scorecard code or the checker paths they compare.
+
+If a grammar changes, run `just generate-den` or `just generate-test-dsl` and commit
+the generated files. `just generate-den --force` bypasses the local parser cache;
+CI forces generation to check that the committed files are current.
 
 ## Layout
 

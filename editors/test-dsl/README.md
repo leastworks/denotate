@@ -6,15 +6,18 @@ the language client.
 
 ## Try it
 
-From the repository root, after the [setup](../../DEVELOPMENT.md#setup):
+With rustup, Node 22+, just and VS Code's `code` launcher installed, run from the
+repository root:
 
 ```sh
-npm ci --prefix editors/test-dsl
-code editors/test-dsl
+just edit-test-dsl editors/test-dsl/examples
 ```
 
-Press **F5** and choose **Run test DSL**. The build bundles the client and copies
-the release server. The Extension Development Host opens `examples/`.
+The command prepares pinned dependencies, builds the client and release server,
+and opens the examples with the extension. Repeat runs reuse unchanged dependencies.
+`just build-test-dsl` builds without opening VS Code; `just setup-test-dsl --force`
+reinstalls dependencies. The **Run test DSL** F5 configuration also uses the same
+build recipe.
 
 - `overlap.testdsl`: both `b` targets conflict. Hover them or open **Problems**
   for the conflicting inputs, quoted conditions and an example observation; related

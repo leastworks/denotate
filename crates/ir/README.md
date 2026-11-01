@@ -63,7 +63,7 @@ Construction validity does not imply admissibility; checking is `denotate-check`
 ## Tests
 
 ```sh
-cargo +1.93.0 test --locked -p denotate-ir
+just test-crate denotate-ir
 ```
 
 Named assumptions use the same `Restriction` cardinality shape as `Requirement`:

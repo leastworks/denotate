@@ -15,6 +15,26 @@ remain explicit and open to automated reasoning. Denotate lets DSL designers
 express a language's meaning in a form that supports both execution and automated
 reasoning. Each DSL retains its own vocabulary and authoring experience.
 
+## Try it
+
+Install [rustup](https://rustup.rs), [Node.js](https://nodejs.org) 22+ and
+[just](https://github.com/casey/just). For the editor, also install VS Code with its
+`code` launcher on your PATH. From this checkout, use `just` for setup and commands:
+
+```sh
+just edit-den editors/den/examples/shipping-news/01-declarations
+just check-den editors/den/examples/shipping-news/01-declarations
+```
+
+The editor command installs its pinned dependencies when needed and builds the
+extension. Subsequent runs reuse unchanged dependencies and parser output. The first
+lesson deliberately reports a missing type; follow the
+[Shipping News tutorial](editors/den/examples/shipping-news/README.md) to repair it
+and build up a complete language library.
+
+Run `just` to see the available commands. `just setup` prepares both editors in
+advance; individual commands prepare what they need automatically.
+
 ## A continuum of meaning
 
 The language library defines the domain's concepts and rules. A program adds the

@@ -54,5 +54,5 @@ the test DSL presenter, which keeps its own wording, guard locations and
 safe-edit eligibility on top of the shared classification.
 
 ```sh
-cargo +1.93.0 test --locked -p denotate-presentation -p denotate-ir-text
+just test-crate denotate-presentation -p denotate-ir-text
 ```

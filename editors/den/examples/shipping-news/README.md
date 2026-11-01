@@ -560,7 +560,7 @@ The tutorial programs and probe templates are inputs to the actual `check-den`
 example's test suite:
 
 ```sh
-cargo +1.93.0 test --locked -p denotate-ir-text --example check shipping_news
+just test-shipping-news
 ```
 
 Tests enforce every step's outcome and findings, the three repairs and placement,

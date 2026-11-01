@@ -129,7 +129,7 @@ time; exhaustion yields explicit inconclusive outcomes with phase and resource.
 ## Tests
 
 ```sh
-cargo +1.93.0 test --locked -p denotate-check
+just test-crate denotate-check
 ```
 
 Tests include independent oracles: a Cartesian-grounded stable-model oracle for

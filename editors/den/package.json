@@ -21,9 +21,10 @@
   },
   "scripts": {
     "generate": "node scripts/generate-parser.mjs",
+    "test:setup": "node --test ../../scripts/tests/*.test.mjs",
     "test:generation": "node --test tests/parser-generation.test.mjs",
     "build": "npm run generate && cargo +1.93.0 build --manifest-path ../../Cargo.toml --locked -p denotate-lsp --release && node build.mjs",
-    "test": "npm run test:generation && npm run generate && cargo +1.93.0 test --manifest-path ../../Cargo.toml --locked -p denotate-lsp",
+    "test": "npm run test:setup && npm run test:generation && npm run generate && cargo +1.93.0 test --manifest-path ../../Cargo.toml --locked -p denotate-lsp",
     "test:origins": "node --test tests/origin-navigation.cjs",
     "test:lsp": "npm run build && node scripts/test-lsp.mjs",
     "test:vscode": "npm run build && node scripts/run-vscode-smoke.mjs"

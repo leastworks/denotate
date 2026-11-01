@@ -8,11 +8,13 @@ discovery, buffers, background checking, publication, navigation and rename.
 ## Try it
 
 ```sh
-npm ci --prefix editors/den
-code editors/den
+just edit-den editors/den/examples/semantic-checking
 ```
 
-In Run and Debug choose a launch configuration and press **F5**; the build runs first.
+Run from the repository root with rustup, Node 22+, just and VS Code's `code`
+launcher installed. The command prepares dependencies, builds the extension and
+opens the sample. You can also open this editor's source folder in VS Code and use
+its F5 launch configurations; their build tasks use the same `just` recipes.
 
 - **Run Denotate semantic checking** opens `examples/semantic-checking/`: two facts
   violate an obligation. Comment one out to clear the findings; unsaved edits are
@@ -34,6 +36,7 @@ To see DSL origins, export a test DSL program and open the output folder:
 
 ```sh
 just export-test-dsl /tmp/example-den editors/test-dsl/examples/overlap.testdsl
+just edit-den /tmp/example-den
 ```
 
 Findings on the exported `.den` carry related locations into the `.testdsl`
@@ -71,11 +74,11 @@ The custom protocol (root status, manifest sync, origin snapshots, test hooks) i
 
 ```sh
 just test-den          # server component tests, syntax manifest, all shared LSP scenarios
-npm run test:origins --prefix editors/den   # Go to Origin unit tests
+just test-den-origins   # Go to Origin unit tests
 just test-den-vscode   # installed VS Code smoke (needs a local VS Code)
 ```
 
-`npm run build` checks the parser from `grammars/den`, builds the release server
+`just build-den` prepares pinned dependencies, checks the parser from `grammars/den`, builds the release server
 and bundles the extension into `dist/`. Parser generation uses a local content
 fingerprint in `target/den-parser-generation.json`: the grammar, tree-sitter
 configuration, pinned generator executable/version, Node version and generation
@@ -86,9 +89,15 @@ must be added to the script's input list.
 Generation runs in a temporary directory and copies back only changed files, so
 identical output keeps its timestamps and does not invalidate Cargo's parser build.
 A missing cache is harmless. Failed generation preserves the old outputs and cache.
-`npm run generate -- --force` bypasses the cache; CI uses this before checking that
-the committed parser is current. `npm run test:generation` tests these behaviors
+`just generate-den --force` bypasses the cache; CI uses this before checking that
+the committed parser is current. `just test-den-generation` tests these behaviors
 with isolated grammars and the pinned generator.
 
 `just edit-den <folder>` uses this same build. With unchanged inputs, parser generation
 is skipped and Cargo reuses the server; extension bundling and copying still run.
+
+Dependency setup is automatic for editor build, generation and test recipes. A
+local stamp inside `node_modules/` records the package/lockfile contents and runtime;
+changes or missing required tools trigger a fresh install. `just setup-den --force`
+explicitly reinstalls dependencies. Parser generation has its own cache described
+above, so dependency setup does not force unchanged generated files to be rewritten.

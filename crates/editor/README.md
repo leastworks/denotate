@@ -55,5 +55,5 @@ the test DSL `{uri, revision, version}`. `denotate/test/idle`, `frontendReady` a
 `validated` are fast barriers and never mean checking-idle.
 
 ```sh
-cargo +1.93.0 test --locked -p denotate-editor
+just test-crate denotate-editor
 ```

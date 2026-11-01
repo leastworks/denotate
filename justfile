@@ -2,6 +2,66 @@
 default:
     @just --list
 
+# Prepare the pinned Rust toolchain and both editors' dependencies.
+setup: setup-den setup-test-dsl
+    rustup toolchain install 1.93.0 --profile minimal --component rustfmt
+
+# Install .den editor dependencies only when missing or changed; --force reinstalls.
+[positional-arguments]
+setup-den *args: _check-node
+    @node scripts/ensure-editor-deps.mjs den "$@"
+
+# Install test DSL editor dependencies only when missing or changed; --force reinstalls.
+[positional-arguments]
+setup-test-dsl *args: _check-node
+    @node scripts/ensure-editor-deps.mjs test-dsl "$@"
+
+# Build the .den server and VS Code client; prepares dependencies automatically.
+build-den: setup-den
+    npm run build --prefix editors/den
+
+# Build the test DSL server and VS Code client; prepares dependencies automatically.
+build-test-dsl: setup-test-dsl
+    npm run build --prefix editors/test-dsl
+
+# Run one Rust crate's tests; accepts additional Cargo test arguments.
+[positional-arguments]
+test-crate crate *args:
+    cargo +1.93.0 test --locked -p "$@"
+
+# Check setup/install caching without downloading dependencies.
+test-tooling: _check-node
+    node --test scripts/tests/*.test.mjs
+
+# Check every Shipping News lesson and exercise.
+test-shipping-news:
+    cargo +1.93.0 test --locked -p denotate-ir-text --example check shipping_news
+
+# Check the .den scorecard.
+test-score-den:
+    cargo +1.93.0 test --release --locked -p denotate-check-session --features test-support --example score_den
+
+# Check the test DSL scorecard.
+test-score-test-dsl:
+    cargo +1.93.0 test --release --locked -p denotate-check-session --features test-support --example scorecard
+
+# Check both scorecards (release builds; not part of `verify`).
+test-scorecards: test-score-den test-score-test-dsl
+
+# Format all Rust crates.
+fmt:
+    cargo +1.93.0 fmt --all
+
+# Check formatting without changing files.
+fmt-check:
+    cargo +1.93.0 fmt --all --check
+
+# Run the verification gate without launching VS Code.
+verify: test-crates test-den test-dsl-lsp test-dsl-extension fmt-check
+
+# Run the installed VS Code smokes, one after the other.
+verify-vscode: test-den-vscode test-dsl-vscode
+
 # Test Rust/Salsa analysis, IR, concrete checking, the test DSL and instrumentation.
 test-crates:
     cargo +1.93.0 test --locked --workspace --exclude denotate-lsp --exclude denotate-lsp-tests
@@ -22,9 +82,14 @@ export-test-dsl +args:
     cargo +1.93.0 run --locked -p denotate-test-dsl --example export -- "$@"
 
 # Build the .den editor and open FOLDER (relative to where you run just) in VS Code with it.
-edit-den folder: _check-node
-    npm run build --prefix editors/den
-    code --extensionDevelopmentPath="{{justfile_directory()}}/editors/den" "$(cd "{{invocation_directory()}}" && cd "{{folder}}" && pwd)"
+[positional-arguments]
+edit-den folder: build-den
+    code --extensionDevelopmentPath="{{justfile_directory()}}/editors/den" "$(cd "{{invocation_directory()}}" && cd "$1" && pwd)"
+
+# Build the test DSL editor and open FOLDER in VS Code with it.
+[positional-arguments]
+edit-test-dsl folder: build-test-dsl
+    code --extensionDevelopmentPath="{{justfile_directory()}}/editors/test-dsl" "$(cd "{{invocation_directory()}}" && cd "$1" && pwd)"
 
 # Load and check a folder-rooted .den program: ROOT_FOLDER_OR_DEN.ROOT.
 [positional-arguments]
@@ -43,8 +108,21 @@ parse-test-dsl file="crates/test-dsl/fixtures/overlapping-mappings.txt":
 update-test-dsl-expectations:
     UPDATE_EXPECTATIONS=1 cargo +1.93.0 test --locked -p denotate-test-dsl --lib corpus_programs_match_their_expectations
 
-# Regenerate the committed DSL parser with the .den editor's pinned CLI (npm ci there first).
-generate-test-dsl: _check-node
+# Generate the .den parser only if needed; --force bypasses its local cache.
+[positional-arguments]
+generate-den *args: setup-den
+    npm run generate --prefix editors/den -- "$@"
+
+# Test .den parser generation caching and recovery.
+test-den-generation: setup-den
+    npm run test:generation --prefix editors/den
+
+# Test Go to Origin navigation without launching VS Code.
+test-den-origins: setup-den
+    npm run test:origins --prefix editors/den
+
+# Regenerate the committed test DSL parser with the pinned CLI.
+generate-test-dsl: setup-den
     cd grammars/test-dsl && ../../editors/den/node_modules/.bin/tree-sitter generate
 
 # Build the test DSL diagnostics server and exercise it over real LSP (no GUI).
@@ -53,24 +131,24 @@ test-dsl-lsp:
     DENOTATE_LSP_COMMAND="{{justfile_directory()}}/target/debug/test-dsl-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.93.0 test --locked -p denotate-lsp-tests --features test-dsl --test test_dsl
 
 # Build the test DSL VS Code extension and check its package/example (no GUI).
-test-dsl-extension: _check-node
+test-dsl-extension: setup-test-dsl
     npm test --prefix editors/test-dsl
 
 # Launch an isolated VS Code and test source-linked test DSL diagnostics.
-test-dsl-vscode: _check-node
+test-dsl-vscode: setup-test-dsl
     DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix editors/test-dsl
 
 # Build the .den editor, check the shared syntax manifest and run every shared LSP scenario.
-test-den: _check-node
+test-den: setup-den
     npm test --prefix editors/den
     npm run test:lsp --prefix editors/den
 
 # Launch an isolated VS Code with the .den editor extension under test.
-test-den-vscode: _check-node
+test-den-vscode: setup-den
     DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix editors/den
 
 # Measure real .den LSP round trips at three sizes; no timing pass/fail threshold.
-bench-lsp: _check-node
+bench-lsp: setup-den
     npm run build --prefix editors/den
     cargo +1.93.0 test --locked -p denotate-lsp-tests --test latency -- --ignored --nocapture --test-threads=1
 

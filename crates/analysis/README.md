@@ -11,5 +11,5 @@ argument analysis from an earlier editor prototype; nothing outside the crate us
 today; trimming it is on the [roadmap](../../docs/roadmap.md#small-items).
 
 ```sh
-cargo +1.93.0 test --locked -p denotate-analysis
+just test-crate denotate-analysis
 ```

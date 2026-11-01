@@ -94,7 +94,7 @@ user files are the program's own documents.
 
 ```sh
 just check-den crates/ir-text/fixtures [--verification library::default_checks] [--json] [--verbose]
-cargo +1.93.0 test --locked -p denotate-ir-text
+just test-crate denotate-ir-text
 ```
 
 `examples/check.rs` backs `just check-den`. By default it prints shared presented

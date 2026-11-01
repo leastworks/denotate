@@ -51,7 +51,7 @@ just demo-overlap                   # source-linked findings for a built-in exam
 just parse-test-dsl             # parse and lower a file, no checking
 just export-test-dsl OUT FILE…  # export one combined program as .den
 just test-dsl-lsp          # LSP scenarios against the test DSL server
-cargo +1.93.0 test --locked -p denotate-test-dsl
+just test-crate denotate-test-dsl
 ```
 
 The editor lives in [editors/test-dsl/](../../editors/test-dsl/README.md). The server (`src/server/`) uses the
