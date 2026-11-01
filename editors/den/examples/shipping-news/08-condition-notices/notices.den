@@ -11,15 +11,17 @@ namespace authoring {
     not_customs() :- !toggle_active(options::'customs-checks');
     relation unreachable();
     unreachable() :- enclosing(), not_customs();
-    notice outer: varies(customs);
-    notice nested: varies(express, within: customs);
+    notice outer_customs_guard_varies: varies(customs);
+    notice nested_express_guard_varies: varies(express, within: customs);
     // A deeper condition must retain BOTH ancestors, not only express.
-    notice repeated: varies(customs, within: enclosing);
-    notice impossible: varies(not_customs, within: enclosing);
-    notice suppressed: varies(express, within: unreachable);
+    notice nested_customs_guard_varies: varies(customs, within: enclosing);
+    notice nested_not_customs_guard_varies: varies(not_customs, within: enclosing);
+    notice inner_express_guard_varies: varies(express, within: unreachable);
     verification conditions {
         assumptions: [one_field_value, one_element_value, predicate_contracts];
         obligations: [];
-        notices: [outer, nested, repeated, impossible, suppressed];
+        notices: [outer_customs_guard_varies, nested_express_guard_varies,
+            nested_customs_guard_varies, nested_not_customs_guard_varies,
+            inner_express_guard_varies];
     }
 }

@@ -6,11 +6,11 @@ sort Field;
 sort Element;
 relation field_type(field: Field, type: DataType);
 relation element_type(element: Element, type: DataType);
-obligation typed_fields: exactly_one(field_type, group_by: field)
+obligation exactly_one_type_per_field: exactly_one(field_type, group_by: field)
     message "Each message field needs exactly one type.";
-obligation typed_elements: exactly_one(element_type, group_by: element)
+obligation exactly_one_type_per_element: exactly_one(element_type, group_by: element)
     message "Each shipment element needs exactly one type.";
 verification declarations {
     assumptions: [];
-    obligations: [typed_fields, typed_elements];
+    obligations: [exactly_one_type_per_field, exactly_one_type_per_element];
 }

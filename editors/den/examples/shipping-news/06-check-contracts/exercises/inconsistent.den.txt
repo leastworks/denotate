@@ -5,5 +5,5 @@ both_checks() :- shipping::predicate_holds(shipment::country, checks::domestic),
 assumption require_both: at_least_one(both_checks, group_by: ());
 verification impossible_context {
     assumptions: [shipping::predicate_contracts, require_both];
-    obligations: [shipping::one_outbound_source];
+    obligations: [shipping::at_most_one_outbound_source];
 }

@@ -13,8 +13,8 @@ relation same_type(field: Field, element: Element);
 same_type(F, E) :- field_type(F, T), element_type(E, T);
 relation invalid_mapping(field: Field, element: Element);
 invalid_mapping(F, E) :- mapping_endpoints(F, E), !same_type(F, E);
-obligation compatible_mappings: empty(invalid_mapping);
-verification mapping_types { assumptions: []; obligations: [compatible_mappings]; }
+obligation no_invalid_mappings: empty(invalid_mapping);
+verification mapping_types { assumptions: []; obligations: [no_invalid_mappings]; }
 
 // Signatures describe opaque functions, not executable bodies or inverse laws.
 relation converter_argument(converter: Converter, port: Port, type: DataType);
@@ -39,9 +39,9 @@ outbound_destination(M, F) :- applicable_outbound_mapping(M), outbound_converter
 // bound through at most one result port per application. This projection drops
 // ports, so the overlap checks cannot discover a repeated destination within M.
 // Missing runtime arguments are nil. They never add an implicit presence guard.
-obligation one_inbound_source: at_most_one(inbound_destination, group_by: element);
-obligation one_outbound_source: at_most_one(outbound_destination, group_by: field);
+obligation at_most_one_inbound_source: at_most_one(inbound_destination, group_by: element);
+obligation at_most_one_outbound_source: at_most_one(outbound_destination, group_by: field);
 verification mappings {
     assumptions: [one_field_value, one_element_value];
-    obligations: [one_inbound_source, one_outbound_source];
+    obligations: [at_most_one_inbound_source, at_most_one_outbound_source];
 }

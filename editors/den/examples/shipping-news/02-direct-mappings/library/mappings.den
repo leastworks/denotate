@@ -8,9 +8,9 @@ relation same_type(field: Field, element: Element);
 same_type(F, E) :- field_type(F, T), element_type(E, T);
 relation invalid_mapping(field: Field, element: Element);
 invalid_mapping(F, E) :- mapping_endpoints(F, E), !same_type(F, E);
-obligation compatible_mappings: empty(invalid_mapping)
+obligation no_invalid_mappings: empty(invalid_mapping)
     message "A direct mapping needs matching endpoint types.";
 verification mapping_types {
     assumptions: [];
-    obligations: [compatible_mappings];
+    obligations: [no_invalid_mappings];
 }

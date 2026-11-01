@@ -11,6 +11,8 @@ Start with a carrier's `mass` and `destination` fields and the business concepts
 optional flags, external predicates and classifications. Each step is a complete
 program with its own library. Later steps retain the features and repair the deliberate
 errors in earlier ones. [09-complete](09-complete/) is the canonical complete sample.
+Each lesson builds a DSL feature and ends with a brief recap of the Denotate concepts
+used to support it.
 
 From the repository root:
 
@@ -31,20 +33,31 @@ outcomes, finding kinds, notice states and relevant placement, not rendered gold
 
 | Step | Expected outcome | CLI exit |
 | --- | --- | ---: |
-| [01 — declarations](01-declarations/) | One field lacks a type; one coverage finding | 1 |
-| [02 — direct mappings](02-direct-mappings/) | One incompatible mapping; one emptiness finding | 1 |
-| [03 — guards](03-guards/) | Two routes overlap; one uniqueness finding at both routes | 1 |
-| [04 — converters](04-converters/) | All four verifications proved | 0 |
-| [05 — toggles and flags](05-toggles-and-flags/) | All four verifications proved | 0 |
-| [06 — check contracts](06-check-contracts/) | All five verifications proved under their selections | 0 |
-| [07 — classifications](07-classifications/) | All five verifications proved | 0 |
-| [08 — condition notices](08-condition-notices/) | All six proved; one always-true and one impossible notice | 0 |
-| [09 — complete model](09-complete/) | Same results as step 08; understand the model's limits | 0 |
+| [01 — Declare typed fields and shipment elements](01-declarations/) | One field lacks a type; one coverage finding | 1 |
+| [02 — Validate direct mappings](02-direct-mappings/) | One invalid mapping; one emptiness finding | 1 |
+| [03 — Detect conflicting conditional mappings](03-guards/) | Two routes overlap; one uniqueness finding at both routes | 1 |
+| [04 — Support conversion functions](04-converters/) | All four verifications proved | 0 |
+| [05 — Add feature toggles and optional flags](05-toggles-and-flags/) | All four verifications proved | 0 |
+| [06 — Support predicate functions and their contracts](06-check-contracts/) | All five verifications proved under their selections | 0 |
+| [07 — Define reusable classification terms](07-classifications/) | All five verifications proved | 0 |
+| [08 — Help authors understand their conditions](08-condition-notices/) | All six proved; one always-true and one impossible notice | 0 |
+| [09 — Review what the completed library guarantees](09-complete/) | Same results as step 08; understand the model's limits | 0 |
 
 There is no claim that every destination must have a mapping. The mapping contract
 is **at most one applicable writer**, not coverage of all destinations.
 
-## 1. Types are facts; omissions are findings
+The Shipping News library uses `snake_case` property names for obligations, with
+explicit cardinality where it matters: `exactly_one_type_per_field`,
+`at_most_one_inbound_source`, and `no_invalid_mappings`. For `empty(...)`
+obligations, `no_<violations>` names what must be absent: for example,
+`no_invalid_field_comparisons: empty(invalid_field_comparison)`. The relation names
+the violations; the obligation requires their absence. Notices name the guard use
+and the question, such as `nested_customs_guard_varies`, so their names remain valid
+when the result changes. The declaration keywords already distinguish requirements
+from advisory queries; names do not add `must` or `should`. This is a convention for
+this sample, not a Denotate naming rule.
+
+## 1. Declare typed fields and shipment elements
 
 Illustrative declarations:
 
@@ -72,7 +85,7 @@ namespace carrier {
 The standard library contract is:
 
 ```den
-obligation typed_fields: exactly_one(field_type, group_by: field);
+obligation exactly_one_type_per_field: exactly_one(field_type, group_by: field);
 ```
 
 Every field in the program's resolved domain needs one type. `exactly_one` checks
@@ -80,7 +93,7 @@ coverage and uniqueness independently. An author who supplies two types gets a
 uniqueness failure; no annotation produces a coverage failure.
 
 ```text
-declarations.den:3:17: counterexample: Obligation typed_fields (coverage): 1 group fails coverage.
+declarations.den:3:17: counterexample: Obligation exactly_one_type_per_field (coverage): 1 group fails coverage.
   note: Missing group (carrier::destination).
 Result: findings
 ```
@@ -91,7 +104,11 @@ contains that repair. The library by itself has empty endpoint domains and may
 show Information notes about empty grouping domains; that is distinct from checking
 a consumer with declared fields.
 
-## 2. Direct mappings have type obligations
+**Denotate concepts learned:** Sorts, constants and facts describe the DSL model;
+`exactly_one` checks both coverage and uniqueness, with missing-group findings placed
+on the consumer's declarations.
+
+## 2. Validate direct mappings
 
 ```text
 Carrier.destination <-> shipment.country
@@ -113,11 +130,11 @@ The [library](02-direct-mappings/library/mappings.den) derives bad combinations:
 
 ```den
 invalid_mapping(F, E) :- mapping_endpoints(F, E), !same_type(F, E);
-obligation compatible_mappings: empty(invalid_mapping);
+obligation no_invalid_mappings: empty(invalid_mapping);
 ```
 
 ```text
-mappings.den:7:1: counterexample: Obligation compatible_mappings: relation is not empty; 1 distinct tuples can be present; showing 1 examples.
+mappings.den:7:1: counterexample: Obligation no_invalid_mappings: relation is not empty; 1 distinct tuples can be present; showing 1 examples.
   note: Replayed present tuple: shipping::invalid_mapping(carrier::mass, shipment::country).
 Result: findings
 ```
@@ -127,7 +144,10 @@ needed for a static type error, so there is no input-world note. Remove the last
 mapping to repair it. A converter, introduced in step 04, is another way to make a
 cross-type intent explicit.
 
-## 3. Guards quantify over valid input worlds
+**Denotate concepts learned:** Rules derive invalid tuples, `empty` requires their
+absence, and retained derivations place findings on the authored facts that caused them.
+
+## 3. Detect conflicting conditional mappings
 
 ```text
 when Carrier.service is express:
@@ -169,7 +189,7 @@ OR has alternative rules or normalization helpers; NOT uses `!` on its lowered
 operand. Parentheses preserve the intended Boolean grouping.
 
 ```text
-counterexample: Obligation one_inbound_source is violated: 2 distinct tuples hold in the replayed observation.
+counterexample: Obligation at_most_one_inbound_source is violated: 2 distinct tuples hold in the replayed observation.
   note: Inputs in dependency cone — present: shipping::field_value(carrier::service, literals::express); ...
 Result: findings
 ```
@@ -184,7 +204,11 @@ not inspect guard syntax to enforce that rule.
 Neither a missing source value nor a mapping declaration implicitly makes a route
 inapplicable: applicability is exactly the authored guard.
 
-## 4. Give mappings identity; introduce converters
+**Denotate concepts learned:** `input … within` defines eligible input tuples; selected
+assumptions constrain their combinations. `at_most_one` detects overlapping mappings
+across permitted worlds, and negating a value comparison includes absence.
+
+## 4. Support conversion functions
 
 ```text
 Carrier.mass -> shipment.weight when Carrier.service is express
@@ -224,7 +248,7 @@ The shared destination projection includes both direct and converter application
 ```den
 inbound_destination(M, E) :- applicable_inbound_mapping(M), inbound_mapping(M, _, E);
 inbound_destination(M, E) :- applicable_inbound_mapping(M), inbound_converter(M, _), inbound_result(M, _, E);
-obligation one_inbound_source: at_most_one(inbound_destination, group_by: element);
+obligation at_most_one_inbound_source: at_most_one(inbound_destination, group_by: element);
 ```
 
 ```text
@@ -240,14 +264,18 @@ destination within an application remain **lowerer invariants**, not obligations
 in this sample. Projecting ports away cannot detect two results of one application
 bound to the same destination. “Proved” does not certify those invariants.
 
-## 5. Toggles are two-state inputs; flags are optional values
+**Denotate concepts learned:** Explicit mapping identity distinguishes a mapping from
+its occurrences. Relational projection lets the same uniqueness obligation cover
+direct mappings and converter destinations.
+
+## 5. Add feature toggles and optional flags
 
 ```text
 toggle "express-service"
 toggle "customs-checks"
 shipment.fragile: Flag
-render_mass when toggle "express-service"
-shipment.display_weight -> Label.mass when not toggle "express-service"
+render_mass when active "express-service"
+shipment.display_weight -> Label.mass when inactive "express-service"
 ```
 
 [Flags and toggles](05-toggles-and-flags/library/flags.den) have different encodings:
@@ -259,9 +287,11 @@ value_type(shipping::flags::true, flag);
 value_type(shipping::flags::false, flag);
 ```
 
-A toggle's atom is either present (active) or absent (inactive). Both toggles can
-be active together. Flag is a `DataType` constant with an explicitly closed value
-domain; the generic candidate rules include both values even without comparisons.
+The illustrative `active "name"` condition lowers to `toggle_active(...)`;
+`inactive "name"` lowers to its negation. A toggle's atom is either present (active)
+or absent (inactive). Both toggles can be active together. Flag is a `DataType`
+constant with an explicitly closed value domain; the generic candidate rules include
+both values even without comparisons.
 The endpoint itself can still be absent. This vocabulary declares only true and
 false as Flag values; valid literal encoding is a lowerer responsibility. The name
 `flag` does not create a built-in or sealed Boolean type in the IR.
@@ -289,12 +319,16 @@ Result: proved
 Adding Flag did not add `field_flag_value`, `element_flag_value` or a special mapping
 relation. Its closed domain is metadata interpreted by the same generic relations.
 
-## 6. Opaque predicates need explicit contracts
+**Denotate concepts learned:** Input presence models a two-state toggle; a restricted
+value relation models true, false or absence. Closed value domains are expressed
+through metadata and generic relations.
+
+## 6. Support predicate functions and their contracts
 
 ```text
 check domestic(Text)
 check international(Text)
-disjoint [domestic, international]
+exclusive [domestic, international]
 shipment.handling_note -> Label.routing when domestic(shipment.country)
 shipment.routing_note -> Label.routing when international(shipment.country)
 ```
@@ -310,15 +344,17 @@ predicate_holds(E, P) :- element_present(E), predicate_result(E, P);
 
 Repeated calls at that endpoint share the bit. Presence is required by the positive
 predicate, not by negation: absent is neither domestic nor international, and both
-negated tests are true. Nothing executes the function. Different endpoints have
-independent bits, even if their actual values might be equal. This over-approximates
-pure functions; it does not disprove purity when two modeled results disagree.
+negated tests are true. Nothing executes the function. Checks are assumed pure,
+but this model does not enforce equal results for equal values held in different
+elements: each element/check pair has an independent bit. It may therefore consider
+combinations that a real implementation cannot produce.
 
-A family declaration allows at most one member to hold at an endpoint; it permits
-none. Membership facts derive every distinct pair, avoiding a second pair inventory:
+An `exclusive` family declaration allows at most one member to hold at the same
+endpoint; it permits none. Membership facts derive every distinct pair, avoiding a
+second pair inventory:
 
 ```den
-forbidden_check_results(E, F) :- disjoint_member(F, P), disjoint_member(F, Q),
+forbidden_check_results(E, F) :- exclusive_member(F, P), exclusive_member(F, Q),
     !same_predicate(P, Q), predicate_holds(E, P), predicate_holds(E, Q);
 assumption predicate_contracts: empty(forbidden_check_results);
 ```
@@ -334,34 +370,39 @@ Selected assumptions: [shipping::one_field_value, shipping::one_element_value, s
 Result: proved
 ```
 
-Three runnable exercises show why context matters. Copy the step to a fresh scratch
-folder, then add one probe at a time; `.den.txt` templates are inert in the tutorial:
+The three templates in step 06's `exercises/` folder show why context matters.
+Copy the step to a fresh scratch folder, then activate one probe at a time;
+`.den.txt` templates are inert until copied to a `.den` file:
 
 ```sh
 scratch=$(mktemp -d)
 cp -R editors/den/examples/shipping-news/06-check-contracts "$scratch/program"
-cp editors/den/examples/shipping-news/exercises/without-contract.den.txt "$scratch/program/probe.den"
+cp "$scratch/program/exercises/without-contract.den.txt" "$scratch/program/probe.den"
 just check-den "$scratch/program"
 ```
 
 | Probe template | Expected result |
 | --- | --- |
-| [without-contract](exercises/without-contract.den.txt) | Extra verification reports a routing counterexample; the library verification remains proved |
-| [assumed-conclusion](exercises/assumed-conclusion.den.txt) | `assumed-conclusion` warning: the selecting verification assumes the relation it claims to audit; its result is proved but circular |
-| [inconsistent](exercises/inconsistent.den.txt) | Requiring both checks while assuming their disjointness yields `inconsistent-assumptions`; obligations are not checked |
+| [without-contract](06-check-contracts/exercises/without-contract.den.txt) | Extra verification reports a routing counterexample; the library verification remains proved |
+| [assumed-conclusion](06-check-contracts/exercises/assumed-conclusion.den.txt) | `assumed-conclusion` warning: the selecting verification assumes the relation it claims to audit; its result is proved but circular |
+| [inconsistent](06-check-contracts/exercises/inconsistent.den.txt) | Requiring both checks while assuming their exclusivity yields `inconsistent-assumptions`; obligations are not checked |
 
 Replace `probe.den` with the next template, rather than accumulating probes. These
 cases currently exit 1. Static signature/type validation uses its own assumption-free
 verification, so a trusted runtime contract cannot hide an invalid predicate use.
 
-## 7. Classifications combine implications, not execution steps
+**Denotate concepts learned:** Selected assumptions express trusted contracts and
+define each verification's permitted worlds. Consistency checking and
+`assumed-conclusion` warnings expose problems in how a verification is constructed.
+
+## 7. Define reusable classification terms
 
 ```text
 term dispatch_rules:
-    when toggle "customs-checks":
+    when active "customs-checks":
         shipment.country is present
         domestic(shipment.country) or international(shipment.country)
-        when toggle "express-service":
+        when active "express-service":
             shipment.fragile is false
 term ready:
     shipment.assessed_weight is present
@@ -429,14 +470,18 @@ Verification shipping::mappings
 Result: proved
 ```
 
-## 8. Inspect a condition in its complete enclosing scope
+**Denotate concepts learned:** Whole-formula normalization preserves implication
+semantics. Positive recursion uses the least fixed point; named recursive relations
+create semantic boundaries that cannot always be introduced by simple extraction.
+
+## 8. Help authors understand their conditions
 
 ```text
-when toggle "customs-checks":
-    when toggle "express-service":
-        when toggle "customs-checks": ...       # always true here
-        when not toggle "customs-checks": ...   # impossible here
-            when toggle "express-service": ...
+when active "customs-checks":
+    when active "express-service":
+        when active "customs-checks": ...     # always true here
+        when inactive "customs-checks": ...   # impossible here
+            when active "express-service": ...
 ```
 
 [notices.den](08-condition-notices/notices.den) introduces advisory observations of
@@ -444,9 +489,9 @@ these authored uses, separate from the term definitions:
 
 ```den
 enclosing() :- customs(), express();
-notice repeated: varies(customs, within: enclosing);
-notice impossible: varies(not_customs, within: enclosing);
-notice suppressed: varies(express, within: unreachable);
+notice nested_customs_guard_varies: varies(customs, within: enclosing);
+notice nested_not_customs_guard_varies: varies(not_customs, within: enclosing);
+notice inner_express_guard_varies: varies(express, within: unreachable);
 ```
 
 `within` includes both ancestors. Using only the immediate parent's `express`
@@ -459,13 +504,19 @@ notices.den:18:12: impossible-condition: Condition is impossible in this scope.
 Result: proved
 ```
 
-`outer` and `nested` vary. `repeated` is always true, `impossible` is impossible, and
-`suppressed` has an unreachable parent. The last receives no child diagnostic; its
-`parent-unreachable` state remains visible with `check-den --json`. Notices do not
-turn into obligation failures or authorize automatic rewrites. In a real lowerer,
+`outer_customs_guard_varies` and `nested_express_guard_varies` vary.
+`nested_customs_guard_varies` is always true, `nested_not_customs_guard_varies` is
+impossible, and `inner_express_guard_varies` has an unreachable parent. The last
+receives no child diagnostic; its `parent-unreachable` state remains visible with
+`check-den --json`. Notices do not turn into obligation failures or authorize automatic
+rewrites. In a real lowerer,
 the notice's provenance points to the authored When, even when formulas are shared.
 
-## 9. Know what the complete sample proves
+**Denotate concepts learned:** `varies` notices inspect conditions within an explicit
+complete scope. They retain authored-use identities and provide advice independently
+of obligation verdicts.
+
+## 9. Review what the completed library guarantees
 
 [09-complete](09-complete/) contains the complete library and consumer. Run its
 scorecard separately from diagnostic inspection:
@@ -483,7 +534,7 @@ remain. No new checker policy or numeric performance threshold is specified here
 | Presence and comparison with typed literals | Arithmetic, ordering, unit conversion results |
 | Per-endpoint open/closed value alternatives | Equality between different endpoints |
 | Conditional potential destinations, including multiple UDF results | UDF execution, success, actual writes or inverse laws |
-| Selected disjoint predicate promises | Verification of those promises against function bodies |
+| Selected exclusivity contracts for predicates | Verification of those promises against function bodies |
 | Independent input-phase and output-phase observations | Runtime value propagation, sequencing or correlations between phases |
 | Boolean classification and existing recursive admission | Generic formula interning or simplification rewrites |
 | Explicit typed-port metadata | Enforcing the port-binding/lowerer invariants listed in step 04 |
@@ -499,6 +550,10 @@ that relationship, but the independent phase inputs do not encode it. The abstra
 can therefore reveal possible conflicts that a more detailed execution model would
 exclude; it never claims to have run a message through a converter.
 
+**Denotate concepts learned:** Proofs concern the modeled relationships under selected
+assumptions. Counterexamples expose possibilities in that model; the scorecard
+measures checking separately from diagnostic inspection.
+
 ## Regression checks
 
 The tutorial programs and probe templates are inputs to the actual `check-den`
@@ -512,5 +567,5 @@ Tests enforce every step's outcome and findings, the three repairs and placement
 contract selections, inconsistency, recursive boundaries, the optional-flag truth
 table, classification truth across 96 valid worlds, cold/warm agreement, invalid
 metadata, and direct/converter collisions. They also check opaque-predicate presence
-and endpoint independence, repeated uses, and non-transitive disjoint families. Tests
-never pin chosen witnesses or rendered CLI text. The regular crate gate also runs them.
+and endpoint independence, repeated uses, and non-transitive exclusivity across
+overlapping families. Tests never pin chosen witnesses or rendered CLI text. The regular crate gate also runs them.

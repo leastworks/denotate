@@ -98,9 +98,9 @@ fn baseline(step: usize) {
     if let Some(failing) = failing {
         let finding = &reports[failing]["findings"][0];
         let (obligation, component) = match step {
-            1 => ("typed_fields", "coverage"),
-            2 => ("compatible_mappings", "emptiness"),
-            _ => ("one_inbound_source", ""),
+            1 => ("exactly_one_type_per_field", "coverage"),
+            2 => ("no_invalid_mappings", "emptiness"),
+            _ => ("at_most_one_inbound_source", ""),
         };
         assert_eq!(
             if step == 3 {
@@ -140,11 +140,17 @@ fn baseline(step: usize) {
         assert_eq!(
             states,
             BTreeMap::from([
-                ("outer".into(), "varying".into()),
-                ("nested".into(), "varying".into()),
-                ("repeated".into(), "always-true".into()),
-                ("impossible".into(), "impossible".into()),
-                ("suppressed".into(), "parent-unreachable".into())
+                ("outer_customs_guard_varies".into(), "varying".into()),
+                ("nested_express_guard_varies".into(), "varying".into()),
+                ("nested_customs_guard_varies".into(), "always-true".into()),
+                (
+                    "nested_not_customs_guard_varies".into(),
+                    "impossible".into()
+                ),
+                (
+                    "inner_express_guard_varies".into(),
+                    "parent-unreachable".into()
+                )
             ])
         );
     }
@@ -214,9 +220,9 @@ impl Snapshot {
             .insert(uri.clone());
         self.sources.push(SourceFile::new(uri, 1, text));
     }
-    fn exercise(&mut self, name: &str) {
+    fn exercise(&mut self, directory: &str, name: &str) {
         self.append(
-            &std::fs::read_to_string(root().join("exercises").join(format!("{name}.den.txt")))
+            &std::fs::read_to_string(root().join(directory).join(format!("{name}.den.txt")))
                 .unwrap(),
         );
     }
@@ -284,7 +290,7 @@ fn documented_repairs_clear_findings_at_the_authored_locations() {
             1,
             "shipping::declarations",
             "declarations.den",
-            "// Intentionally missing: field_type(destination, text);",
+            "// field_type(destination, text);",
             "field_type(destination, text);",
             "destination",
         ),
@@ -369,7 +375,7 @@ fn exercises_expose_unselected_contract_circular_reasoning_and_inconsistency() {
         ),
     ] {
         let mut s = Snapshot::new(6);
-        s.exercise(exercise);
+        s.exercise("06-check-contracts/exercises", exercise);
         let p = s.load();
         let r = check(&p, &mut Session::default());
         assert_eq!(r[verification].summary["state"], state, "{exercise}");
@@ -416,7 +422,7 @@ fn named_recursive_boundary_is_unsupported_and_phase_correlation_is_not_proved()
             assert_eq!(code, 2);
             assert_eq!(reports[verification]["state"], state);
         } else {
-            s.exercise(exercise);
+            s.exercise("exercises", exercise);
         }
         let p = s.load();
         let r = check(&p, &mut Session::default());
@@ -721,9 +727,9 @@ fn opaque_checks_require_presence_share_uses_but_do_not_correlate_endpoints() {
 }
 
 #[test]
-fn overlapping_disjoint_families_do_not_imply_transitivity() {
+fn overlapping_exclusive_families_do_not_imply_transitivity() {
     let mut s = Snapshot::new(6);
-    s.append("use shipping; namespace extra { const remote: Predicate; predicate_type(remote,text); predicate_use(shipment::country,remote); const zone: DisjointFamily; disjoint_member(zone,checks::international); disjoint_member(zone,remote); }");
+    s.append("use shipping; namespace extra { const remote: Predicate; predicate_type(remote,text); predicate_use(shipment::country,remote); const zone: ExclusiveFamily; exclusive_member(zone,checks::international); exclusive_member(zone,remote); }");
     let p = s.load();
     let prepared = prepared(&p);
     let program = prepared.program();

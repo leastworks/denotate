@@ -3,9 +3,9 @@ namespace checks {
     const domestic, international: Predicate;
     predicate_type(domestic, text);
     predicate_type(international, text);
-    const geography: DisjointFamily;
-    disjoint_member(geography, domestic);
-    disjoint_member(geography, international);
+    const geography: ExclusiveFamily;
+    exclusive_member(geography, domestic);
+    exclusive_member(geography, international);
     predicate_use(shipment::country, domestic);
     predicate_use(shipment::country, international);
 }

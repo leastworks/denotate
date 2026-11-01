@@ -2,5 +2,5 @@
 namespace experiments;
 verification without_contract {
     assumptions: [shipping::one_field_value, shipping::one_element_value];
-    obligations: [shipping::one_outbound_source];
+    obligations: [shipping::at_most_one_outbound_source];
 }

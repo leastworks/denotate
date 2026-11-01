@@ -48,15 +48,15 @@ relation invalid_unnamed(type: DataType, value: Value);
 invalid_unnamed(T, V) :- unnamed(T, V), !value_type(V, T);
 invalid_unnamed(T, V) :- unnamed(T, V), closed_type(T);
 obligation registered_types: at_least_one(known_type, group_by: type);
-obligation typed_values: exactly_one(value_type, group_by: value);
-obligation unique_unnamed: at_most_one(unnamed, group_by: type);
-obligation open_types_have_other: empty(missing_unnamed);
-obligation valid_other_values: empty(invalid_unnamed);
-obligation valid_field_comparisons: empty(invalid_field_comparison);
-obligation valid_element_comparisons: empty(invalid_element_comparison);
+obligation exactly_one_type_per_value: exactly_one(value_type, group_by: value);
+obligation at_most_one_unnamed_value_per_type: at_most_one(unnamed, group_by: type);
+obligation no_missing_unnamed_values: empty(missing_unnamed);
+obligation no_invalid_unnamed_values: empty(invalid_unnamed);
+obligation no_invalid_field_comparisons: empty(invalid_field_comparison);
+obligation no_invalid_element_comparisons: empty(invalid_element_comparison);
 verification value_declarations {
     assumptions: [];
-    obligations: [registered_types, typed_values, unique_unnamed,
-        open_types_have_other, valid_other_values,
-        valid_field_comparisons, valid_element_comparisons];
+    obligations: [registered_types, exactly_one_type_per_value, at_most_one_unnamed_value_per_type,
+        no_missing_unnamed_values, no_invalid_unnamed_values,
+        no_invalid_field_comparisons, no_invalid_element_comparisons];
 }
