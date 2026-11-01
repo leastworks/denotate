@@ -21,6 +21,8 @@ covering every crate in `crates/`.
 Editor commands install the pinned npm dependencies when missing or changed; repeat
 runs reuse them. `just setup-den --force` and `just setup-test-dsl --force` reinstall
 an editor's dependencies if needed. No separate npm commands are required.
+`just` is the command-line interface; recipes and F5 tasks share the same npm build
+scripts, whose `prebuild` hooks prepare dependencies automatically.
 
 Try `just edit-den editors/den/examples/semantic-checking` or
 `just edit-test-dsl editors/test-dsl/examples`; see the

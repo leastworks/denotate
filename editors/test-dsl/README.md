@@ -16,8 +16,8 @@ just edit-test-dsl editors/test-dsl/examples
 The command prepares pinned dependencies, builds the client and release server,
 and opens the examples with the extension. Repeat runs reuse unchanged dependencies.
 `just build-test-dsl` builds without opening VS Code; `just setup-test-dsl --force`
-reinstalls dependencies. The **Run test DSL** F5 configuration also uses the same
-build recipe.
+reinstalls dependencies. The **Run test DSL** F5 configuration uses an npm build task
+that shares the scripts used by `just`, including automatic dependency setup.
 
 - `overlap.testdsl`: both `b` targets conflict. Hover them or open **Problems**
   for the conflicting inputs, quoted conditions and an example observation; related

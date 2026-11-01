@@ -33,7 +33,6 @@ test('F5 builds this extension and opens only its example directory', async () =
     assert.deepEqual(launch.args, ['--extensionDevelopmentPath=${workspaceFolder}', '${workspaceFolder}/examples']);
     const task = JSON.parse(await read('.vscode/tasks.json')).tasks[0];
     assert.equal(launch.preLaunchTask, task.label);
-    assert.equal(task.type, 'process');
-    assert.equal(task.command, 'just');
-    assert.deepEqual(task.args, ['build-test-dsl']);
+    assert.equal(task.type, 'npm');
+    assert.equal(task.script, 'build');
 });

@@ -17,11 +17,11 @@ setup-test-dsl *args: _check-node
     @node scripts/ensure-editor-deps.mjs test-dsl "$@"
 
 # Build the .den server and VS Code client; prepares dependencies automatically.
-build-den: setup-den
+build-den:
     npm run build --prefix editors/den
 
 # Build the test DSL server and VS Code client; prepares dependencies automatically.
-build-test-dsl: setup-test-dsl
+build-test-dsl:
     npm run build --prefix editors/test-dsl
 
 # Run one Rust crate's tests; accepts additional Cargo test arguments.
@@ -131,11 +131,11 @@ test-dsl-lsp:
     DENOTATE_LSP_COMMAND="{{justfile_directory()}}/target/debug/test-dsl-lsp" DENOTATE_LSP_ARGS='[]' cargo +1.93.0 test --locked -p denotate-lsp-tests --features test-dsl --test test_dsl
 
 # Build the test DSL VS Code extension and check its package/example (no GUI).
-test-dsl-extension: setup-test-dsl
+test-dsl-extension:
     npm test --prefix editors/test-dsl
 
 # Launch an isolated VS Code and test source-linked test DSL diagnostics.
-test-dsl-vscode: setup-test-dsl
+test-dsl-vscode:
     DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix editors/test-dsl
 
 # Build the .den editor, check the shared syntax manifest and run every shared LSP scenario.
@@ -144,11 +144,11 @@ test-den: setup-den
     npm run test:lsp --prefix editors/den
 
 # Launch an isolated VS Code with the .den editor extension under test.
-test-den-vscode: setup-den
+test-den-vscode:
     DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix editors/den
 
 # Measure real .den LSP round trips at three sizes; no timing pass/fail threshold.
-bench-lsp: setup-den
+bench-lsp:
     npm run build --prefix editors/den
     cargo +1.93.0 test --locked -p denotate-lsp-tests --test latency -- --ignored --nocapture --test-threads=1
 

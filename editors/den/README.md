@@ -14,7 +14,8 @@ just edit-den editors/den/examples/semantic-checking
 Run from the repository root with rustup, Node 22+, just and VS Code's `code`
 launcher installed. The command prepares dependencies, builds the extension and
 opens the sample. You can also open this editor's source folder in VS Code and use
-its F5 launch configurations; their build tasks use the same `just` recipes.
+its F5 launch configurations; their npm build tasks share the scripts used by `just`,
+including automatic dependency setup.
 
 - **Run Denotate semantic checking** opens `examples/semantic-checking/`: two facts
   violate an obligation. Comment one out to clear the findings; unsaved edits are
