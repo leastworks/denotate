@@ -29,7 +29,7 @@ jobs:
         run: npm ci --prefix editors/den
       - name: Shared .den generated parser is current
         run: |
-          npm run generate --prefix editors/den
+          npm run generate --prefix editors/den -- --force
           test -z "$(git status --porcelain --untracked-files=all -- grammars/den/src)"
       - name: Test DSL generated parser is current
         run: |

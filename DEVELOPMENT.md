@@ -23,7 +23,9 @@ is in [editors/test-dsl/](editors/test-dsl/README.md).
 
 To work on `.den` programs kept outside this repository, run `just edit-den <folder>`:
 it builds the editor and opens that folder in VS Code with the extension from this
-checkout. Open the folder containing all of a program's `den.root` roots.
+checkout. Parser generation skips unchanged inputs and preserves unchanged output
+files so Cargo can reuse the server build; see the [build details](editors/den/README.md#tests).
+Open the folder containing all of a program's `den.root` roots.
 
 ## Verification
 

@@ -75,5 +75,20 @@ npm run test:origins --prefix editors/den   # Go to Origin unit tests
 just test-den-vscode   # installed VS Code smoke (needs a local VS Code)
 ```
 
-`npm run build` regenerates the parser from `grammars/den` with the pinned
-`tree-sitter-cli`, builds the release server and bundles the extension into `dist/`.
+`npm run build` checks the parser from `grammars/den`, builds the release server
+and bundles the extension into `dist/`. Parser generation uses a local content
+fingerprint in `target/den-parser-generation.json`: the grammar, tree-sitter
+configuration, pinned generator executable/version, Node version and generation
+script. It also checks the generated files' contents; missing or modified outputs
+trigger regeneration. The grammar is self-contained; any future imported helper
+must be added to the script's input list.
+
+Generation runs in a temporary directory and copies back only changed files, so
+identical output keeps its timestamps and does not invalidate Cargo's parser build.
+A missing cache is harmless. Failed generation preserves the old outputs and cache.
+`npm run generate -- --force` bypasses the cache; CI uses this before checking that
+the committed parser is current. `npm run test:generation` tests these behaviors
+with isolated grammars and the pinned generator.
+
+`just edit-den <folder>` uses this same build. With unchanged inputs, parser generation
+is skipped and Cargo reuses the server; extension bundling and copying still run.
