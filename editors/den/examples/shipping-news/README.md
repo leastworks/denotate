@@ -24,8 +24,11 @@ just edit-den editors/den/examples/shipping-news/09-complete
 
 Each root's `den.root` includes `library/den.root`. That is program membership;
 `use shipping;` only makes names visible. A `namespace` is a naming scope, not a
-file or a separately executed module. Library verifications run over the consumer's
-facts. Their diagnostic locations can therefore point into the consumer.
+file or a separately executed module. The consumer files hold the **program facts**
+a lowerer would emit for one Shipping News program. Carrier and shipment values are
+**runtime inputs**, which vary between worlds ([terms](../../../../docs/den-format.md#terms)).
+Library verifications run over the consumer's facts. Their diagnostic locations can
+therefore point into the consumer.
 
 Output excerpts below omit absolute paths, repeated locations and unrelated proved
 verifications. Exact wording and selected examples may evolve; the tests assert
@@ -413,7 +416,7 @@ Label.assessed_mass <- shipment.weight when not ready
 
 `assessed_weight` is supplied by hypothetical middle processing. The
 [consumer](07-classifications/classification.den) declares it as another typed element;
-its output-phase value is an input to this model, not a computation performed here.
+its output-phase value is a runtime input to this model, not a computation performed here.
 
 A term conjoins its constraints. A conditional constraint contributes
 `NOT (all enclosing guards) OR requirement`. Consequently `dispatch_rules` holds
@@ -556,8 +559,8 @@ measures checking separately from diagnostic inspection.
 
 ## Regression checks
 
-The tutorial programs and probe templates are inputs to the actual `check-den`
-example's test suite:
+The actual `check-den` example's test suite checks the tutorial programs and probe
+templates:
 
 ```sh
 just test-shipping-news

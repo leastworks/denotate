@@ -5,6 +5,23 @@ export format: a DSL can print its lowered program as `.den`, with embedded orig
 pointing back to the DSL source. The grammar is `grammars/den/grammar.js`; the loader
 and printer are in `crates/ir-text`.
 
+## Terms
+
+A DSL on Denotate involves two levels: the DSL program an author writes, and the
+data that program receives when it runs. The checker distinguishes facts by when they
+are known, not by where they came from.
+
+- **DSL program** (DSL source): what the DSL author writes. It is lowered, not input.
+- **Library:** `.den` rules, written once per DSL, that give the DSL its meaning.
+- **Lowering:** translates a DSL program into program facts that the library uses.
+- **Fixed facts:** `.den` facts that are the same in every world. **Program facts**
+  come from lowering a DSL program; **library facts** are written by the library
+  author.
+- **Runtime input:** an `input` relation, the data the DSL program receives when it
+  runs. It is unknown when checking. In this documentation, "input" alone means a
+  runtime input.
+- **World:** one choice of every runtime input. Fixed facts are the same in all worlds.
+
 ## A small program
 
 ```den
