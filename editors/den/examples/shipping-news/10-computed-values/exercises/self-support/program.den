@@ -1,0 +1,21 @@
+use shipping;
+namespace loop {
+    const assess: Step;
+    const zone: Element;
+    const domestic: Value;
+    const ready: Term;
+    required_output(assess, zone);
+    result_choice(assess, zone, domestic);
+    classified(ready) :- element_value(zone, domestic);
+    relation $ready();
+    $ready() :- classified(ready);
+    step_applies(assess) :- $ready();
+
+    // The guessed result does not start the task that would make it available.
+    notice task_varies: varies($ready);
+    verification inspect {
+        assumptions: [every_output_has_result, at_most_one_result];
+        obligations: [];
+        notices: [task_varies];
+    }
+}

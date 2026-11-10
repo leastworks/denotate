@@ -1,0 +1,56 @@
+use shipping;
+
+namespace shipment { const zone, customs_reference, receipt: Element; }
+namespace literals { const domestic, international, reference, receipt: Value; }
+namespace term_ids { const domestic: Term; }
+
+namespace tasks {
+    const compute_zone, prepare_customs: Step;
+    required_output(compute_zone, shipment::zone);
+    required_output(prepare_customs, shipment::customs_reference);
+    conditional_output(prepare_customs, shipment::receipt);
+    result_choice(compute_zone, shipment::zone, literals::domestic);
+    result_choice(compute_zone, shipment::zone, literals::international);
+    result_choice(prepare_customs, shipment::customs_reference, literals::reference);
+    result_choice(prepare_customs, shipment::receipt, literals::receipt);
+
+    // An unconditional task starts the chain. Its selected result is still open.
+    step_applies(compute_zone);
+    // Lowered term: domestic means that the computed zone has this value.
+    classified(term_ids::domestic) :- element_value(shipment::zone, literals::domestic);
+    // Lowered "when not domestic": a helper for this authored guard use.
+    relation $not_domestic();
+    $not_domestic() :- !classified(term_ids::domestic);
+    step_applies(prepare_customs) :- $not_domestic();
+}
+
+namespace shipping_example {
+    input customs_details_received();
+    relation invalid_message();
+    invalid_message() :- !classified(term_ids::domestic), !customs_details_received();
+    // Its relation cone is cyclic, but its ground cone ends at compute_zone.
+    // It does not reach the conditional task prepare_customs.
+    assumption valid_message: empty(invalid_message);
+
+    relation missing_customs_reference();
+    missing_customs_reference() :- !classified(term_ids::domestic), !element_present(shipment::customs_reference);
+    relation unexpected_customs_reference();
+    unexpected_customs_reference() :- classified(term_ids::domestic), element_present(shipment::customs_reference);
+    obligation no_missing_customs_reference: empty(missing_customs_reference);
+    obligation no_unexpected_customs_reference: empty(unexpected_customs_reference);
+
+    relation domestic();
+    domestic() :- classified(term_ids::domestic);
+    relation customs_applies();
+    customs_applies() :- step_applies(tasks::prepare_customs);
+    relation receipt_present();
+    receipt_present() :- element_present(shipment::receipt);
+    notice domestic_varies: varies(domestic);
+    notice customs_guard_varies: varies(customs_applies);
+    notice receipt_varies: varies(receipt_present, within: customs_applies);
+    verification valid_shipments {
+        assumptions: [every_output_has_result, at_most_one_result, valid_message];
+        obligations: [no_missing_customs_reference, no_unexpected_customs_reference];
+        notices: [domestic_varies, customs_guard_varies, receipt_varies];
+    }
+}

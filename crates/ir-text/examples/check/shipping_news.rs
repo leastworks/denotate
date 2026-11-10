@@ -14,7 +14,10 @@ use std::{
     path::PathBuf,
 };
 
-const STEPS: [&str; 9] = [
+#[path = "shipping_news/computations.rs"]
+mod computations;
+
+const STEPS: [&str; 10] = [
     "01-declarations",
     "02-direct-mappings",
     "03-guards",
@@ -24,6 +27,7 @@ const STEPS: [&str; 9] = [
     "07-classifications",
     "08-condition-notices",
     "09-complete",
+    "10-computed-values",
 ];
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../editors/den/examples/shipping-news")

@@ -1,0 +1,21 @@
+use shipping;
+namespace loop {
+    const assess: Step;
+    const zone: Element;
+    const domestic: Value;
+    const ready: Term;
+    required_output(assess, zone);
+    result_choice(assess, zone, domestic);
+    classified(ready) :- element_value(zone, domestic);
+    relation $not_ready();
+    $not_ready() :- !classified(ready);
+    step_applies(assess) :- $not_ready();
+
+    // Applying produces ready; ready prevents applying. This is a ground cycle.
+    notice task_varies: varies($not_ready);
+    verification inspect {
+        assumptions: [every_output_has_result, at_most_one_result];
+        obligations: [];
+        notices: [task_varies];
+    }
+}

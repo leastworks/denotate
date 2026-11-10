@@ -64,9 +64,10 @@ CI forces generation to check that the committed files are current.
 
 ## Documentation
 
-Start with [Shipping News](editors/den/examples/shipping-news/README.md) for a runnable,
-nine-step tutorial on lowering a DSL to `.den`. Its final step is a complete example;
-the illustrative DSL has no parser or UDF runtime.
+Start with [Shipping News](editors/den/examples/shipping-news/README.md) for a runnable
+tutorial on lowering a DSL to `.den`. Steps 1–9 build a complete mapping example;
+lesson 10 models computed values feeding task conditions. The illustrative DSL has
+no parser or UDF runtime.
 
 - [Architecture](docs/architecture.md): layers and what belongs where.
 - [The `.den` format](docs/den-format.md): syntax, namespaces, program roots, origins.

@@ -1,0 +1,52 @@
+// A focused extension of Shipping News: abstract results become workspace values
+// only when their task applies and the output is emitted. This is not a UDF runtime.
+namespace shipping;
+sort Step;
+sort Element;
+sort Value;
+sort Term;
+
+relation required_output(step: Step, element: Element);
+relation conditional_output(step: Step, element: Element);
+relation step_output(step: Step, element: Element);
+step_output(S, E) :- required_output(S, E);
+step_output(S, E) :- conditional_output(S, E);
+
+// Choices are abstract, type-correct values supplied by the lowerer, as in lesson 3.
+relation result_choice(step: Step, element: Element, value: Value);
+relation result_candidate(step: Step, element: Element, value: Value);
+result_candidate(S, E, V) :- step_output(S, E), result_choice(S, E, V);
+input step_result(step: Step, element: Element, value: Value) within result_candidate;
+input output_emitted(step: Step, element: Element) within conditional_output;
+
+// A result is chosen even for an inactive task or an output that is not emitted.
+// It remains unavailable to consumers until writes holds. The emission bit, not a
+// special Value constant, represents an absent conditional output.
+relation step_applies(step: Step);
+relation writes(step: Step, element: Element);
+writes(S, E) :- step_applies(S), required_output(S, E);
+writes(S, E) :- step_applies(S), conditional_output(S, E), output_emitted(S, E);
+relation element_value(element: Element, value: Value);
+element_value(E, V) :- writes(S, E), step_result(S, E, V);
+relation element_present(element: Element);
+element_present(E) :- element_value(E, _);
+relation classified(term: Term);
+
+// Coverage is over authored output pairs, not the Step x Element sort product.
+// These assumptions depend only on fixed declarations and open result inputs.
+relation result_present(step: Step, element: Element);
+result_present(S, E) :- step_result(S, E, _);
+relation missing_result(step: Step, element: Element);
+missing_result(S, E) :- step_output(S, E), !result_present(S, E);
+assumption every_output_has_result: empty(missing_result);
+assumption at_most_one_result: at_most_one(step_result, group_by: (step, element));
+
+obligation at_most_one_element_writer: at_most_one(writes, group_by: element);
+verification computation_sources {
+    assumptions: [every_output_has_result, at_most_one_result];
+    obligations: [at_most_one_element_writer];
+}
+
+// Lowerer invariants for this small model: all outputs are scalar and type-correct;
+// each output pair is either required or conditional. Arguments, function bodies,
+// producer scheduling, failures and correlations between results are not modeled.

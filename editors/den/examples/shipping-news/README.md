@@ -9,8 +9,10 @@ the intended authoring language; they do not specify a grammar.
 Start with a carrier's `mass` and `destination` fields and the business concepts
 `shipment.weight` and `shipment.country`. Then add conditional routes, conversions,
 optional flags, external predicates and classifications. Each step is a complete
-program with its own library. Later steps retain the features and repair the deliberate
-errors in earlier ones. [09-complete](09-complete/) is the canonical complete sample.
+program with its own library. Steps 1–9 retain the features and repair the deliberate
+errors in earlier ones. [09-complete](09-complete/) is the complete mapping sample.
+[Lesson 10](10-computed-values/README.md) adds a focused computation model: task results
+become workspace values, classification reads them, and classifications guard other tasks.
 Each lesson builds a DSL feature and ends with a brief recap of the Denotate concepts
 used to support it.
 
@@ -26,7 +28,9 @@ Each root's `den.root` includes `library/den.root`. That is program membership;
 `use shipping;` only makes names visible. A `namespace` is a naming scope, not a
 file or a separately executed module. The consumer files hold the **program facts**
 a lowerer would emit for one Shipping News program. Carrier and shipment values are
-**runtime inputs**, which vary between worlds ([terms](../../../../docs/den-format.md#terms)).
+**runtime inputs** in steps 1–9, which vary between worlds
+([terms](../../../../docs/den-format.md#terms)). Lesson 10 instead derives workspace
+values from task applicability and open result inputs.
 Library verifications run over the consumer's facts. Their diagnostic locations can
 therefore point into the consumer.
 
@@ -45,6 +49,7 @@ outcomes, finding kinds, notice states and relevant placement, not rendered gold
 | [07 — Define reusable classification terms](07-classifications/) | All five verifications proved | 0 |
 | [08 — Help authors understand their conditions](08-condition-notices/) | All six proved; one always-true and one impossible notice | 0 |
 | [09 — Review what the completed library guarantees](09-complete/) | Same results as step 08; understand the model's limits | 0 |
+| [10 — Use computed values in task conditions](10-computed-values/README.md) | Both verifications proved; all three notices vary | 0 |
 
 There is no claim that every destination must have a mapping. The mapping contract
 is **at most one applicable writer**, not coverage of all destinations.
@@ -521,7 +526,7 @@ of obligation verdicts.
 
 ## 9. Review what the completed library guarantees
 
-[09-complete](09-complete/) contains the complete library and consumer. Run its
+[09-complete](09-complete/) contains the complete mapping library and consumer. Run its
 scorecard separately from diagnostic inspection:
 
 ```sh
@@ -532,7 +537,7 @@ The standard verifications prove the declared static checks and at-most-one mapp
 contracts under their selected assumptions; the same two advisory condition notices
 remain. No new checker policy or numeric performance threshold is specified here.
 
-| Modeled | Deliberately outside this sample |
+| Modeled in steps 1–9 | Deliberately outside steps 1–9 |
 | --- | --- |
 | Presence and comparison with typed literals | Arithmetic, ordering, unit conversion results |
 | Per-endpoint open/closed value alternatives | Equality between different endpoints |
@@ -557,6 +562,34 @@ exclude; it never claims to have run a message through a converter.
 assumptions. Counterexamples expose possibilities in that model; the scorecard
 measures checking separately from diagnostic inspection.
 
+## 10. Use computed values in task conditions
+
+The [computation lesson](10-computed-values/README.md) follows this chain:
+
+```text
+compute_zone → shipment.zone → domestic → prepare_customs → shipment.customs_reference
+```
+
+Its small library derives values only when their task applies and the output is
+emitted. Possible function results and conditional emission remain inputs. This
+replaces the independent workspace observations of step 09 for this focused model;
+it does not execute UDFs or implement an execution scheduler.
+
+```sh
+just check-den editors/den/examples/shipping-news/10-computed-values
+just edit-den editors/den/examples/shipping-news/10-computed-values
+```
+
+The lesson includes a validity assumption whose relation-level dependency cycle
+disappears at the ground level, sparse output-result contracts, and two runnable
+exercises: a task that cannot start itself and a contradictory negative cycle.
+Each exercise has a suggested edit and an expected result in the walkthrough.
+
+**Denotate concepts learned:** Open function outcomes can feed derived availability.
+Ground dependencies distinguish an ordinary task chain from a real cycle; selected
+assumptions must have independent meaning. An unavailable value in a fixed-point
+model does not describe a runtime value that has merely not been computed yet.
+
 ## Regression checks
 
 The actual `check-den` example's test suite checks the tutorial programs and probe
@@ -572,3 +605,6 @@ table, classification truth across 96 valid worlds, cold/warm agreement, invalid
 metadata, and direct/converter collisions. They also check opaque-predicate presence
 and endpoint independence, repeated uses, and non-transitive exclusivity across
 overlapping families. Tests never pin chosen witnesses or rendered CLI text. The regular crate gate also runs them.
+The computation lesson checks all 64 input assignments under each of its two
+contexts (8 and 6 permitted worlds), conditional emission, sparse result coverage,
+the circular exercises, and cold/warm agreement after an output-contract edit.
