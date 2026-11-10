@@ -1,16 +1,21 @@
 //! Load a den.root closure and execute its explicit verifications.
 use denotate_check::{
-    BackendIdentity, EmptinessExamples, Limits, LocalCheckOutcome, OperationalLimits,
-    RegionCompletion, RequestPreparation, ScopedResult,
+    BackendIdentity, Limits, LocalCheckOutcome, OperationalLimits, RegionCompletion,
+    RequestPreparation, ScopedResult,
 };
 use denotate_check_session::Session;
 use denotate_ir_text::{
     LoadedProgram, filesystem, index, load_with_resolver, origins, presentation,
+    progress::{CheckProgress, Phase},
 };
+use serde_json::json;
 use std::{collections::BTreeSet, fmt::Write};
 
 type Failure = (u8, String);
-const USAGE: &str = "Usage: check ROOT_FOLDER_OR_DEN.ROOT [--verification QUALIFIED_NAME] [--json] [--verbose] [--empty-examples N|all] [--hide-library-rewrites]";
+#[path = "check/options.rs"]
+mod options;
+#[path = "check/trace.rs"]
+mod trace;
 
 fn format_errors(ds: Vec<denotate_ir_text::Diagnostic>) -> String {
     ds.iter()
@@ -103,51 +108,72 @@ fn print_diagnostics(
     Ok(())
 }
 
+#[cfg(test)]
 fn run(args: impl IntoIterator<Item = String>, output: &mut String) -> Result<u8, Failure> {
     run_with_limits(args, output, Limits::default())
 }
+#[cfg(test)]
 fn run_with_limits(
     args: impl IntoIterator<Item = String>,
     output: &mut String,
     limits: Limits,
 ) -> Result<u8, Failure> {
-    let mut args = args.into_iter();
-    let root = args.next().ok_or((2, USAGE.into()))?;
-    let backend = BackendIdentity::bdd();
-    let mut selection = None;
-    let mut json = false;
-    let mut verbose = false;
-    let mut empty_examples = None;
-    let mut hide_library_rewrites = false;
-    while let Some(option) = args.next() {
-        match option.as_str() {
-            "--json" if !json => json = true,
-            "--verbose" if !verbose => verbose = true,
-            "--hide-library-rewrites" if !hide_library_rewrites => hide_library_rewrites = true,
-            "--empty-examples" if empty_examples.is_none() => {
-                let value = args.next().ok_or((2, USAGE.into()))?;
-                empty_examples = Some(if value == "all" {
-                    EmptinessExamples::All
-                } else {
-                    EmptinessExamples::Limited(value.parse().map_err(|_| {
-                        (
-                            2,
-                            "--empty-examples requires a positive integer or all".into(),
-                        )
-                    })?)
-                });
-            }
-            "--verification" if selection.is_none() => {
-                selection = Some(args.next().ok_or((2, USAGE.into()))?)
-            }
-            _ => {
-                return Err((
-                    2,
-                    format!("Unknown or repeated argument {option:?}; {USAGE}"),
-                ));
-            }
-        }
+    run_with_progress(args, output, limits, &mut std::io::sink())
+}
+fn run_with_progress(
+    args: impl IntoIterator<Item = String>,
+    output: &mut String,
+    limits: Limits,
+    stderr: &mut dyn std::io::Write,
+) -> Result<u8, Failure> {
+    let args = args.into_iter().collect::<Vec<_>>();
+    if args.iter().any(|a| matches!(a.as_str(), "--help" | "-h")) {
+        output.push_str(&options::help());
+        return Ok(0);
     }
+    let options = options::Options::parse(args, limits)?;
+    let trace = trace::Trace::new(stderr, options.progress);
+    trace.message(format_args!("Root: {}", options.root));
+    trace.message(
+        "Effective limits (per operation/query; timeout is cooperative, not a command deadline):",
+    );
+    for (flag, value) in options::limit_values(&options.limits) {
+        trace.message(format_args!("  {flag} {value}"));
+    }
+    let callback = |event| trace.phase(event);
+    let progress = CheckProgress::new(options.progress.then_some(&callback));
+    let result = check_program(options, output, &progress, &trace);
+    match &result {
+        Ok(code) => trace.finish(format_args!(
+            "Finished: exit {code} ({})",
+            match code {
+                0 => "proved",
+                1 => "findings",
+                _ => "incomplete/invalid/partial",
+            }
+        )),
+        Err((code, error)) => trace.finish(format_args!("Stopped: exit {code}; {error}")),
+    }
+    result
+}
+fn check_program(
+    options: options::Options,
+    output: &mut String,
+    progress: &CheckProgress<'_>,
+    trace: &trace::Trace<'_>,
+) -> Result<u8, Failure> {
+    let options::Options {
+        root,
+        selection,
+        json,
+        verbose,
+        empty_examples,
+        hide_library_rewrites,
+        limits,
+        ..
+    } = options;
+    let backend = BackendIdentity::bdd();
+    progress.emit(Phase::Discovery, json!({}));
     let (membership, sources) = filesystem::discover_classified(std::path::Path::new(&root))
         .map_err(|e| {
             let code = if matches!(e, filesystem::DiscoveryError::Operational(_)) {
@@ -157,12 +183,28 @@ fn run_with_limits(
             };
             (code, format_errors(e.diagnostics()))
         })?;
+    for source in &sources {
+        trace.message(format_args!(
+            "Source: {} ({} UTF-8 bytes)",
+            source.uri,
+            source.text.len()
+        ));
+    }
+    progress.emit(Phase::Loading, json!({"files":sources.len()}));
     let p = load_with_resolver(
         &membership,
         &sources,
         Some(&mut filesystem::FileOriginResolver),
     )
     .map_err(|e| (2, format_errors(e)))?;
+    trace.message(format_args!(
+        "Loaded: {} sorts, {} constants, {} relations, {} rules, {} verifications",
+        p.corpus.sorts().count(),
+        p.corpus.constants().count(),
+        p.corpus.relations().count(),
+        p.corpus.rules().count(),
+        p.corpus.verifications().count()
+    ));
     writeln!(
         output,
         "Root: {}. Backend: {}. Files: {}.",
@@ -180,9 +222,18 @@ fn run_with_limits(
         .unwrap();
     }
     let operations = OperationalLimits::from(&limits);
+    progress.emit(Phase::AssumptionValidation, json!({}));
     let validation =
         denotate_check::validate_assumption_cones(&p.corpus, &p.domains, &p.keys, &limits)
             .map_err(|e| (2, e.to_string()))?;
+    trace.message(format_args!(
+        "Assumption declarations: {}",
+        if validation.is_valid() {
+            "valid"
+        } else {
+            "invalid or inconclusive (see diagnostics)"
+        }
+    ));
     if !validation.is_valid() {
         let presented = presentation::present_assumption_validation(&p, &validation)
             .map_err(|e| (2, e.to_string()))?;
@@ -259,21 +310,25 @@ fn run_with_limits(
     let mut incomplete = partial || unchecked || !validation.is_valid();
     let mut findings = false;
     let mut session = Session::default();
-    for (key, request) in requests {
+    let verification_total = requests.len();
+    for (i, (key, request)) in requests.into_iter().enumerate() {
+        let mut detail = progress
+            .verification(&p, &key, i + 1, verification_total)
+            .map_err(|e| (2, e.to_string()))?;
         let declaration = p
             .corpus
             .verifications()
             .find(|v| p.keys.verification(v.id).is_ok_and(|k| *k == key))
             .unwrap();
-        writeln!(
-            output,
-            "Verification {}",
-            name(
-                p.corpus.namespace(declaration.id).unwrap(),
-                &declaration.name
-            )
-        )
-        .unwrap();
+        let verification_name = name(
+            p.corpus.namespace(declaration.id).unwrap(),
+            &declaration.name,
+        );
+        writeln!(output, "Verification {verification_name}").unwrap();
+        trace.message(format_args!(
+            "Verification {}/{verification_total}: {verification_name}",
+            i + 1
+        ));
         let assumptions = declaration
             .assumptions
             .iter()
@@ -285,6 +340,27 @@ fn run_with_limits(
             })
             .collect::<Vec<_>>();
         writeln!(output, "Selected assumptions: [{}]", assumptions.join(", ")).unwrap();
+        trace.message(format_args!(
+            "Selected assumptions: [{}]",
+            assumptions.join(", ")
+        ));
+        for id in &declaration.obligations {
+            let o = p.corpus.obligation(*id).unwrap();
+            trace.message(format_args!(
+                "Selected obligation: {} ({:?})",
+                name(p.corpus.namespace(*id).unwrap(), &o.name),
+                o.requirement.kind()
+            ));
+        }
+        for id in &declaration.notices {
+            trace.message(format_args!(
+                "Selected notice: {}",
+                name(
+                    p.corpus.namespace(*id).unwrap(),
+                    &p.corpus.notice(*id).unwrap().name
+                )
+            ));
+        }
         if let Some(state) = validation
             .selected_failure(&p.corpus, &p.keys, &request)
             .map_err(|e| (2, e.to_string()))?
@@ -296,6 +372,10 @@ fn run_with_limits(
             )
             .unwrap();
             incomplete = true;
+            trace.message(format_args!(
+                "Verification skipped: selected assumption validation is {}",
+                state.label()
+            ));
             continue;
         }
         if declaration.obligations.is_empty() && declaration.notices.is_empty() {
@@ -305,6 +385,7 @@ fn run_with_limits(
             )
             .unwrap();
         }
+        progress.emit(Phase::Preparation, detail.clone());
         let prepared = session
             .prepare(&request, &p.corpus, &p.keys, &operations)
             .map_err(|e| (2, e.to_string()))?;
@@ -312,19 +393,28 @@ fn run_with_limits(
             RequestPreparation::Complete(prepared) => prepared,
             RequestPreparation::Inconclusive { reason, .. } => {
                 writeln!(output, "Inconclusive: {reason:?}").unwrap();
+                trace.message(format_args!("Preparation inconclusive: {reason:?}"));
                 incomplete = true;
                 continue;
             }
         };
+        progress.prepared(&mut detail, prepared.program());
+        progress.emit(Phase::Admission, detail.clone());
         let admitted = prepared
             .admit(&operations)
             .map_err(|e| (2, e.to_string()))?
             .with_emptiness_examples(empty_examples.unwrap_or_default());
+        trace.message(format_args!(
+            "Admission complete: admitted={}",
+            admitted.program().is_admitted()
+        ));
+        progress.emit(Phase::Checking, detail.clone());
         match session
             .verify(&admitted, &operations)
             .map_err(|e| (2, e.to_string()))?
         {
             LocalCheckOutcome::Complete(report) => {
+                progress.emit(Phase::Presentation, detail.clone());
                 let result = &report.checked.results.value;
                 incomplete |= result.unfinished.is_some()
                     || !result.incomplete.is_empty()
@@ -342,6 +432,9 @@ fn run_with_limits(
                     });
                 let mut presented = denotate_ir_text::presentation::present(&p, &report.checked)
                     .map_err(|e| (2, e.to_string()))?;
+                trace.message(format_args!("Result: {}; {} presented diagnostics, {} uniqueness groups, {} coverage obligations, {} emptiness obligations, {} regions, {} notice results",
+                    presented.status["state"].as_str().unwrap_or("unknown"), presented.diagnostics.len(),
+                    result.groups.len(), result.coverage.len(), result.emptiness.len(), result.regions.len(), result.notices.len()));
                 findings |= presented.status["findings"].as_array().is_some_and(|f| {
                     f.iter().any(|finding| {
                         !matches!(
@@ -378,10 +471,18 @@ fn run_with_limits(
             }
             LocalCheckOutcome::Inconclusive { reason, .. } => {
                 writeln!(output, "Inconclusive: {reason:?}").unwrap();
+                trace.message(format_args!("Checking inconclusive: {reason:?}"));
                 incomplete = true;
             }
         }
+        let cache = session.stats();
+        trace.message(format_args!("Session: evaluation hits={}, misses={}; verdict hits={}, misses={}; retained condition nodes={}",
+            cache.evaluation_hits, cache.evaluation_misses, cache.verdict_hits, cache.verdict_misses, cache.retained_condition_nodes));
     }
+    progress.emit(
+        Phase::Publication,
+        json!({"verificationTotal":verification_total}),
+    );
     Ok(if incomplete {
         2
     } else if findings {
@@ -392,7 +493,12 @@ fn run_with_limits(
 }
 fn main() {
     let mut output = String::new();
-    let result = run(std::env::args().skip(1), &mut output);
+    let result = run_with_progress(
+        std::env::args().skip(1),
+        &mut output,
+        Limits::default(),
+        &mut std::io::stderr().lock(),
+    );
     print!("{output}");
     let code = match result {
         Ok(code) => code,
@@ -447,6 +553,195 @@ mod tests {
     }
     const BODY: &str = "sort S; const x, y: S; input p(x:S); relation q(x:S); q(X) :- p(X); assumption a: at_most_one(p, group_by: ()); obligation o: at_most_one(q, group_by: ());";
     const RESTRICTED: &str = "verification v { assumptions: [a]; obligations: [o]; }";
+    impl Fixture {
+        fn traced(&self, flags: &[&str]) -> (Result<u8, Failure>, String, String) {
+            let mut output = String::new();
+            let mut progress = Vec::new();
+            let result = run_with_progress(
+                std::iter::once(self.0.to_str().unwrap().to_string())
+                    .chain(flags.iter().map(|s| s.to_string())),
+                &mut output,
+                Limits::default(),
+                &mut progress,
+            );
+            (result, output, String::from_utf8(progress).unwrap())
+        }
+    }
+    #[test]
+    fn progress_is_separate_from_results_and_reports_each_selected_verification() {
+        let f = Fixture::new(&format!(
+            "{BODY}{RESTRICTED} verification w {{assumptions:[a];obligations:[o];}}"
+        ));
+        for flags in [
+            vec![],
+            vec!["--json"],
+            vec!["--verification", "v"],
+            vec!["--verbose"],
+        ] {
+            let (result, output, progress) = f.traced(&flags);
+            let mut quiet = flags.clone();
+            quiet.push("--no-progress");
+            let (quiet_result, quiet_output, quiet_progress) = f.traced(&quiet);
+            assert_eq!(result, quiet_result);
+            assert_eq!(output, quiet_output);
+            assert!(quiet_progress.is_empty());
+            assert!(!output.contains("[check +"));
+            assert!(!progress.contains("Results:"));
+            for phase in [
+                "discovery",
+                "loading",
+                "assumption-validation",
+                "preparation",
+                "admission",
+                "checking",
+                "presentation",
+                "publication",
+            ] {
+                assert!(
+                    progress.contains(&format!("Starting {phase}")),
+                    "{progress}"
+                );
+            }
+            for detail in [
+                "Source:",
+                "Loaded:",
+                "Selected assumptions:",
+                "Selected obligation:",
+                "Prepared size (before admission):",
+                "rule instances",
+                "largest component",
+                "Session:",
+                "Finished: exit",
+            ] {
+                assert!(progress.contains(detail), "{progress}");
+            }
+            if flags.contains(&"--verification") {
+                assert!(progress.contains("verification 1/1 ::v"));
+                assert!(!progress.contains("::w"));
+            } else {
+                assert!(progress.contains("verification 1/2 ::v"));
+                assert!(progress.contains("verification 2/2 ::w"));
+            }
+        }
+    }
+    #[test]
+    fn cli_limits_are_applied_and_exhaustion_is_visible_in_progress() {
+        let f = Fixture::new(&format!("{BODY}{RESTRICTED}"));
+        assert_eq!(f.run(&[]).0, 0);
+        for flag in ["--max-atoms", "--max-work", "--timeout-ms"] {
+            let (result, output, progress) = f.traced(&[flag, "0"]);
+            assert!(
+                matches!(result, Ok(2) | Err((2, _))),
+                "{result:?}\n{output}"
+            );
+            assert!(progress.contains(&format!("{flag} 0")), "{progress}");
+            assert!(
+                progress.contains("inconclusive") || progress.contains("Deadline"),
+                "{progress}"
+            );
+            assert!(!output.contains("Result: proved"));
+        }
+        let (result, _, progress) = f.traced(&[
+            "--max-atoms",
+            "1000",
+            "--max-work",
+            "1000000",
+            "--timeout-ms",
+            "60000",
+        ]);
+        assert_eq!(result, Ok(0), "{progress}");
+    }
+    #[test]
+    fn every_limit_has_an_independent_override_and_invalid_values_are_rejected() {
+        let args = [
+            "root",
+            "--timeout-ms",
+            "9",
+            "--max-atoms",
+            "1",
+            "--max-rules",
+            "2",
+            "--max-dependencies",
+            "3",
+            "--max-work",
+            "4",
+            "--max-bdd-variables",
+            "5",
+            "--max-bdd-nodes",
+            "6",
+            "--max-bdd-tasks",
+            "7",
+            "--max-condition-nodes",
+            "8",
+        ];
+        let o = options::Options::parse(args.map(str::to_owned), Limits::default()).unwrap();
+        let l = o.limits;
+        assert_eq!(
+            [
+                l.max_atoms,
+                l.max_rules,
+                l.max_dependencies,
+                l.max_work,
+                l.max_bdd_variables,
+                l.max_bdd_nodes,
+                l.max_bdd_tasks,
+                l.max_condition_nodes
+            ],
+            [1, 2, 3, 4, 5, 6, 7, 8]
+        );
+        assert_eq!(l.timeout, std::time::Duration::from_millis(9));
+        for (flag, _) in options::limit_values(&Limits::default()) {
+            for tail in [
+                vec![flag],
+                vec![flag, "-1"],
+                vec![flag, "1.5"],
+                vec![flag, "huge"],
+                vec![flag, "9999999999999999999999999999999999999999"],
+                vec![flag, "1", flag, "2"],
+            ] {
+                let result = options::Options::parse(
+                    std::iter::once("root".to_string()).chain(tail.iter().map(|s| s.to_string())),
+                    Limits::default(),
+                );
+                assert!(matches!(result, Err((2, _))), "{tail:?}");
+            }
+        }
+        assert!(
+            options::Options::parse(
+                ["root", "--no-progress", "--no-progress"].map(str::to_owned),
+                Limits::default()
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn help_and_early_failures_do_not_report_checks_that_never_ran() {
+        let mut output = String::new();
+        let mut progress = vec![];
+        assert_eq!(
+            run_with_progress(
+                ["--help".into()],
+                &mut output,
+                Limits::default(),
+                &mut progress
+            ),
+            Ok(0)
+        );
+        assert!(progress.is_empty());
+        for (flag, value) in options::limit_values(&Limits::default()) {
+            assert!(output.contains(&format!("{flag} N (default {value})")));
+        }
+        let f = Fixture::new("relation clear();");
+        let (result, _, progress) = f.traced(&[]);
+        assert_eq!(result, Ok(2));
+        assert!(progress.contains("Finished: exit 2"));
+        assert!(!progress.contains("Starting preparation"));
+        fs::write(f.0.join("program.den"), "relation (").unwrap();
+        let (result, _, progress) = f.traced(&[]);
+        assert!(matches!(result, Err((2, _))));
+        assert!(progress.contains("Stopped: exit 2"));
+        assert!(!progress.contains("Starting assumption-validation"));
+    }
     #[test]
     fn invalid_assumptions_are_located_without_verifications_and_block_only_selection() {
         let body = "input i(); relation p(); p():-i(),!p(); assumption invalid:empty(p); assumption exclude:empty(i);";

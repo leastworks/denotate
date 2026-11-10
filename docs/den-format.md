@@ -564,6 +564,8 @@ origins still reloads with full current-text provenance.
 
 ```sh
 just check-den <folder-or-den.root> [--verification QUALIFIED_NAME] [--json] [--verbose]
+just check-den <folder-or-den.root> --timeout-ms 60000 --max-work 100000000
+just check-den --help
 just export-test-dsl <out-dir> <file.testdsl>…   # export a DSL program as .den
 ```
 
@@ -581,11 +583,29 @@ source URI and numeric coordinate order, with content
 as a tie-breaker. Notes are sorted by text. Library fallback messages retain their
 `in <program>:` label. Each verification ends with its status.
 
+Progress is printed and flushed to stderr by default: effective limits, sources,
+phase starts and elapsed times, selected declarations, prepared sizes and result
+counts. `--no-progress` silences this trace without changing stdout, results or exit
+codes, including with `--json`. Progress uses the same phase/size reporter as the
+editor. A long phase has no fabricated percentage or heartbeat; checking still
+covers obligation and notice queries together.
+
+`--timeout-ms` sets the cooperative allowance per operation/query, **not** a total
+command deadline. Loading and presentation are outside that allowance. Resource
+overrides are `--max-atoms`, `--max-rules`, `--max-dependencies`, `--max-work`,
+`--max-bdd-variables`, `--max-bdd-nodes`, `--max-bdd-tasks` and
+`--max-condition-nodes`. Each accepts a nonnegative integer; zero allows no use of
+that resource. Options follow the root. Invalid, overflowing, missing or repeated
+values are argument errors. `--help` prints defaults from the checker itself.
+Defaults, per-query accounting and inconclusive semantics remain unchanged; these
+options do not alter cache retention or separate attribution allowances.
+
 `--json` retains the previous per-verification `Results: {...}` status summary
 instead of human diagnostics. Root/verification headers and configuration notices
 remain, so this mode is not a single JSON document. Exit codes are the same in both
 modes. `--verbose` has no effect with `--json`. With no verification it prints
-`No verification configured` and runs no semantic checks. `--verification` selects one
+`No verification configured` and runs no verification checks; program-level
+assumption-declaration validation still runs. `--verification` selects one
 declaration using the usual quoted/qualified name syntax; a bare name must be unique
 across the closure. Unknown or ambiguous names are errors. Every filtered run is labeled
 partial, even if the program contains only one verification.

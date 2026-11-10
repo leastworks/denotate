@@ -17,6 +17,11 @@ Guarantees that are **not** provisional: cold and warm sessions produce identica
 results and receipts; conclusive answers agree with independent small-world and
 stable-model oracles; limits produce explicit inconclusive outcomes, never silent success.
 
+To diagnose a slow or exhausted run, `just check-den ROOT` prints phases, prepared
+sizes and the effective limits on stderr, and `--timeout-ms`/`--max-*` override
+`Limits` for one invocation ([den-format](den-format.md#commands),
+`just check-den --help`). These are explicit controls, not new defaults.
+
 ## Backend retirement
 
 BDD is the only supported backend. The SAT experiment showed wins on synthetic and

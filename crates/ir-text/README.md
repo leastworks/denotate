@@ -95,6 +95,9 @@ user files are the program's own documents.
 ```sh
 just check-den crates/ir-text/fixtures [--verification library::default_checks] [--json] [--verbose]
 just check-den <program> --empty-examples all
+just check-den <program> --timeout-ms 60000 --max-work 100000000
+just check-den <program> --json --no-progress
+just check-den --help
 just test-crate denotate-ir-text
 ```
 
@@ -104,6 +107,31 @@ kind, message, notes and labeled related locations. By default only producing ru
 the checked obligation and upstream origins are expanded; other related entries
 collapse to "+N more". `--verbose` prints all related locations. `--json` retains the previous
 `Results: {...}` status summaries with their existing headers and notices.
+
+Detailed progress goes to **stderr** by default, also with `--json`. It reports
+effective limits, source inventory, loading and assumption validation, each selected
+verification's declarations, preparation/admission/checking/presentation, prepared
+sizes, result counts and session reuse. Every phase starts with a flushed line;
+transitions report elapsed time. `--no-progress` disables this checker trace.
+`--verbose` remains a diagnostic-layout option, independent of progress.
+
+The CLI and LSP share `progress::CheckProgress` and `Phase`: identical phase names,
+verification metadata and prepared sizes. Delivery remains with each frontend.
+Counts describe completed preparation, not an estimate of checking work remaining.
+The checking phase includes obligations, notices, replay and session bookkeeping;
+it does not yet stream individual queries or live BDD node counts. Progress never
+runs an additional check, changes a semantic budget or enters a cache key.
+
+All public `Limits` resource ceilings are configurable for this invocation:
+`--max-atoms`, `--max-rules`, `--max-dependencies`, `--max-work`,
+`--max-bdd-variables`, `--max-bdd-nodes`, `--max-bdd-tasks`, and
+`--max-condition-nodes`, plus `--timeout-ms`. Values are nonnegative integers;
+zero allows no use of that resource. `--help` lists the actual default values.
+Limits remain per operation/query; the cooperative timeout is not a total command
+deadline and does not cover loading or presentation. Exhaustion remains explicit
+inconclusive, with the existing exit-code policy. Cache-retention policies and
+separate diagnostic attribution allowances are unchanged.
+
 `--empty-examples N` retains a positive number of examples per emptiness obligation
 (default three); `--empty-examples all` retains every confirmed tuple, including in
 JSON summaries. Counts remain lower bounds if checking is incomplete. It does not

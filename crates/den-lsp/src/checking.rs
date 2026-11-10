@@ -13,7 +13,10 @@ use denotate_editor::{
     checking_server::{self, CheckingHandler},
     test_support::{self, CheckingHooks},
 };
-use denotate_ir_text::{ProgramMembership, SourceFile};
+use denotate_ir_text::{
+    progress::{CheckProgress, Phase},
+    ProgramMembership, SourceFile,
+};
 use lsp_server::Connection;
 use lsp_types::{Diagnostic, Url};
 use serde_json::{json, Value};
@@ -100,23 +103,16 @@ fn check_with_progress(
     session: &mut denotate_check_session::Session,
     report: Option<&dyn Fn(Value)>,
 ) -> std::result::Result<Publication, Failure> {
-    let started = std::time::Instant::now();
-    let progress = |phase, mut detail: Value| {
-        if let Some(report) = report {
-            detail["phase"] = json!(phase);
-            detail["elapsedMs"] = json!(started.elapsed().as_millis() as u64);
-            report(detail);
-        }
-    };
+    let progress = CheckProgress::new(report);
     job.limits.cancellation.check()?;
     let s = &job.payload.snapshot;
-    progress("loading", json!({"files":s.files.len()}));
+    progress.emit(Phase::Loading, json!({"files":s.files.len()}));
     let program =
         denotate_ir_text::load_with_resolver(&s.membership, &s.files, Some(&mut &s.bridge))
             .map_err(Failure::Invalid)?;
     job.limits.cancellation.check()?;
     let mut publication = presentation::configuration(&program).map_err(Failure::Internal)?;
-    progress("assumption-validation", json!({}));
+    progress.emit(Phase::AssumptionValidation, json!({}));
     let validation = validate_assumption_cones(
         &program.corpus,
         &program.domains,
@@ -135,11 +131,8 @@ fn check_with_progress(
     }
     publication.status["findings"] = validation_publication.status["findings"].clone();
     let requests = program.verification_requests(&job.limits)?;
-    for (i, (_, request)) in requests.iter().enumerate() {
-        let context = json!({"verification":publication.status["verifications"][i]["verification"],
-            "verificationIndex":i+1,"verificationTotal":requests.len(),
-            "assumptions":publication.status["verifications"][i]["assumptions"].as_array().map_or(0, Vec::len),
-            "obligations":request.obligations.len(),"notices":request.notices.len()});
+    for (i, (key, request)) in requests.iter().enumerate() {
+        let context = progress.verification(&program, key, i + 1, requests.len())?;
         job.limits.cancellation.check()?;
         // Each context gets its own operation limits; a failed context cannot
         // consume another verification's deadline or prevent its execution.
@@ -157,7 +150,7 @@ fn check_with_progress(
                     status: json!({"state":"incomplete","consistency":"unknown","assumptionValidation":denotate_presentation::assumption_validity_data(state)}),
                 });
             }
-            progress("preparation", context.clone());
+            progress.emit(Phase::Preparation, context.clone());
             let ground =
                 match session.prepare(request, &program.corpus, &program.keys, &operations)? {
                     RequestPreparation::Complete(p) => p,
@@ -166,19 +159,13 @@ fn check_with_progress(
                     }
                 };
             let mut detail = context.clone();
-            if report.is_some() {
-                let p = ground.program();
-                detail["ground"] = json!({"atoms":p.atoms().count(),
-                    "inputAtoms":p.input_atoms().count(),"ruleInstances":p.rules().count(),
-                    "components":p.components().count(),
-                    "largestComponentAtoms":p.components().map(|c|c.atoms.len()).max().unwrap_or(0)});
-            }
-            progress("admission", detail.clone());
+            progress.prepared(&mut detail, ground.program());
+            progress.emit(Phase::Admission, detail.clone());
             let ground = ground.admit(&operations)?;
-            progress("checking", detail.clone());
+            progress.emit(Phase::Checking, detail.clone());
             match session.verify(&ground, &operations)? {
                 LocalCheckOutcome::Complete(report) => {
-                    progress("presentation", detail);
+                    progress.emit(Phase::Presentation, detail);
                     presentation::present(&program, &report.checked, s.config.show_library_rewrites)
                         .map_err(Failure::Internal)
                 }
@@ -226,7 +213,10 @@ fn check_with_progress(
                 .extend(findings.iter().cloned());
         }
     }
-    progress("publication", json!({"verificationTotal":requests.len()}));
+    progress.emit(
+        Phase::Publication,
+        json!({"verificationTotal":requests.len()}),
+    );
     let verifications = publication.status["verifications"].as_array().unwrap();
     let checking = if verifications.is_empty() {
         "unconfigured"

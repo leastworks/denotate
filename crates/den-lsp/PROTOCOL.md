@@ -88,6 +88,10 @@ verification's checking/presentation. `elapsedMs` is elapsed worker time at the
 report, not a deadline or heartbeat. Checking includes obligations, notices, replay
 and session bookkeeping; no inner query fraction or BDD node counter is reported.
 Skipped phases need not appear. Startup and discovery remain indeterminate.
+The phase vocabulary, verification metadata and prepared-size inspection are
+shared with `check-den` through `denotate_ir_text::progress`. The CLI additionally
+reports its filesystem discovery phase; the editor retains its snapshot-driven
+discovery and publication policy.
 
 Updates carry the job's ticket through the shared scheduler, and the owner drops
 updates for superseded tickets. A progress-only owner turn does not rebuild source
