@@ -76,6 +76,11 @@ score-test-dsl +args:
 score-den +args:
     cargo +1.93.0 run --release --locked -p denotate-check-session --features test-support --example score_den -- "$@"
 
+# Measure synthetic origin loading: FILES [ITEMS=100] [SOURCE_PADDING=0] [--long-line].
+[positional-arguments]
+bench-den-origins +args:
+    cargo +1.93.0 run --release --locked -p denotate-ir-text --example bench_origins -- "$@"
+
 # Export one combined test DSL program: OUT_DIR FILE... [--without-origins].
 [positional-arguments]
 export-test-dsl +args:

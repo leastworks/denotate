@@ -30,6 +30,25 @@ files for commands. Upstream origins land in `embedded.provenance`, separate fro
 current provenance; unavailable or changed sources produce `embedded.notices` and no
 fabricated spans.
 
+Restoration builds a current-document/range index once per load when annotations
+are present. It batches each upstream source's requested coordinates into one
+forward scan, including within long lines; it stores only requested boundaries.
+These indexes belong to the supplied snapshots and are not caches across edits.
+
+To measure loading with an abstract generated program:
+
+```sh
+just bench-den-origins 80 100
+just bench-den-origins 10 100 1000000 --long-line
+```
+
+Arguments are file count, items per file (default 100), upstream source padding
+(default 0), and optional `--long-line`. Each item generates an annotated constant,
+fact and rule. The release benchmark compares omitted, unavailable and resolved
+origins, reports discovery/loading/checking separately, and checks the same proved
+outcome at default limits. Generated files are temporary. Timings are measurements,
+not test expectations; this is a loader benchmark, not a production scorecard.
+
 `ProgramMembership` holds the selected root and `RootInfo { files, libraries }` per
 root; `ProgramMembership::single` builds an in-memory one-root program.
 `filesystem::discover` resolves `den.root` folders on disk for the CLI.

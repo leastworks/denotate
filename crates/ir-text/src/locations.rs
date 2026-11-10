@@ -264,44 +264,86 @@ fn collect<'a>(n: Node<'a>, aliases: &mut Vec<Node<'a>>, suffixes: &mut Vec<(Nod
         collect(child, aliases, suffixes);
     }
 }
-fn targets(
-    p: &LoadedProgram,
-    source: &SourceFile,
-    statement: Node<'_>,
-) -> BTreeMap<String, Vec<OriginTarget>> {
-    let mut result = BTreeMap::new();
-    let range = statement.byte_range();
-    let within = |id: OccurrenceId| {
-        p.provenance.origins(id).first().is_some_and(|o| {
-            let snapshot = p.sources.snapshot(o.span.snapshot()).unwrap();
-            let r = o.span.byte_range();
-            snapshot.uri == source.uri && range.start <= r.start && r.end <= range.end
-        })
-    };
-    if statement.kind() == "statement" {
-        if let Some(rule) = p.corpus.rules().find(|r| within(r.id.into())) {
-            return rule_positions(rule)
-                .into_iter()
-                .map(|(pos, id)| (pos, vec![OriginTarget::Occurrence(id)]))
-                .collect();
-        }
-    } else {
-        let mut ids = top_level(&p.corpus)
-            .into_iter()
-            .filter(|id| within(*id))
-            .collect::<Vec<_>>();
-        ids.sort_by_key(|id| p.provenance.origins(*id)[0].span.byte_range().start);
-        if statement.kind() == "constants" {
-            for (i, id) in ids.iter().enumerate() {
-                result.insert(format!("decl.{i}"), vec![OriginTarget::Occurrence(*id)]);
+/// Current-text top-level spans, indexed once for this load. Range lookup only
+/// visits occurrences that start inside the annotated statement; unrelated files
+/// and earlier/later statements are excluded before inspecting provenance.
+struct RangeIndex<T> {
+    documents: BTreeMap<String, Vec<(Range<usize>, T)>>,
+}
+impl<T: Copy + Into<OccurrenceId>> RangeIndex<T> {
+    fn new(p: &LoadedProgram, ids: impl IntoIterator<Item = T>) -> Self {
+        let mut documents = BTreeMap::<String, Vec<(Range<usize>, T)>>::new();
+        for id in ids {
+            if let Some(origin) = p.provenance.origins(id.into()).first() {
+                let snapshot = p.sources.snapshot(origin.span.snapshot()).unwrap();
+                documents
+                    .entry(snapshot.uri.clone())
+                    .or_default()
+                    .push((origin.span.byte_range(), id));
             }
         }
-        result.insert(
-            "self".into(),
-            ids.into_iter().map(OriginTarget::Occurrence).collect(),
-        );
+        for entries in documents.values_mut() {
+            // Stable sort preserves corpus order for coincident starts, including
+            // grouped declarations. Only the first current origin is authoritative.
+            entries.sort_by_key(|(range, _)| range.start);
+        }
+        Self { documents }
     }
-    result
+    fn within(&self, uri: &str, range: Range<usize>) -> impl Iterator<Item = T> + '_ {
+        let entries = self.documents.get(uri).map(Vec::as_slice).unwrap_or(&[]);
+        let start = entries.partition_point(|(r, _)| r.start < range.start);
+        entries[start..]
+            .iter()
+            .take_while(move |(r, _)| r.start <= range.end)
+            .filter(move |(r, _)| r.end <= range.end)
+            .map(|(_, id)| *id)
+    }
+}
+struct TargetIndex {
+    declarations: RangeIndex<OccurrenceId>,
+    rules: RangeIndex<RuleId>,
+}
+impl TargetIndex {
+    fn new(p: &LoadedProgram) -> Self {
+        Self {
+            declarations: RangeIndex::new(p, top_level(&p.corpus)),
+            rules: RangeIndex::new(p, p.corpus.rules().map(|r| r.id)),
+        }
+    }
+    fn positions(
+        &self,
+        p: &LoadedProgram,
+        source: &SourceFile,
+        statement: Node<'_>,
+    ) -> BTreeMap<String, Vec<OriginTarget>> {
+        let mut result = BTreeMap::new();
+        let range = statement.byte_range();
+        if statement.kind() == "statement" {
+            // Rule IDs follow corpus iteration order, preserving the old first
+            // match even if several rules ever share a current-text span.
+            if let Some(id) = self.rules.within(&source.uri, range).min() {
+                return rule_positions(p.corpus.rule(id).unwrap())
+                    .into_iter()
+                    .map(|(pos, id)| (pos, vec![OriginTarget::Occurrence(id)]))
+                    .collect();
+            }
+        } else {
+            let ids = self
+                .declarations
+                .within(&source.uri, range)
+                .collect::<Vec<_>>();
+            if statement.kind() == "constants" {
+                for (i, id) in ids.iter().enumerate() {
+                    result.insert(format!("decl.{i}"), vec![OriginTarget::Occurrence(*id)]);
+                }
+            }
+            result.insert(
+                "self".into(),
+                ids.into_iter().map(OriginTarget::Occurrence).collect(),
+            );
+        }
+        result
+    }
 }
 fn descriptors(r: &Resolved) -> Vec<OriginDescriptor> {
     match r {
@@ -321,6 +363,7 @@ pub(crate) fn restore(
     let mut identities = BTreeSet::new();
     let mut associations = BTreeMap::<OriginTarget, BTreeSet<OriginDescriptor>>::new();
     let members = p.membership.members()?;
+    let mut targets = None;
     for doc in documents.iter().filter(|d| members.contains_key(&d.uri)) {
         let tree = parser().parse(doc.text.as_ref(), None).unwrap();
         let (mut aliases, mut suffixes) = (Vec::new(), Vec::new());
@@ -367,7 +410,9 @@ pub(crate) fn restore(
                     return Err(error(doc, n.byte_range(), "A source is not a location"));
                 }
             };
-            let positions = targets(p, doc, statement);
+            let positions = targets
+                .get_or_insert_with(|| TargetIndex::new(p))
+                .positions(p, doc, statement);
             for (pos, origins) in entries {
                 let targets = positions
                     .get(&pos)
@@ -429,20 +474,32 @@ pub(crate) fn restore(
         }
     }
     let mut spans = BTreeMap::new();
-    for (descriptor, (uri, range)) in references {
-        if let Some(id) = snapshots.get(&descriptor.source) {
+    // Descriptors sort by source identity first. Batch one source's endpoints so
+    // overlapping ranges and repeated coordinates never rescan its text.
+    let mut references = references.into_iter().peekable();
+    while let Some(first) = references.next() {
+        let source = first.0.source.clone();
+        let mut group = vec![first];
+        while references.peek().is_some_and(|(d, _)| d.source == source) {
+            group.push(references.next().unwrap());
+        }
+        if let Some(id) = snapshots.get(&source) {
             let text = &p.sources.snapshot(*id).unwrap().text;
-            let span = byte_offset(text, descriptor.start)
-                .zip(byte_offset(text, descriptor.end))
-                .and_then(|(a, b)| p.sources.span(*id, a..b).ok())
-                .ok_or_else(|| {
-                    vec![Diagnostic {
-                        uri,
-                        range,
-                        message: "Invalid coordinates in matching source snapshot".into(),
-                    }]
-                })?;
-            spans.insert(descriptor, span);
+            let offsets = byte_offsets(text, group.iter().flat_map(|(d, _)| [d.start, d.end]));
+            for (descriptor, (uri, range)) in group {
+                let span = offsets
+                    .get(&descriptor.start)
+                    .zip(offsets.get(&descriptor.end))
+                    .and_then(|(a, b)| p.sources.span(*id, *a..*b).ok())
+                    .ok_or_else(|| {
+                        vec![Diagnostic {
+                            uri,
+                            range,
+                            message: "Invalid coordinates in matching source snapshot".into(),
+                        }]
+                    })?;
+                spans.insert(descriptor, span);
+            }
         }
     }
     let mut embedded = EmbeddedOrigins {
@@ -469,4 +526,106 @@ pub(crate) fn restore(
     }
     p.embedded = embedded;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Deliberately independent, slow reference for target selection. The release
+    /// benchmark exercises scaling; this oracle checks range/index equivalence.
+    fn scanned_positions(
+        p: &LoadedProgram,
+        doc: &SourceFile,
+        statement: Node<'_>,
+    ) -> BTreeMap<String, Vec<OriginTarget>> {
+        let within = |id: OccurrenceId| {
+            p.provenance.origins(id).first().is_some_and(|o| {
+                let snapshot = p.sources.snapshot(o.span.snapshot()).unwrap();
+                let range = o.span.byte_range();
+                snapshot.uri == doc.uri
+                    && statement.start_byte() <= range.start
+                    && range.end <= statement.end_byte()
+            })
+        };
+        if statement.kind() == "statement" {
+            return p
+                .corpus
+                .rules()
+                .find(|r| within(r.id.into()))
+                .map(|r| {
+                    rule_positions(r)
+                        .into_iter()
+                        .map(|(pos, id)| (pos, vec![OriginTarget::Occurrence(id)]))
+                        .collect()
+                })
+                .unwrap_or_default();
+        }
+        let mut ids = top_level(&p.corpus)
+            .into_iter()
+            .filter(|id| within(*id))
+            .collect::<Vec<_>>();
+        ids.sort_by_key(|id| p.provenance.origins(*id)[0].span.byte_range().start);
+        let mut positions = BTreeMap::new();
+        if statement.kind() == "constants" {
+            for (i, id) in ids.iter().enumerate() {
+                positions.insert(format!("decl.{i}"), vec![OriginTarget::Occurrence(*id)]);
+            }
+        }
+        positions.insert(
+            "self".into(),
+            ids.into_iter().map(OriginTarget::Occurrence).collect(),
+        );
+        positions
+    }
+
+    #[test]
+    fn indexed_targets_match_scans_across_files_namespaces_and_occurrence_maps() {
+        let docs = (0..12).map(|file| SourceFile::new(
+            format!("file:///doc-{file:02}.den"), 7,
+            format!(r#"
+                namespace n{file:02} {{
+                    sort S loc(#s 1:1 to 1:4);
+                    const a, b: S loc(#s {{self: 1:1 to 1:4, decl.1: 1:2 to 1:3}});
+                    input i(x:S) loc(#s 1:1 to 1:4);
+                    relation p(x:S) loc(#s 1:1 to 1:4);
+                    p(a) loc(#s {{self: 1:1 to 1:4, head: 1:1 to 1:4, head.0: 1:2 to 1:3}});
+                    p(X) :- i(X) loc(#s {{self: 1:1 to 1:4, body.0: 1:1 to 1:4, body.0.0: 1:2 to 1:3}});
+                    obligation unique: at_most_one(p, group_by: ()) loc(#s 1:1 to 1:4);
+                    assumption single: at_most_one(i, group_by: ()) loc(#s 1:1 to 1:4);
+                    input condition() loc(#s 1:1 to 1:4);
+                    notice inspect: varies(condition) loc(#s 1:1 to 1:4);
+                    verification checks {{ assumptions: [single]; obligations: [unique]; notices: [inspect]; }} loc(#s 1:1 to 1:4)
+                }}
+                #s = source("file:///source-{file:02}.dsl", view: "dsl", hash: "{}");
+            "#, content_hash("abc"))
+        )).collect::<Vec<_>>();
+        let membership =
+            crate::ProgramMembership::single("root", docs.iter().map(|d| d.uri.clone()));
+        let mut resolver = |_: &SourceIdentity| Ok(std::sync::Arc::<str>::from("abc"));
+        let p = crate::load_with_resolver(&membership, &docs, Some(&mut resolver)).unwrap();
+        let targets = TargetIndex::new(&p);
+        for doc in &docs {
+            let tree = parser().parse(&*doc.text, None).unwrap();
+            let mut suffixes = vec![];
+            collect(tree.root_node(), &mut vec![], &mut suffixes);
+            for (statement, _) in suffixes {
+                assert_eq!(
+                    targets.positions(&p, doc, statement),
+                    scanned_positions(&p, doc, statement)
+                );
+            }
+        }
+        // Identical byte ranges in different files must retain their own sources.
+        for (target, descriptors) in &p.embedded.associations {
+            let OriginTarget::Occurrence(id) = target;
+            let current = p.provenance.origins(*id)[0].span;
+            let uri = &p.sources.snapshot(current.snapshot()).unwrap().uri;
+            let expected = uri.replace("doc-", "source-").replace(".den", ".dsl");
+            for d in descriptors {
+                assert_eq!(d.source.uri, expected);
+            }
+            assert!(!p.embedded.provenance.origins(*id).is_empty());
+        }
+    }
 }

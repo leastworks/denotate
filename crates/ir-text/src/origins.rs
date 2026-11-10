@@ -1,7 +1,10 @@
 //! Content identities, character coordinates and caller-owned origin resolution.
 use denotate_ir::*;
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    sync::Arc,
+};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct SourceIdentity {
@@ -60,6 +63,90 @@ pub fn byte_offset(text: &str, target: Coordinate) -> Option<usize> {
         }
     }
     (position == target).then_some(text.len())
+}
+
+/// Convert a batch with one forward scan, including within a very long line.
+/// Only requested, valid boundaries are retained; memory does not scale with the
+/// source's character count. Single-coordinate callers can use `byte_offset`.
+pub(crate) fn byte_offsets(
+    text: &str,
+    targets: impl IntoIterator<Item = Coordinate>,
+) -> BTreeMap<Coordinate, usize> {
+    let mut offsets = BTreeMap::new();
+    let mut chars = text.char_indices();
+    let mut position = Coordinate { line: 1, column: 1 };
+    let mut byte = 0;
+    for target in targets.into_iter().collect::<BTreeSet<_>>() {
+        while position < target {
+            let Some((at, c)) = chars.next() else { break };
+            byte = at + c.len_utf8();
+            if c == '\n' {
+                position.line += 1;
+                position.column = 1;
+            } else {
+                position.column += 1;
+            }
+        }
+        if position == target {
+            offsets.insert(target, byte);
+        }
+    }
+    offsets
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn batched_coordinates_match_scalar_lookup_including_invalid_boundaries() {
+        for text in [
+            "",
+            "\u{feff}é😀e\u{301}\r\nend\n",
+            "a\rb",
+            "\n\n",
+            "first\nlast",
+        ] {
+            let targets = (0..=5)
+                .flat_map(|line| (0..=12).map(move |column| Coordinate { line, column }))
+                .rev()
+                .collect::<Vec<_>>();
+            let offsets = byte_offsets(text, targets.clone());
+            for target in targets {
+                assert_eq!(
+                    offsets.get(&target).copied(),
+                    byte_offset(text, target),
+                    "{text:?}: {target:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn batch_handles_long_lines_overlapping_ranges_repeated_endpoints_and_eof() {
+        let text = format!("\u{feff}{}", "é😀e\u{301}\r".repeat(1000));
+        let mut targets = (1..=5002)
+            .step_by(47)
+            .map(|column| Coordinate { line: 1, column })
+            .collect::<Vec<_>>();
+        targets.extend([
+            Coordinate {
+                line: 1,
+                column: 5002,
+            }, // EOF, with no final newline.
+            Coordinate {
+                line: 1,
+                column: 5003,
+            },
+            Coordinate { line: 2, column: 1 },
+        ]);
+        let mut repeated = targets.clone();
+        repeated.extend(targets.iter().rev());
+        let offsets = byte_offsets(&text, repeated);
+        for target in targets {
+            assert_eq!(offsets.get(&target).copied(), byte_offset(&text, target));
+        }
+    }
 }
 impl OriginDescriptor {
     pub fn of(sources: &Sources, origin: &Origin) -> Result<Self, ProvenanceError> {

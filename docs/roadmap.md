@@ -72,8 +72,9 @@ proved simplification remain separate work. Known items:
 - Exported DSL libraries can show singleton-variable warnings that the user cannot act
   on; print singletons as `_` or skip style lints on generated/library files.
 - Each Go to Origin and rename request rebuilds snapshots and reloads programs
-  synchronously; origin restoration scans the corpus per statement. Fine at current
-  sizes; revisit with real programs.
+  synchronously. Origin restoration indexes current-document ranges and converts
+  upstream coordinates in one pass per source; measure the remaining reload cost on
+  real programs before adding caches.
 - Unchecked-obligation notices and verification status load the program a second
   time, synchronously on the server loop, at each snapshot change so they are
   available before checking finishes. Derive them from the incremental index instead
