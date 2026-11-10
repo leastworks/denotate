@@ -11,6 +11,12 @@ stratified derived constraints and consistency checking. Deferred until real pro
 ask for them: "why not derived" coverage explanations, conditional group eligibility,
 and explanations of which selected assumptions conflict.
 
+- **Assumption cones admitted without assumptions.** Ground stratification now
+  handles relation-level cycles with no reachable ground negative cycle. A separate
+  admission pass under all input worlds could also justify cycles broken by logically
+  exclusive runtime guards. It must finish before computing W and preserve explicit
+  inconclusive outcomes. Deferred until a real program needs this stronger admission.
+
 - **Severity on obligations.** Every obligation failure is an Error today. Let a
   declaration choose Error, Warning or Information, where Warning and Information do
   not fail the verification or the exit code: for library rules that should warn

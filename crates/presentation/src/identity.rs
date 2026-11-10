@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 /// structural correspondence; publication uses explicit semantic keys below.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Identity {
+    Assumption(AssumptionId),
     InconsistentAssumptions,
     Notice(NoticeId),
     AssumedConclusion(AssumptionId, ObligationId),
@@ -92,6 +93,9 @@ impl Identity {
     /// messages or ambiguous joined namespace/name strings.
     pub fn data(&self, keys: &SemanticKeys) -> Result<Value> {
         Ok(match self {
+            Self::Assumption(id) => {
+                json!({"assumption":qualified(&keys.assumption(*id)?.0),"check":"ground-cone"})
+            }
             Self::Notice(id) => json!({"notice":qualified(&keys.notice(*id)?.0)}),
             Self::InconsistentAssumptions => json!({"context":"inconsistent-assumptions"}),
             Self::AssumedConclusion(a, o) => {

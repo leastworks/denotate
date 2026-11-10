@@ -13,6 +13,20 @@ pub struct Publication {
 pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Publication, String> {
     let output =
         denotate_ir_text::presentation::present(program, report).map_err(|e| e.to_string())?;
+    convert(program, output)
+}
+pub fn assumption_validation(
+    program: &LoadedProgram,
+    validation: &denotate_check::AssumptionValidation,
+) -> Result<Publication, String> {
+    let output = denotate_ir_text::presentation::present_assumption_validation(program, validation)
+        .map_err(|e| e.to_string())?;
+    convert(program, output)
+}
+fn convert(
+    program: &LoadedProgram,
+    output: denotate_ir_text::presentation::Presentation,
+) -> Result<Publication, String> {
     let mut diagnostics = BTreeMap::<_, Vec<_>>::new();
     for finding in output.diagnostics {
         let (uri, mut diagnostic) =

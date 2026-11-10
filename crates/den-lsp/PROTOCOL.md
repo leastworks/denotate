@@ -160,6 +160,25 @@ An inconsistent context produces an Error with code/evidence kind
 Its selecting verification is primary and selected assumption declarations are
 related; ordinary labeled library fallback applies. No unsatisfiable core is claimed.
 
+Assumption declaration validity is reported once per program, before verifications,
+including unselected declarations and programs without a verification. `invalid-assumption`
+is an Error on the assumption; `unvalidated-assumption` is Information when grounding
+or validation exhausts. Both use finding identity
+`{"verification": null, "assumption": [namespaceKey, name], "check": "ground-cone"}`.
+Evidence kind is `assumption-validation`, with state `invalid` or `inconclusive`.
+Invalid evidence contains `cycles`: arrays of edges with keyed `consumer`, `provider`
+atoms and `polarity` (`positive` or `negative`). Cycle rules and premise occurrences
+are related locations labeled `blocking dependency cycle`; normal library fallback
+and upstream-origin placement apply. Inconclusive evidence names `phase` and `resource`.
+
+The program summary's `assumptionValidation` contains a state (`valid`, `invalid`,
+`inconclusive`), an `assumptions` array of keyed declarations with `validation`
+evidence, and its finding inventory. A verification selecting an invalid or
+unvalidated assumption has an `incomplete` summary, unknown consistency, and
+`assumptionValidation` evidence explaining why it was not checked. Other
+verifications still run. Any invalid or unvalidated declaration keeps the program
+summary `incomplete`, even without verifications; diagnostics remain program-scoped.
+
 A directional `assumed-conclusion` Warning uses identity
 `{"verification": [...], "assumption": [...], "obligation": [...], "notice": "assumed-conclusion"}`.
 It is primary on the selecting verification, with both declarations related. It

@@ -5,6 +5,8 @@ use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Kind {
+    InvalidAssumption,
+    UnvalidatedAssumption,
     InconsistentAssumptions,
     AssumedConclusion,
     ImpossibleCondition,
@@ -21,6 +23,8 @@ pub enum Kind {
 impl Kind {
     pub fn code(self) -> &'static str {
         match self {
+            Self::InvalidAssumption => "invalid-assumption",
+            Self::UnvalidatedAssumption => "unvalidated-assumption",
             Self::InconsistentAssumptions => "inconsistent-assumptions",
             Self::AssumedConclusion => "assumed-conclusion",
             Self::ImpossibleCondition => "impossible-condition",
@@ -37,14 +41,16 @@ impl Kind {
     }
     pub fn severity(self) -> Severity {
         match self {
-            Self::Counterexample | Self::NoMeaning | Self::InconsistentAssumptions => {
-                Severity::Error
-            }
+            Self::InvalidAssumption
+            | Self::Counterexample
+            | Self::NoMeaning
+            | Self::InconsistentAssumptions => Severity::Error,
             Self::UnsupportedRegion
             | Self::Rewrite
             | Self::AssumedConclusion
             | Self::ImpossibleCondition => Severity::Warning,
-            Self::UnsupportedGroup
+            Self::UnvalidatedAssumption
+            | Self::UnsupportedGroup
             | Self::Inconclusive
             | Self::EmptyGroupingDomain
             | Self::AlwaysTrueCondition

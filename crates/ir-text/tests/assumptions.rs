@@ -190,16 +190,30 @@ fn negated_assumptions_and_outside_inputs_survive_replay_and_coverage() {
 #[test]
 fn cone_validation_is_structural_independent_and_accepts_positive_recursion() {
     for body in ["r() :- !r();", "r() :- i(), !q(); q() :- r();"] {
-        let error = load_text(&format!(
+        let p = program(&format!(
             "input i(); relation r(); relation q(); {body} assumption a:empty(r); {VERIFY}"
-        ))
-        .err()
-        .unwrap();
+        ));
+        let validation =
+            validate_assumption_cones(&p.corpus, &p.domains, &p.keys, &Limits::default()).unwrap();
         assert!(
-            error
-                .iter()
-                .any(|d| d.message.contains("cycle through negation"))
+            validation
+                .assumptions
+                .values()
+                .any(|s| matches!(s, AssumptionValidity::Invalid { .. }))
         );
+        let request = p
+            .verification_requests(&Limits::default())
+            .unwrap()
+            .remove(0)
+            .1;
+        assert!(matches!(
+            request.prepare(
+                &p.corpus,
+                &p.keys,
+                &OperationalLimits::from(&Limits::default())
+            ),
+            Err(CheckError::InvalidAssumptionCone { .. })
+        ));
     }
     let p = program(&format!(
         "input i(); relation r(); relation q(); q() :- i(); q() :- r(); r() :- q(); assumption a:empty(r); {VERIFY}"

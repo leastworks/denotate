@@ -43,6 +43,15 @@ fn snapshot(text: &str) -> Snapshot {
 fn config() -> Config {
     Config::parse(["/score".into(), "--samples".into(), "1".into()]).unwrap()
 }
+#[test]
+fn invalid_unselected_assumptions_are_not_silently_scored_as_unconfigured() {
+    let source = snapshot("relation p(); p():-!p(); assumption a:empty(p);");
+    let error = driver::collect(&config(), &source, None).unwrap_err();
+    assert!(
+        error.contains("Assumption validation") && error.contains("invalid-assumption"),
+        "{error}"
+    );
+}
 fn run(text: &str, mode: &str) -> Run {
     let p = snapshot(text).load(false).unwrap();
     let c = config();

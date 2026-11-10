@@ -365,10 +365,6 @@ fn invalid_programs_return_current_source_diagnostics_without_partial_ir() {
             "cannot be defined by a rule",
         ),
         (
-            "relation r(); r() :- !r(); assumption a: at_most_one(r, group_by: ());",
-            "cycle through negation",
-        ),
-        (
             "input p(); obligation a: at_most_one(p, group_by: missing);",
             "Unknown grouping",
         ),
@@ -389,6 +385,38 @@ fn invalid_programs_return_current_source_diagnostics_without_partial_ir() {
         );
         assert_eq!(errors[0].uri, "file:///m.den");
     }
+}
+
+#[test]
+fn assumption_cycles_load_with_pending_ground_validation() {
+    let p = load(
+        "m",
+        &[source(
+            "m",
+            "module m; relation r(); r() :- !r(); assumption a: at_most_one(r, group_by: ());",
+        )],
+    )
+    .unwrap();
+    assert!(
+        p.corpus
+            .validate_assumptions()
+            .unwrap()
+            .values()
+            .all(|c| *c == denotate_ir::AssumptionCone::NeedsGrounding)
+    );
+    let validation = denotate_check::validate_assumption_cones(
+        &p.corpus,
+        &p.domains,
+        &p.keys,
+        &denotate_check::Limits::default(),
+    )
+    .unwrap();
+    assert!(
+        validation
+            .assumptions
+            .values()
+            .all(|s| matches!(s, denotate_check::AssumptionValidity::Invalid { .. }))
+    );
 }
 
 #[test]

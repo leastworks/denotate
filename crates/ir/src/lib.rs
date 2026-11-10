@@ -13,6 +13,7 @@ mod model;
 mod namespace;
 mod provenance;
 
+pub use assumptions::AssumptionCone;
 pub use ids::*;
 pub use keys::*;
 pub use model::*;

@@ -2,16 +2,26 @@
 use crate::*;
 use std::collections::{BTreeMap, BTreeSet};
 
+/// Preliminary classification. Ground validation belongs to the checker, which
+/// has the program's resolved domains, input eligibility and resource limits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AssumptionCone {
+    RelationStratified,
+    NeedsGrounding,
+}
+
 impl Corpus {
-    pub fn validate_assumptions(&self) -> Result<(), ConstructionError> {
+    pub fn validate_assumptions(
+        &self,
+    ) -> Result<BTreeMap<RelationId, AssumptionCone>, ConstructionError> {
         self.validate_assumptions_with(|| Ok(()))
     }
-    /// Call after constructing the rules. The relation graph, not just its current
-    /// finite grounding, must be stratified. No assumption may admit its own cone.
+    /// Call after constructing the rules. A relation-level negative cycle defers
+    /// validation to the checker; it is not a declaration error or an acceptance.
     pub fn validate_assumptions_with<E: From<ConstructionError>>(
         &self,
         tick: impl FnMut() -> Result<(), E>,
-    ) -> Result<(), E> {
+    ) -> Result<BTreeMap<RelationId, AssumptionCone>, E> {
         self.validate_assumption_relations_with(
             self.assumptions().map(|a| a.restriction.relation()),
             tick,
@@ -23,7 +33,7 @@ impl Corpus {
         &self,
         roots: impl IntoIterator<Item = RelationId>,
         mut tick: impl FnMut() -> Result<(), E>,
-    ) -> Result<(), E> {
+    ) -> Result<BTreeMap<RelationId, AssumptionCone>, E> {
         let mut edges = BTreeMap::<RelationId, Vec<(RelationId, bool)>>::new();
         for rule in self.rules() {
             tick()?;
@@ -40,7 +50,8 @@ impl Corpus {
             tick()?;
             unique_roots.insert(relation);
         }
-        for relation in unique_roots {
+        let mut result = BTreeMap::new();
+        'roots: for relation in unique_roots {
             self.relation(relation)
                 .ok_or(ConstructionError::UnknownRelation(relation))?;
             let mut cone = BTreeSet::new();
@@ -66,7 +77,8 @@ impl Corpus {
                     while let Some(id) = pending.pop() {
                         tick()?;
                         if id == *source {
-                            return Err(ConstructionError::InvalidAssumption { relation, reason: "assumption relation has a dependency cycle through negation" }.into());
+                            result.insert(relation, AssumptionCone::NeedsGrounding);
+                            continue 'roots;
                         }
                         if !seen.insert(id) {
                             continue;
@@ -78,8 +90,9 @@ impl Corpus {
                     }
                 }
             }
+            result.insert(relation, AssumptionCone::RelationStratified);
         }
-        Ok(())
+        Ok(result)
     }
     /// Directional warning: assuming a conclusion (or something computed from it).
     /// Depending on an assumed premise is ordinary assume-guarantee reasoning.

@@ -2,6 +2,7 @@
 //! Observation certificates are scoped to one input snapshot. Frontends own presentation.
 
 mod accounting;
+mod assumption_validation;
 mod assumptions;
 mod boolean;
 mod certification;
@@ -20,6 +21,7 @@ mod symbolic;
 mod upper_bounds;
 
 pub use accounting::*;
+pub use assumption_validation::*;
 pub use boolean::*;
 pub use certification::*;
 pub use completion::*;

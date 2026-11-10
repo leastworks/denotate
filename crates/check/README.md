@@ -57,7 +57,21 @@ obligations do not match their named verification. Input-only `at_most_one` cont
 retain their local checking path. General input/derived cardinality constraints
 compute W independently during preparation, then use whole-program checking.
 An empty W reports `inconsistent_assumptions` with no obligation results. Unknown W
-is inconclusive. The IR validates stratified constraint cones before this evaluation.
+is inconclusive. The IR classifies constraint cones before this evaluation; selected
+cones requiring grounding must have no reachable negative cycle in the raw graph.
+
+`validate_assumption_cones(corpus, domains, keys, limits)` is the program-level
+declaration query, called before verification loops, including when none exist. It
+uses relation-stratified cones immediately; others use fresh unrestricted grounding
+with no obligation groups, followed by the existing graph's `blocked_by` and cycle
+evidence. Results identify assumptions and cycle edges with semantic keys. It never
+uses selected assumptions or admission, and never rejects an unrelated ground cycle.
+An exhausted query retains established results and marks remaining declarations
+inconclusive; cancellation aborts. The query currently recomputes, so facts, domains
+and input eligibility cannot leave stale validation. Request preparation also checks
+selected restrictions, including unnamed API requests, before computing W, returning
+`InvalidAssumptionCone` with keyed evidence on failure. Program-level invalid
+declarations do not prevent unrelated verifications from preparing.
 
 Admission, rewrite proofs and no-meaning/unsupported analysis use that request's
 constraints even when no obligations are selected. Unselected assumptions have no

@@ -42,6 +42,18 @@ real program that the current choice serves badly.
   under the assumptions, or certifies a world, and reports everything else as
   unsupported or no-meaning ([meaning](den-format.md#meaning)).
   The well-founded semantics is not adopted until a real program needs it.
+- **Assumption cones may be stratified after grounding.** Generic library relations
+  can contain a relation-level negative cycle whose ends are used by different
+  tuples. Requiring relation stratification forced authors to split those relations
+  even when no ground cycle existed. The IR now classifies such cones for deferred
+  validation; the checker follows dependencies from the assumption's ground atoms
+  in the existing unrevised graph. Selected assumptions cannot prune this graph,
+  and no admission proofs are used, so W's meaning never depends on W. Negative
+  cycles elsewhere in the program do not invalidate an independent assumption.
+  All declarations are validated at program level, including unselected ones;
+  selecting an invalid or unvalidated assumption prevents that verification from
+  running. Ground validation is fresh and bounded. This deliberately leaves
+  assumption-free redundancy proofs and further static simplification for later.
 - **Conclusive answers must be sound.** A false counterexample or a silent success
   misleads the author; an explicit inconclusive or unsupported outcome does not. Hence
   counterexamples only after concrete replay (or certification); blocked or unknown

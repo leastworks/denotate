@@ -1050,8 +1050,8 @@ impl Corpus {
         Ok(indices)
     }
 
-    /// Declare a named restriction. Validate the completed rule graph with
-    /// `validate_assumptions`; checking and text loading also do this.
+    /// Declare a named restriction. Classify the completed rule graph with
+    /// `validate_assumptions`; cones requiring grounding are validated by the checker.
     pub fn assume_in(
         &mut self,
         namespace: impl Into<Namespace>,

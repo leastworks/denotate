@@ -69,9 +69,13 @@ just test-crate denotate-ir
 Named assumptions use the same `Restriction` cardinality shape as `Requirement`:
 `assume_at_most_one_in`, `assume_at_least_one_in`, `assume_exactly_one_in` and
 `assume_empty_in` (or `assume_in`). Input and derived targets are allowed. Once rules
-are complete, `validate_assumptions` rejects dependency cycles through negation;
-positive recursion and input dependencies are allowed. This validation cannot use
-the assumptions it validates. The checker owns evaluation and consistency.
+are complete, `validate_assumptions` returns a classification per target relation:
+`RelationStratified` or `NeedsGrounding`. Positive recursion and input dependencies
+are allowed. Relation-level negative cycles defer validity to the checker's
+`validate_assumption_cones` over resolved domains. They are not load errors or
+implicitly accepted. The IR has no grounder or checker dependency. The checker
+owns final validation, evaluation and consistency, independently of any selected
+assumptions.
 
 Contextual condition notices are separate declarations: `notice_varies_in` takes a
 zero-arity condition, optional zero-arity enclosing scope, and a message label.

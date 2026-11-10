@@ -87,6 +87,23 @@ fn check(
             .map_err(Failure::Invalid)?;
     job.limits.cancellation.check()?;
     let mut publication = presentation::configuration(&program).map_err(Failure::Internal)?;
+    let validation = validate_assumption_cones(
+        &program.corpus,
+        &program.domains,
+        &program.keys,
+        &job.limits,
+    )?;
+    let validation_publication =
+        presentation::assumption_validation(&program, &validation).map_err(Failure::Internal)?;
+    publication.status["assumptionValidation"] = validation_publication.status.clone();
+    for (uri, diagnostics) in validation_publication.diagnostics {
+        publication
+            .diagnostics
+            .entry(uri)
+            .or_default()
+            .extend(diagnostics);
+    }
+    publication.status["findings"] = validation_publication.status["findings"].clone();
     let requests = program.verification_requests(&job.limits)?;
     for (i, (_, request)) in requests.iter().enumerate() {
         job.limits.cancellation.check()?;
@@ -98,6 +115,14 @@ fn check(
             status: denotate_presentation::summary(&request.exhausted(reason)),
         };
         let mut run = || -> std::result::Result<Publication, Failure> {
+            if let Some(state) =
+                validation.selected_failure(&program.corpus, &program.keys, request)?
+            {
+                return Ok(Publication {
+                    diagnostics: BTreeMap::new(),
+                    status: json!({"state":"incomplete","consistency":"unknown","assumptionValidation":denotate_presentation::assumption_validity_data(state)}),
+                });
+            }
             let ground =
                 match session.prepare(request, &program.corpus, &program.keys, &operations)? {
                     RequestPreparation::Complete(p) => p,
@@ -164,7 +189,9 @@ fn check(
     } else {
         "complete"
     };
-    let state = if verifications.is_empty() {
+    let state = if !validation.is_valid() {
+        "incomplete"
+    } else if verifications.is_empty() {
         "unconfigured"
     } else if checking != "complete"
         || !publication.status["uncheckedObligations"]
@@ -698,6 +725,97 @@ impl CheckingHandler for Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn assumption_job(text: &str, limits: Limits) -> Job<String, Payload> {
+        Job {
+            ticket: Ticket {
+                key: "file:///den.root".into(),
+                revision: 1,
+                metadata: (),
+            },
+            payload: Payload {
+                snapshot: Snapshot {
+                    membership: ProgramMembership::single(
+                        "file:///den.root",
+                        ["file:///p.den".into()],
+                    ),
+                    files: vec![SourceFile::new("file:///p.den", 1, text)],
+                    key: Value::Null,
+                    bridge: Bridge::default(),
+                    config: Config::default(),
+                    label: "p".into(),
+                },
+                measure: false,
+            },
+            limits,
+        }
+    }
+    #[test]
+    fn assumption_validation_publishes_without_verifications_and_clears_on_edit() {
+        let mut session = denotate_check_session::Session::with_grounding();
+        for fact in ["", "eligible();", ""] {
+            let text = format!("relation eligible(); {fact} input i() within eligible; relation p(); p():-i(),!p(); assumption invalid:empty(p);");
+            let job = assumption_job(&text, Limits::default());
+            let warm = check(&job, &mut session).unwrap();
+            let cold = check(&job, &mut denotate_check_session::Session::default()).unwrap();
+            assert_eq!(warm.status, cold.status);
+            assert_eq!(warm.diagnostics, cold.diagnostics);
+            if fact.is_empty() {
+                assert_eq!(warm.status["state"], "unconfigured");
+                assert!(warm.diagnostics.values().all(Vec::is_empty));
+            } else {
+                assert_eq!(warm.status["state"], "incomplete");
+                let ds = warm.diagnostics.values().flatten().collect::<Vec<_>>();
+                assert_eq!(ds.len(), 1);
+                let data = ds[0].data.as_ref().unwrap();
+                assert_eq!(data["kind"], "invalid-assumption");
+                assert_eq!(data["finding"]["verification"], Value::Null);
+                assert!(!ds[0].related_information.as_ref().unwrap().is_empty());
+            }
+        }
+    }
+    #[test]
+    fn invalid_assumptions_skip_their_verifications_but_not_independent_ones() {
+        let job = assumption_job("input i(); relation p(); p():-i(),!p(); assumption invalid:empty(p); assumption exclude:empty(i); verification bad { assumptions:[invalid]; obligations:[]; } verification good { assumptions:[exclude]; obligations:[]; }",Limits::default());
+        let result = check(&job, &mut denotate_check_session::Session::default()).unwrap();
+        assert_eq!(
+            result.status["verifications"][0]["summary"]["assumptionValidation"]["state"],
+            "invalid"
+        );
+        assert_eq!(
+            result.status["verifications"][1]["summary"]["state"],
+            "proved"
+        );
+        assert_eq!(
+            result
+                .diagnostics
+                .values()
+                .flatten()
+                .filter(|d| d
+                    .data
+                    .as_ref()
+                    .is_some_and(|d| d["kind"] == "invalid-assumption"))
+                .count(),
+            1
+        );
+    }
+    #[test]
+    fn exhausted_assumption_validation_is_visible_without_a_verification() {
+        let job = assumption_job(
+            "input i(); relation p(); p():-i(),!p(); assumption a:empty(p);",
+            Limits {
+                max_atoms: 0,
+                ..Limits::default()
+            },
+        );
+        let result = check(&job, &mut denotate_check_session::Session::default()).unwrap();
+        assert_eq!(result.status["state"], "incomplete");
+        assert_eq!(
+            result.status["assumptionValidation"]["state"],
+            "inconclusive"
+        );
+        let d = result.diagnostics.values().flatten().next().unwrap();
+        assert_eq!(d.data.as_ref().unwrap()["kind"], "unvalidated-assumption");
+    }
     #[test]
     fn an_exhausted_verification_does_not_prevent_the_next_one() {
         let text = "sort S; const a,b,c:S; input p(x:S); relation single(); single(); obligation expensive: at_most_one(p, group_by: ()); obligation trivial: at_most_one(single, group_by: ()); verification first { assumptions: []; obligations: [expensive]; } verification second { assumptions: []; obligations: [trivial]; }";

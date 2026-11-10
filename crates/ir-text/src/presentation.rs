@@ -9,6 +9,52 @@ pub struct Presentation {
     pub diagnostics: Vec<Diagnostic>,
     pub status: Value,
 }
+/// Declaration validity is program-scoped, including without verifications.
+pub fn present_assumption_validation(
+    program: &LoadedProgram,
+    validation: &denotate_check::AssumptionValidation,
+) -> Result<Presentation> {
+    let user_files = program
+        .documents
+        .iter()
+        .filter(|d| d.ownership == "user")
+        .map(|d| d.uri.clone())
+        .collect();
+    let placement = Placement {
+        program: &program.root,
+        verification: None,
+        user_files: &user_files,
+        sources: &program.sources,
+        current: &program.provenance,
+        upstream: &program.embedded.provenance,
+    };
+    let mut diagnostics = Vec::new();
+    let mut inventory = Vec::new();
+    for (finding, evidence) in denotate_presentation::assumption_validation_findings(
+        &program.corpus,
+        &program.keys,
+        validation,
+    )? {
+        let mut placed = placement.place(
+            &finding.identity,
+            finding.kind,
+            &finding.message,
+            &[],
+            &finding.contributions,
+        )?;
+        for d in &mut placed {
+            d.evidence = evidence.clone();
+        }
+        inventory.push(json!({"identity":finding.identity.data_in(&program.keys,None)?,"kind":finding.kind.code(),"message":finding.message,"fallback":placed.iter().any(|d|d.fallback),"located":!placed.is_empty()}));
+        diagnostics.extend(placed);
+    }
+    let mut status = denotate_presentation::assumption_validation_summary(validation);
+    status["findings"] = json!(inventory);
+    Ok(Presentation {
+        diagnostics,
+        status,
+    })
+}
 pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Presentation> {
     let user_files = program
         .documents

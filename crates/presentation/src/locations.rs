@@ -117,7 +117,7 @@ impl Placement<'_> {
                 fallback,
                 evidence: Value::Null,
             });
-            if matches!(identity, Identity::Notice(_))
+            if matches!(identity, Identity::Notice(_) | Identity::Assumption(_))
                 || (matches!(identity, Identity::Coverage(_)) && !coverage_constants)
                 || matches!(
                     kind,

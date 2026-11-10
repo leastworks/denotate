@@ -21,6 +21,11 @@ pub enum CheckError {
         phase: &'static str,
     },
     InvalidRequest(&'static str),
+    /// A selected restriction depends on a negative cycle before admission.
+    InvalidAssumptionCone {
+        relation: denotate_ir::RelationKey,
+        cycles: Vec<crate::AssumptionCycle>,
+    },
     /// Low-level property queries cannot report vacuous proofs. Request checking
     /// represents this as an inconsistent context with no obligation results.
     InconsistentAssumptions,
@@ -292,5 +297,10 @@ impl<'a> Budget<'a> {
 impl From<denotate_ir::ConstructionError> for CheckError {
     fn from(e: denotate_ir::ConstructionError) -> Self {
         Self::Construction(e)
+    }
+}
+impl From<denotate_ir::KeyError> for CheckError {
+    fn from(e: denotate_ir::KeyError) -> Self {
+        Self::Keys(e)
     }
 }

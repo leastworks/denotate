@@ -165,6 +165,19 @@ fn run_with_limits(
         .unwrap();
     }
     let operations = OperationalLimits::from(&limits);
+    let validation =
+        denotate_check::validate_assumption_cones(&p.corpus, &p.domains, &p.keys, &limits)
+            .map_err(|e| (2, e.to_string()))?;
+    if !validation.is_valid() {
+        let presented = presentation::present_assumption_validation(&p, &validation)
+            .map_err(|e| (2, e.to_string()))?;
+        if json {
+            writeln!(output, "Assumption validation: {:#}", presented.status).unwrap();
+        } else {
+            writeln!(output, "Assumption validation").unwrap();
+            print_diagnostics(&p, &presented, output, verbose)?;
+        }
+    }
     let mut requests = p
         .verification_requests(&limits)
         .map_err(|e| (2, e.to_string()))?;
@@ -228,7 +241,7 @@ fn run_with_limits(
         .unwrap();
     }
     // Unchecked obligations are incomplete configuration, not findings.
-    let mut incomplete = partial || unchecked;
+    let mut incomplete = partial || unchecked || !validation.is_valid();
     let mut findings = false;
     let mut session = Session::default();
     for (key, request) in requests {
@@ -257,6 +270,19 @@ fn run_with_limits(
             })
             .collect::<Vec<_>>();
         writeln!(output, "Selected assumptions: [{}]", assumptions.join(", ")).unwrap();
+        if let Some(state) = validation
+            .selected_failure(&p.corpus, &p.keys, &request)
+            .map_err(|e| (2, e.to_string()))?
+        {
+            writeln!(
+                output,
+                "Not checked: selected assumption validation is {}.",
+                state.label()
+            )
+            .unwrap();
+            incomplete = true;
+            continue;
+        }
         if declaration.obligations.is_empty() && declaration.notices.is_empty() {
             writeln!(
                 output,
@@ -396,6 +422,41 @@ mod tests {
     }
     const BODY: &str = "sort S; const x, y: S; input p(x:S); relation q(x:S); q(X) :- p(X); assumption a: at_most_one(p, group_by: ()); obligation o: at_most_one(q, group_by: ());";
     const RESTRICTED: &str = "verification v { assumptions: [a]; obligations: [o]; }";
+    #[test]
+    fn invalid_assumptions_are_located_without_verifications_and_block_only_selection() {
+        let body = "input i(); relation p(); p():-i(),!p(); assumption invalid:empty(p); assumption exclude:empty(i);";
+        for verifications in [
+            "",
+            "verification bad { assumptions:[invalid]; obligations:[]; } verification good { assumptions:[exclude]; obligations:[]; }",
+        ] {
+            let fixture = Fixture::new(&format!("{body}{verifications}"));
+            let (code, output) = fixture.run(&[]);
+            assert_eq!(code, 2, "{output}");
+            assert!(
+                output.contains("invalid-assumption: Assumption invalid"),
+                "{output}"
+            );
+            assert!(
+                output.contains("related:") && output.contains("blocking dependency cycle"),
+                "{output}"
+            );
+            if verifications.is_empty() {
+                assert!(output.contains("No verification configured"));
+            } else {
+                assert!(output.contains("Not checked: selected assumption validation is invalid."));
+                assert!(
+                    output.contains("Verification ::good") && output.contains("Result: proved"),
+                    "{output}"
+                );
+            }
+            let (json_code, json) = fixture.run(&["--json"]);
+            assert_eq!(json_code, code);
+            assert!(
+                json.contains("\"cycles\"") && json.contains("\"state\": \"invalid\""),
+                "{json}"
+            );
+        }
+    }
     #[test]
     fn advisory_notices_print_locations_without_failing_obligations() {
         let f = Fixture::new(

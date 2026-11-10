@@ -326,16 +326,12 @@ impl CheckRequest {
         let limits = self.limits.with_operations(operations);
         let mut budget = Budget::tracked(&limits);
         let mut receipts = WorkReceipts::default();
+        let mut ground_validation = BTreeMap::new();
         let result = (|| {
-            corpus.validate_assumption_relations_with(
-                corpus
-                    .assumptions()
-                    .map(|a| a.restriction.relation())
-                    .chain(
-                        self.constraints
-                            .iter()
-                            .filter_map(|c| relations.get(c.relation()).copied()),
-                    ),
+            ground_validation = corpus.validate_assumption_relations_with(
+                self.constraints
+                    .iter()
+                    .filter_map(|c| relations.get(c.relation()).copied()),
                 || budget.tick("assumptions"),
             )?;
             if let Some(store) = grounding {
@@ -409,6 +405,25 @@ impl CheckRequest {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
+        for (relation, classification) in ground_validation {
+            if classification == denotate_ir::AssumptionCone::NeedsGrounding {
+                let cycles = match program.assumption_cycles(relation, keys, &mut budget) {
+                    Ok(cycles) => cycles,
+                    Err(error) => {
+                        budget.failure(&error);
+                        let reason = Inconclusive::from_error(error)?;
+                        budget.record(&mut receipts, QueryKey::Preparation, dependencies)?;
+                        return Ok(RequestPreparation::Inconclusive { reason, receipts });
+                    }
+                };
+                if !cycles.is_empty() {
+                    return Err(CheckError::InvalidAssumptionCone {
+                        relation: keys.relation(relation)?.clone(),
+                        cycles,
+                    });
+                }
+            }
+        }
         if !general.is_empty() {
             if let Err(error) = program.install_assumptions(&general, &mut budget) {
                 budget.failure(&error);

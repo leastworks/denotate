@@ -302,6 +302,19 @@ fn configuration(p: &LoadedProgram, requests: &[(VerificationKey, CheckRequest)]
 pub fn collect(c: &Config, base: &Snapshot, edit: Option<&Snapshot>) -> Result<Value, String> {
     let p = base.load(false)?;
     let e = edit.map(|s| s.load(false)).transpose()?;
+    for program in std::iter::once(&p).chain(e.as_ref()) {
+        let validation =
+            validate_assumption_cones(&program.corpus, &program.domains, &program.keys, &c.limits)
+                .map_err(|e| e.to_string())?;
+        if !validation.is_valid() {
+            return Err(format!(
+                "Assumption validation: {}",
+                denotate_ir_text::presentation::present_assumption_validation(program, &validation)
+                    .map_err(|e| e.to_string())?
+                    .status
+            ));
+        }
+    }
     let requests = p
         .verification_requests(&c.limits)
         .map_err(|e| e.to_string())?;

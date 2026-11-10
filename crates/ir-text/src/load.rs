@@ -1064,28 +1064,11 @@ pub fn load_with_resolver(
         let (m, span) = &input_domain_sites[input];
         ir_construction::<()>(m, span.clone(), Err(e), &b.program.corpus)?;
     }
-    if let Err(ConstructionError::InvalidAssumption { relation, reason }) =
-        b.program.corpus.validate_assumptions()
-    {
-        let assumption = b
-            .program
-            .corpus
-            .assumptions()
-            .find(|a| a.restriction.relation() == relation)
-            .expect("validated declared assumption")
-            .id;
-        let origins = b.program.provenance.origins(assumption);
-        let span = origins
-            .first()
-            .expect("loaded assumption has an origin")
-            .span;
-        let snapshot = b.program.sources.snapshot(span.snapshot()).unwrap();
-        return Err(vec![Diagnostic {
-            uri: snapshot.uri.clone(),
-            range: span.byte_range(),
-            message: reason.into(),
-        }]);
-    }
+    // Preliminary classification only; domain-aware validation runs in the checker.
+    b.program
+        .corpus
+        .validate_assumptions()
+        .expect("assumption relations were resolved");
     b.program.keys.validate(&b.program.corpus).map_err(|e| {
         vec![Diagnostic {
             uri: membership.root.clone(),

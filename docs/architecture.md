@@ -70,8 +70,17 @@ before seeding input atoms. Complete eligible tuple sets are explicit semantic-k
 inputs to session grounding. Provider evaluation itself is currently fresh on each
 preparation; no partial result can enter the grounding cache.
 
-Selected general assumptions are another preparation boundary. The IR validates their
-independent stratified dependency cones; the checker computes W before admission.
+Assumption declaration validity is a program-level query. The IR classifies
+relation-stratified cones and those requiring grounding; the checker resolves the
+latter against its unrevised ground dependency graph, without selected assumptions.
+The editor and CLI run `validate_assumption_cones` before their verification loops,
+so unselected declarations and unconfigured programs still get diagnostics. Keyed
+cycle evidence goes through the shared presenter; it is never reconstructed there.
+Validation currently recomputes from each complete snapshot. Request preparation
+also enforces validity of selected restrictions for construction/API callers.
+
+Selected general assumptions are another preparation boundary: once their meaning
+is independently established, the checker computes W before admission.
 Input-only at-most-one contexts retain local memoized queries. General contexts use
 whole-program BDD evaluation and fresh W, while retaining grounding/plan reuse:
 local absent-extension and constraint-projection shortcuts are not sound for general

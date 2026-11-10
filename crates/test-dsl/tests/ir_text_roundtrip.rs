@@ -690,7 +690,8 @@ fn finding_identity(
 ) -> FindingIdentity {
     use denotate_presentation::Identity;
     match id {
-        Identity::InconsistentAssumptions
+        Identity::Assumption(_)
+        | Identity::InconsistentAssumptions
         | Identity::AssumedConclusion(..)
         | Identity::Notice(_) => panic!(
             "test DSL input-cardinality contracts are consistent and do not assume their conclusion"
