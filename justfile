@@ -143,6 +143,10 @@ test-den: setup-den
     npm test --prefix editors/den
     npm run test:lsp --prefix editors/den
 
+# Check progress labels and output logging without launching an editor.
+test-den-progress: setup-den
+    npm run test:progress --prefix editors/den
+
 # Launch an isolated VS Code with the .den editor extension under test.
 test-den-vscode:
     DENOTATE_VSCODE_EXECUTABLE="${DENOTATE_VSCODE_EXECUTABLE:-/Applications/Visual Studio Code.app/Contents/MacOS/Code}" npm run test:vscode --prefix editors/den

@@ -66,8 +66,8 @@ pub(crate) struct Payload {
     measure: bool,
 }
 type Output = (std::result::Result<Publication, Failure>, Value);
-type Worker = Scheduler<String, Payload, Output>;
-pub type Event = checking::Event<String, Output>;
+type Worker = Scheduler<String, Payload, Output, (), Value>;
+pub type Event = checking::Event<String, Output, (), Value>;
 #[derive(Debug)]
 pub enum Failure {
     Cancelled,
@@ -88,17 +88,35 @@ impl From<CheckError> for Failure {
         }
     }
 }
+#[cfg(test)]
 fn check(
     job: &Job<String, Payload>,
     session: &mut denotate_check_session::Session,
 ) -> std::result::Result<Publication, Failure> {
+    check_with_progress(job, session, None)
+}
+fn check_with_progress(
+    job: &Job<String, Payload>,
+    session: &mut denotate_check_session::Session,
+    report: Option<&dyn Fn(Value)>,
+) -> std::result::Result<Publication, Failure> {
+    let started = std::time::Instant::now();
+    let progress = |phase, mut detail: Value| {
+        if let Some(report) = report {
+            detail["phase"] = json!(phase);
+            detail["elapsedMs"] = json!(started.elapsed().as_millis() as u64);
+            report(detail);
+        }
+    };
     job.limits.cancellation.check()?;
     let s = &job.payload.snapshot;
+    progress("loading", json!({"files":s.files.len()}));
     let program =
         denotate_ir_text::load_with_resolver(&s.membership, &s.files, Some(&mut &s.bridge))
             .map_err(Failure::Invalid)?;
     job.limits.cancellation.check()?;
     let mut publication = presentation::configuration(&program).map_err(Failure::Internal)?;
+    progress("assumption-validation", json!({}));
     let validation = validate_assumption_cones(
         &program.corpus,
         &program.domains,
@@ -118,6 +136,10 @@ fn check(
     publication.status["findings"] = validation_publication.status["findings"].clone();
     let requests = program.verification_requests(&job.limits)?;
     for (i, (_, request)) in requests.iter().enumerate() {
+        let context = json!({"verification":publication.status["verifications"][i]["verification"],
+            "verificationIndex":i+1,"verificationTotal":requests.len(),
+            "assumptions":publication.status["verifications"][i]["assumptions"].as_array().map_or(0, Vec::len),
+            "obligations":request.obligations.len(),"notices":request.notices.len()});
         job.limits.cancellation.check()?;
         // Each context gets its own operation limits; a failed context cannot
         // consume another verification's deadline or prevent its execution.
@@ -135,6 +157,7 @@ fn check(
                     status: json!({"state":"incomplete","consistency":"unknown","assumptionValidation":denotate_presentation::assumption_validity_data(state)}),
                 });
             }
+            progress("preparation", context.clone());
             let ground =
                 match session.prepare(request, &program.corpus, &program.keys, &operations)? {
                     RequestPreparation::Complete(p) => p,
@@ -142,9 +165,20 @@ fn check(
                         return Ok(exhausted(reason))
                     }
                 };
+            let mut detail = context.clone();
+            if report.is_some() {
+                let p = ground.program();
+                detail["ground"] = json!({"atoms":p.atoms().count(),
+                    "inputAtoms":p.input_atoms().count(),"ruleInstances":p.rules().count(),
+                    "components":p.components().count(),
+                    "largestComponentAtoms":p.components().map(|c|c.atoms.len()).max().unwrap_or(0)});
+            }
+            progress("admission", detail.clone());
             let ground = ground.admit(&operations)?;
+            progress("checking", detail.clone());
             match session.verify(&ground, &operations)? {
                 LocalCheckOutcome::Complete(report) => {
+                    progress("presentation", detail);
                     presentation::present(&program, &report.checked, s.config.show_library_rewrites)
                         .map_err(Failure::Internal)
                 }
@@ -192,6 +226,7 @@ fn check(
                 .extend(findings.iter().cloned());
         }
     }
+    progress("publication", json!({"verificationTotal":requests.len()}));
     let verifications = publication.status["verifications"].as_array().unwrap();
     let checking = if verifications.is_empty() {
         "unconfigured"
@@ -264,6 +299,7 @@ struct State {
     publication: Option<Publication>,
     configuration: Option<Publication>,
     errors: Vec<String>,
+    progress: Option<Value>,
 }
 #[derive(Default)]
 pub struct Checking {
@@ -272,15 +308,66 @@ pub struct Checking {
     tests: bool,
     pub config: Config,
     hooks: CheckingHooks,
+    pub progress_enabled: bool,
+    last_progress: Option<Value>,
 }
 impl Checking {
+    fn record_progress(&mut self, ticket: &Ticket<String>, detail: Value) {
+        if let Some(state) = self.states.get_mut(&ticket.key) {
+            if state.revision == ticket.revision && state.checking == "checking" {
+                state.progress = Some(detail);
+            }
+        }
+    }
+    fn progress(&self, awaiting_snapshots: bool) -> Value {
+        let mut counts = BTreeMap::from([
+            ("pending", 0usize),
+            ("checking", 0),
+            ("complete", 0),
+            ("blocked", 0),
+            ("unconfigured", 0),
+            ("deadline", 0),
+            ("failed", 0),
+            ("cancelled", 0),
+        ]);
+        let mut active = vec![];
+        for (program, state) in &self.states {
+            *counts.entry(state.checking).or_default() += 1;
+            if state.checking == "checking" {
+                active.push(
+                    json!({"program":program,"revision":state.revision,"detail":state.progress,
+                    "label":state.snapshot.as_ref().map(|s|s.label.as_str()).unwrap_or(program)}),
+                );
+            }
+        }
+        json!({"total":self.states.len(),
+            "processed":self.states.len() - counts["pending"] - counts["checking"],
+            "counts":counts,"active":active,"awaitingSnapshots":awaiting_snapshots})
+    }
+    fn announce_progress(
+        &mut self,
+        connection: &Connection,
+        awaiting_snapshots: bool,
+    ) -> Result<()> {
+        if !self.progress_enabled {
+            return Ok(());
+        }
+        let progress = self.progress(awaiting_snapshots);
+        if self.last_progress.as_ref() != Some(&progress) {
+            send(connection, "denotate/checkingProgress", progress.clone())?;
+            self.last_progress = Some(progress);
+        }
+        Ok(())
+    }
     pub fn enable(&mut self, tests: bool) -> Result<()> {
         self.tests = tests;
-        self.worker = Some(Worker::spawn(
+        let progress_enabled = self.progress_enabled;
+        self.worker = Some(Worker::spawn_with_progress(
             "denotate-check",
-            |job, session, checkpoint| {
+            move |job, session, checkpoint, progress| {
                 checkpoint();
-                let result = check(job, session);
+                let result =
+                    check_with_progress(job, session, progress_enabled.then_some(progress));
                 let cache = if job.payload.measure {
                     let c = session.stats();
                     json!({"evaluationHits":c.evaluation_hits,"evaluationMisses":c.evaluation_misses,
@@ -370,6 +457,7 @@ impl Checking {
                         publication: None,
                         configuration: None,
                         errors: vec![],
+                        progress: None,
                     },
                 );
                 continue;
@@ -404,6 +492,7 @@ impl Checking {
                     publication: None,
                     configuration,
                     errors: vec![],
+                    progress: None,
                 },
             );
         }
@@ -570,6 +659,10 @@ impl Server {
     }
     fn check_finished(&mut self, connection: &Connection, event: Event) -> Result<()> {
         let (ticket, (result, cache)) = match event {
+            Event::Progress(ticket, detail) => {
+                self.checking.record_progress(&ticket, detail);
+                return Ok(());
+            }
             Event::Checkpoint(ticket) => {
                 send(
                     connection,
@@ -683,6 +776,32 @@ impl Server {
                 state.errors.push(error);
             }
         }
+        if matches!(state.checking, "failed" | "deadline") {
+            let label = state
+                .snapshot
+                .as_ref()
+                .map(|s| s.label.as_str())
+                .unwrap_or(&root);
+            let mut details = state.errors.clone();
+            if let Some(publication) = &state.publication {
+                for verification in publication.status["verifications"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                {
+                    if let Some(error) = verification["summary"]["error"].as_str() {
+                        details.push(error.to_owned());
+                    }
+                }
+            }
+            send(
+                connection,
+                "window/logMessage",
+                json!({"type":2,
+                "message":format!("{label}: checking {}{}", state.checking,
+                    if details.is_empty() { String::new() } else { format!(": {}", details.join("; ")) })}),
+            )?;
+        }
         for uri in self.documents.keys().cloned().collect::<Vec<_>>() {
             self.publish(connection, &uri)?;
         }
@@ -705,6 +824,7 @@ impl CheckingHandler for Server {
     type Payload = Payload;
     type Output = Output;
     type Metadata = ();
+    type Progress = Value;
     fn scheduler(&mut self) -> &mut Worker {
         self.checking.worker.as_mut().unwrap()
     }
@@ -726,6 +846,10 @@ impl CheckingHandler for Server {
     fn started(&mut self, ticket: &Ticket<String>) {
         self.checking.states.get_mut(&ticket.key).unwrap().checking = "checking";
     }
+    fn checking_status(&mut self, connection: &Connection) -> Result<()> {
+        self.checking
+            .announce_progress(connection, !self.bridge.settled())
+    }
     fn settled(&self) -> bool {
         self.bridge.settled()
     }
@@ -738,6 +862,81 @@ impl CheckingHandler for Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn progress_distinguishes_terminal_states_and_deduplicates_current_snapshots() {
+        let (server, client) = Connection::memory();
+        let mut checking = Checking::default();
+        checking.announce_progress(&server, false).unwrap();
+        assert!(client.receiver.try_recv().is_err()); // Opt in explicitly.
+        checking.progress_enabled = true;
+        for (program, phase) in [
+            ("a", "complete"),
+            ("b", "checking"),
+            ("c", "blocked"),
+            ("d", "unconfigured"),
+            ("e", "deadline"),
+            ("f", "failed"),
+            ("g", "cancelled"),
+        ] {
+            checking.states.insert(
+                program.into(),
+                State {
+                    snapshot: None,
+                    revision: 1,
+                    checking: phase,
+                    publication: None,
+                    configuration: None,
+                    errors: vec![],
+                    progress: None,
+                },
+            );
+        }
+        let snapshot = checking.progress(false);
+        assert_eq!(snapshot["total"], 7);
+        assert_eq!(snapshot["processed"], 6);
+        assert_eq!(snapshot["counts"]["complete"], 1);
+        assert_eq!(snapshot["active"][0]["program"], "b");
+        checking.announce_progress(&server, false).unwrap();
+        let lsp_server::Message::Notification(n) = client.receiver.try_recv().unwrap() else {
+            panic!()
+        };
+        assert_eq!(n.method, "denotate/checkingProgress");
+        assert_eq!(n.params, snapshot);
+        checking.announce_progress(&server, false).unwrap();
+        assert!(client.receiver.try_recv().is_err());
+        checking.announce_progress(&server, true).unwrap();
+        assert!(client.receiver.try_recv().is_ok());
+        checking.states.remove("a");
+        checking.states.get_mut("b").unwrap().checking = "pending";
+        let changed = checking.progress(false);
+        assert_eq!(changed["total"], 6);
+        assert_eq!(changed["processed"], 5);
+        assert_eq!(changed["active"], json!([]));
+        assert_eq!(changed["counts"]["pending"], 1);
+        let ticket = Ticket {
+            key: "b".into(),
+            revision: 1,
+            metadata: (),
+        };
+        checking.record_progress(&ticket, json!({"phase":"admission"}));
+        assert!(checking.states["b"].progress.is_none()); // Queued replacement.
+        let state = checking.states.get_mut("b").unwrap();
+        state.checking = "checking";
+        state.revision = 2;
+        checking.record_progress(&ticket, json!({"phase":"admission"}));
+        assert!(checking.states["b"].progress.is_none()); // Obsolete worker.
+        checking.record_progress(
+            &Ticket {
+                revision: 2,
+                ..ticket
+            },
+            json!({"phase":"checking"}),
+        );
+        assert_eq!(
+            checking.progress(false)["active"][0]["detail"]["phase"],
+            "checking"
+        );
+    }
     fn assumption_job(text: &str, limits: Limits) -> Job<String, Payload> {
         Job {
             ticket: Ticket {
@@ -760,6 +959,47 @@ mod tests {
                 measure: false,
             },
             limits,
+        }
+    }
+    #[test]
+    fn phase_reports_describe_prepared_work_without_changing_cold_or_warm_results() {
+        let job = assumption_job("sort S; const a,b:S; input p(x:S); obligation o:empty(p); verification v{assumptions:[];obligations:[o];}", Limits::default());
+        let mut session = denotate_check_session::Session::default();
+        let expected = check(&job, &mut session).unwrap();
+        for session in [
+            &mut session,
+            &mut denotate_check_session::Session::default(),
+        ] {
+            let updates = std::cell::RefCell::new(vec![]);
+            let actual =
+                check_with_progress(&job, session, Some(&|p| updates.borrow_mut().push(p)))
+                    .unwrap();
+            assert_eq!(actual.status, expected.status);
+            assert_eq!(actual.diagnostics, expected.diagnostics);
+            let updates = updates.into_inner();
+            assert_eq!(
+                updates
+                    .iter()
+                    .map(|p| p["phase"].as_str().unwrap())
+                    .collect::<Vec<_>>(),
+                [
+                    "loading",
+                    "assumption-validation",
+                    "preparation",
+                    "admission",
+                    "checking",
+                    "presentation",
+                    "publication"
+                ]
+            );
+            let prepared = &updates[3];
+            assert_eq!(prepared["verification"], "::v");
+            assert_eq!(prepared["verificationIndex"], 1);
+            assert_eq!(prepared["verificationTotal"], 1);
+            assert_eq!(prepared["obligations"], 1);
+            assert!(prepared["ground"]["inputAtoms"].as_u64().unwrap() > 0);
+            assert!(prepared["ground"]["atoms"].as_u64().unwrap() > 0);
+            assert!(prepared["ground"]["components"].as_u64().unwrap() > 0);
         }
     }
     #[test]

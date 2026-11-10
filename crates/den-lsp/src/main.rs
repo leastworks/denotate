@@ -773,6 +773,7 @@ fn run_with_mode(connection: &Connection, test_mode: bool) -> Result<()> {
         observation: 0,
     };
     server.bridge.enabled = params["initializationOptions"]["originSnapshotBridge"] == true;
+    server.checking.progress_enabled = params["initializationOptions"]["checkingProgress"] == true;
     server.checking.config = checking::Config::read(&params["initializationOptions"]["denotate"])?;
     server.checking.enable(test_mode)?;
     server.refresh_memberships();

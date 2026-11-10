@@ -79,11 +79,43 @@ findings remain visible everywhere. Full per-verification status inventories rem
 available; the status tooltip shows how many rewrite findings were hidden. Changing
 the setting refreshes publication without requiring a source edit.
 
+## Progress and output
+
+While background checking runs, the status bar shows a spinner and a count such as
+**Denotate: Checking 3/8 programs**. Hover to see the active program and how many
+programs are queued, checked, blocked, without verifications, or interrupted.
+The count includes library home programs; “processed” does not mean “proved”.
+Editing a program can put it back in the queue, and adding roots changes the total.
+For a single large program, the item shows the active phase and verification, such
+as **Admission · verification 2/3**. After preparation, its tooltip includes inputs,
+ground atoms, rule instances, components and largest component size. The clock
+shows time since the last server report; it is not a heartbeat or time remaining.
+Startup and discovery show an indeterminate spinner. When idle, the item resumes
+the active `.den` file's status.
+
+Click the status item or run **Denotate: Show Output** to open **Output → Denotate**.
+This is the normal log view: startup, phase transitions, prepared sizes, completion
+summaries, and operational errors such as a failed check or deadline. Run numbers
+identify replacements after edits: the same run staying in one phase differs from
+new runs repeatedly starting. Select **Debug** using the output
+channel's log-level control for detailed count and active-program updates. Routine
+progress does not open the panel automatically. Source diagnostics remain in
+**Problems**. The **Debug Console** is useful when developing the extension with
+F5; users do not need a debugging session to see Denotate's logs.
+
+Library findings can appear before a consumer finishes: the library has its own
+home program, and structural/configuration diagnostics can precede semantic checks.
+The timeout is applied to checking operations, not to the workspace as a whole;
+multiple verifications and queries can take longer in total. If CPU stays high
+without edits, the last phase, run number and size report help identify where work
+remains. A phase that stays unchanged does not by itself prove the process is stuck.
+
 ## Tests
 
 ```sh
 just test-den          # server component tests, syntax manifest, all shared LSP scenarios
 just test-den-origins   # Go to Origin unit tests
+just test-den-progress # progress labels and logging tests, no editor
 just test-den-vscode   # installed VS Code smoke (needs a local VS Code)
 ```
 

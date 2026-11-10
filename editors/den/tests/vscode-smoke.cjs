@@ -91,6 +91,16 @@ exports.run = async function () {
         }
         throw new Error(`Timed out: ${label}`);
     }
+    const progressStatus = await eventually(() => api.checkingStatus(),
+        s => s.progress && !s.progress.awaitingSnapshots && s.progress.counts.pending === 0 && s.progress.counts.checking === 0 && !s.text.includes('~spin'),
+        'checking progress settles');
+    assert.equal(progressStatus.progress.processed, progressStatus.progress.total);
+    assert.ok(progressStatus.progress.total > 0);
+    assert.equal(progressStatus.command, 'denotate.showOutput');
+    assert.match(progressStatus.tooltip, /programs processed/);
+    assert.ok(!progressStatus.text.includes('~spin'), progressStatus.text);
+    await vscode.commands.executeCommand('denotate.showOutput');
+    console.log('Denotate progress settled; status links to its Output channel.');
     const rootUri = vscode.Uri.joinPath(folder, 'den.root');
     const rootDoc = await vscode.workspace.openTextDocument(rootUri);
     const rootText = rootDoc.getText();

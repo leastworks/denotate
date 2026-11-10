@@ -152,6 +152,7 @@ impl Server {
 
     fn completed(&mut self, connection: &Connection, event: Event) -> Result<()> {
         let (id, result, check_ns) = match event {
+            Event::Progress(_, never) => match never {},
             Event::Checkpoint(id) => {
                 if self.tests {
                     send(connection, test_support::CHECKPOINT, identity(&id))?;
@@ -248,6 +249,7 @@ impl CheckingHandler for Server {
     type Payload = Payload;
     type Output = worker::Checked;
     type Metadata = i32;
+    type Progress = std::convert::Infallible;
     fn scheduler(&mut self) -> &mut Worker {
         &mut self.worker
     }

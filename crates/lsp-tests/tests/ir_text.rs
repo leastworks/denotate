@@ -11,6 +11,93 @@ fn query(c: &mut Client, method: &str, uri: &str, text: &str, needle: &str, delt
     c.request(method,json!({"textDocument":{"uri":uri},"position":position(text,needle,delta),"context":{"includeDeclaration":true}}))
 }
 #[test]
+fn checking_progress_tracks_current_work_and_never_counts_a_discarded_result() {
+    const PROGRESS: &str = "denotate/checkingProgress";
+    let mut c = Client::start_with_progress("base/00-valid");
+    checking_idle(&mut c);
+    let initial = c.take_notifications(PROGRESS).pop().unwrap();
+    assert_eq!(initial["processed"], initial["total"]);
+    assert_eq!(initial["counts"]["checking"], 0);
+    c.request("denotate/test/hold", json!({}));
+    let (uri, _) = c.open("example.den");
+    let held = c.notification("denotate/test/checkpoint");
+    c.request("denotate/test/idle", Value::Null);
+    let started = c.take_notifications(PROGRESS).pop().unwrap();
+    assert_eq!(started["counts"]["checking"], 1);
+    assert_eq!(started["active"][0]["revision"], held["revision"]);
+
+    c.change(&uri, 2, CONFLICT);
+    // A newer snapshot supersedes the held result. It must count as queued,
+    // even though the obsolete worker is still physically running.
+    c.request("denotate/test/idle", Value::Null);
+    let pending = c.take_notifications(PROGRESS).pop().unwrap();
+    assert_eq!(pending["counts"]["pending"], 1);
+    assert_eq!(pending["active"], json!([]));
+    assert_eq!(pending["processed"].as_u64().unwrap() + 1, pending["total"]);
+    c.request(
+        "denotate/test/release",
+        json!({"revision":held["revision"]}),
+    );
+    checking_idle(&mut c);
+    let updates = c.take_notifications(PROGRESS);
+    assert!(updates
+        .iter()
+        .flat_map(|p| p["active"].as_array().unwrap())
+        .all(|active| active["revision"] != held["revision"]));
+    let completed = updates.last().unwrap();
+    assert_eq!(completed["processed"], completed["total"]);
+    assert_eq!(completed["counts"]["complete"], 1);
+    let phases = updates
+        .iter()
+        .flat_map(|p| p["active"].as_array().unwrap())
+        .filter_map(|p| p["detail"]["phase"].as_str())
+        .collect::<Vec<_>>();
+    assert!(phases.contains(&"preparation"), "{updates:?}");
+    assert!(phases.contains(&"checking"), "{updates:?}");
+    assert!(updates
+        .iter()
+        .flat_map(|p| p["active"].as_array().unwrap())
+        .any(|a| a["detail"]["ground"]["atoms"]
+            .as_u64()
+            .is_some_and(|n| n > 0)));
+    // Status traffic must not restart a settled program or produce new work.
+    let before = c.request("denotate/test/checkingStats", Value::Null);
+    for _ in 0..8 {
+        c.request("denotate/roots", json!({"uri":uri}));
+    }
+    checking_idle(&mut c);
+    let after = c.request("denotate/test/checkingStats", Value::Null);
+    assert_eq!(before["started"], after["started"]);
+    assert_eq!(before["finished"], after["finished"]);
+    assert!(c.take_notifications(PROGRESS).is_empty());
+    for (version, text, terminal) in [
+        (3, "relation broken(", "blocked"),
+        (4, "relation unconfigured();", "unconfigured"),
+        (5, CONFLICT, "complete"),
+    ] {
+        c.change(&uri, version, text);
+        checking_idle(&mut c);
+        let update = c.take_notifications(PROGRESS).pop().unwrap();
+        assert_eq!(update["counts"][terminal], 1, "{update}");
+        assert_eq!(update["processed"], update["total"]);
+        assert_eq!(update["counts"]["checking"], 0);
+    }
+    c.notify(
+        "workspace/didChangeConfiguration",
+        json!({"settings":{"denotate":{"timeoutMs":0}}}),
+    );
+    checking_idle(&mut c);
+    let exhausted = c.take_notifications(PROGRESS).pop().unwrap();
+    assert_eq!(exhausted["counts"]["deadline"], 1);
+    assert_eq!(exhausted["processed"], exhausted["total"]);
+    assert!(c
+        .take_notifications("window/logMessage")
+        .iter()
+        .any(|m| m["type"] == 2 && m["message"].as_str().unwrap().contains("deadline")));
+    c.shutdown();
+}
+
+#[test]
 fn ground_cycle_diagnostics_distinguish_instances_and_follow_open_buffer_edits() {
     let mut c = Client::start("base/00-valid");
     let (uri, _) = c.open("example.den");

@@ -27,8 +27,9 @@ pub enum HoldStage {
     DuringCheck,
     BeforeResult,
 }
-pub enum Event<K, O, M = ()> {
+pub enum Event<K, O, M = (), U = std::convert::Infallible> {
     Checkpoint(Ticket<K, M>),
+    Progress(Ticket<K, M>, U),
     Finished(Ticket<K, M>, O),
 }
 struct Hold {
@@ -45,9 +46,9 @@ struct Active<K, M> {
     cancellation: Cancellation,
 }
 
-pub struct Scheduler<K, P, O, M = ()> {
+pub struct Scheduler<K, P, O, M = (), U = std::convert::Infallible> {
     jobs: Option<Sender<Command<K, P, M>>>,
-    events: Receiver<Event<K, O, M>>,
+    events: Receiver<Event<K, O, M, U>>,
     thread: Option<JoinHandle<()>>,
     pending: VecDeque<Job<K, P, M>>,
     active: Option<Active<K, M>>,
@@ -58,16 +59,27 @@ pub struct Scheduler<K, P, O, M = ()> {
 fn stopped() -> io::Error {
     io::Error::new(io::ErrorKind::BrokenPipe, "Checking worker stopped")
 }
-impl<K, P, O, M> Scheduler<K, P, O, M>
+impl<K, P, O, M, U> Scheduler<K, P, O, M, U>
 where
     K: Ord + Clone + Send + 'static,
     P: Send + 'static,
     O: Send + 'static,
     M: Clone + Send + 'static,
+    U: Send + 'static,
 {
     pub fn spawn(
         name: &str,
         mut check: impl FnMut(&Job<K, P, M>, &mut Session, &dyn Fn()) -> O + Send + 'static,
+    ) -> io::Result<Self> {
+        Self::spawn_with_progress(name, move |job, session, checkpoint, _| {
+            check(job, session, checkpoint)
+        })
+    }
+    /// Observational updates share the result channel and ticket. The owner must
+    /// discard superseded updates just as it discards obsolete results.
+    pub fn spawn_with_progress(
+        name: &str,
+        mut check: impl FnMut(&Job<K, P, M>, &mut Session, &dyn Fn(), &dyn Fn(U)) -> O + Send + 'static,
     ) -> io::Result<Self> {
         let (jobs, pending) = unbounded::<Command<K, P, M>>();
         let (send, events) = unbounded();
@@ -99,6 +111,9 @@ where
                         &job,
                         sessions.entry(job.ticket.key.clone()).or_default(),
                         &|| checkpoint(HoldStage::DuringCheck),
+                        &|update| {
+                            let _ = send.send(Event::Progress(job.ticket.clone(), update));
+                        },
                     );
                     checkpoint(HoldStage::BeforeResult);
                     if send.send(Event::Finished(job.ticket, output)).is_err() {
@@ -117,7 +132,7 @@ where
             releases: BTreeMap::new(),
         })
     }
-    pub fn events(&self) -> &Receiver<Event<K, O, M>> {
+    pub fn events(&self) -> &Receiver<Event<K, O, M, U>> {
         &self.events
     }
     /// Allocate an observation identity before frontend preparation. This cancels
@@ -243,7 +258,7 @@ where
             .map_err(|_| stopped())
     }
 }
-impl<K, P, O, M> Scheduler<K, P, O, M> {
+impl<K, P, O, M, U> Scheduler<K, P, O, M, U> {
     /// Also releases held test checkpoints, so shutdown never waits for a client.
     pub fn stop(&mut self) {
         if let Some(a) = &self.active {
@@ -260,7 +275,7 @@ impl<K, P, O, M> Scheduler<K, P, O, M> {
         }
     }
 }
-impl<K, P, O, M> Drop for Scheduler<K, P, O, M> {
+impl<K, P, O, M, U> Drop for Scheduler<K, P, O, M, U> {
     fn drop(&mut self) {
         self.stop();
     }

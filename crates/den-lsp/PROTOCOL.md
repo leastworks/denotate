@@ -39,6 +39,75 @@ The status bar shows the home program, verification count and aggregate outcome.
 Its tooltip includes one line per verification with its assumptions, mode, consistency,
 checking state and outcome, plus unchecked obligations and origin notices.
 
+### Checking progress and logs
+
+Clients opting in with `initializationOptions.checkingProgress: true` receive
+`denotate/checkingProgress` notifications. Each is a complete, deduplicated snapshot
+of current program work, emitted by the owner loop after edits, completions and
+starting the next job, before answering checking-idle barriers:
+
+```json
+{
+  "total": 4,
+  "processed": 2,
+  "counts": {
+    "pending": 1, "checking": 1, "complete": 1, "blocked": 1,
+    "unconfigured": 0, "deadline": 0, "failed": 0, "cancelled": 0
+  },
+  "active": [{
+    "program": "file:///app/den.root", "label": "app/den.root", "revision": 12,
+    "detail": {
+      "phase": "admission", "elapsedMs": 250,
+      "verification": "::checks", "verificationIndex": 1, "verificationTotal": 2,
+      "assumptions": 1, "obligations": 4, "notices": 2,
+      "ground": {"inputAtoms": 50, "atoms": 200, "ruleInstances": 160,
+        "components": 60, "largestComponentAtoms": 12}
+    }
+  }],
+  "awaitingSnapshots": false
+}
+```
+
+`total` includes library home programs and standalone documents. `processed` is
+`total - pending - checking`: blocked, unconfigured and interrupted programs count
+as processed, not as proved. `complete` means checking finished, regardless of its
+semantic outcome; results remain in the ordinary per-verification summaries.
+An edit can move a processed program back to pending, and discovery/removal can
+change the total. These are current counts, not a monotonic percentage or an estimate
+of remaining time. An obsolete running ticket is excluded once superseded. No worker
+can publish progress directly or advance it with a discarded result.
+
+`active` lists current checking tickets (at most one with the serial scheduler).
+`awaitingSnapshots` indicates the origin bridge still needs current source snapshots.
+`detail` is null until the worker reports its phase. Phases are `loading`,
+`assumption-validation`, `preparation`, `admission`, `checking`, `presentation`
+and `publication`. Loading includes `files`; verification phases include its name,
+one-based index, total, and selected declaration counts. `ground`, when available,
+is the size after preparation, before admission rewrites, retained through that
+verification's checking/presentation. `elapsedMs` is elapsed worker time at the
+report, not a deadline or heartbeat. Checking includes obligations, notices, replay
+and session bookkeeping; no inner query fraction or BDD node counter is reported.
+Skipped phases need not appear. Startup and discovery remain indeterminate.
+
+Updates carry the job's ticket through the shared scheduler, and the owner drops
+updates for superseded tickets. A progress-only owner turn does not rebuild source
+snapshots. The client renders active progress without requesting program status;
+its local clock displays time since the last report without polling the server.
+
+The VS Code status item shows a spinner and counts while work is pending, including
+when a different language's editor is active. Its tooltip identifies the active
+program and the terminal categories. Once idle, it resumes the active `.den`
+document's existing status, or hides if there is none. Clicking the item or running
+**Denotate: Show Output** opens the `Denotate` log output channel.
+
+The client logs startup, phase transitions with run revisions and prepared sizes,
+and completion summaries at Info, aggregate counts at Debug, and server
+stops/operational failures at Warning or Error. Accepted failed
+or deadline results also send standard `window/logMessage` warnings, including
+available failure details. Stale results do not log an accepted failure. Ordinary
+source diagnostics stay in Problems; progress adds no checking work or semantic
+results. The Debug Console remains a development/debugging surface.
+
 ## Findings and publication
 
 A program's findings are published on its **own** files. Primary locations are

@@ -2,20 +2,31 @@ const vscode = require('vscode');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { snapshotResolver, goToOrigin } = require('./origin-navigation.cjs');
-const { LanguageClient } = require('vscode-languageclient/node');
+const { LanguageClient, State } = require('vscode-languageclient/node');
+const progressView = require('./checking-progress.cjs');
 let client;
 
 exports.activate = async (context) => {
+  const output = vscode.window.createOutputChannel('Denotate', { log: true });
+  context.subscriptions.push(output);
   client = new LanguageClient('denotate', 'Denotate',
     { command: context.asAbsolutePath(process.platform === 'win32' ? 'dist/denotate-lsp.exe' : 'dist/denotate-lsp'), args: [] },
     { documentSelector: [{ scheme: 'file', language: 'denotate' }],
-      initializationOptions: { originSnapshotBridge: true, denotate: {
+      outputChannel: output,
+      initializationOptions: { originSnapshotBridge: true, checkingProgress: true, denotate: {
         showLibraryRewrites: vscode.workspace.getConfiguration('denotate').get('showLibraryRewrites', true)
       } },
       synchronize: { configurationSection: 'denotate' } });
   context.subscriptions.push(client);
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 20);
+  status.name = 'Denotate checking';
+  status.command = 'denotate.showOutput';
+  status.text = '$(sync~spin) Denotate: Starting';
+  status.tooltip = 'Starting the language server. Click to open Denotate output.';
+  status.show();
   context.subscriptions.push(status);
+  let progress, starting = true;
+  let progressReceivedAt = Date.now();
   let origins = new Set(), generation = 0, statusGeneration = 0, externalFolders = [];
   const rootWatchers = new Map(), originWatchers = new Map(), sourceGenerations = new Map();
   const canonical = (uri) => {
@@ -68,7 +79,18 @@ exports.activate = async (context) => {
   };
   const refreshStatus = async () => {
     const ticket = ++statusGeneration, doc = activeDocument();
-    if (!doc) { status.hide(); return; }
+    if (!client.isRunning()) return;
+    const working = progressView.busy(progress);
+    if (working) {
+      const quietMs = Date.now() - progressReceivedAt;
+      status.text = progressView.text(progress, quietMs);
+      status.tooltip = progressView.details(progress, quietMs);
+      status.show();
+      // The notification is already a complete snapshot. Don't make progress
+      // trigger program-status requests and repeat server snapshot construction.
+      return;
+    }
+    if (!doc) { if (!working && !starting) status.hide(); return; }
     const uri = doc.uri.toString();
     try {
       let result = await client.sendRequest('denotate/roots', { uri });
@@ -80,21 +102,52 @@ exports.activate = async (context) => {
       const outcomeState = result.state === 'invalid' ? 'invalid' : result.summary?.state ?? result.checking;
       const outcome = outcomeState === 'unconfigured' ? 'No verification configured' : outcomeState;
       const count = verifications ? `${verifications.length} verification${verifications.length === 1 ? '' : 's'}` : 'configuration incomplete';
-      status.text = `Denotate: ${label} · ${count} · ${outcome}`;
-      status.tooltip = [label, `${count}: ${outcome}`, `Checking: ${result.checking}`, `Backend: ${result.backend}`,
+      status.text = working ? progressView.text(progress) : `Denotate: ${label} · ${count} · ${outcome}`;
+      status.tooltip = [progress ? progressView.details(progress) : 'Click to open Denotate output.', label, `${count}: ${outcome}`, `Checking: ${result.checking}`, `Backend: ${result.backend}`,
         ...(verifications ?? []).map(v => `${v.verification}: ${v.summary?.state ?? v.checking} (${v.checking}); assumptions [${v.assumptions.join(', ')}]; ${v.mode}; ${v.consistency}`),
         ...(verifications ?? []).filter(v => v.summary?.hiddenLibraryRewrites > 0).map(v => `${v.verification}: ${v.summary.hiddenLibraryRewrites} library rewrite findings hidden by setting`),
         ...((verifications ?? []).some(v => v.mode === 'consistency-only') ? ['Consistency-only: no obligations selected; context-wide semantic diagnostics still run.'] : []),
         `Unchecked obligations: ${result.uncheckedObligations?.join(', ') || (verifications ? 'none' : 'configuration incomplete')}`,
         `Findings: ${result.findings?.length ?? 0}`, ...(result.originNotices ?? []).map(n => `Origin unavailable: ${n.uri} (${n.reason})`), ...result.errors].flat().join('\n');
       status.show();
-    } catch (error) { if (ticket === statusGeneration) { status.text = 'Denotate: Root unavailable'; status.tooltip = String(error); status.show(); } }
+    } catch (error) { if (ticket === statusGeneration) { output.error(`Could not read program status: ${error}`); status.text = 'Denotate: Root unavailable'; status.tooltip = `${error}\nClick to open Denotate output.`; status.show(); } }
   };
   const resolveOrigin = snapshotResolver(vscode, canonical, sourceGenerations);
   client.onRequest('denotate/originSnapshot', resolveOrigin);
   client.onNotification('denotate/originSubscriptions', ({ uris }) => { origins = new Set(uris); refreshOriginWatchers(); });
   client.onNotification('denotate/rootsChanged', ({ watchFolders }) => { refreshRootWatchers(watchFolders); void refreshStatus(); });
+  client.onNotification('denotate/checkingProgress', update => {
+    progressView.logProgress(output, progress, update);
+    progress = update;
+    progressReceivedAt = Date.now();
+    starting = false;
+    void refreshStatus();
+  });
+  // Only redraw cached progress; never poll the server. Long silence is visible
+  // even when either the worker or the owner is occupied.
+  const progressClock = setInterval(() => {
+    if (client.isRunning() && progressView.busy(progress)) void refreshStatus();
+  }, 1000);
+  context.subscriptions.push({ dispose: () => clearInterval(progressClock) });
   context.subscriptions.push(
+    client.onDidChangeState(({ newState }) => {
+      ++statusGeneration;
+      if (newState === State.Starting) {
+        progress = undefined; starting = true;
+        output.info('Starting Denotate language server.');
+        status.text = '$(sync~spin) Denotate: Starting';
+      } else if (newState === State.Running) {
+        output.info('Denotate language server ready.');
+        if (starting) status.text = '$(sync~spin) Denotate: Discovering programs';
+      } else if (newState === State.Stopped) {
+        progress = undefined; starting = false;
+        output.warn('Denotate language server stopped.');
+        status.text = 'Denotate: Server stopped';
+      }
+      status.tooltip = 'Click to open Denotate output.';
+      status.show();
+    }),
+    vscode.commands.registerCommand('denotate.showOutput', () => output.show(true)),
     vscode.workspace.onDidOpenTextDocument(doc => { void syncManifest(doc); void originChanged(doc.uri); }),
     vscode.workspace.onDidChangeTextDocument(({ document }) => { void syncManifest(document); void originChanged(document.uri); }),
     vscode.workspace.onDidSaveTextDocument(doc => { void syncManifest(doc); void originChanged(doc.uri); }),
@@ -117,11 +170,21 @@ exports.activate = async (context) => {
       await memberEvent(target, 1); await refreshStatus();
     })
   );
-  await client.start();
+  try {
+    await client.start();
+    if (starting) { status.text = '$(sync~spin) Denotate: Discovering programs'; }
+  } catch (error) {
+    starting = false;
+    output.error(`Language server startup failed: ${error}`);
+    status.text = 'Denotate: Startup failed';
+    status.tooltip = 'Click to open Denotate output.';
+    throw error;
+  }
   refreshRootWatchers();
   for (const doc of vscode.workspace.textDocuments) await syncManifest(doc);
   await refreshStatus();
   // Exposed to installed-extension smoke tests and other clients of this extension.
-  return { request: (method, params) => client.sendRequest(method, params) };
+  return { request: (method, params) => client.sendRequest(method, params),
+    checkingStatus: () => ({ progress, text: status.text, tooltip: status.tooltip, command: status.command }) };
 };
 exports.deactivate = async () => { await client?.stop(); };

@@ -14,21 +14,27 @@ pub trait CheckingHandler: Handler {
     type Payload: Send + 'static;
     type Output: Send + 'static;
     type Metadata: Clone + Send + 'static;
+    type Progress: Send + 'static;
     fn scheduler(
         &mut self,
-    ) -> &mut Scheduler<Self::Key, Self::Payload, Self::Output, Self::Metadata>;
+    ) -> &mut Scheduler<Self::Key, Self::Payload, Self::Output, Self::Metadata, Self::Progress>;
     fn hooks(&mut self) -> &mut CheckingHooks;
     fn test_mode(&self) -> bool;
     fn identity(ticket: &Ticket<Self::Key, Self::Metadata>) -> Value;
     fn completed(
         &mut self,
         connection: &Connection,
-        event: Event<Self::Key, Self::Output, Self::Metadata>,
+        event: Event<Self::Key, Self::Output, Self::Metadata, Self::Progress>,
     ) -> Result<()>;
     fn before_start(&mut self, _connection: &Connection) -> Result<()> {
         Ok(())
     }
     fn started(&mut self, _ticket: &Ticket<Self::Key, Self::Metadata>) {}
+    /// Publish observational status after completions, edits and starting work.
+    /// This runs on the owner thread; frontends can deduplicate their snapshots.
+    fn checking_status(&mut self, _connection: &Connection) -> Result<()> {
+        Ok(())
+    }
     fn settled(&self) -> bool {
         true
     }
@@ -136,17 +142,25 @@ fn run_inner<H: CheckingHandler>(handler: &mut H, connection: &Connection) -> Re
     let mut pending = VecDeque::new();
     handler.before_start(connection)?;
     loop {
+        let mut reconcile = false;
+        let mut received_event = false;
         transport::receive_ready(connection, &mut pending);
         if pending.is_empty() {
             crossbeam_channel::select_biased! {
                 recv(connection.receiver) -> m => match m { Ok(m) => pending.push_back(m), Err(_) => break },
-                recv(events) -> e => handler.completed(connection, e.map_err(|_| "Checking worker stopped")?)?,
+                recv(events) -> e => {
+                    received_event = true;
+                    let event = e.map_err(|_| "Checking worker stopped")?;
+                    reconcile |= !matches!(&event, Event::Progress(..));
+                    handler.completed(connection, event)?;
+                },
             }
         }
         for _ in 0..256 {
             let Some(message) = pending.pop_front() else {
                 break;
             };
+            reconcile = true;
             match message {
                 Message::Request(request) => {
                     if request.method == "shutdown" {
@@ -172,11 +186,19 @@ fn run_inner<H: CheckingHandler>(handler: &mut H, connection: &Connection) -> Re
             }
         }
         // A bounded edit batch precedes completion, even under continuous traffic.
-        if let Ok(event) = events.try_recv() {
-            handler.completed(connection, event)?;
+        if !received_event {
+            if let Ok(event) = events.try_recv() {
+                reconcile |= !matches!(&event, Event::Progress(..));
+                handler.completed(connection, event)?;
+            }
         }
-        handler.before_start(connection)?;
+        // A progress-only turn must not reconstruct frontend snapshots. Edits
+        // still reconcile before publication/start, including alongside updates.
+        if reconcile {
+            handler.before_start(connection)?;
+        }
         start_next(handler)?;
+        handler.checking_status(connection)?;
         if handler.scheduler().is_idle() && handler.settled() {
             handler.hooks().answer_idle(connection)?;
         }
@@ -193,10 +215,12 @@ mod tests {
     use std::time::Duration;
 
     struct Owner {
-        worker: Scheduler<String, (), ()>,
+        worker: Scheduler<String, (), (), (), usize>,
         hooks: CheckingHooks,
         edits: usize,
         completed_after: Vec<usize>,
+        progress: Vec<usize>,
+        reconciliations: usize,
     }
     impl Owner {
         fn new() -> Self {
@@ -205,6 +229,8 @@ mod tests {
                 hooks: CheckingHooks::default(),
                 edits: 0,
                 completed_after: vec![],
+                progress: vec![],
+                reconciliations: 0,
             }
         }
         fn enqueue(&mut self) {
@@ -237,7 +263,8 @@ mod tests {
         type Payload = ();
         type Output = ();
         type Metadata = ();
-        fn scheduler(&mut self) -> &mut Scheduler<String, (), ()> {
+        type Progress = usize;
+        fn scheduler(&mut self) -> &mut Scheduler<String, (), (), (), usize> {
             &mut self.worker
         }
         fn hooks(&mut self) -> &mut CheckingHooks {
@@ -249,8 +276,17 @@ mod tests {
         fn identity(ticket: &Ticket<String>) -> Value {
             json!({"revision":ticket.revision})
         }
-        fn completed(&mut self, connection: &Connection, event: Event<String, ()>) -> Result<()> {
+        fn before_start(&mut self, _: &Connection) -> Result<()> {
+            self.reconciliations += 1;
+            Ok(())
+        }
+        fn completed(
+            &mut self,
+            connection: &Connection,
+            event: Event<String, (), (), usize>,
+        ) -> Result<()> {
             match event {
+                Event::Progress(_, update) => self.progress.push(update),
                 Event::Checkpoint(ticket) => transport::send(
                     connection,
                     test_support::CHECKPOINT,
@@ -288,6 +324,43 @@ mod tests {
         };
         assert_eq!(response.id, id.into());
         response
+    }
+    #[test]
+    fn progress_alone_does_not_repeat_frontend_reconciliation() {
+        let (server, client) = Connection::memory();
+        let thread = std::thread::spawn(move || {
+            let mut owner = Owner::new();
+            owner.worker =
+                Scheduler::spawn_with_progress("phase-test", |_, _, checkpoint, report| {
+                    for phase in 0..3 {
+                        report(phase);
+                    }
+                    checkpoint();
+                })
+                .unwrap();
+            owner.worker.hold_next(HoldStage::DuringCheck);
+            owner.enqueue();
+            start_next(&mut owner).unwrap();
+            run(&mut owner, &server).unwrap();
+            owner
+        });
+        let Message::Notification(n) = receive(&client) else {
+            panic!("expected checkpoint")
+        };
+        assert_eq!(n.method, test_support::CHECKPOINT);
+        request(&client, 1, "shutdown", Value::Null);
+        assert!(response(&client, 1).error.is_none());
+        client
+            .sender
+            .send(Message::Notification(Notification::new(
+                "exit".into(),
+                Value::Null,
+            )))
+            .unwrap();
+        let owner = thread.join().unwrap();
+        assert_eq!(owner.progress, [0, 1, 2]);
+        // Startup and the test checkpoint; phase updates do not enter this path.
+        assert_eq!(owner.reconciliations, 2);
     }
     #[test]
     fn queued_edits_precede_results_but_a_full_batch_cannot_starve_completion() {

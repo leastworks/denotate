@@ -29,6 +29,16 @@ the running context joins the tail. Cancellation keeps the session warm; `close`
 releases it. At publication, `complete` runs the frontend's "still current?"
 predicate; publication itself stays with the frontend.
 
+`CheckingHandler::checking_status` is an optional owner-thread hook after updates
+and starting the next job, before checking-idle responses. A frontend can publish
+deduplicated progress from current states there. Progress never bypasses the
+frontend's freshness checks or changes the worker's semantic budgets.
+`Scheduler::spawn_with_progress` additionally supplies a typed report callback;
+`Event::Progress` carries the same ticket as the result. Frontends discard stale
+updates. Progress-only owner turns skip snapshot reconciliation, and each turn
+consumes at most one worker event so a phase update can be observed before the next.
+The default progress type is uninhabited; ordinary `spawn` callers emit none.
+
 `workspace_edit::editable` checks workspace containment by canonical path, protected
 folders (`DEFAULT_PROTECTED_FOLDERS`: `generated`, `node_modules`, `dist`, `.git`) on
 both canonical and visible paths, and real write access without truncation.

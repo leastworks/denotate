@@ -119,13 +119,17 @@ pub struct Client {
 
 impl Client {
     pub fn start(fixture: &str) -> Self {
-        Self::start_options(fixture, false)
+        Self::start_options(fixture, false, false)
     }
     #[allow(dead_code)] // Opt-in bridge scenarios live in ir_text.rs.
     pub fn start_with_bridge(fixture: &str) -> Self {
-        Self::start_options(fixture, true)
+        Self::start_options(fixture, true, false)
     }
-    fn start_options(fixture: &str, bridge: bool) -> Self {
+    #[allow(dead_code)]
+    pub fn start_with_progress(fixture: &str) -> Self {
+        Self::start_options(fixture, false, true)
+    }
+    fn start_options(fixture: &str, bridge: bool, progress: bool) -> Self {
         let workspace = tempfile::Builder::new()
             .prefix("denotate lsp ")
             .tempdir()
@@ -247,7 +251,7 @@ impl Client {
         let uri = file_uri(client.workspace.path());
         let initialized = client.request("initialize", json!({
             "processId": std::process::id(), "rootUri": uri,
-            "initializationOptions": {"originSnapshotBridge": bridge},
+            "initializationOptions": {"originSnapshotBridge": bridge, "checkingProgress": progress},
             "workspaceFolders": [{"uri": uri, "name": "fixture"}],
             "capabilities": {
                 "general": {"positionEncodings": ["utf-16"]},
@@ -366,6 +370,21 @@ impl Client {
     #[allow(dead_code)]
     pub fn notification(&mut self, method: &str) -> Value {
         self.wait(|m| m["method"] == method)["params"].clone()
+    }
+
+    /// Drain notifications already received through a request/barrier.
+    #[allow(dead_code)]
+    pub fn take_notifications(&mut self, method: &str) -> Vec<Value> {
+        let mut found = vec![];
+        self.pending.retain(|message| {
+            if message["method"] == method {
+                found.push(message["params"].clone());
+                false
+            } else {
+                true
+            }
+        });
+        found
     }
 
     #[allow(dead_code)]
