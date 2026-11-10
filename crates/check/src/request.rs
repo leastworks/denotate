@@ -438,6 +438,7 @@ impl CheckRequest {
         let key_computation = key_order_time + index.elapsed;
         Ok(RequestPreparation::Complete(PreparedCheck {
             request: self.clone(),
+            emptiness_examples: EmptinessExamples::default(),
             program,
             keys: index,
             corpus,
@@ -667,6 +668,7 @@ impl ScopedResults {
 
 pub struct PreparedCheck<'s> {
     pub(crate) request: CheckRequest,
+    pub(crate) emptiness_examples: EmptinessExamples,
     pub(crate) program: GroundProgram,
     pub(crate) keys: GroundKeyIndex,
     corpus: &'s Corpus,
@@ -715,6 +717,13 @@ pub struct CheckedReport<'p> {
     pub results: Accounted<ScopedResults>,
 }
 impl PreparedCheck<'_> {
+    /// Choose retained diagnostic examples for this invocation. This does not
+    /// change the request, candidate scan, semantic budgets or cache inputs.
+    /// Sessions recompute emptiness evidence using the current choice.
+    pub fn with_emptiness_examples(mut self, examples: EmptinessExamples) -> Self {
+        self.emptiness_examples = examples;
+        self
+    }
     pub fn request(&self) -> &CheckRequest {
         &self.request
     }
@@ -811,6 +820,7 @@ impl PreparedCheck<'_> {
             &limits,
             &limits,
             &limits,
+            self.emptiness_examples,
             Some(&mut queries),
         ))? {
             AnalysisOutcome::Complete(r) => r,

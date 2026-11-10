@@ -94,6 +94,7 @@ user files are the program's own documents.
 
 ```sh
 just check-den crates/ir-text/fixtures [--verification library::default_checks] [--json] [--verbose]
+just check-den <program> --empty-examples all
 just test-crate denotate-ir-text
 ```
 
@@ -103,6 +104,18 @@ kind, message, notes and labeled related locations. By default only producing ru
 the checked obligation and upstream origins are expanded; other related entries
 collapse to "+N more". `--verbose` prints all related locations. `--json` retains the previous
 `Results: {...}` status summaries with their existing headers and notices.
+`--empty-examples N` retains a positive number of examples per emptiness obligation
+(default three); `--empty-examples all` retains every confirmed tuple, including in
+JSON summaries. Counts remain lower bounds if checking is incomplete. It does not
+change verdicts or exit-code policy, and it does not enumerate alternative
+derivations or worlds for the same tuple.
+
+`--hide-library-rewrites` hides diagnostics for rewritten rules owned by included
+libraries, with a count of hidden findings per verification. Own-file rewrites and
+all other diagnostics remain visible. The full finding inventory stays in the
+status summary, including with `--json`, and exit codes stay unchanged. The shared
+view filter is `Presentation::hide_library_rewrites`; it checks rule ownership,
+not where a diagnostic happened to be placed.
 See the [command contract](../../docs/den-format.md#commands) for ordering and exit codes.
 
 The round trip of the test DSL

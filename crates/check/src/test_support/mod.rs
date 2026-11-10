@@ -28,7 +28,13 @@ impl<'p> SymbolicMeaning<'p> {
             ground: q.ground,
             receipts: q.receipts,
         });
-        self.verify_queries(limits, completion, certification, queries.as_mut())
+        self.verify_queries(
+            limits,
+            completion,
+            certification,
+            EmptinessExamples::default(),
+            queries.as_mut(),
+        )
     }
 }
 pub fn component_rules(

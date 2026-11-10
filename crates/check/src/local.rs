@@ -411,8 +411,11 @@ impl PreparedCheck<'_> {
                         ground: &self.keys,
                         receipts: &mut receipts,
                     };
-                    verification.emptiness =
-                        meaning.check_emptiness(&limits, Some(&mut queries))?;
+                    verification.emptiness = meaning.check_emptiness(
+                        &limits,
+                        self.emptiness_examples,
+                        Some(&mut queries),
+                    )?;
                     verification.coverage = meaning.check_coverage(&limits, Some(&mut queries))?;
                 }
                 Err(e) => {

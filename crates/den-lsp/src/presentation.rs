@@ -10,9 +10,16 @@ pub struct Publication {
     pub diagnostics: BTreeMap<Url, Vec<Diagnostic>>,
     pub status: Value,
 }
-pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Publication, String> {
-    let output =
+pub fn present(
+    program: &LoadedProgram,
+    report: &CheckedReport<'_>,
+    show_library_rewrites: bool,
+) -> Result<Publication, String> {
+    let mut output =
         denotate_ir_text::presentation::present(program, report).map_err(|e| e.to_string())?;
+    if !show_library_rewrites {
+        output.hide_library_rewrites(program);
+    }
     convert(program, output)
 }
 pub fn assumption_validation(
@@ -162,7 +169,7 @@ mod tests {
         let CheckOutcome::Complete(report) = prepared.verify(&ops).unwrap() else {
             panic!()
         };
-        let out = present(&program, &report).unwrap();
+        let out = present(&program, &report, true).unwrap();
         let diagnostics = &out.diagnostics[&Url::parse("file:///unicode.den").unwrap()];
         assert_eq!(diagnostics.len(), 2);
         for d in diagnostics {

@@ -8,7 +8,11 @@ let client;
 exports.activate = async (context) => {
   client = new LanguageClient('denotate', 'Denotate',
     { command: context.asAbsolutePath(process.platform === 'win32' ? 'dist/denotate-lsp.exe' : 'dist/denotate-lsp'), args: [] },
-    { documentSelector: [{ scheme: 'file', language: 'denotate' }], initializationOptions: { originSnapshotBridge: true } });
+    { documentSelector: [{ scheme: 'file', language: 'denotate' }],
+      initializationOptions: { originSnapshotBridge: true, denotate: {
+        showLibraryRewrites: vscode.workspace.getConfiguration('denotate').get('showLibraryRewrites', true)
+      } },
+      synchronize: { configurationSection: 'denotate' } });
   context.subscriptions.push(client);
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 20);
   context.subscriptions.push(status);
@@ -79,6 +83,7 @@ exports.activate = async (context) => {
       status.text = `Denotate: ${label} · ${count} · ${outcome}`;
       status.tooltip = [label, `${count}: ${outcome}`, `Checking: ${result.checking}`, `Backend: ${result.backend}`,
         ...(verifications ?? []).map(v => `${v.verification}: ${v.summary?.state ?? v.checking} (${v.checking}); assumptions [${v.assumptions.join(', ')}]; ${v.mode}; ${v.consistency}`),
+        ...(verifications ?? []).filter(v => v.summary?.hiddenLibraryRewrites > 0).map(v => `${v.verification}: ${v.summary.hiddenLibraryRewrites} library rewrite findings hidden by setting`),
         ...((verifications ?? []).some(v => v.mode === 'consistency-only') ? ['Consistency-only: no obligations selected; context-wide semantic diagnostics still run.'] : []),
         `Unchecked obligations: ${result.uncheckedObligations?.join(', ') || (verifications ? 'none' : 'configuration incomplete')}`,
         `Findings: ${result.findings?.length ?? 0}`, ...(result.originNotices ?? []).map(n => `Origin unavailable: ${n.uri} (${n.reason})`), ...result.errors].flat().join('\n');

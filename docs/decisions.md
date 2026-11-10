@@ -137,9 +137,17 @@ real program that the current choice serves badly.
   tuple's fallback independently. Locally authored obligations keep their existing
   detail; unknown ownership also keeps existing placement. This is presentation
   over the same proof, with no new checker policy, evidence or attribution budget.
+- **Library rewrite noise is an optional view filter.** A rewrite proof may hold in
+  one consumer and fail in another, so a per-library merged warning would lose its
+  verification context. Keep all proofs and finding identities. The CLI's
+  `--hide-library-rewrites` and editor's `denotate.showLibraryRewrites: false` hide
+  only diagnostics for rewritten rules owned by included libraries. Use rule
+  ownership, not primary location or namespace; retain unknown ownership. Keep
+  home-program warnings, other diagnostics, full status inventories and exit codes.
+  Report the hidden finding count so a filtered view does not imply a clean check.
 - **Several emptiness examples belong to one finding.** Independent invalid tuples
   should be visible together, without changing the obligation/verification identity
-  when an author fixes one. Retain up to three confirmed tuples in semantic-key
+  when an author fixes one. By default retain up to three confirmed tuples in semantic-key
   order, each with its own world, replay scope and bounded attribution. Count
   distinct tuples across worlds, exactly when checking completes and as a lower
   bound otherwise. Keep the semantic scan order and its existing work charges;
@@ -148,6 +156,16 @@ real program that the current choice serves badly.
   them with the tuple. Per-tuple identities are deferred until suppressions, waivers
   or another consumer needs to track individual errors; introducing them now would
   add identity and publication machinery without a consumer.
+- **Emptiness sampling is an invocation-level reporting choice.** Debugging a
+  generated library sometimes requires seeing every invalid tuple: an omitted
+  example must not be mistaken for an impossible one. `check-den --empty-examples
+  N|all` and `PreparedCheck::with_emptiness_examples` control retention, with the
+  editor's default unchanged. Keep this outside the semantic request and cache
+  inputs; sessions already recompute emptiness evidence. Scan and deterministic
+  charges stay unchanged; retain all by appending during the scan and sorting once
+  afterwards. Additional worlds and attribution consume memory and time. `all`
+  means all confirmed tuples, not all worlds or derivations, and a count remains a
+  lower bound when checking is incomplete. No per-tuple identity is needed.
 - **Obligation world notes use structural input cones.** Filtering to retained proof
   leaves hides inputs behind negative derived premises: `violation() :- order(),
   !approved(); approved() :- signed();` still depends on `signed()`. The checker

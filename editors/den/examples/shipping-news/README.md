@@ -38,6 +38,11 @@ Output excerpts below omit absolute paths, repeated locations and unrelated prov
 verifications. Exact wording and selected examples may evolve; the tests assert
 outcomes, finding kinds, notice states and relevant placement, not rendered goldens.
 
+While debugging, add `--empty-examples all` to `just check-den` to see every confirmed
+invalid tuple instead of the default sample of three. Incomplete checking still
+reports a lower-bound count. Add `--hide-library-rewrites` to hide consumer warnings
+about library rewrites; the full status inventory remains available with `--json`.
+
 | Step | Expected outcome | CLI exit |
 | --- | --- | ---: |
 | [01 — Declare typed fields and shipment elements](01-declarations/) | One field lacks a type; one coverage finding | 1 |

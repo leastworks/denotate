@@ -1,7 +1,7 @@
 //! Load a den.root closure and execute its explicit verifications.
 use denotate_check::{
-    BackendIdentity, Limits, LocalCheckOutcome, OperationalLimits, RegionCompletion,
-    RequestPreparation, ScopedResult,
+    BackendIdentity, EmptinessExamples, Limits, LocalCheckOutcome, OperationalLimits,
+    RegionCompletion, RequestPreparation, ScopedResult,
 };
 use denotate_check_session::Session;
 use denotate_ir_text::{
@@ -10,8 +10,7 @@ use denotate_ir_text::{
 use std::{collections::BTreeSet, fmt::Write};
 
 type Failure = (u8, String);
-const USAGE: &str =
-    "Usage: check ROOT_FOLDER_OR_DEN.ROOT [--verification QUALIFIED_NAME] [--json] [--verbose]";
+const USAGE: &str = "Usage: check ROOT_FOLDER_OR_DEN.ROOT [--verification QUALIFIED_NAME] [--json] [--verbose] [--empty-examples N|all] [--hide-library-rewrites]";
 
 fn format_errors(ds: Vec<denotate_ir_text::Diagnostic>) -> String {
     ds.iter()
@@ -118,10 +117,26 @@ fn run_with_limits(
     let mut selection = None;
     let mut json = false;
     let mut verbose = false;
+    let mut empty_examples = None;
+    let mut hide_library_rewrites = false;
     while let Some(option) = args.next() {
         match option.as_str() {
             "--json" if !json => json = true,
             "--verbose" if !verbose => verbose = true,
+            "--hide-library-rewrites" if !hide_library_rewrites => hide_library_rewrites = true,
+            "--empty-examples" if empty_examples.is_none() => {
+                let value = args.next().ok_or((2, USAGE.into()))?;
+                empty_examples = Some(if value == "all" {
+                    EmptinessExamples::All
+                } else {
+                    EmptinessExamples::Limited(value.parse().map_err(|_| {
+                        (
+                            2,
+                            "--empty-examples requires a positive integer or all".into(),
+                        )
+                    })?)
+                });
+            }
             "--verification" if selection.is_none() => {
                 selection = Some(args.next().ok_or((2, USAGE.into()))?)
             }
@@ -303,7 +318,8 @@ fn run_with_limits(
         };
         let admitted = prepared
             .admit(&operations)
-            .map_err(|e| (2, e.to_string()))?;
+            .map_err(|e| (2, e.to_string()))?
+            .with_emptiness_examples(empty_examples.unwrap_or_default());
         match session
             .verify(&admitted, &operations)
             .map_err(|e| (2, e.to_string()))?
@@ -324,7 +340,7 @@ fn run_with_limits(
                         matches!(r.outcome, ScopedResult::Inconclusive(_))
                             || !matches!(r.completion, RegionCompletion::NoMeaning { .. })
                     });
-                let presented = denotate_ir_text::presentation::present(&p, &report.checked)
+                let mut presented = denotate_ir_text::presentation::present(&p, &report.checked)
                     .map_err(|e| (2, e.to_string()))?;
                 findings |= presented.status["findings"].as_array().is_some_and(|f| {
                     f.iter().any(|finding| {
@@ -339,10 +355,19 @@ fn run_with_limits(
                         )
                     })
                 });
+                if hide_library_rewrites {
+                    presented.hide_library_rewrites(&p);
+                }
                 if json {
                     writeln!(output, "Results: {:#}", presented.status).unwrap();
                 } else {
                     print_diagnostics(&p, &presented, output, verbose)?;
+                    if let Some(count) = presented.status["hiddenLibraryRewrites"]
+                        .as_u64()
+                        .filter(|n| *n > 0)
+                    {
+                        writeln!(output, "{count} library rewrite findings hidden; omit --hide-library-rewrites to show them (status and exit code unchanged).").unwrap();
+                    }
                     writeln!(
                         output,
                         "Result: {}",
@@ -875,6 +900,42 @@ verification checks { assumptions: []; obligations: [one]; }",
     }
 
     #[test]
+    fn hiding_library_rewrites_keeps_status_and_exit_codes() {
+        let f = Fixture::new("relation own_rule(); own_rule():-flag(),!flag(),!own_rule();");
+        fs::create_dir(f.0.join("library")).unwrap();
+        fs::write(f.0.join("library/den.root"), "{}").unwrap();
+        fs::write(
+            f.0.join("den.root"),
+            r#"{"libraries":["library/den.root"]}"#,
+        )
+        .unwrap();
+        fs::write(f.0.join("library/lib.den"), "input flag(); relation library_rule(); library_rule():-flag(),!flag(),!library_rule(); relation clear(); obligation o:empty(clear); verification v{assumptions:[];obligations:[o];}").unwrap();
+        let (code, full) = f.run(&[]);
+        let (filtered_code, filtered) = f.run(&["--hide-library-rewrites"]);
+        assert_eq!(filtered_code, code);
+        assert_eq!(full.matches(": redundant:").count(), 2, "{full}");
+        assert_eq!(filtered.matches(": redundant:").count(), 1, "{filtered}");
+        assert!(
+            filtered.contains("1 library rewrite findings hidden"),
+            "{filtered}"
+        );
+        let status = |options: &[&str]| -> serde_json::Value {
+            let (json_code, text) = f.run(options);
+            assert_eq!(json_code, code);
+            serde_json::from_str(text.split_once("Results: ").unwrap().1).unwrap()
+        };
+        let mut filtered = status(&["--json", "--hide-library-rewrites"]);
+        assert_eq!(
+            filtered
+                .as_object_mut()
+                .unwrap()
+                .remove("hiddenLibraryRewrites"),
+            Some(serde_json::json!(1))
+        );
+        assert_eq!(filtered, status(&["--json"]));
+    }
+
+    #[test]
     fn several_empty_tuples_are_located_in_numeric_source_order_under_each_verification() {
         let f = Fixture::new(&format!(
             "sort S;
@@ -913,6 +974,52 @@ verification a {{ assumptions: []; obligations: [one]; }}",
             assert_eq!(group.matches("Result: findings").count(), 1);
         }
         assert_eq!(f.run(&["--json"]).0, code);
+    }
+
+    #[test]
+    fn empty_example_option_changes_diagnostics_and_json_but_not_exit_codes() {
+        let f = Fixture::new(
+            "sort S; const a,b,c,d,e:S; relation p(x:S); p(a);p(b);p(c);p(d);p(e); obligation one:empty(p); verification checks{assumptions:[];obligations:[one];}",
+        );
+        for (options, n) in [
+            (vec![], 3),
+            (vec!["--empty-examples", "1"], 1),
+            (vec!["--empty-examples", "all"], 5),
+            (vec!["--empty-examples", "10"], 5),
+        ] {
+            let (code, text) = f.run(&options);
+            assert_eq!(code, 1, "{text}");
+            assert!(
+                text.contains(&format!(
+                    "5 distinct tuples can be present; showing {n} examples"
+                )),
+                "{text}"
+            );
+            let mut json_options = options;
+            json_options.push("--json");
+            let (code, text) = f.run(&json_options);
+            assert_eq!(code, 1);
+            let status: serde_json::Value =
+                serde_json::from_str(text.split_once("Results: ").unwrap().1).unwrap();
+            assert_eq!(
+                status["emptiness"][0]["examples"].as_array().unwrap().len(),
+                n
+            );
+            assert_eq!(status["emptiness"][0]["examplesTruncated"], n < 5);
+        }
+        for options in [
+            vec!["--empty-examples"],
+            vec!["--empty-examples", "0"],
+            vec!["--empty-examples", "-1"],
+            vec!["--empty-examples", "lots"],
+            vec!["--empty-examples", "2", "--empty-examples", "all"],
+        ] {
+            assert_eq!(f.run(&options).0, 2);
+        }
+        let clean = Fixture::new(
+            "relation p(); obligation one:empty(p); verification checks{assumptions:[];obligations:[one];}",
+        );
+        assert_eq!(clean.run(&["--empty-examples", "all"]).0, 0);
     }
 
     #[test]

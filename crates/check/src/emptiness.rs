@@ -11,6 +11,27 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub const EMPTINESS_EXAMPLE_LIMIT: usize = 3;
 
+/// Diagnostic retention only: every candidate is checked regardless of this
+/// choice. `All` retains every confirmed tuple, not every possible input world.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmptinessExamples {
+    Limited(std::num::NonZeroUsize),
+    All,
+}
+impl Default for EmptinessExamples {
+    fn default() -> Self {
+        Self::Limited(std::num::NonZeroUsize::new(EMPTINESS_EXAMPLE_LIMIT).unwrap())
+    }
+}
+impl EmptinessExamples {
+    pub(crate) fn limit(self) -> usize {
+        match self {
+            Self::Limited(n) => n.get(),
+            Self::All => usize::MAX,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PresenceExample<A, W, E> {
     pub tuple: A,
@@ -63,6 +84,7 @@ impl SymbolicMeaning<'_> {
     pub(crate) fn check_emptiness(
         &self,
         limits: &Limits,
+        examples: EmptinessExamples,
         mut queries: Option<&mut QueryRun<'_>>,
     ) -> Result<BTreeMap<ObligationId, EmptinessReport>> {
         let mut ordered = self.program.emptiness.iter().collect::<Vec<_>>();
@@ -76,12 +98,31 @@ impl SymbolicMeaning<'_> {
             if let Err(error) = self.empty_relation(
                 *relation,
                 queries.as_ref().map(|q| q.keys),
-                EMPTINESS_EXAMPLE_LIMIT,
+                examples.limit(),
                 &mut budget,
                 &mut report,
             ) {
                 budget.failure(&error);
                 report.inconclusive = Some(Inconclusive::from_error(error)?);
+            }
+            // For an unbounded sample, append during checking and sort once
+            // afterwards. Re-sorting each insertion would make retention quadratic.
+            if examples.limit() == usize::MAX {
+                if let Some(q) = &queries {
+                    let mut keyed = report
+                        .examples
+                        .drain(..)
+                        .map(|example| {
+                            AtomKey::from_atom(q.keys, &example.tuple)
+                                .map(|key| (key, example))
+                                .map_err(CheckError::Keys)
+                        })
+                        .collect::<Result<Vec<_>>>()?;
+                    keyed.sort_by(|(a, _), (b, _)| a.cmp(b));
+                    report.examples = keyed.into_iter().map(|(_, example)| example).collect();
+                } else {
+                    report.examples.sort_by(|a, b| a.tuple.cmp(&b.tuple));
+                }
             }
             if let Some(q) = queries.as_mut() {
                 let dependency = if q.receipts.get(&QueryKey::CoverageMeaning).is_some() {
@@ -212,6 +253,16 @@ fn retain_example(
     keys: Option<&denotate_ir::SemanticKeys>,
     limit: usize,
 ) -> Result<()> {
+    if limit == usize::MAX {
+        report.examples.push(PresenceExample {
+            tuple: atom.clone(),
+            observation: observation.clone(),
+            replay_scope,
+            dependency_inputs: None,
+            attribution: None,
+        });
+        return Ok(());
+    }
     let mut index = 0;
     let key = keys
         .map(|keys| AtomKey::from_atom(keys, atom))
@@ -336,7 +387,9 @@ mod tests {
             let program =
                 GroundProgram::prepare(&c, &Domains::from([(s, vec![a, b])]), &limits).unwrap();
             let meaning = program.symbolic(&limits).unwrap();
-            let original = meaning.check_emptiness(&limits, None).unwrap();
+            let original = meaning
+                .check_emptiness(&limits, EmptinessExamples::default(), None)
+                .unwrap();
             assert!(original.values().all(|r| r.present > 0));
             assert_eq!(original.values().next().unwrap().complete(), !unresolved);
             for max_work in [0, limits.max_work] {
@@ -410,6 +463,11 @@ mod tests {
             };
             let one = check(1);
             let several = check(EMPTINESS_EXAMPLE_LIMIT);
+            let all = check(usize::MAX);
+            assert_eq!(
+                (one.present, one.unresolved, one.inconclusive, one.proved()),
+                (all.present, all.unresolved, all.inconclusive, all.proved())
+            );
             assert_eq!(
                 (one.present, one.unresolved, one.inconclusive, one.proved()),
                 (
@@ -423,6 +481,7 @@ mod tests {
             if several.complete() {
                 assert_eq!(several.present, 5);
                 assert_eq!(several.examples.len(), EMPTINESS_EXAMPLE_LIMIT);
+                assert_eq!(all.examples.len(), 5);
                 saw_complete = true;
                 break;
             }
@@ -463,7 +522,9 @@ mod tests {
         let program =
             GroundProgram::prepare(&c, &Domains::from([(s, vec![a, b])]), &limits).unwrap();
         let meaning = program.symbolic(&limits).unwrap();
-        let original = meaning.check_emptiness(&limits, None).unwrap();
+        let original = meaning
+            .check_emptiness(&limits, EmptinessExamples::default(), None)
+            .unwrap();
         let mut saw_independent = false;
         for max_work in 0..5000 {
             let mut attributed = original.clone();

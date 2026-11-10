@@ -9,6 +9,35 @@ pub struct Presentation {
     pub diagnostics: Vec<Diagnostic>,
     pub status: Value,
 }
+impl Presentation {
+    /// Optional view filter. Use the rewritten rule's ownership, not its primary
+    /// location: a library proof may be placed on a consumer occurrence. Keep the
+    /// complete per-verification finding inventory and outcome in the summary.
+    pub fn hide_library_rewrites(&mut self, program: &LoadedProgram) {
+        let library_files: std::collections::BTreeSet<_> = program
+            .documents
+            .iter()
+            .filter(|d| d.ownership == "library")
+            .map(|d| &d.uri)
+            .collect();
+        let mut hidden = std::collections::BTreeSet::new();
+        self.diagnostics.retain(|d| {
+            let denotate_presentation::Identity::Rewrite { rule, .. } = &d.identity else {
+                return true;
+            };
+            let library = program
+                .owners
+                .get(&(*rule).into())
+                .is_some_and(|uri| library_files.contains(uri));
+            if library {
+                hidden.insert(d.identity.clone());
+            }
+            !library
+        });
+        let previous = self.status["hiddenLibraryRewrites"].as_u64().unwrap_or(0);
+        self.status["hiddenLibraryRewrites"] = json!(previous + hidden.len() as u64);
+    }
+}
 /// Declaration validity is program-scoped, including without verifications.
 pub fn present_assumption_validation(
     program: &LoadedProgram,

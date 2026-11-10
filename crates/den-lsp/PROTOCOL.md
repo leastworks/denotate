@@ -48,6 +48,21 @@ published on the library location labeled `in <program>: …` (workspace-relativ
 where possible) and listed in that program's status. This labeled fallback is the only
 cross-program publication and is never deduplicated across programs.
 
+The optional `denotate.showLibraryRewrites` setting (default `true`) controls only
+rewrite diagnostic visibility. Supply it under `initializationOptions.denotate` or
+`workspace/didChangeConfiguration.params.settings.denotate`. When false, a program
+hides diagnostics whose rewritten rule is owned by its library closure. This uses
+rule ownership rather than primary location; unknown ownership is kept visible.
+Own-file rewrites, the library's home-program diagnostics and every other finding
+kind are unchanged. No proofs are merged across programs or verifications.
+
+The full finding inventory and outcomes remain in each verification's summary.
+With filtering enabled, `summary.hiddenLibraryRewrites` counts distinct hidden
+rewrite findings (not locations). The status tooltip displays that count. Setting
+changes participate in snapshot validation and refresh publication; stale diagnostics
+are withdrawn. `check-den --hide-library-rewrites` uses the same view filter and
+retains its existing exit-code policy.
+
 A consumer-caused library failure (for example, a consumer declaration that makes a
 library name ambiguous) is reported in the consumer's status and on the conflicting
 consumer declaration, with the library location related.
@@ -386,7 +401,9 @@ if there is no confirmed tuple. It carries the same `complete`, `unresolved` and
   and derivations of the same tuple do not increase it.
 - `examplesTruncated`: true when the confirmed count exceeds the retained sample.
   False does not assert completeness; consult `presentTuples.exact`.
-- `examples`: up to three entries, the smallest confirmed tuples by semantic key.
+- `examples`: the retained entries, the smallest confirmed tuples by semantic key.
+  The editor retains up to three. API/CLI callers may request another bound or all
+  confirmed tuples; the shape, finding identity and count semantics are unchanged.
   Each contains `tuple` (one keyed atom), its own `observation: {present, absent}`,
   `scope` (`whole-program` or `cone-only`), `producers` (retained producing-rule
   occurrence keys), `attribution` and `dependencyInputs`. Empty when no tuple was confirmed.

@@ -301,6 +301,80 @@ fn manifest(c: &mut Client, uri: &str, text: &str, version: i64) {
     c.request("denotate/test/idle", Value::Null);
 }
 #[test]
+fn library_rewrite_visibility_withdraws_and_restores_only_consumer_warnings() {
+    let mut c = Client::start("ir-text/standalone");
+    let base = c.workspace.path().to_owned();
+    for (file, text) in [
+        ("app/den.root", r#"{"libraries":["../lib/den.root"]}"#),
+        ("other/den.root", r#"{"libraries":["../lib/den.root"]}"#),
+        ("lib/den.root", "{}"),
+        ("app/code.den", "relation own_rule(); own_rule():-flag(),!flag(),!own_rule();"),
+        ("other/code.den", "// another consumer"),
+        ("lib/code.den", "input flag(); relation library_rule(); library_rule():-flag(),!flag(),!library_rule(); relation bad(); bad(); obligation o:empty(bad); verification v{assumptions:[];obligations:[o];}"),
+    ] {
+        let path = base.join(file);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, text).unwrap();
+    }
+    watched(&mut c, &support::file_uri(&base.join("app/den.root")), 1);
+    let (app, _) = c.open("app/code.den");
+    let (lib, _) = c.open("lib/code.den");
+    checking_idle(&mut c);
+    let original = c.diagnostics(&lib);
+    let count = |ds: &Value, code| {
+        ds.as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["code"] == code)
+            .count()
+    };
+    assert_eq!(count(&original, "redundant"), 3, "{original}");
+    assert_eq!(count(&original, "counterexample"), 3, "{original}");
+    let full_status = c.request("denotate/roots", json!({"uri":app}));
+    for show in [false, true] {
+        c.notify(
+            "workspace/didChangeConfiguration",
+            json!({"settings":{"denotate":{"showLibraryRewrites":show}}}),
+        );
+        checking_idle(&mut c);
+        let ds = c.diagnostics(&lib);
+        assert_eq!(count(&ds, "redundant"), if show { 3 } else { 1 }, "{ds}");
+        assert_eq!(count(&ds, "counterexample"), 3, "{ds}");
+        assert_eq!(count(&c.diagnostics(&app), "redundant"), 1);
+        let mut status = c.request("denotate/roots", json!({"uri":app}));
+        if !show {
+            assert_eq!(
+                status["verifications"][0]["summary"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("hiddenLibraryRewrites"),
+                Some(json!(1))
+            );
+            assert!(ds
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|d| d["code"] == "redundant")
+                .all(|d| d["data"]["fallback"] == false));
+        } else {
+            let without_revision = |mut diagnostics: Value| {
+                for diagnostic in diagnostics.as_array_mut().unwrap() {
+                    diagnostic["data"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("checkRevision");
+                }
+                diagnostics
+            };
+            assert_eq!(without_revision(ds), without_revision(original.clone()));
+        }
+        assert_eq!(status["verifications"], full_status["verifications"]);
+        assert_eq!(status["findings"], full_status["findings"]);
+    }
+    c.shutdown();
+}
+
+#[test]
 fn home_programs_unsaved_manifests_cycles_nested_boundaries_and_independent_failures() {
     let mut c = Client::start("ir-text/standalone");
     let base = c.workspace.path().to_owned();

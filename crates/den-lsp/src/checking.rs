@@ -22,10 +22,14 @@ use std::collections::BTreeMap;
 #[derive(Clone, PartialEq, Eq)]
 pub struct Config {
     pub timeout_ms: u64,
+    pub show_library_rewrites: bool,
 }
 impl Default for Config {
     fn default() -> Self {
-        Self { timeout_ms: 10_000 }
+        Self {
+            timeout_ms: 10_000,
+            show_library_rewrites: true,
+        }
     }
 }
 impl Config {
@@ -35,7 +39,15 @@ impl Config {
             .map(|v| v.as_u64().ok_or("Expected nonnegative timeoutMs"))
             .transpose()?
             .unwrap_or(10_000);
-        Ok(Self { timeout_ms })
+        let show_library_rewrites = value
+            .get("showLibraryRewrites")
+            .map(|v| v.as_bool().ok_or("Expected boolean showLibraryRewrites"))
+            .transpose()?
+            .unwrap_or(true);
+        Ok(Self {
+            timeout_ms,
+            show_library_rewrites,
+        })
     }
 }
 #[derive(Clone)]
@@ -133,7 +145,8 @@ fn check(
             let ground = ground.admit(&operations)?;
             match session.verify(&ground, &operations)? {
                 LocalCheckOutcome::Complete(report) => {
-                    presentation::present(&program, &report.checked).map_err(Failure::Internal)
+                    presentation::present(&program, &report.checked, s.config.show_library_rewrites)
+                        .map_err(Failure::Internal)
                 }
                 LocalCheckOutcome::Inconclusive { reason, .. } => Ok(exhausted(reason)),
             }
@@ -522,7 +535,7 @@ impl Server {
                 .iter()
                 .map(|(r, n)| (r, json!({"files":n.files,"libraries":n.libraries})))
                 .collect::<BTreeMap<_, _>>();
-            let key = json!({"members":observations,"manifests":manifests,"graph":graph,"origins":self.bridge.snapshot_key(&files.iter().map(|f|f.uri.clone()).collect::<Vec<_>>()),"timeoutMs":self.checking.config.timeout_ms});
+            let key = json!({"members":observations,"manifests":manifests,"graph":graph,"origins":self.bridge.snapshot_key(&files.iter().map(|f|f.uri.clone()).collect::<Vec<_>>()),"timeoutMs":self.checking.config.timeout_ms,"showLibraryRewrites":self.checking.config.show_library_rewrites});
             let label = Url::parse(&root)
                 .ok()
                 .and_then(|u| u.to_file_path().ok())

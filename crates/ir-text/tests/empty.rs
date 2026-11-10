@@ -20,6 +20,14 @@ fn run(
     session: &mut Session,
     limits: &Limits,
 ) -> (ScopedResults, presentation::Presentation) {
+    run_with_examples(p, session, limits, EmptinessExamples::default())
+}
+fn run_with_examples(
+    p: &LoadedProgram,
+    session: &mut Session,
+    limits: &Limits,
+    examples: EmptinessExamples,
+) -> (ScopedResults, presentation::Presentation) {
     let ops = OperationalLimits::from(limits);
     let request = p.verification_requests(limits).unwrap().remove(0).1;
     let RequestPreparation::Complete(prepared) =
@@ -27,7 +35,10 @@ fn run(
     else {
         panic!("preparation incomplete")
     };
-    let prepared = prepared.admit(&ops).unwrap();
+    let prepared = prepared
+        .admit(&ops)
+        .unwrap()
+        .with_emptiness_examples(examples);
     let LocalCheckOutcome::Complete(report) = session.verify(&prepared, &ops).unwrap() else {
         panic!("checking incomplete")
     };
@@ -37,6 +48,105 @@ fn run(
         output.status["state"] == "proved"
     );
     (report.checked.results.value, output)
+}
+#[test]
+fn configurable_examples_keep_verdict_identity_worlds_and_cold_warm_agreement() {
+    for general in [false, true] {
+        let p = load_text(&format!(
+            "sort S; const z,a,m,b,k:S; input i(x:S); relation p(x:S); p(X):-i(X);
+             assumption single:at_most_one(i,group_by:());
+             relation nothing(); assumption general:empty(nothing);
+             obligation one:empty(p);
+             verification checks{{assumptions:[single{}];obligations:[one];}}",
+            if general { ",general" } else { "" }
+        ));
+        let limits = Limits::default();
+        let mut session = Session::default();
+        let (baseline, output) = run(&p, &mut session, &limits);
+        let identity = output
+            .diagnostics
+            .iter()
+            .find(|d| d.kind == Kind::Counterexample)
+            .unwrap()
+            .identity
+            .clone();
+        // Change the choice on a warm session, including restoring the default.
+        for (examples, expected) in [
+            (EmptinessExamples::All, 5),
+            (EmptinessExamples::Limited(1.try_into().unwrap()), 1),
+            (EmptinessExamples::default(), 3),
+        ] {
+            let (warm, out) = run_with_examples(&p, &mut session, &limits, examples);
+            let (cold, _) = run_with_examples(&p, &mut Session::default(), &limits, examples);
+            assert_eq!(warm, cold);
+            let result = warm.emptiness.values().next().unwrap();
+            assert_eq!(result.present, 5);
+            assert!(result.complete() && !result.proved());
+            assert_eq!(result.examples.len(), expected);
+            let tuples: Vec<_> = result
+                .examples
+                .iter()
+                .map(|e| &e.tuple.arguments[0])
+                .collect();
+            let mut keys: Vec<_> = p
+                .corpus
+                .constants()
+                .map(|c| p.keys.constant(c.id).unwrap())
+                .collect();
+            keys.sort();
+            assert_eq!(tuples, keys[..expected]);
+            for example in &result.examples {
+                assert_eq!(example.observation.present.len(), 1);
+                assert_eq!(
+                    example.observation.present.iter().next().unwrap().arguments,
+                    example.tuple.arguments
+                );
+                assert!(matches!(
+                    example.attribution,
+                    Some(Attribution::Complete(_))
+                ));
+            }
+            assert!(
+                out.diagnostics
+                    .iter()
+                    .filter(|d| d.kind == Kind::Counterexample)
+                    .all(|d| d.identity == identity)
+            );
+            // Everything else, including the semantic request, is unchanged.
+            let mut without_examples = warm;
+            without_examples.emptiness = baseline.emptiness.clone();
+            assert_eq!(without_examples, baseline);
+        }
+    }
+}
+
+#[test]
+fn all_examples_do_not_claim_completeness_for_unresolved_tuples() {
+    let p = load_text(&format!(
+        "sort S; const a,b,c,d,z:S; relation p(x:S); p(a);p(b);p(c);p(d);
+         p(z):-!p(z); obligation one:empty(p); {V}"
+    ));
+    let (result, out) = run_with_examples(
+        &p,
+        &mut Session::default(),
+        &Limits::default(),
+        EmptinessExamples::All,
+    );
+    let result = result.emptiness.values().next().unwrap();
+    assert_eq!((result.present, result.examples.len()), (4, 4));
+    assert!(!result.complete() && !result.proved());
+    let finding = out
+        .diagnostics
+        .iter()
+        .find(|d| d.kind == Kind::Counterexample)
+        .unwrap();
+    assert_eq!(finding.evidence["presentTuples"]["exact"], false);
+    assert_eq!(finding.evidence["examplesTruncated"], false);
+    assert!(
+        finding.message.contains("at least 4"),
+        "{}",
+        finding.message
+    );
 }
 fn check(text: &str) -> (ScopedResults, presentation::Presentation) {
     run(

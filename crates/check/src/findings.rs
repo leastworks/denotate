@@ -159,13 +159,20 @@ impl<'p> SymbolicMeaning<'p> {
         completion_limits: &Limits,
         certification_limits: &Limits,
     ) -> Result<Verification<'p>> {
-        self.verify_queries(limits, completion_limits, certification_limits, None)
+        self.verify_queries(
+            limits,
+            completion_limits,
+            certification_limits,
+            EmptinessExamples::default(),
+            None,
+        )
     }
     pub(crate) fn verify_queries(
         &self,
         limits: &Limits,
         completion_limits: &Limits,
         certification_limits: &Limits,
+        emptiness_examples: EmptinessExamples,
         mut queries: Option<&mut QueryRun<'_>>,
     ) -> Result<Verification<'p>> {
         limits.cancellation.check()?;
@@ -173,7 +180,7 @@ impl<'p> SymbolicMeaning<'p> {
             return Ok(Verification::inconsistent(self.program));
         }
         let report = self.check_queries(limits, queries.as_deref_mut())?;
-        let emptiness = self.check_emptiness(limits, queries.as_deref_mut())?;
+        let emptiness = self.check_emptiness(limits, emptiness_examples, queries.as_deref_mut())?;
         let coverage = self.check_coverage(limits, queries.as_deref_mut())?;
         let mut verified = self.verify_report(
             limits,

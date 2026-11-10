@@ -11,6 +11,15 @@
   "main": "./dist/extension.cjs",
   "activationEvents": ["onLanguage:denotate", "workspaceContains:**/den.root"],
   "contributes": {
+    "configuration": {
+      "title": "Denotate",
+      "properties": {
+        "denotate.showLibraryRewrites": {
+          "type": "boolean", "default": true, "scope": "window",
+          "description": "Show rewrite warnings for library rules in consuming programs. The library's own warnings, other diagnostics and full status summaries remain available."
+        }
+      }
+    },
     "languages": [{"id": "denotate", "aliases": ["Denotate IR"], "extensions": [".den"], "configuration": "./dist/language-configuration.json"}],
     "grammars": [{"language": "denotate", "scopeName": "source.denotate", "path": "./dist/denotate.tmLanguage.json"}],
     "menus": {"editor/context": [{"command": "denotate.goToOrigin", "when": "editorLangId == denotate", "group": "navigation"}]},

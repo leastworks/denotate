@@ -110,11 +110,15 @@ Known limits of this increment:
 
 ## Implemented: several emptiness tuples per finding
 
-`empty` now retains up to three distinct replay-confirmed tuples, ordered by semantic
-key, each with its own world, replay scope and attribution. Checking continues to
+`empty` now defaults to retaining up to three distinct replay-confirmed tuples,
+ordered by semantic key, each with its own world, replay scope and attribution. Checking continues to
 count confirmed tuples beyond the retained sample. The count is exact when checking
 completes and a lower bound otherwise; it counts tuples across permitted worlds,
 not tuples necessarily present together.
+
+The CLI can retain more with `--empty-examples N|all`, using the checker's
+invocation-level reporting option. This preserves count semantics and identity;
+`all` includes every confirmed tuple, without claiming completeness after exhaustion.
 
 Retention preserves semantic scan order and work charges. Attribution runs after
 checking with a fresh bounded allowance per tuple. One tuple exhausting attribution

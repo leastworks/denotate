@@ -50,8 +50,8 @@ pub mod test_support;
 
 mod emptiness;
 pub use emptiness::{
-    Attribution, EMPTINESS_EXAMPLE_LIMIT, EmptinessReport, EmptinessResult, EmptinessSummary,
-    PresenceExample,
+    Attribution, EMPTINESS_EXAMPLE_LIMIT, EmptinessExamples, EmptinessReport, EmptinessResult,
+    EmptinessSummary, PresenceExample,
 };
 mod coverage;
 pub use coverage::{CoverageExample, CoverageReport, CoverageResult, CoverageSummary};

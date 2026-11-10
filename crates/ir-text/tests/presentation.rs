@@ -63,6 +63,63 @@ fn program(root: &str, app: &str, library: &str) -> LoadedProgram {
 const LIB: &str = "sort S; const a,b: S; relation p(x:S); obligation unique: at_most_one(p, group_by: ()); verification checks { assumptions: []; obligations: [unique]; }";
 
 #[test]
+fn hiding_library_rewrites_preserves_home_warnings_other_findings_and_full_inventory() {
+    let library = format!(
+        "{LIB} input flag(); relation library_rule(); library_rule():-flag(),!flag(),!library_rule();"
+    );
+    let app = "p(a);p(b); relation own_rule(); own_rule():-flag(),!flag(),!own_rule();";
+    let consumer = program("file:///app/den.root", app, &library);
+    let mut out = checked(&consumer);
+    let status = out.status.clone();
+    let before: BTreeSet<_> = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.kind == Kind::Rewrite)
+        .map(|d| d.identity.clone())
+        .collect();
+    assert_eq!(before.len(), 2);
+    let errors = out
+        .diagnostics
+        .iter()
+        .filter(|d| d.kind != Kind::Rewrite)
+        .count();
+    assert!(errors > 0);
+    out.hide_library_rewrites(&consumer);
+    assert_eq!(out.status["hiddenLibraryRewrites"], 1);
+    assert_eq!(
+        out.diagnostics
+            .iter()
+            .filter(|d| d.kind != Kind::Rewrite)
+            .count(),
+        errors
+    );
+    assert!(
+        out.diagnostics
+            .iter()
+            .filter(|d| d.kind == Kind::Rewrite)
+            .all(
+                |d| consumer.sources.snapshot(d.primary.snapshot()).unwrap().uri
+                    == "file:///app/app.den"
+            )
+    );
+    out.hide_library_rewrites(&consumer); // Applying a view filter twice is harmless.
+    assert_eq!(
+        out.status
+            .as_object_mut()
+            .unwrap()
+            .remove("hiddenLibraryRewrites"),
+        Some(serde_json::json!(1))
+    );
+    assert_eq!(out.status, status);
+
+    let home = program("file:///lib/den.root", "", &library);
+    let mut out = checked(&home);
+    out.hide_library_rewrites(&home);
+    assert_eq!(out.status["hiddenLibraryRewrites"], 0);
+    assert!(out.diagnostics.iter().any(|d| d.kind == Kind::Rewrite));
+}
+
+#[test]
 fn consumer_locations_and_labeled_fallback_do_not_change_library_home() {
     {
         let app = program("file:///app/den.root", "p(a); p(b);", LIB);

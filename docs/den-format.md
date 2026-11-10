@@ -67,6 +67,31 @@ verification single_value {
   Unnecessary source quotes need not be preserved. This affects display only,
   not semantic keys or finding identity.
 
+The reserved words are `module`, `namespace`, `use`, `sort`, `const`, `relation`,
+`input`, `within`, `domain`, `obligation`, `assumption`, `notice`, `verification`
+and `source`. For example, write `relation 'source'();`. Contract operators such as
+`empty` and `exactly_one`, and list labels such as `assumptions`, are contextual:
+they do not need quotes when used as declaration names.
+
+### Equality in rules
+
+Rule bodies have no `=` or `!=` operators. Reusing a variable requires the same
+constant in each position: `matches(I) :- actual(I, V), expected(I, V);`. A literal
+constant tests that value directly, as in `actual(I, approved)`.
+
+For inequality, a library can define a reflexive helper and negate it:
+
+```den
+same_value(V, V) :- candidate_value(V);
+differs(I) :- actual(I, V), expected(I, W), !same_value(V, W);
+```
+
+These are rule fragments; declare the relations with compatible sorts first.
+`candidate_value` must enumerate every value that either relation can contain.
+Otherwise a missing reflexive tuple would incorrectly make equal values differ.
+When the requirement is simply “no more than one value for each item”, an
+`at_most_one` obligation expresses it directly without an inequality helper.
+
 ## Restricted input domains
 
 An input normally has one possible atom for every combination of its parameters'
@@ -224,13 +249,21 @@ even `empty(R, group_by: ())` is rejected. A relation with no possible tuples is
 proved empty; a zero-arity relation fails as soon as its single tuple is present.
 Duplicate derivations do not change this.
 
-One finding per obligation and verification reports up to three distinct,
+One finding per obligation and verification reports, by default, up to three distinct,
 replay-confirmed present tuples. Each retains its own input world, replay scope and
 derivation. The count includes every confirmed tuple, including those beyond the
 sample: it is exact when checking completes and a lower bound otherwise. This is a
 count across permitted worlds, not a claim that all the tuples occur together.
 Repeated derivations or worlds for the same tuple count only once. The sample keeps
 the smallest confirmed tuples by semantic key, independently of checking order.
+
+For debugging, `just check-den <program> --empty-examples N` retains up to `N`
+examples per emptiness obligation; `--empty-examples all` retains every confirmed
+tuple. This also applies to `--json`. The editor keeps the default of three.
+Changing retention does not change the candidate scan or deterministic checking
+allowance; each additional example needs memory and separate attribution work.
+“All” does not override limits or make incomplete checking complete. A tuple absent
+from a truncated sample or an incomplete result has not been shown impossible.
 
 The identity has component `emptiness` and does not depend on the tuples or worlds
 shown. Blocked or unknown facts never count as presence. Unresolved worlds and

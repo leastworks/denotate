@@ -40,7 +40,7 @@ impossible and always-true conditions within an explicit scope. Formula sharing 
 proved simplification remain separate work. Known items:
 
 - [Obligation diagnostic placement](proposals/obligation-diagnostic-placement.md):
-  emptiness reports a bounded set of tuples, each on its own derivation; coverage
+  emptiness reports a configurable sample of tuples, each on its own derivation; coverage
   failures highlight the missing group's consumer constants. Library counterexamples
   narrow primaries to the first consumer producers along retained support.
   Explicit targets, alternative derivations and per-tuple identity are

@@ -153,8 +153,15 @@ regression tests.
 ## Emptiness
 
 `empty` has one ungrouped `EmptinessReport` per selected obligation (keyed as
-`EmptinessResult` in `ScopedResults.emptiness`). `examples` retains at most three
-distinct replayed present tuples, each with its own observation. `unresolved` and `inconclusive` keep unknown
+`EmptinessResult` in `ScopedResults.emptiness`). `examples` defaults to at most three
+distinct replayed present tuples, each with its own observation.
+`PreparedCheck::with_emptiness_examples(EmptinessExamples::Limited(n))` selects a
+positive sample size; `EmptinessExamples::All` retains every confirmed tuple.
+This invocation-level reporting choice is outside `CheckRequest`, semantic limits
+and cached inputs. It changes neither candidate enumeration nor deterministic
+charges. Extra examples consume memory and receive independent post-check attribution
+allowances. All modes keep semantic-key order and exact/lower-bound count semantics.
+`unresolved` and `inconclusive` keep unknown
 worlds and resource exhaustion visible independently of a known failure. `proved()`
 requires complete analysis and zero present tuples. The BDD checks settled presence conditions;
 blocked facts require world replay/certification, with enumeration and evidence charged

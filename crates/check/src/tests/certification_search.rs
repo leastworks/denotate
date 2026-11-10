@@ -80,7 +80,9 @@ fn compare(c: &Corpus, domains: &Domains, p: &GroundProgram, target: RelationId)
             }
         }
     }
-    let empty = m.check_emptiness(&limits, None).unwrap();
+    let empty = m
+        .check_emptiness(&limits, EmptinessExamples::default(), None)
+        .unwrap();
     let empty = empty.values().next().unwrap();
     assert!(empty.inconclusive.is_none(), "{empty:?}");
     assert_eq!(empty.present, seen.len());
@@ -205,7 +207,9 @@ fn unrelated_release_input_is_kept_and_permanent_failure_is_not_scoped_away() {
         let p = GroundProgram::prepare(&c, &Domains::new(), &Limits::default()).unwrap();
         compare(&c, &Domains::new(), &p, result);
         let m = p.symbolic(&Limits::default()).unwrap();
-        let reports = m.check_emptiness(&Limits::default(), None).unwrap();
+        let reports = m
+            .check_emptiness(&Limits::default(), EmptinessExamples::default(), None)
+            .unwrap();
         let report = reports.values().next().unwrap();
         assert_eq!(report.present, usize::from(!permanent));
         assert!(report.unresolved);
@@ -298,7 +302,9 @@ fn input_independent_cycle_with_many_inputs_finishes_unresolved_at_default_limit
         .admit(&limits)
         .unwrap();
     let m = p.symbolic(&limits).unwrap();
-    let empty = m.check_emptiness(&limits, None).unwrap();
+    let empty = m
+        .check_emptiness(&limits, EmptinessExamples::default(), None)
+        .unwrap();
     let empty = empty.values().next().unwrap();
     assert!(empty.inconclusive.is_none());
     assert!(empty.unresolved && !empty.proved());
@@ -349,7 +355,9 @@ fn incomplete_dependency_analysis_returns_a_limit_not_an_empty_scope() {
             max_work,
             ..limits.clone()
         };
-        let empty = m.check_emptiness(&limited, None).unwrap();
+        let empty = m
+            .check_emptiness(&limited, EmptinessExamples::default(), None)
+            .unwrap();
         let coverage = m.check_coverage(&limited, None).unwrap();
         let empty = empty.values().next().unwrap();
         let coverage = coverage.values().next().unwrap();

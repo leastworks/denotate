@@ -1,6 +1,6 @@
 # The `.den` editor
 
-A Rust language server (`server/`, crate `denotate-lsp`) and a VS Code extension
+A Rust language server ([`crates/den-lsp`](../../crates/den-lsp), crate `denotate-lsp`) and a VS Code extension
 (`src/extension.cjs`) for the [`.den` format](../../docs/den-format.md). Language
 semantics come from `crates/ir-text`; this package owns the editor: program
 discovery, buffers, background checking, publication, navigation and rename.
@@ -46,7 +46,8 @@ reported, not navigated). Do not commit generated exports: they contain absolute
 `file://` URIs.
 
 The [Shipping News tutorial](examples/shipping-news/README.md) builds a complete
-message-mapping and classification example in nine runnable steps.
+message-mapping and classification example in nine runnable steps; lesson 10 adds
+computed values that feed task conditions.
 
 ## What the editor does
 
@@ -70,6 +71,13 @@ message-mapping and classification example in nine runnable steps.
 
 The custom protocol (root status, manifest sync, origin snapshots, test hooks) is in
 [PROTOCOL.md](../../crates/den-lsp/PROTOCOL.md).
+
+Set **Denotate: Show Library Rewrites** (`denotate.showLibraryRewrites`) to `false`
+to hide consumer-program rewrite warnings about included library rules. The default
+is `true`. The library's own program still shows its warnings, and errors and other
+findings remain visible everywhere. Full per-verification status inventories remain
+available; the status tooltip shows how many rewrite findings were hidden. Changing
+the setting refreshes publication without requiring a source edit.
 
 ## Tests
 
