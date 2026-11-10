@@ -1,7 +1,7 @@
 //! Interpret program-level assumption validation; never reconstruct dependencies.
 use crate::*;
 use denotate_check::{AssumptionValidation, AssumptionValidity};
-use denotate_ir::{Corpus, OccurrenceKey, SemanticKeys};
+use denotate_ir::{Corpus, OccurrenceId, OccurrenceKey, SemanticKeys};
 use serde_json::{Value, json};
 
 pub fn assumption_validity_data(state: &AssumptionValidity) -> Value {
@@ -9,10 +9,9 @@ pub fn assumption_validity_data(state: &AssumptionValidity) -> Value {
         AssumptionValidity::Valid => json!({"kind":"assumption-validation","state":"valid"}),
         AssumptionValidity::Invalid { cycles } => json!({
             "kind":"assumption-validation", "state":"invalid",
-            "cycles":cycles.iter().map(|c| c.0.iter().map(|e| json!({
-                "consumer":atom_data(&e.consumer),"provider":atom_data(&e.provider),
-                "polarity":if e.negative {"negative"} else {"positive"}
-            })).collect::<Vec<_>>()).collect::<Vec<_>>()
+            "cycles":cycles.iter().map(|c| c.0.iter().map(|e|
+                crate::cycles::cycle_edge_data(&e.consumer, &e.provider, e.negative)
+            ).collect::<Vec<_>>()).collect::<Vec<_>>()
         }),
         AssumptionValidity::Inconclusive(reason) => json!({
             "kind":"assumption-validation","state":"inconclusive",
@@ -36,6 +35,7 @@ pub fn assumption_validation_findings(
     corpus: &Corpus,
     keys: &SemanticKeys,
     validation: &AssumptionValidation,
+    names: &dyn Fn(OccurrenceId) -> String,
 ) -> Result<Vec<(ContextFinding, Value)>> {
     let mut findings = Vec::new();
     for assumption in corpus.assumptions() {
@@ -49,10 +49,12 @@ pub fn assumption_validation_findings(
             occurrence: assumption.id.into(),
             role: Role::Declaration,
         }];
+        let mut notes = Vec::new();
         let (kind, message) = match state {
             AssumptionValidity::Valid => continue,
             AssumptionValidity::Invalid { cycles } => {
                 for cycle in cycles {
+                    notes.push(crate::cycles::assumption_cycle_note(keys, names, cycle)?);
                     for edge in &cycle.0 {
                         for occurrence in [&edge.premise, &OccurrenceKey::Rule(edge.rule.clone())] {
                             contributions.push(Contribution {
@@ -83,6 +85,7 @@ pub fn assumption_validation_findings(
                 identity: Identity::Assumption(assumption.id),
                 kind,
                 message,
+                notes,
                 contributions,
             },
             assumption_validity_data(state),

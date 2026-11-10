@@ -1,6 +1,7 @@
 //! Shared interpretation of checked evidence. No editor protocol, source language,
 //! filesystem, scheduling or source-edit authority lives here.
 mod assumptions;
+mod cycles;
 mod evidence;
 mod identity;
 mod locations;

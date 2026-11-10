@@ -588,10 +588,13 @@ pub fn generic_details(
             }
             _ => None,
         },
-        Evidence::Region(r) => match &r.completion {
-            CompletionOutcome::NoMeaning(n) => Some(&n.observation),
-            _ => None,
-        },
+        Evidence::Region(r) => {
+            details.push(crate::cycles::ground_cycle_note(corpus, names, &r.cycle)?);
+            match &r.completion {
+                CompletionOutcome::NoMeaning(n) => Some(&n.observation),
+                _ => None,
+            }
+        }
     };
     if let Some(o) = observation {
         details.push(format!(
@@ -603,7 +606,7 @@ pub fn generic_details(
     Ok(details)
 }
 
-fn atom_name(
+pub(crate) fn atom_name(
     corpus: &Corpus,
     names: &dyn Fn(OccurrenceId) -> String,
     a: &GroundAtom,
@@ -738,6 +741,7 @@ pub struct ContextFinding {
     pub identity: Identity,
     pub kind: Kind,
     pub message: String,
+    pub notes: Vec<String>,
     pub contributions: Vec<Contribution>,
 }
 pub fn context_findings(
@@ -768,6 +772,7 @@ pub fn context_findings(
             kind: Kind::InconsistentAssumptions,
             message: "Selected assumptions permit no input world; obligations were not checked."
                 .into(),
+            notes: vec![],
             contributions,
         });
     }
@@ -837,11 +842,12 @@ pub fn context_findings(
             } else {
                 format!("{}: {explanation}", n.message)
             },
+            notes: vec![],
             contributions,
         });
     }
     for (a, o) in corpus.assumption_conclusions(v.id) {
-        findings.push(ContextFinding {identity:Identity::AssumedConclusion(a,o),kind:Kind::AssumedConclusion,
+        findings.push(ContextFinding {identity:Identity::AssumedConclusion(a,o),kind:Kind::AssumedConclusion, notes:vec![],
             message:format!("Assumption {} constrains the conclusion of obligation {} (directly or through its dependencies).", corpus.assumption(a).unwrap().name,corpus.obligation(o).unwrap().name),
             contributions:vec![Contribution {occurrence:v.id.into(),role:Role::Declaration},Contribution {occurrence:a.into(),role:Role::RelatedOnly},Contribution {occurrence:o.into(),role:Role::RelatedOnly}] });
     }

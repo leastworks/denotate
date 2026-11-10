@@ -436,6 +436,22 @@ a fixed world never depends on the verification.
   only after concrete replay confirms it; exhausted limits give an explicit
   **inconclusive** outcome.
 
+Cycle diagnostics show concrete arguments, so different instances of the same
+generic rules can be distinguished. For example:
+
+```text
+Ground dependency cycle (structural; arrows mean "depends on"): p(a) -not-> q(a) -> p(a).
+```
+
+`->` is a positive dependency; `-not->` is a negative dependency. The checker retains
+one closed path per negative component, not every possible cycle. The path is
+structural: it is not an execution trace, a minimal explanation of inconsistency,
+or a claim that all its rules are active in the displayed world. A `no-meaning`
+finding retains its separate example input observation. Unsupported and inconclusive
+region findings can show a cycle without having such a witness. Invalid assumptions
+show the retained cycles reachable from their ground cones. Names use canonical
+`.den` spelling, including quoted constants and generated helpers.
+
 ## Namespaces
 
 - `namespace a::b;` applies to the rest of the file; `namespace a::b { ... }` blocks

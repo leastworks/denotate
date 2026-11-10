@@ -360,6 +360,9 @@ fn library_cycle_evidence_uses_labeled_fallback_and_current_source_locations() {
     assert_eq!(validation, validate(&current, &Limits::default()));
     let output = presentation::present_assumption_validation(&current, &validation).unwrap();
     let d = &output.diagnostics[0];
+    assert!(d.notes.iter().any(
+        |n| n.starts_with("Ground dependency cycle ") && n.contains("lib::p() -not-> lib::p()")
+    ));
     assert!(d.fallback && d.message.starts_with("in consumer:"));
     assert_eq!(
         current.sources.snapshot(d.primary.snapshot()).unwrap().uri,

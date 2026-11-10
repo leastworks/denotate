@@ -10,6 +10,14 @@ participating occurrences, and places them on source locations. It depends only 
   The caller supplies `names`, a relation/constant declaration-to-name callback;
   `generic_details` uses the same callback. Text syntax stays with the caller,
   while finding identities and structured evidence remain independent of spelling.
+- `generic_details` shows a region's retained ground dependency cycle with concrete
+  arguments. Arrows run from consumer to provider; `-not->` marks a negative edge.
+  This is structural evidence, separate from a no-meaning observation. The path is
+  copied from the checker, with no new analysis, witness selection or budget charge.
+  Region diagnostic evidence exposes the same ordered edges as `cycles` with keyed
+  atoms and polarity. Assumption validation uses the same renderer after rebinding
+  its keyed cycles to current declarations. The test DSL retains its own cycle
+  wording while carrying the shared structured evidence.
 - Coverage produces one finding per obligation/verification, with bounded missing-group
   examples, separate observations, and exact or lower-bound counts. Each example is
   placed on its locatable grouping-constant declarations in the program's own files,

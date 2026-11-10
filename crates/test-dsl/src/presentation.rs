@@ -168,7 +168,7 @@ pub fn present_checked(
             message: finding.message,
             primary,
             related,
-            notes: vec![],
+            notes: finding.notes,
             cycle_rules: vec![],
         });
     }

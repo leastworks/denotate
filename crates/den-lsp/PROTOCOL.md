@@ -125,6 +125,27 @@ primary with the other producers related. Evidence kinds are
 `replayed-counterexample`, `replayed-coverage-counterexamples`, `no-meaning-observation`, `rewrite-proof` and `no-witness`. Rewrite proofs do not
 authorize edits.
 
+### Ground dependency cycles
+
+Region diagnostics (`unsupported-region`, `no-meaning`, and region-level
+`inconclusive`) include a human-readable ground-cycle note with concrete arguments.
+`->` means a positive dependency from consumer to provider; `-not->` means a
+negative dependency. It shows the checker's retained ordered path, including its
+closing edge. It does not enumerate other cycles or imply an execution order.
+
+Their existing `data.evidence` gains `cycles`, using the same shape as assumption
+validation: an array of cycles, each an ordered array of edges with keyed `consumer`
+and `provider` atoms and `polarity` (`positive` or `negative`). A region carries one
+retained cycle. The evidence kind stays `no-meaning-observation` or `no-witness`;
+the no-meaning observation and producer fields remain intact. The cycle is structural
+evidence, not a witnessed trace or a minimal inconsistent subset. Finding identities,
+placement, severity, verdicts and status summaries are unchanged.
+
+Invalid-assumption diagnostics render their existing `cycles` evidence as the same
+notes, rebinding semantic keys to the current snapshot's canonical `.den` names.
+Both CLI human output and editor messages use the shared presenter. Notice diagnostics
+continue to identify blocking rules through related locations.
+
 ### Ownership-frontier placement
 
 For library-declared emptiness and uniqueness counterexamples, primaries are the

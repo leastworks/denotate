@@ -54,6 +54,13 @@ real program that the current choice serves badly.
   selecting an invalid or unvalidated assumption prevents that verification from
   running. Ground validation is fresh and bounded. This deliberately leaves
   assumption-free redundancy proofs and further static simplification for later.
+- **Cycle diagnostics show retained ground dependencies.** A generic rule can have
+  many instances with different recursive behavior. Showing concrete arguments and
+  signed edges identifies the reported instance without searching for a new cycle
+  or changing checking work. The displayed path is structural evidence; no-meaning
+  retains its separate input observation, and the path is not a minimal inconsistent
+  subset or an execution trace. Frontends share this rendering and keyed evidence;
+  DSLs can keep their own vocabulary. Finding identities and verdicts are unchanged.
 - **Conclusive answers must be sound.** A false counterexample or a silent success
   misleads the author; an explicit inconclusive or unsupported outcome does not. Hence
   counterexamples only after concrete replay (or certification); blocked or unknown

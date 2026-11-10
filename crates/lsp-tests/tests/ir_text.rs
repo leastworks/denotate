@@ -11,6 +11,112 @@ fn query(c: &mut Client, method: &str, uri: &str, text: &str, needle: &str, delt
     c.request(method,json!({"textDocument":{"uri":uri},"position":position(text,needle,delta),"context":{"includeDeclaration":true}}))
 }
 #[test]
+fn ground_cycle_diagnostics_distinguish_instances_and_follow_open_buffer_edits() {
+    let mut c = Client::start("base/00-valid");
+    let (uri, _) = c.open("example.den");
+    let declarations = "sort S; const 'F2','F3':S; relation eligible(x:S); eligible('F2'); eligible('F3'); relation p(x:S); relation q(x:S);";
+    let verification = "relation clear(); obligation o:empty(clear); verification v{assumptions:[];obligations:[o];}";
+    let unsupported =
+        format!("{declarations} p(X):-eligible(X),!q(X); q(X):-eligible(X),!p(X); {verification}");
+    c.change(&uri, 2, &unsupported);
+    checking_idle(&mut c);
+    let all = c.diagnostics(&uri);
+    let cycles = all
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["code"] == "unsupported-region")
+        .collect::<Vec<_>>();
+    assert_eq!(cycles.len(), 2, "{all}");
+    for name in ["F2", "F3"] {
+        let d = cycles
+            .iter()
+            .find(|d| {
+                d["message"]
+                    .as_str()
+                    .unwrap()
+                    .contains(&format!("p('{name}')"))
+            })
+            .unwrap();
+        assert!(d["message"]
+            .as_str()
+            .unwrap()
+            .contains("Ground dependency cycle "));
+        assert!(d["message"].as_str().unwrap().contains(" -not-> "));
+        assert!(d["data"]["evidence"]["cycles"][0]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e["polarity"] == "negative"));
+    }
+    let remaining = cycles
+        .iter()
+        .find(|d| d["message"].as_str().unwrap().contains("p('F3')"))
+        .unwrap()["data"]
+        .clone();
+    c.change(&uri, 3, &unsupported.replace("eligible('F2');", ""));
+    checking_idle(&mut c);
+    let all = c.diagnostics(&uri);
+    let cycles = all
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["code"] == "unsupported-region")
+        .collect::<Vec<_>>();
+    assert_eq!(cycles.len(), 1);
+    assert!(!cycles[0]["message"].as_str().unwrap().contains("F2"));
+    assert_eq!(cycles[0]["data"]["finding"], remaining["finding"]);
+    assert_eq!(cycles[0]["data"]["evidence"], remaining["evidence"]);
+
+    let negative = format!("{declarations} p(X):-eligible(X),!p(X);");
+    c.change(&uri, 4, &format!("{negative}{verification}"));
+    checking_idle(&mut c);
+    let all = c.diagnostics(&uri);
+    let cycles = all
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|d| d["code"] == "no-meaning")
+        .collect::<Vec<_>>();
+    assert!(!cycles.is_empty());
+    for d in cycles {
+        let message = d["message"].as_str().unwrap();
+        assert!(
+            message.contains("Ground dependency cycle ")
+                && message.contains("Example input observation")
+        );
+        assert_eq!(d["data"]["evidence"]["kind"], "no-meaning-observation");
+        assert!(d["data"]["evidence"]["observation"].is_object());
+    }
+    c.change(&uri, 5, &format!("{negative} assumption invalid:empty(p);"));
+    checking_idle(&mut c);
+    let all = c.diagnostics(&uri);
+    let d = all
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["code"] == "invalid-assumption")
+        .unwrap();
+    let message = d["message"].as_str().unwrap();
+    assert!(
+        message.contains("p('F2') -not-> p('F2')") && message.contains("p('F3') -not-> p('F3')")
+    );
+    assert_eq!(d["data"]["evidence"]["cycles"].as_array().unwrap().len(), 2);
+    assert!(d["data"]["finding"]["verification"].is_null());
+    c.change(
+        &uri,
+        6,
+        &format!("{declarations} assumption invalid:empty(p);"),
+    );
+    checking_idle(&mut c);
+    assert!(!c
+        .diagnostics(&uri)
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "invalid-assumption"));
+}
+#[test]
 fn namespaces_quoted_names_helpers_domains_contracts_and_locations_use_one_index() {
     let mut c = Client::start("base/00-valid");
     let (uri, _) = c.open("example.den");

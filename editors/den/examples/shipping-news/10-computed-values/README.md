@@ -179,6 +179,13 @@ classification true and disables the task. Not applying leaves the classificatio
 false and requires the task to apply. The checker reports `no-meaning` and exits 1;
 the notice is `unknown`, reported as `unanalysed-condition`, not impossible.
 
+The `no-meaning` diagnostic also shows the concrete dependency cycle through
+`classified(loop::ready)`, `element_value(loop::zone, loop::domestic)`,
+`writes(loop::assess, loop::zone)`, `step_applies(loop::assess)` and `$not_ready()`.
+Arrows mean “depends on”; `-not->` marks the negative dependency. This retained
+structural path is separate from the example input observation that demonstrates
+the inconsistency. Other cycles can have consistent equations and still be unsupported.
+
 **Repair:** replace `step_applies(assess) :- $not_ready();` with
 `step_applies(assess);`. The task then always applies, while `$not_ready` is always
 false. The notice becomes impossible and exit returns to 0.

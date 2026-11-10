@@ -318,12 +318,26 @@ pub fn evidence_data(finding: &crate::Finding<'_>, keys: &SemanticKeys) -> Resul
             }
             _ => json!({"kind":"no-witness","producers":producers}),
         },
-        crate::Evidence::Region(r) => match &r.completion {
-            CompletionOutcome::NoMeaning(n) => {
-                json!({"kind":"no-meaning-observation","observation":observation(&n.observation)?,"producers":producers})
+        crate::Evidence::Region(r) => {
+            let cycle = r
+                .cycle
+                .edges
+                .iter()
+                .map(|edge| {
+                    Ok(crate::cycles::cycle_edge_data(
+                        &AtomKey::from_atom(keys, &edge.consumer)?,
+                        &AtomKey::from_atom(keys, &edge.provider)?,
+                        edge.polarity == denotate_check::Polarity::Negative,
+                    ))
+                })
+                .collect::<Result<Vec<_>>>()?;
+            match &r.completion {
+                CompletionOutcome::NoMeaning(n) => {
+                    json!({"kind":"no-meaning-observation","observation":observation(&n.observation)?,"producers":producers,"cycles":[cycle]})
+                }
+                _ => json!({"kind":"no-witness","producers":producers,"cycles":[cycle]}),
             }
-            _ => json!({"kind":"no-witness","producers":producers}),
-        },
+        }
     })
 }
 

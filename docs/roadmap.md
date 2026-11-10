@@ -45,10 +45,12 @@ proved simplification remain separate work. Known items:
   narrow primaries to the first consumer producers along retained support.
   Explicit targets, alternative derivations and per-tuple identity are
   deferred until a real program needs them.
-- Explain unsupported negation cycles. When a redundancy proof fails, show the
-  permitted world where the guards overlap and the consistent answers it allows, and
-  suggest the fixes (an assumption that excludes the inputs, or giving one case
-  priority). Today the diagnostic only says the cycle is unsupported.
+- Explain unsupported negation cycles further. Diagnostics now show the retained
+  ground dependency path with concrete arguments and negative edges. When a
+  redundancy proof fails, show the permitted world where the guards overlap and the
+  consistent answers it allows, and suggest the fixes (an assumption that excludes
+  the inputs, or giving one case priority). Those world-specific explanations remain
+  separate from the structural cycle path.
 - Generated helpers can change recursive meaning. The normalizer cancels double
   negation within one expression, but a relation boundary stops it: `t :- not not t`
   is `t :- t`, whereas `w :- not t; t :- not w; t :- t` is an unsupported negative

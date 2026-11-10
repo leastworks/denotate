@@ -34,12 +34,13 @@ pub fn present_assumption_validation(
         &program.corpus,
         &program.keys,
         validation,
+        &diagnostic_names(&program.corpus),
     )? {
         let mut placed = placement.place(
             &finding.identity,
             finding.kind,
             &finding.message,
-            &[],
+            &finding.notes,
             &finding.contributions,
         )?;
         for d in &mut placed {
@@ -111,7 +112,7 @@ pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Pr
             &finding.identity,
             finding.kind,
             &finding.message,
-            &[],
+            &finding.notes,
             &finding.contributions,
         )?;
         for d in &mut placed {

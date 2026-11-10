@@ -440,6 +440,13 @@ mod tests {
                 output.contains("related:") && output.contains("blocking dependency cycle"),
                 "{output}"
             );
+            assert!(
+                output
+                    .lines()
+                    .any(|line| line.contains("note: Ground dependency cycle ")
+                        && line.contains("p() -not-> p()")),
+                "{output}"
+            );
             if verifications.is_empty() {
                 assert!(output.contains("No verification configured"));
             } else {
@@ -455,6 +462,43 @@ mod tests {
                 json.contains("\"cycles\"") && json.contains("\"state\": \"invalid\""),
                 "{json}"
             );
+        }
+    }
+    #[test]
+    fn region_diagnostics_print_ground_instances_and_preserve_exit_codes() {
+        for (rules, code, kind) in [
+            ("p(X):-eligible(X),!p(X);", 1, "no-meaning"),
+            (
+                "p(X):-eligible(X),!q(X); q(X):-eligible(X),!p(X);",
+                2,
+                "unsupported-region",
+            ),
+        ] {
+            let fixture = Fixture::new(&format!(
+                "sort S; const 'F2','F3':S; relation eligible(x:S); eligible('F2'); eligible('F3'); relation p(x:S); relation q(x:S); {rules} relation clear(); obligation o:empty(clear); verification v{{assumptions:[];obligations:[o];}}"
+            ));
+            let (exit, output) = fixture.run(&[]);
+            assert_eq!(exit, code, "{output}");
+            assert!(output.contains(kind));
+            let notes = output
+                .lines()
+                .filter(|line| line.contains("note: Ground dependency cycle "))
+                .collect::<Vec<_>>();
+            for name in ["F2", "F3"] {
+                assert!(
+                    notes
+                        .iter()
+                        .any(|line| line.contains(&format!("p('{name}')"))
+                            && line.contains(" -not-> ")),
+                    "{output}"
+                );
+            }
+            assert!(
+                notes
+                    .iter()
+                    .all(|n| !(n.contains("F2") && n.contains("F3")))
+            );
+            assert_eq!(fixture.run(&["--json"]).0, exit);
         }
     }
     #[test]
