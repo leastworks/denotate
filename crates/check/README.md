@@ -22,6 +22,10 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
 3. **Admissibility.** Positive cycles are admitted. A negative edge inside an SCC blocks
    that component and its dependents unless a rewrite proves the negation redundant
    under W. Blocked regions are reported (`Unsupported`), never treated as false.
+   Each settled snapshot first proves redundant producer removals from independent
+   exact coverage. A nonempty removal batch is committed and the components rebuilt
+   before another snapshot; only a snapshot with no removals proceeds to negation
+   discharge and cycle bounds. Later exhaustion preserves earlier committed batches.
 4. **Concrete replay.** `evaluate(present_inputs)` runs admitted components on a
    complete input snapshot (omitted tuples are absent; observations violating W are
    rejected). Facts are `Settled(true|false)` or `Blocked`; each established fact keeps

@@ -4,6 +4,7 @@ mod certification_search;
 mod completion;
 mod core;
 mod findings;
+mod producer_removals;
 mod rewrites;
 mod sparse;
 mod symbolic;

@@ -24,7 +24,7 @@ pub struct AdmissionProgress {
     /// Includes atoms in components depending on an unresolved component.
     pub blocked_atoms: usize,
     pub current: Option<AdmissionComponent>,
-    /// One-based current rule in summaries/candidates, zero outside those scans.
+    /// One-based current rule in summaries/removals/candidates, zero outside scans.
     pub rule: usize,
     pub rules: usize,
     pub iteration: Option<usize>,
@@ -194,7 +194,7 @@ impl<'a> AdmissionReporter<'a> {
         }
         s.last = Some(Instant::now());
         // Resolve rule -> component only for delivered updates, not on every
-        // rule visited in a large summaries/candidates scan.
+        // rule visited in a large summaries/removals/candidates scan.
         let current = s.current.or_else(|| {
             s.current_rule
                 .and_then(|id| program.rule(id))

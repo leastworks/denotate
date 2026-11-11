@@ -68,6 +68,16 @@ real program that the current choice serves badly.
   under the assumptions, or certifies a world, and reports everything else as
   unsupported or no-meaning ([meaning](den-format.md#meaning)).
   The well-founded semantics is not adopted until a real program needs it.
+- **Commit independent producer coverage before analysing remaining cycles.** An
+  atom in a negative component can already have an independently settled producer
+  covering every case in which its cyclic alternative could apply. Previously that
+  alternative's removal waited in a batch while bounds were computed for the same,
+  unreduced component; exhaustion could discard the available proof. Admission now
+  commits producer removals first, rebuilds components and repeats before attempting
+  negation discharge. Exact coverage under the selected assumptions remains the
+  justification, and original rules and replay evidence remain available. This is
+  an ordering change, not structural body subsumption or a new meaning for unresolved
+  atoms. Extra snapshots and changed proof choices are possible; limits stay explicit.
 - **Assumption cones may be stratified after grounding.** Generic library relations
   can contain a relation-level negative cycle whose ends are used by different
   tuples. Requiring relation stratification forced authors to split those relations

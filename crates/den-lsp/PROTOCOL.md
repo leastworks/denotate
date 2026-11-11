@@ -134,13 +134,17 @@ representative ground atom and optional current-source location identify the
 component without expanding semantic component keys. Location line/column are
 one-based Unicode-scalar coordinates, as in CLI diagnostics, not LSP zero-based
 UTF-16 positions.
-`rule` is the one-based current active rule in summaries/candidates (zero outside
-rule scans); `rules` counts active residual rule instances at the last boundary.
+`rule` is the one-based current active rule in summaries/removals/candidates
+(zero outside rule scans); `rules` counts active residual rule instances at the
+last boundary.
 `iteration` is an optional current upper-bound iteration, not an estimated total.
 Rewrite counts are cumulative committed counts, not proposed changes.
 
-Stages are `starting`, `symbolic`, `summaries`, `candidates`, `upper-bounds`,
-`commit`, `committed`, `complete`, `reused`, and `inconsistent-assumptions`.
+Stages are `starting`, `symbolic`, `summaries`, `producer-removals`, `candidates`,
+`upper-bounds`, `commit`, `committed`, `complete`, `reused`, and
+`inconsistent-assumptions`.
+Producer removals are committed and components rebuilt before negation candidates
+and cycle bounds are attempted. A round with removals therefore skips those stages.
 Round zero means no rewrite round has started in this invocation. `complete`
 means admission finished, possibly leaving unsupported components; `reused` means
 previously completed admission was reused. Neither is an obligation verdict.

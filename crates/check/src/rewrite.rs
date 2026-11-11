@@ -356,7 +356,9 @@ impl GroundProgram {
             }
             drop(summaries_profile);
             let mut candidates_profile = profile.span("admission-candidates", Some(round));
-            progress.work(self, "candidates", None, 0, true);
+            // Commit exact-coverage removals before computing bounds on a graph
+            // they may already break. All proofs still use this immutable snapshot.
+            progress.work(self, "producer-removals", None, 0, true);
             let mut batch = Vec::new();
             let mut upper_bounds = BTreeMap::new();
             for (position, rule) in self
@@ -365,49 +367,10 @@ impl GroundProgram {
                 .filter(|r| !self.rewrites.dropped.contains(&r.id))
                 .enumerate()
             {
-                progress.rule(self, "candidates", rule.id, position + 1);
+                progress.rule(self, "producer-removals", rule.id, position + 1);
                 budget.tick("rewrite candidates")?;
                 let candidate = &summaries[&rule.id];
                 if candidate.exact {
-                    // Narrow value guard rule: only input negations whose
-                    // redundancy depends on W, proved from the OTHER premises.
-                    for excluded in candidate.settled.iter().filter(|p| {
-                        p.literal.polarity == Polarity::Negative
-                            && self.inputs.contains(&p.literal.term.atom)
-                    }) {
-                        let mut guard = candidate.clone();
-                        guard.settled.retain(|p| {
-                            p.literal.term.occurrence != excluded.literal.term.occurrence
-                        });
-                        guard.condition = ctx.true_condition();
-                        for premise in &guard.settled {
-                            guard.condition =
-                                ctx.apply(&guard.condition, &premise.condition, and, budget)?;
-                        }
-                        let coverage =
-                            ctx.input_with_budget(&excluded.literal.term.atom, budget)?;
-                        let conflict = ctx.apply(&guard.condition, &coverage, and, budget)?;
-                        if !conflict.is_false()
-                            && !ctx.restrict(&guard.condition, budget)?.is_false()
-                            && ctx.restrict(&conflict, budget)?.is_false()
-                        {
-                            self.propose(
-                                &mut batch,
-                                &guard,
-                                vec![],
-                                coverage,
-                                RewriteKind::Discharge {
-                                    literal_occurrence: excluded.literal.term.occurrence,
-                                },
-                                None,
-                                &mut retained,
-                                budget,
-                            )?;
-                            // Another negation may rely on this one. Rebuild
-                            // its guard next round before proposing its removal.
-                            break;
-                        }
-                    }
                     continue;
                 }
                 let covering: Vec<_> = producers[&rule.head.atom]
@@ -436,61 +399,129 @@ impl GroundProgram {
                         &mut retained,
                         budget,
                     )?;
-                    continue; // A whole-rule removal takes precedence over literal warnings.
                 }
-                let component = self.component_for(&rule.head.atom)?;
-                for literal in &rule.body {
+            }
+            // Discharge (including input guards) waits until removals reach a
+            // fixed point. Newly settled meanings are read only next round.
+            if batch.is_empty() {
+                progress.work(self, "candidates", None, 0, true);
+                for (position, rule) in self
+                    .rules
+                    .iter()
+                    .filter(|r| !self.rewrites.dropped.contains(&r.id))
+                    .enumerate()
+                {
+                    progress.rule(self, "candidates", rule.id, position + 1);
                     budget.tick("rewrite candidates")?;
-                    if literal.polarity != Polarity::Negative
-                        || self.inputs.contains(&literal.term.atom)
-                        || !self.is_possible(&literal.term.atom)?
-                        || self.component_for(&literal.term.atom)?.id != component.id
-                    {
+                    let candidate = &summaries[&rule.id];
+                    if candidate.exact {
+                        // Narrow value guard rule: only input negations whose
+                        // redundancy depends on W, proved from the OTHER premises.
+                        for excluded in candidate.settled.iter().filter(|p| {
+                            p.literal.polarity == Polarity::Negative
+                                && self.inputs.contains(&p.literal.term.atom)
+                        }) {
+                            let mut guard = candidate.clone();
+                            guard.settled.retain(|p| {
+                                p.literal.term.occurrence != excluded.literal.term.occurrence
+                            });
+                            guard.condition = ctx.true_condition();
+                            for premise in &guard.settled {
+                                guard.condition =
+                                    ctx.apply(&guard.condition, &premise.condition, and, budget)?;
+                            }
+                            let coverage =
+                                ctx.input_with_budget(&excluded.literal.term.atom, budget)?;
+                            let conflict = ctx.apply(&guard.condition, &coverage, and, budget)?;
+                            if !conflict.is_false()
+                                && !ctx.restrict(&guard.condition, budget)?.is_false()
+                                && ctx.restrict(&conflict, budget)?.is_false()
+                            {
+                                self.propose(
+                                    &mut batch,
+                                    &guard,
+                                    vec![],
+                                    coverage,
+                                    RewriteKind::Discharge {
+                                        literal_occurrence: excluded.literal.term.occurrence,
+                                    },
+                                    None,
+                                    &mut retained,
+                                    budget,
+                                )?;
+                                // Another negation may rely on this one. Rebuild
+                                // its guard next round before proposing its removal.
+                                break;
+                            }
+                        }
                         continue;
                     }
-                    let covering: Vec<_> = producers
-                        .get(&literal.term.atom)
-                        .into_iter()
-                        .flatten()
-                        .map(|id| &summaries[id])
-                        .collect();
-                    if let std::collections::btree_map::Entry::Vacant(entry) =
-                        upper_bounds.entry(component.id)
-                    {
-                        progress.work(self, "upper-bounds", Some(component.id), position + 1, true);
-                        let observe = |iteration| progress.iteration(self, iteration);
-                        entry.insert(crate::upper_bounds::compute(
-                            self,
-                            component,
-                            &summaries,
-                            ctx,
-                            &mut retained,
-                            budget,
-                            progress.enabled().then_some(&observe),
-                        )?);
-                        progress.work(self, "candidates", Some(component.id), position + 1, true);
-                    }
-                    let bounds = &upper_bounds[&component.id];
-                    let coverage = bounds.conditions[&literal.term.atom].clone();
-                    if ctx
-                        .restrict(
-                            &ctx.apply(&candidate.condition, &coverage, and, budget)?,
-                            budget,
-                        )?
-                        .is_false()
-                    {
-                        self.propose(
-                            &mut batch,
-                            candidate,
-                            covering,
-                            coverage,
-                            RewriteKind::Discharge {
-                                literal_occurrence: literal.term.occurrence,
-                            },
-                            Some(Arc::clone(bounds)),
-                            &mut retained,
-                            budget,
-                        )?;
+                    let component = self.component_for(&rule.head.atom)?;
+                    for literal in &rule.body {
+                        budget.tick("rewrite candidates")?;
+                        if literal.polarity != Polarity::Negative
+                            || self.inputs.contains(&literal.term.atom)
+                            || !self.is_possible(&literal.term.atom)?
+                            || self.component_for(&literal.term.atom)?.id != component.id
+                        {
+                            continue;
+                        }
+                        let covering: Vec<_> = producers
+                            .get(&literal.term.atom)
+                            .into_iter()
+                            .flatten()
+                            .map(|id| &summaries[id])
+                            .collect();
+                        if let std::collections::btree_map::Entry::Vacant(entry) =
+                            upper_bounds.entry(component.id)
+                        {
+                            progress.work(
+                                self,
+                                "upper-bounds",
+                                Some(component.id),
+                                position + 1,
+                                true,
+                            );
+                            let observe = |iteration| progress.iteration(self, iteration);
+                            entry.insert(crate::upper_bounds::compute(
+                                self,
+                                component,
+                                &summaries,
+                                ctx,
+                                &mut retained,
+                                budget,
+                                progress.enabled().then_some(&observe),
+                            )?);
+                            progress.work(
+                                self,
+                                "candidates",
+                                Some(component.id),
+                                position + 1,
+                                true,
+                            );
+                        }
+                        let bounds = &upper_bounds[&component.id];
+                        let coverage = bounds.conditions[&literal.term.atom].clone();
+                        if ctx
+                            .restrict(
+                                &ctx.apply(&candidate.condition, &coverage, and, budget)?,
+                                budget,
+                            )?
+                            .is_false()
+                        {
+                            self.propose(
+                                &mut batch,
+                                candidate,
+                                covering,
+                                coverage,
+                                RewriteKind::Discharge {
+                                    literal_occurrence: literal.term.occurrence,
+                                },
+                                Some(Arc::clone(bounds)),
+                                &mut retained,
+                                budget,
+                            )?;
+                        }
                     }
                 }
             }

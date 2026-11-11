@@ -9,6 +9,7 @@ it when real programs exist, and change it on evidence.
 | Checker backend | BDD only; cached coarse BDD in editors | Predictable, canonical conditions; good warm reuse |
 | Relation-SCC grounding | Kept opt-in | Warm-run wins; not yet worth the complexity by default |
 | Fixed-fact evaluation | Shared across verifications; one retained keyed fold per session, without a byte cap | Checker limits bound the fold; retain completed work for reuse across edits and report its accounted bytes |
+| Admission rewrite order | Commit exact-coverage producer removals before cycle bounds | Avoid analysing cycles that independent support already makes redundant; preserve removals if later bounds exhaust |
 | Plan cache | Small-rule bypass with bounded retention | Avoids caching cost for trivial rules |
 | Coverage results | Recomputed each check; preparation is reused | No measured need for a coverage verdict cache yet |
 
@@ -54,6 +55,15 @@ the optional memory-profile span stream; both can be enabled together. See the
 [progress protocol](../crates/den-lsp/PROTOCOL.md#checking-progress-and-logs).
 They do not alter deterministic allowances, cache keys or results. As with other
 logging, delivery costs wall time; deadlines remain cooperative.
+
+Within each admission snapshot, producer removal runs before negation discharge.
+A nonempty removal batch rebuilds the graph and starts a fresh snapshot; cycle
+bounds run only after removals reach a fixed point. The coverage proof and
+transactional commit rules are unchanged. This can reduce BDD work and preserve
+useful progress before later exhaustion, but changes work charges and may require
+extra snapshots. Symbolic evaluation and summary construction still cover the
+residual program. No new allowance is introduced; `admission-candidates` profiling
+covers both passes, and progress distinguishes `producer-removals` from `candidates`.
 
 ### Memory profiling
 

@@ -1,6 +1,7 @@
 mod completion;
 mod fixed_retention;
 mod incremental_inventory;
+mod producer_removals;
 mod rewrites;
 mod symbolic;
 mod test_dsl;
