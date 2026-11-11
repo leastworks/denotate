@@ -378,6 +378,7 @@ impl Retained for QueryKey {
     fn heap(&self, p: &mut Payload) {
         match self {
             Self::FixedFacts
+            | Self::AssumptionValidation
             | Self::Preparation
             | Self::Admission
             | Self::CoverageMeaning

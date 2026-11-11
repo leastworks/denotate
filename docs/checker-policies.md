@@ -78,7 +78,10 @@ single shared fold across four verifications against unfolded execution. It asse
 outcome agreement and reports timings and retained sizes, never timing goldens.
 Add `--ground-assumption` after the counts to include a selected assumption that
 requires original ground validation. Program validation is timed separately;
-per-request validation is included in preparation, exposing the preserved cost.
+the folded benchmark shares that result with all requests. Residual preparation
+still runs per verification. The scorecard's per-verification `folded-bdd` sample
+uses the direct API path: its timer includes the lazy original validation when
+needed, along with the fold, rather than amortizing either across verifications.
 
 ### `.den` measurements
 
@@ -115,9 +118,12 @@ shared within the run; it is not a compact proof store or a heap measurement.
 Residual grounding still seeds fixed possible tuples to preserve rule and finding
 identity, including false guards. Semantic indexes remain per request. This step
 reduces repeated executable and symbolic work, not all initial grounding or evidence
-storage. Program-level validation is outside the phase timers. On the folded path, a
-request selecting an assumption that needs ground validation grounds the unrevised
-program again inside its preparation; the unfolded path reuses its prepared graph.
+storage. Program-level validation is outside the phase timers. The CLI/editor share
+its original-graph summary with folded preparation. Direct API callers compute that
+summary on the first request needing ground validation and reuse it within the run;
+the temporary original graph is released. The unfolded control still checks its own
+prepared graph. The validation query has a separate bounded allowance and receipt;
+default ceilings are unchanged. No cross-edit validation cache is involved.
 
 BDD figures have distinct meanings:
 

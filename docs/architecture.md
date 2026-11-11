@@ -87,14 +87,19 @@ reconstruct fixed evidence rules. Cross-edit sharing is a separate increment.
 Assumption declaration validity is a program-level query. The IR classifies
 relation-stratified cones and those requiring grounding; the checker resolves the
 latter against its unrevised ground dependency graph, without selected assumptions.
-The editor and CLI run `validate_assumption_cones` before their verification loops,
+The editor and CLI run `validate_assumption_cones_for_run` before their verification loops,
 so unselected declarations and unconfigured programs still get diagnostics. Keyed
 cycle evidence goes through the shared presenter; it is never reconstructed there.
-Validation currently recomputes from each complete snapshot. Request preparation
-also enforces validity of selected restrictions for construction/API callers.
+Validation recomputes from each complete snapshot. Its sealed `ValidatedAssumptions`
+artifact can initialize fixed preparation, so selected restrictions reuse the same
+original-graph check. Only relation-to-cycle summaries and keyed cycle evidence
+survive; the temporary original ground graph is released. Without that artifact,
+folded API preparation computes the check lazily once, including unnamed restrictions
+and later selections. Corpus, domains, keys and deterministic limits bind the reuse.
 Both paths use the original ground dependencies: a fixed-false guard must
-not erase a negative cycle from assumption validation. Selected cones needing
-ground validation therefore incur an additional original grounding on the folded path.
+not erase a negative cycle from assumption validation. Logical exhaustion remains
+explicit for requests needing the check; cancellation/deadlines are not cached.
+This is run-scoped sharing, not reuse across edits or an admission cache.
 
 Selected general assumptions are another preparation boundary: once their meaning
 is independently established, the checker computes W before admission.

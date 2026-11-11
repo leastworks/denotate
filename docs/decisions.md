@@ -68,6 +68,16 @@ real program that the current choice serves badly.
   allowance and receipt; retained atoms, rules and dependencies also count against
   preparation's size limits. Sharing residual preparation and caching the fold
   across edits remain separate work, measured with the `.den` scorecard.
+- **Original assumption validation is shared within a run.** Rebuilding the entire
+  unrevised program inside every folded request repeated work independent of its
+  selections. The program-level pass now offers a sealed snapshot-bound artifact;
+  folded API callers without it initialize the same query lazily. It indexes all
+  relations so later unnamed restrictions cannot escape validation, stores each
+  cycle once, and releases the original ground graph. A caller-editable diagnostics
+  map is not proof of validity. The query is independently bounded and accounted;
+  exhaustion remains inconclusive and operational interruptions are not cached.
+  Original graph semantics, selective rejection and current-source evidence stay
+  unchanged. Residual preparation and admission still run per verification.
 - **Cycle diagnostics show retained ground dependencies.** A generic rule can have
   many instances with different recursive behavior. Showing concrete arguments and
   signed edges identifies the reported instance without searching for a new cycle

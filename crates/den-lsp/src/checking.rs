@@ -96,12 +96,13 @@ fn check_with_progress(
     job.limits.cancellation.check()?;
     let mut publication = presentation::configuration(&program).map_err(Failure::Internal)?;
     progress.emit(Phase::AssumptionValidation, json!({}));
-    let validation = validate_assumption_cones(
+    let validated = validate_assumption_cones_for_run(
         &program.corpus,
         &program.domains,
         &program.keys,
         &job.limits,
     )?;
+    let validation = validated.result();
     let validation_publication =
         presentation::assumption_validation(&program, &validation).map_err(Failure::Internal)?;
     publication.status["assumptionValidation"] = validation_publication.status.clone();
@@ -136,11 +137,7 @@ fn check_with_progress(
             }
             let fixed = fixed.get_or_init(|| {
                 progress.emit(Phase::FixedFacts, json!({}));
-                denotate_check::FixedPreparation::prepare(
-                    &program.corpus,
-                    &program.domains,
-                    &job.limits,
-                )
+                denotate_check::FixedPreparation::prepare_with_validation(&validated, &job.limits)
             });
             progress.emit(Phase::Preparation, context.clone());
             let fixed = fixed.as_ref().map_err(|e| Failure::from(e.clone()))?;

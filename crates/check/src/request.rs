@@ -346,6 +346,9 @@ impl CheckRequest {
         }
         let mut ground_validation = BTreeMap::new();
         let result = (|| {
+            if let Some(fixed) = fixed {
+                fixed.validate_snapshot(corpus, &domains, &mut budget)?;
+            }
             ground_validation = corpus.validate_assumption_relations_with(
                 self.constraints
                     .iter()
@@ -357,25 +360,15 @@ impl CheckRequest {
                     .values()
                     .any(|v| *v == denotate_ir::AssumptionCone::NeedsGrounding)
             {
-                let original = GroundProgram::prepare_using(
-                    corpus,
-                    &domains,
-                    &[],
-                    &BTreeSet::new(),
-                    &mut budget,
-                    None,
-                )?;
+                let original = fixed.unwrap().original_validation(keys, &limits)?;
+                receipts
+                    .record(QueryKey::AssumptionValidation, original.receipt.clone())
+                    .map_err(CheckError::Receipts)?;
                 for (relation, classification) in &ground_validation {
                     if *classification != denotate_ir::AssumptionCone::NeedsGrounding {
                         continue;
                     }
-                    let cycles = original.assumption_cycles(*relation, keys, &mut budget)?;
-                    if !cycles.is_empty() {
-                        return Err(CheckError::InvalidAssumptionCone {
-                            relation: keys.relation(*relation)?.clone(),
-                            cycles,
-                        });
-                    }
+                    original.check(*relation, keys, &mut budget)?;
                 }
             }
             if let Some(store) = grounding {

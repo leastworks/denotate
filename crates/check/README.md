@@ -67,7 +67,7 @@ with no obligation groups, followed by the existing graph's `blocked_by` and cyc
 evidence. Results identify assumptions and cycle edges with semantic keys. It never
 uses selected assumptions or admission, and never rejects an unrelated ground cycle.
 An exhausted query retains established results and marks remaining declarations
-inconclusive; cancellation aborts. The query currently recomputes, so facts, domains
+inconclusive; cancellation aborts. The query recomputes per run, so facts, domains
 and input eligibility cannot leave stale validation. Request preparation also checks
 selected restrictions, including unnamed API requests, before computing W, returning
 `InvalidAssumptionCone` with keyed evidence on failure. Program-level invalid
@@ -88,6 +88,20 @@ atoms, and shares their original graph and derivations as evidence. Residual
 admission and symbolic evaluation read those facts as constants. Blocked fixed
 atoms remain residual. Selected-assumption validation still uses original ground
 dependencies, as does the program-level validator.
+
+To share the program-level original check, use
+`validate_assumption_cones_for_run(corpus, domains, keys, limits)` and then
+`FixedPreparation::prepare_with_validation(&validated, limits)`.
+`validated.result()` supplies the ordinary declaration diagnostics. The artifact's
+private construction prevents a caller-edited diagnostic map from certifying a
+request. It retains a compact relation-to-cycle index, with each keyed cycle once,
+and releases the original graph. It also covers later unnamed API restrictions.
+Without a supplied artifact, the first folded request needing ground validation
+initializes the same query; later requests share it. A changed corpus, domain,
+key table or deterministic limit cannot reuse that check. The original validation
+has its own bounded allowance and `AssumptionValidation` receipt. Logical exhaustion
+is shared as inconclusive within the run; cancellation and deadlines abort without
+initializing the reusable result. Relation-stratified selections need no such query.
 
 `atoms()`, `rules()`, `components()` and `dependencies()` include retained fixed
 evidence; `fixed_size()` and `residual_size()` distinguish it from execution.

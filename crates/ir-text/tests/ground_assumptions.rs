@@ -139,6 +139,7 @@ fn edit_sequence(texts: &[String], valid: &[bool]) {
     let limits = Limits::default();
     let ops = OperationalLimits::from(&limits);
     let mut session = Session::with_grounding();
+    let mut folded_session = Session::default();
     for (text, expected) in texts.iter().zip(valid) {
         let p = load_text(text);
         let validation = validate(&p, &limits);
@@ -148,6 +149,10 @@ fn edit_sequence(texts: &[String], valid: &[bool]) {
         let request = p.verification_requests(&limits).unwrap().remove(0).1;
         let warm = session.prepare(&request, &p.corpus, &p.keys, &ops);
         let cold = request.prepare(&p.corpus, &p.keys, &ops);
+        let validated =
+            validate_assumption_cones_for_run(&p.corpus, &p.domains, &p.keys, &limits).unwrap();
+        let fixed = FixedPreparation::prepare_with_validation(&validated, &limits).unwrap();
+        let folded = folded_session.prepare_with_fixed(&request, &p.corpus, &p.keys, &ops, &fixed);
         if *expected {
             let (Ok(RequestPreparation::Complete(warm)), Ok(RequestPreparation::Complete(cold))) =
                 (warm, cold)
@@ -162,11 +167,21 @@ fn edit_sequence(texts: &[String], valid: &[bool]) {
                 panic!()
             };
             assert_eq!(warm.checked.results.value, cold.results.value);
+            let Ok(RequestPreparation::Complete(folded)) = folded else {
+                panic!("valid folded cone failed")
+            };
+            let folded = folded.admit(&ops).unwrap();
+            let LocalCheckOutcome::Complete(folded) = folded_session.verify(&folded, &ops).unwrap()
+            else {
+                panic!()
+            };
+            assert_eq!(folded.checked.results.value, cold.results.value);
         } else {
             let (Err(warm), Err(cold)) = (warm, cold) else {
                 panic!("invalid cone accepted")
             };
             assert_eq!(warm, cold);
+            assert_eq!(folded.err().unwrap(), cold);
             assert!(matches!(warm, CheckError::InvalidAssumptionCone { .. }));
         }
     }

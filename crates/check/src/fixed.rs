@@ -1,6 +1,7 @@
 //! Run-scoped, assumption-independent facts. The original fixed graph is retained
 //! as evidence; only the residual graph is executed by admission and checking.
 use super::*;
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
@@ -20,6 +21,10 @@ pub struct FixedPreparation<'a> {
     pub(crate) facts: Option<Arc<FixedFacts>>,
     pub(crate) input_domains: BTreeMap<denotate_ir::RelationId, BTreeSet<GroundAtom>>,
     pub(crate) receipt: WorkReceipt,
+    validation: OnceCell<(
+        &'a denotate_ir::SemanticKeys,
+        Arc<OriginalAssumptionValidation>,
+    )>,
 }
 impl<'a> FixedPreparation<'a> {
     pub fn prepare(
@@ -91,6 +96,7 @@ impl<'a> FixedPreparation<'a> {
                     limits: limits.into(),
                     facts: None,
                     input_domains,
+                    validation: OnceCell::new(),
                     receipt: WorkReceipt {
                         allowance: limits.into(),
                         own: budget.snapshot(),
@@ -126,6 +132,7 @@ impl<'a> FixedPreparation<'a> {
                     relations,
                 })),
                 input_domains,
+                validation: OnceCell::new(),
                 receipt: WorkReceipt {
                     allowance: limits.into(),
                     own: budget.snapshot(),
@@ -134,6 +141,68 @@ impl<'a> FixedPreparation<'a> {
             })
         })();
         result.map_err(|e: CheckError| e.in_phase("fixed facts", None))
+    }
+
+    /// Reuse the sealed original-graph check already performed for this run.
+    /// The public, editable diagnostic result is deliberately not accepted here.
+    pub fn prepare_with_validation(
+        validation: &ValidatedAssumptions<'a>,
+        limits: &Limits,
+    ) -> Result<Self> {
+        if validation.limits != DeterministicLimits::from(limits) {
+            return Err(CheckError::InvalidRequest(
+                "assumption validation limits do not match fixed preparation",
+            ));
+        }
+        let fixed = Self::prepare(validation.corpus, &validation.domains, limits)?;
+        if let Some(original) = &validation.original {
+            fixed
+                .validation
+                .set((validation.keys, original.clone()))
+                .expect("new validation cell");
+        }
+        Ok(fixed)
+    }
+
+    pub(crate) fn validate_snapshot(
+        &self,
+        corpus: &denotate_ir::Corpus,
+        domains: &Domains,
+        budget: &mut Budget<'_>,
+    ) -> Result<()> {
+        if !std::ptr::eq(corpus, self.corpus)
+            || DeterministicLimits::from(budget.limits) != self.limits
+            || validate_domains(corpus, domains, budget)? != self.domains
+        {
+            return Err(CheckError::InvalidRequest(
+                "fixed preparation does not match this snapshot, domains or limits",
+            ));
+        }
+        Ok(())
+    }
+
+    /// A caller that did not validate declarations still gets exactly the same
+    /// original-graph query, initialized on first use and shared by later requests.
+    pub(crate) fn original_validation(
+        &self,
+        keys: &'a denotate_ir::SemanticKeys,
+        limits: &Limits,
+    ) -> Result<&OriginalAssumptionValidation> {
+        limits.cancellation.check()?;
+        if self.validation.get().is_none() {
+            let original =
+                OriginalAssumptionValidation::prepare(self.corpus, &self.domains, keys, limits)?;
+            self.validation
+                .set((keys, Arc::new(original)))
+                .expect("uninitialized validation cell");
+        }
+        let (source_keys, original) = self.validation.get().unwrap();
+        if !std::ptr::eq(*source_keys, keys) {
+            return Err(CheckError::InvalidRequest(
+                "assumption validation keys do not match this snapshot",
+            ));
+        }
+        Ok(original)
     }
 }
 

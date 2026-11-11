@@ -242,9 +242,10 @@ fn check_program(
     }
     let operations = OperationalLimits::from(&limits);
     progress.emit(Phase::AssumptionValidation, json!({}));
-    let validation =
-        denotate_check::validate_assumption_cones(&p.corpus, &p.domains, &p.keys, &limits)
+    let validated =
+        denotate_check::validate_assumption_cones_for_run(&p.corpus, &p.domains, &p.keys, &limits)
             .map_err(checker_failure)?;
+    let validation = validated.result();
     trace.message(format_args!(
         "Assumption declarations: {}",
         if validation.is_valid() {
@@ -410,7 +411,7 @@ fn check_program(
         }
         let fixed = fixed.get_or_init(|| {
             progress.emit(Phase::FixedFacts, json!({}));
-            denotate_check::FixedPreparation::prepare(&p.corpus, &p.domains, &limits)
+            denotate_check::FixedPreparation::prepare_with_validation(&validated, &limits)
         });
         progress.emit(Phase::Preparation, detail.clone());
         let prepared = match fixed {

@@ -53,15 +53,13 @@ fn main() {
     for folded in [false, true] {
         let mut session = Session::default();
         let start = Instant::now();
-        assert!(
-            validate_assumption_cones(&p.corpus, &p.domains, &p.keys, &limits)
-                .unwrap()
-                .is_valid()
-        );
+        let validated =
+            validate_assumption_cones_for_run(&p.corpus, &p.domains, &p.keys, &limits).unwrap();
+        assert!(validated.result().is_valid());
         let validation = start.elapsed();
         let start = Instant::now();
         let fixed =
-            folded.then(|| FixedPreparation::prepare(&p.corpus, &p.domains, &limits).unwrap());
+            folded.then(|| FixedPreparation::prepare_with_validation(&validated, &limits).unwrap());
         let fold = start.elapsed();
         let mut preparation = fold;
         let mut admission = Duration::ZERO;
