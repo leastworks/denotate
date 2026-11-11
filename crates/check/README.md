@@ -138,6 +138,13 @@ rewrite findings with their coverage; they never authorize source edits.
 
 `Limits` bounds atoms, rule instances, dependencies, work, BDD storage and elapsed
 time; exhaustion yields explicit inconclusive outcomes with phase and resource.
+`CheckError`, `Inconclusive` and keyed `ResourceReason` carry `LimitDetails`: optional
+subphase, effective limit and observed demand at the failed check. Observed demand
+may include a rejected addition; an unknown solver count remains absent. Deadlines
+carry the allowance in milliseconds, never elapsed timing. Input-domain preparation
+preserves provider discovery/grounding/analysis/evaluation versus input enumeration.
+Details do not charge work or alter verdicts; forwarded and cached reasons retain
+them. Backend capacity or available work/storage can tighten the effective ceiling.
 `Cancellation` is cooperative and checked at phase boundaries.
 
 ## Tests

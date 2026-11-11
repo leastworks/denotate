@@ -564,12 +564,14 @@ impl std::fmt::Debug for UnsupportedReason {
 pub struct ResourceReason {
     pub phase: String,
     pub resource: String,
+    pub details: LimitDetails,
 }
 impl From<Inconclusive> for ResourceReason {
     fn from(c: Inconclusive) -> Self {
         Self {
             phase: c.phase.into(),
             resource: c.resource.into(),
+            details: c.details,
         }
     }
 }

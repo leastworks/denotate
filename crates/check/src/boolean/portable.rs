@@ -102,7 +102,12 @@ impl ConditionContext {
         )?;
         budget.observe("local condition import", "BDD nodes", value.node_count());
         if value.node_count() > budget.limits.max_bdd_nodes {
-            return Err(limit("local condition import", "BDD nodes"));
+            return Err(limit(
+                "local condition import",
+                "BDD nodes",
+                budget.limits.max_bdd_nodes,
+                Some(value.node_count()),
+            ));
         }
         let variables: Vec<_> = value
             .inputs

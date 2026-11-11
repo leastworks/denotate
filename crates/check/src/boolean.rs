@@ -123,7 +123,12 @@ impl GroundProgram {
             return Err(CheckError::ForeignCondition);
         }
         if condition.node_count() > limits.max_bdd_nodes {
-            return Err(limit("condition summary", "BDD nodes"));
+            return Err(limit(
+                "condition summary",
+                "BDD nodes",
+                limits.max_bdd_nodes,
+                Some(condition.node_count()),
+            ));
         }
         if condition.is_false() {
             return Ok(None);
@@ -192,10 +197,23 @@ impl ConditionContext {
         budget.observe("BDD inputs", "BDD variables", count);
         budget.observe("BDD inputs", "BDD nodes", 2);
         if count > budget.limits.max_bdd_variables || count >= usize::from(u16::MAX - 1) {
-            return Err(limit("BDD inputs", "BDD variables"));
+            return Err(limit(
+                "BDD inputs",
+                "BDD variables",
+                budget
+                    .limits
+                    .max_bdd_variables
+                    .min(usize::from(u16::MAX - 2)),
+                Some(count),
+            ));
         }
         if budget.limits.max_bdd_nodes < 2 {
-            return Err(limit("BDD inputs", "BDD nodes"));
+            return Err(limit(
+                "BDD inputs",
+                "BDD nodes",
+                budget.limits.max_bdd_nodes,
+                Some(2),
+            ));
         }
         budget.charge(count, "BDD inputs")?;
         let variables = BddVariableSet::new_anonymous(count as u16);
@@ -281,7 +299,12 @@ impl ConditionContext {
             .ok_or_else(|| CheckError::InvalidObservation(atom.clone()))?;
         budget.observe("BDD input", "BDD nodes", 3);
         if budget.limits.max_bdd_nodes < 3 {
-            return Err(limit("BDD inputs", "BDD nodes"));
+            return Err(limit(
+                "BDD inputs",
+                "BDD nodes",
+                budget.limits.max_bdd_nodes,
+                Some(3),
+            ));
         }
         Ok(self.wrap(self.variables.mk_var(*variable)))
     }
@@ -459,7 +482,12 @@ impl ConditionContext {
         }
         budget.observe("BDD operation", "BDD nodes", condition.node_count());
         if condition.node_count() > budget.limits.max_bdd_nodes {
-            return Err(limit("BDD operation", "BDD nodes"));
+            return Err(limit(
+                "BDD operation",
+                "BDD nodes",
+                budget.limits.max_bdd_nodes,
+                Some(condition.node_count()),
+            ));
         }
         Ok(())
     }
@@ -484,7 +512,7 @@ impl ConditionContext {
         let allowed = budget.limits.max_bdd_tasks.min(budget.remaining() / 2);
         let Some((_, tasks)) = Bdd::check_binary_op(allowed, &a.bdd, &b.bdd, op) else {
             budget.observe("BDD preflight", "BDD tasks", allowed.saturating_add(1));
-            return Err(limit("BDD preflight", "BDD tasks"));
+            return Err(limit("BDD preflight", "BDD tasks", allowed, None));
         };
         budget.observe("BDD operation", "BDD tasks", tasks);
         budget.charge(2 * tasks + 1, "BDD operation")?;
@@ -495,7 +523,12 @@ impl ConditionContext {
                 "BDD nodes",
                 budget.limits.max_bdd_nodes.saturating_add(1),
             );
-            return Err(limit("BDD operation", "BDD nodes"));
+            return Err(limit(
+                "BDD operation",
+                "BDD nodes",
+                budget.limits.max_bdd_nodes,
+                None,
+            ));
         };
         budget.observe("BDD operation", "BDD nodes", bdd.size());
         budget.charge(0, "BDD operation")?;
@@ -503,8 +536,13 @@ impl ConditionContext {
     }
 }
 
-pub(crate) fn limit(phase: &'static str, resource: &'static str) -> CheckError {
-    CheckError::LimitExceeded { phase, resource }
+pub(crate) fn limit(
+    phase: &'static str,
+    resource: &'static str,
+    limit: usize,
+    observed: Option<usize>,
+) -> CheckError {
+    CheckError::limit(phase, resource, limit, observed)
 }
 
 #[cfg(test)]
@@ -512,6 +550,42 @@ mod tests {
     use super::*;
     use biodivine_lib_bdd::{BddNode, BddPointer};
     use denotate_ir::{Corpus, RelationRole};
+
+    #[test]
+    fn stopped_bdd_preflight_reports_its_limit_without_inventing_a_task_count() {
+        let limits = Limits::default();
+        let mut corpus = Corpus::new();
+        let x = GroundAtom::new(
+            corpus
+                .declare_relation("x", RelationRole::Input, [])
+                .unwrap(),
+            [],
+        );
+        let y = GroundAtom::new(
+            corpus
+                .declare_relation("y", RelationRole::Input, [])
+                .unwrap(),
+            [],
+        );
+        let program = GroundProgram::prepare(&corpus, &Domains::new(), &limits).unwrap();
+        let ctx = program.condition_context(&limits).unwrap();
+        let x = ctx.input(&x, &limits).unwrap();
+        let y = ctx.input(&y, &limits).unwrap();
+        let stopped = Limits {
+            max_bdd_tasks: 0,
+            ..limits.clone()
+        };
+        let CheckError::LimitExceeded {
+            resource, details, ..
+        } = ctx.and(&x, &y, &stopped).unwrap_err()
+        else {
+            panic!()
+        };
+        assert_eq!(resource, "BDD tasks");
+        assert_eq!(details.limit, Some(stopped.max_bdd_tasks));
+        assert_eq!(details.observed, None);
+        assert!(ctx.and(&x, &y, &limits).is_ok());
+    }
 
     #[test]
     fn input_conjunction_is_exact_and_omits_dont_care_inputs() {

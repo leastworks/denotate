@@ -1,6 +1,6 @@
 //! Load a den.root closure and execute its explicit verifications.
 use denotate_check::{
-    BackendIdentity, Limits, LocalCheckOutcome, OperationalLimits, RegionCompletion,
+    BackendIdentity, CheckError, Limits, LocalCheckOutcome, OperationalLimits, RegionCompletion,
     RequestPreparation, ScopedResult,
 };
 use denotate_check_session::Session;
@@ -16,6 +16,25 @@ type Failure = (u8, String);
 mod options;
 #[path = "check/trace.rs"]
 mod trace;
+
+fn checker_failure(error: CheckError) -> Failure {
+    let (phase, resource, details) = match error {
+        CheckError::Deadline { phase, details } => (phase, "deadline", details),
+        CheckError::LimitExceeded {
+            phase,
+            resource,
+            details,
+        } => (phase, resource, details),
+        other => return (2, other.to_string()),
+    };
+    (
+        2,
+        format!(
+            "Checking inconclusive: {}",
+            denotate_presentation::exhaustion_text(phase, resource, details)
+        ),
+    )
+}
 
 fn format_errors(ds: Vec<denotate_ir_text::Diagnostic>) -> String {
     ds.iter()
@@ -225,7 +244,7 @@ fn check_program(
     progress.emit(Phase::AssumptionValidation, json!({}));
     let validation =
         denotate_check::validate_assumption_cones(&p.corpus, &p.domains, &p.keys, &limits)
-            .map_err(|e| (2, e.to_string()))?;
+            .map_err(checker_failure)?;
     trace.message(format_args!(
         "Assumption declarations: {}",
         if validation.is_valid() {
@@ -237,6 +256,9 @@ fn check_program(
     if !validation.is_valid() {
         let presented = presentation::present_assumption_validation(&p, &validation)
             .map_err(|e| (2, e.to_string()))?;
+        for message in denotate_presentation::exhaustion_messages(&presented.status) {
+            trace.message(message);
+        }
         if json {
             writeln!(output, "Assumption validation: {:#}", presented.status).unwrap();
         } else {
@@ -388,12 +410,36 @@ fn check_program(
         progress.emit(Phase::Preparation, detail.clone());
         let prepared = session
             .prepare(&request, &p.corpus, &p.keys, &operations)
-            .map_err(|e| (2, e.to_string()))?;
+            .map_err(checker_failure)?;
         let prepared = match prepared {
             RequestPreparation::Complete(prepared) => prepared,
             RequestPreparation::Inconclusive { reason, .. } => {
-                writeln!(output, "Inconclusive: {reason:?}").unwrap();
-                trace.message(format_args!("Preparation inconclusive: {reason:?}"));
+                writeln!(
+                    output,
+                    "Inconclusive: {}",
+                    denotate_presentation::exhaustion_text(
+                        reason.phase,
+                        reason.resource,
+                        reason.details
+                    )
+                )
+                .unwrap();
+                trace.message(format!(
+                    "Preparation inconclusive: {}",
+                    denotate_presentation::exhaustion_text(
+                        reason.phase,
+                        reason.resource,
+                        reason.details
+                    )
+                ));
+                if json {
+                    writeln!(
+                        output,
+                        "Results: {:#}",
+                        denotate_presentation::summary(&request.exhausted(reason))
+                    )
+                    .unwrap();
+                }
                 incomplete = true;
                 continue;
             }
@@ -402,7 +448,7 @@ fn check_program(
         progress.emit(Phase::Admission, detail.clone());
         let admitted = prepared
             .admit(&operations)
-            .map_err(|e| (2, e.to_string()))?
+            .map_err(checker_failure)?
             .with_emptiness_examples(empty_examples.unwrap_or_default());
         trace.message(format_args!(
             "Admission complete: admitted={}",
@@ -411,7 +457,7 @@ fn check_program(
         progress.emit(Phase::Checking, detail.clone());
         match session
             .verify(&admitted, &operations)
-            .map_err(|e| (2, e.to_string()))?
+            .map_err(checker_failure)?
         {
             LocalCheckOutcome::Complete(report) => {
                 progress.emit(Phase::Presentation, detail.clone());
@@ -448,6 +494,9 @@ fn check_program(
                         )
                     })
                 });
+                for message in denotate_presentation::exhaustion_messages(&presented.status) {
+                    trace.message(message);
+                }
                 if hide_library_rewrites {
                     presented.hide_library_rewrites(&p);
                 }
@@ -470,8 +519,32 @@ fn check_program(
                 }
             }
             LocalCheckOutcome::Inconclusive { reason, .. } => {
-                writeln!(output, "Inconclusive: {reason:?}").unwrap();
-                trace.message(format_args!("Checking inconclusive: {reason:?}"));
+                writeln!(
+                    output,
+                    "Inconclusive: {}",
+                    denotate_presentation::exhaustion_text(
+                        reason.phase,
+                        reason.resource,
+                        reason.details
+                    )
+                )
+                .unwrap();
+                trace.message(format!(
+                    "Checking inconclusive: {}",
+                    denotate_presentation::exhaustion_text(
+                        reason.phase,
+                        reason.resource,
+                        reason.details
+                    )
+                ));
+                if json {
+                    writeln!(
+                        output,
+                        "Results: {:#}",
+                        denotate_presentation::summary(&request.exhausted(reason))
+                    )
+                    .unwrap();
+                }
                 incomplete = true;
             }
         }
@@ -635,10 +708,8 @@ mod tests {
                 "{result:?}\n{output}"
             );
             assert!(progress.contains(&format!("{flag} 0")), "{progress}");
-            assert!(
-                progress.contains("inconclusive") || progress.contains("Deadline"),
-                "{progress}"
-            );
+            assert!(progress.contains("inconclusive"), "{progress}");
+            assert!(progress.contains("limit 0"), "{progress}");
             assert!(!output.contains("Result: proved"));
         }
         let (result, _, progress) = f.traced(&[
@@ -1093,6 +1164,37 @@ mod tests {
             }
         }
     }
+    #[test]
+    fn input_domain_limit_output_preserves_subphase_counts_and_exit_code() {
+        for (body, stage) in [
+            (
+                "allowed(a); allowed(b); input first(x:S) within allowed;",
+                "provider grounding",
+            ),
+            (
+                "allowed(a); input first(x:S) within allowed; input second(x:S) within allowed;",
+                "eligible input enumeration",
+            ),
+        ] {
+            let f = Fixture::new(&format!(
+                "sort S; const a,b:S; relation allowed(x:S); {body} relation nothing(); obligation o:empty(nothing); verification v{{assumptions:[];obligations:[o];}}"
+            ));
+            let (code, output) = f.run(&["--max-atoms", "1"]);
+            assert_eq!(code, 2, "{output}");
+            assert!(output.contains(stage), "{output}");
+            assert!(output.contains("limit 1"));
+            assert!(output.contains("observed demand"));
+            let (code, output) = f.run(&["--max-atoms", "1", "--json"]);
+            assert_eq!(code, 2);
+            let status: serde_json::Value =
+                serde_json::from_str(output.split_once("Results: ").unwrap().1).unwrap();
+            assert_eq!(status["unfinished"]["subphase"], stage);
+            assert_eq!(status["unfinished"]["limit"], 1);
+            assert!(status["unfinished"]["observed"].as_u64().unwrap() > 1);
+            assert_eq!(f.run(&[]).0, 0);
+        }
+    }
+
     #[test]
     fn invalid_input_and_operational_failure_have_distinct_codes() {
         let (code, output) = Fixture::new("").run(&["--sat"]);

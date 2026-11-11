@@ -9,17 +9,22 @@ pub(super) fn evaluate(
     if !corpus.relations().any(|r| r.input_domain.is_some()) {
         return Ok(BTreeMap::new());
     }
+    let mut stage = "provider discovery";
     let result = (|| {
         let cone = corpus.input_domain_cone_with(|| budget.tick("input domains"))?;
         let mut program = GroundProgram::empty(corpus, domains.clone());
+        stage = "provider grounding";
         sparse::populate_domain_cone(corpus, &mut program, budget, &cone)?;
+        stage = "provider dependency analysis";
         graph::analyze(&mut program, budget)?;
+        stage = "provider evaluation";
         let replay = program.evaluate_selected([], None, budget)?;
         if !replay.is_complete() {
             return Err(CheckError::Internal(
                 "validated input domain did not settle",
             ));
         }
+        stage = "eligible input enumeration";
         let mut out = BTreeMap::new();
         let mut input_atoms = 0;
         for relation in corpus.relations() {
@@ -46,14 +51,5 @@ pub(super) fn evaluate(
         }
         Ok(out)
     })();
-    result.map_err(|e| match e {
-        CheckError::LimitExceeded { resource, .. } => CheckError::LimitExceeded {
-            phase: "input domains",
-            resource,
-        },
-        CheckError::Deadline { .. } => CheckError::Deadline {
-            phase: "input domains",
-        },
-        e => e,
-    })
+    result.map_err(|e| e.in_phase("input domains", Some(stage)))
 }

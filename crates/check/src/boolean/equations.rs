@@ -36,14 +36,28 @@ impl<'a> EquationContext<'a> {
         reserved: usize,
         budget: &mut Budget<'_>,
     ) -> Result<Self> {
-        let count = inputs
-            .inputs
-            .len()
-            .checked_add(temporary)
-            .ok_or_else(|| limit("completion universe", "BDD variables"))?;
+        let count = inputs.inputs.len().checked_add(temporary).ok_or_else(|| {
+            limit(
+                "completion universe",
+                "BDD variables",
+                budget
+                    .limits
+                    .max_bdd_variables
+                    .min(usize::from(u16::MAX - 2)),
+                None,
+            )
+        })?;
         budget.observe("completion universe", "BDD variables", count);
         if count > budget.limits.max_bdd_variables || count >= usize::from(u16::MAX - 1) {
-            return Err(limit("completion universe", "BDD variables"));
+            return Err(limit(
+                "completion universe",
+                "BDD variables",
+                budget
+                    .limits
+                    .max_bdd_variables
+                    .min(usize::from(u16::MAX - 2)),
+                Some(count),
+            ));
         }
         budget.charge(count, "completion universe")?;
         let result = Self {
@@ -76,7 +90,12 @@ impl<'a> EquationContext<'a> {
         self.room(bdd.size(), budget)?;
         budget.observe("completion BDD", "BDD nodes", bdd.size());
         if bdd.size() > budget.limits.max_bdd_nodes {
-            return Err(limit("completion BDD", "BDD nodes"));
+            return Err(limit(
+                "completion BDD",
+                "BDD nodes",
+                budget.limits.max_bdd_nodes,
+                Some(bdd.size()),
+            ));
         }
         self.live.set(self.live.get() + bdd.size());
         Ok(Formula {
@@ -108,7 +127,12 @@ impl<'a> EquationContext<'a> {
         }
         self.room(3, budget)?;
         if budget.limits.max_bdd_nodes < 3 {
-            return Err(limit("completion BDD", "BDD nodes"));
+            return Err(limit(
+                "completion BDD",
+                "BDD nodes",
+                budget.limits.max_bdd_nodes,
+                Some(3),
+            ));
         }
         self.own(
             self.variables.mk_var(BddVariable::from_index(index)),
@@ -153,7 +177,7 @@ impl<'a> EquationContext<'a> {
                 "BDD tasks",
                 allowed.saturating_add(1),
             );
-            return Err(limit("completion preflight", "BDD tasks"));
+            return Err(limit("completion preflight", "BDD tasks", allowed, None));
         };
         budget.observe("completion apply", "BDD tasks", tasks);
         budget.charge(2 * tasks + 1, "completion apply")?;
@@ -167,7 +191,7 @@ impl<'a> EquationContext<'a> {
                 "BDD nodes",
                 node_limit.saturating_add(1),
             );
-            return Err(limit("completion apply", "BDD nodes"));
+            return Err(limit("completion apply", "BDD nodes", node_limit, None));
         };
         self.own(bdd, budget)
     }

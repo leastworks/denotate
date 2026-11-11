@@ -450,10 +450,7 @@ pub fn ground_owned_unit(
                 let cause = provider
                     .1
                     .ok_or(CheckError::Internal("missing grounding failure"))?;
-                return Err(CheckError::LimitExceeded {
-                    phase: cause.phase,
-                    resource: cause.resource,
-                });
+                return Err(CheckError::from(cause));
             };
             for a in possible.iter() {
                 budget.tick("grounding providers")?;
@@ -578,9 +575,10 @@ impl GroundingStore for FreshGrounding {
         for key in &graph.order {
             operations.cancellation.check()?;
             if started.elapsed() >= operations.timeout {
-                return Err(CheckError::Deadline {
-                    phase: "fresh grounding queries",
-                });
+                return Err(CheckError::deadline(
+                    "fresh grounding queries",
+                    operations.timeout,
+                ));
             }
             let input = &graph.inputs[key];
             let providers = input
@@ -637,10 +635,7 @@ impl GroundProgram {
             }
         }
         if let Some(c) = failure {
-            return Err(CheckError::LimitExceeded {
-                phase: c.phase,
-                resource: c.resource,
-            });
+            return Err(CheckError::from(c));
         }
         let queries = query_start.elapsed();
         let assembly_start = Instant::now();

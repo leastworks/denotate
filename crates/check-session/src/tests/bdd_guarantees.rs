@@ -341,6 +341,7 @@ fn bdd_bypass_limits_and_cancellation_recovery_preserve_results() {
     input.admission_limit = Some(Inconclusive {
         phase: "admission",
         resource: "work",
+        details: Default::default(),
     });
     let bounded = NoLocalMemo
         .execute(&input, &fresh_ops, &mut LocalMetrics::default())

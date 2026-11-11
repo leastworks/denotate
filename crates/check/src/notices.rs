@@ -31,7 +31,10 @@ impl NoticeState {
 pub enum NoticeUnknown {
     Unsupported,
     Inconclusive(Inconclusive),
-    Deadline { phase: &'static str },
+    Deadline {
+        phase: &'static str,
+        details: LimitDetails,
+    },
     InconsistentAssumptions,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,9 +193,10 @@ impl GroundProgram {
                     Inconclusive::from_error(e)?,
                 )))
             }
-            Err(CheckError::Deadline { phase }) => {
+            Err(CheckError::Deadline { phase, details }) => {
                 Ok(ConditionAnalysis::unknown(NoticeUnknown::Deadline {
                     phase,
+                    details,
                 }))
             }
             other => other,

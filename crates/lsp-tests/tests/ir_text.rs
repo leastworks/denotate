@@ -2810,3 +2810,133 @@ fn notices_navigate_highlight_complete_and_follow_unsaved_context_edits() {
     }
     c.shutdown();
 }
+
+#[test]
+fn window_limits_initialize_recheck_all_roots_reject_invalid_and_discard_stale_results() {
+    let cap = json!({"limits":{"maxAtoms":0}});
+    let mut c = Client::start_with_config("base/00-valid", cap.clone());
+    let (uri, _) = c.open("example.den");
+    c.change(&uri, 2, CONFLICT);
+    let other = c.workspace.path().join("other");
+    std::fs::create_dir(&other).unwrap();
+    std::fs::write(other.join("den.root"), "{}").unwrap();
+    std::fs::write(other.join("code.den"), CONFLICT).unwrap();
+    c.notify(
+        "workspace/didChangeWatchedFiles",
+        json!({"changes":[{"uri":support::file_uri(&other.join("den.root")),"type":1}]}),
+    );
+    let (other_uri, _) = c.open("other/code.den");
+    checking_idle(&mut c);
+    for uri in [&uri, &other_uri] {
+        let status = c.request("denotate/roots", json!({"uri":uri}));
+        let reason = &status["verifications"][0]["summary"]["unfinished"];
+        assert_eq!(reason["resource"], "atoms", "{status}");
+        assert_eq!(reason["limit"], 0);
+        assert!(reason["observed"].as_u64().unwrap() > 0);
+        assert!(semantic_findings(&c, uri).is_empty());
+    }
+    let progress = c.take_notifications("denotate/checkingProgress");
+    assert!(progress.iter().any(|p| p["active"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|a| a["detail"]["configuration"]["limits"]["maxAtoms"] == 0)));
+    assert!(c
+        .take_notifications("window/logMessage")
+        .iter()
+        .any(|v| v["message"].as_str().unwrap().contains("limit 0")));
+
+    c.notify(
+        "workspace/didChangeConfiguration",
+        json!({"settings":{"denotate":{"limits":{"maxAtoms":-1}}}}),
+    );
+    checking_idle(&mut c);
+    let status = c.request("denotate/roots", json!({"uri":uri}));
+    assert_eq!(
+        status["verifications"][0]["summary"]["unfinished"]["limit"],
+        0
+    );
+    assert!(c
+        .take_notifications("window/logMessage")
+        .iter()
+        .any(|v| v["type"] == 1
+            && v["message"]
+                .as_str()
+                .unwrap()
+                .contains("keeping previous configuration")));
+
+    c.notify(
+        "workspace/didChangeConfiguration",
+        json!({"settings":{"denotate":{}}}),
+    );
+    checking_idle(&mut c);
+    for uri in [&uri, &other_uri] {
+        assert!(!semantic_findings(&c, uri).is_empty());
+    }
+    let warm =
+        c.request("denotate/roots", json!({"uri":uri}))["verifications"][0]["summary"].clone();
+
+    c.request("denotate/test/hold", json!({"stage":"beforeResult"}));
+    c.change(&uri, 3, &format!("{CONFLICT}\n// hold old configuration"));
+    let held = c.notification("denotate/test/checkpoint");
+    let before = c.publications().len();
+    c.notify(
+        "workspace/didChangeConfiguration",
+        json!({"settings":{"denotate":cap}}),
+    );
+    c.request(
+        "denotate/test/release",
+        json!({"revision":held["revision"]}),
+    );
+    checking_idle(&mut c);
+    for publication in &c.publications()[before..] {
+        assert!(publication["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|d| d["data"]["checkRevision"] != held["revision"]));
+    }
+    for uri in [&uri, &other_uri] {
+        let status = c.request("denotate/roots", json!({"uri":uri}));
+        assert_eq!(
+            status["verifications"][0]["summary"]["unfinished"]["limit"],
+            0
+        );
+        assert!(
+            semantic_findings(&c, uri).is_empty(),
+            "obsolete results published"
+        );
+    }
+    c.notify(
+        "workspace/didChangeConfiguration",
+        json!({"settings":{"denotate":{}}}),
+    );
+    checking_idle(&mut c);
+    let recovered =
+        c.request("denotate/roots", json!({"uri":uri}))["verifications"][0]["summary"].clone();
+    assert_eq!(warm, recovered);
+    c.shutdown();
+
+    let mut fresh = Client::start("base/00-valid");
+    let (uri, _) = fresh.open("example.den");
+    fresh.change(&uri, 2, CONFLICT);
+    checking_idle(&mut fresh);
+    let mut cold =
+        fresh.request("denotate/roots", json!({"uri":uri}))["verifications"][0]["summary"].clone();
+    // The fresh client owns a separate temporary workspace; compare the same program.
+    cold["program"] = recovered["program"].clone();
+    assert_eq!(cold, recovered);
+    fresh.shutdown();
+
+    let mut invalid =
+        Client::start_with_config("base/00-valid", json!({"limits":{"maxAtoms":"bad"}}));
+    let (uri, _) = invalid.open("example.den");
+    invalid.change(&uri, 2, CONFLICT);
+    checking_idle(&mut invalid);
+    assert!(!semantic_findings(&invalid, &uri).is_empty());
+    assert!(invalid
+        .take_notifications("window/logMessage")
+        .iter()
+        .any(|v| v["type"] == 1 && v["message"].as_str().unwrap().contains("using defaults")));
+    invalid.shutdown();
+}

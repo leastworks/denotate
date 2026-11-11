@@ -429,10 +429,7 @@ pub fn answer_owned_local(
     let computed = (|| -> Result<LocalAnswer> {
         let Some(value) = value else {
             let f = failure.ok_or(CheckError::Internal("missing owned evaluation failure"))?;
-            return Err(CheckError::LimitExceeded {
-                phase: f.phase,
-                resource: f.resource,
-            });
+            return Err(CheckError::from(f));
         };
         let projected = input.for_answer();
         let rt = Runtime::new(
@@ -469,18 +466,12 @@ pub fn answer_owned_local(
                 // source obligation ID; compute directly in canonical key order.
                 budget.tick("property checks")?;
                 if let Some(c) = meaning.inconclusive.values().next() {
-                    return Err(CheckError::LimitExceeded {
-                        phase: c.phase,
-                        resource: c.resource,
-                    });
+                    return Err(CheckError::from(*c));
                 }
                 if !rt.cone.blocked_by.is_empty() {
                     return Ok(LocalAnswer::Group(match input.admission_limit {
                         Some(c) => {
-                            return Err(CheckError::LimitExceeded {
-                                phase: c.phase,
-                                resource: c.resource,
-                            });
+                            return Err(CheckError::from(c));
                         }
                         None => LocalVerdict::Unsupported(UnsupportedReason::DependsOnUnsettled(
                             input
@@ -533,10 +524,7 @@ pub fn answer_owned_local(
                 let outcome = match completion {
                     CompletionOutcome::NoContradiction => RegionCompletion::NoContradiction,
                     CompletionOutcome::Inconclusive(c) => {
-                        return Err(CheckError::LimitExceeded {
-                            phase: c.phase,
-                            resource: c.resource,
-                        });
+                        return Err(CheckError::from(c));
                     }
                     CompletionOutcome::Deferred { blocked_by } => RegionCompletion::Deferred(
                         blocked_by

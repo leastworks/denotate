@@ -9,16 +9,34 @@ use denotate_ir::OccurrenceId;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Inconclusive {
     pub phase: &'static str,
     pub resource: &'static str,
+    pub details: LimitDetails,
 }
 impl Inconclusive {
     pub(crate) fn from_error(error: CheckError) -> Result<Self> {
         match error {
-            CheckError::LimitExceeded { phase, resource } => Ok(Self { phase, resource }),
+            CheckError::LimitExceeded {
+                phase,
+                resource,
+                details,
+            } => Ok(Self {
+                phase,
+                resource,
+                details,
+            }),
             error => Err(error),
+        }
+    }
+}
+impl From<Inconclusive> for CheckError {
+    fn from(c: Inconclusive) -> Self {
+        Self::LimitExceeded {
+            phase: c.phase,
+            resource: c.resource,
+            details: c.details,
         }
     }
 }
@@ -227,10 +245,7 @@ impl GroundProgram {
                     match meaning.fact(&literal.term.atom)? {
                         SymbolicFact::Blocked(_) => exact = false,
                         SymbolicFact::Inconclusive(cause) => {
-                            return Err(CheckError::LimitExceeded {
-                                phase: cause.phase,
-                                resource: cause.resource,
-                            });
+                            return Err(CheckError::from(cause));
                         }
                         SymbolicFact::Settled(mut value) => {
                             if literal.polarity == Polarity::Negative {

@@ -154,8 +154,8 @@ pub fn notice_result_data(result: &NoticeResult) -> Value {
     json!({"kind":"condition-variability", "state":result.state.label(),
         "reason":match &result.state {
             NoticeState::Unknown(NoticeUnknown::Unsupported)=>json!({"kind":"unsupported"}),
-            NoticeState::Unknown(NoticeUnknown::Inconclusive(c))=>json!({"kind":"inconclusive","phase":c.phase,"resource":c.resource}),
-            NoticeState::Unknown(NoticeUnknown::Deadline { .. })=>json!({"kind":"deadline"}),
+            NoticeState::Unknown(NoticeUnknown::Inconclusive(c))=>crate::with_limit_details(json!({"kind":"inconclusive","phase":c.phase,"resource":c.resource}), c.details),
+            NoticeState::Unknown(NoticeUnknown::Deadline { phase, details })=>crate::with_limit_details(json!({"kind":"deadline","phase":phase,"resource":"deadline"}), *details),
             NoticeState::Unknown(NoticeUnknown::InconsistentAssumptions)=>json!({"kind":"inconsistent-assumptions"}),
             _=>Value::Null,
         }, "whenTrue":result.when_true.as_ref().map(example), "whenFalse":result.when_false.as_ref().map(example)})
@@ -174,7 +174,7 @@ pub fn notice_evidence_data(result: &NoticeResult) -> Value {
                     .collect::<Vec<_>>()
             );
         }
-        NoticeState::Unknown(NoticeUnknown::Deadline { phase }) => {
+        NoticeState::Unknown(NoticeUnknown::Deadline { phase, .. }) => {
             data["reason"]["phase"] = json!(phase);
             data["reason"]["resource"] = json!("deadline");
         }
@@ -208,9 +208,9 @@ pub fn summary(results: &ScopedResults) -> Value {
         "backend":{"backend":results.context.backend.backend,"configuration":results.context.backend.configuration},
         "activeAssumptions":results.context.constraints.iter().map(|c| json!({"kind":match c.kind() {Cardinality::AtMostOne=>"at-most-one",Cardinality::AtLeastOne=>"at-least-one",Cardinality::ExactlyOne=>"exactly-one",Cardinality::Empty=>"empty"},"relation":relation(c.relation()),"groupBy":c.group_by()})).collect::<Vec<_>>(),
         "groups":results.groups.iter().map(|(k,v)|json!({"identity":group_identity(k, results) ,"outcome":kinds(v),"reason":result_reason(v)})).collect::<Vec<_>>(),
-        "regions":results.regions.iter().map(|(k,v)|json!({"identity":k.0.iter().map(atom_data).collect::<Vec<_>>(),"outcome":kinds(&v.outcome),"reason":result_reason(&v.outcome),"completionReason":match &v.completion { RegionCompletion::Inconclusive(r)=>Some(json!({"phase":r.phase,"resource":r.resource})),_=>None },"completion":match v.completion { RegionCompletion::NoContradiction => "no-contradiction", RegionCompletion::NoMeaning{..} => "no-meaning",RegionCompletion::Deferred(_) => "deferred",RegionCompletion::Inconclusive(_) => "inconclusive" }})).collect::<Vec<_>>(),
-        "unfinished":results.unfinished.as_ref().map(|r|json!({"phase":r.phase,"resource":r.resource})),
-        "incomplete":results.incomplete.iter().map(|(k,r)|json!({"region":k.0.iter().map(atom_data).collect::<Vec<_>>(),"phase":r.phase,"resource":r.resource})).collect::<Vec<_>>()
+        "regions":results.regions.iter().map(|(k,v)|json!({"identity":k.0.iter().map(atom_data).collect::<Vec<_>>(),"outcome":kinds(&v.outcome),"reason":result_reason(&v.outcome),"completionReason":match &v.completion { RegionCompletion::Inconclusive(r)=>Some(crate::exhaustion_data(&r.phase, &r.resource, r.details)),_=>None },"completion":match v.completion { RegionCompletion::NoContradiction => "no-contradiction", RegionCompletion::NoMeaning{..} => "no-meaning",RegionCompletion::Deferred(_) => "deferred",RegionCompletion::Inconclusive(_) => "inconclusive" }})).collect::<Vec<_>>(),
+        "unfinished":results.unfinished.as_ref().map(|r|crate::exhaustion_data(&r.phase, &r.resource, r.details)),
+        "incomplete":results.incomplete.iter().map(|(k,r)|crate::with_limit_details(json!({"region":k.0.iter().map(atom_data).collect::<Vec<_>>(),"phase":r.phase,"resource":r.resource}), r.details)).collect::<Vec<_>>()
     });
     if !results.context.notices.is_empty() {
         summary["notices"] = json!(results.context.notices.iter().map(|key| {
@@ -240,7 +240,7 @@ pub fn summary(results: &ScopedResults) -> Value {
                 },
                 "attribution":attribution_data(example.attribution.as_ref())
             })).collect::<Vec<_>>(),
-            "reason":e.inconclusive.map(|r|json!({"phase":r.phase,"resource":r.resource}))
+            "reason":e.inconclusive.map(|r|crate::exhaustion_data(&r.phase, &r.resource, r.details))
         })).collect::<Vec<_>>());
     }
     if !results.coverage.is_empty() {
@@ -249,7 +249,7 @@ pub fn summary(results: &ScopedResults) -> Value {
             "outcome":if c.missing > 0 {"counterexample"} else if c.proved() {"proved"} else if c.inconclusive.is_some() {"inconclusive"} else {"unsupported"},
             "examinedGroups":c.examined,"missingGroups":{"count":c.missing,"exact":c.complete()},
             "complete":c.complete(),"noGroups":c.no_groups,"unsupportedGroups":c.unsupported,
-            "reason":c.inconclusive.map(|r|json!({"phase":r.phase,"resource":r.resource}))
+            "reason":c.inconclusive.map(|r|crate::exhaustion_data(&r.phase, &r.resource, r.details))
         })).collect::<Vec<_>>());
     }
     summary
@@ -283,7 +283,7 @@ pub fn evidence_data(finding: &crate::Finding<'_>, keys: &SemanticKeys) -> Resul
                 "presentTuples":{"count":e.present,"exact":e.complete()},
                 "examplesTruncated":e.present > e.examples.len(),
                 "producers":producers,
-                "reason":e.inconclusive.map(|r|json!({"phase":r.phase,"resource":r.resource})),
+                "reason":e.inconclusive.map(|r|crate::exhaustion_data(&r.phase, &r.resource, r.details)),
                 "examples":e.examples.iter().map(|example| Ok(json!({
                     "tuple":atom_data(&AtomKey::from_atom(keys, &example.tuple)?),
                     "observation":observation(&example.observation)?,
@@ -304,7 +304,7 @@ pub fn evidence_data(finding: &crate::Finding<'_>, keys: &SemanticKeys) -> Resul
             "kind":if c.missing > 0 {"replayed-coverage-counterexamples"} else {"no-witness"},
             "component":"coverage", "missingGroups":{"count":c.missing,"exact":c.complete()},
             "complete":c.complete(), "unsupportedGroups":c.unsupported,
-            "reason":c.inconclusive.map(|r|json!({"phase":r.phase,"resource":r.resource})),
+            "reason":c.inconclusive.map(|r|crate::exhaustion_data(&r.phase, &r.resource, r.details)),
             "examples":c.examples.iter().map(|e| Ok(json!({
                 "group":e.group.iter().map(|id|Ok(constant(keys.constant(*id)?))).collect::<Result<Vec<_>>>()?,
                 "observation":observation(&e.observation)?,
@@ -343,7 +343,9 @@ pub fn evidence_data(finding: &crate::Finding<'_>, keys: &SemanticKeys) -> Resul
 
 fn result_reason(result: &ScopedResult) -> Option<Value> {
     match result {
-        ScopedResult::Inconclusive(r) => Some(json!({"phase":r.phase,"resource":r.resource})),
+        ScopedResult::Inconclusive(r) => {
+            Some(crate::exhaustion_data(&r.phase, &r.resource, r.details))
+        }
         ScopedResult::Unsupported(UnsupportedReason::UnsettledNegativeCycle) => {
             Some(json!({"kind":"unsettled-negative-cycle"}))
         }
@@ -359,7 +361,7 @@ fn attribution_data<E>(attribution: Option<&Attribution<E>>) -> Value {
         None => Value::Null,
         Some(Attribution::Complete(_)) => json!({"state":"complete"}),
         Some(Attribution::Incomplete(c)) => json!({
-            "state":"incomplete", "reason":{"phase":c.phase,"resource":c.resource}
+            "state":"incomplete", "reason":crate::exhaustion_data(c.phase, c.resource, c.details)
         }),
     }
 }

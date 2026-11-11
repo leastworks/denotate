@@ -55,7 +55,10 @@ participating occurrences, and places them on source locations. It depends only 
   the full derivation related. Own-file and unlocated obligations keep old placement.
 - `rewrites` groups proven rewrite warnings and their coverage; they never carry edits.
 - `summary` builds root-level outcome summaries (backend, selected assumptions, group
-  and region outcomes, resource reasons).
+  and region outcomes, resource reasons). Resource reasons preserve checker-supplied
+  subphase, effective limit and observed demand where available; unknown counts are
+  omitted. The same resource formatter serves diagnostic messages and CLI/editor
+  logs without reconstructing checker work.
 
 Frontends adapt the output: `crates/ir-text`'s `presentation` module for `.den`, and
 the test DSL presenter, which keeps its own wording, guard locations and

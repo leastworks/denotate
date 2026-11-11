@@ -279,9 +279,10 @@ impl GroundingCache {
         for key in &order {
             operations.cancellation.check()?;
             if started.elapsed() >= operations.timeout {
-                return Err(CheckError::Deadline {
-                    phase: "grounding queries",
-                });
+                return Err(CheckError::deadline(
+                    "grounding queries",
+                    operations.timeout,
+                ));
             }
             let before = self.db.executions.lock().unwrap().0;
             let result = evaluate(&self.db, self.entries[key].slot)

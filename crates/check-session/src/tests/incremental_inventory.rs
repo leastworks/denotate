@@ -333,7 +333,9 @@ fn budget_result_lowered(p: &LoweredProgram, max_work: usize) -> Value {
     })();
     match result {
         Ok(v) => v,
-        Err(CheckError::LimitExceeded { phase, resource }) => {
+        Err(CheckError::LimitExceeded {
+            phase, resource, ..
+        }) => {
             json!({"status":"inconclusive","phase":phase,"resource":resource})
         }
         Err(e) => panic!("{e}"),

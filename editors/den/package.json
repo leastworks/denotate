@@ -14,6 +14,71 @@
     "configuration": {
       "title": "Denotate",
       "properties": {
+        "denotate.timeoutMs": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "default": 10000,
+          "scope": "window",
+          "description": "Cooperative timeout in milliseconds per checker operation/query, not per program. Zero allows no time. Changes recheck every program in this window."
+        },
+        "denotate.limits": {
+          "type": "object",
+          "default": {},
+          "scope": "window",
+          "additionalProperties": false,
+          "description": "Resource ceilings per checker operation/query, shared by every program in this window. Omitted values use checker defaults; zero allows no use. Changes recheck programs.",
+          "properties": {
+            "maxAtoms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "description": "Ground atoms, including input-domain provider facts and intermediate atoms."
+            },
+            "maxRules": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "description": "Ground rule instances."
+            },
+            "maxDependencies": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "description": "Ground dependency edges."
+            },
+            "maxWork": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "description": "Deterministic checker work units."
+            },
+            "maxBddVariables": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "description": "BDD variables."
+            },
+            "maxBddNodes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "description": "BDD nodes per bounded operation."
+            },
+            "maxBddTasks": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "description": "BDD operation tasks; available work/storage may impose a tighter effective ceiling."
+            },
+            "maxConditionNodes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991,
+              "description": "Conservatively counted retained BDD condition nodes, not heap bytes."
+            }
+          }
+        },
         "denotate.showLibraryRewrites": {
           "type": "boolean", "default": true, "scope": "window",
           "description": "Show rewrite warnings for library rules in consuming programs. The library's own warnings, other diagnostics and full status summaries remain available."

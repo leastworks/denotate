@@ -293,6 +293,7 @@ fn exhausted_request_keeps_backend_assumptions_and_reason_in_status() {
     let status = denotate_presentation::summary(&request.exhausted(Inconclusive {
         phase: "grounding",
         resource: "deadline",
+        details: Default::default(),
     }));
     assert_eq!(status["state"], "incomplete");
     assert_eq!(status["backend"]["backend"], "bdd");

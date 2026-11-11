@@ -561,6 +561,7 @@ fn known_exactly_one_failure_survives_incomplete_other_component() {
     coverage.inconclusive = Some(Inconclusive {
         phase: "coverage",
         resource: "work",
+        details: Default::default(),
     });
     let o = Outcomes::from_results(&p, &result.value);
     assert_eq!(obligation(&o, "exact")["state"], "counterexample");

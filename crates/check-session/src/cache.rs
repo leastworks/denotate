@@ -403,9 +403,10 @@ impl Session {
         self.refresh();
         operations.cancellation.check()?;
         if operations.timeout.is_zero() {
-            return Err(CheckError::Deadline {
-                phase: "local cache lookup",
-            });
+            return Err(CheckError::deadline(
+                "local cache lookup",
+                operations.timeout,
+            ));
         }
         *self.db.operations.lock().unwrap() = operations.clone();
         let result = match metrics {
@@ -481,9 +482,10 @@ impl LocalMemoStore for Session {
         }
         operations.cancellation.check()?;
         if operations.timeout.is_zero() {
-            return Err(CheckError::Deadline {
-                phase: "local cache lookup",
-            });
+            return Err(CheckError::deadline(
+                "local cache lookup",
+                operations.timeout,
+            ));
         }
         let start = Instant::now();
         if self.clock == u64::MAX {
@@ -533,9 +535,10 @@ impl LocalMemoStore for Session {
                 .ok_or(CheckError::Internal("missing owned answer"))?;
             operations.cancellation.check()?;
             if start.elapsed() >= operations.timeout {
-                return Err(CheckError::Deadline {
-                    phase: "owned local query",
-                });
+                return Err(CheckError::deadline(
+                    "owned local query",
+                    operations.timeout,
+                ));
             }
             Ok::<_, CheckError>(Arc::new(LocalMemo {
                 evaluation: a.value.as_deref().cloned(),

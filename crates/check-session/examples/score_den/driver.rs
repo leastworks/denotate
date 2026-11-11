@@ -223,9 +223,17 @@ pub fn measure(
     run.row["timings_ns"]["admission"] = json!(start.elapsed().as_nanos());
     let prepared = match admitted {
         Ok(p) => p,
-        Err(CheckError::LimitExceeded { phase, resource }) => {
+        Err(CheckError::LimitExceeded {
+            phase,
+            resource,
+            details,
+        }) => {
             return run.finish(
-                request.exhausted(Inconclusive { phase, resource }),
+                request.exhausted(Inconclusive {
+                    phase,
+                    resource,
+                    details,
+                }),
                 p,
                 Some(consistent),
                 before_admission,

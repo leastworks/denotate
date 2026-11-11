@@ -97,10 +97,7 @@ impl GroundProgram {
                         let value = match meaning.fact(atom)? {
                             SymbolicFact::Settled(c) => c,
                             SymbolicFact::Inconclusive(c) => {
-                                return Err(CheckError::LimitExceeded {
-                                    phase: c.phase,
-                                    resource: c.resource,
-                                });
+                                return Err(CheckError::from(c));
                             }
                             SymbolicFact::Blocked(_) => {
                                 return Err(CheckError::InvalidRequest(
@@ -136,15 +133,6 @@ impl GroundProgram {
             self.assumption_condition = Some(permitted);
             Ok(())
         })();
-        result.map_err(|e| match e {
-            CheckError::LimitExceeded { resource, .. } => CheckError::LimitExceeded {
-                phase: "assumptions",
-                resource,
-            },
-            CheckError::Deadline { .. } => CheckError::Deadline {
-                phase: "assumptions",
-            },
-            e => e,
-        })
+        result.map_err(|e| e.in_phase("assumptions", None))
     }
 }

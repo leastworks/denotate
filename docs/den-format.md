@@ -599,6 +599,12 @@ that resource. Options follow the root. Invalid, overflowing, missing or repeate
 values are argument errors. `--help` prints defaults from the checker itself.
 Defaults, per-query accounting and inconclusive semantics remain unchanged; these
 options do not alter cache retention or separate attribution allowances.
+Exhaustion reports retain the subphase and show the effective limit and observed
+demand where known. Provider grounding during input-domain preparation is distinguished
+from eligible-input enumeration. Counts can include rejected demand and are not
+estimates of final size; unknown solver counts are omitted. VS Code exposes the same
+controls through `denotate.timeoutMs` and `denotate.limits` (see the
+[editor guide](../editors/den/README.md#checker-limits)).
 
 `--json` retains the previous per-verification `Results: {...}` status summary
 instead of human diagnostics. Root/verification headers and configuration notices

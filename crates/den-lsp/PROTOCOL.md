@@ -362,8 +362,9 @@ Input observations range over the checked program's eligible input atoms. A
 `within` provider excludes tuples from that universe entirely, including the absent
 list; an authored negative premise on an excluded atom can still appear in proof
 evidence. Restricted-domain preparation exhaustion uses the existing inconclusive
-shape with phase `input domains` and the exhausted resource. No evidence schema or
-finding identity changes.
+shape with phase `input domains` and the exhausted resource. The additive
+[resource details](#resource-reason-detail) preserve the failure subphase; finding
+identity is unchanged.
 
 Uniqueness and coverage retain their full observations in structured evidence.
 Their human notes restrict those observations to checker-supplied structural
@@ -503,13 +504,47 @@ for a replayed failure and `inconclusive` otherwise; proof emits no diagnostic.
 Current `.den` spans remain primary; embedded origins remain related and available
 through Go to Origin.
 
+### Resource reason detail
+
+Every resource reason retains its existing `phase` and `resource`. It may additionally
+contain `subphase`, `limit` and `observed`. These fields apply to summaries, diagnostic
+evidence, notices, assumption validation and incomplete attribution. `limit` is the
+effective ceiling at the failed check (milliseconds for `deadline`). `observed` is
+the checked demand, possibly including a rejected addition, not the final required
+size. Counts unknown to the checker are omitted; elapsed times are not retained.
+Backend capacity or remaining work/storage may make the effective ceiling smaller
+than the configured ceiling. Existing phase/resource identities and verdicts remain
+unchanged.
+
+The enclosing `input domains` phase distinguishes `provider discovery`, `provider
+grounding`, `provider dependency analysis`, `provider evaluation` and `eligible input
+enumeration` through `subphase`. No frontend reconstructs the failure stage. Deadline
+notice summaries now include the same phase/resource/limit detail as their evidence.
+Editor deadlines retain the checker phase instead of replacing it with a generic
+`checking` label.
+
 ### Configuration
 
 `initializationOptions.denotate` or
-`workspace/didChangeConfiguration {settings: {denotate: {timeoutMs}}}`:
-`timeoutMs` defaults to 10000 and bounds each verification's check separately, so a
-program with several verifications may take that long per verification. An update
-replaces the whole object. There is no backend setting: BDD is the only implementation.
+`workspace/didChangeConfiguration {settings: {denotate: {timeoutMs, limits}}}`:
+`timeoutMs` defaults to 10000; it is a cooperative allowance per operation/query,
+not a program or workspace deadline. Optional `limits` accepts nonnegative integer
+`maxAtoms`, `maxRules`, `maxDependencies`, `maxWork`, `maxBddVariables`, `maxBddNodes`,
+`maxBddTasks` and `maxConditionNodes`, with checker defaults for omitted fields.
+Zero permits no use. Limits do not include loading, presentation, session retention
+or separate attribution allowances. An update replaces the whole object; omitted
+settings revert to defaults. Invalid values or unknown names inside `limits` are
+logged as errors and leave the last valid configuration in place (defaults at startup).
+
+This is window-wide policy. All limits participate in snapshot validity and checker
+request inputs. Changes cancel obsolete work and recheck every program; old results
+cannot publish under new limits. Loading progress includes the effective
+`configuration: {timeoutMs, limits, showLibraryRewrites}`. The client prints it in
+Output; current published resource reasons also produce labeled `window/logMessage`
+entries. A resource message may concern advisory/attribution work and is not itself
+a new verdict or finding.
+
+There is no backend setting: BDD is the only implementation.
 The `backend` fields in status and summaries remain fixed BDD metadata for compatibility
 and result identity; they do not select an algorithm. Obsolete backend configuration
 properties are ignored like other unknown configuration properties.

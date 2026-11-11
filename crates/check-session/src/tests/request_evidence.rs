@@ -114,6 +114,7 @@ fn request_context_and_scoped_results_are_owned_and_distinguish_reasons() {
                     ScopedResult::Inconclusive(ResourceReason {
                         phase: "test".into(),
                         resource: "work".into(),
+                        details: Default::default(),
                     }),
                 );
             }

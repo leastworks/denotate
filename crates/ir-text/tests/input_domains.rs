@@ -500,3 +500,62 @@ fn binary_domains_preserve_tuple_correlation_and_switching_restrictions_refreshe
         }
     }
 }
+
+#[test]
+fn exhaustion_distinguishes_provider_work_from_eligible_input_enumeration() {
+    let prefix = "sort S; const a,b:S; relation allowed(x:S);";
+    let checks = "relation nothing(); obligation o:empty(nothing); verification v{assumptions:[];obligations:[o];}";
+    for (body, stage) in [
+        (
+            "allowed(a); allowed(b); input first(x:S) within allowed;",
+            "provider grounding",
+        ),
+        (
+            "allowed(a); input first(x:S) within allowed; input second(x:S) within allowed;",
+            "eligible input enumeration",
+        ),
+    ] {
+        let source = format!("{prefix} {body} {checks}");
+        let mut warm = Session::default();
+        let limits = Limits {
+            max_atoms: 1,
+            ..Limits::default()
+        };
+        let mut previous = None;
+        for _ in 0..2 {
+            let p = parse(&source).unwrap(); // fresh arena for each warm preparation
+            let request = p.verification_requests(&limits).unwrap().remove(0).1;
+            let RequestPreparation::Inconclusive { reason, .. } = warm
+                .prepare(&request, &p.corpus, &p.keys, &(&limits).into())
+                .unwrap()
+            else {
+                panic!("partial input domain accepted")
+            };
+            assert_eq!(reason.phase, "input domains");
+            assert_eq!(reason.resource, "atoms");
+            assert_eq!(reason.details.subphase, Some(stage));
+            assert_eq!(reason.details.limit, Some(limits.max_atoms));
+            assert!(reason.details.observed.unwrap() > limits.max_atoms);
+            let RequestPreparation::Inconclusive { reason: cold, .. } = request
+                .prepare(&p.corpus, &p.keys, &(&limits).into())
+                .unwrap()
+            else {
+                panic!()
+            };
+            assert_eq!(reason, cold);
+            if let Some(previous) = previous {
+                assert_eq!(reason, previous);
+            }
+            previous = Some(reason);
+            let status = denotate_presentation::summary(&request.exhausted(reason));
+            assert_eq!(status["state"], "incomplete");
+            assert_eq!(status["unfinished"]["subphase"], stage);
+            assert_eq!(
+                status["unfinished"]["observed"],
+                reason.details.observed.unwrap()
+            );
+        }
+        let p = parse(&source).unwrap();
+        assert_eq!(run(&p, &mut warm), run(&p, &mut Session::default()));
+    }
+}

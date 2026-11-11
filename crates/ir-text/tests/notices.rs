@@ -316,7 +316,7 @@ fn notice_deadline_retains_phase_and_presents_advisory_detail_only() {
         .program()
         .analyze_condition(p.corpus.notices().next().unwrap().condition, None, &limited)
         .unwrap();
-    let NoticeState::Unknown(NoticeUnknown::Deadline { phase }) = analysis.state else {
+    let NoticeState::Unknown(NoticeUnknown::Deadline { phase, .. }) = analysis.state else {
         panic!()
     };
     let result = report.results.value.notices.values_mut().next().unwrap();
@@ -327,7 +327,7 @@ fn notice_deadline_retains_phase_and_presents_advisory_detail_only() {
     assert_eq!(out.status["state"], "proved");
     assert_eq!(
         out.status["notices"][0]["result"]["reason"],
-        serde_json::json!({"kind":"deadline"})
+        serde_json::json!({"kind":"deadline", "phase":phase, "resource":"deadline", "limit":0})
     );
     assert_eq!(out.diagnostics.len(), 1);
     let d = &out.diagnostics[0];

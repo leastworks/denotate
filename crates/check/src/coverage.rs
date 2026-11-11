@@ -207,10 +207,7 @@ impl SymbolicMeaning<'_> {
                 return Ok((None, unresolved));
             };
             if let Some(c) = incomplete {
-                return Err(CheckError::LimitExceeded {
-                    phase: c.phase,
-                    resource: c.resource,
-                });
+                return Err(CheckError::from(c));
             }
             let replay = self.program.evaluate_selected(
                 observation.present.iter().cloned(),
@@ -250,10 +247,7 @@ impl SymbolicMeaning<'_> {
                     }
                     CertificationOutcome::NotCertified => unresolved = true,
                     CertificationOutcome::Inconclusive(c) => {
-                        return Err(CheckError::LimitExceeded {
-                            phase: c.phase,
-                            resource: c.resource,
-                        });
+                        return Err(CheckError::from(c));
                     }
                 }
             }
@@ -277,8 +271,10 @@ impl SymbolicMeaning<'_> {
 }
 
 fn increment(n: usize) -> Result<usize> {
-    n.checked_add(1).ok_or(CheckError::LimitExceeded {
-        phase: "coverage counting",
-        resource: "cardinality",
-    })
+    n.checked_add(1).ok_or(CheckError::limit(
+        "coverage counting",
+        "cardinality",
+        usize::MAX,
+        None,
+    ))
 }

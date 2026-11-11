@@ -195,10 +195,7 @@ impl SymbolicMeaning<'_> {
                             (false, scope)
                         }
                         CertificationOutcome::Inconclusive(c) => {
-                            return Err(CheckError::LimitExceeded {
-                                phase: c.phase,
-                                resource: c.resource,
-                            });
+                            return Err(CheckError::from(c));
                         }
                     },
                 };
@@ -347,10 +344,7 @@ impl GroundProgram {
                 {
                     crate::certification::certified_evidence(&certified, &roots, budget)
                 }
-                CertificationOutcome::Inconclusive(c) => Err(CheckError::LimitExceeded {
-                    phase: c.phase,
-                    resource: c.resource,
-                }),
+                CertificationOutcome::Inconclusive(c) => Err(CheckError::from(c)),
                 _ => Err(CheckError::Internal("presence attribution did not certify")),
             },
             FactState::Settled(false) => {

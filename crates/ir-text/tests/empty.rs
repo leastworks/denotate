@@ -708,6 +708,7 @@ fn attribution_fallback_preserves_semantic_summary_and_uses_obligation_location(
     let cause = Inconclusive {
         phase: "attribution",
         resource: "work",
+        details: Default::default(),
     };
     for e in report.verification.emptiness.values_mut() {
         e.examples[0].attribution = Some(Attribution::Incomplete(cause));
@@ -952,6 +953,7 @@ fn one_attribution_fallback_is_not_hidden_by_another_tuples_derivation() {
     let cause = Inconclusive {
         phase: "attribution",
         resource: "work",
+        details: Default::default(),
     };
     report
         .verification
@@ -1151,6 +1153,7 @@ fn unavailable_empty_input_scope_falls_back_to_full_world_without_affecting_fail
     let cause = Inconclusive {
         phase: "dependency cones",
         resource: "work",
+        details: Default::default(),
     };
     report
         .verification

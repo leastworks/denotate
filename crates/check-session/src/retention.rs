@@ -44,6 +44,7 @@ flat!(
     bool,
     DeterministicLimits,
     Inconclusive,
+    LimitDetails,
     RequestScope
 );
 impl Retained for String {
@@ -235,7 +236,11 @@ fields!(BackendIdentity {
     backend,
     configuration
 });
-fields!(ResourceReason { phase, resource });
+fields!(ResourceReason {
+    phase,
+    resource,
+    details
+});
 fields!(Candidate { present, absent });
 fields!(EvidenceKeys {
     instances,

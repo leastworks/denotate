@@ -286,11 +286,28 @@ pub(crate) fn retain(
     let next = total
         .checked_sub(old)
         .and_then(|n| n.checked_add(new))
-        .ok_or_else(|| limit("symbolic storage", "condition nodes"))?;
+        .ok_or_else(|| {
+            limit(
+                "symbolic storage",
+                "condition nodes",
+                budget.limits.max_condition_nodes,
+                None,
+            )
+        })?;
     budget.observe("symbolic storage", "condition nodes", next);
     if next > budget.limits.max_condition_nodes {
-        budget.failure(&limit("symbolic storage", "condition nodes"));
-        return Err(limit("symbolic storage", "condition nodes"));
+        budget.failure(&limit(
+            "symbolic storage",
+            "condition nodes",
+            budget.limits.max_condition_nodes,
+            Some(next),
+        ));
+        return Err(limit(
+            "symbolic storage",
+            "condition nodes",
+            budget.limits.max_condition_nodes,
+            Some(next),
+        ));
     }
     Ok(next)
 }

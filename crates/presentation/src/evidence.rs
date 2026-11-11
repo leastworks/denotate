@@ -1,3 +1,4 @@
+use crate::exhaustion_text;
 use crate::{Error, Identity, Result};
 use denotate_check::*;
 use denotate_ir::*;
@@ -263,7 +264,7 @@ pub fn interpret<'a>(
                 }.into());
                 match &example.certification {
                     Some(CertificationOutcome::NotCertified) => notes.push("Whole-program replay was not certified for the attempted observations. Failure to certify alone is not proof of no meaning.".into()),
-                    Some(CertificationOutcome::Inconclusive(c)) => notes.push(format!("Whole-program replay certification is inconclusive: {} exhausted its {} budget. The cone counterexample is unchanged.", c.phase, c.resource)),
+                    Some(CertificationOutcome::Inconclusive(c)) => notes.push(format!("Whole-program replay certification is inconclusive: {}. The cone counterexample is unchanged.", exhaustion_text(c.phase, c.resource, c.details))),
                     _ => {}
                 }
                 for id in &example.confined_to_no_meaning {
@@ -318,8 +319,8 @@ pub fn interpret<'a>(
                     VerifiedOutcome::Inconclusive(c) => (
                         Kind::Inconclusive,
                         format!(
-                            "{subject} is inconclusive: {} exhausted its {} budget.",
-                            c.phase, c.resource
+                            "{subject} is inconclusive: {}.",
+                            exhaustion_text(c.phase, c.resource, c.details)
                         ),
                     ),
                     _ => (
@@ -372,7 +373,7 @@ pub fn interpret<'a>(
                 obligation.name,
                 emptiness
                     .inconclusive
-                    .map(|c| format!(" ({}: {})", c.phase, c.resource))
+                    .map(|c| format!(" ({})", exhaustion_text(c.phase, c.resource, c.details)))
                     .unwrap_or_else(|| " (unresolved permitted worlds)".into())
             )
         };
@@ -400,8 +401,8 @@ pub fn interpret<'a>(
                     derivation_contributions(evidence, &mut group.contributions);
                 }
                 Some(Attribution::Incomplete(c)) => group.notes.push(format!(
-                    "Source attribution for {} is incomplete ({}: {}); its counterexample is unchanged. Locations fall back to the obligation.",
-                    atom_name(corpus, names, &example.tuple)?, c.phase, c.resource,
+                    "Source attribution for {} is incomplete ({}); its counterexample is unchanged. Locations fall back to the obligation.",
+                    atom_name(corpus, names, &example.tuple)?, exhaustion_text(c.phase, c.resource, c.details),
                 )),
                 None => {}
             }
@@ -464,8 +465,8 @@ pub fn interpret<'a>(
             (
                 Kind::Inconclusive,
                 format!(
-                    "{subject}: coverage checking incomplete ({}: {}).",
-                    cause.phase, cause.resource
+                    "{subject}: coverage checking incomplete ({}).",
+                    exhaustion_text(cause.phase, cause.resource, cause.details)
                 ),
             )
         } else if coverage.unsupported > 0 {
@@ -522,18 +523,18 @@ pub fn interpret<'a>(
                 rules = n.rules.iter().map(|r| r.source).collect();
                 notes = vec!["Other observations remain unsupported unless separately certified; a consistent equation solution does not establish meaning.".into(), "Independent obligation results remain available.".into()];
                 if let RegionOutcome::Inconclusive(c) = region.outcome {
-                    notes.push(format!("Admission remains inconclusive: {} exhausted its {} budget. The separate consistency check established this failure.", c.phase, c.resource));
+                    notes.push(format!("Admission remains inconclusive: {}. The separate consistency check established this failure.", exhaustion_text(c.phase, c.resource, c.details)));
                 }
                 (Kind::NoMeaning, "These rules have no consistent result in the example input observation.".into())
             }
-            CompletionOutcome::Inconclusive(c) => (Kind::Inconclusive, format!("Consistency checking for this dependency cycle is inconclusive: {} exhausted its {} budget.",c.phase,c.resource)),
+            CompletionOutcome::Inconclusive(c) => (Kind::Inconclusive, format!("Consistency checking for this dependency cycle is inconclusive: {}.", exhaustion_text(c.phase, c.resource, c.details))),
             CompletionOutcome::Deferred { blocked_by } => {
                 for id in blocked_by { region_contributions(linked_region(report, *id)?, &mut contributions); }
                 (Kind::UnsupportedRegion, "Consistency checking for this cycle was deferred: an upstream component is not settled. See related locations.".into())
             }
             CompletionOutcome::NoContradiction => match region.outcome {
                 RegionOutcome::Unsupported => (Kind::UnsupportedRegion, "This dependency cycle contains negation and is unsupported by the current checker. Its equations have a solution for every input observation, but that does not establish meaning.".into()),
-                RegionOutcome::Inconclusive(c) => (Kind::Inconclusive, format!("Admission of this dependency cycle is inconclusive: {} exhausted its {} budget.",c.phase,c.resource)),
+                RegionOutcome::Inconclusive(c) => (Kind::Inconclusive, format!("Admission of this dependency cycle is inconclusive: {}.", exhaustion_text(c.phase, c.resource, c.details))),
             },
         };
         findings.push(Finding {
@@ -687,7 +688,10 @@ fn input_note(
         scope => {
             note.push_str(" Dependency-cone inputs unavailable");
             if let Some(Attribution::Incomplete(c)) = scope {
-                note.push_str(&format!(" ({}: {})", c.phase, c.resource));
+                note.push_str(&format!(
+                    " ({})",
+                    exhaustion_text(c.phase, c.resource, c.details)
+                ));
             }
             note.push_str("; showing the full observation.");
             (
@@ -793,13 +797,16 @@ pub fn context_findings(
             NoticeState::Unknown(NoticeUnknown::Inconclusive(c)) => (
                 Kind::UnanalysedCondition,
                 format!(
-                    "Condition could not be analysed: {} exhausted its {} budget.",
-                    c.phase, c.resource
+                    "Condition could not be analysed: {}.",
+                    exhaustion_text(c.phase, c.resource, c.details)
                 ),
             ),
-            NoticeState::Unknown(NoticeUnknown::Deadline { phase }) => (
+            NoticeState::Unknown(NoticeUnknown::Deadline { phase, details }) => (
                 Kind::UnanalysedCondition,
-                format!("Condition could not be analysed: {phase} reached its deadline."),
+                format!(
+                    "Condition could not be analysed: {}.",
+                    exhaustion_text(phase, "deadline", details)
+                ),
             ),
             _ => continue,
         };

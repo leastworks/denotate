@@ -110,6 +110,39 @@ multiple verifications and queries can take longer in total. If CPU stays high
 without edits, the last phase, run number and size report help identify where work
 remains. A phase that stays unchanged does not by itself prove the process is stuck.
 
+## Checker limits
+
+Set `denotate.timeoutMs` and `denotate.limits` in user or workspace settings. One
+configuration applies to every program in the VS Code window, including library
+programs. For example:
+
+```json
+{
+  "denotate.timeoutMs": 60000,
+  "denotate.limits": {
+    "maxAtoms": 200000,
+    "maxBddVariables": 30000
+  }
+}
+```
+
+These are example overrides, not recommended defaults. `limits` accepts `maxAtoms`,
+`maxRules`, `maxDependencies`, `maxWork`, `maxBddVariables`, `maxBddNodes`,
+`maxBddTasks` and `maxConditionNodes`, matching the CLI controls. Omitted fields use
+checker defaults; zero allows no use. Limits apply per operation/query, and timeout
+is cooperative. Loading and presentation are outside that allowance. A limit change
+cancels obsolete checking and automatically rechecks all affected programs.
+Invalid settings are reported in Output and retain the last valid configuration
+(defaults at startup). Removing an override restores its default.
+
+Output logs the effective values at the start of each check and explains resource
+exhaustion, including its subphase, effective ceiling and observed demand when known.
+For example, reaching the atom limit while grounding an input-domain provider is
+distinct from reaching it while enumerating eligible inputs. Observed demand can
+include a rejected addition; it is not the eventual total size. Unknown solver
+counts are omitted. Internal capacity and remaining work/storage may impose a tighter
+ceiling than the configured value. Inconclusive results remain inconclusive.
+
 ## Tests
 
 ```sh

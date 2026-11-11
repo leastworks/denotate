@@ -1,6 +1,7 @@
 mod bridge;
 mod catalog;
 mod checking;
+mod configuration;
 mod formatting;
 mod presentation;
 mod rename;
@@ -640,9 +641,17 @@ impl Server {
                 self.publish_all(connection)?;
             }
             "workspace/didChangeConfiguration" => {
-                self.checking.config =
-                    checking::Config::read(&notification.params["settings"]["denotate"])?;
-                self.publish_all(connection)?;
+                match checking::Config::read(&notification.params["settings"]["denotate"]) {
+                    Ok(config) => {
+                        self.checking.config = config;
+                        self.publish_all(connection)?;
+                    }
+                    Err(error) => send(
+                        connection,
+                        "window/logMessage",
+                        json!({"type":1,"message":format!("Invalid Denotate settings; keeping previous configuration: {error}")}),
+                    )?,
+                }
             }
             "denotate/originChanged" => {
                 self.bridge.invalidate(connection, &notification.params)?;
@@ -774,7 +783,14 @@ fn run_with_mode(connection: &Connection, test_mode: bool) -> Result<()> {
     };
     server.bridge.enabled = params["initializationOptions"]["originSnapshotBridge"] == true;
     server.checking.progress_enabled = params["initializationOptions"]["checkingProgress"] == true;
-    server.checking.config = checking::Config::read(&params["initializationOptions"]["denotate"])?;
+    match checking::Config::read(&params["initializationOptions"]["denotate"]) {
+        Ok(config) => server.checking.config = config,
+        Err(error) => send(
+            &connection,
+            "window/logMessage",
+            json!({"type":1,"message":format!("Invalid Denotate settings; using defaults: {error}")}),
+        )?,
+    }
     server.checking.enable(test_mode)?;
     server.refresh_memberships();
     // Bridge clients own workspace and external-root watchers. Other clients can

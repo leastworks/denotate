@@ -4,11 +4,13 @@ mod assumptions;
 mod cycles;
 mod evidence;
 mod identity;
+mod limits;
 mod locations;
 mod rewrites;
 pub use assumptions::*;
 pub use evidence::*;
 pub use identity::*;
+pub use limits::*;
 pub use locations::*;
 pub use rewrites::*;
 

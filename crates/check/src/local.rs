@@ -154,10 +154,7 @@ impl PreparedCheck<'_> {
                     )?;
                     let mut b = Budget::tracked(&limits);
                     let cause = Inconclusive::from_error(e)?;
-                    b.failure(&CheckError::LimitExceeded {
-                        phase: cause.phase,
-                        resource: cause.resource,
-                    });
+                    b.failure(&CheckError::from(cause));
                     b.record(
                         &mut receipts,
                         QueryKey::Property(key.clone()),

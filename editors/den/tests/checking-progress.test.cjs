@@ -78,3 +78,14 @@ test('one large program reports its phase, verification and prepared size', () =
   restarted.active[0].detail = { phase: 'publication', verificationTotal: 3, elapsedMs: 9000 };
   assert.doesNotMatch(view.text(restarted), /undefined/);
 });
+
+test('Output names every effective limit without estimating unfinished work', () => {
+  const limits = Object.fromEntries(Object.keys(require('../package.json').contributes.configuration.properties['denotate.limits'].properties).map((key, i) => [key, i]));
+  const p = progress({ checking: 1 }, { active: [{ label: 'app', revision: 2,
+    detail: { phase: 'loading', elapsedMs: 0, configuration: { timeoutMs: 42, limits } } }] });
+  const lines = [];
+  const output = Object.fromEntries(['info', 'warn', 'debug'].map(level => [level, value => lines.push(value)]));
+  view.logProgress(output, undefined, p);
+  assert.ok(lines.some(line => line.includes('timeoutMs=42')));
+  for (const [key, value] of Object.entries(limits)) assert.ok(lines.some(line => line.includes(`${key}=${value}`)));
+});

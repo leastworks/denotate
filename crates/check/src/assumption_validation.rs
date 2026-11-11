@@ -91,7 +91,7 @@ pub fn validate_assumption_cones(
         return Ok(result);
     }
     let mut budget = Budget::new(limits);
-    let validation = (|| {
+    let validation: Result<()> = (|| {
         let classified =
             corpus.validate_assumptions_with(|| budget.tick("assumption validation"))?;
         let mut pending = BTreeMap::<RelationId, Vec<AssumptionKey>>::new();
@@ -130,9 +130,11 @@ pub fn validate_assumption_cones(
         Ok(())
     })();
     if let Err(error) = validation {
-        let resource = match error {
-            CheckError::LimitExceeded { resource, .. } => resource,
-            CheckError::Deadline { .. } => "deadline",
+        let (resource, details) = match error.in_phase("assumption validation", None) {
+            CheckError::LimitExceeded {
+                resource, details, ..
+            } => (resource, details),
+            CheckError::Deadline { details, .. } => ("deadline", details),
             other => return Err(other),
         };
         for assumption in corpus.assumptions() {
@@ -142,6 +144,7 @@ pub fn validate_assumption_cones(
                 .or_insert(AssumptionValidity::Inconclusive(ResourceReason {
                     phase: "assumption validation".into(),
                     resource: resource.into(),
+                    details,
                 }));
         }
     }

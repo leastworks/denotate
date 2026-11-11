@@ -22,37 +22,7 @@ use lsp_types::{Diagnostic, Url};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
 
-#[derive(Clone, PartialEq, Eq)]
-pub struct Config {
-    pub timeout_ms: u64,
-    pub show_library_rewrites: bool,
-}
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            timeout_ms: 10_000,
-            show_library_rewrites: true,
-        }
-    }
-}
-impl Config {
-    pub fn read(value: &Value) -> std::result::Result<Self, &'static str> {
-        let timeout_ms = value
-            .get("timeoutMs")
-            .map(|v| v.as_u64().ok_or("Expected nonnegative timeoutMs"))
-            .transpose()?
-            .unwrap_or(10_000);
-        let show_library_rewrites = value
-            .get("showLibraryRewrites")
-            .map(|v| v.as_bool().ok_or("Expected boolean showLibraryRewrites"))
-            .transpose()?
-            .unwrap_or(true);
-        Ok(Self {
-            timeout_ms,
-            show_library_rewrites,
-        })
-    }
-}
+pub use crate::configuration::Config;
 #[derive(Clone)]
 struct Snapshot {
     membership: ProgramMembership,
@@ -74,7 +44,7 @@ pub type Event = checking::Event<String, Output, (), Value>;
 #[derive(Debug)]
 pub enum Failure {
     Cancelled,
-    Deadline,
+    Deadline(Inconclusive),
     Exhausted(Inconclusive),
     Invalid(Vec<denotate_ir_text::Diagnostic>),
     Internal(String),
@@ -83,10 +53,20 @@ impl From<CheckError> for Failure {
     fn from(e: CheckError) -> Self {
         match e {
             CheckError::Cancelled => Self::Cancelled,
-            CheckError::Deadline { .. } => Self::Deadline,
-            CheckError::LimitExceeded { phase, resource } => {
-                Self::Exhausted(Inconclusive { phase, resource })
-            }
+            CheckError::Deadline { phase, details } => Self::Deadline(Inconclusive {
+                phase,
+                resource: "deadline",
+                details,
+            }),
+            CheckError::LimitExceeded {
+                phase,
+                resource,
+                details,
+            } => Self::Exhausted(Inconclusive {
+                phase,
+                resource,
+                details,
+            }),
             _ => Self::Internal(e.to_string()),
         }
     }
@@ -106,7 +86,10 @@ fn check_with_progress(
     let progress = CheckProgress::new(report);
     job.limits.cancellation.check()?;
     let s = &job.payload.snapshot;
-    progress.emit(Phase::Loading, json!({"files":s.files.len()}));
+    progress.emit(
+        Phase::Loading,
+        json!({"files":s.files.len(),"configuration":s.config.data()}),
+    );
     let program =
         denotate_ir_text::load_with_resolver(&s.membership, &s.files, Some(&mut &s.bridge))
             .map_err(Failure::Invalid)?;
@@ -176,13 +159,7 @@ fn check_with_progress(
             Ok(result) => ("complete", result),
             Err(Failure::Cancelled) => return Err(Failure::Cancelled),
             Err(Failure::Exhausted(reason)) => ("complete", exhausted(reason)),
-            Err(Failure::Deadline) => (
-                "deadline",
-                exhausted(Inconclusive {
-                    phase: "checking",
-                    resource: "deadline",
-                }),
-            ),
+            Err(Failure::Deadline(reason)) => ("deadline", exhausted(reason)),
             Err(error) => (
                 "failed",
                 Publication {
@@ -452,10 +429,7 @@ impl Checking {
                 );
                 continue;
             };
-            let limits = Limits {
-                timeout: std::time::Duration::from_millis(snapshot.config.timeout_ms),
-                ..Limits::default()
-            };
+            let limits = snapshot.config.checker_limits();
             let mut configuration = denotate_ir_text::load(&snapshot.membership, &snapshot.files)
                 .ok()
                 .and_then(|p| presentation::configuration(&p).ok());
@@ -614,7 +588,7 @@ impl Server {
                 .iter()
                 .map(|(r, n)| (r, json!({"files":n.files,"libraries":n.libraries})))
                 .collect::<BTreeMap<_, _>>();
-            let key = json!({"members":observations,"manifests":manifests,"graph":graph,"origins":self.bridge.snapshot_key(&files.iter().map(|f|f.uri.clone()).collect::<Vec<_>>()),"timeoutMs":self.checking.config.timeout_ms,"showLibraryRewrites":self.checking.config.show_library_rewrites});
+            let key = json!({"members":observations,"manifests":manifests,"graph":graph,"origins":self.bridge.snapshot_key(&files.iter().map(|f|f.uri.clone()).collect::<Vec<_>>()),"configuration":self.checking.config.data()});
             let label = Url::parse(&root)
                 .ok()
                 .and_then(|u| u.to_file_path().ok())
@@ -733,6 +707,33 @@ impl Server {
                         Some("failed") => "failed",
                         _ => "complete",
                     };
+                    for message in denotate_presentation::exhaustion_messages(
+                        &publication.status["assumptionValidation"],
+                    ) {
+                        send(
+                            connection,
+                            "window/logMessage",
+                            json!({"type":2,"message":format!("{root}: {message}")}),
+                        )?;
+                    }
+                    for verification in publication.status["verifications"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                    {
+                        let name = verification["verification"]
+                            .as_str()
+                            .unwrap_or("verification");
+                        for message in
+                            denotate_presentation::exhaustion_messages(&verification["summary"])
+                        {
+                            send(
+                                connection,
+                                "window/logMessage",
+                                json!({"type":2,"message":format!("{root}, {name}: {message}")}),
+                            )?;
+                        }
+                    }
                     state.publication = Some(publication);
                 } else {
                     // A failed destination check must never stop independent roots.
@@ -745,8 +746,13 @@ impl Server {
             Err(Failure::Cancelled) => {
                 state.checking = "cancelled";
             }
-            Err(Failure::Deadline) => {
+            Err(Failure::Deadline(reason)) => {
                 state.checking = "deadline";
+                state.errors.push(denotate_presentation::exhaustion_text(
+                    reason.phase,
+                    reason.resource,
+                    reason.details,
+                ));
             }
             Err(Failure::Invalid(errors)) => {
                 state.checking = "blocked";
@@ -757,9 +763,14 @@ impl Server {
             }
             Err(Failure::Exhausted(reason)) => {
                 state.checking = "failed";
-                state
-                    .errors
-                    .push(format!("Configuration exhausted: {reason:?}"));
+                state.errors.push(format!(
+                    "Configuration exhausted: {}",
+                    denotate_presentation::exhaustion_text(
+                        reason.phase,
+                        reason.resource,
+                        reason.details,
+                    )
+                ));
             }
             Err(Failure::Internal(error)) => {
                 state.checking = "failed";

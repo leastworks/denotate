@@ -13,10 +13,13 @@ pub fn assumption_validity_data(state: &AssumptionValidity) -> Value {
                 crate::cycles::cycle_edge_data(&e.consumer, &e.provider, e.negative)
             ).collect::<Vec<_>>()).collect::<Vec<_>>()
         }),
-        AssumptionValidity::Inconclusive(reason) => json!({
-            "kind":"assumption-validation","state":"inconclusive",
-            "phase":reason.phase,"resource":reason.resource
-        }),
+        AssumptionValidity::Inconclusive(reason) => with_limit_details(
+            json!({
+                "kind":"assumption-validation","state":"inconclusive",
+                "phase":reason.phase,"resource":reason.resource
+            }),
+            reason.details,
+        ),
     }
 }
 
@@ -75,8 +78,9 @@ pub fn assumption_validation_findings(
             AssumptionValidity::Inconclusive(reason) => (
                 Kind::UnvalidatedAssumption,
                 format!(
-                    "Assumption {} could not be validated ({}: {}).",
-                    assumption.name, reason.phase, reason.resource
+                    "Assumption {} could not be validated ({}).",
+                    assumption.name,
+                    exhaustion_text(&reason.phase, &reason.resource, reason.details)
                 ),
             ),
         };

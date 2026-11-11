@@ -226,6 +226,7 @@ fn unavailable_display_scopes_keep_full_worlds_and_do_not_change_verdict_or_plac
     let cause = Inconclusive {
         phase: "dependency cones",
         resource: "work",
+        details: Default::default(),
     };
     for group in &mut report.verification.groups {
         if let VerifiedOutcome::Counterexample(c) = &mut group.outcome {

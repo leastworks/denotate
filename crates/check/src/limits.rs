@@ -11,6 +11,17 @@ use std::{
     time::{Duration, Instant},
 };
 
+/// Diagnostic context only. Counts describe the checked demand, including a
+/// rejected addition, not the eventual size of a completed program. Unknown
+/// solver counts are omitted. Deadline limits are milliseconds; no timings are
+/// retained here or used in semantic equality.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LimitDetails {
+    pub subphase: Option<&'static str>,
+    pub limit: Option<usize>,
+    pub observed: Option<usize>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CheckError {
     Keys(denotate_ir::KeyError),
@@ -19,6 +30,7 @@ pub enum CheckError {
     Cancelled,
     Deadline {
         phase: &'static str,
+        details: LimitDetails,
     },
     InvalidRequest(&'static str),
     /// A selected restriction depends on a negative cycle before admission.
@@ -43,8 +55,50 @@ pub enum CheckError {
     LimitExceeded {
         phase: &'static str,
         resource: &'static str,
+        details: LimitDetails,
     },
     Internal(&'static str),
+}
+impl CheckError {
+    pub fn limit(
+        phase: &'static str,
+        resource: &'static str,
+        limit: usize,
+        observed: Option<usize>,
+    ) -> Self {
+        Self::LimitExceeded {
+            phase,
+            resource,
+            details: LimitDetails {
+                limit: Some(limit),
+                observed,
+                subphase: None,
+            },
+        }
+    }
+    pub fn deadline(phase: &'static str, timeout: Duration) -> Self {
+        Self::Deadline {
+            phase,
+            details: LimitDetails {
+                limit: timeout.as_millis().try_into().ok(),
+                ..Default::default()
+            },
+        }
+    }
+    /// Keep an enclosing operation's established phase while preserving where
+    /// within it the failure happened. This never changes the failure kind.
+    pub(crate) fn in_phase(mut self, outer: &'static str, subphase: Option<&'static str>) -> Self {
+        match &mut self {
+            Self::LimitExceeded { phase, details, .. } | Self::Deadline { phase, details } => {
+                details.subphase = subphase
+                    .or(details.subphase)
+                    .or_else(|| (*phase != outer).then_some(*phase));
+                *phase = outer;
+            }
+            _ => {}
+        }
+        self
+    }
 }
 impl fmt::Display for CheckError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -166,8 +220,12 @@ impl<'a> Budget<'a> {
         }
     }
     pub fn failure(&mut self, error: &CheckError) {
-        if let (Some(charges), CheckError::LimitExceeded { phase, resource }) =
-            (&mut self.charges, error)
+        if let (
+            Some(charges),
+            CheckError::LimitExceeded {
+                phase, resource, ..
+            },
+        ) = (&mut self.charges, error)
         {
             charges.exhausted.insert(ResourceKey {
                 phase: (*phase).into(),
@@ -228,7 +286,7 @@ impl<'a> Budget<'a> {
     pub fn check(&self, phase: &'static str) -> Result<()> {
         self.limits.cancellation.check()?;
         if self.start.elapsed() >= self.limits.timeout {
-            return Err(CheckError::Deadline { phase });
+            return Err(CheckError::deadline(phase, self.limits.timeout));
         }
         Ok(())
     }
@@ -245,10 +303,12 @@ impl<'a> Budget<'a> {
                     resource: "work".into(),
                 });
             }
-            return Err(CheckError::LimitExceeded {
+            return Err(CheckError::limit(
                 phase,
-                resource: "work",
-            });
+                "work",
+                self.limits.max_work,
+                self.work.checked_add(amount),
+            ));
         }
         self.work = self
             .work
@@ -287,8 +347,9 @@ impl<'a> Budget<'a> {
         self.tick(phase)?;
         self.observe(phase, resource, count.saturating_add(1));
         if count >= limit {
-            self.failure(&CheckError::LimitExceeded { phase, resource });
-            return Err(CheckError::LimitExceeded { phase, resource });
+            let error = CheckError::limit(phase, resource, limit, count.checked_add(1));
+            self.failure(&error);
+            return Err(error);
         }
         Ok(())
     }

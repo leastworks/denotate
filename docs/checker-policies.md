@@ -20,7 +20,13 @@ stable-model oracles; limits produce explicit inconclusive outcomes, never silen
 To diagnose a slow or exhausted run, `just check-den ROOT` prints phases, prepared
 sizes and the effective limits on stderr, and `--timeout-ms`/`--max-*` override
 `Limits` for one invocation ([den-format](den-format.md#commands),
-`just check-den --help`). These are explicit controls, not new defaults.
+`just check-den --help`). VS Code exposes the same controls through
+`denotate.timeoutMs` and `denotate.limits`, window-wide, with automatic rechecking.
+These are explicit controls, not new defaults. Both frontends report the failure's
+subphase, effective ceiling and observed demand where available. A stopped BDD
+operation may not expose an exact count; no count is fabricated. Counts can include
+rejected demand, and an effective ceiling can be tightened by remaining work/storage
+or backend capacity. These diagnostics do not change accounting or semantic outcomes.
 
 ## Backend retirement
 

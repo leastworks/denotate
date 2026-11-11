@@ -14,7 +14,9 @@ exports.activate = async (context) => {
     { documentSelector: [{ scheme: 'file', language: 'denotate' }],
       outputChannel: output,
       initializationOptions: { originSnapshotBridge: true, checkingProgress: true, denotate: {
-        showLibraryRewrites: vscode.workspace.getConfiguration('denotate').get('showLibraryRewrites', true)
+        showLibraryRewrites: vscode.workspace.getConfiguration('denotate').get('showLibraryRewrites', true),
+        timeoutMs: vscode.workspace.getConfiguration('denotate').get('timeoutMs', 10000),
+        limits: vscode.workspace.getConfiguration('denotate').get('limits', {})
       } },
       synchronize: { configurationSection: 'denotate' } });
   context.subscriptions.push(client);
