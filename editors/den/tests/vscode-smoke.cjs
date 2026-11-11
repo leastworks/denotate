@@ -203,7 +203,11 @@ obligation unique: at_most_one(p, group_by: ()); verification checks { assumptio
         .replace('1:1 to 1:6', '1:2 to 1:3').replace('1:7 to 1:13', '1:3 to 1:5');
     await replace(checkedDoc, bomDen);
     await eventually(() => api.request('denotate/originStatus', { uri: bomUri.toString() }), r => r.state === 'matching' && r.snapshot.open === false, 'closed BOM source matches exact disk bytes');
-    await navigate();
+    // A delayed file-watch notification can invalidate the resolver generation
+    // during its disk read. Navigation correctly refuses that transient snapshot;
+    // retry against the unchanged source, retaining all hash/selection assertions.
+    await eventually(async () => { await navigate(); return vscode.window.activeTextEditor.document.uri.toString(); },
+        uri => uri === bomUri.toString(), 'closed BOM navigation settles after file-watch invalidation');
     assert.equal(vscode.window.activeTextEditor.document.uri.toString(), bomUri.toString(), 'closed BOM source opens at its origin');
     const bomDoc = vscode.window.activeTextEditor.document;
     assert.equal(bomDoc.encoding, 'utf8bom');

@@ -101,6 +101,13 @@ present/absent facts, retained
 original evidence and the residual executable graph. A small residual does not mean
 the retained evidence has disappeared; these counts are not memory measurements.
 
+Phase updates also show process RSS and, on macOS, physical footprint in the
+tooltip and Output. Values are bytes; peaks are process lifetime high waters,
+including other checked programs and caches. Unsupported readings are `null`.
+For a detailed profile through admission, use `just check-den <program>
+--profile-memory <new-file.jsonl>`; see
+[memory profiling](../../docs/checker-policies.md#memory-profiling).
+
 Click the status item or run **Denotate: Show Output** to open **Output → Denotate**.
 This is the normal log view: startup, phase transitions, prepared sizes, completion
 summaries, and operational errors such as a failed check or deadline. Run numbers

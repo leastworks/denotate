@@ -58,6 +58,7 @@ impl Config {
     }
     pub fn checker_limits(&self) -> Limits {
         self.limits.with_operations(&OperationalLimits {
+            profile: Default::default(),
             cancellation: Default::default(),
             timeout: Duration::from_millis(self.timeout_ms),
         })

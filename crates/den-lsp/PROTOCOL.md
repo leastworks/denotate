@@ -88,6 +88,12 @@ verification's checking/presentation. `elapsedMs` is elapsed worker time at the
 report, not a deadline or heartbeat. Checking includes obligations, notices, replay
 and session bookkeeping; no inner query fraction or BDD node counter is reported.
 Skipped phases need not appear. Startup and discovery remain indeterminate.
+Each reported phase also includes `memory`: `rssBytes`, `peakRssBytes`,
+`footprintBytes`, and `peakFootprintBytes`. These are best-effort process readings,
+not per-program allocations; unavailable fields are null. RSS is supported on
+macOS/Linux and physical footprint on macOS. Peaks are OS process lifetime high
+waters, not peaks of the latest phase. Phase callbacks do not sample continuously.
+These readings are separate from the logical counts and cache accounting below.
 `fixed-facts` runs once before the first verification that can prepare; it is
 independent of selection. Prepared details additionally contain `fold`:
 `presentFacts`, `absentFacts`, `retainedEvidence` (`atoms`, `ruleInstances`,

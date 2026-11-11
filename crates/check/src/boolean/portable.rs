@@ -142,6 +142,6 @@ impl ConditionContext {
         }
         let bdd =
             Bdd::from_nodes(&nodes).map_err(|_| CheckError::Internal("invalid portable BDD"))?;
-        Ok(self.wrap(bdd))
+        Ok(self.wrap(bdd, budget))
     }
 }

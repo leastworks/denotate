@@ -36,6 +36,7 @@ impl From<&Limits> for DeterministicLimits {
 }
 #[derive(Debug, Clone)]
 pub struct OperationalLimits {
+    pub profile: Profile,
     pub cancellation: Cancellation,
     pub timeout: Duration,
 }
@@ -43,6 +44,7 @@ impl From<&Limits> for OperationalLimits {
     fn from(l: &Limits) -> Self {
         Self {
             cancellation: l.cancellation.clone(),
+            profile: l.profile.clone(),
             timeout: l.timeout,
         }
     }
@@ -51,6 +53,7 @@ impl DeterministicLimits {
     pub fn with_operations(&self, o: &OperationalLimits) -> Limits {
         Limits {
             cancellation: o.cancellation.clone(),
+            profile: o.profile.clone(),
             timeout: o.timeout,
             max_atoms: self.max_atoms,
             max_rules: self.max_rules,
@@ -403,6 +406,7 @@ impl CheckRequest {
                     original.check(*relation, keys, &mut budget)?;
                 }
             }
+            let _profile = limits.profile.span("residual-preparation", None);
             if let Some(store) = grounding {
                 GroundProgram::prepare_grounding(
                     corpus,
@@ -503,7 +507,10 @@ impl CheckRequest {
             }
         }
         budget.record(&mut receipts, QueryKey::Preparation, dependencies)?;
-        let index = GroundKeyIndex::build(corpus, keys, &program).map_err(CheckError::Keys)?;
+        let index = {
+            let _profile = limits.profile.span("semantic-keys", None);
+            GroundKeyIndex::build(corpus, keys, &program).map_err(CheckError::Keys)?
+        };
         operations.cancellation.check()?;
         let key_computation = key_order_time + index.elapsed;
         if let Some(fixed) = fixed {
@@ -922,8 +929,11 @@ impl PreparedCheck<'_> {
             QueryKey::Admission,
             [QueryKey::Preparation],
         )?;
-        self.keys = GroundKeyIndex::build(self.corpus, self.semantic_keys, &self.program)
-            .map_err(CheckError::Keys)?;
+        self.keys = {
+            let _profile = limits.profile.span("admission-key-refresh", None);
+            GroundKeyIndex::build(self.corpus, self.semantic_keys, &self.program)
+                .map_err(CheckError::Keys)?
+        };
         self.key_computation += self.keys.elapsed;
         operations.cancellation.check()?;
         if self.program.admission_limit().is_none() {

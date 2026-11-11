@@ -57,6 +57,7 @@ test('one large program reports its phase, verification and prepared size', () =
   const p = progress({ checking: 1 }, { active: [{ program: 'file:///app/den.root', label: 'app/den.root', revision: 12,
     detail: { phase: 'admission', elapsedMs: 5000, verification: 'library::checks', verificationIndex: 2, verificationTotal: 3,
       assumptions: 1, obligations: 7, notices: 4,
+      memory: { rssBytes: 1024, peakRssBytes: 2048, footprintBytes: null, peakFootprintBytes: null },
       ground: { inputAtoms: 120, atoms: 300, ruleInstances: 200, components: 80, largestComponentAtoms: 15 },
       fold: { presentFacts: 30, absentFacts: 20, retainedBytes: 4096, retainedEvidence: { atoms: 50 }, residual: { atoms: 250 } } } }] });
   assert.match(view.text(p), /Admission · verification 2\/3/);
@@ -65,6 +66,7 @@ test('one large program reports its phase, verification and prepared size', () =
   assert.match(view.details(p), /largest: 15 atoms/);
   assert.match(view.details(p), /30 present, 20 absent; retained evidence:.*50.*residual graph:.*250/);
   assert.match(view.details(p), /Retained keyed fold: 4096 accounted bytes/);
+  assert.match(view.details(p), /Process memory \(bytes; peaks are lifetime\):.*"rssBytes":1024/);
   assert.match(view.details(p), /library::checks/);
   assert.match(view.details(p, 9000), /not a heartbeat/);
   const lines = [];

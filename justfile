@@ -86,6 +86,11 @@ bench-den-origins +args:
 bench-den-fixed +args:
     cargo +1.93.0 run --release --locked -p denotate-ir-text --example bench_fixed -- "$@"
 
+# Stream phase memory and admission profiles; use --help for workload controls.
+[positional-arguments]
+bench-den-memory *args:
+    cargo +1.93.0 run --release --locked -p denotate-ir-text --example bench_memory -- "$@"
+
 # Export one combined test DSL program: OUT_DIR FILE... [--without-origins].
 [positional-arguments]
 export-test-dsl +args:

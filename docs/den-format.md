@@ -590,6 +590,11 @@ codes, including with `--json`. Progress uses the same phase/size reporter as th
 editor. A long phase has no fabricated percentage or heartbeat; checking still
 covers obligation and notice queries together.
 
+Phase boundaries also report process memory, distinct from retained cache-byte
+accounting. `--profile-memory FILE` creates a new file containing detailed memory
+and admission events as JSON lines; it works independently of `--no-progress`.
+See [memory profiling](checker-policies.md#memory-profiling) for metric definitions.
+
 `--timeout-ms` sets the cooperative allowance per operation/query, **not** a total
 command deadline. Loading and presentation are outside that allowance. Resource
 overrides are `--max-atoms`, `--max-rules`, `--max-dependencies`, `--max-work`,

@@ -180,6 +180,13 @@ rewrite findings with their coverage; they never authorize source edits.
 
 ## Limits and cancellation
 
+`Limits::profile` / `OperationalLimits::profile` optionally observe stage boundaries
+and admission rounds. The default is disabled. Callbacks are observational and own
+delivery; the checker performs no OS memory reads. The observer is excluded from
+`DeterministicLimits`, receipts and cached values. BDD result counters count wrapped
+result payload, not internal allocator traffic; retained snapshots deduplicate
+shared `Condition` storage. See [memory profiling](../../docs/checker-policies.md#memory-profiling).
+
 `Limits` bounds atoms, rule instances, dependencies, work, BDD storage and elapsed
 time; exhaustion yields explicit inconclusive outcomes with phase and resource.
 `CheckError`, `Inconclusive` and keyed `ResourceReason` carry `LimitDetails`: optional

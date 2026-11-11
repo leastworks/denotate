@@ -6,6 +6,17 @@ Settled design choices and why they were made. Current behavior is specified in 
 alternatives that were rejected. Revisit a decision only with new evidence, such as a
 real program that the current choice serves badly.
 
+## Measurement
+
+- **Measure process memory separately from retained payload.** Cache accounting
+  cannot explain a process killed during admission. Phase observations distinguish
+  RSS, physical footprint, lifetime peaks and sampled span peaks. Optional checker
+  profile events carry no semantic inputs and perform no OS reads; drivers own
+  sampling and delivery. BDD result-node traffic and deduplicated retained node
+  payload are labeled separately from allocator traffic. Profile through semantic
+  indexing and admission refresh before choosing a representation or backend
+  change; a large fixed graph alone does not establish the cause of a later peak.
+
 ## Meaning and checking
 
 - **Input domains define the universe; assumptions constrain its worlds.** A

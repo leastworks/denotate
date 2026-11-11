@@ -84,6 +84,9 @@ pub struct ProducerSummary {
     pub exact: bool,
 }
 impl ProducerSummary {
+    fn profile_conditions(&self) -> impl Iterator<Item = &Condition> {
+        std::iter::once(&self.condition).chain(self.settled.iter().map(|p| &p.condition))
+    }
     pub(crate) fn nodes(&self) -> usize {
         self.condition.node_count()
             + self
@@ -107,6 +110,22 @@ pub struct RewriteProof {
     pub upper_bounds: Option<Arc<ComponentUpperBounds>>,
 }
 impl RewriteProof {
+    fn profile_conditions(&self) -> impl Iterator<Item = &Condition> {
+        std::iter::once(&self.coverage)
+            .chain(self.candidate.profile_conditions())
+            .chain(
+                self.producers
+                    .iter()
+                    .flat_map(ProducerSummary::profile_conditions),
+            )
+            .chain(self.upper_bounds.iter().flat_map(|b| {
+                b.conditions.values().chain(
+                    b.producers
+                        .iter()
+                        .flat_map(ProducerSummary::profile_conditions),
+                )
+            }))
+    }
     fn nodes(&self) -> usize {
         std::iter::once(&self.candidate)
             .chain(&self.producers)
@@ -228,6 +247,8 @@ impl GroundProgram {
     }
 
     fn rewrite_loop(&mut self, budget: &mut Budget<'_>) -> Result<()> {
+        let profile = budget.limits.profile.clone();
+        let mut round = 0;
         loop {
             if self.is_admitted()
                 && self.input_groups.is_empty()
@@ -235,9 +256,24 @@ impl GroundProgram {
             {
                 return Ok(());
             }
+            round += 1;
+            let _round_profile = profile.span("admission-round", Some(round));
             budget.tick("rewrite snapshot")?;
-            let meaning = self.symbolic_with_budget(budget)?;
+            let meaning = {
+                let mut stage = profile.span("admission-symbolic", Some(round));
+                let meaning = self.symbolic_with_budget(budget)?;
+                if profile.enabled() {
+                    stage.retained(crate::boolean::condition_storage(
+                        meaning
+                            .conditions
+                            .values()
+                            .chain(meaning.context.stored_conditions()),
+                    ));
+                }
+                meaning
+            };
             let ctx = meaning.context();
+            let mut summaries_profile = profile.span("admission-summaries", Some(round));
             let mut summaries = BTreeMap::new();
             let mut producers = BTreeMap::<_, Vec<_>>::new();
             let mut retained = self.rewrites.nodes + meaning.metrics().retained_condition_nodes;
@@ -283,6 +319,20 @@ impl GroundProgram {
                 );
                 producers.entry(&rule.head.atom).or_default().push(rule.id);
             }
+            if profile.enabled() {
+                summaries_profile.retained(crate::boolean::condition_storage(
+                    meaning
+                        .conditions
+                        .values()
+                        .chain(ctx.stored_conditions())
+                        .chain(summaries.values().flat_map(|s| {
+                            std::iter::once(&s.condition)
+                                .chain(s.settled.iter().map(|p| &p.condition))
+                        })),
+                ));
+            }
+            drop(summaries_profile);
+            let mut candidates_profile = profile.span("admission-candidates", Some(round));
             let mut batch = Vec::new();
             let mut upper_bounds = BTreeMap::new();
             for rule in self
@@ -414,9 +464,37 @@ impl GroundProgram {
                     }
                 }
             }
+            if profile.enabled() {
+                candidates_profile.retained(crate::boolean::condition_storage(
+                    meaning
+                        .conditions
+                        .values()
+                        .chain(ctx.stored_conditions())
+                        .chain(
+                            summaries
+                                .values()
+                                .flat_map(ProducerSummary::profile_conditions),
+                        )
+                        .chain(upper_bounds.values().flat_map(|b| {
+                            b.conditions.values().chain(
+                                b.producers
+                                    .iter()
+                                    .flat_map(ProducerSummary::profile_conditions),
+                            )
+                        }))
+                        .chain(
+                            batch
+                                .iter()
+                                .chain(self.rewrites.proofs.iter())
+                                .flat_map(RewriteProof::profile_conditions),
+                        ),
+                ));
+            }
+            drop(candidates_profile);
             if batch.is_empty() {
                 return Ok(());
             }
+            let _commit_profile = profile.span("admission-commit", Some(round));
             // Transactional graph rebuild: an interrupted batch cannot leave a
             // half-rewritten graph or publish warnings for uncommitted changes.
             budget.charge(

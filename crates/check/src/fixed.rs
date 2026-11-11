@@ -38,6 +38,7 @@ impl<'a> FixedPreparation<'a> {
         domains: &Domains,
         limits: &Limits,
     ) -> Result<Self> {
+        let _profile = limits.profile.span("fixed-evaluation", None);
         let mut budget = Budget::tracked(limits);
         // Keep provider validation and its established failure phase intact.
         let domains = validate_domains(corpus, domains, &mut budget)?;

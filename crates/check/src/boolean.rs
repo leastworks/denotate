@@ -73,6 +73,24 @@ impl Condition {
     }
 }
 
+pub(crate) fn condition_storage<'a>(
+    conditions: impl IntoIterator<Item = &'a Condition>,
+) -> BddStorage {
+    let mut seen = std::collections::HashSet::new();
+    let mut size = BddStorage::default();
+    for condition in conditions {
+        size.references += 1;
+        if seen.insert(Arc::as_ptr(&condition.bdd)) {
+            size.distinct_arrays += 1;
+            size.nodes += condition.node_count();
+        }
+    }
+    size.node_bytes = size
+        .nodes
+        .saturating_mul(std::mem::size_of::<biodivine_lib_bdd::BddNode>());
+    size
+}
+
 /// Boolean conditions over ground input facts.
 /// Raw Boolean algebra is unrestricted; semantic queries and witnesses respect
 /// the preparation's selected constraints. General restrictions were evaluated
@@ -223,9 +241,12 @@ impl ConditionContext {
             budget.tick("BDD inputs")?;
             inputs.insert(atom.clone(), variable);
         }
-        let wrap = |bdd| Condition {
-            universe,
-            bdd: Arc::new(bdd),
+        let wrap = |bdd: Bdd| {
+            budget.limits.profile.bdd_created(bdd.size());
+            Condition {
+                universe,
+                bdd: Arc::new(bdd),
+            }
         };
         let mut context = Self {
             universe,
@@ -306,7 +327,7 @@ impl ConditionContext {
                 Some(3),
             ));
         }
-        Ok(self.wrap(self.variables.mk_var(*variable)))
+        Ok(self.wrap(self.variables.mk_var(*variable), budget))
     }
 
     pub fn and(&self, a: &Condition, b: &Condition, limits: &Limits) -> Result<Condition> {
@@ -467,7 +488,11 @@ impl ConditionContext {
         Ok(result)
     }
 
-    fn wrap(&self, bdd: Bdd) -> Condition {
+    pub(crate) fn stored_conditions(&self) -> impl Iterator<Item = &Condition> {
+        [&self.no, &self.yes, &self.permitted].into_iter()
+    }
+    fn wrap(&self, bdd: Bdd, budget: &Budget<'_>) -> Condition {
+        budget.limits.profile.bdd_created(bdd.size());
         Condition {
             universe: self.universe,
             bdd: Arc::new(bdd),
@@ -494,7 +519,7 @@ impl ConditionContext {
     pub(crate) fn complement(&self, a: &Condition, budget: &mut Budget<'_>) -> Result<Condition> {
         self.check(a, budget)?;
         budget.charge(a.node_count(), "BDD complement")?;
-        let result = self.wrap(a.bdd.not());
+        let result = self.wrap(a.bdd.not(), budget);
         self.check(&result, budget)?;
         Ok(result)
     }
@@ -532,7 +557,7 @@ impl ConditionContext {
         };
         budget.observe("BDD operation", "BDD nodes", bdd.size());
         budget.charge(0, "BDD operation")?;
-        Ok(self.wrap(bdd))
+        Ok(self.wrap(bdd, budget))
     }
 }
 
@@ -736,7 +761,10 @@ mod tests {
                 assert_eq!(b.eval_in(&valuation), x ^ y);
             }
         }
-        let (a, b) = (ctx.wrap(a), ctx.wrap(b));
+        let (a, b) = (
+            ctx.wrap(a, &Budget::new(&limits)),
+            ctx.wrap(b, &Budget::new(&limits)),
+        );
         assert!(ctx.equivalent(&a, &b, &limits).unwrap());
         assert!(ctx.equivalent(&b, &a, &limits).unwrap());
         assert!(

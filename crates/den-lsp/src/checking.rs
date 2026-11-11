@@ -83,7 +83,14 @@ fn check_with_progress(
     session: &mut denotate_check_session::Session,
     report: Option<&dyn Fn(Value)>,
 ) -> std::result::Result<Publication, Failure> {
-    let progress = CheckProgress::new(report);
+    let observed = |mut detail: Value| {
+        detail["memory"] =
+            serde_json::to_value(denotate_check_session::profiling::process_memory()).unwrap();
+        if let Some(report) = report {
+            report(detail);
+        }
+    };
+    let progress = CheckProgress::new(report.map(|_| &observed as &dyn Fn(Value)));
     job.limits.cancellation.check()?;
     let s = &job.payload.snapshot;
     progress.emit(
@@ -1009,6 +1016,9 @@ mod tests {
                 ]
             );
             let prepared = &updates[4];
+            assert!(updates
+                .iter()
+                .all(|p| p["memory"].get("rssBytes").is_some()));
             assert_eq!(prepared["verification"], "::v");
             assert_eq!(prepared["verificationIndex"], 1);
             assert_eq!(prepared["verificationTotal"], 1);

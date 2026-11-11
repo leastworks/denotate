@@ -13,6 +13,11 @@ test-support = ["denotate-check/test-support"]
 salsa.workspace = true
 denotate-check = { path = "../check" }
 denotate-ir = { path = "../ir" }
+serde.workspace = true
+serde_json.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+libc = "=0.2.189"
 
 [dev-dependencies]
 denotate-ir-text = { path = "../ir-text" }
@@ -20,7 +25,6 @@ denotate-check = { path = "../check", features = ["test-support"] }
 denotate-test-dsl = { path = "../test-dsl" }
 denotate-editor = { path = "../editor" }
 denotate-normalize = { path = "../normalize" }
-serde_json.workspace = true
 
 [[example]]
 name = "scorecard"

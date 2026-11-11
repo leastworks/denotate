@@ -173,7 +173,9 @@ dependencies = [
  "denotate-ir-text",
  "denotate-normalize",
  "denotate-test-dsl",
+ "libc",
  "salsa",
+ "serde",
  "serde_json",
 ]
 

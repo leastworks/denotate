@@ -106,7 +106,10 @@ impl<'a> FixedPreparation<'a> {
                 },
                 &limits.into(),
             )?;
-            let facts = value.bind(corpus, keys, &domains, &mut budget)?;
+            let facts = {
+                let _profile = limits.profile.span("fixed-binding", None);
+                value.bind(corpus, keys, &domains, &mut budget)?
+            };
             budget.check("fixed binding")?;
             let mut transfer_receipts = WorkReceipts::default();
             transfer_receipts
@@ -164,8 +167,12 @@ impl<'a> FixedPreparation<'a> {
 pub fn fold_owned(input: &FixedInput, operations: &OperationalLimits) -> Result<FixedValue> {
     let limits = input.limits.with_operations(operations);
     let mut budget = Budget::tracked(&limits);
-    let (corpus, keys, domains) = input.runtime(&mut budget)?;
+    let (corpus, keys, domains) = {
+        let _profile = limits.profile.span("fixed-runtime", None);
+        input.runtime(&mut budget)?
+    };
     let fixed = FixedPreparation::prepare(&corpus, &domains, &limits)?;
+    let _profile = limits.profile.span("fixed-export", None);
     let mut value = FixedValue {
         possible: BTreeSet::new(),
         instances: BTreeSet::new(),

@@ -116,6 +116,7 @@ just check-den crates/ir-text/fixtures [--verification library::default_checks] 
 just check-den <program> --empty-examples all
 just check-den <program> --timeout-ms 60000 --max-work 100000000
 just check-den <program> --json --no-progress
+just check-den <program> --profile-memory /tmp/den-memory.jsonl
 just check-den --help
 just test-crate denotate-ir-text
 ```
@@ -133,6 +134,14 @@ verification's declarations, preparation/admission/checking/presentation, prepar
 sizes, result counts and session reuse. Every phase starts with a flushed line;
 transitions report elapsed time. `--no-progress` disables this checker trace.
 `--verbose` remains a diagnostic-layout option, independent of progress.
+
+Phase boundaries include best-effort process RSS/footprint readings, with OS
+lifetime peaks labeled separately. `--profile-memory FILE` creates a new JSON-lines
+file with detailed fixed preparation, key-index and admission-round events and
+20 ms memory samples summarized per span. It also works with `--no-progress`.
+Unavailable metrics are null; these are process observations, not cache bytes or
+per-program allocation totals. See [memory profiling](../../docs/checker-policies.md#memory-profiling)
+for metric definitions and `just bench-den-memory` workload controls.
 
 Fixed facts are shared across verifications, with one completed fold retained across edits.
 Residual preparation and admission run once per selected restriction set in a run;

@@ -132,6 +132,7 @@ impl Cancellation {
 /// cooperatively between work items, not a promise of hard real-time preemption.
 #[derive(Debug, Clone)]
 pub struct Limits {
+    pub profile: crate::Profile,
     pub cancellation: Cancellation,
     pub max_atoms: usize,
     pub max_rules: usize,
@@ -150,6 +151,7 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             cancellation: Cancellation::default(),
+            profile: Default::default(),
             max_atoms: 100_000,
             max_rules: 200_000,
             max_dependencies: 1_000_000,

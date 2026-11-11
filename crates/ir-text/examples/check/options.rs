@@ -11,6 +11,7 @@ pub struct Options {
     pub empty_examples: Option<EmptinessExamples>,
     pub hide_library_rewrites: bool,
     pub progress: bool,
+    pub profile_memory: Option<String>,
     pub limits: Limits,
 }
 pub fn limit_values(l: &Limits) -> [(&'static str, u128); 9] {
@@ -35,6 +36,7 @@ pub fn help() -> String {
         --empty-examples N|all    Retain N present tuples per empty obligation (default 3)\n\
         --hide-library-rewrites   Hide library rewrite diagnostics\n\
         --no-progress             Silence progress on stderr\n\
+        --profile-memory FILE     Stream detailed memory/BDD JSON lines to a new file\n\
         --help, -h                Show this help\n\n\
         Checker limits (nonnegative integers; zero allows no use of that resource):\n",
     );
@@ -62,6 +64,7 @@ impl Options {
             empty_examples: None,
             hide_library_rewrites: false,
             progress: true,
+            profile_memory: None,
             limits,
         };
         let mut seen = BTreeSet::new();
@@ -77,6 +80,7 @@ impl Options {
                 "--json" => options.json = true,
                 "--verbose" => options.verbose = true,
                 "--no-progress" => options.progress = false,
+                "--profile-memory" => options.profile_memory = Some(value()?),
                 "--hide-library-rewrites" => options.hide_library_rewrites = true,
                 "--verification" => options.selection = Some(value()?),
                 "--empty-examples" => {

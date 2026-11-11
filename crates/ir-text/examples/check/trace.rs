@@ -52,6 +52,7 @@ impl<'a> Trace<'a> {
             phase.into()
         };
         self.message(format_args!("Starting {label}"));
+        self.memory();
         *self.phase.borrow_mut() = Some((label, Instant::now()));
         if let Some(files) = detail.get("files") {
             self.message(format_args!("Source files: {files}"));
@@ -73,6 +74,15 @@ impl<'a> Trace<'a> {
     }
     pub fn finish(&self, outcome: impl std::fmt::Display) {
         self.end_phase();
+        self.memory();
         self.message(outcome);
+    }
+    fn memory(&self) {
+        if self.enabled {
+            self.message(format_args!(
+                "Process memory (bytes; peaks are lifetime): {}",
+                serde_json::to_value(denotate_check_session::profiling::process_memory()).unwrap()
+            ));
+        }
     }
 }

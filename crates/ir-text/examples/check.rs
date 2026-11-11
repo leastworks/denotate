@@ -150,7 +150,25 @@ fn run_with_progress(
         output.push_str(&options::help());
         return Ok(0);
     }
-    let options = options::Options::parse(args, limits)?;
+    let mut options = options::Options::parse(args, limits)?;
+    let _memory_profile = if let Some(path) = &options.profile_memory {
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|e| (3, format!("Cannot create memory profile {path}: {e}")))?;
+        let file = std::sync::Mutex::new(file);
+        let monitor = denotate_check_session::profiling::MemoryProfiler::new(move |event| {
+            use std::io::Write;
+            let mut file = file.lock().unwrap();
+            let _ = writeln!(file, "{}", event.data());
+            let _ = file.flush();
+        });
+        options.limits.profile = monitor.profile.clone();
+        Some(monitor)
+    } else {
+        None
+    };
     let trace = trace::Trace::new(stderr, options.progress);
     trace.message(format_args!("Root: {}", options.root));
     trace.message(
@@ -159,9 +177,30 @@ fn run_with_progress(
     for (flag, value) in options::limit_values(&options.limits) {
         trace.message(format_args!("  {flag} {value}"));
     }
-    let callback = |event| trace.phase(event);
-    let progress = CheckProgress::new(options.progress.then_some(&callback));
+    let profile = options.limits.profile.clone();
+    let active = std::cell::RefCell::new(None);
+    let callback = |event: serde_json::Value| {
+        active.borrow_mut().take();
+        let stage = [
+            "discovery",
+            "loading",
+            "assumption-validation",
+            "fixed-facts",
+            "preparation",
+            "admission",
+            "checking",
+            "presentation",
+            "publication",
+        ]
+        .into_iter()
+        .find(|p| event["phase"].as_str() == Some(*p))
+        .unwrap_or("frontend");
+        *active.borrow_mut() = Some(profile.span(stage, None));
+        trace.phase(event);
+    };
+    let progress = CheckProgress::new((options.progress || profile.enabled()).then_some(&callback));
     let result = check_program(options, output, &progress, &trace);
+    active.borrow_mut().take();
     match &result {
         Ok(code) => trace.finish(format_args!(
             "Finished: exit {code} ({})",
@@ -666,6 +705,36 @@ mod tests {
         }
     }
     #[test]
+    fn memory_profile_streams_without_changing_output_or_exit_code() {
+        let f = Fixture::new(&format!("{BODY}{RESTRICTED}"));
+        let path = f.0.join("memory.jsonl");
+        let (expected, text, _) = f.traced(&["--no-progress"]);
+        let (actual, observed, progress) =
+            f.traced(&["--no-progress", "--profile-memory", path.to_str().unwrap()]);
+        assert_eq!(actual, expected);
+        assert_eq!(observed, text);
+        assert!(progress.is_empty());
+        let records = fs::read_to_string(&path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+            .collect::<Vec<_>>();
+        assert!(
+            records
+                .iter()
+                .any(|r| r["stage"] == "admission-key-refresh" && r["event"] == "end")
+        );
+        assert!(
+            records
+                .iter()
+                .all(|r| r["memory"].get("rssBytes").is_some())
+        );
+        assert!(matches!(
+            f.traced(&["--profile-memory", path.to_str().unwrap()]).0,
+            Err((3, _))
+        ));
+    }
+    #[test]
     fn progress_is_separate_from_results_and_reports_each_selected_verification() {
         let f = Fixture::new(&format!(
             "{BODY}{RESTRICTED} verification w {{assumptions:[a];obligations:[o];}}"
@@ -685,6 +754,7 @@ mod tests {
             assert!(quiet_progress.is_empty());
             assert!(!output.contains("[check +"));
             assert!(!progress.contains("Results:"));
+            assert!(progress.contains("Process memory (bytes; peaks are lifetime)"));
             for phase in [
                 "discovery",
                 "loading",

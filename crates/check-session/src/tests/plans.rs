@@ -243,6 +243,7 @@ fn completed_plan_survives_outer_interruption_without_caching_interruption() {
     assert_eq!(store.plans.stats.executed, 1);
     store.plans.begin(128, 1024 * 1024);
     let operations = OperationalLimits {
+        profile: Default::default(),
         cancellation: Cancellation::default(),
         timeout: Duration::from_secs(60),
     };

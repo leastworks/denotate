@@ -46,6 +46,54 @@ standing feature-parity requirement.
 
 ## Re-scoring
 
+### Memory profiling
+
+Phase progress from `check-den` and the `.den` editor includes best-effort process
+memory readings. RSS and physical footprint are separate OS metrics; their peak
+fields are process lifetime high waters, not peaks attributable to the last phase.
+Unavailable readings are `null` (RSS on macOS/Linux, physical footprint on macOS).
+These include all live work in the process and are distinct from cache accounting.
+
+```sh
+just check-den path/to/program --profile-memory /tmp/den-memory.jsonl
+just bench-den-memory --items 1000 --inputs 1000 --width 4 --warm
+just bench-den-memory --items 1000 --inputs 1000 --width 32
+```
+
+`--profile-memory` creates a new file and streams JSON lines, including starts of
+unfinished stages. It works with `--no-progress` and does not change stdout or exit
+policy. The optional profiler samples memory every 20 ms while spans are active;
+`sampledPeak.rssBytes` and `sampledPeak.footprintBytes` are maxima of boundary and
+periodic samples, lower bounds on true phase peaks. The `peak*` fields remain OS
+lifetime high waters. Nested spans overlap: their durations and peak sizes must not
+be summed. An `end` event means the scope exited, including on failure; the CLI
+outcome determines success. Write failures in the profile stream are best-effort.
+
+Stages separate fixed runtime reconstruction, evaluation, export and binding;
+residual preparation; semantic-key construction; each admission round's symbolic,
+summary, candidate and commit work; and key refresh. `bddResults`, `bddResultNodes`
+and `bddResultNodeBytes` count new wrapped BDD results produced within a span.
+They are cumulative result payload, **not** allocator traffic or simultaneous live
+storage, and exclude the BDD library's internal temporary allocations. Retained BDD
+snapshots at symbolic, summary and candidate boundaries deduplicate `Arc` sharing and report
+occupied node payload; vector capacity, maps and allocator overhead are excluded.
+`Condition` clones share storage; independently computed BDD arrays do not share
+their nodes. Memory samples are needed alongside these counters.
+
+The companion benchmark has positive recursion, fixed false producers, four-way
+joins, multiple inputs and residual negative cycles discharged during admission.
+`--items`, `--inputs`, `--width` (inputs per item), `--layers` (fixed layers), and
+`--verifications` vary its shape. Around 30,000 items, 29,000 inputs, width 1 and
+28 layers produce roughly three million atoms, mostly fixed. Start smaller: this
+is a configurable reproduction tool, not a promise that the full size fits memory.
+Its logical limits are explicitly reported (defaults times 100), with a configurable
+operation timeout. `--unfolded` and `--no-retention` are separate fresh-process
+controls. `--warm` reloads the same source with the session retained and compares
+outcomes. Profile one process at a time; allocator retention and profiling overhead
+affect observations. No default checking policy changes, timing or memory goldens.
+
+### Outcome scorecards
+
 ```sh
 just score-den path/to/program/den.root \
     --edit path/to/edited-program --json /tmp/den-scorecard.json

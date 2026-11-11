@@ -235,7 +235,7 @@ impl<'a> EquationContext<'a> {
             .take()
             .ok_or(CheckError::Internal("missing equation formula"))?;
         self.live.set(self.live.get() - bdd.size());
-        Ok(self.inputs.wrap(bdd))
+        Ok(self.inputs.wrap(bdd, budget))
     }
 }
 
@@ -339,7 +339,7 @@ mod tests {
             eq.lift(&foreign, &mut budget),
             Err(CheckError::ForeignCondition)
         ));
-        let forged = ctx.wrap(BddVariableSet::new_anonymous(3).mk_true());
+        let forged = ctx.wrap(BddVariableSet::new_anonymous(3).mk_true(), &budget);
         assert!(matches!(
             ctx.witness(&forged, &limits),
             Err(CheckError::ForeignCondition)

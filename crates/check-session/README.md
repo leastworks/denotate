@@ -4,6 +4,12 @@ Reusable checker sessions. A `Session` caches preparation and verification work 
 snapshots of the same program, so an editor's warm checks are fast, while guaranteeing
 that warm results (and work receipts) equal a cold check of the same snapshot.
 
+`profiling::process_memory` provides best-effort process measurements for drivers.
+`MemoryProfiler` samples active checker profile spans every 20 ms and streams
+boundary events; it retains no event history. OS lifetime peaks and sampled span
+peaks are distinct. These observations never enter queries, receipts or cache keys.
+See [memory profiling](../../docs/checker-policies.md#memory-profiling).
+
 - `Session::prepare(&request, &corpus, &keys, &operations)` and `Session::verify(...)`
   mirror the fresh checker entry points. `FreshSession` is the uncached control.
 - `Session::prepare_fixed` (or `prepare_fixed_with_validation`) retains the

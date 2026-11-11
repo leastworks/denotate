@@ -103,6 +103,14 @@ evaluation, evidence binding and residual preparation/admission still run on eac
 new snapshot. Local verification queries
 may reconstruct fixed evidence rules.
 
+Optional `Profile` callbacks travel with operational limits, outside deterministic
+limits, semantic keys, receipts and cached results. The checker emits scoped events
+and BDD storage observations without OS access or additional semantic work.
+Driver-owned memory sampling lives in `check-session::profiling`; CLI/editor phase
+callbacks choose when to read it. The detailed profiler streams samples and events
+without retaining a growing event history. Process-wide readings are observations,
+never cache inputs or resource-policy decisions.
+
 Assumption declaration validity is a program-level query. The IR classifies
 relation-stratified cones and those requiring grounding; the checker resolves the
 latter against its unrevised ground dependency graph, without selected assumptions.
