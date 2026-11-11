@@ -49,6 +49,17 @@ is a top-level inconclusive outcome, never an empty success.
 
 ## Requests, keys and results
 
+`PreparedCheck::admit_with_progress` accepts an optional invocation-local observer.
+It reports rounds, stages, unresolved ground components with negation, affected
+atoms, current component sizes and representative atoms/rules, and committed
+rewrite counts. It also reports reused admission and exhaustion. Traversal and
+upper-bound iteration updates are throttled; component upper-bound starts, stage
+transitions and exhaustion are immediate. Callbacks perform no checking or key
+projection, and are absent from semantic keys, receipts and retained admission.
+Frontends resolve the representative's names and current source location. Counts
+are snapshots, not percentages; completed admission can still leave unsupported
+components. A single BDD operation has no inner progress heartbeat.
+
 `CheckRequest::for_verification` builds a request from one IR verification: only its
 selected assumptions constrain permitted worlds, and only its selected obligations
 produce groups (including the compact domains for trivial groups). Preparation

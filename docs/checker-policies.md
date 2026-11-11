@@ -46,6 +46,15 @@ standing feature-parity requirement.
 
 ## Re-scoring
 
+Admission progress in CLI stderr and the `.den` editor reports round/stage,
+unresolved ground components, affected atoms, current component and committed
+rewrites, with a precise final update on exhaustion. It uses existing graph
+metadata, not extra admission or BDD work. Inner observations are separate from
+the optional memory-profile span stream; both can be enabled together. See the
+[progress protocol](../crates/den-lsp/PROTOCOL.md#checking-progress-and-logs).
+They do not alter deterministic allowances, cache keys or results. As with other
+logging, delivery costs wall time; deadlines remain cooperative.
+
 ### Memory profiling
 
 Phase progress from `check-den` and the `.den` editor includes best-effort process

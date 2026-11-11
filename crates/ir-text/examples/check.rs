@@ -180,6 +180,12 @@ fn run_with_progress(
     let profile = options.limits.profile.clone();
     let active = std::cell::RefCell::new(None);
     let callback = |event: serde_json::Value| {
+        if event.get("admission").is_some() {
+            trace.message(denotate_ir_text::progress::admission_text(
+                &event["admission"],
+            ));
+            return;
+        }
         active.borrow_mut().take();
         let stage = [
             "discovery",
@@ -228,6 +234,7 @@ fn check_program(
         empty_examples,
         hide_library_rewrites,
         limits,
+        progress: report_progress,
         ..
     } = options;
     let backend = BackendIdentity::bdd();
@@ -373,6 +380,7 @@ fn check_program(
     let mut findings = false;
     let mut session = Session::default();
     let verification_total = requests.len();
+    let admission = denotate_ir_text::progress::AdmissionDetails::new(&p);
     let fixed = std::cell::OnceCell::new();
     for (i, (key, request)) in requests.into_iter().enumerate() {
         let mut detail = progress
@@ -510,8 +518,10 @@ fn check_program(
             session.fixed_stats().retained_bytes,
         );
         progress.emit(Phase::Admission, detail.clone());
+        let observer =
+            |event: &denotate_check::AdmissionProgress| admission.report(progress, &detail, event);
         let admitted = prepared
-            .admit(&operations)
+            .admit_with_progress(&operations, report_progress.then_some(&observer))
             .map_err(checker_failure)?
             .with_emptiness_examples(empty_examples.unwrap_or_default());
         trace.message(format_args!(
@@ -794,6 +804,36 @@ mod tests {
             } else {
                 assert!(progress.contains("verification 1/2 ::v"));
                 assert!(progress.contains("verification 2/2 ::w"));
+            }
+        }
+    }
+    #[test]
+    fn admission_progress_reports_cycles_locations_reuse_and_exhaustion_on_stderr_only() {
+        let f = Fixture::new(
+            "input t(); relation a(); relation b(); a():-t(),!b(); b():-!t(),!a(); relation bad(); bad():-a(),b(); obligation o:empty(bad); verification v{assumptions:[];obligations:[o];} verification w{assumptions:[];obligations:[o];}",
+        );
+        for flags in [vec![], vec!["--json"], vec!["--max-condition-nodes", "0"]] {
+            let (result, output, progress) = f.traced(&flags);
+            let mut quiet = flags.clone();
+            quiet.push("--no-progress");
+            let (quiet_result, quiet_output, quiet_progress) = f.traced(&quiet);
+            assert_eq!(result, quiet_result);
+            assert_eq!(output, quiet_output);
+            assert!(quiet_progress.is_empty());
+            assert!(progress.contains("unresolved negation components"));
+            if flags.contains(&"0") {
+                assert!(progress.contains("stopped:"), "{progress}");
+                assert!(progress.contains("condition nodes"), "{progress}");
+            } else {
+                assert!(progress.contains("upper-bounds"), "{progress}");
+                assert!(progress.contains("2 atoms, 2 rule instances"), "{progress}");
+                assert!(progress.contains(".den:1:"), "{progress}");
+                assert!(
+                    progress.contains("0 unresolved negation components"),
+                    "{progress}"
+                );
+                assert!(progress.contains("2 negations discharged"), "{progress}");
+                assert!(progress.contains("reused"), "{progress}");
             }
         }
     }

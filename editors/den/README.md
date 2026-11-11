@@ -93,6 +93,16 @@ shows time since the last server report; it is not a heartbeat or time remaining
 Startup and discovery show an indeterminate spinner. When idle, the item resumes
 the active `.den` file's status.
 
+During admission the status item also shows the round and unresolved-component
+count. The tooltip and Output identify the current stage and reported component,
+its representative ground tuple and current `.den` source location, its size,
+and committed rewrite counts. Upper-bound component starts are reported before
+analysis; ordinary scan/iteration updates are throttled. Exhaustion forces a
+report of the precise current work and resource. Reused admission is labeled.
+Counts describe components containing negation cycles, not every possible cycle;
+blocked atoms include downstream dependents. Components may split between rounds,
+so these counts are not a monotonically decreasing percentage.
+
 “Evaluating fixed facts” runs once per program check, shared across its
 verifications. A completed keyed fold is retained across runs without a byte cap;
 its accounted bytes appear in the tooltip and Output separately from bound evidence

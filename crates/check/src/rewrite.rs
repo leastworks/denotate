@@ -230,23 +230,40 @@ impl GroundProgram {
     pub fn admit(self, limits: &Limits) -> Result<Self> {
         self.admit_with_budget(&mut Budget::new(limits))
     }
-    pub(crate) fn admit_with_budget(mut self, budget: &mut Budget<'_>) -> Result<Self> {
+    pub(crate) fn admit_with_budget(self, budget: &mut Budget<'_>) -> Result<Self> {
+        self.admit_observed(budget, None)
+    }
+    pub(crate) fn admit_observed(
+        mut self,
+        budget: &mut Budget<'_>,
+        observer: Option<&AdmissionObserver<'_>>,
+    ) -> Result<Self> {
+        let progress = crate::admission_progress::AdmissionReporter::new(observer);
+        progress.snapshot(&self, 0, "starting");
         let limits = budget.limits;
         limits.cancellation.check()?;
         self.rewrites.inconclusive = None;
         if !self.assumptions_consistent() {
+            progress.finish(&self, "inconsistent-assumptions");
             return Ok(self);
         }
-        let result = self.rewrite_loop(budget);
+        let result = self.rewrite_loop(budget, &progress);
         if let Err(error) = result {
+            progress.failed(&self, &error);
             budget.failure(&error);
             self.rewrites.inconclusive = Some(Inconclusive::from_error(error)?);
+        } else {
+            progress.finish(&self, "complete");
         }
         limits.cancellation.check()?;
         Ok(self)
     }
 
-    fn rewrite_loop(&mut self, budget: &mut Budget<'_>) -> Result<()> {
+    fn rewrite_loop(
+        &mut self,
+        budget: &mut Budget<'_>,
+        progress: &crate::admission_progress::AdmissionReporter<'_>,
+    ) -> Result<()> {
         let profile = budget.limits.profile.clone();
         let mut round = 0;
         loop {
@@ -257,11 +274,14 @@ impl GroundProgram {
                 return Ok(());
             }
             round += 1;
+            progress.snapshot(self, round, "symbolic");
             let _round_profile = profile.span("admission-round", Some(round));
             budget.tick("rewrite snapshot")?;
             let meaning = {
                 let mut stage = profile.span("admission-symbolic", Some(round));
-                let meaning = self.symbolic_with_budget(budget)?;
+                let observe = |id| progress.work(self, "symbolic", Some(id), 0, false);
+                let meaning =
+                    self.symbolic_for_admission(budget, progress.enabled().then_some(&observe))?;
                 if profile.enabled() {
                     stage.retained(crate::boolean::condition_storage(
                         meaning
@@ -274,14 +294,17 @@ impl GroundProgram {
             };
             let ctx = meaning.context();
             let mut summaries_profile = profile.span("admission-summaries", Some(round));
+            progress.work(self, "summaries", None, 0, true);
             let mut summaries = BTreeMap::new();
             let mut producers = BTreeMap::<_, Vec<_>>::new();
             let mut retained = self.rewrites.nodes + meaning.metrics().retained_condition_nodes;
-            for rule in self
+            for (position, rule) in self
                 .rules
                 .iter()
                 .filter(|r| !self.rewrites.dropped.contains(&r.id))
+                .enumerate()
             {
+                progress.rule(self, "summaries", rule.id, position + 1);
                 budget.tick("rewrite summaries")?;
                 let mut condition = ctx.true_condition();
                 let mut settled = Vec::new();
@@ -333,13 +356,16 @@ impl GroundProgram {
             }
             drop(summaries_profile);
             let mut candidates_profile = profile.span("admission-candidates", Some(round));
+            progress.work(self, "candidates", None, 0, true);
             let mut batch = Vec::new();
             let mut upper_bounds = BTreeMap::new();
-            for rule in self
+            for (position, rule) in self
                 .rules
                 .iter()
                 .filter(|r| !self.rewrites.dropped.contains(&r.id))
+                .enumerate()
             {
+                progress.rule(self, "candidates", rule.id, position + 1);
                 budget.tick("rewrite candidates")?;
                 let candidate = &summaries[&rule.id];
                 if candidate.exact {
@@ -431,6 +457,8 @@ impl GroundProgram {
                     if let std::collections::btree_map::Entry::Vacant(entry) =
                         upper_bounds.entry(component.id)
                     {
+                        progress.work(self, "upper-bounds", Some(component.id), position + 1, true);
+                        let observe = |iteration| progress.iteration(self, iteration);
                         entry.insert(crate::upper_bounds::compute(
                             self,
                             component,
@@ -438,7 +466,9 @@ impl GroundProgram {
                             ctx,
                             &mut retained,
                             budget,
+                            progress.enabled().then_some(&observe),
                         )?);
+                        progress.work(self, "candidates", Some(component.id), position + 1, true);
                     }
                     let bounds = &upper_bounds[&component.id];
                     let coverage = bounds.conditions[&literal.term.atom].clone();
@@ -495,6 +525,7 @@ impl GroundProgram {
                 return Ok(());
             }
             let _commit_profile = profile.span("admission-commit", Some(round));
+            progress.work(self, "commit", None, 0, true);
             // Transactional graph rebuild: an interrupted batch cannot leave a
             // half-rewritten graph or publish warnings for uncommitted changes.
             budget.charge(
@@ -521,6 +552,7 @@ impl GroundProgram {
             }
             crate::graph::analyze(&mut next, budget)?;
             *self = next;
+            progress.snapshot(self, round, "committed");
         }
     }
 

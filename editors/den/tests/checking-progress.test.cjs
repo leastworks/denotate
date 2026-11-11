@@ -97,3 +97,28 @@ test('Output names every effective limit without estimating unfinished work', ()
   assert.ok(lines.some(line => line.includes('timeoutMs=42')));
   for (const [key, value] of Object.entries(limits)) assert.ok(lines.some(line => line.includes(`${key}=${value}`)));
 });
+
+test('admission snapshots identify unresolved components, current work, reuse and exhaustion', () => {
+  const a = { round: 2, stage: 'upper-bounds', unresolvedComponents: 3, blockedAtoms: 12,
+    removedRules: 1, dischargedNegations: 2, rule: 7, rules: 20, iteration: 4,
+    current: { index: 6, atoms: 5, ruleInstances: 8, atom: "p('a')",
+      location: { uri: 'file:///p.den', line: 3, column: 2 } } };
+  const p = progress({ checking: 1 }, { active: [{ label: 'app', program: 'app', revision: 4,
+    detail: { phase: 'admission', elapsedMs: 10, verification: '::v', verificationIndex: 1, verificationTotal: 1,
+      assumptions: 0, obligations: 1, notices: 0, admission: a } }] });
+  assert.match(view.text(p), /round 2 · 3 unresolved components/);
+  assert.match(view.details(p), /upper-bounds.*12 blocked atoms.*component 6.*5 atoms.*p\('a'\).*file:\/\/\/p.den:3:2/);
+  assert.match(view.details(p), /iteration 4/);
+  const lines = [];
+  const output = { debug() {}, info(s) { lines.push(['info', s]); }, warn(s) { lines.push(['warn', s]); } };
+  view.logProgress(output, undefined, p);
+  assert.match(lines[0][1], /app \(run 4\), ::v: Admission/);
+  const failed = structuredClone(p);
+  failed.active[0].detail.admission.failure = 'admission: BDD nodes limit reached';
+  view.logProgress(output, p, failed);
+  assert.equal(lines.at(-1)[0], 'warn');
+  assert.match(lines.at(-1)[1], /stopped: admission: BDD nodes limit reached/);
+  a.stage = 'reused'; a.round = 0; a.current = null; a.iteration = null;
+  assert.match(view.text(p), /reused/);
+  assert.doesNotMatch(view.details(p), /component 6|iteration 4|undefined/);
+});

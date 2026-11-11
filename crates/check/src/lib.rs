@@ -2,6 +2,8 @@
 //! Observation certificates are scoped to one input snapshot. Frontends own presentation.
 
 mod accounting;
+mod admission_progress;
+pub use admission_progress::{AdmissionComponent, AdmissionObserver, AdmissionProgress};
 mod assumption_validation;
 mod assumptions;
 mod boolean;

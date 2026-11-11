@@ -915,7 +915,15 @@ impl PreparedCheck<'_> {
     pub fn key_computation(&self) -> Duration {
         self.key_computation
     }
-    pub fn admit(mut self, operations: &OperationalLimits) -> Result<Self> {
+    pub fn admit(self, operations: &OperationalLimits) -> Result<Self> {
+        self.admit_with_progress(operations, None)
+    }
+    /// Observational, invocation-local progress; never retained with admission.
+    pub fn admit_with_progress(
+        mut self,
+        operations: &OperationalLimits,
+        observer: Option<&AdmissionObserver<'_>>,
+    ) -> Result<Self> {
         let limits = self.request.limits.with_operations(operations);
         let mut budget = Budget::tracked(&limits);
         operations.cancellation.check()?;
@@ -926,9 +934,14 @@ impl PreparedCheck<'_> {
             self.receipts
                 .record(QueryKey::Admission, receipt.clone())
                 .map_err(CheckError::Receipts)?;
+            crate::admission_progress::AdmissionReporter::new(observer).snapshot(
+                &self.program,
+                0,
+                "reused",
+            );
             return Ok(self);
         }
-        self.program = self.program.admit_with_budget(&mut budget)?;
+        self.program = self.program.admit_observed(&mut budget, observer)?;
         self.receipts.invalidate(&QueryKey::Admission);
         budget.record(
             &mut self.receipts,

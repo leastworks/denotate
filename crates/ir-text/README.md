@@ -135,6 +135,15 @@ sizes, result counts and session reuse. Every phase starts with a flushed line;
 transitions report elapsed time. `--no-progress` disables this checker trace.
 `--verbose` remains a diagnostic-layout option, independent of progress.
 
+Admission additionally reports rounds, stages, remaining ground components with
+negation, blocked atoms and committed rewrites. Upper-bound analysis identifies
+its component before work starts, with a representative tuple, source location
+and component size. Routine scans/iterations are throttled; exhaustion reports the
+precise current work and resource even if its last update was throttled. Reused
+admission is labeled `reused`. Counts are snapshots, not percentages or proof
+status. This detail is on stderr; `--profile-memory` retains its separate span
+and memory format.
+
 Phase boundaries include best-effort process RSS/footprint readings, with OS
 lifetime peaks labeled separately. `--profile-memory FILE` creates a new JSON-lines
 file with detailed fixed preparation, key-index and admission-round events and

@@ -122,6 +122,7 @@ fn check_with_progress(
     }
     publication.status["findings"] = validation_publication.status["findings"].clone();
     let requests = program.verification_requests(&job.limits)?;
+    let admission = denotate_ir_text::progress::AdmissionDetails::new(&program);
     let fixed = std::cell::OnceCell::new();
     for (i, (key, request)) in requests.iter().enumerate() {
         let context = progress.verification(&program, key, i + 1, requests.len())?;
@@ -165,7 +166,13 @@ fn check_with_progress(
                 session.fixed_stats().retained_bytes,
             );
             progress.emit(Phase::Admission, detail.clone());
-            let ground = ground.admit(&operations)?;
+            let observer = |event: &denotate_check::AdmissionProgress| {
+                admission.report(&progress, &detail, event)
+            };
+            let ground = ground.admit_with_progress(
+                &operations,
+                report.map(|_| &observer as &denotate_check::AdmissionObserver<'_>),
+            )?;
             progress.emit(Phase::Checking, detail.clone());
             match session.verify(&ground, &operations)? {
                 LocalCheckOutcome::Complete(report) => {
@@ -1002,6 +1009,7 @@ mod tests {
             assert_eq!(
                 updates
                     .iter()
+                    .filter(|p| p.get("admission").is_none())
                     .map(|p| p["phase"].as_str().unwrap())
                     .collect::<Vec<_>>(),
                 [
@@ -1034,6 +1042,63 @@ mod tests {
         }
     }
     #[test]
+    fn admission_reports_current_cycles_and_reuse_without_changing_publication() {
+        let job = assumption_job("input t(); relation a(); relation b(); a():-t(),!b(); b():-!t(),!a(); relation bad(); bad():-a(),b(); obligation o:empty(bad); verification v{assumptions:[];obligations:[o];} verification w{assumptions:[];obligations:[o];}", Limits::default());
+        let mut session = denotate_check_session::Session::default();
+        let expected = check(&job, &mut session).unwrap();
+        for session in [
+            &mut session,
+            &mut denotate_check_session::Session::default(),
+        ] {
+            let events = std::cell::RefCell::new(Vec::new());
+            let actual =
+                check_with_progress(&job, session, Some(&|e| events.borrow_mut().push(e))).unwrap();
+            assert_eq!(expected.status, actual.status);
+            assert_eq!(expected.diagnostics, actual.diagnostics);
+            let events = events.into_inner();
+            let upper = events
+                .iter()
+                .find(|e| e["admission"]["stage"] == "upper-bounds")
+                .unwrap();
+            assert_eq!(upper["verification"], "::v");
+            assert_eq!(upper["admission"]["unresolvedComponents"], 1);
+            assert_eq!(upper["admission"]["current"]["atoms"], 2);
+            assert!(upper["admission"]["current"]["atom"]
+                .as_str()
+                .unwrap()
+                .ends_with("()"));
+            assert_eq!(
+                upper["admission"]["current"]["location"]["uri"],
+                "file:///p.den"
+            );
+            let done = events
+                .iter()
+                .find(|e| e["admission"]["stage"] == "complete")
+                .unwrap();
+            assert_eq!(done["admission"]["unresolvedComponents"], 0);
+            assert_eq!(done["admission"]["dischargedNegations"], 2);
+            assert!(events
+                .iter()
+                .any(|e| e["verification"] == "::w" && e["admission"]["stage"] == "reused"));
+        }
+        let mut exhausted = job;
+        exhausted.limits.max_condition_nodes = 0;
+        let expected = check(&exhausted, &mut denotate_check_session::Session::default()).unwrap();
+        let events = std::cell::RefCell::new(Vec::new());
+        let actual = check_with_progress(
+            &exhausted,
+            &mut denotate_check_session::Session::default(),
+            Some(&|e| events.borrow_mut().push(e)),
+        )
+        .unwrap();
+        assert_eq!(actual.status, expected.status);
+        assert_eq!(actual.diagnostics, expected.diagnostics);
+        assert!(events
+            .borrow()
+            .iter()
+            .any(|e| e["admission"]["failure"].is_string()));
+    }
+    #[test]
     fn fixed_preparation_runs_once_across_verifications() {
         let job = assumption_job("relation fixed(); fixed(); input i(); relation r(); r():-fixed(),i(); obligation o:empty(r); verification a{assumptions:[];obligations:[o];} verification b{assumptions:[];obligations:[o];}", Limits::default());
         let updates = std::cell::RefCell::new(vec![]);
@@ -1053,7 +1118,7 @@ mod tests {
         );
         let prepared = updates
             .iter()
-            .filter(|p| p["phase"] == "admission")
+            .filter(|p| p["phase"] == "admission" && p.get("admission").is_none())
             .collect::<Vec<_>>();
         assert_eq!(prepared.len(), 2);
         for detail in prepared {

@@ -1,7 +1,7 @@
 //! Observational phase reporting shared by `.den` checking frontends. Callbacks
 //! own delivery; this module performs no IO, scheduling or additional checking.
 use crate::{LoadedProgram, index};
-use denotate_check::{CheckError, GroundProgram};
+use denotate_check::{AdmissionProgress, CheckError, GroundProgram};
 use denotate_ir::VerificationKey;
 use serde_json::{Value, json};
 use std::time::Instant;
@@ -52,6 +52,9 @@ impl<'a> CheckProgress<'a> {
             report(detail);
         }
     }
+    pub fn enabled(&self) -> bool {
+        self.report.is_some()
+    }
     /// Counts selections, not completed work. Indices are one-based in the
     /// frontend's selected run (which may contain only one verification).
     pub fn verification(
@@ -101,4 +104,86 @@ impl<'a> CheckProgress<'a> {
                 "residual":{"atoms":residual_atoms,"ruleInstances":residual_rules,"components":residual_components}});
         }
     }
+}
+
+/// Invocation-local formatting caches. Never rebuild all names or rescan a source
+/// prefix for each reported component; nothing here is retained across edits.
+pub struct AdmissionDetails<'a> {
+    program: &'a LoadedProgram,
+    names: std::cell::OnceCell<Box<dyn Fn(denotate_ir::OccurrenceId) -> String + 'a>>,
+    locations: std::cell::RefCell<std::collections::BTreeMap<denotate_ir::RuleId, Value>>,
+}
+impl<'a> AdmissionDetails<'a> {
+    pub fn new(program: &'a LoadedProgram) -> Self {
+        Self {
+            program,
+            names: Default::default(),
+            locations: Default::default(),
+        }
+    }
+    pub fn report(&self, progress: &CheckProgress<'_>, context: &Value, event: &AdmissionProgress) {
+        if !progress.enabled() {
+            return;
+        }
+        let mut detail = context.clone();
+        let current = event.current.as_ref().map(|c| {
+            let names = self.names.get_or_init(|| Box::new(crate::presentation::diagnostic_names(&self.program.corpus)));
+            let atom = format!("{}({})", names(c.representative.relation.into()),
+                c.representative.arguments.iter().map(|id| names((*id).into())).collect::<Vec<_>>().join(", "));
+            let location = c.source.map(|id| {
+                self.locations.borrow_mut().entry(id).or_insert_with(|| {
+                    self.program.provenance.origins(id).first().and_then(|origin| {
+                        let span = origin.span;
+                        let source = self.program.sources.snapshot(span.snapshot()).ok()?;
+                        let at = crate::origins::coordinate(&source.text, span.byte_range().start)?;
+                        Some(json!({"uri":source.uri,"line":at.line,"column":at.column}))
+                    }).unwrap_or(Value::Null)
+                }).clone()
+            });
+            json!({"index":c.index,"atoms":c.atoms,"ruleInstances":c.rules,"atom":atom,"location":location})
+        });
+        detail["admission"] = json!({"round":event.round,"stage":event.stage,
+            "unresolvedComponents":event.unresolved_components,"blockedAtoms":event.blocked_atoms,
+            "current":current,"rule":event.rule,"rules":event.rules,"iteration":event.iteration,
+            "removedRules":event.removed_rules,"dischargedNegations":event.discharged_negations,
+            "failure":event.failure.map(|r| denotate_presentation::exhaustion_text(r.phase,r.resource,r.details))});
+        progress.emit(Phase::Admission, detail);
+    }
+}
+
+pub fn admission_text(a: &Value) -> String {
+    let mut text = format!(
+        "Admission round {} · {}: {} unresolved negation components; {} blocked atoms; {} rules removed, {} negations discharged",
+        a["round"],
+        a["stage"].as_str().unwrap_or("unknown"),
+        a["unresolvedComponents"],
+        a["blockedAtoms"],
+        a["removedRules"],
+        a["dischargedNegations"]
+    );
+    if a["rule"].as_u64().unwrap_or(0) > 0 {
+        text.push_str(&format!("; rule {}/{}", a["rule"], a["rules"]));
+    }
+    if let Some(iteration) = a["iteration"].as_u64() {
+        text.push_str(&format!("; iteration {iteration}"));
+    }
+    if let Some(c) = a.get("current").filter(|c| c.is_object()) {
+        text.push_str(&format!(
+            "; component {} ({} atoms, {} rule instances), {}",
+            c["index"],
+            c["atoms"],
+            c["ruleInstances"],
+            c["atom"].as_str().unwrap_or("?")
+        ));
+        if let Some(uri) = c["location"]["uri"].as_str() {
+            text.push_str(&format!(
+                " at {uri}:{}:{}",
+                c["location"]["line"], c["location"]["column"]
+            ));
+        }
+    }
+    if let Some(failure) = a["failure"].as_str() {
+        text.push_str(&format!("; stopped: {failure}"));
+    }
+    text
 }

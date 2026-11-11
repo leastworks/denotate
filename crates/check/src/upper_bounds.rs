@@ -39,6 +39,7 @@ pub(crate) fn compute(
     ctx: &ConditionContext,
     retained: &mut usize,
     budget: &mut Budget<'_>,
+    observe: Option<&dyn Fn(usize)>,
 ) -> Result<Arc<ComponentUpperBounds>> {
     let mut producers = Vec::new();
     for index in &program.component_rules[component.id.index] {
@@ -59,7 +60,12 @@ pub(crate) fn compute(
         *retained = crate::symbolic::retain(*retained, 0, top.node_count(), budget)?;
         previous.insert(atom.clone(), top);
     }
+    let mut iteration = 0;
     loop {
+        iteration += 1;
+        if let Some(observe) = observe {
+            observe(iteration);
+        }
         budget.tick("upper-bound iteration")?;
         let mut next = BTreeMap::new();
         let mut next_nodes = 0;

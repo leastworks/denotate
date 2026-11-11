@@ -92,6 +92,21 @@ impl GroundProgram {
         self.symbolic_impl(budget, false)
     }
 
+    pub(crate) fn symbolic_for_admission(
+        &self,
+        budget: &mut Budget<'_>,
+        observe: Option<&dyn Fn(ComponentId)>,
+    ) -> Result<SymbolicMeaning<'_>> {
+        self.symbolic_selected_impl(
+            budget,
+            false,
+            None,
+            observe,
+            #[cfg(any(test, feature = "test-support"))]
+            None,
+        )
+    }
+
     /// Reporting evaluation retains only completed components after exhaustion.
     /// No intermediate recursive approximation becomes a settled fact.
     pub fn symbolic_checked(
@@ -118,6 +133,7 @@ impl GroundProgram {
             budget,
             partial,
             cone,
+            None,
             #[cfg(any(test, feature = "test-support"))]
             None,
         )
@@ -130,13 +146,14 @@ impl GroundProgram {
         cone: Option<&DependencyCone>,
         measured: &mut dyn FnMut(ComponentId, Duration),
     ) -> Result<SymbolicMeaning<'_>> {
-        self.symbolic_selected_impl(budget, partial, cone, Some(measured))
+        self.symbolic_selected_impl(budget, partial, cone, None, Some(measured))
     }
     fn symbolic_selected_impl(
         &self,
         budget: &mut Budget<'_>,
         partial: bool,
         cone: Option<&DependencyCone>,
+        observe: Option<&dyn Fn(ComponentId)>,
         #[cfg(any(test, feature = "test-support"))] mut measured: Option<
             &mut dyn FnMut(ComponentId, Duration),
         >,
@@ -192,6 +209,9 @@ impl GroundProgram {
                 continue;
             }
             let previous_retained = retained;
+            if let Some(observe) = observe {
+                observe(component.id);
+            }
             #[cfg(any(test, feature = "test-support"))]
             let component_start = measured.as_ref().map(|_| Instant::now());
             let result = (|| -> Result<()> {

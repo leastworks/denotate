@@ -115,6 +115,43 @@ updates for superseded tickets. A progress-only owner turn does not rebuild sour
 snapshots. The client renders active progress without requesting program status;
 its local clock displays time since the last report without polling the server.
 
+During admission, `detail.admission` optionally adds an invocation-local snapshot:
+
+```json
+{"round":2,"stage":"upper-bounds","unresolvedComponents":3,"blockedAtoms":120,
+ "current":{"index":17,"atoms":12,"ruleInstances":20,"atom":"p(a)",
+   "location":{"uri":"file:///app/p.den","line":14,"column":1}},
+ "rule":32,"rules":80,"iteration":null,
+ "removedRules":4,"dischargedNegations":6,"failure":null}
+```
+
+`unresolvedComponents` counts residual ground SCCs containing a negative cycle;
+`blockedAtoms` includes their downstream dependents. Counts are refreshed at round
+boundaries and after committed rewrites. They are not counts of all simple cycles
+or a monotonic percentage. `current.index` is one-based within that round's graph,
+not a persistent identity. `current` is null for whole-program stages; its
+representative ground atom and optional current-source location identify the
+component without expanding semantic component keys. Location line/column are
+one-based Unicode-scalar coordinates, as in CLI diagnostics, not LSP zero-based
+UTF-16 positions.
+`rule` is the one-based current active rule in summaries/candidates (zero outside
+rule scans); `rules` counts active residual rule instances at the last boundary.
+`iteration` is an optional current upper-bound iteration, not an estimated total.
+Rewrite counts are cumulative committed counts, not proposed changes.
+
+Stages are `starting`, `symbolic`, `summaries`, `candidates`, `upper-bounds`,
+`commit`, `committed`, `complete`, `reused`, and `inconsistent-assumptions`.
+Round zero means no rewrite round has started in this invocation. `complete`
+means admission finished, possibly leaving unsupported components; `reused` means
+previously completed admission was reused. Neither is an obligation verdict.
+`failure`, when present, is the shared formatted phase/resource/limit explanation;
+the last stage/component is preserved on exhaustion. Ordinary traversal and
+iteration updates are throttled to at most one every 250 ms. Stage transitions,
+upper-bound component starts, commit results and exhaustion are immediate. These
+are observations at safe boundaries, not heartbeats during individual BDD calls.
+The normal stale-ticket rules apply to every inner update. CLI stderr uses the
+same `AdmissionDetails` adapter; stdout and diagnostic publication are unchanged.
+
 The VS Code status item shows a spinner and counts while work is pending, including
 when a different language's editor is active. Its tooltip identifies the active
 program and the terminal categories. Once idle, it resumes the active `.den`
