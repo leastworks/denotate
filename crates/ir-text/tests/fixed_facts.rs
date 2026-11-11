@@ -16,6 +16,9 @@ fn compare(text: &str) {
     let operations = (&limits).into();
     let fixed = FixedPreparation::prepare(&p.corpus, &p.domains, &limits).unwrap();
     let mut session = Session::default();
+    let cached = session
+        .prepare_fixed(&p.corpus, &p.keys, &p.domains, &limits)
+        .unwrap();
     for (_, request) in p.verification_requests(&limits).unwrap() {
         let RequestPreparation::Complete(raw) =
             request.prepare(&p.corpus, &p.keys, &operations).unwrap()
@@ -27,9 +30,9 @@ fn compare(text: &str) {
             panic!()
         };
         let raw_presentation = presentation::present(&p, &raw_report).unwrap();
-        for _ in 0..2 {
+        for fixed in [&fixed, &cached, &cached] {
             let RequestPreparation::Complete(folded) = request
-                .prepare_with_fixed(&p.corpus, &p.keys, &operations, &fixed, None)
+                .prepare_with_fixed(&p.corpus, &p.keys, &operations, fixed, None)
                 .unwrap()
             else {
                 panic!()
@@ -136,7 +139,9 @@ fn warm_edits_change_fixed_membership_and_keep_current_evidence() {
         let p = parse(&format!(
             "{declaration} relation r(); r():-a(); obligation o:empty(r); verification v{{assumptions:[];obligations:[o];}}"
         ));
-        let fixed = FixedPreparation::prepare(&p.corpus, &p.domains, &limits).unwrap();
+        let fixed = session
+            .prepare_fixed(&p.corpus, &p.keys, &p.domains, &limits)
+            .unwrap();
         let request = p.verification_requests(&limits).unwrap().remove(0).1;
         let operations = (&limits).into();
         let RequestPreparation::Complete(warm) = session

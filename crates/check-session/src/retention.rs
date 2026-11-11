@@ -378,6 +378,8 @@ impl Retained for QueryKey {
     fn heap(&self, p: &mut Payload) {
         match self {
             Self::FixedFacts
+            | Self::FixedRuntime
+            | Self::FixedBinding
             | Self::AssumptionValidation
             | Self::Preparation
             | Self::Admission
@@ -480,4 +482,19 @@ fields!(GroundingResult {
     value,
     failure,
     receipt
+});
+
+fields!(FixedInput {
+    relations,
+    rules,
+    domains,
+    limits
+});
+fields!(FixedValue {
+    possible,
+    instances,
+    present,
+    relations,
+    receipt,
+    runtime_receipt
 });

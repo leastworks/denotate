@@ -604,10 +604,11 @@ fn populate_using(
         if relation.role != RelationRole::Input || cone.is_some() {
             continue;
         }
-        if let Some(allowed) = p.input_domains.get(&relation.id) {
+        let core = &mut **p;
+        if let Some(allowed) = core.input_domains.get(&relation.id) {
             for atom in allowed {
                 budget.tick("grounding")?;
-                p.inputs.insert(atom.clone());
+                core.inputs.insert(atom.clone());
                 tuples.insert(atom.clone(), budget)?;
             }
             continue;
@@ -615,11 +616,11 @@ fn populate_using(
         let columns: Vec<_> = relation
             .parameters
             .iter()
-            .map(|parameter| p.domains[&parameter.sort].as_slice())
+            .map(|parameter| core.domains[&parameter.sort].as_slice())
             .collect();
         each_tuple(&columns, budget, |args, budget| {
             let atom = GroundAtom::new(relation.id, args.iter().copied());
-            p.inputs.insert(atom.clone());
+            core.inputs.insert(atom.clone());
             tuples.insert(atom, budget)
         })?;
     }
@@ -673,7 +674,8 @@ fn populate_using(
         if p.fixed_value(&atom).is_some() {
             continue;
         }
-        p.atom_index.insert(atom.clone(), p.atoms.len());
+        let index = p.atoms.len();
+        p.atom_index.insert(atom.clone(), index);
         p.atoms.push(atom);
     }
     for (_, mut rule) in instances.rules {

@@ -38,6 +38,7 @@ pub struct Component {
 }
 
 pub(crate) fn analyze(p: &mut GroundProgram, budget: &mut Budget<'_>) -> Result<()> {
+    let p = &mut **p;
     static NEXT: AtomicU64 = AtomicU64::new(1);
     p.graph_revision = NEXT.fetch_add(1, Ordering::Relaxed);
     p.dependencies.clear();
@@ -226,7 +227,7 @@ pub(crate) fn analyze(p: &mut GroundProgram, budget: &mut Budget<'_>) -> Result<
 }
 
 fn cycle_path(
-    p: &GroundProgram,
+    p: &GroundCore,
     adjacent: &[Vec<usize>],
     membership: &[usize],
     negative: usize,

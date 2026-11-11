@@ -80,9 +80,23 @@ The artifact shares original fixed rules, components, dependencies and derivatio
 as evidence, separate from the executable residual graph. Replay and presentation
 still resolve original occurrences, including completed-but-absent providers.
 Retained evidence and residual sizes are reported separately. This artifact is
-bound to one corpus, domains and limits, not cached across edits. Residual grounding,
-semantic indexes and admission still run per verification; local queries may
-reconstruct fixed evidence rules. Cross-edit sharing is a separate increment.
+bound to one corpus, domains and limits. Within the run, requests with the same
+selected restrictions share residual grounding, permitted worlds, semantic indexes
+and completed admission. Obligation groups, notice selection, verification identity
+and example policy remain request attachments; a failed attachment cannot change
+another request's context.
+
+The session's Salsa fold query retains only semantic keys: possible tuples, original
+rule-instance substitutions and the chosen producer/order of each true tuple. On the
+next snapshot it reconstructs the evidence with current occurrences. Its explicit
+input contains fixed relation/rule schemas, resolved domains and deterministic
+limits, excluding input-dependent rule bodies and source locations. This first query
+covers the entire fixed cone, so an edit within it recomputes the cone; per-SCC
+provider reuse remains a possible refinement. Retention is bounded and oversized
+folds bypass it. Failures and interruptions are cleared, never reused as completed
+folds. Original validation, eligibility evaluation, evidence binding and residual
+preparation/admission still run on each new snapshot. Local verification queries
+may reconstruct fixed evidence rules.
 
 Assumption declaration validity is a program-level query. The IR classifies
 relation-stratified cones and those requiring grounding; the checker resolves the
@@ -99,12 +113,12 @@ and later selections. Corpus, domains, keys and deterministic limits bind the re
 Both paths use the original ground dependencies: a fixed-false guard must
 not erase a negative cycle from assumption validation. Logical exhaustion remains
 explicit for requests needing the check; cancellation/deadlines are not cached.
-This is run-scoped sharing, not reuse across edits or an admission cache.
+This original-validation sharing remains run-scoped.
 
 Selected general assumptions are another preparation boundary: once their meaning
 is independently established, the checker computes W before admission.
 Input-only at-most-one contexts retain local memoized queries. General contexts use
-whole-program BDD evaluation and fresh W, while retaining grounding/plan reuse:
+whole-program BDD evaluation, with W shared only within the same selection:
 local absent-extension and constraint-projection shortcuts are not sound for general
 constraints. No context-dependent BDD or verdict is reused across selections.
 

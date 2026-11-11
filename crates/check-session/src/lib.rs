@@ -25,3 +25,6 @@ pub use plans::PlanStats;
 
 mod grounding;
 pub use grounding::GroundingStats;
+
+mod fixed;
+pub use fixed::FixedStats;

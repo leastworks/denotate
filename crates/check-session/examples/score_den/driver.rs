@@ -211,7 +211,11 @@ pub fn measure(
     let start = Instant::now();
     let mut preparation_started = false;
     let prepared = if mode == "folded-bdd" {
-        match FixedPreparation::prepare(&p.corpus, &p.domains, limits) {
+        let fixed = match cache {
+            Some(s) => s.prepare_fixed(&p.corpus, &p.keys, &p.domains, limits),
+            None => FixedPreparation::prepare(&p.corpus, &p.domains, limits),
+        };
+        match fixed {
             Ok(fixed) => {
                 preparation_started = true;
                 match cache {

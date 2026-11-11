@@ -89,6 +89,16 @@ admission and symbolic evaluation read those facts as constants. Blocked fixed
 atoms remain residual. Selected-assumption validation still uses original ground
 dependencies, as does the program-level validator.
 
+The same artifact shares residual graphs, indexes and completed admission between
+requests selecting the same restrictions. Each request still validates its named
+verification and builds only its own obligation groups. Notices and diagnostic
+example policies are never cached as part of that graph. An inconclusive attachment
+or admission does not become a reusable completed result. The source-bound graph
+and index use immutable shared cores, copied only when admission rewrites them.
+`FixedPreparation::prepare_cached` exposes the owned fold kernel to session stores;
+its `FixedInput`/`FixedValue` use semantic keys and rebind evidence to current IR.
+The session owns Salsa and bounded retention, not the checker.
+
 To share the program-level original check, use
 `validate_assumption_cones_for_run(corpus, domains, keys, limits)` and then
 `FixedPreparation::prepare_with_validation(&validated, limits)`.
@@ -107,7 +117,8 @@ initializing the reusable result. Relation-stratified selections need no such qu
 evidence; `fixed_size()` and `residual_size()` distinguish it from execution.
 Presence replay can traverse fixed derivations; derived absence retains its
 completed provider, not `NoPossibleProducer`. Successful folds carry a `FixedFacts`
-receipt depended on by preparation. Fold exhaustion is explicit (`fixed facts`,
+receipt depended on by preparation; the owned path also records `FixedRuntime`
+and `FixedBinding` transfer work. Fold exhaustion is explicit (`fixed facts`,
 with subphase/resource); eligibility failures retain `input domains`. Cancellation
 publishes no partial fold. The ordinary preparation API remains the unfolded
 control. The `.den` frontends opt into folding; the test DSL's direct path is unchanged.

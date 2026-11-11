@@ -8,7 +8,7 @@ impl GroundProgram {
         let restricted = input_domains::evaluate(corpus, &domains, &mut budget)?;
         let mut p = Self::empty(corpus, domains);
         p.input_domains = restricted;
-        let domains = &p.domains;
+        let domains = p.domains.clone();
         let preparation = p.preparation;
         for relation in corpus.relations() {
             budget.tick("grounding")?;
@@ -29,7 +29,8 @@ impl GroundProgram {
                     }
                     p.inputs.insert(atom.clone());
                 }
-                p.atom_index.insert(atom.clone(), p.atoms.len());
+                let index = p.atoms.len();
+                p.atom_index.insert(atom.clone(), index);
                 p.atoms.push(atom);
                 Ok(())
             })?;
@@ -74,11 +75,9 @@ impl GroundProgram {
                         term: ground_atom(literal.atom(), &binding, budget)?,
                     });
                 }
+                let index = p.rules.len();
                 p.rules.push(GroundRule {
-                    id: GroundRuleId {
-                        preparation,
-                        index: p.rules.len(),
-                    },
+                    id: GroundRuleId { preparation, index },
                     source: rule.id,
                     head,
                     body,

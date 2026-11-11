@@ -70,18 +70,31 @@ in a session; the `.den` report labels that fallback. Preparation reuse may stil
 apply, but the variant's name does not imply verdict-cache reuse.
 
 The `.den` scorecard additionally compares `folded-bdd`, the default CLI/editor
-preparation path. Its preparation timer includes a fresh fold for that verification;
-it does not amortize the fold over other verifications. Existing variants remain
-unfolded controls, and the test DSL variants are unchanged. Use
-`just bench-den-fixed 4000 4` for an abstract mostly-fixed workload that measures a
-single shared fold across four verifications against unfolded execution. It asserts
-outcome agreement and reports timings and retained sizes, never timing goldens.
-Add `--ground-assumption` after the counts to include a selected assumption that
-requires original ground validation. Program validation is timed separately;
-the folded benchmark shares that result with all requests. Residual preparation
-still runs per verification. The scorecard's per-verification `folded-bdd` sample
-uses the direct API path: its timer includes the lazy original validation when
-needed, along with the fold, rather than amortizing either across verifications.
+preparation path. It includes keyed fold projection/binding, with retained fold
+reuse on warm/edit runs when the fixed projection is unchanged and fits retention.
+Samples are still per verification, so they do not amortize preparation/admission
+across other verifications. Existing variants remain unfolded controls; the test
+DSL variants are unchanged. `preparation_cache.fixed` reports cumulative executed,
+reused and bypassed queries plus retained bytes.
+
+Use `just bench-den-fixed 4000 4` for an abstract mostly-fixed workload comparing
+unfolded execution with cold and warm folded runs across four verifications. Within
+a folded run, each distinct restriction selection prepares and admits once; groups
+and results remain per verification. The benchmark asserts outcome agreement and
+reports timings and retained sizes, never timing goldens. It also reloads an edit
+to an input-dependent rule to measure fixed-query reuse. Add `--ground-assumption`
+after the counts to include original ground validation, timed separately and shared
+with all requests; `--two-selections` alternates two restriction sets. The
+scorecard's direct API timer instead includes lazy original validation when needed.
+
+Fold retention uses one Salsa query for the entire fixed cone and a quarter of the
+session byte allowance. Its input excludes input-dependent rules, but a fixed edit
+recomputes the cone; per-relation SCC reuse is not implemented. The retained value
+stores original instance substitutions and true producers, not duplicate grounded
+rule bodies. Oversized values bypass retention. Cold reconstruction/export and warm
+source binding have costs; re-score them against fresh folding on real programs.
+Original validation, eligibility, residual grounding and admission remain fresh
+across snapshots. No policy ceiling or admission semantics change.
 
 ### `.den` measurements
 
@@ -133,7 +146,7 @@ BDD figures have distinct meanings:
   observation for a query. Shared conditions can be counted conservatively.
 - `cache.retained_condition_nodes` counts payload retained in the session's local
   cache after verification. Cache byte counts are also conservative payload accounting,
-  not measured heap usage or RSS. Planning and grounding have separate retained bytes.
+  not measured heap usage or RSS. Planning, grounding and fixed folding have separate retained bytes.
 
 Receipts may describe reused work and include rejected attempts. These figures are
 neither fresh allocation counts nor sums presented as memory peaks. Missing observations

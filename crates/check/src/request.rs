@@ -340,15 +340,47 @@ impl CheckRequest {
         let mut budget = Budget::tracked(&limits);
         let mut receipts = WorkReceipts::default();
         if let Some(fixed) = fixed {
+            for (key, receipt) in fixed.transfer_receipts.entries() {
+                receipts
+                    .record(key.clone(), receipt.clone())
+                    .map_err(CheckError::Receipts)?;
+            }
             receipts
                 .record(QueryKey::FixedFacts, fixed.receipt.clone())
                 .map_err(CheckError::Receipts)?;
         }
+        if let Some(fixed) = fixed {
+            if let Err(error) = fixed.validate_snapshot(corpus, &domains, &mut budget) {
+                budget.failure(&error);
+                let reason = Inconclusive::from_error(error)?;
+                let dependencies = receipts
+                    .entries()
+                    .map(|(k, _)| k.clone())
+                    .collect::<Vec<_>>();
+                budget.record(&mut receipts, QueryKey::Preparation, dependencies)?;
+                return Ok(RequestPreparation::Inconclusive { reason, receipts });
+            }
+            if let Some(context) = fixed
+                .contexts
+                .borrow()
+                .iter()
+                .find(|c| c.constraints == self.constraints)
+            {
+                if !std::ptr::eq(context.semantic_keys, keys) {
+                    return Err(CheckError::InvalidRequest(
+                        "shared preparation keys do not match this snapshot",
+                    ));
+                }
+                return context.attach(self, corpus, keys, obligations, operations);
+            }
+        }
+        let prepared_obligations = if fixed.is_some() {
+            BTreeSet::new()
+        } else {
+            obligations.clone()
+        };
         let mut ground_validation = BTreeMap::new();
         let result = (|| {
-            if let Some(fixed) = fixed {
-                fixed.validate_snapshot(corpus, &domains, &mut budget)?;
-            }
             ground_validation = corpus.validate_assumption_relations_with(
                 self.constraints
                     .iter()
@@ -377,7 +409,7 @@ impl CheckRequest {
                     keys,
                     &domains,
                     &constraints,
-                    &obligations,
+                    &prepared_obligations,
                     &mut budget,
                     plans.expect("grounding requires a plan provider"),
                     store,
@@ -388,7 +420,7 @@ impl CheckRequest {
                     corpus,
                     &domains,
                     &constraints,
-                    &obligations,
+                    &prepared_obligations,
                     &mut budget,
                     plans.map(|store| (keys, store)),
                     fixed,
@@ -474,6 +506,25 @@ impl CheckRequest {
         let index = GroundKeyIndex::build(corpus, keys, &program).map_err(CheckError::Keys)?;
         operations.cancellation.check()?;
         let key_computation = key_order_time + index.elapsed;
+        if let Some(fixed) = fixed {
+            let context = SharedContext {
+                constraints: self.constraints.clone(),
+                semantic_keys: keys,
+                program,
+                index,
+                receipts,
+                admission: Default::default(),
+            };
+            let mut attached = context.attach(self, corpus, keys, obligations, operations)?;
+            if let RequestPreparation::Complete(prepared) = &mut attached {
+                prepared.key_computation += key_computation;
+            }
+            // An exhausted attachment is never retained as a completed context.
+            if matches!(attached, RequestPreparation::Complete(_)) {
+                fixed.contexts.borrow_mut().push(context);
+            }
+            return Ok(attached);
+        }
         Ok(RequestPreparation::Complete(PreparedCheck {
             request: self.clone(),
             emptiness_examples: EmptinessExamples::default(),
@@ -483,6 +534,7 @@ impl CheckRequest {
             semantic_keys: keys,
             key_computation,
             receipts,
+            shared_admission: None,
         }))
     }
     pub fn exhausted(&self, reason: Inconclusive) -> ScopedResults {
@@ -706,7 +758,74 @@ impl ScopedResults {
     }
 }
 
+type SharedAdmission = std::sync::Arc<
+    std::sync::OnceLock<(
+        std::sync::Arc<GroundCore>,
+        std::sync::Arc<GroundKeyCore>,
+        WorkReceipt,
+    )>,
+>;
+
+/// Bound to one source snapshot. No arena handles escape into a session cache.
+pub(crate) struct SharedContext<'a> {
+    constraints: Vec<InputConstraint>,
+    semantic_keys: &'a SemanticKeys,
+    program: GroundProgram,
+    index: GroundKeyIndex,
+    receipts: WorkReceipts,
+    admission: SharedAdmission,
+}
+impl SharedContext<'_> {
+    fn attach<'s>(
+        &self,
+        request: &CheckRequest,
+        corpus: &'s Corpus,
+        keys: &'s SemanticKeys,
+        obligations: BTreeSet<ObligationId>,
+        operations: &OperationalLimits,
+    ) -> Result<RequestPreparation<'s>> {
+        let limits = request.limits.with_operations(operations);
+        let original = self.receipts.get(&QueryKey::Preparation).unwrap();
+        let mut budget = Budget::resume(&limits, original.own.clone());
+        let mut program = self.program.clone();
+        program.obligations = obligations;
+        let result = program.build_groups(corpus, &mut budget);
+        if let Err(error) = &result {
+            budget.failure(error);
+        }
+        let mut receipts = self.receipts.clone();
+        receipts.invalidate(&QueryKey::Preparation);
+        budget.record(
+            &mut receipts,
+            QueryKey::Preparation,
+            original.dependencies.clone(),
+        )?;
+        if let Err(error) = result {
+            return Ok(RequestPreparation::Inconclusive {
+                reason: Inconclusive::from_error(error)?,
+                receipts,
+            });
+        }
+        let start = Instant::now();
+        let mut index = self.index.clone();
+        index.build_groups(corpus, keys, &program)?;
+        operations.cancellation.check()?;
+        Ok(RequestPreparation::Complete(PreparedCheck {
+            request: request.clone(),
+            emptiness_examples: Default::default(),
+            program,
+            keys: index,
+            corpus,
+            semantic_keys: keys,
+            key_computation: start.elapsed(),
+            receipts,
+            shared_admission: Some(self.admission.clone()),
+        }))
+    }
+}
+
 pub struct PreparedCheck<'s> {
+    shared_admission: Option<SharedAdmission>,
     pub(crate) request: CheckRequest,
     pub(crate) emptiness_examples: EmptinessExamples,
     pub(crate) program: GroundProgram,
@@ -784,6 +903,18 @@ impl PreparedCheck<'_> {
     pub fn admit(mut self, operations: &OperationalLimits) -> Result<Self> {
         let limits = self.request.limits.with_operations(operations);
         let mut budget = Budget::tracked(&limits);
+        operations.cancellation.check()?;
+        budget.check("admission")?;
+        if let Some((program, keys, receipt)) = self.shared_admission.as_ref().and_then(|c| c.get())
+        {
+            self.program.core = program.clone();
+            self.keys.core = keys.clone();
+            self.receipts.invalidate(&QueryKey::Admission);
+            self.receipts
+                .record(QueryKey::Admission, receipt.clone())
+                .map_err(CheckError::Receipts)?;
+            return Ok(self);
+        }
         self.program = self.program.admit_with_budget(&mut budget)?;
         self.receipts.invalidate(&QueryKey::Admission);
         budget.record(
@@ -795,6 +926,16 @@ impl PreparedCheck<'_> {
             .map_err(CheckError::Keys)?;
         self.key_computation += self.keys.elapsed;
         operations.cancellation.check()?;
+        if self.program.admission_limit().is_none() {
+            if let Some(cell) = &self.shared_admission {
+                let _ = cell.set((
+                    self.program.core.clone(),
+                    self.keys.core.clone(),
+                    self.receipts.get(&QueryKey::Admission).unwrap().clone(),
+                ));
+            }
+        }
+
         Ok(self)
     }
     pub fn verify(&self, operations: &OperationalLimits) -> Result<CheckOutcome<'_>> {

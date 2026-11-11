@@ -34,6 +34,74 @@ pub struct InstanceKey {
     /// Complete typed-variable order, including variables occurring only in body.
     pub substitution: Vec<(VariableKey, ConstantKey)>,
 }
+impl InstanceKey {
+    pub(crate) fn from_rule(
+        corpus: &Corpus,
+        keys: &SemanticKeys,
+        r: &GroundRule,
+    ) -> std::result::Result<Self, KeyError> {
+        let source = corpus
+            .rule(r.source)
+            .ok_or(KeyError::UnknownOccurrence(r.source.into()))?;
+        if source.body.len() != r.body.len()
+            || source.body.iter().zip(&r.body).any(|(a, b)| {
+                matches!(a, Literal::Negative(_)) != (b.polarity == Polarity::Negative)
+            })
+        {
+            return Err(KeyError::InvalidStructure(
+                "original ground rule does not match source schema",
+            ));
+        }
+        let mut substitution = BTreeMap::new();
+        for (a, g) in std::iter::once((&source.head, &r.head)).chain(
+            source
+                .body
+                .iter()
+                .zip(&r.body)
+                .map(|(a, b)| (a.atom(), &b.term)),
+        ) {
+            if a.id() != g.occurrence
+                || a.relation() != g.atom.relation
+                || a.arguments().len() != g.atom.arguments.len()
+                || g.arguments != a.arguments().iter().map(|t| t.id()).collect::<Vec<_>>()
+            {
+                return Err(KeyError::InvalidStructure(
+                    "ground/source occurrence mismatch",
+                ));
+            }
+            for (t, c) in a.arguments().iter().zip(&g.atom.arguments) {
+                let value = keys.constant(*c)?.clone();
+                match t.value() {
+                    Term::Constant(expected) if expected != c => {
+                        return Err(KeyError::InvalidStructure("ground constant mismatch"));
+                    }
+                    Term::Constant(_) => {}
+                    Term::Variable { name, sort } => {
+                        let variable = VariableKey {
+                            sort: keys.sort(*sort)?.clone(),
+                            name: name.as_str().into(),
+                        };
+                        if variable.sort != value.sort {
+                            return Err(KeyError::InvalidStructure(
+                                "ground variable sort mismatch",
+                            ));
+                        }
+                        if substitution
+                            .insert(variable, value.clone())
+                            .is_some_and(|old| old != value)
+                        {
+                            return Err(KeyError::InvalidStructure("inconsistent substitution"));
+                        }
+                    }
+                }
+            }
+        }
+        Ok(InstanceKey {
+            rule: keys.rule(r.source)?.clone(),
+            substitution: substitution.into_iter().collect(),
+        })
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ComponentKey(pub Arc<[AtomKey]>);
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -91,8 +159,14 @@ pub struct RewriteEvidenceKey {
     pub kind: KeyedRewriteKind,
     pub producers: BTreeSet<InstanceKey>,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GroundKeyIndex {
+    pub(crate) core: Arc<GroundKeyCore>,
+    pub groups: BTreeMap<ObligationKey, KeyedGroups>,
+    pub elapsed: Duration,
+}
+#[derive(Debug, Clone)]
+pub struct GroundKeyCore {
     /// Current executable content; original instances remain available for provenance.
     pub committed: BTreeMap<InstanceKey, GroundInstance>,
     pub dropped: BTreeSet<InstanceKey>,
@@ -101,10 +175,22 @@ pub struct GroundKeyIndex {
     pub instances: BTreeMap<GroundRuleId, InstanceKey>,
     pub content: BTreeMap<InstanceKey, GroundInstance>,
     pub components: BTreeMap<ComponentId, ComponentKey>,
-    pub groups: BTreeMap<ObligationKey, KeyedGroups>,
-    pub elapsed: Duration,
+}
+impl std::ops::Deref for GroundKeyIndex {
+    type Target = GroundKeyCore;
+    fn deref(&self) -> &GroundKeyCore {
+        &self.core
+    }
+}
+impl std::ops::DerefMut for GroundKeyIndex {
+    fn deref_mut(&mut self) -> &mut GroundKeyCore {
+        Arc::make_mut(&mut self.core)
+    }
 }
 impl GroundKeyIndex {
+    pub(crate) fn into_content(self) -> BTreeMap<InstanceKey, GroundInstance> {
+        Arc::unwrap_or_clone(self.core).content
+    }
     /// Index the committed round, retaining original instances for provenance.
     /// Key errors are creator failures, separate from resource exhaustion. The
     /// key phase adds no logical charges to existing preparation/check budgets.
@@ -116,24 +202,27 @@ impl GroundKeyIndex {
         let start = Instant::now();
         keys.validate(corpus)?;
         let mut out = Self {
-            committed: BTreeMap::new(),
-            dropped: BTreeSet::new(),
-            rewrites: BTreeMap::new(),
-            atoms: BTreeMap::new(),
-            instances: BTreeMap::new(),
-            content: BTreeMap::new(),
-            components: BTreeMap::new(),
+            core: Arc::new(GroundKeyCore {
+                committed: BTreeMap::new(),
+                dropped: BTreeSet::new(),
+                rewrites: BTreeMap::new(),
+                atoms: BTreeMap::new(),
+                instances: BTreeMap::new(),
+                content: BTreeMap::new(),
+                components: BTreeMap::new(),
+            }),
             groups: BTreeMap::new(),
             elapsed: Duration::ZERO,
         };
+        let core = Arc::get_mut(&mut out.core).unwrap();
         // Include impossible negative premises too; they have identity but no SCC.
         for atom in program.atoms().chain(
             program
                 .original_rules()
                 .flat_map(|r| r.body.iter().map(|l| &l.term.atom)),
         ) {
-            if !out.atoms.contains_key(atom) {
-                out.atoms
+            if !core.atoms.contains_key(atom) {
+                core.atoms
                     .insert(atom.clone(), AtomKey::from_atom(keys, atom)?);
             }
         }
@@ -154,68 +243,7 @@ impl GroundKeyIndex {
                 })
             };
         for r in program.original_rules() {
-            let source = corpus
-                .rule(r.source)
-                .ok_or(KeyError::UnknownOccurrence(r.source.into()))?;
-            if source.body.len() != r.body.len()
-                || source.body.iter().zip(&r.body).any(|(a, b)| {
-                    matches!(a, Literal::Negative(_)) != (b.polarity == Polarity::Negative)
-                })
-            {
-                return Err(KeyError::InvalidStructure(
-                    "original ground rule does not match source schema",
-                ));
-            }
-            let mut substitution = BTreeMap::new();
-            for (a, g) in std::iter::once((&source.head, &r.head)).chain(
-                source
-                    .body
-                    .iter()
-                    .zip(&r.body)
-                    .map(|(a, b)| (a.atom(), &b.term)),
-            ) {
-                if a.id() != g.occurrence
-                    || a.relation() != g.atom.relation
-                    || a.arguments().len() != g.atom.arguments.len()
-                    || g.arguments != a.arguments().iter().map(|t| t.id()).collect::<Vec<_>>()
-                {
-                    return Err(KeyError::InvalidStructure(
-                        "ground/source occurrence mismatch",
-                    ));
-                }
-                for (t, c) in a.arguments().iter().zip(&g.atom.arguments) {
-                    let value = keys.constant(*c)?.clone();
-                    match t.value() {
-                        Term::Constant(expected) if expected != c => {
-                            return Err(KeyError::InvalidStructure("ground constant mismatch"));
-                        }
-                        Term::Constant(_) => {}
-                        Term::Variable { name, sort } => {
-                            let variable = VariableKey {
-                                sort: keys.sort(*sort)?.clone(),
-                                name: name.as_str().into(),
-                            };
-                            if variable.sort != value.sort {
-                                return Err(KeyError::InvalidStructure(
-                                    "ground variable sort mismatch",
-                                ));
-                            }
-                            if substitution
-                                .insert(variable, value.clone())
-                                .is_some_and(|old| old != value)
-                            {
-                                return Err(KeyError::InvalidStructure(
-                                    "inconsistent substitution",
-                                ));
-                            }
-                        }
-                    }
-                }
-            }
-            let key = InstanceKey {
-                rule: keys.rule(r.source)?.clone(),
-                substitution: substitution.into_iter().collect(),
-            };
+            let key = InstanceKey::from_rule(corpus, keys, r)?;
             let value = GroundInstance {
                 schema: schemas[&r.source].clone(),
                 head: occurrence(&r.head)?,
@@ -225,17 +253,17 @@ impl GroundKeyIndex {
                     .map(|l| Ok((l.polarity == Polarity::Negative, occurrence(&l.term)?)))
                     .collect::<std::result::Result<_, KeyError>>()?,
             };
-            if out.content.insert(key.clone(), value).is_some() {
+            if core.content.insert(key.clone(), value).is_some() {
                 return Err(KeyError::InvalidStructure("duplicate ground instance key"));
             }
-            out.instances.insert(r.id, key);
+            core.instances.insert(r.id, key);
         }
         for r in program.rules() {
-            let key = out.instances[&r.id].clone();
-            out.committed.insert(
+            let key = core.instances[&r.id].clone();
+            core.committed.insert(
                 key.clone(),
                 GroundInstance {
-                    schema: out.content[&key].schema.clone(),
+                    schema: core.content[&key].schema.clone(),
                     head: occurrence(&r.head)?,
                     body: r
                         .body
@@ -245,17 +273,17 @@ impl GroundKeyIndex {
                 },
             );
         }
-        out.dropped = out
+        core.dropped = core
             .content
             .keys()
-            .filter(|k| !out.committed.contains_key(*k))
+            .filter(|k| !core.committed.contains_key(*k))
             .cloned()
             .collect();
         for proof in program.rewrite_proofs() {
-            out.rewrites.insert(
+            core.rewrites.insert(
                 proof.id,
                 RewriteEvidenceKey {
-                    candidate: out.instances[&proof.candidate.rule.id].clone(),
+                    candidate: core.instances[&proof.candidate.rule.id].clone(),
                     kind: match proof.kind {
                         RewriteKind::Discharge { literal_occurrence } => {
                             KeyedRewriteKind::Discharge(
@@ -267,18 +295,29 @@ impl GroundKeyIndex {
                     producers: proof
                         .producers
                         .iter()
-                        .map(|p| out.instances[&p.rule.id].clone())
+                        .map(|p| core.instances[&p.rule.id].clone())
                         .collect(),
                 },
             );
         }
         for c in program.components() {
-            let atoms: BTreeSet<_> = c.atoms.iter().map(|a| out.atoms[a].clone()).collect();
-            out.components.insert(
+            let atoms: BTreeSet<_> = c.atoms.iter().map(|a| core.atoms[a].clone()).collect();
+            core.components.insert(
                 c.id,
                 ComponentKey(atoms.into_iter().collect::<Vec<_>>().into()),
             );
         }
+        out.build_groups(corpus, keys, program)?;
+        out.elapsed = start.elapsed();
+        Ok(out)
+    }
+    pub(crate) fn build_groups(
+        &mut self,
+        corpus: &Corpus,
+        keys: &SemanticKeys,
+        program: &GroundProgram,
+    ) -> std::result::Result<(), KeyError> {
+        self.groups.clear();
         for o in corpus
             .obligations()
             .filter(|o| program.obligations.contains(&o.id))
@@ -310,7 +349,7 @@ impl GroundKeyIndex {
                 members: BTreeMap::new(),
             };
             for a in program.atoms().filter(|a| a.relation == *relation) {
-                let atom = &out.atoms[a];
+                let atom = &self.atoms[a];
                 let tuple = group_by
                     .iter()
                     .map(|i| atom.arguments[*i].clone())
@@ -321,10 +360,9 @@ impl GroundKeyIndex {
                     .or_default()
                     .insert(atom.clone());
             }
-            out.groups.insert(keys.obligation(o.id)?.clone(), groups);
+            self.groups.insert(keys.obligation(o.id)?.clone(), groups);
         }
-        out.elapsed = start.elapsed();
-        Ok(out)
+        Ok(())
     }
 }
 

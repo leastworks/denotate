@@ -5,6 +5,10 @@ use std::cell::OnceCell;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
+#[path = "fixed_owned.rs"]
+mod owned;
+pub use owned::*;
+
 #[derive(Debug)]
 pub(crate) struct FixedFacts {
     pub program: GroundProgram,
@@ -15,13 +19,15 @@ pub(crate) struct FixedFacts {
 /// A single program snapshot's fold, shared across verifications in this run.
 /// This is not a cross-edit cache: handles and provenance belong to `corpus`.
 pub struct FixedPreparation<'a> {
+    pub(crate) contexts: std::cell::RefCell<Vec<crate::request::SharedContext<'a>>>,
     pub(crate) corpus: &'a denotate_ir::Corpus,
     pub(crate) domains: Domains,
     pub(crate) limits: DeterministicLimits,
     pub(crate) facts: Option<Arc<FixedFacts>>,
     pub(crate) input_domains: BTreeMap<denotate_ir::RelationId, BTreeSet<GroundAtom>>,
     pub(crate) receipt: WorkReceipt,
-    validation: OnceCell<(
+    pub(crate) transfer_receipts: WorkReceipts,
+    pub(super) validation: OnceCell<(
         &'a denotate_ir::SemanticKeys,
         Arc<OriginalAssumptionValidation>,
     )>,
@@ -37,41 +43,7 @@ impl<'a> FixedPreparation<'a> {
         let domains = validate_domains(corpus, domains, &mut budget)?;
         let input_domains = input_domains::evaluate(corpus, &domains, &mut budget)?;
         let result = (|| {
-            // Input dependence follows BOTH signs. The possible-tuple grounding
-            // SCC graph deliberately follows only positive edges and cannot serve
-            // as this classifier.
-            let mut readers = BTreeMap::<_, BTreeSet<_>>::new();
-            let mut dependent = BTreeSet::new();
-            let mut pending = VecDeque::new();
-            for relation in corpus.relations() {
-                budget.tick("fixed classification")?;
-                if relation.role == denotate_ir::RelationRole::Input {
-                    dependent.insert(relation.id);
-                    pending.push_back(relation.id);
-                }
-            }
-            for rule in corpus.rules() {
-                for literal in &rule.body {
-                    budget.tick("fixed classification")?;
-                    readers
-                        .entry(literal.atom().relation())
-                        .or_default()
-                        .insert(rule.head.relation());
-                }
-            }
-            while let Some(provider) = pending.pop_front() {
-                for consumer in readers.get(&provider).into_iter().flatten() {
-                    budget.tick("fixed classification")?;
-                    if dependent.insert(*consumer) {
-                        pending.push_back(*consumer);
-                    }
-                }
-            }
-            let cone: BTreeSet<_> = corpus
-                .relations()
-                .filter(|r| !dependent.contains(&r.id))
-                .map(|r| r.id)
-                .collect();
+            let cone = fixed_relations(corpus, &mut budget)?;
             let mut program = GroundProgram::empty(corpus, domains.clone());
             sparse::populate_domain_cone(corpus, &mut program, &mut budget, &cone)?;
             graph::analyze(&mut program, &mut budget)?;
@@ -91,6 +63,8 @@ impl<'a> FixedPreparation<'a> {
             }
             if settled.is_empty() {
                 return Ok(Self {
+                    contexts: Default::default(),
+                    transfer_receipts: Default::default(),
                     corpus,
                     domains,
                     limits: limits.into(),
@@ -123,6 +97,8 @@ impl<'a> FixedPreparation<'a> {
                 .evaluate_selected([], None, &mut budget)?
                 .into_derivations();
             Ok(Self {
+                contexts: Default::default(),
+                transfer_receipts: Default::default(),
                 corpus,
                 domains,
                 limits: limits.into(),
@@ -206,7 +182,49 @@ impl<'a> FixedPreparation<'a> {
     }
 }
 
-impl GroundProgram {
+fn fixed_relations(
+    corpus: &denotate_ir::Corpus,
+    budget: &mut Budget<'_>,
+) -> Result<BTreeSet<denotate_ir::RelationId>> {
+    // Input dependence follows BOTH signs. The possible-tuple grounding
+    // SCC graph deliberately follows only positive edges and cannot serve
+    // as this classifier.
+    let mut readers = BTreeMap::<_, BTreeSet<_>>::new();
+    let mut dependent = BTreeSet::new();
+    let mut pending = VecDeque::new();
+    for relation in corpus.relations() {
+        budget.tick("fixed classification")?;
+        if relation.role == denotate_ir::RelationRole::Input {
+            dependent.insert(relation.id);
+            pending.push_back(relation.id);
+        }
+    }
+    for rule in corpus.rules() {
+        for literal in &rule.body {
+            budget.tick("fixed classification")?;
+            readers
+                .entry(literal.atom().relation())
+                .or_default()
+                .insert(rule.head.relation());
+        }
+    }
+    while let Some(provider) = pending.pop_front() {
+        for consumer in readers.get(&provider).into_iter().flatten() {
+            budget.tick("fixed classification")?;
+            if dependent.insert(*consumer) {
+                pending.push_back(*consumer);
+            }
+        }
+    }
+    let cone: BTreeSet<_> = corpus
+        .relations()
+        .filter(|r| !dependent.contains(&r.id))
+        .map(|r| r.id)
+        .collect();
+    Ok(cone)
+}
+
+impl GroundCore {
     pub(crate) fn fixed_value(&self, atom: &GroundAtom) -> Option<bool> {
         let fixed = self.fixed.as_ref()?;
         fixed

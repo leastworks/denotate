@@ -26,7 +26,7 @@ pub use grounding::*;
 #[path = "fixed.rs"]
 mod fixed;
 pub(crate) use fixed::FixedFacts;
-pub use fixed::FixedPreparation;
+pub use fixed::{FixedInput, FixedPreparation, FixedStore, FixedValue, fold_owned};
 
 #[cfg(any(test, feature = "test-support"))]
 #[path = "tests/preparation_profile.rs"]
@@ -128,6 +128,17 @@ pub struct InputAtMostOne {
 /// Owns a snapshot of rule structure; source IDs point back to the original IR.
 #[derive(Debug, Clone)]
 pub struct GroundProgram {
+    pub(crate) core: std::sync::Arc<GroundCore>,
+    groups: Vec<AtMostOneGroup>,
+    pub(crate) emptiness: BTreeMap<ObligationId, RelationId>,
+    pub(crate) coverage: BTreeMap<ObligationId, crate::coverage::CoverageShape>,
+    // Keep the selection even when all its groups are trivial, and through admission.
+    pub(crate) obligations: BTreeSet<ObligationId>,
+}
+/// Shared graph and assumption context. Its fields are private to the checker;
+/// obligation selection lives on each GroundProgram wrapper.
+#[derive(Debug, Clone)]
+pub struct GroundCore {
     pub(crate) fixed: Option<std::sync::Arc<FixedFacts>>,
     pub(crate) preparation: u64,
     pub(crate) graph_revision: u64,
@@ -144,15 +155,22 @@ pub struct GroundProgram {
     pub(crate) atom_components: Vec<ComponentId>,
     pub(crate) component_rules: Vec<Vec<usize>>,
     pub(crate) dependencies: Vec<Dependency>,
-    groups: Vec<AtMostOneGroup>,
-    pub(crate) emptiness: BTreeMap<ObligationId, RelationId>,
-    pub(crate) coverage: BTreeMap<ObligationId, crate::coverage::CoverageShape>,
-    // Keep the selection even when all its groups are trivial, and through admission.
-    pub(crate) obligations: BTreeSet<ObligationId>,
     pub(crate) input_groups: Vec<Vec<GroundAtom>>,
     pub(crate) assumption_condition: Option<Condition>,
     metrics: PreparationMetrics,
 }
+impl std::ops::Deref for GroundProgram {
+    type Target = GroundCore;
+    fn deref(&self) -> &GroundCore {
+        &self.core
+    }
+}
+impl std::ops::DerefMut for GroundProgram {
+    fn deref_mut(&mut self) -> &mut GroundCore {
+        std::sync::Arc::make_mut(&mut self.core)
+    }
+}
+
 impl GroundProgram {
     /// Prepare unrestricted input worlds (W = true). This does not infer input
     /// constraints from relation names, signatures or checked obligations.
@@ -292,32 +310,34 @@ impl GroundProgram {
     pub(crate) fn empty(corpus: &Corpus, domains: Domains) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         Self {
-            fixed: None,
-            preparation: NEXT.fetch_add(1, Ordering::Relaxed),
-            graph_revision: 0,
-            rewrites: Default::default(),
-            signatures: corpus
-                .relations()
-                .map(|r| (r.id, r.parameters.iter().map(|p| p.sort).collect()))
-                .collect(),
-            domains,
-            atoms: vec![],
-            atom_index: BTreeMap::new(),
-            inputs: BTreeSet::new(),
-            input_domains: BTreeMap::new(),
-            input_order: None,
-            rules: vec![],
-            components: vec![],
-            atom_components: vec![],
-            component_rules: vec![],
-            dependencies: vec![],
+            core: std::sync::Arc::new(GroundCore {
+                fixed: None,
+                preparation: NEXT.fetch_add(1, Ordering::Relaxed),
+                graph_revision: 0,
+                rewrites: Default::default(),
+                signatures: corpus
+                    .relations()
+                    .map(|r| (r.id, r.parameters.iter().map(|p| p.sort).collect()))
+                    .collect(),
+                domains,
+                atoms: vec![],
+                atom_index: BTreeMap::new(),
+                inputs: BTreeSet::new(),
+                input_domains: BTreeMap::new(),
+                input_order: None,
+                rules: vec![],
+                components: vec![],
+                atom_components: vec![],
+                component_rules: vec![],
+                dependencies: vec![],
+                input_groups: vec![],
+                assumption_condition: None,
+                metrics: PreparationMetrics::default(),
+            }),
             groups: vec![],
             coverage: BTreeMap::new(),
             emptiness: BTreeMap::new(),
             obligations: corpus.obligations().map(|o| o.id).collect(),
-            input_groups: vec![],
-            assumption_condition: None,
-            metrics: PreparationMetrics::default(),
         }
     }
 
@@ -342,13 +362,20 @@ impl GroundProgram {
         Ok(self.atom_index.contains_key(atom) || self.fixed_value(atom).is_some())
     }
 
-    fn build_groups(&mut self, corpus: &Corpus, budget: &mut Budget<'_>) -> Result<()> {
+    pub(crate) fn build_groups(&mut self, corpus: &Corpus, budget: &mut Budget<'_>) -> Result<()> {
+        self.groups.clear();
+        self.emptiness.clear();
+        self.coverage.clear();
+        if self.obligations.is_empty() {
+            return Ok(());
+        }
         let mut by_relation = BTreeMap::<_, Vec<_>>::new();
         for atom in self
+            .core
             .fixed
             .iter()
             .flat_map(|f| f.program.atoms.iter())
-            .chain(self.atoms.iter())
+            .chain(self.core.atoms.iter())
         {
             budget.tick("obligation groups")?;
             by_relation.entry(atom.relation).or_default().push(atom);
@@ -487,7 +514,7 @@ impl GroundProgram {
         self.fixed
             .iter()
             .flat_map(|f| f.program.atoms.iter())
-            .chain(self.atoms.iter())
+            .chain(self.core.atoms.iter())
     }
     pub fn input_atoms(&self) -> impl Iterator<Item = &GroundAtom> {
         self.inputs.iter()

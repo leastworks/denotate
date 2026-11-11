@@ -411,7 +411,7 @@ fn check_program(
         }
         let fixed = fixed.get_or_init(|| {
             progress.emit(Phase::FixedFacts, json!({}));
-            denotate_check::FixedPreparation::prepare_with_validation(&validated, &limits)
+            session.prepare_fixed_with_validation(&validated, &limits)
         });
         progress.emit(Phase::Preparation, detail.clone());
         let prepared = match fixed {

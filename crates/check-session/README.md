@@ -6,18 +6,27 @@ that warm results (and work receipts) equal a cold check of the same snapshot.
 
 - `Session::prepare(&request, &corpus, &keys, &operations)` and `Session::verify(...)`
   mirror the fresh checker entry points. `FreshSession` is the uncached control.
-- `Session::prepare_with_fixed` takes a run-scoped `FixedPreparation`, shared across
-  verification requests. Join plans and local verdicts retain their existing reuse;
-  this path grounds the residual afresh and does not use the optional relation-SCC
-  grounding cache. Its original assumption validation is also shared within the run,
-  including when callers omit the program-level validation pass. The fold and
-  validation are not cached across edits.
+- `Session::prepare_fixed` (or `prepare_fixed_with_validation`) retains the
+  assumption-independent fold in Salsa. Its input is keyed fixed schemas, domains
+  and deterministic limits; its output contains no arena handles or source spans.
+  Binding restores current evidence. The current query covers the whole fixed cone:
+  input-dependent edits reuse it, fixed edits recompute it.
+- `Session::prepare_with_fixed` shares residual grounding, indexes and admission
+  across requests with the same selected restrictions in that run. Obligation
+  groups, notices, verification identity and example policy stay separate. This
+  path does not use the optional relation-SCC grounding cache. Original assumption
+  validation remains shared within a run and fresh across edits.
+- The fold has one recycled slot and at most one quarter of the session byte
+  allowance (including source schemas and retained output). Oversized results
+  bypass retention. `fixed_stats()` reports execution, reuse, bypass and bytes;
+  reset and eviction release the value. Cancellation, deadlines and exhaustion
+  clear the query. Residual preparation and admission are not retained across edits.
 - `Session::verify_with_metrics` and the checker's corresponding methods optionally
   time the actual notice pass. Metrics reset on entry, stay outside semantic results
   and receipts, and are never cached.
-- Caches are keyed by semantic keys, never arena IDs: unchanged rules and components
-  are reused across edits, trivia-only edits re-execute nothing, and an edit
-  invalidates exactly the dependent work.
+- Retained queries use semantic keys, never arena IDs. Unchanged query inputs reuse
+  answers; edits invalidate work at each query's granularity. Source binding and
+  run-scoped preparation still execute after trivia-only edits.
 - **Retention** is bounded (`Retention`, recycled slots, per-pool byte limits);
   oversized entries bypass the cache. `without_retention_limits` exists for
   measurement. `reset` and `evict_values` drop cached state.

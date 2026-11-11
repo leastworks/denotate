@@ -137,7 +137,7 @@ fn check_with_progress(
             }
             let fixed = fixed.get_or_init(|| {
                 progress.emit(Phase::FixedFacts, json!({}));
-                denotate_check::FixedPreparation::prepare_with_validation(&validated, &job.limits)
+                session.prepare_fixed_with_validation(&validated, &job.limits)
             });
             progress.emit(Phase::Preparation, context.clone());
             let fixed = fixed.as_ref().map_err(|e| Failure::from(e.clone()))?;

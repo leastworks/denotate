@@ -61,7 +61,8 @@ pub fn size(p: &PreparedCheck<'_>) -> Value {
 pub fn preparation_stats(s: &Session, mode: &str) -> Value {
     let p = s.plan_stats();
     let g = s.grounding_stats();
-    json!({"plans":if mode=="bdd-no-plans" {Value::Null}else{json!({
+    let f = s.fixed_stats();
+    json!({"fixed":if mode=="folded-bdd" {json!({"executed":f.executed,"reused":f.reused,"bypassed":f.bypassed,"retained_bytes":f.retained_bytes})}else{Value::Null},"plans":if mode=="bdd-no-plans" {Value::Null}else{json!({
         "queries":p.queries,"executed":p.executed,"reused":p.reused,"fallback":p.fallback,
         "small_rules":p.small_rules,"evicted":p.evicted,"bypassed":p.bypassed,"reused_work":p.reused_work,
         "retained_entries":p.retained_entries,"retained_bytes":p.retained_bytes,

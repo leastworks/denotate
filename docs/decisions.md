@@ -66,8 +66,8 @@ real program that the current choice serves badly.
   ground graph: accepting a cycle after simplifying a false guard would change
   declaration validity, not merely performance. The fold has its own bounded
   allowance and receipt; retained atoms, rules and dependencies also count against
-  preparation's size limits. Sharing residual preparation and caching the fold
-  across edits remain separate work, measured with the `.den` scorecard.
+  preparation's size limits. Reuse is measured with the `.den` scorecard and the
+  multi-verification benchmark.
 - **Original assumption validation is shared within a run.** Rebuilding the entire
   unrevised program inside every folded request repeated work independent of its
   selections. The program-level pass now offers a sealed snapshot-bound artifact;
@@ -77,7 +77,19 @@ real program that the current choice serves badly.
   map is not proof of validity. The query is independently bounded and accounted;
   exhaustion remains inconclusive and operational interruptions are not cached.
   Original graph semantics, selective rejection and current-source evidence stay
-  unchanged. Residual preparation and admission still run per verification.
+  unchanged.
+- **Share a context, not its selected checks.** Residual grounding, permitted worlds,
+  indexes and admission depend on the program, resolved domains, restrictions and
+  deterministic limits. Obligation groups, notices, verification identity and
+  example policy are separate attachments. Requests sharing a context still check
+  their own selections; neither exhaustion nor an attachment can contaminate another.
+  Context graphs remain bound to one source snapshot. Across snapshots, the bounded
+  Salsa fold query retains semantic keys and original instance substitutions, then
+  binds current evidence. The first query covers the whole fixed cone, preserving
+  its whole-operation allowance. The existing possibility-grounding SCCs follow
+  positive edges and cannot directly cache fixed truth through negative providers;
+  finer fixed SCC invalidation is deferred pending measurements. No failed fold or incomplete
+  admission is reused as a completed artifact.
 - **Cycle diagnostics show retained ground dependencies.** A generic rule can have
   many instances with different recursive behavior. Showing concrete arguments and
   signed edges identifies the reported instance without searching for a new cycle

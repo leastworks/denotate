@@ -13,12 +13,15 @@ fn main() {
         .parse()
         .unwrap();
     let verifications: usize = args.next().map(|n| n.parse().unwrap()).unwrap_or(4);
-    let ground_assumption = match args.next().as_deref() {
-        None => false,
-        Some("--ground-assumption") => true,
-        _ => panic!("expected --ground-assumption"),
-    };
-    assert!(n > 0 && verifications > 0 && args.next().is_none());
+    let flags = args.collect::<Vec<_>>();
+    assert!(
+        flags
+            .iter()
+            .all(|f| matches!(f.as_str(), "--ground-assumption" | "--two-selections"))
+    );
+    let ground_assumption = flags.iter().any(|f| f == "--ground-assumption");
+    let two_selections = flags.iter().any(|f| f == "--two-selections");
+    assert!(n > 0 && verifications > 0);
     let mut source = String::from(
         "sort S; relation item(s:S); relation tagged(s:S); relation off(s:S); input flag(); relation error(s:S); relation left(); relation right();\n",
     );
@@ -31,35 +34,59 @@ fn main() {
         // both original-graph validation paths without changing the obligation.
         source.push_str("sort Side; const a,b:Side; input present(s:Side); relation guarded(s:Side); guarded(a); relation gives(s:Side); gives(b); relation holds(s:Side); holds(X):-present(X); holds(X):-guarded(X),!supplied(X); relation supplied(s:Side); supplied(X):-gives(X),!holds(X); relation broken(); broken():-!holds(a); assumption valid:empty(broken);\n");
     }
+    if two_selections {
+        source.push_str("assumption fixed_coverage:at_least_one(item,group_by:());\n");
+    }
     for i in 0..verifications {
         source.push_str(&format!(
-            "verification v{i}{{assumptions:[fixed_absence{}];obligations:[clean];}}\n",
+            "verification v{i}{{assumptions:[{}{}];obligations:[clean];}}\n",
+            if two_selections && i % 2 == 1 {
+                "fixed_coverage"
+            } else {
+                "fixed_absence"
+            },
             if ground_assumption { ",valid" } else { "" }
         ));
     }
-    let file = SourceFile::new("file:///benchmark.den", 1, source);
-    let p = load(
-        &ProgramMembership::single("benchmark", [file.uri.clone()]),
-        &[file],
-    )
-    .unwrap();
     let limits = Limits {
         timeout: Duration::from_secs(120),
         ..Limits::default()
     };
     let operations = (&limits).into();
-    let requests = p.verification_requests(&limits).unwrap();
     let mut controls = Vec::new();
-    for folded in [false, true] {
-        let mut session = Session::default();
+    let mut session = Session::default();
+    for (folded, warm, edited) in [
+        (false, false, false),
+        (true, false, false),
+        (true, true, false),
+        (true, true, true),
+    ] {
+        let text = if edited {
+            source.replace("error(X):-off(X),flag()", "error(X):-off(X),!flag()")
+        } else {
+            source.clone()
+        };
+        let file = SourceFile::new("file:///benchmark.den", 1, text);
+        let p = load(
+            &ProgramMembership::single("benchmark", [file.uri.clone()]),
+            &[file],
+        )
+        .unwrap();
+        let requests = p.verification_requests(&limits).unwrap();
+        if !warm {
+            session = Session::default();
+        }
         let start = Instant::now();
         let validated =
             validate_assumption_cones_for_run(&p.corpus, &p.domains, &p.keys, &limits).unwrap();
         assert!(validated.result().is_valid());
         let validation = start.elapsed();
         let start = Instant::now();
-        let fixed =
-            folded.then(|| FixedPreparation::prepare_with_validation(&validated, &limits).unwrap());
+        let fixed = folded.then(|| {
+            session
+                .prepare_fixed_with_validation(&validated, &limits)
+                .unwrap()
+        });
         let fold = start.elapsed();
         let mut preparation = fold;
         let mut admission = Duration::ZERO;
@@ -103,7 +130,7 @@ fn main() {
         }
         println!(
             "{}",
-            json!({"folded":folded,"items":n,"verifications":verifications,
+            json!({"folded":folded,"warm":warm,"edited":edited,"two_selections":two_selections,"fixed_cache":{"executed":session.fixed_stats().executed,"reused":session.fixed_stats().reused,"bypassed":session.fixed_stats().bypassed,"retained_bytes":session.fixed_stats().retained_bytes},"items":n,"verifications":verifications,
             "ground_assumption":ground_assumption,"validation_ms":validation.as_secs_f64()*1000.,
             "fixed_ms":fold.as_secs_f64()*1000., "preparation_ms":preparation.as_secs_f64()*1000.,
             "admission_ms":admission.as_secs_f64()*1000.,"checking_ms":checking.as_secs_f64()*1000.,"size":sizes})

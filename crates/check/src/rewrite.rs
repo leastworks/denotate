@@ -142,9 +142,10 @@ impl GroundProgram {
         self.rewrites
             .originals
             .insert(original.id, original.clone());
+        let snapshot = self.preparation;
         self.rewrites.proofs.push(RewriteProof {
             id,
-            snapshot: self.preparation,
+            snapshot,
             kind: RewriteKind::Discharge {
                 literal_occurrence: occurrence,
             },

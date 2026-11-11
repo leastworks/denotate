@@ -11,6 +11,8 @@ use std::{
 pub enum QueryKey {
     AssumptionValidation,
     FixedFacts,
+    FixedRuntime,
+    FixedBinding,
     Preparation,
     Grounding(GroundingKey),
     Admission,

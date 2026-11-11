@@ -180,6 +180,7 @@ pub struct Session {
     clock: u64,
     stats: CacheStats,
     plans: crate::plans::PlanCache,
+    fixed: crate::fixed::FixedCache,
     grounding: Option<crate::grounding::GroundingCache>,
     #[cfg(any(test, feature = "test-support"))]
     fresh_grounding: bool,
@@ -203,6 +204,7 @@ impl Session {
             clock: 0,
             stats: Default::default(),
             plans: Default::default(),
+            fixed: Default::default(),
             grounding: None,
             #[cfg(any(test, feature = "test-support"))]
             fresh_grounding: false,
@@ -256,6 +258,52 @@ impl Session {
             fresh_grounding: true,
             ..Self::with_grounding()
         }
+    }
+    pub fn fixed_stats(&self) -> crate::FixedStats {
+        self.fixed.stats
+    }
+    fn reserve_fixed(&mut self) {
+        self.fixed.max_bytes = if self.total_retention.max_entries == 0 {
+            0
+        } else {
+            self.total_retention.max_bytes / 4
+        };
+        self.trim_local(
+            self.total_retention
+                .max_bytes
+                .saturating_sub(self.fixed.max_bytes)
+                .saturating_sub(self.plans.stats.retained_bytes)
+                .saturating_sub(self.grounding_stats().retained_bytes),
+            self.total_retention.max_entries,
+        );
+    }
+    pub fn prepare_fixed<'s>(
+        &mut self,
+        corpus: &'s denotate_ir::Corpus,
+        keys: &denotate_ir::SemanticKeys,
+        domains: &Domains,
+        limits: &Limits,
+    ) -> Result<FixedPreparation<'s>, CheckError> {
+        self.reserve_fixed();
+        let result =
+            FixedPreparation::prepare_cached(corpus, keys, domains, limits, &mut self.fixed);
+        if result.is_err() {
+            self.fixed.clear();
+        }
+        result
+    }
+    pub fn prepare_fixed_with_validation<'s>(
+        &mut self,
+        validation: &ValidatedAssumptions<'s>,
+        limits: &Limits,
+    ) -> Result<FixedPreparation<'s>, CheckError> {
+        self.reserve_fixed();
+        let result =
+            FixedPreparation::prepare_cached_with_validation(validation, limits, &mut self.fixed);
+        if result.is_err() {
+            self.fixed.clear();
+        }
+        result
     }
     pub fn grounding_stats(&self) -> crate::GroundingStats {
         self.grounding
@@ -322,7 +370,8 @@ impl Session {
             self.total_retention
                 .max_bytes
                 .saturating_sub(plan_bytes)
-                .saturating_sub(self.grounding_stats().retained_bytes),
+                .saturating_sub(self.grounding_stats().retained_bytes)
+                .saturating_sub(self.fixed.stats.retained_bytes),
             self.total_retention.max_entries,
         );
         self.plans.begin(plan_entries, plan_bytes);
@@ -348,7 +397,8 @@ impl Session {
             self.total_retention
                 .max_bytes
                 .saturating_sub(stats.retained_bytes)
-                .saturating_sub(self.grounding_stats().retained_bytes),
+                .saturating_sub(self.grounding_stats().retained_bytes)
+                .saturating_sub(self.fixed.stats.retained_bytes),
             self.total_retention.max_entries,
         );
         result
@@ -384,6 +434,7 @@ impl Session {
         self.stats
     }
     pub fn reset(&mut self) {
+        self.fixed.clear();
         self.plans.clear();
         if let Some(grounding) = &mut self.grounding {
             grounding.clear();
@@ -471,6 +522,7 @@ impl Session {
         self.stats.evicted += 2;
     }
     pub fn evict_values(&mut self) {
+        self.fixed.clear();
         if let Some(grounding) = &mut self.grounding {
             grounding.evict_values();
         }
