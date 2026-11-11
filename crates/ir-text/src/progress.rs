@@ -1,7 +1,7 @@
 //! Observational phase reporting shared by `.den` checking frontends. Callbacks
 //! own delivery; this module performs no IO, scheduling or additional checking.
 use crate::{LoadedProgram, index};
-use denotate_check::{AdmissionProgress, CheckError, GroundProgram};
+use denotate_check::{AdmissionComponent, AdmissionProgress, CheckError, GroundProgram};
 use denotate_ir::VerificationKey;
 use serde_json::{Value, json};
 use std::time::Instant;
@@ -126,28 +126,59 @@ impl<'a> AdmissionDetails<'a> {
             return;
         }
         let mut detail = context.clone();
-        let current = event.current.as_ref().map(|c| {
-            let names = self.names.get_or_init(|| Box::new(crate::presentation::diagnostic_names(&self.program.corpus)));
-            let atom = format!("{}({})", names(c.representative.relation.into()),
-                c.representative.arguments.iter().map(|id| names((*id).into())).collect::<Vec<_>>().join(", "));
-            let location = c.source.map(|id| {
-                self.locations.borrow_mut().entry(id).or_insert_with(|| {
-                    self.program.provenance.origins(id).first().and_then(|origin| {
-                        let span = origin.span;
-                        let source = self.program.sources.snapshot(span.snapshot()).ok()?;
-                        let at = crate::origins::coordinate(&source.text, span.byte_range().start)?;
-                        Some(json!({"uri":source.uri,"line":at.line,"column":at.column}))
-                    }).unwrap_or(Value::Null)
-                }).clone()
-            });
-            json!({"index":c.index,"atoms":c.atoms,"ruleInstances":c.rules,"atom":atom,"location":location})
+        detail["admission"] = json!({
+            "round": event.round,
+            "stage": event.stage,
+            "unresolvedComponents": event.unresolved_components,
+            "blockedAtoms": event.blocked_atoms,
+            "current": event.current.as_ref().map(|c| self.component(c)),
+            "rule": event.rule,
+            "rules": event.rules,
+            "iteration": event.iteration,
+            "removedRules": event.removed_rules,
+            "dischargedNegations": event.discharged_negations,
+            "failure": event
+                .failure
+                .map(|r| denotate_presentation::exhaustion_text(r.phase, r.resource, r.details)),
         });
-        detail["admission"] = json!({"round":event.round,"stage":event.stage,
-            "unresolvedComponents":event.unresolved_components,"blockedAtoms":event.blocked_atoms,
-            "current":current,"rule":event.rule,"rules":event.rules,"iteration":event.iteration,
-            "removedRules":event.removed_rules,"dischargedNegations":event.discharged_negations,
-            "failure":event.failure.map(|r| denotate_presentation::exhaustion_text(r.phase,r.resource,r.details))});
         progress.emit(Phase::Admission, detail);
+    }
+    fn component(&self, c: &AdmissionComponent) -> Value {
+        let names = self
+            .names
+            .get_or_init(|| Box::new(crate::presentation::diagnostic_names(&self.program.corpus)));
+        let arguments = c.representative.arguments.iter();
+        let atom = format!(
+            "{}({})",
+            names(c.representative.relation.into()),
+            arguments
+                .map(|id| names((*id).into()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        json!({
+            "index": c.index,
+            "atoms": c.atoms,
+            "ruleInstances": c.rules,
+            "atom": atom,
+            "location": c.source.map(|id| self.location(id)),
+        })
+    }
+    fn location(&self, rule: denotate_ir::RuleId) -> Value {
+        let mut locations = self.locations.borrow_mut();
+        let location = locations.entry(rule).or_insert_with(|| {
+            let origins = self.program.provenance.origins(rule);
+            origins
+                .first()
+                .and_then(|origin| {
+                    let span = origin.span;
+                    let source = self.program.sources.snapshot(span.snapshot()).ok()?;
+                    let at = crate::origins::coordinate(&source.text, span.byte_range().start)?;
+                    Some(json!({"uri": source.uri, "line": at.line, "column": at.column}))
+                })
+                .unwrap_or(Value::Null)
+        });
+        location.clone()
     }
 }
 
