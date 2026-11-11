@@ -195,6 +195,7 @@ fn request_context_and_scoped_results_are_owned_and_distinguish_reasons() {
     cancelled.cancellation.cancel();
     assert!(matches!(g.verify(&cancelled), Err(CheckError::Cancelled)));
     let deadline = OperationalLimits {
+        progress: Default::default(),
         profile: Default::default(),
         cancellation: Cancellation::default(),
         timeout: Duration::ZERO,

@@ -122,3 +122,28 @@ test('admission snapshots identify unresolved components, current work, reuse an
   assert.match(view.text(p), /reused/);
   assert.doesNotMatch(view.details(p), /component 6|iteration 4|undefined/);
 });
+
+test('checking Output reports target, immediate exhaustion, recovery and remaining cycle locations', () => {
+  const p = progress({ checking: 1 }, { active: [{ program: 'app', label: 'app', revision: 5,
+    detail: { phase: 'checking', verification: '::v', elapsedMs: 50,
+      checking: { stage: 'certification', state: 'exhausted', continues: true,
+        target: { kind: 'obligation', name: '::o', location: { uri: 'file:///p.den', line: 4, column: 1 } },
+        failure: 'certification: condition nodes limit 42' } } }] });
+  assert.match(view.text(p), /certification/);
+  const lines = [];
+  const output = { debug() {}, info(s) { lines.push(['info', s]); }, warn(s) { lines.push(['warn', s]); } };
+  view.logProgress(output, undefined, p);
+  assert.equal(lines[0][0], 'warn');
+  assert.match(lines[0][1], /::v: Checking certification.*obligation ::o.*file:\/\/\/p.den:4:1.*condition nodes limit 42.*continuing other checking work/);
+  p.active[0].detail.checking.continues = false;
+  p.active[0].detail.checking.failure = 'certification: deadline';
+  assert.match(view.details(p), /deadline; stopping this verification/);
+  p.active[0].detail = { phase: 'admission', verification: '::v', elapsedMs: 10,
+    remainingComponent: { position: 1, total: 2, component: { index: 8, atoms: 3, ruleInstances: 5, atom: 'r()' },
+      cycle: [{ from: 'r()', to: 's()', negative: true, location: { uri: 'file:///p.den', line: 9, column: 2 } }],
+      truncated: true, cycleEdges: 20 } };
+  view.logProgress(output, undefined, p);
+  assert.match(lines.at(-1)[1], /Unresolved component 1\/2.*3 atoms, 5 rule instances/);
+  assert.match(lines.at(-1)[1], /r\(\) -not-> s\(\) at file:\/\/\/p.den:9:2/);
+  assert.match(lines.at(-1)[1], /20 cycle edges in total/);
+});

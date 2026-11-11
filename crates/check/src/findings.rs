@@ -212,6 +212,9 @@ impl<'p> SymbolicMeaning<'p> {
         let mut groups = Vec::new();
         let mut violations = Vec::new();
         for check in report.groups {
+            let _stage = limits.progress.sampled("replay", true, || {
+                CheckingTarget::Obligation(check.group.obligation)
+            });
             if queries.is_some() {
                 budget = Budget::tracked(limits);
             }
@@ -322,6 +325,13 @@ impl<'p> SymbolicMeaning<'p> {
             crate::accounting::test_schedule(&mut ordered);
         }
         for id in ordered {
+            let _stage = completion_limits.progress.scope(
+                "no-meaning",
+                self.program
+                    .progress_component(id)
+                    .map(CheckingTarget::Component),
+                true,
+            );
             if queries.is_some() {
                 completion_budget = Budget::tracked(completion_limits);
                 completion_nodes = 0;
@@ -394,6 +404,11 @@ impl<'p> SymbolicMeaning<'p> {
         certification_limits.cancellation.check()?;
         let mut certification_budget = Budget::new(certification_limits);
         for (group, condition) in groups.iter_mut().zip(violations) {
+            let _stage = certification_limits
+                .progress
+                .sampled("certification", true, || {
+                    CheckingTarget::Obligation(group.group.obligation)
+                });
             if queries.is_some() {
                 certification_budget = Budget::tracked(certification_limits);
             }

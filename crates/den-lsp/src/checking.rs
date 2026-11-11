@@ -81,16 +81,21 @@ fn check(
 fn check_with_progress(
     job: &Job<String, Payload>,
     session: &mut denotate_check_session::Session,
-    report: Option<&dyn Fn(Value)>,
+    report: Option<std::sync::Arc<dyn Fn(Value) + Send + Sync>>,
 ) -> std::result::Result<Publication, Failure> {
-    let observed = |mut detail: Value| {
+    let sink = report.clone();
+    let observed = std::sync::Arc::new(move |mut detail: Value| {
         detail["memory"] =
             serde_json::to_value(denotate_check_session::profiling::process_memory()).unwrap();
-        if let Some(report) = report {
+        if let Some(report) = &sink {
             report(detail);
         }
-    };
-    let progress = CheckProgress::new(report.map(|_| &observed as &dyn Fn(Value)));
+    });
+    let progress = CheckProgress::new(
+        report
+            .as_ref()
+            .map(|_| observed as std::sync::Arc<dyn Fn(Value) + Send + Sync>),
+    );
     job.limits.cancellation.check()?;
     let s = &job.payload.snapshot;
     progress.emit(
@@ -112,6 +117,9 @@ fn check_with_progress(
     let validation = validated.result();
     let validation_publication =
         presentation::assumption_validation(&program, &validation).map_err(Failure::Internal)?;
+    for message in denotate_presentation::exhaustion_messages(&validation_publication.status) {
+        progress.exhaustion(Phase::AssumptionValidation, &json!({}), message, true);
+    }
     publication.status["assumptionValidation"] = validation_publication.status.clone();
     for (uri, diagnostics) in validation_publication.diagnostics {
         publication
@@ -130,9 +138,22 @@ fn check_with_progress(
         // Each context gets its own operation limits; a failed context cannot
         // consume another verification's deadline or prevent its execution.
         let operations = OperationalLimits::from(&job.limits);
-        let exhausted = |reason| Publication {
-            diagnostics: BTreeMap::new(),
-            status: denotate_presentation::summary(&request.exhausted(reason)),
+        let current_phase = std::cell::Cell::new(Phase::Preparation);
+        let exhausted = |reason: denotate_check::Inconclusive| {
+            progress.exhaustion(
+                current_phase.get(),
+                &context,
+                denotate_presentation::exhaustion_text(
+                    reason.phase,
+                    reason.resource,
+                    reason.details,
+                ),
+                false,
+            );
+            Publication {
+                diagnostics: BTreeMap::new(),
+                status: denotate_presentation::summary(&request.exhausted(reason)),
+            }
         };
         let mut run = || -> std::result::Result<Publication, Failure> {
             if let Some(state) =
@@ -165,14 +186,20 @@ fn check_with_progress(
                 ground.program(),
                 session.fixed_stats().retained_bytes,
             );
+            current_phase.set(Phase::Admission);
             progress.emit(Phase::Admission, detail.clone());
             let observer = |event: &denotate_check::AdmissionProgress| {
                 admission.report(&progress, &detail, event)
             };
             let ground = ground.admit_with_progress(
                 &operations,
-                report.map(|_| &observer as &denotate_check::AdmissionObserver<'_>),
+                report
+                    .as_ref()
+                    .map(|_| &observer as &denotate_check::AdmissionObserver<'_>),
             )?;
+            let mut operations = operations.clone();
+            operations.progress = admission.checking(&progress, &detail, ground.program());
+            current_phase.set(Phase::Checking);
             progress.emit(Phase::Checking, detail.clone());
             match session.verify(&ground, &operations)? {
                 LocalCheckOutcome::Complete(report) => {
@@ -999,17 +1026,25 @@ mod tests {
             &mut session,
             &mut denotate_check_session::Session::default(),
         ] {
-            let updates = std::cell::RefCell::new(vec![]);
-            let actual =
-                check_with_progress(&job, session, Some(&|p| updates.borrow_mut().push(p)))
-                    .unwrap();
+            let updates = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
+            let actual = check_with_progress(
+                &job,
+                session,
+                Some({
+                    let updates = updates.clone();
+                    std::sync::Arc::new(move |p| updates.lock().unwrap().push(p))
+                }),
+            )
+            .unwrap();
             assert_eq!(actual.status, expected.status);
             assert_eq!(actual.diagnostics, expected.diagnostics);
-            let updates = updates.into_inner();
+            let updates = updates.lock().unwrap();
             assert_eq!(
                 updates
                     .iter()
-                    .filter(|p| p.get("admission").is_none())
+                    .filter(|p| p.get("admission").is_none()
+                        && p.get("checking").is_none()
+                        && p.get("remainingComponent").is_none())
                     .map(|p| p["phase"].as_str().unwrap())
                     .collect::<Vec<_>>(),
                 [
@@ -1042,6 +1077,94 @@ mod tests {
         }
     }
     #[test]
+    fn checking_reports_unresolved_work_and_exhaustion_without_changing_publication() {
+        for nodes in [Limits::default().max_condition_nodes, 0] {
+            let job = assumption_job("relation a(); a():-!a(); obligation o:empty(a); verification v{assumptions:[];obligations:[o];}", Limits {max_condition_nodes:nodes,..Limits::default()});
+            let mut session = denotate_check_session::Session::default();
+            let expected = check(&job, &mut session).unwrap();
+            for session in [
+                &mut session,
+                &mut denotate_check_session::Session::default(),
+            ] {
+                let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+                let send = events.clone();
+                let actual = check_with_progress(
+                    &job,
+                    session,
+                    Some(std::sync::Arc::new(move |e| send.lock().unwrap().push(e))),
+                )
+                .unwrap();
+                assert_eq!(expected.status, actual.status);
+                assert_eq!(expected.diagnostics, actual.diagnostics);
+                let events = events.lock().unwrap();
+                let remaining = events
+                    .iter()
+                    .position(|e| e.get("remainingComponent").is_some())
+                    .unwrap();
+                let checking = events
+                    .iter()
+                    .position(|e| e["phase"] == "checking")
+                    .unwrap();
+                assert!(remaining < checking);
+                assert_eq!(
+                    events[remaining]["remainingComponent"]["component"]["atoms"],
+                    1
+                );
+                assert_eq!(
+                    events[remaining]["remainingComponent"]["cycle"][0]["location"]["uri"],
+                    "file:///p.den"
+                );
+                if nodes == 0 {
+                    let failed = events
+                        .iter()
+                        .find(|e| e["checking"]["state"] == "exhausted")
+                        .unwrap();
+                    assert_eq!(failed["verification"], "::v");
+                    assert!(failed["checking"]["failure"]
+                        .as_str()
+                        .unwrap()
+                        .contains("condition nodes"));
+                } else {
+                    assert!(events
+                        .iter()
+                        .any(|e| e["checking"]["target"]["name"] == "::o"));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn preparation_exhaustion_is_reported_before_the_next_verification() {
+        let job = assumption_job("input p(); obligation o:empty(p); verification v{assumptions:[];obligations:[o];} verification w{assumptions:[];obligations:[o];}", Limits{max_atoms:0,..Limits::default()});
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let send = events.clone();
+        let expected = check(&job, &mut denotate_check_session::Session::default()).unwrap();
+        let actual = check_with_progress(
+            &job,
+            &mut denotate_check_session::Session::default(),
+            Some(std::sync::Arc::new(move |e| send.lock().unwrap().push(e))),
+        )
+        .unwrap();
+        assert_eq!(actual.status, expected.status);
+        assert_eq!(actual.diagnostics, expected.diagnostics);
+        let events = events.lock().unwrap();
+        let failure = events
+            .iter()
+            .position(|e| e["verification"] == "::v" && e["checking"]["state"] == "exhausted")
+            .unwrap();
+        let next = events
+            .iter()
+            .position(|e| e["verification"] == "::w")
+            .unwrap();
+        assert!(failure < next);
+        assert_eq!(events[failure]["phase"], "preparation");
+        assert!(events[failure]["checking"]["failure"]
+            .as_str()
+            .unwrap()
+            .contains("atoms"));
+    }
+
+    #[test]
     fn admission_reports_current_cycles_and_reuse_without_changing_publication() {
         let job = assumption_job("input t(); relation a(); relation b(); a():-t(),!b(); b():-!t(),!a(); relation bad(); bad():-a(),b(); obligation o:empty(bad); verification v{assumptions:[];obligations:[o];} verification w{assumptions:[];obligations:[o];}", Limits::default());
         let mut session = denotate_check_session::Session::default();
@@ -1050,12 +1173,19 @@ mod tests {
             &mut session,
             &mut denotate_check_session::Session::default(),
         ] {
-            let events = std::cell::RefCell::new(Vec::new());
-            let actual =
-                check_with_progress(&job, session, Some(&|e| events.borrow_mut().push(e))).unwrap();
+            let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let actual = check_with_progress(
+                &job,
+                session,
+                Some({
+                    let events = events.clone();
+                    std::sync::Arc::new(move |e| events.lock().unwrap().push(e))
+                }),
+            )
+            .unwrap();
             assert_eq!(expected.status, actual.status);
             assert_eq!(expected.diagnostics, actual.diagnostics);
-            let events = events.into_inner();
+            let events = events.lock().unwrap();
             let upper = events
                 .iter()
                 .find(|e| e["admission"]["stage"] == "upper-bounds")
@@ -1084,31 +1214,38 @@ mod tests {
         let mut exhausted = job;
         exhausted.limits.max_condition_nodes = 0;
         let expected = check(&exhausted, &mut denotate_check_session::Session::default()).unwrap();
-        let events = std::cell::RefCell::new(Vec::new());
+        let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
         let actual = check_with_progress(
             &exhausted,
             &mut denotate_check_session::Session::default(),
-            Some(&|e| events.borrow_mut().push(e)),
+            Some({
+                let events = events.clone();
+                std::sync::Arc::new(move |e| events.lock().unwrap().push(e))
+            }),
         )
         .unwrap();
         assert_eq!(actual.status, expected.status);
         assert_eq!(actual.diagnostics, expected.diagnostics);
         assert!(events
-            .borrow()
+            .lock()
+            .unwrap()
             .iter()
             .any(|e| e["admission"]["failure"].is_string()));
     }
     #[test]
     fn fixed_preparation_runs_once_across_verifications() {
         let job = assumption_job("relation fixed(); fixed(); input i(); relation r(); r():-fixed(),i(); obligation o:empty(r); verification a{assumptions:[];obligations:[o];} verification b{assumptions:[];obligations:[o];}", Limits::default());
-        let updates = std::cell::RefCell::new(vec![]);
+        let updates = std::sync::Arc::new(std::sync::Mutex::new(vec![]));
         check_with_progress(
             &job,
             &mut denotate_check_session::Session::default(),
-            Some(&|p| updates.borrow_mut().push(p)),
+            Some({
+                let updates = updates.clone();
+                std::sync::Arc::new(move |p| updates.lock().unwrap().push(p))
+            }),
         )
         .unwrap();
-        let updates = updates.into_inner();
+        let updates = updates.lock().unwrap();
         assert_eq!(
             updates
                 .iter()
@@ -1118,7 +1255,12 @@ mod tests {
         );
         let prepared = updates
             .iter()
-            .filter(|p| p["phase"] == "admission" && p.get("admission").is_none())
+            .filter(|p| {
+                p["phase"] == "admission"
+                    && p.get("admission").is_none()
+                    && p.get("checking").is_none()
+                    && p.get("remainingComponent").is_none()
+            })
             .collect::<Vec<_>>();
         assert_eq!(prepared.len(), 2);
         for detail in prepared {

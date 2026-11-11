@@ -1,3 +1,4 @@
+mod checking_progress;
 mod completion;
 mod fixed_retention;
 mod incremental_inventory;

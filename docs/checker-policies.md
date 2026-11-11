@@ -55,6 +55,13 @@ the optional memory-profile span stream; both can be enabled together. See the
 [progress protocol](../crates/den-lsp/PROTOCOL.md#checking-progress-and-logs).
 They do not alter deterministic allowances, cache keys or results. As with other
 logging, delivery costs wall time; deadlines remain cooperative.
+After admission, progress lists remaining component sizes and bounded cycle
+excerpts. Checking then reports the current target and operation, with exhaustion
+as soon as it is detected or restored from cache. Recoverable query failures allow
+other checks; deadlines ordinarily stop the verification, except for advisory
+notices and optional attribution. This changes observation only, not resource
+allowances or the existing recovery policy. Finished CLI verification reports are
+flushed before later verification work.
 
 Within each admission snapshot, producer removal runs before negation discharge.
 A nonempty removal batch rebuilds the graph and starts a fresh snapshot; cycle

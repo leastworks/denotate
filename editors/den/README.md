@@ -103,6 +103,16 @@ Counts describe components containing negation cycles, not every possible cycle;
 blocked atoms include downstream dependents. Components may split between rounds,
 so these counts are not a monotonically decreasing percentage.
 
+Before checking starts, Output lists remaining component sizes and representative
+cycle source locations (up to 12 edges each). During checking, the status item shows
+the current operation; the tooltip and Output identify its obligation, notice or
+component. Budget exhaustion produces an immediate Warning with phase, resource,
+limit and observed demand when available, plus whether checking continues elsewhere.
+Cached inconclusive results report their cause too. Ordinary checking deadlines
+stop that verification; advisory notices and optional attribution can recover.
+A finished operation is not a proof. Inner traversal is sampled; there is no
+heartbeat inside a single BDD call and no publication of tentative findings.
+
 “Evaluating fixed facts” runs once per program check, shared across its
 verifications. A completed keyed fold is retained across runs without a byte cap;
 its accounted bytes appear in the tooltip and Output separately from bound evidence

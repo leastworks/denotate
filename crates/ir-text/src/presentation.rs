@@ -174,7 +174,7 @@ pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Pr
 /// The callback accepts only relation and constant declarations in this corpus.
 pub fn diagnostic_names(
     corpus: &denotate_ir::Corpus,
-) -> impl Fn(denotate_ir::OccurrenceId) -> String {
+) -> impl Fn(denotate_ir::OccurrenceId) -> String + Send + Sync + use<> {
     use crate::{NameKind, spelling};
     use denotate_ir::OccurrenceId;
     let qualify = |id: OccurrenceId, text: String| {

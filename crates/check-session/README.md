@@ -37,6 +37,11 @@ See [memory profiling](../../docs/checker-policies.md#memory-profiling).
   directly from the current corpus, without reconstruction/export. A zero
   `max_bytes` alone limits the other pools; it does not disable the fold. Retained
   and direct preparation agree on semantic outcomes; chosen evidence may differ.
+- `OperationalLimits::progress` observes actual local evaluation and answers as
+  well as reused inconclusive results. The observer is invocation-local operational
+  state, excluded from query keys and values, and released after verification or
+  a local execution returns, including errors. Private runtimes keep the caller's
+  current obligation/component target.
 - `Session::verify_with_metrics` and the checker's corresponding methods optionally
   time the actual notice pass. Metrics reset on entry, stay outside semantic results
   and receipts, and are never cached.

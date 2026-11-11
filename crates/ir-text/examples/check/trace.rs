@@ -1,26 +1,31 @@
 //! CLI layout for shared phase events. Progress is best-effort and never alters
 //! a checking result when the diagnostic stream cannot be written.
 use serde_json::Value;
-use std::{cell::RefCell, io::Write, time::Instant};
+use std::{
+    io::Write,
+    sync::{Arc, Mutex},
+    time::Instant,
+};
 
-pub struct Trace<'a> {
-    output: RefCell<&'a mut dyn Write>,
+#[derive(Clone)]
+pub struct Trace {
+    output: Arc<Mutex<Box<dyn Write + Send>>>,
     enabled: bool,
     started: Instant,
-    phase: RefCell<Option<(String, Instant)>>,
+    phase: Arc<Mutex<Option<(String, Instant)>>>,
 }
-impl<'a> Trace<'a> {
-    pub fn new(output: &'a mut dyn Write, enabled: bool) -> Self {
+impl Trace {
+    pub fn new(output: impl Write + Send + 'static, enabled: bool) -> Self {
         Self {
-            output: RefCell::new(output),
+            output: Arc::new(Mutex::new(Box::new(output))),
             enabled,
             started: Instant::now(),
-            phase: RefCell::new(None),
+            phase: Arc::new(Mutex::new(None)),
         }
     }
     pub fn message(&self, message: impl std::fmt::Display) {
         if self.enabled {
-            let mut output = self.output.borrow_mut();
+            let mut output = self.output.lock().unwrap();
             let _ = writeln!(
                 output,
                 "[check +{:.3}s] {message}",
@@ -30,7 +35,7 @@ impl<'a> Trace<'a> {
         }
     }
     fn end_phase(&self) {
-        if let Some((name, start)) = self.phase.borrow_mut().take() {
+        if let Some((name, start)) = self.phase.lock().unwrap().take() {
             self.message(format_args!(
                 "{name}: phase time {:.3}s",
                 start.elapsed().as_secs_f64()
@@ -53,7 +58,7 @@ impl<'a> Trace<'a> {
         };
         self.message(format_args!("Starting {label}"));
         self.memory();
-        *self.phase.borrow_mut() = Some((label, Instant::now()));
+        *self.phase.lock().unwrap() = Some((label, Instant::now()));
         if let Some(files) = detail.get("files") {
             self.message(format_args!("Source files: {files}"));
         }

@@ -124,6 +124,15 @@ callbacks choose when to read it. The detailed profiler streams samples and even
 without retaining a growing event history. Process-wide readings are observations,
 never cache inputs or resource-policy decisions.
 
+Checking progress also travels through operational limits. Synchronous, owned
+callbacks reach session-backed local queries without becoming query inputs or
+retained results; sessions clear the callback on return. The checker reports current
+targets, operations and exhaustion using existing graph metadata. Private runtimes
+inherit their source-bound caller target. The `.den` adapter resolves names and
+bounded cycle excerpts, while CLI/editor own delivery. Editor events retain the
+normal ticket filtering. Completed CLI verification reports flush immediately;
+individual tentative findings are not published.
+
 Assumption declaration validity is a program-level query. The IR classifies
 relation-stratified cones and those requiring grounding; the checker resolves the
 latter against its unrevised ground dependency graph, without selected assumptions.

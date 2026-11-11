@@ -13,6 +13,7 @@ function text(progress, quietMs = 0) {
   const detail = progress.active[0]?.detail;
   if (detail) return `$(sync~spin) Denotate: ${phase(detail)}` +
     (detail.admission ? ` · ${detail.admission.stage === 'reused' ? 'reused' : `round ${detail.admission.round}`} · ${detail.admission.unresolvedComponents} unresolved components` : '') +
+    (detail.checking ? ` · ${detail.checking.stage}` : '') +
     (detail.verificationIndex ? ` · verification ${detail.verificationIndex}/${detail.verificationTotal}` : '') +
     (quietMs >= 1000 ? ` · ${Math.floor(quietMs / 1000)}s since update` : '');
   return `$(sync~spin) Denotate: Checking ${progress.processed}/${progress.total} programs`;
@@ -36,6 +37,8 @@ function activity(active) {
     ...(d.memory ? [`Process memory (bytes; peaks are lifetime): ${JSON.stringify(d.memory)}`] : []),
     ...(d.verification ? [`${d.verification} (${d.verificationIndex}/${d.verificationTotal}); ${d.assumptions} assumptions, ${d.obligations} obligations, ${d.notices} notices`] : []),
     ...(d.admission ? [admission(d.admission)] : []),
+    ...(d.checking ? [checking(d.checking)] : []),
+    ...(d.remainingComponent ? [remaining(d.remainingComponent)] : []),
     ...(d.ground ? [`Prepared size: ${d.ground.inputAtoms} inputs, ${d.ground.atoms} atoms, ${d.ground.ruleInstances} rule instances, ${d.ground.components} components (largest: ${d.ground.largestComponentAtoms} atoms)`] : []),
     ...(d.fold ? [`Fixed facts: ${d.fold.presentFacts} present, ${d.fold.absentFacts} absent; retained evidence: ${JSON.stringify(d.fold.retainedEvidence)}; residual graph: ${JSON.stringify(d.fold.residual)}`,
       ...(d.fold.retainedBytes !== undefined ? [`Retained keyed fold: ${d.fold.retainedBytes} accounted bytes`] : [])] : [])
@@ -49,6 +52,24 @@ function admission(a) {
     (c ? `; component ${c.index} (${c.atoms} atoms, ${c.ruleInstances} rule instances), ${c.atom}` : '') +
     (l ? ` at ${l.uri}:${l.line}:${l.column}` : '') +
     (a.failure ? `; stopped: ${a.failure}` : '');
+}
+function checking(v) {
+  const t = v.target, l = t?.location;
+  let text = `Checking ${v.stage} · ${v.state}`;
+  if (t?.kind === 'component') text += `: component ${t.index} (${t.atoms} atoms, ${t.ruleInstances} rule instances), ${t.atom}`;
+  else if (t?.name) text += `: ${t.kind} ${t.name}`;
+  if (l) text += ` at ${l.uri}:${l.line}:${l.column}`;
+  if (v.failure) text += v.state === 'exhausted'
+    ? `; ${v.failure}; ${v.continues ? 'current operation incomplete; continuing other checking work' : 'stopping this verification'}`
+    : '; operation incomplete';
+  return text;
+}
+function remaining(v) {
+  const c = v.component;
+  return `Unresolved component ${v.position}/${v.total}: component ${c.index} (${c.atoms} atoms, ${c.ruleInstances} rule instances), ${c.atom}` +
+    (v.admissionFailure ? `; admission stopped: ${v.admissionFailure}` : '') +
+    v.cycle.map(e => `\n  ${e.from} ${e.negative ? '-not->' : '->'} ${e.to}` + (e.location ? ` at ${e.location.uri}:${e.location.line}:${e.location.column}` : '')).join('') +
+    (v.truncated ? `\n  ... ${v.cycleEdges} cycle edges in total` : '');
 }
 function details(progress, quietMs = 0) {
   return [summary(progress),
@@ -64,9 +85,9 @@ function logProgress(output, previous, progress) {
     const old = previous?.active.find(p => p.program === active.program && p.revision === active.revision);
     if (!old || JSON.stringify(old.detail) !== JSON.stringify(active.detail)) {
       // Inner updates keep context without repeating every prepared-size field.
-      const a = active.detail?.admission;
-      const message = a ? `${active.label} (run ${active.revision}), ${active.detail.verification}: ${admission(a)}` : activity(active).replaceAll('\n', '; ');
-      if (a?.failure) output.warn(message); else output.info(message);
+      const a = active.detail?.admission, c = active.detail?.checking, r = active.detail?.remainingComponent;
+      const message = a || c || r ? `${active.label} (run ${active.revision}), ${active.detail.verification ?? 'program'}: ${a ? admission(a) : c ? checking(c) : remaining(r)}` : activity(active).replaceAll('\n', '; ');
+      if (a?.failure || c?.state === 'exhausted') output.warn(message); else output.info(message);
     }
   }
   if (!busy(progress) && (!previous || busy(previous) || summary(previous) !== summary(progress))) {

@@ -137,17 +137,28 @@ fn run_with_limits(
     output: &mut String,
     limits: Limits,
 ) -> Result<u8, Failure> {
-    run_with_progress(args, output, limits, &mut std::io::sink())
+    run_with_progress(args, output, limits, std::io::sink())
 }
+#[cfg(test)]
 fn run_with_progress(
     args: impl IntoIterator<Item = String>,
     output: &mut String,
     limits: Limits,
-    stderr: &mut dyn std::io::Write,
+    stderr: impl std::io::Write + Send + 'static,
+) -> Result<u8, Failure> {
+    run_streaming(args, output, limits, stderr, &mut |_| Ok(()))
+}
+fn run_streaming(
+    args: impl IntoIterator<Item = String>,
+    output: &mut String,
+    limits: Limits,
+    stderr: impl std::io::Write + Send + 'static,
+    flush: &mut dyn FnMut(&mut String) -> Result<(), Failure>,
 ) -> Result<u8, Failure> {
     let args = args.into_iter().collect::<Vec<_>>();
     if args.iter().any(|a| matches!(a.as_str(), "--help" | "-h")) {
         output.push_str(&options::help());
+        flush(output)?;
         return Ok(0);
     }
     let mut options = options::Options::parse(args, limits)?;
@@ -178,15 +189,37 @@ fn run_with_progress(
         trace.message(format_args!("  {flag} {value}"));
     }
     let profile = options.limits.profile.clone();
-    let active = std::cell::RefCell::new(None);
-    let callback = |event: serde_json::Value| {
+    let active = std::sync::Arc::new(std::sync::Mutex::new(None));
+    let callback_trace = trace.clone();
+    let callback_active = active.clone();
+    let callback_profile = profile.clone();
+    let callback = std::sync::Arc::new(move |event: serde_json::Value| {
+        let trace = &callback_trace;
+        let active = &callback_active;
+        let profile = &callback_profile;
+        if let Some(v) = event.get("checking") {
+            trace.message(format!(
+                "{}: {}",
+                event["verification"].as_str().unwrap_or("verification"),
+                denotate_ir_text::progress::checking_text(v)
+            ));
+            return;
+        }
+        if let Some(v) = event.get("remainingComponent") {
+            trace.message(format!(
+                "{}: {}",
+                event["verification"].as_str().unwrap_or("verification"),
+                denotate_ir_text::progress::remaining_text(v)
+            ));
+            return;
+        }
         if event.get("admission").is_some() {
             trace.message(denotate_ir_text::progress::admission_text(
                 &event["admission"],
             ));
             return;
         }
-        active.borrow_mut().take();
+        active.lock().unwrap().take();
         let stage = [
             "discovery",
             "loading",
@@ -201,12 +234,13 @@ fn run_with_progress(
         .into_iter()
         .find(|p| event["phase"].as_str() == Some(*p))
         .unwrap_or("frontend");
-        *active.borrow_mut() = Some(profile.span(stage, None));
+        *active.lock().unwrap() = Some(profile.span(stage, None));
         trace.phase(event);
-    };
-    let progress = CheckProgress::new((options.progress || profile.enabled()).then_some(&callback));
-    let result = check_program(options, output, &progress, &trace);
-    active.borrow_mut().take();
+    });
+    let progress = CheckProgress::new((options.progress || profile.enabled()).then_some(callback));
+    let result = check_program(options, output, &progress, &trace, flush);
+    active.lock().unwrap().take();
+    flush(output)?;
     match &result {
         Ok(code) => trace.finish(format_args!(
             "Finished: exit {code} ({})",
@@ -223,8 +257,9 @@ fn run_with_progress(
 fn check_program(
     options: options::Options,
     output: &mut String,
-    progress: &CheckProgress<'_>,
-    trace: &trace::Trace<'_>,
+    progress: &CheckProgress,
+    trace: &trace::Trace,
+    flush: &mut dyn FnMut(&mut String) -> Result<(), Failure>,
 ) -> Result<u8, Failure> {
     let options::Options {
         root,
@@ -447,6 +482,7 @@ fn check_program(
                 "Verification skipped: selected assumption validation is {}",
                 state.label()
             ));
+            flush(output)?;
             continue;
         }
         if declaration.obligations.is_empty() && declaration.notices.is_empty() {
@@ -509,6 +545,7 @@ fn check_program(
                     .unwrap();
                 }
                 incomplete = true;
+                flush(output)?;
                 continue;
             }
         };
@@ -528,7 +565,15 @@ fn check_program(
             "Admission complete: admitted={}",
             admitted.program().is_admitted()
         ));
+        let mut operations = operations.clone();
+        // The callback owns only a small display catalog and the event sink.
+        operations.progress = if report_progress {
+            admission.checking(progress, &detail, admitted.program())
+        } else {
+            Default::default()
+        };
         progress.emit(Phase::Checking, detail.clone());
+        flush(output)?;
         match session
             .verify(&admitted, &operations)
             .map_err(checker_failure)?
@@ -622,6 +667,7 @@ fn check_program(
                 incomplete = true;
             }
         }
+        flush(output)?;
         let cache = session.stats();
         trace.message(format_args!("Session: evaluation hits={}, misses={}; verdict hits={}, misses={}; retained condition nodes={}",
             cache.evaluation_hits, cache.evaluation_misses, cache.verdict_hits, cache.verdict_misses, cache.retained_condition_nodes));
@@ -639,14 +685,23 @@ fn check_program(
     })
 }
 fn main() {
+    use std::io::Write;
     let mut output = String::new();
-    let result = run_with_progress(
+    let mut stdout = std::io::stdout().lock();
+    let result = run_streaming(
         std::env::args().skip(1),
         &mut output,
         Limits::default(),
-        &mut std::io::stderr().lock(),
+        std::io::stderr(),
+        &mut |text| {
+            stdout
+                .write_all(text.as_bytes())
+                .and_then(|_| stdout.flush())
+                .map_err(|e| (3, format!("Cannot write diagnostic output: {e}")))?;
+            text.clear();
+            Ok(())
+        },
     );
-    print!("{output}");
     let code = match result {
         Ok(code) => code,
         Err((code, error)) => {
@@ -665,6 +720,17 @@ mod tests {
         path::PathBuf,
         sync::atomic::{AtomicU64, Ordering},
     };
+    #[derive(Clone, Default)]
+    struct SharedOutput(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+    impl std::io::Write for SharedOutput {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
     struct Fixture(PathBuf);
     impl Fixture {
         fn new(text: &str) -> Self {
@@ -703,15 +769,19 @@ mod tests {
     impl Fixture {
         fn traced(&self, flags: &[&str]) -> (Result<u8, Failure>, String, String) {
             let mut output = String::new();
-            let mut progress = Vec::new();
+            let progress = SharedOutput::default();
             let result = run_with_progress(
                 std::iter::once(self.0.to_str().unwrap().to_string())
                     .chain(flags.iter().map(|s| s.to_string())),
                 &mut output,
                 Limits::default(),
-                &mut progress,
+                progress.clone(),
             );
-            (result, output, String::from_utf8(progress).unwrap())
+            (
+                result,
+                output,
+                String::from_utf8(progress.0.lock().unwrap().clone()).unwrap(),
+            )
         }
     }
     #[test]
@@ -838,6 +908,78 @@ mod tests {
         }
     }
     #[test]
+    fn unresolved_inventory_precedes_checking_and_names_the_cycle() {
+        let f = Fixture::new(
+            "relation a(); a():-!a(); obligation o:empty(a); verification v{assumptions:[];obligations:[o];}",
+        );
+        let (result, output, progress) = f.traced(&[]);
+        let (quiet_result, quiet_output, _) = f.traced(&["--no-progress"]);
+        assert_eq!(result, quiet_result);
+        assert_eq!(output, quiet_output);
+        let inventory = progress.find("::v: Unresolved component 1/1").unwrap();
+        let checking = progress.find("Starting checking").unwrap();
+        assert!(inventory < checking);
+        assert!(progress.contains("1 atoms, 1 rule instances"), "{progress}");
+        assert!(progress[inventory..checking].contains("-not->"));
+        assert!(progress[inventory..checking].contains(".den:1:"));
+        assert!(progress.contains("Checking no-meaning"));
+        assert!(progress.contains("obligation ::o"));
+    }
+
+    #[test]
+    fn completed_reports_flush_before_a_later_verification_and_survive_its_failure() {
+        let f = Fixture::new(&format!(
+            "{BODY}{RESTRICTED} verification w{{assumptions:[];obligations:[o];}}"
+        ));
+        for json in [false, true] {
+            for interrupt in [false, true] {
+                let flags = if json {
+                    vec!["--json", "--no-progress"]
+                } else {
+                    vec!["--no-progress"]
+                };
+                let (expected_code, expected_text, _) = f.traced(&flags);
+                let limits = Limits::default();
+                let cancel = limits.cancellation.clone();
+                let mut chunks = Vec::new();
+                let result = run_streaming(
+                    std::iter::once(f.0.to_str().unwrap().to_owned())
+                        .chain(flags.iter().map(|s| s.to_string())),
+                    &mut String::new(),
+                    limits,
+                    std::io::sink(),
+                    &mut |text| {
+                        if text.is_empty() {
+                            return Ok(());
+                        }
+                        if text.contains(if json { "Results:" } else { "Result:" })
+                            && chunks.len() == 1
+                        {
+                            assert!(
+                                !text.contains("Verification ::w"),
+                                "first result must precede the second verification"
+                            );
+                            if interrupt {
+                                cancel.cancel();
+                            }
+                        }
+                        chunks.push(std::mem::take(text));
+                        Ok(())
+                    },
+                );
+                assert!(chunks[1].contains(if json { "Results:" } else { "Result:" }));
+                if interrupt {
+                    assert!(result.is_err());
+                    assert!(chunks.concat().contains("Verification ::v"));
+                } else {
+                    assert_eq!(result, expected_code);
+                    assert_eq!(chunks.concat(), expected_text);
+                }
+            }
+        }
+    }
+
+    #[test]
     fn cli_limits_are_applied_and_exhaustion_is_visible_in_progress() {
         let f = Fixture::new(&format!("{BODY}{RESTRICTED}"));
         assert_eq!(f.run(&[]).0, 0);
@@ -928,17 +1070,17 @@ mod tests {
     #[test]
     fn help_and_early_failures_do_not_report_checks_that_never_ran() {
         let mut output = String::new();
-        let mut progress = vec![];
+        let progress = SharedOutput::default();
         assert_eq!(
             run_with_progress(
                 ["--help".into()],
                 &mut output,
                 Limits::default(),
-                &mut progress
+                progress.clone()
             ),
             Ok(0)
         );
-        assert!(progress.is_empty());
+        assert!(progress.0.lock().unwrap().is_empty());
         for (flag, value) in options::limit_values(&Limits::default()) {
             assert!(output.contains(&format!("{flag} N (default {value})")));
         }

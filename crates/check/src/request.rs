@@ -37,6 +37,7 @@ impl From<&Limits> for DeterministicLimits {
 #[derive(Debug, Clone)]
 pub struct OperationalLimits {
     pub profile: Profile,
+    pub progress: CheckingProgress,
     pub cancellation: Cancellation,
     pub timeout: Duration,
 }
@@ -45,6 +46,7 @@ impl From<&Limits> for OperationalLimits {
         Self {
             cancellation: l.cancellation.clone(),
             profile: l.profile.clone(),
+            progress: l.progress.clone(),
             timeout: l.timeout,
         }
     }
@@ -54,6 +56,7 @@ impl DeterministicLimits {
         Limits {
             cancellation: o.cancellation.clone(),
             profile: o.profile.clone(),
+            progress: o.progress.clone(),
             timeout: o.timeout,
             max_atoms: self.max_atoms,
             max_rules: self.max_rules,
@@ -1081,6 +1084,9 @@ impl PreparedCheck<'_> {
                 .notices()
                 .find(|n| self.semantic_keys.notice(n.id).is_ok_and(|k| k == key))
                 .ok_or(CheckError::InvalidRequest("unknown notice key"))?;
+            let _stage = limits
+                .progress
+                .advisory("notice", CheckingTarget::Notice(n.id));
             let mut budget = Budget::tracked(&limits);
             let result =
                 self.program

@@ -170,9 +170,21 @@ preparation without reconstructing/exporting a retained value. Measurements are 
 The CLI and LSP share `progress::CheckProgress` and `Phase`: identical phase names,
 verification metadata and prepared sizes. Delivery remains with each frontend.
 Counts describe completed preparation, not an estimate of checking work remaining.
-The checking phase includes obligations, notices, replay and session bookkeeping;
-it does not yet stream individual queries or live BDD node counts. Progress never
-runs an additional check, changes a semantic budget or enters a cache key.
+After admission, stderr lists each remaining negative component's size and up to
+12 edges of its representative cycle, with current source locations and any
+admission exhaustion. These are structural observations, not no-meaning findings.
+During checking, it names the current obligation, notice or component and work such
+as symbolic evaluation, replay, certification and attribution. Exhaustion is
+reported immediately when detected or recovered from cache, including the resource,
+limit and observed demand when available, and whether other checking work continues.
+Notices and optional attribution can recover from deadlines; a checking deadline
+otherwise stops the verification. Inner traversal is sampled, not a heartbeat
+inside an individual BDD operation. There are no live BDD node counts.
+
+Completed verification reports are flushed to stdout before the next verification,
+including in `--json` mode and when later work fails. Concatenated stdout and exit
+policy are unchanged. Individual tentative findings are not streamed. Progress
+never runs an additional check, changes a semantic budget or enters a cache key.
 
 All public `Limits` resource ceilings are configurable for this invocation:
 `--max-atoms`, `--max-rules`, `--max-dependencies`, `--max-work`,

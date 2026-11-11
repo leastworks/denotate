@@ -474,16 +474,19 @@ impl Session {
         self.refresh();
         operations.cancellation.check()?;
         if operations.timeout.is_zero() {
-            return Err(CheckError::deadline(
-                "local cache lookup",
-                operations.timeout,
-            ));
+            let error = CheckError::deadline("local cache lookup", operations.timeout);
+            operations.progress.failure(&error);
+            return Err(error);
         }
         *self.db.operations.lock().unwrap() = operations.clone();
         let result = match metrics {
             Some(metrics) => prepared.verify_local_with_metrics(operations, self, metrics),
             None => prepared.verify_local_with(operations, self),
         };
+        self.db.operations.lock().unwrap().progress = CheckingProgress::default();
+        if let Err(error) = &result {
+            operations.progress.failure(error);
+        }
         operations.cancellation.check()?;
         result
     }
@@ -543,6 +546,13 @@ impl LocalMemoStore for Session {
         operations: &OperationalLimits,
         metrics: &mut LocalMetrics,
     ) -> Result<Arc<LocalMemo>, CheckError> {
+        struct ClearProgress(Arc<Mutex<OperationalLimits>>);
+        impl Drop for ClearProgress {
+            fn drop(&mut self) {
+                self.0.lock().unwrap().progress = CheckingProgress::default();
+            }
+        }
+        let _clear_progress = ClearProgress(self.db.operations.clone());
         // A scope identifies the cache slot, not its validity across verifications.
         // LocalInput includes relevant constraints, input groups, obligation shape
         // and completion proof context; Salsa compares that full input. Request
@@ -554,10 +564,9 @@ impl LocalMemoStore for Session {
         }
         operations.cancellation.check()?;
         if operations.timeout.is_zero() {
-            return Err(CheckError::deadline(
-                "local cache lookup",
-                operations.timeout,
-            ));
+            let error = CheckError::deadline("local cache lookup", operations.timeout);
+            operations.progress.failure(&error);
+            return Err(error);
         }
         let start = Instant::now();
         if self.clock == u64::MAX {
@@ -602,9 +611,15 @@ impl LocalMemoStore for Session {
             let a = evaluation(&self.db, slot)
                 .clone()?
                 .ok_or(CheckError::Internal("missing owned evaluation"))?;
+            if let Some(failure) = a.failure {
+                operations.progress.failure(&failure.into());
+            }
             let b = answer(&self.db, slot)
                 .clone()?
                 .ok_or(CheckError::Internal("missing owned answer"))?;
+            if let Some(failure) = b.failure {
+                operations.progress.failure(&failure.into());
+            }
             operations.cancellation.check()?;
             if start.elapsed() >= operations.timeout {
                 return Err(CheckError::deadline(

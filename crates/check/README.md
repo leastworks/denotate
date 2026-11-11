@@ -64,6 +64,17 @@ Frontends resolve the representative's names and current source location. Counts
 are snapshots, not percentages; completed admission can still leave unsupported
 components. A single BDD operation has no inner progress heartbeat.
 
+`OperationalLimits::progress` optionally carries an owned `CheckingProgress`
+callback through direct and cached verification. It reports current targets and
+operations, and limit/deadline failures at detection or recovery. Its scopes are
+synchronous and invocation-local; use a separate observer for each concurrent run.
+Private local runtimes retain their caller's target rather than exposing synthetic
+arena identities. Notices and optional attribution recover from deadlines; ordinary
+checking does not. No observer enters deterministic limits, query inputs, receipts
+or cached semantic values. Frontends own delivery and source-name resolution.
+Exhaustion is immediate; repetitive inner work is sampled. Callback delivery costs
+wall time under the existing cooperative deadlines.
+
 `CheckRequest::for_verification` builds a request from one IR verification: only its
 selected assumptions constrain permitted worlds, and only its selected obligations
 produce groups (including the compact domains for trivial groups). Preparation

@@ -60,6 +60,7 @@ impl GroundProgram {
         present: impl IntoIterator<Item = GroundAtom>,
         budget: &mut Budget<'_>,
     ) -> Result<CertificationOutcome> {
+        let _stage = budget.limits.progress.nested("certification");
         let mut observation = Observation {
             present: BTreeSet::new(),
             absent: BTreeSet::new(),

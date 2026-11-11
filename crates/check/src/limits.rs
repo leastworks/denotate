@@ -133,6 +133,7 @@ impl Cancellation {
 #[derive(Debug, Clone)]
 pub struct Limits {
     pub profile: crate::Profile,
+    pub progress: crate::CheckingProgress,
     pub cancellation: Cancellation,
     pub max_atoms: usize,
     pub max_rules: usize,
@@ -152,6 +153,7 @@ impl Default for Limits {
         Self {
             cancellation: Cancellation::default(),
             profile: Default::default(),
+            progress: Default::default(),
             max_atoms: 100_000,
             max_rules: 200_000,
             max_dependencies: 1_000_000,
@@ -222,6 +224,7 @@ impl<'a> Budget<'a> {
         }
     }
     pub fn failure(&mut self, error: &CheckError) {
+        self.limits.progress.failure(error);
         if let (
             Some(charges),
             CheckError::LimitExceeded {
@@ -288,7 +291,9 @@ impl<'a> Budget<'a> {
     pub fn check(&self, phase: &'static str) -> Result<()> {
         self.limits.cancellation.check()?;
         if self.start.elapsed() >= self.limits.timeout {
-            return Err(CheckError::deadline(phase, self.limits.timeout));
+            let error = CheckError::deadline(phase, self.limits.timeout);
+            self.limits.progress.failure(&error);
+            return Err(error);
         }
         Ok(())
     }
@@ -305,12 +310,14 @@ impl<'a> Budget<'a> {
                     resource: "work".into(),
                 });
             }
-            return Err(CheckError::limit(
+            let error = CheckError::limit(
                 phase,
                 "work",
                 self.limits.max_work,
                 self.work.checked_add(amount),
-            ));
+            );
+            self.limits.progress.failure(&error);
+            return Err(error);
         }
         self.work = self
             .work

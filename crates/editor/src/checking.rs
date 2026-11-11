@@ -79,7 +79,14 @@ where
     /// discard superseded updates just as it discards obsolete results.
     pub fn spawn_with_progress(
         name: &str,
-        mut check: impl FnMut(&Job<K, P, M>, &mut Session, &dyn Fn(), &dyn Fn(U)) -> O + Send + 'static,
+        mut check: impl FnMut(
+                &Job<K, P, M>,
+                &mut Session,
+                &dyn Fn(),
+                std::sync::Arc<dyn Fn(U) + Send + Sync>,
+            ) -> O
+            + Send
+            + 'static,
     ) -> io::Result<Self> {
         let (jobs, pending) = unbounded::<Command<K, P, M>>();
         let (send, events) = unbounded();
@@ -107,13 +114,19 @@ where
                             }
                         }
                     };
+                    let progress_ticket = std::sync::Mutex::new(job.ticket.clone());
+                    let progress_send = send.clone();
+                    let progress = std::sync::Arc::new(move |update| {
+                        let _ = progress_send.send(Event::Progress(
+                            progress_ticket.lock().unwrap().clone(),
+                            update,
+                        ));
+                    });
                     let output = check(
                         &job,
                         sessions.entry(job.ticket.key.clone()).or_default(),
                         &|| checkpoint(HoldStage::DuringCheck),
-                        &|update| {
-                            let _ = send.send(Event::Progress(job.ticket.clone(), update));
-                        },
+                        progress,
                     );
                     checkpoint(HoldStage::BeforeResult);
                     if send.send(Event::Finished(job.ticket, output)).is_err() {

@@ -180,6 +180,9 @@ impl SymbolicMeaning<'_> {
             crate::accounting::test_schedule(&mut ordered);
         }
         for group in ordered {
+            let _stage = limits.progress.sampled("uniqueness", true, || {
+                CheckingTarget::Obligation(group.obligation)
+            });
             let mut tuples: Vec<_> = group.tuples.iter().collect();
             if let Some(q) = queries.as_ref() {
                 let keyed = tuples
@@ -317,11 +320,18 @@ impl GroundProgram {
         let scope = |result: Result<BTreeSet<GroundAtom>>| -> Result<_> {
             Ok(Some(match result {
                 Ok(inputs) => Attribution::Complete(inputs),
-                Err(error) => Attribution::Incomplete(Inconclusive::from_error(error)?),
+                Err(error) => {
+                    limits.progress.failure(&error);
+                    Attribution::Incomplete(Inconclusive::from_error(error)?)
+                }
             }))
         };
         for group in &mut report.groups {
             if let VerifiedOutcome::Counterexample(example) = &mut group.outcome {
+                let _stage = limits.progress.advisory(
+                    "attribution",
+                    CheckingTarget::Obligation(group.group.obligation),
+                );
                 example.dependency_inputs = scope(self.dependency_inputs_with_budget(
                     example.tuples.iter().cloned(),
                     &mut Budget::new(limits),
@@ -329,6 +339,9 @@ impl GroundProgram {
             }
         }
         for (id, report) in &mut report.coverage {
+            let _stage = limits
+                .progress
+                .advisory("attribution", CheckingTarget::Obligation(*id));
             let shape = self
                 .coverage
                 .get(id)

@@ -66,6 +66,10 @@ impl SymbolicMeaning<'_> {
         }
         let mut reports = BTreeMap::new();
         for (id, shape) in ordered {
+            let _stage =
+                limits
+                    .progress
+                    .scope("coverage", Some(CheckingTarget::Obligation(*id)), true);
             let mut budget = Budget::tracked(limits);
             let mut report = CoverageReport::default();
             let result = self.coverage_obligation(

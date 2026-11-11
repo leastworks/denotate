@@ -158,6 +158,7 @@ impl GroundProgram {
             &mut dyn FnMut(ComponentId, Duration),
         >,
     ) -> Result<SymbolicMeaning<'_>> {
+        let _stage = budget.limits.progress.nested("symbolic-evaluation");
         let start = Instant::now();
         let context = ConditionContext::build_selected(self, cone.map(|c| &c.facts), budget)?;
         let mut meaning = SymbolicMeaning {
@@ -208,6 +209,16 @@ impl GroundProgram {
                 meaning.inconclusive.insert(component.id, cause);
                 continue;
             }
+            let _component_stage =
+                budget
+                    .limits
+                    .progress
+                    .sampled("symbolic-evaluation", partial, || {
+                        CheckingTarget::Component(
+                            self.progress_component(component.id)
+                                .expect("current component"),
+                        )
+                    });
             let previous_retained = retained;
             if let Some(observe) = observe {
                 observe(component.id);

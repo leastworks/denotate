@@ -93,6 +93,10 @@ impl SymbolicMeaning<'_> {
         }
         let mut reports = BTreeMap::new();
         for (id, relation) in ordered {
+            let _stage =
+                limits
+                    .progress
+                    .scope("emptiness", Some(CheckingTarget::Obligation(*id)), true);
             let mut budget = Budget::tracked(limits);
             let mut report = EmptinessReport::default();
             if let Err(error) = self.empty_relation(
@@ -303,13 +307,19 @@ impl GroundProgram {
         reports: &mut BTreeMap<ObligationId, EmptinessReport>,
         limits: &Limits,
     ) -> Result<()> {
-        for report in reports.values_mut() {
+        for (id, report) in reports.iter_mut() {
+            let _stage = limits
+                .progress
+                .advisory("attribution", CheckingTarget::Obligation(*id));
             for example in &mut report.examples {
                 let mut budget = Budget::new(limits);
                 let result = self.presence_evidence(example, &mut budget);
                 example.attribution = Some(match result {
                     Ok(evidence) => Attribution::Complete(evidence),
-                    Err(error) => Attribution::Incomplete(Inconclusive::from_error(error)?),
+                    Err(error) => {
+                        limits.progress.failure(&error);
+                        Attribution::Incomplete(Inconclusive::from_error(error)?)
+                    }
                 });
                 // Display scope must include negative dependencies and alternative
                 // producers, not only the selected positive proof. Its own budget
@@ -319,7 +329,10 @@ impl GroundProgram {
                     self.dependency_inputs_with_budget([example.tuple.clone()], &mut budget);
                 example.dependency_inputs = Some(match result {
                     Ok(inputs) => Attribution::Complete(inputs),
-                    Err(error) => Attribution::Incomplete(Inconclusive::from_error(error)?),
+                    Err(error) => {
+                        limits.progress.failure(&error);
+                        Attribution::Incomplete(Inconclusive::from_error(error)?)
+                    }
                 });
             }
         }

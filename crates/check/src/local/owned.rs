@@ -370,6 +370,7 @@ pub fn evaluate_owned_local(
     let limits = input.limits.with_operations(operations);
     let mut budget = Budget::tracked(&limits);
     let start = Instant::now();
+    let _stage = limits.progress.private_scope("local-symbolic-evaluation");
     let evaluated = (|| {
         let rt = Runtime::new(input, &mut budget, true)?;
         #[cfg(any(test, feature = "test-support"))]
@@ -426,6 +427,10 @@ pub fn answer_owned_local(
     let mut budget = Budget::tracked(&limits);
     let start = Instant::now();
     let exports_before = metrics.export;
+    let _stage = limits.progress.private_scope(match input.scope {
+        LocalScope::Group(_) => "uniqueness",
+        LocalScope::Region(_) => "no-meaning",
+    });
     let computed = (|| -> Result<LocalAnswer> {
         let Some(value) = value else {
             let f = failure.ok_or(CheckError::Internal("missing owned evaluation failure"))?;

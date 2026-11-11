@@ -156,6 +156,53 @@ are observations at safe boundaries, not heartbeats during individual BDD calls.
 The normal stale-ticket rules apply to every inner update. CLI stderr uses the
 same `AdmissionDetails` adapter; stdout and diagnostic publication are unchanged.
 
+After admission and before checking, one `detail.remainingComponent` update per
+remaining negative component identifies its size and representative cycle:
+
+```json
+{"position":1,"total":2,
+ "component":{"index":17,"atoms":12,"ruleInstances":20,"atom":"p(a)","location":null},
+ "cycle":[{"from":"p(a)","negative":true,"to":"q(a)",
+   "location":{"uri":"file:///app/p.den","line":14,"column":1}}],
+ "cycleEdges":1,"truncated":false,"admissionFailure":null}
+```
+
+The cycle excerpt has at most 12 edges; `cycleEdges` gives the full length.
+`admissionFailure` uses the shared formatted exhaustion explanation. Counts and
+indices describe the admitted graph. A remaining cycle is not itself a no-meaning
+finding. Locations use the same coordinates as admission progress.
+
+During checking, `detail.checking` describes the current operation:
+
+```json
+{"stage":"certification","state":"exhausted",
+ "target":{"kind":"obligation","name":"library::unique","location":null},
+ "failure":"certification: work limit 100 reached (observed 101)","continues":true}
+```
+
+`state` is `started`, `finished` or `exhausted`. `finished` means control returned,
+not proved. `failure` is null or the shared phase/resource/limit/demand explanation.
+`target` is null for setup, an `obligation` or `notice` with name/location, or a
+`component` with `index`, `atoms`, `ruleInstances`, `atom` and optional `location`.
+Targets inside a private cache runtime retain the caller's source-bound identity.
+Stages include `dependency-index`, `input-context`, `query-input`,
+`local-symbolic-evaluation`, `symbolic-evaluation`, `uniqueness`, `emptiness`,
+`coverage`, `no-meaning`, `replay`, `certification`, `attribution` and `notice`.
+Frontend exhaustion before checking uses the enclosing phase (for example
+`preparation` or `assumption-validation`), with a null target; program-level
+validation has no verification metadata.
+The first occurrence of a stage, major checking boundaries and exhaustion report
+immediately; repetitive inner traversal is sampled at 250 ms. Exhaustion reports
+the current target even if its ordinary update was sampled out. Cached
+inconclusive answers also report their cause when encountered.
+On exhaustion, `continues` says whether recovery allows other checking work in
+this verification. Deadlines stop ordinary checking, but notice analysis and
+optional attribution recover. Repeated propagation can report the same failure
+at enclosing boundaries. These events neither publish tentative findings nor
+change diagnostic identity, verdicts, limits or receipts. They provide no heartbeat
+inside one BDD call. All events retain the verification metadata and stale-ticket
+filtering described above.
+
 The VS Code status item shows a spinner and counts while work is pending, including
 when a different language's editor is active. Its tooltip identifies the active
 program and the terminal categories. Once idle, it resumes the active `.den`
@@ -163,8 +210,9 @@ document's existing status, or hides if there is none. Clicking the item or runn
 **Denotate: Show Output** opens the `Denotate` log output channel.
 
 The client logs startup, phase transitions with run revisions and prepared sizes,
-and completion summaries at Info, aggregate counts at Debug, and server
-stops/operational failures at Warning or Error. Accepted failed
+and completion summaries at Info, aggregate counts at Debug, and immediate
+checking exhaustion at Warning. Server stops/operational failures use Warning
+or Error. Accepted failed
 or deadline results also send standard `window/logMessage` warnings, including
 available failure details. Stale results do not log an accepted failure. Ordinary
 source diagnostics stay in Problems; progress adds no checking work or semantic

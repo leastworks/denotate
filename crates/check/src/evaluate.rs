@@ -143,6 +143,7 @@ impl GroundProgram {
         selected: Option<&BTreeSet<ComponentId>>,
         budget: &mut Budget<'_>,
     ) -> Result<Replay<'_>> {
+        let _stage = budget.limits.progress.nested("replay");
         budget.limits.cancellation.check()?;
         let mut snapshot = BTreeSet::new();
         for input in present {

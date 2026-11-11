@@ -4,7 +4,7 @@ use crate::{LoadedProgram, index};
 use denotate_check::{AdmissionComponent, AdmissionProgress, CheckError, GroundProgram};
 use denotate_ir::VerificationKey;
 use serde_json::{Value, json};
-use std::time::Instant;
+use std::{sync::Arc, time::Instant};
 
 #[derive(Clone, Copy)]
 pub enum Phase {
@@ -34,19 +34,20 @@ impl Phase {
     }
 }
 
-pub struct CheckProgress<'a> {
-    report: Option<&'a dyn Fn(Value)>,
+#[derive(Clone)]
+pub struct CheckProgress {
+    report: Option<Arc<dyn Fn(Value) + Send + Sync>>,
     started: Instant,
 }
-impl<'a> CheckProgress<'a> {
-    pub fn new(report: Option<&'a dyn Fn(Value)>) -> Self {
+impl CheckProgress {
+    pub fn new(report: Option<Arc<dyn Fn(Value) + Send + Sync>>) -> Self {
         Self {
             report,
             started: Instant::now(),
         }
     }
     pub fn emit(&self, phase: Phase, mut detail: Value) {
-        if let Some(report) = self.report {
+        if let Some(report) = &self.report {
             detail["phase"] = json!(phase.name());
             detail["elapsedMs"] = json!(self.started.elapsed().as_millis() as u64);
             report(detail);
@@ -54,6 +55,12 @@ impl<'a> CheckProgress<'a> {
     }
     pub fn enabled(&self) -> bool {
         self.report.is_some()
+    }
+    /// Frontend boundaries that finish before per-query checking starts.
+    pub fn exhaustion(&self, phase: Phase, context: &Value, message: String, continues: bool) {
+        let mut detail = context.clone();
+        detail["checking"] = json!({"stage":phase.name(),"state":"exhausted","target":null,"failure":message,"continues":continues});
+        self.emit(phase, detail);
     }
     /// Counts selections, not completed work. Indices are one-based in the
     /// frontend's selected run (which may contain only one verification).
@@ -110,7 +117,7 @@ impl<'a> CheckProgress<'a> {
 /// prefix for each reported component; nothing here is retained across edits.
 pub struct AdmissionDetails<'a> {
     program: &'a LoadedProgram,
-    names: std::cell::OnceCell<Box<dyn Fn(denotate_ir::OccurrenceId) -> String + 'a>>,
+    names: std::cell::OnceCell<Arc<dyn Fn(denotate_ir::OccurrenceId) -> String + Send + Sync>>,
     locations: std::cell::RefCell<std::collections::BTreeMap<denotate_ir::RuleId, Value>>,
 }
 impl<'a> AdmissionDetails<'a> {
@@ -121,7 +128,7 @@ impl<'a> AdmissionDetails<'a> {
             locations: Default::default(),
         }
     }
-    pub fn report(&self, progress: &CheckProgress<'_>, context: &Value, event: &AdmissionProgress) {
+    pub fn report(&self, progress: &CheckProgress, context: &Value, event: &AdmissionProgress) {
         if !progress.enabled() {
             return;
         }
@@ -146,7 +153,7 @@ impl<'a> AdmissionDetails<'a> {
     fn component(&self, c: &AdmissionComponent) -> Value {
         let names = self
             .names
-            .get_or_init(|| Box::new(crate::presentation::diagnostic_names(&self.program.corpus)));
+            .get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)));
         let arguments = c.representative.arguments.iter();
         let atom = format!(
             "{}({})",
@@ -215,6 +222,213 @@ pub fn admission_text(a: &Value) -> String {
     }
     if let Some(failure) = a["failure"].as_str() {
         text.push_str(&format!("; stopped: {failure}"));
+    }
+    text
+}
+
+impl AdmissionDetails<'_> {
+    /// Snapshot declaration labels and bounded cycle locations. No
+    /// complete provenance/key graph is copied into the invocation callback.
+    pub fn checking(
+        &self,
+        progress: &CheckProgress,
+        context: &Value,
+        ground: &GroundProgram,
+    ) -> denotate_check::CheckingProgress {
+        if !progress.enabled() {
+            return Default::default();
+        }
+        let names = self
+            .names
+            .get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)))
+            .clone();
+        let mut declarations = std::collections::BTreeMap::new();
+        let mut locations = std::collections::BTreeMap::new();
+        for (id, name) in self
+            .program
+            .corpus
+            .obligations()
+            .map(|o| (denotate_ir::OccurrenceId::from(o.id), o.name.clone()))
+            .chain(
+                self.program
+                    .corpus
+                    .notices()
+                    .map(|n| (denotate_ir::OccurrenceId::from(n.id), n.name.clone())),
+            )
+        {
+            let name = index::Name {
+                namespace: self.program.corpus.namespace(id).cloned(),
+                text: name,
+                generated: false,
+            }
+            .spelling();
+            let location = self
+                .program
+                .provenance
+                .origins(id)
+                .first()
+                .and_then(|origin| {
+                    let source = self.program.sources.snapshot(origin.span.snapshot()).ok()?;
+                    let at =
+                        crate::origins::coordinate(&source.text, origin.span.byte_range().start)?;
+                    Some(json!({"uri":source.uri,"line":at.line,"column":at.column}))
+                });
+            declarations.insert(id, json!({"name":name,"location":location}));
+        }
+        let remaining = ground
+            .components()
+            .filter(|c| c.cycle.is_some())
+            .collect::<Vec<_>>();
+        for (position, c) in remaining.iter().enumerate() {
+            let Some(summary) = ground.progress_component(c.id) else {
+                continue;
+            };
+            let cycle = c.cycle.as_ref().unwrap();
+            let edges = cycle.edges.iter().take(12).map(|e| {
+                let source = ground.rule(e.rule).map(|r| r.source);
+                if let Some(source) = source { locations.insert(source, self.location(source)); }
+                json!({"from": atom_text(&e.consumer, &*names), "negative": e.polarity == denotate_check::Polarity::Negative,
+                    "to": atom_text(&e.provider, &*names), "location": source.and_then(|s| locations.get(&s).cloned())})
+            }).collect::<Vec<_>>();
+            if let Some(source) = summary.source {
+                locations.insert(source, self.location(source));
+            }
+            let mut detail = context.clone();
+            detail["remainingComponent"] = json!({"position":position+1,"total":remaining.len(),"component":self.component(&summary),
+                "cycle":edges,"cycleEdges":cycle.edges.len(),"truncated":cycle.edges.len()>12,
+                "admissionFailure":ground.admission_limit().map(|r| denotate_presentation::exhaustion_text(r.phase,r.resource,r.details))});
+            progress.emit(Phase::Admission, detail);
+        }
+        let progress = progress.clone();
+        let context = context.clone();
+        denotate_check::CheckingProgress::new(move |e| {
+            let target = match e.target {
+                Some(denotate_check::CheckingTarget::Obligation(id)) => {
+                    declarations.get(&id.into()).map(
+                        |v| json!({"kind":"obligation","name":v["name"],"location":v["location"]}),
+                    )
+                }
+                Some(denotate_check::CheckingTarget::Notice(id)) => declarations
+                    .get(&id.into())
+                    .map(|v| json!({"kind":"notice","name":v["name"],"location":v["location"]})),
+                Some(denotate_check::CheckingTarget::Component(c)) => Some(
+                    json!({"kind":"component","index":c.index,"atoms":c.atoms,"ruleInstances":c.rules,
+                    "atom":atom_text(&c.representative,&*names),"location":c.source.and_then(|s|locations.get(&s).cloned())}),
+                ),
+                None => None,
+            };
+            let failure = e.failure.as_ref().and_then(|e| match e {
+                CheckError::LimitExceeded {
+                    phase,
+                    resource,
+                    details,
+                } => Some(denotate_presentation::exhaustion_text(
+                    phase, resource, *details,
+                )),
+                CheckError::Deadline { phase, details } => Some(
+                    denotate_presentation::exhaustion_text(phase, "deadline", *details),
+                ),
+                _ => None,
+            });
+            let mut detail = context.clone();
+            detail["checking"] = json!({"stage":e.stage,"state":e.state,"target":target,"failure":failure,"continues":e.continues});
+            progress.emit(Phase::Checking, detail);
+        })
+    }
+}
+fn atom_text(
+    atom: &denotate_check::GroundAtom,
+    names: &dyn Fn(denotate_ir::OccurrenceId) -> String,
+) -> String {
+    format!(
+        "{}({})",
+        names(atom.relation.into()),
+        atom.arguments
+            .iter()
+            .map(|id| names((*id).into()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+pub fn checking_text(v: &Value) -> String {
+    let mut text = format!(
+        "Checking {} · {}",
+        v["stage"].as_str().unwrap_or("unknown"),
+        v["state"].as_str().unwrap_or("unknown")
+    );
+    let t = &v["target"];
+    if t["kind"] == "component" {
+        text.push_str(&format!(
+            ": component {} ({} atoms, {} rule instances), {}",
+            t["index"],
+            t["atoms"],
+            t["ruleInstances"],
+            t["atom"].as_str().unwrap_or("?")
+        ));
+    } else if let Some(name) = t["name"].as_str() {
+        text.push_str(&format!(
+            ": {} {name}",
+            t["kind"].as_str().unwrap_or("check")
+        ));
+    }
+    if let Some(uri) = t["location"]["uri"].as_str() {
+        text.push_str(&format!(
+            " at {uri}:{}:{}",
+            t["location"]["line"], t["location"]["column"]
+        ));
+    }
+    if let Some(failure) = v["failure"].as_str() {
+        if v["state"] == "exhausted" {
+            text.push_str(&format!(
+                "; {failure}; {}",
+                if v["continues"] == true {
+                    "current operation incomplete; continuing other checking work"
+                } else {
+                    "stopping this verification"
+                }
+            ));
+        } else {
+            text.push_str("; operation incomplete");
+        }
+    }
+    text
+}
+pub fn remaining_text(v: &Value) -> String {
+    let c = &v["component"];
+    let mut text = format!(
+        "Unresolved component {}/{}: component {} ({} atoms, {} rule instances), {}",
+        v["position"],
+        v["total"],
+        c["index"],
+        c["atoms"],
+        c["ruleInstances"],
+        c["atom"].as_str().unwrap_or("?")
+    );
+    if let Some(reason) = v["admissionFailure"].as_str() {
+        text.push_str(&format!("; admission stopped: {reason}"));
+    }
+    if let Some(edges) = v["cycle"].as_array() {
+        for e in edges {
+            text.push_str(&format!(
+                "\n  {} {} {}",
+                e["from"].as_str().unwrap_or("?"),
+                if e["negative"] == true {
+                    "-not->"
+                } else {
+                    "->"
+                },
+                e["to"].as_str().unwrap_or("?")
+            ));
+            if let Some(uri) = e["location"]["uri"].as_str() {
+                text.push_str(&format!(
+                    " at {uri}:{}:{}",
+                    e["location"]["line"], e["location"]["column"]
+                ));
+            }
+        }
+    }
+    if v["truncated"] == true {
+        text.push_str(&format!("\n  ... {} cycle edges in total", v["cycleEdges"]));
     }
     text
 }

@@ -8,6 +8,8 @@ mod assumption_validation;
 mod assumptions;
 mod boolean;
 mod certification;
+mod checking_progress;
+pub use checking_progress::*;
 mod completion;
 mod contracts;
 mod evaluate;

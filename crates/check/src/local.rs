@@ -70,6 +70,7 @@ impl PreparedCheck<'_> {
             QueryKey::Preparation
         };
         let mut budget = Budget::tracked(&limits);
+        let index_stage = limits.progress.scope("dependency-index", None, false);
         let index = ConeIndex::new(&self.program, &mut budget);
         if let Err(e) = &index {
             Inconclusive::from_error(e.clone())?;
@@ -85,9 +86,11 @@ impl PreparedCheck<'_> {
                 });
             }
         };
+        drop(index_stage);
         // This fresh global context serves replay/certification and current presentation.
         // It never evaluates program rules, and is charged separately from local solving.
         let mut budget = Budget::tracked(&limits);
+        let context_stage = limits.progress.scope("input-context", None, false);
         let context_start = Instant::now();
         let context = ConditionContext::build(&self.program, &mut budget);
         let context_time = context_start.elapsed();
@@ -105,6 +108,7 @@ impl PreparedCheck<'_> {
                 });
             }
         };
+        drop(context_stage);
         let mut presentation = SymbolicMeaning {
             program: &self.program,
             context,
@@ -137,6 +141,9 @@ impl PreparedCheck<'_> {
             .map(|g| Ok((GroupKey::from_group(self.semantic_keys, g)?, g)))
             .collect::<Result<BTreeMap<_, _>>>()?;
         for (key, group) in ordered {
+            let _stage = limits.progress.sampled("uniqueness", true, || {
+                CheckingTarget::Obligation(group.obligation)
+            });
             let scope = LocalScope::Group(key.clone());
             let mut budget = Budget::tracked(&limits);
             let cone = index.build(group.tuples.iter().cloned(), &mut budget);
@@ -175,7 +182,9 @@ impl PreparedCheck<'_> {
                 }
             };
             let start = Instant::now();
+            let input_stage = limits.progress.nested("query-input");
             let input = self.local_input(scope.clone(), &cone, &presentation.context)?;
+            drop(input_stage);
             metrics.keys += start.elapsed();
             metrics.cone_atoms += input.facts.len();
             metrics.cone_inputs += input.inputs.len();
@@ -187,6 +196,9 @@ impl PreparedCheck<'_> {
                 [QueryKey::ConeIndex],
             )?;
             let memo = cache.execute(&input, operations, &mut metrics)?;
+            if let Some(failure) = memo.failure {
+                limits.progress.failure(&failure.into());
+            }
             receipts
                 .record(
                     QueryKey::ConeEvaluation(key.clone()),
@@ -270,13 +282,22 @@ impl PreparedCheck<'_> {
             .map(|c| Ok((self.key_view().component(c.id)?, c)))
             .collect::<Result<BTreeMap<_, _>>>()?;
         for (key, component) in regions {
+            let _stage = limits.progress.scope(
+                "no-meaning",
+                self.program
+                    .progress_component(component.id)
+                    .map(CheckingTarget::Component),
+                true,
+            );
             let scope = LocalScope::Region(key.clone());
             let mut budget = Budget::tracked(&limits);
             let cone = index.build(component.atoms.iter().cloned(), &mut budget);
             let memo = match cone {
                 Ok(cone) => {
                     let start = Instant::now();
+                    let input_stage = limits.progress.nested("query-input");
                     let input = self.local_input(scope.clone(), &cone, &presentation.context)?;
+                    drop(input_stage);
                     metrics.keys += start.elapsed();
                     metrics.cone_atoms += input.facts.len();
                     metrics.cone_inputs += input.inputs.len();
@@ -287,6 +308,9 @@ impl PreparedCheck<'_> {
                         [QueryKey::ConeIndex],
                     )?;
                     let memo = cache.execute(&input, operations, &mut metrics)?;
+                    if let Some(failure) = memo.failure {
+                        limits.progress.failure(&failure.into());
+                    }
                     artifacts.insert(
                         scope,
                         LocalArtifact {
