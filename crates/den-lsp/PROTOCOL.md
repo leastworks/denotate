@@ -80,7 +80,7 @@ can publish progress directly or advance it with a discarded result.
 `active` lists current checking tickets (at most one with the serial scheduler).
 `awaitingSnapshots` indicates the origin bridge still needs current source snapshots.
 `detail` is null until the worker reports its phase. Phases are `loading`,
-`assumption-validation`, `preparation`, `admission`, `checking`, `presentation`
+`assumption-validation`, `fixed-facts`, `preparation`, `admission`, `checking`, `presentation`
 and `publication`. Loading includes `files`; verification phases include its name,
 one-based index, total, and selected declaration counts. `ground`, when available,
 is the size after preparation, before admission rewrites, retained through that
@@ -88,6 +88,13 @@ verification's checking/presentation. `elapsedMs` is elapsed worker time at the
 report, not a deadline or heartbeat. Checking includes obligations, notices, replay
 and session bookkeeping; no inner query fraction or BDD node counter is reported.
 Skipped phases need not appear. Startup and discovery remain indeterminate.
+`fixed-facts` runs once before the first verification that can prepare; it is
+independent of selection. Prepared details additionally contain `fold`:
+`presentFacts`, `absentFacts`, `retainedEvidence` (`atoms`, `ruleInstances`,
+`components`, `dependencies`) and `residual` (`atoms`, `ruleInstances`, `components`).
+`ground` continues to include both parts. These are logical sizes, not heap usage.
+Fold exhaustion uses phase `fixed facts` with resource/subphase detail; eligibility
+failures retain phase `input domains`. Neither publishes partial folded facts.
 The phase vocabulary, verification metadata and prepared-size inspection are
 shared with `check-den` through `denotate_ir_text::progress`. The CLI additionally
 reports its filesystem discovery phase; the editor retains its snapshot-driven

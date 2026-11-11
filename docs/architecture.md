@@ -67,8 +67,22 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
 Restricted input domains follow the same boundaries: `Corpus` validates provider
 signatures and their static, stratified dependency cones; the checker evaluates them
 before seeding input atoms. Complete eligible tuple sets are explicit semantic-keyed
-inputs to session grounding. Provider evaluation itself is currently fresh on each
-preparation; no partial result can enter the grounding cache.
+inputs to session grounding. The `.den` frontends prepare eligibility once in the
+run's fixed preparation; the ordinary preparation API does so per request. Provider
+relations may also participate in fixed-fact evaluation. No partial result can
+enter the grounding cache.
+
+The `.den` CLI and editor construct a `FixedPreparation` once per checking run,
+independent of assumption selection. Relation dependence follows both positive and
+negative premises. Settled input-independent atoms become concrete true/false
+providers; unsettled atoms remain in the residual graph for ordinary admission.
+The artifact shares original fixed rules, components, dependencies and derivations
+as evidence, separate from the executable residual graph. Replay and presentation
+still resolve original occurrences, including completed-but-absent providers.
+Retained evidence and residual sizes are reported separately. This artifact is
+bound to one corpus, domains and limits, not cached across edits. Residual grounding,
+semantic indexes and admission still run per verification; local queries may
+reconstruct fixed evidence rules. Cross-edit sharing is a separate increment.
 
 Assumption declaration validity is a program-level query. The IR classifies
 relation-stratified cones and those requiring grounding; the checker resolves the
@@ -78,6 +92,9 @@ so unselected declarations and unconfigured programs still get diagnostics. Keye
 cycle evidence goes through the shared presenter; it is never reconstructed there.
 Validation currently recomputes from each complete snapshot. Request preparation
 also enforces validity of selected restrictions for construction/API callers.
+Both paths use the original ground dependencies: a fixed-false guard must
+not erase a negative cycle from assumption validation. Selected cones needing
+ground validation therefore incur an additional original grounding on the folded path.
 
 Selected general assumptions are another preparation boundary: once their meaning
 is independently established, the checker computes W before admission.

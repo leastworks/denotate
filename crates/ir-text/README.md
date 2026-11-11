@@ -134,6 +134,12 @@ sizes, result counts and session reuse. Every phase starts with a flushed line;
 transitions report elapsed time. `--no-progress` disables this checker trace.
 `--verbose` remains a diagnostic-layout option, independent of progress.
 
+Fixed facts are evaluated once per program run, then shared across verifications.
+Prepared-size output separates fixed present/absent facts, retained original
+evidence and the residual executable graph. `just bench-den-fixed ITEMS [VERIFICATIONS]`
+compares this path with ordinary preparation on an abstract generated workload;
+the optional verification count defaults to four. Its measurements are not goldens.
+
 The CLI and LSP share `progress::CheckProgress` and `Phase`: identical phase names,
 verification metadata and prepared sizes. Delivery remains with each frontend.
 Counts describe completed preparation, not an estimate of checking work remaining.

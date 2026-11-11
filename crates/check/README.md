@@ -79,6 +79,25 @@ effect. The transitional `all_obligations` constructor keeps existing callers wo
 with `verification: None`; unnamed requests may also select an obligation subset.
 The public `GroundProgram::prepare*` entry points still cover all obligations.
 
+For run-scoped fixed-fact evaluation, construct
+`FixedPreparation::prepare(&corpus, &domains, &limits)` once, then use
+`CheckRequest::prepare_with_fixed` for each verification. The artifact is bound to
+that corpus snapshot, resolved domains and deterministic limits. It follows both
+signs of relation dependencies, concretely evaluates only settled input-independent
+atoms, and shares their original graph and derivations as evidence. Residual
+admission and symbolic evaluation read those facts as constants. Blocked fixed
+atoms remain residual. Selected-assumption validation still uses original ground
+dependencies, as does the program-level validator.
+
+`atoms()`, `rules()`, `components()` and `dependencies()` include retained fixed
+evidence; `fixed_size()` and `residual_size()` distinguish it from execution.
+Presence replay can traverse fixed derivations; derived absence retains its
+completed provider, not `NoPossibleProducer`. Successful folds carry a `FixedFacts`
+receipt depended on by preparation. Fold exhaustion is explicit (`fixed facts`,
+with subphase/resource); eligibility failures retain `input domains`. Cancellation
+publishes no partial fold. The ordinary preparation API remains the unfolded
+control. The `.den` frontends opt into folding; the test DSL's direct path is unchanged.
+
 `ScopedResults.context` retains the request, including its optional `VerificationKey`.
 Per-group and per-region outcomes use semantic identities (`GroupKey`, `ComponentKey`,
 `AtomKey`), so results correspond across snapshots without arena IDs. Witness ordering

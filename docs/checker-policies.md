@@ -8,6 +8,7 @@ it when real programs exist, and change it on evidence.
 | --- | --- | --- |
 | Checker backend | BDD only; cached coarse BDD in editors | Predictable, canonical conditions; good warm reuse |
 | Relation-SCC grounding | Kept opt-in | Warm-run wins; not yet worth the complexity by default |
+| Fixed-fact evaluation | Once per `.den` checking run, shared across verifications | Removes settled static atoms from symbolic execution; retains original evidence explicitly; no cross-edit fold cache yet |
 | Plan cache | Small-rule bypass with bounded retention | Avoids caching cost for trivial rules |
 | Coverage results | Recomputed each check; preparation is reused | No measured need for a coverage verdict cache yet |
 
@@ -68,6 +69,17 @@ planning and grounding reuse. General assumptions force global verification even
 in a session; the `.den` report labels that fallback. Preparation reuse may still
 apply, but the variant's name does not imply verdict-cache reuse.
 
+The `.den` scorecard additionally compares `folded-bdd`, the default CLI/editor
+preparation path. Its preparation timer includes a fresh fold for that verification;
+it does not amortize the fold over other verifications. Existing variants remain
+unfolded controls, and the test DSL variants are unchanged. Use
+`just bench-den-fixed 4000 4` for an abstract mostly-fixed workload that measures a
+single shared fold across four verifications against unfolded execution. It asserts
+outcome agreement and reports timings and retained sizes, never timing goldens.
+Add `--ground-assumption` after the counts to include a selected assumption that
+requires original ground validation. Program validation is timed separately;
+per-request validation is included in preparation, exposing the preserved cost.
+
 ### `.den` measurements
 
 Each sample and variant starts fresh for each verification, then reuses that session
@@ -94,6 +106,18 @@ Unreached phases and a missing notice pass are `null`, not zero. Sizes are sampl
 after preparation, before admission rewrites: input atoms, ground atoms, rule instances,
 components and the largest five by atoms then rules. Counts of selected assumptions,
 obligations and notices are included separately. No parser or LSP latency is measured.
+
+The additional `size.fold` reports present/absent fixed facts, retained evidence
+atoms/rule instances/components/dependencies, and residual atoms/rule instances/
+components. The existing size fields include both parts. The fixed evidence is
+currently the full original settled graph plus one derivation per true fact,
+shared within the run; it is not a compact proof store or a heap measurement.
+Residual grounding still seeds fixed possible tuples to preserve rule and finding
+identity, including false guards. Semantic indexes remain per request. This step
+reduces repeated executable and symbolic work, not all initial grounding or evidence
+storage. Program-level validation is outside the phase timers. On the folded path, a
+request selecting an assumption that needs ground validation grounds the unrevised
+program again inside its preparation; the unfolded path reuses its prepared graph.
 
 BDD figures have distinct meanings:
 

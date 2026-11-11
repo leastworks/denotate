@@ -333,6 +333,7 @@ fn check_program(
     let mut findings = false;
     let mut session = Session::default();
     let verification_total = requests.len();
+    let fixed = std::cell::OnceCell::new();
     for (i, (key, request)) in requests.into_iter().enumerate() {
         let mut detail = progress
             .verification(&p, &key, i + 1, verification_total)
@@ -407,10 +408,29 @@ fn check_program(
             )
             .unwrap();
         }
+        let fixed = fixed.get_or_init(|| {
+            progress.emit(Phase::FixedFacts, json!({}));
+            denotate_check::FixedPreparation::prepare(&p.corpus, &p.domains, &limits)
+        });
         progress.emit(Phase::Preparation, detail.clone());
-        let prepared = session
-            .prepare(&request, &p.corpus, &p.keys, &operations)
-            .map_err(checker_failure)?;
+        let prepared = match fixed {
+            Ok(fixed) => session
+                .prepare_with_fixed(&request, &p.corpus, &p.keys, &operations, fixed)
+                .map_err(checker_failure)?,
+            Err(error) => {
+                match denotate_check::AnalysisOutcome::<()>::from_result(Err(error.clone()))
+                    .map_err(checker_failure)?
+                {
+                    denotate_check::AnalysisOutcome::Inconclusive(reason) => {
+                        RequestPreparation::Inconclusive {
+                            reason,
+                            receipts: Default::default(),
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+            }
+        };
         let prepared = match prepared {
             RequestPreparation::Complete(prepared) => prepared,
             RequestPreparation::Inconclusive { reason, .. } => {

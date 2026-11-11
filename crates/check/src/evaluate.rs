@@ -65,6 +65,9 @@ pub struct Replay<'a> {
     completed: BTreeSet<ComponentId>,
 }
 impl Replay<'_> {
+    pub(crate) fn into_derivations(self) -> BTreeMap<GroundAtom, Derivation> {
+        self.derivations
+    }
     pub fn program(&self) -> &GroundProgram {
         self.program
     }
@@ -77,9 +80,15 @@ impl Replay<'_> {
     /// Only established facts, NOT a total meaning when is_complete() is false.
     /// Use fact() to distinguish settled absence from blocked knowledge.
     pub fn established_facts(&self) -> impl Iterator<Item = &GroundAtom> {
-        self.derivations.keys()
+        self.program
+            .fixed_derivations()
+            .map(|(a, _)| a)
+            .chain(self.derivations.keys())
     }
     pub fn fact(&self, atom: &GroundAtom) -> Result<FactState> {
+        if let Some(value) = self.program.fixed_value(atom) {
+            return Ok(FactState::Settled(value));
+        }
         if !self.program.is_possible(atom)? {
             return Ok(FactState::Settled(false));
         }
@@ -108,7 +117,9 @@ impl Replay<'_> {
     }
     /// None is not evidence of absence; inspect fact() for settled/blocked state.
     pub fn derivation(&self, atom: &GroundAtom) -> Option<&Derivation> {
-        self.derivations.get(atom)
+        self.derivations
+            .get(atom)
+            .or_else(|| self.program.fixed_derivation(atom))
     }
 }
 
@@ -153,7 +164,8 @@ impl GroundProgram {
             replay.derivations.insert(
                 atom.clone(),
                 Derivation {
-                    order: replay.derivations.len(),
+                    order: self.fixed.as_ref().map_or(0, |f| f.derivations.len())
+                        + replay.derivations.len(),
                     evidence: Evidence::Input,
                 },
             );
@@ -175,7 +187,7 @@ impl GroundProgram {
                 for rule in &self.component_rules[index] {
                     budget.tick("evaluation")?;
                     let rule = &self.rules[*rule];
-                    if replay.derivations.contains_key(&rule.head.atom) {
+                    if replay.derivation(&rule.head.atom).is_some() {
                         continue;
                     } // keep first grounded derivation
                     let mut premises = Vec::new();
@@ -196,7 +208,7 @@ impl GroundProgram {
                         let occurrence = literal.term.occurrence;
                         match literal.polarity {
                             Polarity::Positive => {
-                                if !replay.derivations.contains_key(fact) {
+                                if replay.derivation(fact).is_none() {
                                     enabled = false;
                                     break;
                                 }
@@ -206,6 +218,20 @@ impl GroundProgram {
                                 });
                             }
                             Polarity::Negative => {
+                                if let Some(value) = self.fixed_value(fact) {
+                                    if value {
+                                        enabled = false;
+                                        break;
+                                    }
+                                    premises.push(PremiseEvidence::Absent {
+                                        fact: fact.clone(),
+                                        occurrence,
+                                        provider: CompletedProvider::Component(
+                                            self.component_for(fact)?.id,
+                                        ),
+                                    });
+                                    continue;
+                                }
                                 if !self.atom_index.contains_key(fact) {
                                     premises.push(PremiseEvidence::Absent {
                                         fact: fact.clone(),
@@ -251,7 +277,8 @@ impl GroundProgram {
                                 )?;
                             }
                         }
-                        let order = replay.derivations.len();
+                        let order = self.fixed.as_ref().map_or(0, |f| f.derivations.len())
+                            + replay.derivations.len();
                         replay.derivations.insert(
                             rule.head.atom.clone(),
                             Derivation {

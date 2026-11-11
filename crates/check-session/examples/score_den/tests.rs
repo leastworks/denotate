@@ -93,7 +93,7 @@ fn ordinary(
 }
 #[test]
 fn all_kinds_count_authored_obligations_and_both_exact_components() {
-    for mode in scorecard_support::MODES {
+    for mode in super::driver::MODES {
         let r = run(ALL, mode);
         let o = r.outcomes.as_ref().unwrap();
         assert_eq!(
@@ -133,7 +133,7 @@ fn all_kinds_count_authored_obligations_and_both_exact_components() {
 #[test]
 fn inconsistent_context_and_consistency_only_are_not_vacuous_proofs() {
     let text = "relation r(); r(); assumption impossible: empty(r); obligation none: empty(r); notice n: varies(r); verification v { assumptions: [impossible]; obligations: [none]; notices: [n]; }";
-    for mode in scorecard_support::MODES {
+    for mode in super::driver::MODES {
         let r = run(text, mode);
         let o = r.outcomes.as_ref().unwrap();
         assert_eq!(o.consistency, "inconsistent");
@@ -158,7 +158,7 @@ fn notices_unknown_and_regions_do_not_become_proofs() {
     let l = config().limits;
     let req = p.verification_requests(&l).unwrap().remove(0).1;
     let (_, status) = ordinary(&p, &req, &l);
-    for mode in scorecard_support::MODES {
+    for mode in super::driver::MODES {
         let r = run(text, mode);
         assert_eq!(r.row["outcomes"]["state"], status["state"]);
         assert_ne!(r.row["outcomes"]["state"], "proved");
@@ -269,7 +269,7 @@ fn preparation_exhaustion_keeps_unreached_metrics_unavailable() {
 fn missing_edit_is_omitted_and_warm_uses_new_handles() {
     let report = driver::collect(&config(), &snapshot(ALL), None).unwrap();
     assert_eq!(report["failures"], json!([]));
-    for mode in scorecard_support::MODES {
+    for mode in super::driver::MODES {
         let row = &report["verifications"][0]["samples"][0][mode];
         assert!(row.get("edit").is_none());
         assert_eq!(row["warm"]["warm_equals_cold"], true);
@@ -293,7 +293,7 @@ fn trivia_file_move_and_changed_selection_match_fresh_controls() {
     let report = driver::collect(&config(), &base, Some(&edited)).unwrap();
     assert_eq!(report["failures"], json!([]));
     assert_eq!(report["verifications"][0]["change"], "retained");
-    for mode in scorecard_support::MODES {
+    for mode in super::driver::MODES {
         let row = &report["verifications"][0]["samples"][0][mode];
         assert_eq!(row["cold"]["outcomes"]["state"], "findings");
         assert_eq!(row["edit"]["outcomes"]["state"], "proved");
@@ -323,7 +323,7 @@ fn added_removed_and_unconfigured_are_explicit() {
     let list = report["verifications"].as_array().unwrap();
     assert_eq!(list.len(), 2);
     for v in list {
-        for mode in scorecard_support::MODES {
+        for mode in super::driver::MODES {
             let row = &v["samples"][0][mode];
             if v["change"] == "added" {
                 assert!(row.get("cold").is_none());
@@ -381,7 +381,7 @@ fn in_repo_examples_match_check_den_presentation() {
         let l = config().limits;
         for (_, request) in p.verification_requests(&l).unwrap() {
             let (plain, status) = ordinary(&p, &request, &l);
-            for mode in scorecard_support::MODES {
+            for mode in super::driver::MODES {
                 let r = measure(
                     &p,
                     &request,
@@ -434,7 +434,7 @@ fn exported_test_dsl_regression_matches_check_den() {
     let (plain, status) = ordinary(&p, &requests[0].1, &l);
     let report = driver::collect(&config(), &snapshot, None).unwrap();
     assert_eq!(report["failures"], json!([]));
-    for mode in scorecard_support::MODES {
+    for mode in super::driver::MODES {
         let r = measure(
             &p,
             &requests[0].1,
@@ -536,6 +536,26 @@ fn symbolic_exhaustion_keeps_independent_notice_pass_visible() {
             .unwrap()
             .iter()
             .any(|r| r["resource"] == "BDD nodes")
+    );
+}
+
+#[test]
+fn fixed_preparation_exhaustion_is_a_scored_inconclusive_result() {
+    let p = snapshot(ALL).load(false).unwrap();
+    let limits = Limits {
+        max_atoms: 0,
+        ..Limits::default()
+    };
+    let request = p.verification_requests(&limits).unwrap().remove(0).1;
+    let run = measure(&p, &request, "folded-bdd", &mut None, &limits);
+    assert!(run.row["error"].is_null(), "{}", run.row);
+    assert_eq!(run.row["outcomes"]["state"], "incomplete");
+    assert!(
+        run.row["outcomes"]["inconclusive"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|r| r["phase"] == "fixed facts" && r["resource"] == "atoms")
     );
 }
 

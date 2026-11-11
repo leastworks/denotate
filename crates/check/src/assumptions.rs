@@ -82,7 +82,7 @@ impl GroundProgram {
                         }
                     }
                 }
-                for atom in &self.atoms {
+                for atom in self.atoms() {
                     budget.tick("assumptions")?;
                     if atom.relation != relation {
                         continue;

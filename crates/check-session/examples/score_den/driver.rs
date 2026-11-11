@@ -1,7 +1,7 @@
 use super::{
     outcomes::{self, Outcomes},
     report,
-    scorecard_support::{MODES, session},
+    scorecard_support::session,
 };
 use denotate_check::*;
 use denotate_check_session::Session;
@@ -15,6 +15,19 @@ use std::{
 };
 
 const USAGE: &str = "score_den ROOT_FOLDER_OR_DEN.ROOT [--edit ROOT] [--samples N] [--timeout-ms N] [--unconstrained] [--json FILE]";
+// Keep the test DSL's control variants, adding the .den-only folded path.
+pub const MODES: [&str; 7] = {
+    let base = super::scorecard_support::MODES;
+    [
+        base[0],
+        base[1],
+        base[2],
+        base[3],
+        base[4],
+        base[5],
+        "folded-bdd",
+    ]
+};
 pub struct Config {
     pub root: PathBuf,
     pub edit: Option<PathBuf>,
@@ -196,14 +209,40 @@ pub fn measure(
         outcomes: None,
     };
     let start = Instant::now();
-    let prepared = match cache {
-        Some(s) => s.prepare(request, &p.corpus, &p.keys, &operations),
-        None => request.prepare(&p.corpus, &p.keys, &operations),
+    let mut preparation_started = false;
+    let prepared = if mode == "folded-bdd" {
+        match FixedPreparation::prepare(&p.corpus, &p.domains, limits) {
+            Ok(fixed) => {
+                preparation_started = true;
+                match cache {
+                    Some(s) => {
+                        s.prepare_with_fixed(request, &p.corpus, &p.keys, &operations, &fixed)
+                    }
+                    None => {
+                        request.prepare_with_fixed(&p.corpus, &p.keys, &operations, &fixed, None)
+                    }
+                }
+            }
+            Err(e) => match AnalysisOutcome::<()>::from_result(Err(e)) {
+                Ok(AnalysisOutcome::Inconclusive(reason)) => Ok(RequestPreparation::Inconclusive {
+                    reason,
+                    receipts: WorkReceipts::default(),
+                }),
+                Ok(AnalysisOutcome::Complete(())) => unreachable!(),
+                Err(e) => Err(e),
+            },
+        }
+    } else {
+        preparation_started = true;
+        match cache {
+            Some(s) => s.prepare(request, &p.corpus, &p.keys, &operations),
+            None => request.prepare(&p.corpus, &p.keys, &operations),
+        }
     };
     run.row["timings_ns"]["preparation"] = json!(start.elapsed().as_nanos());
     // An operational failure may precede the session's counter reset. Do not
     // publish counters from the previous snapshot in that case.
-    if prepared.is_ok() {
+    if preparation_started && prepared.is_ok() {
         if let Some(s) = cache.as_ref() {
             run.row["preparation_cache"] = report::preparation_stats(s, mode);
         }

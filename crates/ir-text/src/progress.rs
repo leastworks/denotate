@@ -11,6 +11,7 @@ pub enum Phase {
     Discovery,
     Loading,
     AssumptionValidation,
+    FixedFacts,
     Preparation,
     Admission,
     Checking,
@@ -23,6 +24,7 @@ impl Phase {
             Self::Discovery => "discovery",
             Self::Loading => "loading",
             Self::AssumptionValidation => "assumption-validation",
+            Self::FixedFacts => "fixed-facts",
             Self::Preparation => "preparation",
             Self::Admission => "admission",
             Self::Checking => "checking",
@@ -86,6 +88,11 @@ impl<'a> CheckProgress<'a> {
                 "inputAtoms":program.input_atoms().count(),"ruleInstances":program.rules().count(),
                 "components":program.components().count(),
                 "largestComponentAtoms":program.components().map(|c| c.atoms.len()).max().unwrap_or(0)});
+            let (atoms, present, rules, components, dependencies) = program.fixed_size();
+            let (residual_atoms, residual_rules, residual_components) = program.residual_size();
+            detail["fold"] = json!({"presentFacts":present,"absentFacts":atoms-present,
+                "retainedEvidence":{"atoms":atoms,"ruleInstances":rules,"components":components,"dependencies":dependencies},
+                "residual":{"atoms":residual_atoms,"ruleInstances":residual_rules,"components":residual_components}});
         }
     }
 }

@@ -194,7 +194,7 @@ impl CheckRequest {
         keys: &'s SemanticKeys,
         operations: &OperationalLimits,
     ) -> Result<RequestPreparation<'s>> {
-        self.prepare_using(corpus, keys, operations, None, None)
+        self.prepare_using(corpus, keys, operations, None, None, None)
     }
     pub fn prepare_with_plans<'s>(
         &self,
@@ -203,7 +203,7 @@ impl CheckRequest {
         operations: &OperationalLimits,
         plans: &mut dyn JoinPlanStore,
     ) -> Result<RequestPreparation<'s>> {
-        self.prepare_using(corpus, keys, operations, Some(plans), None)
+        self.prepare_using(corpus, keys, operations, Some(plans), None, None)
     }
     /// Relation-SCC grounding with an independent allowance for each owned unit.
     pub fn prepare_with_grounding<'s>(
@@ -214,7 +214,19 @@ impl CheckRequest {
         plans: &mut dyn JoinPlanStore,
         grounding: &mut dyn GroundingStore,
     ) -> Result<RequestPreparation<'s>> {
-        self.prepare_using(corpus, keys, operations, Some(plans), Some(grounding))
+        self.prepare_using(corpus, keys, operations, Some(plans), Some(grounding), None)
+    }
+    /// Reuse this run's assumption-independent fixed facts. Declaration checking
+    /// still uses unrestricted, unrevised grounding, including for unnamed requests.
+    pub fn prepare_with_fixed<'s>(
+        &self,
+        corpus: &'s Corpus,
+        keys: &'s SemanticKeys,
+        operations: &OperationalLimits,
+        fixed: &FixedPreparation<'s>,
+        plans: Option<&mut dyn JoinPlanStore>,
+    ) -> Result<RequestPreparation<'s>> {
+        self.prepare_using(corpus, keys, operations, plans, None, Some(fixed))
     }
     fn prepare_using<'s>(
         &self,
@@ -223,6 +235,7 @@ impl CheckRequest {
         operations: &OperationalLimits,
         plans: Option<&mut dyn JoinPlanStore>,
         grounding: Option<&mut dyn GroundingStore>,
+        fixed: Option<&FixedPreparation<'s>>,
     ) -> Result<RequestPreparation<'s>> {
         operations.cancellation.check()?;
         keys.validate(corpus).map_err(CheckError::Keys)?;
@@ -326,6 +339,11 @@ impl CheckRequest {
         let limits = self.limits.with_operations(operations);
         let mut budget = Budget::tracked(&limits);
         let mut receipts = WorkReceipts::default();
+        if let Some(fixed) = fixed {
+            receipts
+                .record(QueryKey::FixedFacts, fixed.receipt.clone())
+                .map_err(CheckError::Receipts)?;
+        }
         let mut ground_validation = BTreeMap::new();
         let result = (|| {
             ground_validation = corpus.validate_assumption_relations_with(
@@ -334,6 +352,32 @@ impl CheckRequest {
                     .filter_map(|c| relations.get(c.relation()).copied()),
                 || budget.tick("assumptions"),
             )?;
+            if fixed.is_some()
+                && ground_validation
+                    .values()
+                    .any(|v| *v == denotate_ir::AssumptionCone::NeedsGrounding)
+            {
+                let original = GroundProgram::prepare_using(
+                    corpus,
+                    &domains,
+                    &[],
+                    &BTreeSet::new(),
+                    &mut budget,
+                    None,
+                )?;
+                for (relation, classification) in &ground_validation {
+                    if *classification != denotate_ir::AssumptionCone::NeedsGrounding {
+                        continue;
+                    }
+                    let cycles = original.assumption_cycles(*relation, keys, &mut budget)?;
+                    if !cycles.is_empty() {
+                        return Err(CheckError::InvalidAssumptionCone {
+                            relation: keys.relation(*relation)?.clone(),
+                            cycles,
+                        });
+                    }
+                }
+            }
             if let Some(store) = grounding {
                 GroundProgram::prepare_grounding(
                     corpus,
@@ -347,13 +391,14 @@ impl CheckRequest {
                     &mut receipts,
                 )
             } else {
-                GroundProgram::prepare_using(
+                GroundProgram::prepare_using_fixed(
                     corpus,
                     &domains,
                     &constraints,
                     &obligations,
                     &mut budget,
                     plans.map(|store| (keys, store)),
+                    fixed,
                 )
             }
         })();
@@ -406,7 +451,7 @@ impl CheckRequest {
             })
             .collect::<Result<Vec<_>>>()?;
         for (relation, classification) in ground_validation {
-            if classification == denotate_ir::AssumptionCone::NeedsGrounding {
+            if fixed.is_none() && classification == denotate_ir::AssumptionCone::NeedsGrounding {
                 let cycles = match program.assumption_cycles(relation, keys, &mut budget) {
                     Ok(cycles) => cycles,
                     Err(error) => {

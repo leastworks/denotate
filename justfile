@@ -81,6 +81,11 @@ score-den +args:
 bench-den-origins +args:
     cargo +1.93.0 run --release --locked -p denotate-ir-text --example bench_origins -- "$@"
 
+# Compare folded/unfolded checking: ITEMS [VERIFICATIONS=4] [--ground-assumption].
+[positional-arguments]
+bench-den-fixed +args:
+    cargo +1.93.0 run --release --locked -p denotate-ir-text --example bench_fixed -- "$@"
+
 # Export one combined test DSL program: OUT_DIR FILE... [--without-origins].
 [positional-arguments]
 export-test-dsl +args:

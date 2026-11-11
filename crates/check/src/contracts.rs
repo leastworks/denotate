@@ -56,10 +56,10 @@ impl<'p> ConeIndex<'p> {
             if !cone.facts.insert(fact.clone()) {
                 continue;
             }
-            if let Some(index) = self.program.atom_index.get(&fact) {
-                let id = self.program.atom_components[*index];
-                cone.components.insert(id);
-                for root in &self.program.components[id.index].blocked_by {
+            if self.program.is_possible(&fact)? {
+                let component = self.program.component_for(&fact)?;
+                cone.components.insert(component.id);
+                for root in &component.blocked_by {
                     budget.tick("dependency cones")?;
                     cone.blocked_by.insert(*root);
                 }

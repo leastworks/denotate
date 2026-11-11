@@ -276,6 +276,7 @@ impl Instances {
         rule: &Rule,
         binding: &Binding<'_>,
         preparation: u64,
+        fixed: Option<&FixedFacts>,
         budget: &mut Budget<'_>,
     ) -> Result<Option<GroundAtom>> {
         budget.tick("grounding")?;
@@ -288,13 +289,27 @@ impl Instances {
         if self.rules.contains_key(&key) {
             return Ok(None);
         }
+        let folded_head = if let Some(fixed) = fixed {
+            let head = ground_atom(&rule.head, binding, budget)?;
+            if fixed.program.atom_index.contains_key(&head.atom) {
+                return Ok(None);
+            }
+            Some(head)
+        } else {
+            None
+        };
         budget.room(
-            self.rules.len(),
+            self.rules
+                .len()
+                .saturating_add(fixed.map_or(0, |f| f.program.rules.len())),
             budget.limits.max_rules,
             "grounding",
             "rules",
         )?;
-        let head = ground_atom(&rule.head, binding, budget)?;
+        let head = match folded_head {
+            Some(head) => head,
+            None => ground_atom(&rule.head, binding, budget)?,
+        };
         let mut body = Vec::new();
         for literal in &rule.body {
             budget.tick("grounding")?;
@@ -457,6 +472,12 @@ fn populate_using(
         if cone.is_some_and(|c| !c.contains(&rule.head.relation())) {
             continue;
         }
+        if p.fixed
+            .as_ref()
+            .is_some_and(|f| f.relations.contains(&rule.head.relation()))
+        {
+            continue;
+        }
         let mut positives = Vec::new();
         for literal in &rule.body {
             budget.tick("grounding plans")?;
@@ -465,7 +486,13 @@ fn populate_using(
             }
         }
         if positives.is_empty() {
-            if let Some(head) = instances.add(rule, &Binding::new(), p.preparation, budget)? {
+            if let Some(head) = instances.add(
+                rule,
+                &Binding::new(),
+                p.preparation,
+                p.fixed.as_deref(),
+                budget,
+            )? {
                 seeds.push(head);
             }
         }
@@ -562,7 +589,14 @@ fn populate_using(
     #[cfg(any(test, feature = "test-support"))]
     budget.mark("plans_and_seed_instances");
     // Index definitions must exist before any tuple is indexed.
-    for atom in external.iter().cloned().chain(seeds) {
+    for atom in p
+        .fixed
+        .iter()
+        .flat_map(|f| f.program.atoms.iter())
+        .cloned()
+        .chain(external.iter().cloned())
+        .chain(seeds)
+    {
         tuples.insert(atom, budget)?;
     }
     for relation in corpus.relations() {
@@ -609,9 +643,13 @@ fn populate_using(
                             match_tuple(plan.pivot, tuple, &Binding::new(), budget)?
                         {
                             join(plan, binding, &tuples, budget, |binding, budget| {
-                                if let Some(head) =
-                                    instances.add(plan.rule, binding, p.preparation, budget)?
-                                {
+                                if let Some(head) = instances.add(
+                                    plan.rule,
+                                    binding,
+                                    p.preparation,
+                                    p.fixed.as_deref(),
+                                    budget,
+                                )? {
                                     heads.push(head);
                                 }
                                 Ok(())
@@ -632,6 +670,9 @@ fn populate_using(
     // Canonical IDs and traversal order, independent of delta discovery order.
     for atom in tuples.seen {
         budget.tick("grounding")?;
+        if p.fixed_value(&atom).is_some() {
+            continue;
+        }
         p.atom_index.insert(atom.clone(), p.atoms.len());
         p.atoms.push(atom);
     }

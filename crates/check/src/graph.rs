@@ -54,6 +54,26 @@ pub(crate) fn analyze(p: &mut GroundProgram, budget: &mut Budget<'_>) -> Result<
         for literal in &rule.body {
             budget.tick("dependencies")?;
             let Some(&provider) = p.atom_index.get(&literal.term.atom) else {
+                if p.fixed_value(&literal.term.atom).is_some() {
+                    // Keep the original boundary edge as evidence, but do not
+                    // schedule an already-settled provider in the residual graph.
+                    budget.room(
+                        p.dependencies.len().saturating_add(
+                            p.fixed.as_ref().map_or(0, |f| f.program.dependencies.len()),
+                        ),
+                        budget.limits.max_dependencies,
+                        "dependencies",
+                        "dependencies",
+                    )?;
+                    p.dependencies.push(Dependency {
+                        consumer: rule.head.atom.clone(),
+                        provider: literal.term.atom.clone(),
+                        rule: rule.id,
+                        premise: literal.term.occurrence,
+                        polarity: literal.polarity,
+                    });
+                    continue;
+                }
                 if literal.polarity == Polarity::Positive {
                     return Err(CheckError::Internal("impossible positive premise"));
                 }
@@ -62,7 +82,9 @@ pub(crate) fn analyze(p: &mut GroundProgram, budget: &mut Budget<'_>) -> Result<
                 continue;
             };
             budget.room(
-                p.dependencies.len(),
+                p.dependencies
+                    .len()
+                    .saturating_add(p.fixed.as_ref().map_or(0, |f| f.program.dependencies.len())),
                 budget.limits.max_dependencies,
                 "dependencies",
                 "dependencies",

@@ -178,9 +178,14 @@ impl GroundProgram {
         self.rewrites.originals.get(&id).or_else(|| self.rule(id))
     }
     pub fn original_rules(&self) -> impl Iterator<Item = &GroundRule> {
-        self.rules
+        self.fixed
             .iter()
-            .map(|r| self.rewrites.originals.get(&r.id).unwrap_or(r))
+            .flat_map(|f| f.program.rules.iter())
+            .chain(
+                self.rules
+                    .iter()
+                    .map(|r| self.rewrites.originals.get(&r.id).unwrap_or(r)),
+            )
     }
     pub fn admission_limit(&self) -> Option<Inconclusive> {
         self.rewrites.inconclusive
@@ -235,7 +240,11 @@ impl GroundProgram {
             let mut summaries = BTreeMap::new();
             let mut producers = BTreeMap::<_, Vec<_>>::new();
             let mut retained = self.rewrites.nodes + meaning.metrics().retained_condition_nodes;
-            for rule in self.rules() {
+            for rule in self
+                .rules
+                .iter()
+                .filter(|r| !self.rewrites.dropped.contains(&r.id))
+            {
                 budget.tick("rewrite summaries")?;
                 let mut condition = ctx.true_condition();
                 let mut settled = Vec::new();
@@ -275,7 +284,11 @@ impl GroundProgram {
             }
             let mut batch = Vec::new();
             let mut upper_bounds = BTreeMap::new();
-            for rule in self.rules() {
+            for rule in self
+                .rules
+                .iter()
+                .filter(|r| !self.rewrites.dropped.contains(&r.id))
+            {
                 budget.tick("rewrite candidates")?;
                 let candidate = &summaries[&rule.id];
                 if candidate.exact {

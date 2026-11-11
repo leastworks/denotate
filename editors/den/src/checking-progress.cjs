@@ -4,7 +4,7 @@ function busy(progress) {
 }
 const phases = {
   loading: 'Loading', 'assumption-validation': 'Validating assumptions',
-  preparation: 'Preparing', admission: 'Admission', checking: 'Checking obligations and notices',
+  'fixed-facts': 'Evaluating fixed facts', preparation: 'Preparing', admission: 'Admission', checking: 'Checking obligations and notices',
   presentation: 'Preparing diagnostics', publication: 'Preparing publication'
 };
 function phase(detail) { return phases[detail?.phase] ?? 'Starting check'; }
@@ -33,7 +33,8 @@ function activity(active) {
     ...(d.configuration ? [`Effective checker limits (per operation/query): timeoutMs=${d.configuration.timeoutMs}; ${Object.entries(d.configuration.limits).map(([k, v]) => `${k}=${v}`).join(', ')}`] : []),
     ...(d.files !== undefined ? [`${d.files} source files`] : []),
     ...(d.verification ? [`${d.verification} (${d.verificationIndex}/${d.verificationTotal}); ${d.assumptions} assumptions, ${d.obligations} obligations, ${d.notices} notices`] : []),
-    ...(d.ground ? [`Prepared size: ${d.ground.inputAtoms} inputs, ${d.ground.atoms} atoms, ${d.ground.ruleInstances} rule instances, ${d.ground.components} components (largest: ${d.ground.largestComponentAtoms} atoms)`] : [])
+    ...(d.ground ? [`Prepared size: ${d.ground.inputAtoms} inputs, ${d.ground.atoms} atoms, ${d.ground.ruleInstances} rule instances, ${d.ground.components} components (largest: ${d.ground.largestComponentAtoms} atoms)`] : []),
+    ...(d.fold ? [`Fixed facts: ${d.fold.presentFacts} present, ${d.fold.absentFacts} absent; retained evidence: ${JSON.stringify(d.fold.retainedEvidence)}; residual graph: ${JSON.stringify(d.fold.residual)}`] : [])
   ] : [])].join('\n');
 }
 function details(progress, quietMs = 0) {

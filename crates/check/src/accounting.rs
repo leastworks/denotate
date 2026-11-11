@@ -9,6 +9,7 @@ use std::{
 /// standalone cache keys: a driver must also validate those inputs and limits.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum QueryKey {
+    FixedFacts,
     Preparation,
     Grounding(GroundingKey),
     Admission,

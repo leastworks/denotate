@@ -54,6 +54,20 @@ real program that the current choice serves badly.
   selecting an invalid or unvalidated assumption prevents that verification from
   running. Ground validation is fresh and bounded. This deliberately leaves
   assumption-free redundancy proofs and further static simplification for later.
+- **Fixed facts are evaluated once per run, without changing assumption validity.**
+  Large authored structures should not become repeated symbolic work in every
+  verification. Relations reaching no inputs through either polarity can be
+  evaluated independently of the selected context. Only settled atoms are folded;
+  unresolved components keep existing admission and findings. Original fixed rules,
+  dependencies, completed absences and presence derivations remain shared evidence,
+  with their size reported separately from residual execution. This first version
+  retains the full fixed graph rather than compacting away diagnostic information.
+  Program-level and selected-assumption validation still inspect the original
+  ground graph: accepting a cycle after simplifying a false guard would change
+  declaration validity, not merely performance. The fold has its own bounded
+  allowance and receipt; retained atoms, rules and dependencies also count against
+  preparation's size limits. Sharing residual preparation and caching the fold
+  across edits remain separate work, measured with the `.den` scorecard.
 - **Cycle diagnostics show retained ground dependencies.** A generic rule can have
   many instances with different recursive behavior. Showing concrete arguments and
   signed edges identifies the reported instance without searching for a new cycle

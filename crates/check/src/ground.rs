@@ -23,6 +23,10 @@ pub use planning::*;
 #[path = "grounding.rs"]
 mod grounding;
 pub use grounding::*;
+#[path = "fixed.rs"]
+mod fixed;
+pub(crate) use fixed::FixedFacts;
+pub use fixed::FixedPreparation;
 
 #[cfg(any(test, feature = "test-support"))]
 #[path = "tests/preparation_profile.rs"]
@@ -124,6 +128,7 @@ pub struct InputAtMostOne {
 /// Owns a snapshot of rule structure; source IDs point back to the original IR.
 #[derive(Debug, Clone)]
 pub struct GroundProgram {
+    pub(crate) fixed: Option<std::sync::Arc<FixedFacts>>,
     pub(crate) preparation: u64,
     pub(crate) graph_revision: u64,
     pub(crate) signatures: BTreeMap<RelationId, Vec<SortId>>,
@@ -183,12 +188,45 @@ impl GroundProgram {
         budget: &mut Budget<'_>,
         cache: Option<(&SemanticKeys, &mut dyn JoinPlanStore)>,
     ) -> Result<Self> {
+        Self::prepare_using_fixed(
+            corpus,
+            domains,
+            constraints,
+            obligations,
+            budget,
+            cache,
+            None,
+        )
+    }
+    pub(crate) fn prepare_using_fixed(
+        corpus: &Corpus,
+        domains: &Domains,
+        constraints: &[InputAtMostOne],
+        obligations: &BTreeSet<ObligationId>,
+        budget: &mut Budget<'_>,
+        cache: Option<(&SemanticKeys, &mut dyn JoinPlanStore)>,
+        fixed: Option<&FixedPreparation<'_>>,
+    ) -> Result<Self> {
         let limits = budget.limits;
         limits.cancellation.check()?;
         let start = Instant::now();
         let domains = validate_domains(corpus, domains, budget)?;
-        let restricted = input_domains::evaluate(corpus, &domains, budget)?;
+        let restricted = match fixed {
+            Some(fixed) => fixed.input_domains.clone(),
+            None => input_domains::evaluate(corpus, &domains, budget)?,
+        };
         let mut p = Self::empty(corpus, domains);
+        if let Some(fixed) = fixed {
+            if !std::ptr::eq(corpus, fixed.corpus)
+                || p.domains != fixed.domains
+                || DeterministicLimits::from(limits) != fixed.limits
+            {
+                return Err(CheckError::InvalidRequest(
+                    "fixed preparation does not match this snapshot, domains or limits",
+                ));
+            }
+            p.fixed = fixed.facts.clone();
+        }
         p.input_domains = restricted;
         p.obligations = obligations.clone();
         if let Some((keys, store)) = cache {
@@ -254,6 +292,7 @@ impl GroundProgram {
     pub(crate) fn empty(corpus: &Corpus, domains: Domains) -> Self {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         Self {
+            fixed: None,
             preparation: NEXT.fetch_add(1, Ordering::Relaxed),
             graph_revision: 0,
             rewrites: Default::default(),
@@ -300,12 +339,17 @@ impl GroundProgram {
     /// Legality and possibility are independent of whether a replay derives a fact.
     pub fn is_possible(&self, atom: &GroundAtom) -> Result<bool> {
         self.validate_atom(atom)?;
-        Ok(self.atom_index.contains_key(atom))
+        Ok(self.atom_index.contains_key(atom) || self.fixed_value(atom).is_some())
     }
 
     fn build_groups(&mut self, corpus: &Corpus, budget: &mut Budget<'_>) -> Result<()> {
         let mut by_relation = BTreeMap::<_, Vec<_>>::new();
-        for atom in &self.atoms {
+        for atom in self
+            .fixed
+            .iter()
+            .flat_map(|f| f.program.atoms.iter())
+            .chain(self.atoms.iter())
+        {
             budget.tick("obligation groups")?;
             by_relation.entry(atom.relation).or_default().push(atom);
         }
@@ -440,32 +484,58 @@ impl GroundProgram {
     }
 
     pub fn atoms(&self) -> impl Iterator<Item = &GroundAtom> {
-        self.atoms.iter()
+        self.fixed
+            .iter()
+            .flat_map(|f| f.program.atoms.iter())
+            .chain(self.atoms.iter())
     }
     pub fn input_atoms(&self) -> impl Iterator<Item = &GroundAtom> {
         self.inputs.iter()
     }
     pub fn rules(&self) -> impl Iterator<Item = &GroundRule> {
-        self.rules
+        self.fixed
             .iter()
-            .filter(|r| !self.rewrites.dropped.contains(&r.id))
+            .flat_map(|f| f.program.rules.iter())
+            .chain(
+                self.rules
+                    .iter()
+                    .filter(|r| !self.rewrites.dropped.contains(&r.id)),
+            )
     }
     pub fn rule(&self, id: GroundRuleId) -> Option<&GroundRule> {
-        (id.preparation == self.preparation && !self.rewrites.dropped.contains(&id))
-            .then(|| self.rules.get(id.index))
-            .flatten()
+        self.fixed
+            .as_ref()
+            .and_then(|f| f.program.rule(id))
+            .or_else(|| {
+                (id.preparation == self.preparation && !self.rewrites.dropped.contains(&id))
+                    .then(|| self.rules.get(id.index))
+                    .flatten()
+            })
     }
     pub fn components(&self) -> impl Iterator<Item = &Component> {
-        self.components.iter()
+        self.fixed
+            .iter()
+            .flat_map(|f| f.program.components.iter())
+            .chain(self.components.iter())
     }
     pub fn component(&self, id: ComponentId) -> Option<&Component> {
-        (id.preparation == self.graph_revision)
-            .then(|| self.components.get(id.index))
-            .flatten()
+        self.fixed
+            .as_ref()
+            .and_then(|f| f.program.component(id))
+            .or_else(|| {
+                (id.preparation == self.graph_revision)
+                    .then(|| self.components.get(id.index))
+                    .flatten()
+            })
     }
     /// Looks up a represented node. For legal unrepresented atoms use
     /// is_possible() or Replay::fact(); they have no component.
     pub fn component_for(&self, atom: &GroundAtom) -> Result<&Component> {
+        if let Some(fixed) = &self.fixed {
+            if fixed.program.atom_index.contains_key(atom) {
+                return fixed.program.component_for(atom);
+            }
+        }
         let index = self
             .atom_index
             .get(atom)
@@ -473,7 +543,10 @@ impl GroundProgram {
         Ok(&self.components[self.atom_components[*index].index])
     }
     pub fn dependencies(&self) -> impl Iterator<Item = &Dependency> {
-        self.dependencies.iter()
+        self.fixed
+            .iter()
+            .flat_map(|f| f.program.dependencies.iter())
+            .chain(self.dependencies.iter())
     }
     pub fn is_admitted(&self) -> bool {
         self.components.iter().all(|c| c.blocked_by.is_empty())

@@ -377,7 +377,8 @@ fields!(WorkReceipt {
 impl Retained for QueryKey {
     fn heap(&self, p: &mut Payload) {
         match self {
-            Self::Preparation
+            Self::FixedFacts
+            | Self::Preparation
             | Self::Admission
             | Self::CoverageMeaning
             | Self::Symbolic

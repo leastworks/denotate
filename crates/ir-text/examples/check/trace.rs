@@ -67,6 +67,9 @@ impl<'a> Trace<'a> {
             self.message(format_args!("Prepared size (before admission): {} inputs, {} atoms, {} rule instances, {} components; largest component {} atoms",
                 g["inputAtoms"], g["atoms"], g["ruleInstances"], g["components"], g["largestComponentAtoms"]));
         }
+        if let Some(fold) = detail.get("fold").filter(|_| phase == "admission") {
+            self.message(format_args!("Fixed facts and retained evidence: {fold}"));
+        }
     }
     pub fn finish(&self, outcome: impl std::fmt::Display) {
         self.end_phase();

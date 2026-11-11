@@ -6,6 +6,10 @@ that warm results (and work receipts) equal a cold check of the same snapshot.
 
 - `Session::prepare(&request, &corpus, &keys, &operations)` and `Session::verify(...)`
   mirror the fresh checker entry points. `FreshSession` is the uncached control.
+- `Session::prepare_with_fixed` takes a run-scoped `FixedPreparation`, shared across
+  verification requests. Join plans and local verdicts retain their existing reuse;
+  this path grounds the residual afresh and does not use the optional relation-SCC
+  grounding cache. The fold itself is not cached across edits.
 - `Session::verify_with_metrics` and the checker's corresponding methods optionally
   time the actual notice pass. Metrics reset on entry, stay outside semantic results
   and receipts, and are never cached.

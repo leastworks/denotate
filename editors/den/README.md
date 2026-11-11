@@ -93,6 +93,11 @@ shows time since the last server report; it is not a heartbeat or time remaining
 Startup and discovery show an indeterminate spinner. When idle, the item resumes
 the active `.den` file's status.
 
+“Evaluating fixed facts” runs once per program check, shared across its
+verifications. The tooltip and Output separate fixed present/absent facts, retained
+original evidence and the residual executable graph. A small residual does not mean
+the retained evidence has disappeared; these counts are not memory measurements.
+
 Click the status item or run **Denotate: Show Output** to open **Output → Denotate**.
 This is the normal log view: startup, phase transitions, prepared sizes, completion
 summaries, and operational errors such as a failed check or deadline. Run numbers

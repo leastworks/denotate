@@ -296,7 +296,10 @@ impl PreparedCheck<'_> {
             possible: cone
                 .facts
                 .iter()
-                .filter(|a| self.program.atom_index.contains_key(*a))
+                .filter(|a| {
+                    self.program.atom_index.contains_key(*a)
+                        || self.program.fixed_value(a).is_some()
+                })
                 .map(&atom)
                 .collect::<Result<_>>()?,
             inputs,

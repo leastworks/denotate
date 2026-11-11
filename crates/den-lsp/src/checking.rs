@@ -114,6 +114,7 @@ fn check_with_progress(
     }
     publication.status["findings"] = validation_publication.status["findings"].clone();
     let requests = program.verification_requests(&job.limits)?;
+    let fixed = std::cell::OnceCell::new();
     for (i, (key, request)) in requests.iter().enumerate() {
         let context = progress.verification(&program, key, i + 1, requests.len())?;
         job.limits.cancellation.check()?;
@@ -133,14 +134,26 @@ fn check_with_progress(
                     status: json!({"state":"incomplete","consistency":"unknown","assumptionValidation":denotate_presentation::assumption_validity_data(state)}),
                 });
             }
+            let fixed = fixed.get_or_init(|| {
+                progress.emit(Phase::FixedFacts, json!({}));
+                denotate_check::FixedPreparation::prepare(
+                    &program.corpus,
+                    &program.domains,
+                    &job.limits,
+                )
+            });
             progress.emit(Phase::Preparation, context.clone());
-            let ground =
-                match session.prepare(request, &program.corpus, &program.keys, &operations)? {
-                    RequestPreparation::Complete(p) => p,
-                    RequestPreparation::Inconclusive { reason, .. } => {
-                        return Ok(exhausted(reason))
-                    }
-                };
+            let fixed = fixed.as_ref().map_err(|e| Failure::from(e.clone()))?;
+            let ground = match session.prepare_with_fixed(
+                request,
+                &program.corpus,
+                &program.keys,
+                &operations,
+                fixed,
+            )? {
+                RequestPreparation::Complete(p) => p,
+                RequestPreparation::Inconclusive { reason, .. } => return Ok(exhausted(reason)),
+            };
             let mut detail = context.clone();
             progress.prepared(&mut detail, ground.program());
             progress.emit(Phase::Admission, detail.clone());
@@ -986,6 +999,7 @@ mod tests {
                 [
                     "loading",
                     "assumption-validation",
+                    "fixed-facts",
                     "preparation",
                     "admission",
                     "checking",
@@ -993,7 +1007,7 @@ mod tests {
                     "publication"
                 ]
             );
-            let prepared = &updates[3];
+            let prepared = &updates[4];
             assert_eq!(prepared["verification"], "::v");
             assert_eq!(prepared["verificationIndex"], 1);
             assert_eq!(prepared["verificationTotal"], 1);
@@ -1001,6 +1015,34 @@ mod tests {
             assert!(prepared["ground"]["inputAtoms"].as_u64().unwrap() > 0);
             assert!(prepared["ground"]["atoms"].as_u64().unwrap() > 0);
             assert!(prepared["ground"]["components"].as_u64().unwrap() > 0);
+        }
+    }
+    #[test]
+    fn fixed_preparation_runs_once_across_verifications() {
+        let job = assumption_job("relation fixed(); fixed(); input i(); relation r(); r():-fixed(),i(); obligation o:empty(r); verification a{assumptions:[];obligations:[o];} verification b{assumptions:[];obligations:[o];}", Limits::default());
+        let updates = std::cell::RefCell::new(vec![]);
+        check_with_progress(
+            &job,
+            &mut denotate_check_session::Session::default(),
+            Some(&|p| updates.borrow_mut().push(p)),
+        )
+        .unwrap();
+        let updates = updates.into_inner();
+        assert_eq!(
+            updates
+                .iter()
+                .filter(|p| p["phase"] == "fixed-facts")
+                .count(),
+            1
+        );
+        let prepared = updates
+            .iter()
+            .filter(|p| p["phase"] == "admission")
+            .collect::<Vec<_>>();
+        assert_eq!(prepared.len(), 2);
+        for detail in prepared {
+            assert_eq!(detail["fold"]["presentFacts"], 1);
+            assert!(detail["fold"]["residual"]["atoms"].as_u64().unwrap() > 0);
         }
     }
     #[test]

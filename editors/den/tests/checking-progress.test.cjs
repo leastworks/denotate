@@ -57,11 +57,13 @@ test('one large program reports its phase, verification and prepared size', () =
   const p = progress({ checking: 1 }, { active: [{ program: 'file:///app/den.root', label: 'app/den.root', revision: 12,
     detail: { phase: 'admission', elapsedMs: 5000, verification: 'library::checks', verificationIndex: 2, verificationTotal: 3,
       assumptions: 1, obligations: 7, notices: 4,
-      ground: { inputAtoms: 120, atoms: 300, ruleInstances: 200, components: 80, largestComponentAtoms: 15 } } }] });
+      ground: { inputAtoms: 120, atoms: 300, ruleInstances: 200, components: 80, largestComponentAtoms: 15 },
+      fold: { presentFacts: 30, absentFacts: 20, retainedEvidence: { atoms: 50 }, residual: { atoms: 250 } } } }] });
   assert.match(view.text(p), /Admission · verification 2\/3/);
   assert.match(view.text(p, 9000), /9s since update/);
   assert.match(view.details(p), /120 inputs, 300 atoms, 200 rule instances, 80 components/);
   assert.match(view.details(p), /largest: 15 atoms/);
+  assert.match(view.details(p), /30 present, 20 absent; retained evidence:.*50.*residual graph:.*250/);
   assert.match(view.details(p), /library::checks/);
   assert.match(view.details(p, 9000), /not a heartbeat/);
   const lines = [];
@@ -77,6 +79,8 @@ test('one large program reports its phase, verification and prepared size', () =
   assert.match(lines[1], /run 13/);
   restarted.active[0].detail = { phase: 'publication', verificationTotal: 3, elapsedMs: 9000 };
   assert.doesNotMatch(view.text(restarted), /undefined/);
+  restarted.active[0].detail = { phase: 'fixed-facts', elapsedMs: 0 };
+  assert.match(view.text(restarted), /Evaluating fixed facts/);
 });
 
 test('Output names every effective limit without estimating unfinished work', () => {

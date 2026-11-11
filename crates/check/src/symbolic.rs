@@ -47,6 +47,9 @@ impl SymbolicMeaning<'_> {
         &self.metrics
     }
     pub fn fact(&self, atom: &GroundAtom) -> Result<SymbolicFact> {
+        if self.program.fixed_value(atom).is_some() {
+            return Ok(SymbolicFact::Settled(self.known(atom)));
+        }
         if self.program.is_possible(atom)? {
             let component = self.program.component_for(atom)?;
             if let Some(cause) = self.inconclusive.get(&component.id) {
@@ -62,6 +65,13 @@ impl SymbolicMeaning<'_> {
         Ok(SymbolicFact::Settled(self.known(atom)))
     }
     pub(crate) fn known(&self, atom: &GroundAtom) -> Condition {
+        if let Some(value) = self.program.fixed_value(atom) {
+            return if value {
+                self.context.true_condition()
+            } else {
+                self.context.false_condition()
+            };
+        }
         self.conditions
             .get(atom)
             .cloned()

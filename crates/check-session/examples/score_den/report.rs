@@ -31,7 +31,7 @@ pub fn variant(mode: &str, unconstrained: bool) -> Value {
     };
     json!({"mode":mode,"session_retention":retention,
         "planning":if mode=="global-bdd"||mode=="bdd-no-plans" {"fresh"}else{"cached-small-rule-bypass"},
-        "grounding":match mode {"grounding-bdd"=>"cached-relation-scc","fresh-grounding-bdd"=>"fresh-relation-scc",_=>"fresh"}})
+        "grounding":match mode {"grounding-bdd"=>"cached-relation-scc","fresh-grounding-bdd"=>"fresh-relation-scc","folded-bdd"=>"fixed-facts-and-residual",_=>"fresh"}})
 }
 pub fn size(p: &PreparedCheck<'_>) -> Value {
     let g = p.program();
@@ -50,8 +50,13 @@ pub fn size(p: &PreparedCheck<'_>) -> Value {
     });
     let count = components.len();
     components.truncate(5);
+    let (atoms, present, fixed_rules, fixed_components, dependencies) = g.fixed_size();
+    let (residual_atoms, residual_rules, residual_components) = g.residual_size();
     json!({"inputs":g.input_atoms().count(),"ground_atoms":g.atoms().count(),"rule_instances":g.rules().count(),
-        "components":count,"largest_components":components})
+        "components":count,"largest_components":components,
+        "fold":{"present_facts":present,"absent_facts":atoms-present,
+            "retained_evidence":{"atoms":atoms,"rule_instances":fixed_rules,"components":fixed_components,"dependencies":dependencies},
+            "residual":{"atoms":residual_atoms,"rule_instances":residual_rules,"components":residual_components}}})
 }
 pub fn preparation_stats(s: &Session, mode: &str) -> Value {
     let p = s.plan_stats();
@@ -129,7 +134,7 @@ pub fn human(report: &Value) -> String {
         )
         .unwrap();
         let samples = v["samples"].as_array().unwrap();
-        for mode in crate::scorecard_support::MODES {
+        for mode in super::driver::MODES {
             for phase in ["cold", "warm", "edit"] {
                 let rows = samples
                     .iter()
@@ -180,6 +185,14 @@ pub fn human(report: &Value) -> String {
             }
         }
         for phase in ["cold", "edit"] {
+            if let Some(r) = samples.first().and_then(|s| s["folded-bdd"].get(phase)) {
+                writeln!(
+                    out,
+                    "  {phase} folded size (evidence and residual): {}",
+                    r["size"]["fold"]
+                )
+                .unwrap();
+            }
             if let Some(r) = samples.first().and_then(|s| s["global-bdd"].get(phase)) {
                 writeln!(out, "  {phase} size (after preparation): {}", r["size"]).unwrap();
                 writeln!(

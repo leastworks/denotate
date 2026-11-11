@@ -274,9 +274,32 @@ impl Session {
         keys: &'s denotate_ir::SemanticKeys,
         operations: &OperationalLimits,
     ) -> Result<RequestPreparation<'s>, CheckError> {
+        self.prepare_using(request, corpus, keys, operations, None)
+    }
+    pub fn prepare_with_fixed<'s>(
+        &mut self,
+        request: &CheckRequest,
+        corpus: &'s denotate_ir::Corpus,
+        keys: &'s denotate_ir::SemanticKeys,
+        operations: &OperationalLimits,
+        fixed: &FixedPreparation<'s>,
+    ) -> Result<RequestPreparation<'s>, CheckError> {
+        self.prepare_using(request, corpus, keys, operations, Some(fixed))
+    }
+    fn prepare_using<'s>(
+        &mut self,
+        request: &CheckRequest,
+        corpus: &'s denotate_ir::Corpus,
+        keys: &'s denotate_ir::SemanticKeys,
+        operations: &OperationalLimits,
+        fixed: Option<&FixedPreparation<'s>>,
+    ) -> Result<RequestPreparation<'s>, CheckError> {
         #[cfg(any(test, feature = "test-support"))]
         if self.fresh_planning {
-            return request.prepare(corpus, keys, operations);
+            return match fixed {
+                Some(fixed) => request.prepare_with_fixed(corpus, keys, operations, fixed, None),
+                None => request.prepare(corpus, keys, operations),
+            };
         }
         let plan_bytes = self.total_retention.max_bytes / 8;
         let plan_entries = self.total_retention.max_entries / 2;
@@ -303,7 +326,9 @@ impl Session {
             self.total_retention.max_entries,
         );
         self.plans.begin(plan_entries, plan_bytes);
-        let result = if let Some(grounding) = &mut self.grounding {
+        let result = if let Some(fixed) = fixed {
+            request.prepare_with_fixed(corpus, keys, operations, fixed, Some(&mut self.plans))
+        } else if let Some(grounding) = &mut self.grounding {
             grounding.begin(self.total_retention.max_bytes / 4);
             #[cfg(any(test, feature = "test-support"))]
             let fresh = self.fresh_grounding;
