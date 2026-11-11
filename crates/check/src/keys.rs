@@ -104,6 +104,27 @@ impl InstanceKey {
 }
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ComponentKey(pub Arc<[AtomKey]>);
+impl ComponentKey {
+    pub fn from_component(
+        program: &GroundProgram,
+        keys: &SemanticKeys,
+        id: ComponentId,
+    ) -> Result<Self> {
+        let component = program
+            .component(id)
+            .ok_or(CheckError::Internal("missing committed component"))?;
+        Ok(Self(
+            component
+                .atoms
+                .iter()
+                .map(|a| AtomKey::from_atom(keys, a).map_err(CheckError::Keys))
+                .collect::<Result<BTreeSet<_>>>()?
+                .into_iter()
+                .collect::<Vec<_>>()
+                .into(),
+        ))
+    }
+}
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct GroupKey {
     pub obligation: ObligationKey,
@@ -165,151 +186,84 @@ pub struct GroundKeyIndex {
     pub groups: BTreeMap<ObligationKey, KeyedGroups>,
     pub elapsed: Duration,
 }
-#[derive(Debug, Clone)]
+/// Source schemas shared by every request and admitted view of this snapshot.
+/// Ground bodies already live in GroundProgram; never retain keyed copies here.
+#[derive(Debug)]
 pub struct GroundKeyCore {
-    /// Current executable content; original instances remain available for provenance.
-    pub committed: BTreeMap<InstanceKey, GroundInstance>,
-    pub dropped: BTreeSet<InstanceKey>,
-    pub rewrites: BTreeMap<RewriteProofId, RewriteEvidenceKey>,
-    pub atoms: BTreeMap<GroundAtom, AtomKey>,
-    pub instances: BTreeMap<GroundRuleId, InstanceKey>,
-    pub content: BTreeMap<InstanceKey, GroundInstance>,
-    pub components: BTreeMap<ComponentId, ComponentKey>,
-}
-impl std::ops::Deref for GroundKeyIndex {
-    type Target = GroundKeyCore;
-    fn deref(&self) -> &GroundKeyCore {
-        &self.core
-    }
-}
-impl std::ops::DerefMut for GroundKeyIndex {
-    fn deref_mut(&mut self) -> &mut GroundKeyCore {
-        Arc::make_mut(&mut self.core)
-    }
+    schemas: BTreeMap<RuleId, Arc<RuleSchema>>,
+    relations: BTreeMap<RelationKey, RelationId>,
+    constants: BTreeMap<ConstantKey, ConstantId>,
 }
 impl GroundKeyIndex {
-    pub(crate) fn into_content(self) -> BTreeMap<InstanceKey, GroundInstance> {
-        Arc::unwrap_or_clone(self.core).content
-    }
-    /// Index the committed round, retaining original instances for provenance.
-    /// Key errors are creator failures, separate from resource exhaustion. The
-    /// key phase adds no logical charges to existing preparation/check budgets.
+    /// Index source schemas and selected groups, without expanding ground instances.
+    /// Checked ground programs already enforce instance uniqueness and typed binding.
     pub fn build(
         corpus: &Corpus,
         keys: &SemanticKeys,
         program: &GroundProgram,
     ) -> std::result::Result<Self, KeyError> {
+        Self::build_shared(corpus, keys, program, None)
+    }
+    pub(crate) fn build_shared(
+        corpus: &Corpus,
+        keys: &SemanticKeys,
+        program: &GroundProgram,
+        shared: Option<Arc<GroundKeyCore>>,
+    ) -> std::result::Result<Self, KeyError> {
         let start = Instant::now();
         keys.validate(corpus)?;
+        // GroundProgram is constructed only by the checked grounding paths.
+        // Validate its snapshot even when no consumer requests an instance.
+        for relation in program.signatures.keys() {
+            keys.relation(*relation)?;
+        }
+        for (sort, domain) in &program.domains {
+            keys.sort(*sort)?;
+            for constant in domain {
+                keys.constant(*constant)?;
+            }
+        }
+        let core = if let Some(core) = shared {
+            core
+        } else {
+            Arc::new(GroundKeyCore {
+                relations: corpus
+                    .relations()
+                    .map(|r| Ok((keys.relation(r.id)?.clone(), r.id)))
+                    .collect::<std::result::Result<_, KeyError>>()?,
+                constants: corpus
+                    .constants()
+                    .map(|c| Ok((keys.constant(c.id)?.clone(), c.id)))
+                    .collect::<std::result::Result<_, KeyError>>()?,
+                schemas: corpus
+                    .rules()
+                    .map(|r| Ok((r.id, Arc::new(keys.rule_schema(r)?))))
+                    .collect::<std::result::Result<_, KeyError>>()?,
+            })
+        };
         let mut out = Self {
-            core: Arc::new(GroundKeyCore {
-                committed: BTreeMap::new(),
-                dropped: BTreeSet::new(),
-                rewrites: BTreeMap::new(),
-                atoms: BTreeMap::new(),
-                instances: BTreeMap::new(),
-                content: BTreeMap::new(),
-                components: BTreeMap::new(),
-            }),
+            core,
             groups: BTreeMap::new(),
             elapsed: Duration::ZERO,
         };
-        let core = Arc::get_mut(&mut out.core).unwrap();
-        // Include impossible negative premises too; they have identity but no SCC.
-        for atom in program.atoms().chain(
-            program
-                .original_rules()
-                .flat_map(|r| r.body.iter().map(|l| &l.term.atom)),
-        ) {
-            if !core.atoms.contains_key(atom) {
-                core.atoms
-                    .insert(atom.clone(), AtomKey::from_atom(keys, atom)?);
-            }
-        }
-        let schemas: BTreeMap<_, _> = corpus
-            .rules()
-            .map(|r| Ok((r.id, Arc::new(keys.rule_schema(r)?))))
-            .collect::<std::result::Result<_, KeyError>>()?;
-        let occurrence =
-            |g: &GroundOccurrence| -> std::result::Result<KeyedGroundOccurrence, KeyError> {
-                Ok(KeyedGroundOccurrence {
-                    atom: AtomKey::from_atom(keys, &g.atom)?,
-                    occurrence: keys.bindings().key(g.occurrence)?.clone(),
-                    arguments: g
-                        .arguments
-                        .iter()
-                        .map(|id| keys.bindings().key(*id).cloned())
-                        .collect::<std::result::Result<_, _>>()?,
-                })
-            };
-        for r in program.original_rules() {
-            let key = InstanceKey::from_rule(corpus, keys, r)?;
-            let value = GroundInstance {
-                schema: schemas[&r.source].clone(),
-                head: occurrence(&r.head)?,
-                body: r
-                    .body
-                    .iter()
-                    .map(|l| Ok((l.polarity == Polarity::Negative, occurrence(&l.term)?)))
-                    .collect::<std::result::Result<_, KeyError>>()?,
-            };
-            if core.content.insert(key.clone(), value).is_some() {
-                return Err(KeyError::InvalidStructure("duplicate ground instance key"));
-            }
-            core.instances.insert(r.id, key);
-        }
-        for r in program.rules() {
-            let key = core.instances[&r.id].clone();
-            core.committed.insert(
-                key.clone(),
-                GroundInstance {
-                    schema: core.content[&key].schema.clone(),
-                    head: occurrence(&r.head)?,
-                    body: r
-                        .body
-                        .iter()
-                        .map(|l| Ok((l.polarity == Polarity::Negative, occurrence(&l.term)?)))
-                        .collect::<std::result::Result<_, KeyError>>()?,
-                },
-            );
-        }
-        core.dropped = core
-            .content
-            .keys()
-            .filter(|k| !core.committed.contains_key(*k))
-            .cloned()
-            .collect();
-        for proof in program.rewrite_proofs() {
-            core.rewrites.insert(
-                proof.id,
-                RewriteEvidenceKey {
-                    candidate: core.instances[&proof.candidate.rule.id].clone(),
-                    kind: match proof.kind {
-                        RewriteKind::Discharge { literal_occurrence } => {
-                            KeyedRewriteKind::Discharge(
-                                keys.bindings().key(literal_occurrence)?.clone(),
-                            )
-                        }
-                        RewriteKind::RedundantProducer => KeyedRewriteKind::RedundantProducer,
-                    },
-                    producers: proof
-                        .producers
-                        .iter()
-                        .map(|p| core.instances[&p.rule.id].clone())
-                        .collect(),
-                },
-            );
-        }
-        for c in program.components() {
-            let atoms: BTreeSet<_> = c.atoms.iter().map(|a| core.atoms[a].clone()).collect();
-            core.components.insert(
-                c.id,
-                ComponentKey(atoms.into_iter().collect::<Vec<_>>().into()),
-            );
-        }
         out.build_groups(corpus, keys, program)?;
         out.elapsed = start.elapsed();
         Ok(out)
+    }
+    /// Explicit projection from the current snapshot and admitted graph. The view
+    /// holds no cache: owned outputs contain stable keys and complete structure.
+    pub fn view<'a>(
+        &'a self,
+        corpus: &'a Corpus,
+        keys: &'a SemanticKeys,
+        program: &'a GroundProgram,
+    ) -> GroundKeyView<'a> {
+        GroundKeyView {
+            index: self,
+            corpus,
+            keys,
+            program,
+        }
     }
     pub(crate) fn build_groups(
         &mut self,
@@ -349,7 +303,7 @@ impl GroundKeyIndex {
                 members: BTreeMap::new(),
             };
             for a in program.atoms().filter(|a| a.relation == *relation) {
-                let atom = &self.atoms[a];
+                let atom = AtomKey::from_atom(keys, a)?;
                 let tuple = group_by
                     .iter()
                     .map(|i| atom.arguments[*i].clone())
@@ -363,6 +317,154 @@ impl GroundKeyIndex {
             self.groups.insert(keys.obligation(o.id)?.clone(), groups);
         }
         Ok(())
+    }
+}
+
+/// On-demand semantic projection. Original and committed bodies are read from
+/// the graph's original-rule storage and rewrite overlay respectively.
+#[derive(Clone, Copy)]
+pub struct GroundKeyView<'a> {
+    index: &'a GroundKeyIndex,
+    corpus: &'a Corpus,
+    keys: &'a SemanticKeys,
+    program: &'a GroundProgram,
+}
+impl GroundKeyView<'_> {
+    pub fn atom(&self, atom: &GroundAtom) -> Result<AtomKey> {
+        AtomKey::from_atom(self.keys, atom).map_err(CheckError::Keys)
+    }
+    pub fn instance(&self, id: GroundRuleId) -> Result<InstanceKey> {
+        let rule = self
+            .program
+            .original_rule(id)
+            .ok_or(CheckError::Internal("missing original ground rule"))?;
+        InstanceKey::from_rule(self.corpus, self.keys, rule).map_err(CheckError::Keys)
+    }
+    fn occurrence(&self, g: &GroundOccurrence) -> Result<KeyedGroundOccurrence> {
+        Ok(KeyedGroundOccurrence {
+            atom: self.atom(&g.atom)?,
+            occurrence: self
+                .keys
+                .bindings()
+                .key(g.occurrence)
+                .map_err(CheckError::Keys)?
+                .clone(),
+            arguments: g
+                .arguments
+                .iter()
+                .map(|id| {
+                    self.keys
+                        .bindings()
+                        .key(*id)
+                        .cloned()
+                        .map_err(CheckError::Keys)
+                })
+                .collect::<Result<_>>()?,
+        })
+    }
+    fn body(&self, rule: &GroundRule) -> Result<GroundInstance> {
+        Ok(GroundInstance {
+            schema: self
+                .index
+                .core
+                .schemas
+                .get(&rule.source)
+                .ok_or(CheckError::Internal("missing source schema"))?
+                .clone(),
+            head: self.occurrence(&rule.head)?,
+            body: rule
+                .body
+                .iter()
+                .map(|l| Ok((l.polarity == Polarity::Negative, self.occurrence(&l.term)?)))
+                .collect::<Result<_>>()?,
+        })
+    }
+    pub fn original(&self, id: GroundRuleId) -> Result<GroundInstance> {
+        self.body(
+            self.program
+                .original_rule(id)
+                .ok_or(CheckError::Internal("missing original ground rule"))?,
+        )
+    }
+    pub fn committed(&self, id: GroundRuleId) -> Result<GroundInstance> {
+        self.body(
+            self.program
+                .rule(id)
+                .ok_or(CheckError::Internal("missing committed ground rule"))?,
+        )
+    }
+    pub fn component(&self, id: ComponentId) -> Result<ComponentKey> {
+        ComponentKey::from_component(self.program, self.keys, id)
+    }
+    pub fn bind_atom(&self, key: &AtomKey) -> Result<GroundAtom> {
+        let relation = self
+            .index
+            .core
+            .relations
+            .get(&key.relation)
+            .ok_or(CheckError::Internal("missing current relation"))?;
+        let arguments = key
+            .arguments
+            .iter()
+            .map(|c| {
+                self.index
+                    .core
+                    .constants
+                    .get(c)
+                    .copied()
+                    .ok_or(CheckError::Internal("missing current constant"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        Ok(GroundAtom::new(*relation, arguments))
+    }
+    pub fn bind_component(&self, key: &ComponentKey) -> Result<ComponentId> {
+        let first = key
+            .0
+            .first()
+            .ok_or(CheckError::Internal("empty component key"))?;
+        let component = self.program.component_for(&self.bind_atom(first)?)?;
+        if self.component(component.id)? != *key {
+            return Err(CheckError::Internal("component membership changed"));
+        }
+        Ok(component.id)
+    }
+    pub fn rewrite(&self, id: RewriteProofId) -> Result<RewriteEvidenceKey> {
+        let proof = self
+            .program
+            .rewrite_proof(id)
+            .ok_or(CheckError::Internal("missing rewrite proof"))?;
+        Ok(RewriteEvidenceKey {
+            candidate: self.instance(proof.candidate.rule.id)?,
+            kind: match proof.kind {
+                RewriteKind::Discharge { literal_occurrence } => KeyedRewriteKind::Discharge(
+                    self.keys
+                        .bindings()
+                        .key(literal_occurrence)
+                        .map_err(CheckError::Keys)?
+                        .clone(),
+                ),
+                RewriteKind::RedundantProducer => KeyedRewriteKind::RedundantProducer,
+            },
+            producers: proof
+                .producers
+                .iter()
+                .map(|p| self.instance(p.rule.id))
+                .collect::<Result<_>>()?,
+        })
+    }
+    pub fn rewrites(&self) -> Result<BTreeMap<RewriteProofId, RewriteEvidenceKey>> {
+        self.program
+            .rewrite_proofs()
+            .map(|p| Ok((p.id, self.rewrite(p.id)?)))
+            .collect()
+    }
+    /// Explicit full export for the optional relation-grounding cache and structural
+    /// comparisons. Normal preparation, admission and findings never call this.
+    pub fn original_content(&self) -> Result<BTreeMap<InstanceKey, GroundInstance>> {
+        self.program
+            .original_rules()
+            .map(|r| Ok((self.instance(r.id)?, self.original(r.id)?)))
+            .collect()
     }
 }
 

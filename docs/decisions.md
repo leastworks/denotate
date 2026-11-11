@@ -17,6 +17,21 @@ real program that the current choice serves badly.
   indexing and admission refresh before choosing a representation or backend
   change; a large fixed graph alone does not establish the cause of a later peak.
 
+- **Project ground keys on demand instead of duplicating the ground program.**
+  Production profiling attributed the largest growth to keyed copies of original
+  and committed rule bodies, followed by another complete index during admission.
+  Share source schemas and bindings, and read the existing graph's original rules
+  and admission changes when a query, replay or finding needs keyed content.
+  Cross-edit query inputs still include complete relevant structure, not just rule
+  identity. This removes index duplication without changing admission, the BDD
+  backend, or the fixed evidence graph. Measure through checking and presentation
+  so deferred work cannot hide a later memory peak.
+- **Use direct fixed preparation for the one-shot CLI.** `check-den` shares work
+  across verifications in one snapshot but has no later snapshot to reuse a
+  portable fold. Avoid its reconstruction, export and rebinding there; keep session
+  retention for editors. Limits remain unchanged; transfer receipts and valid
+  witness choices may differ between direct and retained preparation.
+
 ## Meaning and checking
 
 - **Input domains define the universe; assumptions constrain its worlds.** A

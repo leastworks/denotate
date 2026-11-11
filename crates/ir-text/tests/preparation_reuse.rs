@@ -285,3 +285,88 @@ fn shared_preparation_keeps_example_policy_and_operational_interruptions_local()
     ));
     compare(&p, &mut session);
 }
+
+#[test]
+fn shared_key_base_keeps_context_rewrites_and_original_evidence_separate() {
+    let text = "sort S; const a,b:S; relation seed(); seed(); input value(s:S);
+relation left(); relation right();
+left():-seed(),value(a),!right(); right():-seed(),value(b),!left();
+assumption single:at_most_one(value,group_by:()); obligation o:empty(left);
+verification restricted{assumptions:[single];obligations:[o];}
+verification open{assumptions:[];obligations:[o];}";
+    let p = parse("file:///contexts.den", text);
+    let limits = Limits::default();
+    let ops = (&limits).into();
+    let requests = p.verification_requests(&limits).unwrap();
+    for reverse in [false, true] {
+        let mut session = Session::default();
+        let fixed = session
+            .prepare_fixed(&p.corpus, &p.keys, &p.domains, &limits)
+            .unwrap();
+        let mut ordered: Vec<_> = requests.iter().collect();
+        if reverse {
+            ordered.reverse();
+        }
+        // Retain both preparations before admitting either of them.
+        let prepared: Vec<_> = ordered
+            .iter()
+            .map(|(_, r)| {
+                let RequestPreparation::Complete(prepared) = session
+                    .prepare_with_fixed(r, &p.corpus, &p.keys, &ops, &fixed)
+                    .unwrap()
+                else {
+                    panic!()
+                };
+                prepared
+            })
+            .collect();
+        for (prepared, (_, request)) in prepared.into_iter().zip(ordered) {
+            let prepared = prepared.admit(&ops).unwrap();
+            let restricted = !request.constraints.is_empty();
+            assert_eq!(prepared.program().is_admitted(), restricted);
+            assert_eq!(
+                prepared.program().rewrite_proofs().next().is_some(),
+                restricted
+            );
+            for proof in prepared.program().rewrite_proofs() {
+                let id = proof.candidate.rule.id;
+                let original = prepared.key_view().original(id).unwrap();
+                assert!(original.body.iter().any(|(negative, _)| *negative));
+                match proof.kind {
+                    RewriteKind::Discharge { literal_occurrence } => {
+                        let key = p.keys.bindings().key(literal_occurrence).unwrap();
+                        assert!(original.body.iter().any(|(_, o)| &o.occurrence == key));
+                        assert!(
+                            !prepared
+                                .key_view()
+                                .committed(id)
+                                .unwrap()
+                                .body
+                                .iter()
+                                .any(|(_, o)| &o.occurrence == key)
+                        );
+                    }
+                    RewriteKind::RedundantProducer => {
+                        assert!(prepared.program().rule(id).is_none())
+                    }
+                }
+            }
+            let LocalCheckOutcome::Complete(actual) = session.verify(&prepared, &ops).unwrap()
+            else {
+                panic!()
+            };
+            let RequestPreparation::Complete(fresh) =
+                request.prepare(&p.corpus, &p.keys, &ops).unwrap()
+            else {
+                panic!()
+            };
+            let fresh = fresh.admit(&ops).unwrap();
+            let CheckOutcome::Complete(expected) = fresh.verify(&ops).unwrap() else {
+                panic!()
+            };
+            assert_eq!(actual.checked.results.value, expected.results.value);
+        }
+        // Exercise warm checking and presentation too, including fixed evidence.
+        compare(&p, &mut session);
+    }
+}

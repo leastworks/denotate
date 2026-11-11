@@ -259,8 +259,15 @@ fn keyed_frontend_preparation_preserves_limits_and_routes_binding_failures_to_cr
                         old.atoms().collect::<Vec<_>>(),
                         new.program.atoms().collect::<Vec<_>>()
                     );
-                    assert_eq!(old.rules().count(), new.keys.instances.len());
-                    assert_eq!(old.components().count(), new.keys.components.len());
+                    assert_eq!(
+                        old.rules().count(),
+                        new.keys
+                            .view(&p.corpus, &p.keys, &new.program)
+                            .original_content()
+                            .unwrap()
+                            .len()
+                    );
+                    assert_eq!(old.components().count(), new.program.components().count());
                 }
                 (Err(old), Err(new)) => assert_eq!(old, new),
                 _ => panic!("key computation changed preparation exhaustion"),

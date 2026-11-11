@@ -213,7 +213,7 @@ impl GroupKey {
 /// Group/region execution is canonical; receipt storage/aggregation is order-free.
 pub(crate) struct QueryRun<'a> {
     pub keys: &'a denotate_ir::SemanticKeys,
-    pub ground: &'a GroundKeyIndex,
+    pub ground: &'a GroundProgram,
     pub receipts: &'a mut WorkReceipts,
 }
 impl QueryRun<'_> {
@@ -221,11 +221,7 @@ impl QueryRun<'_> {
         GroupKey::from_group(self.keys, group)
     }
     pub fn component(&self, id: ComponentId) -> Result<ComponentKey, CheckError> {
-        self.ground
-            .components
-            .get(&id)
-            .cloned()
-            .ok_or(CheckError::Internal("missing receipt component key"))
+        ComponentKey::from_component(self.ground, self.keys, id)
     }
 }
 

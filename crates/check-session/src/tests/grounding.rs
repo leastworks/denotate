@@ -42,8 +42,8 @@ fn grounding_fresh_matches_global_preparation_and_diagnostics() {
             panic!("new {source}")
         };
         assert_eq!(
-            old.keys().content,
-            fresh.keys().content,
+            old.key_view().original_content().unwrap(),
+            fresh.key_view().original_content().unwrap(),
             "instances {source}"
         );
         assert_eq!(
@@ -106,15 +106,15 @@ fn independent_grounding(p: &LoweredProgram, actual: &PreparedCheck<'_>) {
                 .all(|l| possible.contains(&l.term.atom))
         })
         .map(|r| {
-            let key = &index.instances[&r.id];
-            (key.clone(), index.content[key].clone())
+            let view = index.view(&p.corpus, &p.keys, &full);
+            (view.instance(r.id).unwrap(), view.original(r.id).unwrap())
         })
         .collect::<BTreeMap<_, _>>();
     assert_eq!(
         actual.program().atoms().cloned().collect::<BTreeSet<_>>(),
         possible
     );
-    assert_eq!(actual.keys().content, expected);
+    assert_eq!(actual.key_view().original_content().unwrap(), expected);
 }
 #[test]
 fn grounding_matches_independent_cartesian_positive_closure() {
@@ -463,7 +463,10 @@ fn grounding_retractions_alternative_supports_scc_merge_split_and_negative_edits
         else {
             panic!()
         };
-        assert_eq!(fresh.keys().content, cached.keys().content);
+        assert_eq!(
+            fresh.key_view().original_content().unwrap(),
+            cached.key_view().original_content().unwrap()
+        );
         assert_eq!(fresh.receipts(), cached.receipts());
         let full = GroundProgram::prepare_cartesian(&c, &Domains::new(), &l).unwrap();
         let mut possible = full.input_atoms().cloned().collect::<BTreeSet<_>>();
@@ -493,11 +496,11 @@ fn grounding_retractions_alternative_supports_scc_merge_split_and_negative_edits
                     .all(|a| possible.contains(&a.term.atom))
             })
             .map(|r| {
-                let k = &full_keys.instances[&r.id];
-                (k.clone(), full_keys.content[k].clone())
+                let view = full_keys.view(&c, &keys, &full);
+                (view.instance(r.id).unwrap(), view.original(r.id).unwrap())
             })
             .collect::<BTreeMap<_, _>>();
-        assert_eq!(expected, cached.keys().content);
+        assert_eq!(expected, cached.key_view().original_content().unwrap());
         if !spec.iter().any(|(n, _, _)| n.starts_with("seed")) {
             assert_eq!(
                 cached.program().atoms().count(),
@@ -710,4 +713,74 @@ fn grounding_equal_possible_provider_skips_all_downstream_units() {
             .unwrap();
     }
     assert_eq!(receipts.total().unwrap().queries.len(), after.inputs.len());
+}
+
+#[test]
+fn stable_instance_identity_does_not_hide_changed_rule_content() {
+    let mut session = crate::Session::with_grounding();
+    let mut prior = None;
+    for body in [vec![], vec![("unused", false)], vec![]] {
+        let (mut c, mut keys) = generic(&[
+            ("stable", "a", body),
+            ("disabled", "unused", vec![("p", false), ("p", true)]),
+        ]);
+        let relation = c.relations().find(|r| r.name.as_str() == "a").unwrap().id;
+        let obligation = c.empty("empty_a", relation, "a must be empty").unwrap();
+        keys.bind_obligation(
+            &c,
+            obligation,
+            ObligationKey(QualifiedKey::new("grounding-tests", "empty_a")),
+        )
+        .unwrap();
+        let limits = limits();
+        let ops = (&limits).into();
+        let request =
+            CheckRequest::all_obligations(&c, &keys, &Domains::new(), &[], &limits).unwrap();
+        let RequestPreparation::Complete(warm) =
+            session.prepare(&request, &c, &keys, &ops).unwrap()
+        else {
+            panic!()
+        };
+        // The source key is identical, while its schema and outcome change.
+        let rule = c.rules().next().unwrap();
+        let identity = keys.rule(rule.id).unwrap().clone();
+        let schema = keys.rule_schema(rule).unwrap();
+        let instance = warm
+            .program()
+            .original_rules()
+            .find(|r| r.source == rule.id)
+            .unwrap();
+        let instance_key = warm.key_view().instance(instance.id).unwrap();
+        if let Some((old_identity, old_schema, old_instance)) = prior {
+            assert_eq!(old_identity, identity);
+            assert_eq!(old_instance, instance_key);
+            assert_ne!(old_schema, schema);
+        }
+        prior = Some((identity, schema, instance_key));
+        let warm = warm.admit(&ops).unwrap();
+        let LocalCheckOutcome::Complete(actual) = session.verify(&warm, &ops).unwrap() else {
+            panic!()
+        };
+        let RequestPreparation::Complete(fresh) = request.prepare(&c, &keys, &ops).unwrap() else {
+            panic!()
+        };
+        let fresh = fresh.admit(&ops).unwrap();
+        let CheckOutcome::Complete(expected) = fresh.verify(&ops).unwrap() else {
+            panic!()
+        };
+        assert_eq!(actual.checked.results.value, expected.results.value);
+        let has_body = !rule.body.is_empty();
+        assert_eq!(
+            actual
+                .checked
+                .results
+                .value
+                .emptiness
+                .values()
+                .next()
+                .unwrap()
+                .proved(),
+            has_body
+        );
+    }
 }

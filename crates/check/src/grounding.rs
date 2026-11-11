@@ -529,7 +529,7 @@ pub fn ground_owned_unit(
         metrics.export_ns += nanos(start);
         Ok(Arc::new(GroundingValue {
             possible: Arc::new(possible),
-            instances: Arc::new(index.into_content()),
+            instances: Arc::new(index.view(&corpus, &keys, &p).original_content()?),
         }))
     })();
     let (value, failure) = match result {

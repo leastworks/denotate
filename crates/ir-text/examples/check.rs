@@ -450,7 +450,7 @@ fn check_program(
         }
         let fixed = fixed.get_or_init(|| {
             progress.emit(Phase::FixedFacts, json!({}));
-            session.prepare_fixed_with_validation(&validated, &limits)
+            denotate_check::FixedPreparation::prepare_with_validation(&validated, &limits)
         });
         progress.emit(Phase::Preparation, detail.clone());
         let prepared = match fixed {
@@ -722,13 +722,17 @@ mod tests {
         assert!(
             records
                 .iter()
-                .any(|r| r["stage"] == "admission-key-refresh" && r["event"] == "end")
+                .any(|r| r["stage"] == "semantic-keys" && r["event"] == "end")
         );
         assert!(
             records
                 .iter()
                 .all(|r| r["memory"].get("rssBytes").is_some())
         );
+        assert!(records.iter().all(|r| !matches!(
+            r["stage"].as_str(),
+            Some("fixed-runtime" | "fixed-export" | "fixed-binding" | "admission-key-refresh")
+        )));
         assert!(matches!(
             f.traced(&["--profile-memory", path.to_str().unwrap()]).0,
             Err((3, _))

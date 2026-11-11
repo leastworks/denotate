@@ -12,7 +12,7 @@ use crate::*;
 use denotate_ir::SemanticKeys;
 pub struct TestQueryRun<'a> {
     pub keys: &'a SemanticKeys,
-    pub ground: &'a GroundKeyIndex,
+    pub ground: &'a GroundProgram,
     pub receipts: &'a mut WorkReceipts,
 }
 impl<'p> SymbolicMeaning<'p> {

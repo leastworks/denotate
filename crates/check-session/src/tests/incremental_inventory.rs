@@ -74,6 +74,7 @@ impl<'a> Names<'a> {
 fn inventory(ast: &Program, sources: &Sources, p: &LoweredProgram, g: &GroundProgram) -> Inventory {
     let n = Names::new(ast, sources, p);
     let index = GroundKeyIndex::build(&p.corpus, &p.keys, g).unwrap();
+    let view = index.view(&p.corpus, &p.keys, g);
     let mut out = Inventory::new();
     out.insert(
         "sorts",
@@ -123,15 +124,15 @@ fn inventory(ast: &Program, sources: &Sources, p: &LoweredProgram, g: &GroundPro
         "possible_atoms",
         g.atoms()
             .map(|a| {
-                let key = format!("{:?}", index.atoms[a]);
+                let key = format!("{:?}", view.atom(a).unwrap());
                 (key.clone(), key)
             })
             .collect(),
     );
     out.insert(
         "ground_instances",
-        index
-            .content
+        view.original_content()
+            .unwrap()
             .iter()
             .map(|(key, value)| (format!("{key:?}"), format!("{value:?}")))
             .collect(),
@@ -141,15 +142,15 @@ fn inventory(ast: &Program, sources: &Sources, p: &LoweredProgram, g: &GroundPro
         g.components()
             .map(|c| {
                 let rules: BTreeSet<_> = denotate_check::test_support::component_rules(g, c.id)
-                    .map(|r| &index.instances[&r.id])
+                    .map(|r| view.instance(r.id).unwrap())
                     .collect();
                 let providers: BTreeSet<_> = c
                     .dependencies
                     .iter()
-                    .map(|id| &index.components[id])
+                    .map(|id| view.component(*id).unwrap())
                     .collect();
                 (
-                    format!("{:?}", index.components[&c.id]),
+                    format!("{:?}", view.component(c.id).unwrap()),
                     format!(
                         "rules:{rules:?}; providers:{providers:?}; recursive:{}; negative:{}",
                         c.recursive,
@@ -161,7 +162,7 @@ fn inventory(ast: &Program, sources: &Sources, p: &LoweredProgram, g: &GroundPro
     );
     let mut groups = Entities::new();
     let mut cones = Entities::new();
-    let current_atoms: BTreeMap<_, _> = index.atoms.iter().map(|(id, key)| (key, id)).collect();
+    let current_atoms: BTreeMap<_, _> = g.atoms().map(|a| (view.atom(a).unwrap(), a)).collect();
     for (obligation, descriptor) in &index.groups {
         // The frontend library has one grouping column (Slot); empty groups
         // use the production domain descriptor, not corpus/name reconstruction.
@@ -179,12 +180,16 @@ fn inventory(ast: &Program, sources: &Sources, p: &LoweredProgram, g: &GroundPro
                     &Limits::default(),
                 )
                 .unwrap();
-            let facts: BTreeSet<_> = cone.facts.iter().map(|a| &index.atoms[a]).collect();
-            let rules: BTreeSet<_> = cone.rules.iter().map(|r| &index.instances[r]).collect();
+            let facts: BTreeSet<_> = cone.facts.iter().map(|a| view.atom(a).unwrap()).collect();
+            let rules: BTreeSet<_> = cone
+                .rules
+                .iter()
+                .map(|r| view.instance(*r).unwrap())
+                .collect();
             let comps: BTreeSet<_> = cone
                 .components
                 .iter()
-                .map(|c| &index.components[c])
+                .map(|c| view.component(*c).unwrap())
                 .collect();
             let key = format!("{key:?}");
             groups.insert(key.clone(), format!("{roots:?}"));

@@ -159,14 +159,14 @@ impl PreparedCheck<'_> {
                     .component(*id)
                     .ok_or(CheckError::Internal("missing local component"))?;
                 Ok((
-                    self.keys.components[id].clone(),
+                    self.key_view().component(*id)?,
                     LocalComponent {
                         recursive: c.recursive,
                         blocked_by: c
                             .blocked_by
                             .iter()
-                            .map(|id| self.keys.components[id].clone())
-                            .collect(),
+                            .map(|id| self.key_view().component(*id))
+                            .collect::<Result<_>>()?,
                     },
                 ))
             })
@@ -180,14 +180,14 @@ impl PreparedCheck<'_> {
             let before = (needed.len(), originals.len(), rewrites.len());
             for rule in self.program.original_rules() {
                 if needed.contains(&rule.head.atom) {
-                    let key = &self.keys.instances[&rule.id];
-                    originals.insert(key.clone(), self.keys.content[key].clone());
+                    let key = self.key_view().instance(rule.id)?;
+                    originals.insert(key, self.key_view().original(rule.id)?);
                     needed.extend(rule.body.iter().map(|l| l.term.atom.clone()));
                 }
             }
             for proof in self.program.rewrite_proofs() {
                 if needed.contains(&proof.candidate.rule.head.atom) {
-                    rewrites.insert(self.keys.rewrites[&proof.id].clone());
+                    rewrites.insert(self.key_view().rewrite(proof.id)?);
                     for producer in std::iter::once(&proof.candidate)
                         .chain(&proof.producers)
                         .chain(proof.upper_bounds.iter().flat_map(|b| b.producers.iter()))
@@ -270,7 +270,7 @@ impl PreparedCheck<'_> {
                         .into_iter()
                         .map(|p| {
                             Ok((
-                                self.keys.rewrites[&p.id].clone(),
+                                self.key_view().rewrite(p.id)?,
                                 (
                                     context.export(
                                         &p.candidate.condition,
@@ -308,10 +308,12 @@ impl PreparedCheck<'_> {
                 .rules
                 .iter()
                 .map(|id| {
-                    let k = &self.keys.instances[id];
-                    (k.clone(), self.keys.committed[k].clone())
+                    Ok((
+                        self.key_view().instance(*id)?,
+                        self.key_view().committed(*id)?,
+                    ))
                 })
-                .collect(),
+                .collect::<Result<_>>()?,
             original_dependencies: originals,
             rewrites,
             domains: self

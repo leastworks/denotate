@@ -211,30 +211,30 @@ fn committed_key_index_retains_original_bindings_and_indexes_rewrites() {
         "input i, j; slot a; a <- i when present(j) and not present(j) and not available(a); a <- j;",
     );
     let g = checked(&p, &Limits::default());
-    assert!(!g.keys().rewrites.is_empty());
-    assert_eq!(
-        g.keys().instances.len(),
-        g.program().original_rules().count()
-    );
-    assert_eq!(g.keys().committed.len(), g.program().rules().count());
+    let view = g.key_view();
+    let content = view.original_content().unwrap();
+    assert!(!view.rewrites().unwrap().is_empty());
+    assert_eq!(content.len(), g.program().original_rules().count());
     assert!(
-        g.keys()
-            .content
-            .iter()
-            .any(|(k, v)| g.keys().committed.get(k) != Some(v))
+        g.program()
+            .original_rules()
+            .any(|r| g.program().rule(r.id).is_none()
+                || view.original(r.id).unwrap() != view.committed(r.id).unwrap())
     );
     for proof in g.program().rewrite_proofs() {
-        let key = &g.keys().rewrites[&proof.id];
-        assert_eq!(key.candidate, g.keys().instances[&proof.candidate.rule.id]);
-        assert!(g.keys().content.contains_key(&key.candidate));
+        let key = view.rewrite(proof.id).unwrap();
+        assert_eq!(
+            key.candidate,
+            view.instance(proof.candidate.rule.id).unwrap()
+        );
+        assert!(content.contains_key(&key.candidate));
         for producer in &key.producers {
-            assert!(g.keys().content.contains_key(producer));
+            assert!(content.contains_key(producer));
         }
         if let KeyedRewriteKind::Discharge(o) = &key.kind {
             p.keys.bindings().resolve(o).unwrap();
         }
     }
-    assert_eq!(g.keys().components.len(), g.program().components().count());
     for c in g.program().components() {
         let actual: BTreeSet<_> = c
             .atoms
@@ -243,7 +243,7 @@ fn committed_key_index_retains_original_bindings_and_indexes_rewrites() {
             .collect();
         assert_eq!(
             actual,
-            g.keys().components[&c.id].0.iter().cloned().collect()
+            view.component(c.id).unwrap().0.iter().cloned().collect()
         );
     }
     let CheckOutcome::Complete(r) = g.verify(&(&Limits::default()).into()).unwrap() else {
@@ -255,7 +255,7 @@ fn committed_key_index_retains_original_bindings_and_indexes_rewrites() {
                 p.keys.bindings().resolve(o).unwrap();
             }
             for i in &e.instances {
-                assert!(g.keys().content.contains_key(i));
+                assert!(content.contains_key(i));
             }
         }
     }

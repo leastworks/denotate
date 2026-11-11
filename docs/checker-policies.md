@@ -71,8 +71,9 @@ outcome determines success. Write failures in the profile stream are best-effort
 
 Stages separate fixed runtime reconstruction, evaluation, export and binding;
 residual preparation; semantic-key construction; each admission round's symbolic,
-summary, candidate and commit work; and key refresh. `bddResults`, `bddResultNodes`
-and `bddResultNodeBytes` count new wrapped BDD results produced within a span.
+summary, candidate and commit work. Key projection reads the current ground graph
+on demand; there is no longer an `admission-key-refresh` stage. `bddResults`,
+`bddResultNodes` and `bddResultNodeBytes` count new wrapped BDD results produced within a span.
 They are cumulative result payload, **not** allocator traffic or simultaneous live
 storage, and exclude the BDD library's internal temporary allocations. Retained BDD
 snapshots at symbolic, summary and candidate boundaries deduplicate `Arc` sharing and report
@@ -89,7 +90,10 @@ is a configurable reproduction tool, not a promise that the full size fits memor
 Its logical limits are explicitly reported (defaults times 100), with a configurable
 operation timeout. `--unfolded` and `--no-retention` are separate fresh-process
 controls. `--warm` reloads the same source with the session retained and compares
-outcomes. Profile one process at a time; allocator retention and profiling overhead
+outcomes. `--findings` adds a violation derived through fixed rules; presentation
+runs for every verification. Measure through the complete run, since key projection
+also serves cache inputs and findings. Profile one process at a time; allocator
+retention and profiling overhead
 affect observations. No default checking policy changes, timing or memory goldens.
 
 ### Outcome scorecards
@@ -117,8 +121,8 @@ planning and grounding reuse. General assumptions force global verification even
 in a session; the `.den` report labels that fallback. Preparation reuse may still
 apply, but the variant's name does not imply verdict-cache reuse.
 
-The `.den` scorecard additionally compares `folded-bdd`, the default CLI/editor
-preparation path. It includes keyed fold projection/binding, with retained fold
+The `.den` scorecard additionally compares `folded-bdd`, the retained preparation
+path used by editors. It includes keyed fold projection/binding, with retained fold
 reuse on warm/edit runs when the fixed projection is unchanged and retention is enabled.
 Samples are still per verification, so they do not amortize preparation/admission
 across other verifications. Existing variants remain unfolded controls; the test
@@ -136,6 +140,10 @@ after the counts to include original ground validation, timed separately and sha
 with all requests; `--two-selections` alternates two restriction sets and
 `--no-retention` measures direct fixed preparation. The
 scorecard's direct API timer instead includes lazy original validation when needed.
+
+The one-shot CLI uses direct fixed preparation, avoiding portable export and
+binding while still sharing preparation/admission within its invocation. Editors
+retain the session fold; the scorecard keeps its retained/direct controls.
 
 Fold retention uses one Salsa query for the entire fixed cone, with no byte cap.
 The session keeps every completed fold under the checker limits and replaces the
@@ -172,8 +180,8 @@ The human table gives median milliseconds and maximum BDD observations across sa
 `--json FILE` also retains every sample, size, outcome, comparison and cache counter.
 Checker timing has four non-overlapping phases:
 
-- **Preparation:** including selected-assumption evaluation and key construction.
-- **Admission:** admission and refreshed ground keys after rewrites.
+- **Preparation:** including selected-assumption evaluation and source-schema/group indexing.
+- **Admission:** admission rewrites; keyed content uses the current graph without rebuilding.
 - **Checking:** verification, replay, attribution and session bookkeeping, minus the
   notice pass. `verification_call_ns` records that enclosing call: checking plus
   notices, not an additional phase.

@@ -117,7 +117,7 @@ fn per_query_exhaustion_keeps_finished_scopes_and_does_not_spend_other_allowance
             .unwrap();
         let mut q = QueryRun {
             keys: &p.keys,
-            ground: g.keys(),
+            ground: g.program(),
             receipts: &mut receipts,
         };
         let report = meaning
@@ -201,7 +201,7 @@ fn per_query_allowances_preserve_outcomes_when_shared_allowance_exhausts() {
             .unwrap();
         let mut queries = QueryRun {
             keys: &p.keys,
-            ground: g.keys(),
+            ground: g.program(),
             receipts: &mut receipts,
         };
         let report = meaning

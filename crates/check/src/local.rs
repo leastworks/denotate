@@ -116,12 +116,13 @@ impl PreparedCheck<'_> {
                 retained_condition_nodes: 0,
             },
         };
+        // BDD imports only bind input variables. Other evidence atoms are rebound
+        // individually through source keys, never an all-program atom index.
         let atoms: BTreeMap<_, _> = self
-            .keys
-            .atoms
-            .iter()
-            .map(|(a, k)| (k.clone(), a.clone()))
-            .collect();
+            .program
+            .input_atoms()
+            .map(|a| Ok((self.key_view().atom(a)?, a.clone())))
+            .collect::<Result<_>>()?;
         let mut artifacts = BTreeMap::new();
         let mut metrics = LocalMetrics {
             finding_context: context_time,
@@ -266,8 +267,8 @@ impl PreparedCheck<'_> {
             .program
             .components()
             .filter(|c| c.cycle.is_some())
-            .map(|c| (self.keys.components[&c.id].clone(), c))
-            .collect::<BTreeMap<_, _>>();
+            .map(|c| Ok((self.key_view().component(c.id)?, c)))
+            .collect::<Result<BTreeMap<_, _>>>()?;
         for (key, component) in regions {
             let scope = LocalScope::Region(key.clone());
             let mut budget = Budget::tracked(&limits);
@@ -379,7 +380,7 @@ impl PreparedCheck<'_> {
         };
         let mut query_run = QueryRun {
             keys: self.semantic_keys,
-            ground: &self.keys,
+            ground: &self.program,
             receipts: &mut receipts,
         };
         let mut verification = presentation.verify_report(
@@ -405,7 +406,7 @@ impl PreparedCheck<'_> {
                 Ok(meaning) => {
                     let mut queries = QueryRun {
                         keys: self.semantic_keys,
-                        ground: &self.keys,
+                        ground: &self.program,
                         receipts: &mut receipts,
                     };
                     verification.emptiness = meaning.check_emptiness(

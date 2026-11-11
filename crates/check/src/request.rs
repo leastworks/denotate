@@ -509,7 +509,16 @@ impl CheckRequest {
         budget.record(&mut receipts, QueryKey::Preparation, dependencies)?;
         let index = {
             let _profile = limits.profile.span("semantic-keys", None);
-            GroundKeyIndex::build(corpus, keys, &program).map_err(CheckError::Keys)?
+            let shared = fixed.and_then(|fixed| {
+                fixed
+                    .contexts
+                    .borrow()
+                    .iter()
+                    .find(|context| std::ptr::eq(context.semantic_keys, keys))
+                    .map(|context| context.index.core.clone())
+            });
+            GroundKeyIndex::build_shared(corpus, keys, &program, shared)
+                .map_err(CheckError::Keys)?
         };
         operations.cancellation.check()?;
         let key_computation = key_order_time + index.elapsed;
@@ -765,13 +774,8 @@ impl ScopedResults {
     }
 }
 
-type SharedAdmission = std::sync::Arc<
-    std::sync::OnceLock<(
-        std::sync::Arc<GroundCore>,
-        std::sync::Arc<GroundKeyCore>,
-        WorkReceipt,
-    )>,
->;
+type SharedAdmission =
+    std::sync::Arc<std::sync::OnceLock<(std::sync::Arc<GroundCore>, WorkReceipt)>>;
 
 /// Bound to one source snapshot. No arena handles escape into a session cache.
 pub(crate) struct SharedContext<'a> {
@@ -902,8 +906,12 @@ impl PreparedCheck<'_> {
     pub fn keys(&self) -> &GroundKeyIndex {
         &self.keys
     }
-    /// Full ground-key work, including initial ordering/indexing and every
-    /// post-admission refresh. Frontends add their installation-key phase.
+    pub fn key_view(&self) -> GroundKeyView<'_> {
+        self.keys
+            .view(self.corpus, self.semantic_keys, &self.program)
+    }
+    /// Initial ordering/schema/group projection. On-demand local query keys
+    /// are accounted in LocalMetrics; admission needs no key refresh.
     pub fn key_computation(&self) -> Duration {
         self.key_computation
     }
@@ -912,10 +920,8 @@ impl PreparedCheck<'_> {
         let mut budget = Budget::tracked(&limits);
         operations.cancellation.check()?;
         budget.check("admission")?;
-        if let Some((program, keys, receipt)) = self.shared_admission.as_ref().and_then(|c| c.get())
-        {
+        if let Some((program, receipt)) = self.shared_admission.as_ref().and_then(|c| c.get()) {
             self.program.core = program.clone();
-            self.keys.core = keys.clone();
             self.receipts.invalidate(&QueryKey::Admission);
             self.receipts
                 .record(QueryKey::Admission, receipt.clone())
@@ -929,18 +935,13 @@ impl PreparedCheck<'_> {
             QueryKey::Admission,
             [QueryKey::Preparation],
         )?;
-        self.keys = {
-            let _profile = limits.profile.span("admission-key-refresh", None);
-            GroundKeyIndex::build(self.corpus, self.semantic_keys, &self.program)
-                .map_err(CheckError::Keys)?
-        };
-        self.key_computation += self.keys.elapsed;
+        // Keys are projected from the current graph on demand. Admission already
+        // stores its changed bodies and original proofs there; no key refresh.
         operations.cancellation.check()?;
         if self.program.admission_limit().is_none() {
             if let Some(cell) = &self.shared_admission {
                 let _ = cell.set((
                     self.program.core.clone(),
-                    self.keys.core.clone(),
                     self.receipts.get(&QueryKey::Admission).unwrap().clone(),
                 ));
             }
@@ -1004,7 +1005,7 @@ impl PreparedCheck<'_> {
         };
         let mut queries = QueryRun {
             keys: self.semantic_keys,
-            ground: &self.keys,
+            ground: &self.program,
             receipts: &mut receipts,
         };
         let verification = match AnalysisOutcome::from_result(meaning.verify_queries(
@@ -1107,12 +1108,7 @@ impl PreparedCheck<'_> {
             };
             let mut blockers = BTreeMap::new();
             for id in &result.blocked_by {
-                let key = self
-                    .keys
-                    .components
-                    .get(id)
-                    .ok_or(CheckError::Internal("missing notice blocker key"))?
-                    .clone();
+                let key = self.key_view().component(*id)?;
                 let cycle = self
                     .program
                     .component(*id)
@@ -1158,13 +1154,7 @@ impl PreparedCheck<'_> {
                 absent: o.absent.iter().map(&atom).collect::<Result<_>>()?,
             })
         };
-        let component = |id: &ComponentId| {
-            self.keys
-                .components
-                .get(id)
-                .cloned()
-                .ok_or(CheckError::Internal("missing committed component key"))
-        };
+        let component = |id: &ComponentId| self.key_view().component(*id);
         let mut out = ScopedResults {
             inconsistent_assumptions: !self.program.assumptions_consistent(),
             notices: BTreeMap::new(),
@@ -1345,15 +1335,7 @@ impl PreparedCheck<'_> {
                                                 .map_err(CheckError::Keys)?
                                                 .clone(),
                                         );
-                                        evidence.rewrites.insert(
-                                            self.keys
-                                                .rewrites
-                                                .get(proof)
-                                                .ok_or(CheckError::Internal(
-                                                    "missing rewrite evidence key",
-                                                ))?
-                                                .clone(),
-                                        );
+                                        evidence.rewrites.insert(self.key_view().rewrite(*proof)?);
                                     }
                                 }
                             }
@@ -1404,13 +1386,7 @@ impl PreparedCheck<'_> {
                         self.rule_evidence(r, keys, &mut evidence)?;
                     }
                     for id in &n.rewrites {
-                        evidence.rewrites.insert(
-                            self.keys
-                                .rewrites
-                                .get(id)
-                                .ok_or(CheckError::Internal("missing no-meaning rewrite key"))?
-                                .clone(),
-                        );
+                        evidence.rewrites.insert(self.key_view().rewrite(*id)?);
                     }
                     for b in n.upstream.values() {
                         if let CompletedProvider::Component(id) = b.provider {
@@ -1442,13 +1418,9 @@ impl PreparedCheck<'_> {
         keys: &SemanticKeys,
         evidence: &mut EvidenceKeys,
     ) -> Result<()> {
-        evidence.instances.insert(
-            self.keys
-                .instances
-                .get(&rule.id)
-                .ok_or(CheckError::Internal("missing original instance key"))?
-                .clone(),
-        );
+        evidence
+            .instances
+            .insert(self.key_view().instance(rule.id)?);
         for a in std::iter::once(&rule.head).chain(rule.body.iter().map(|l| &l.term)) {
             for id in std::iter::once(a.occurrence).chain(a.arguments.iter().copied()) {
                 evidence

@@ -17,6 +17,11 @@ See [memory profiling](../../docs/checker-policies.md#memory-profiling).
   and deterministic limits; its output contains no arena handles or source spans.
   Binding restores current evidence. The current query covers the whole fixed cone:
   input-dependent edits reuse it, fixed edits recompute it.
+- Ground keys are projected on demand from the current graph. Owned local queries
+  still include full relevant rule content and original dependencies, so changing
+  a body invalidates reuse even if the rule and instance keys stay the same.
+  Source schemas and declaration bindings are shared across restriction selections;
+  admitted views do not retain complete keyed copies of the graph.
 - `Session::prepare_with_fixed` shares residual grounding, indexes and admission
   across requests with the same selected restrictions in that run. Obligation
   groups, notices, verification identity and example policy stay separate. This

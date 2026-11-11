@@ -20,13 +20,7 @@ impl PreparedCheck<'_> {
                 CheckError::Internal("missing cached completion failure"),
             )?));
         };
-        let component_id = |key: &ComponentKey| {
-            self.keys
-                .components
-                .iter()
-                .find_map(|(id, k)| (k == key).then_some(*id))
-                .ok_or(CheckError::Internal("missing current completion component"))
-        };
+        let component_id = |key: &ComponentKey| self.key_view().bind_component(key);
         match outcome {
             RegionCompletion::NoContradiction => Ok(CompletionOutcome::NoContradiction),
             RegionCompletion::Inconclusive(_) => Ok(CompletionOutcome::Inconclusive(
@@ -40,12 +34,7 @@ impl PreparedCheck<'_> {
                 candidate,
                 evidence,
             } => {
-                let bind = |key: &AtomKey| {
-                    atoms
-                        .get(key)
-                        .cloned()
-                        .ok_or(CheckError::Internal("missing current completion atom"))
-                };
+                let bind = |key: &AtomKey| self.key_view().bind_atom(key);
                 let owned_bad = bad_input
                     .as_ref()
                     .ok_or(CheckError::Internal("missing completion condition"))?;
@@ -96,12 +85,12 @@ impl PreparedCheck<'_> {
                 // Reject stale/missing evidence instead of guessing current sources.
                 let current_instances = rules
                     .iter()
-                    .map(|r| self.keys.instances[&r.id].clone())
-                    .collect::<BTreeSet<_>>();
+                    .map(|r| self.key_view().instance(r.id))
+                    .collect::<Result<BTreeSet<_>>>()?;
                 let current_rewrites = rewrites
                     .iter()
-                    .map(|id| self.keys.rewrites[id].clone())
-                    .collect::<BTreeSet<_>>();
+                    .map(|id| self.key_view().rewrite(*id))
+                    .collect::<Result<BTreeSet<_>>>()?;
                 if current_instances != evidence.instances || current_rewrites != evidence.rewrites
                 {
                     return Err(CheckError::Internal(

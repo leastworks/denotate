@@ -143,12 +143,14 @@ Unavailable metrics are null; these are process observations, not cache bytes or
 per-program allocation totals. See [memory profiling](../../docs/checker-policies.md#memory-profiling)
 for metric definitions and `just bench-den-memory` workload controls.
 
-Fixed facts are shared across verifications, with one completed fold retained across edits.
+Fixed facts are shared across verifications. The CLI prepares them directly in its
+single snapshot; the editor retains a portable session fold across edits.
 Residual preparation and admission run once per selected restriction set in a run;
 obligation groups, notices and finding identities remain per verification.
 Prepared-size output separates fixed present/absent facts, retained original
 evidence and the residual executable graph. `fold.retainedBytes` reports the keyed
-session fold's accounted bytes; that single fold has no additional byte cap.
+session fold's accounted bytes (zero for the direct CLI); that single retained
+fold has no additional byte cap.
 `just bench-den-fixed ITEMS [VERIFICATIONS]`
 compares cold and warm folded runs with ordinary preparation on an abstract workload;
 the optional verification count defaults to four. `--two-selections` alternates

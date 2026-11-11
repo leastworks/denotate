@@ -94,7 +94,14 @@ requests selecting the same restrictions. Each request still validates its named
 verification and builds only its own obligation groups. Notices and diagnostic
 example policies are never cached as part of that graph. An inconclusive attachment
 or admission does not become a reusable completed result. The source-bound graph
-and index use immutable shared cores, copied only when admission rewrites them.
+uses an immutable shared core, copied only when admission rewrites it.
+`GroundKeyIndex` retains shared source schemas and declaration bindings plus the
+request's groups. `PreparedCheck::key_view()` (or `GroundKeyIndex::view` for raw
+programs) projects semantic atoms, instances, components and rewrite evidence on
+demand from the current graph. Original and committed bodies remain distinct,
+without keyed copies of either whole graph or an admission key refresh.
+`original_content()` is an explicit full export for structural comparisons and the
+optional relation-grounding cache; ordinary checking uses individual lookups.
 `FixedPreparation::prepare_cached` exposes the owned fold kernel to session stores;
 its `FixedInput`/`FixedValue` use semantic keys and rebind evidence to current IR.
 The session owns Salsa and bounded retention, not the checker.

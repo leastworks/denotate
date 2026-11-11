@@ -86,6 +86,14 @@ and completed admission. Obligation groups, notice selection, verification ident
 and example policy remain request attachments; a failed attachment cannot change
 another request's context.
 
+Semantic indexing shares source schemas and declaration bindings across those
+contexts. `GroundKeyView` projects atom, instance, component and rewrite keys from
+the current graph when needed. It reads original and committed bodies from the
+graph's existing rewrite storage; there is no second keyed ground graph or
+post-admission rebuild. Local cache inputs still own complete relevant schemas,
+bodies and dependencies: stable membership keys alone cannot establish unchanged
+meaning. Only stable keys cross snapshots; compact handles stay within the run.
+
 The session's Salsa fold query retains only semantic keys: possible tuples, original
 rule-instance substitutions and the chosen producer/order of each true tuple. On the
 next snapshot it reconstructs the evidence with current occurrences. Its explicit
@@ -102,6 +110,11 @@ directly, without constructing the portable value. Original validation, eligibil
 evaluation, evidence binding and residual preparation/admission still run on each
 new snapshot. Local verification queries
 may reconstruct fixed evidence rules.
+
+The one-shot `check-den` command uses direct fixed preparation, sharing it across
+verifications within the invocation. It does not construct a portable Salsa fold
+that it would immediately bind and discard. Editors retain that fold for later
+snapshots; scorecards keep both paths available for measurement.
 
 Optional `Profile` callbacks travel with operational limits, outside deterministic
 limits, semantic keys, receipts and cached results. The checker emits scoped events

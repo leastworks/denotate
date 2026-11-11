@@ -216,7 +216,13 @@ fn check(f: &Fixture, request: &CheckRequest, mut session: Option<&mut Session>)
     Capture {
         results,
         admitted: prepared.program().is_admitted(),
-        rewrites: prepared.keys().rewrites.values().cloned().collect(),
+        rewrites: prepared
+            .key_view()
+            .rewrites()
+            .unwrap()
+            .values()
+            .cloned()
+            .collect(),
     }
 }
 

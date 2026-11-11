@@ -61,10 +61,14 @@ fn ground_keys_keep_body_only_variables_empty_groups_and_negative_absence() {
     let prepared = prepare_keyed(&p).unwrap();
     let g = &prepared.program;
     let index = &prepared.keys;
-    assert_eq!(index.instances.len(), g.rules().count());
+    let view = index.view(&p.corpus, &p.keys, g);
+    let content = view.original_content().unwrap();
+    assert_eq!(content.len(), g.rules().count());
     assert!(
-        index.atoms.len() > g.atoms().count(),
-        "impossible negative premises retained"
+        g.original_rules()
+            .flat_map(|r| &r.body)
+            .any(|l| !g.atoms().any(|a| *a == l.term.atom) && view.atom(&l.term.atom).is_ok()),
+        "impossible negative premises retain identity on demand"
     );
     let (obligation, groups) = index.groups.first_key_value().unwrap();
     let empty = groups.domains[0]
@@ -75,8 +79,7 @@ fn ground_keys_keep_body_only_variables_empty_groups_and_negative_absence() {
     let key = groups.key(obligation, vec![empty]).unwrap();
     assert!(!groups.members.contains_key(&key.tuple));
     assert!(groups.key(obligation, vec![]).is_err());
-    let present = index
-        .content
+    let present = content
         .iter()
         .find(|(key, _)| matches!(&key.rule, RuleKey::Library(k) if k.name.as_ref()=="present"))
         .unwrap();

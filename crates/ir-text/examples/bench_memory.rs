@@ -15,6 +15,7 @@ struct Shape {
     width: usize,
     layers: usize,
     verifications: usize,
+    findings: bool,
 }
 impl Default for Shape {
     fn default() -> Self {
@@ -24,6 +25,7 @@ impl Default for Shape {
             width: 4,
             layers: 28,
             verifications: 1,
+            findings: false,
         }
     }
 }
@@ -67,6 +69,9 @@ fn source(s: &Shape) -> String {
         ));
     }
     t.push_str("relation error(x:Item); error(X):-left(X),right(X); error(X):-off(X,L),r4(X); obligation clean:empty(error);\n");
+    if s.findings {
+        t.push_str("error(k0):-f2(k0,a);\n");
+    }
     for i in 0..s.verifications {
         t.push_str(&format!(
             "verification v{i}{{assumptions:[];obligations:[clean];}}\n"
@@ -97,6 +102,10 @@ fn main() {
             "--layers" => &mut shape.layers,
             "--verifications" => &mut shape.verifications,
             "--timeout-ms" => &mut timeout_ms,
+            "--findings" => {
+                shape.findings = true;
+                continue;
+            }
             "--warm" => {
                 warm = true;
                 continue;
@@ -111,7 +120,7 @@ fn main() {
             }
             "--help" => {
                 println!(
-                    "bench_memory [--items 200] [--inputs 200] [--width 4] [--layers 28] [--verifications 1] [--timeout-ms 120000] [--warm] [--unfolded] [--no-retention]\nJSON lines stream to stdout. Logical limits are checker defaults x100. Memory is sampled every 20ms; unavailable metrics are null."
+                    "bench_memory [--items 200] [--inputs 200] [--width 4] [--layers 28] [--verifications 1] [--timeout-ms 120000] [--findings] [--warm] [--unfolded] [--no-retention]\nJSON lines stream to stdout. Logical limits are checker defaults x100. Memory is sampled every 20ms; unavailable metrics are null."
                 );
                 return;
             }
@@ -149,7 +158,7 @@ fn main() {
     };
     emit(
         json!({"type":"configuration","items":shape.items,"inputs":shape.inputs,"width":shape.width,"fixedLayers":shape.layers,
-        "verifications":shape.verifications,"folded":folded,"retention":retained,"warm":warm,"timeoutMs":timeout_ms,
+        "verifications":shape.verifications,"findings":shape.findings,"folded":folded,"retention":retained,"warm":warm,"timeoutMs":timeout_ms,
         "limits":{"atoms":limits.max_atoms,"rules":limits.max_rules,"dependencies":limits.max_dependencies,"work":limits.max_work,
         "bddVariables":limits.max_bdd_variables,"bddNodes":limits.max_bdd_nodes,"bddTasks":limits.max_bdd_tasks,"conditionNodes":limits.max_condition_nodes}}),
     );
@@ -176,7 +185,10 @@ fn main() {
                     json!({"type":"result","run":run,"outcomes":outcomes,"memory":process_memory(),
                     "fixedCache":{"executed":session.fixed_stats().executed,"reused":session.fixed_stats().reused,"retainedBytes":session.fixed_stats().retained_bytes}}),
                 );
-                if outcomes.iter().any(|s| s["state"] != "proved") {
+                if outcomes
+                    .iter()
+                    .any(|s| s["state"] != if shape.findings { "findings" } else { "proved" })
+                {
                     std::process::exit(2);
                 }
             }
@@ -242,6 +254,12 @@ fn run_check(
         let _span = limits.profile.span("checking", None);
         match session.verify(&prepared, &ops)? {
             LocalCheckOutcome::Complete(report) => {
+                let _presentation = limits.profile.span("presentation", None);
+                let presented =
+                    presentation::present(&p, &report.checked).expect("present benchmark findings");
+                emit(
+                    json!({"type":"presentation","diagnostics":presented.diagnostics.len(),"memory":process_memory()}),
+                );
                 let summary = denotate_presentation::summary(&report.checked.results.value);
                 outcomes.push(summary);
             }
@@ -263,6 +281,7 @@ mod tests {
             width: 2,
             layers: 3,
             verifications: 2,
+            findings: false,
         });
         let quiet = run_check(&text, &Limits::default(), &mut Session::default(), true).unwrap();
         assert!(quiet.iter().all(|s| s["state"] == "proved"));
@@ -288,7 +307,6 @@ mod tests {
             "semantic-keys",
             "admission-symbolic",
             "admission-summaries",
-            "admission-key-refresh",
         ] {
             assert!(
                 events.iter().any(|e| e.stage == stage && e.finished),
@@ -303,6 +321,47 @@ mod tests {
         );
     }
     #[test]
+    fn fixed_findings_are_presented_across_verifications_and_retention_modes() {
+        let text = source(&Shape {
+            items: 4,
+            inputs: 4,
+            width: 2,
+            layers: 3,
+            verifications: 3,
+            findings: true,
+        });
+        let mut retained = Session::default();
+        let mut direct = Session::new(Retention {
+            max_entries: 0,
+            ..Default::default()
+        });
+        let mut controls = None;
+        for session in [&mut retained, &mut direct] {
+            for _ in 0..2 {
+                let results = run_check(&text, &Limits::default(), session, true).unwrap();
+                let outcomes: Vec<_> = results
+                    .iter()
+                    .map(|s| {
+                        assert_eq!(s["state"], "findings");
+                        let emptiness = s["emptiness"].as_array().unwrap();
+                        assert_eq!(emptiness.len(), 1);
+                        (
+                            s["state"].clone(),
+                            emptiness[0]["identity"].clone(),
+                            emptiness[0]["presentTuples"].clone(),
+                        )
+                    })
+                    .collect();
+                assert_eq!(outcomes.len(), 3);
+                if let Some(expected) = &controls {
+                    assert_eq!(&outcomes, expected);
+                } else {
+                    controls = Some(outcomes);
+                }
+            }
+        }
+    }
+    #[test]
     fn exhausted_profile_closes_spans_without_claiming_a_result() {
         let text = source(&Shape {
             items: 2,
@@ -310,6 +369,7 @@ mod tests {
             width: 1,
             layers: 3,
             verifications: 1,
+            findings: false,
         });
         let events = Arc::new(Mutex::new(Vec::new()));
         let out = events.clone();

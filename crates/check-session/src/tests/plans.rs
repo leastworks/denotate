@@ -21,14 +21,39 @@ fn compare(session: &mut Session, source: &str, work: usize) {
     match (fresh, cached) {
         (RequestPreparation::Complete(a), RequestPreparation::Complete(b)) => {
             assert_eq!(a.receipts(), b.receipts());
-            assert_eq!(a.keys().content, b.keys().content);
             assert_eq!(
-                a.keys().components.values().collect::<BTreeSet<_>>(),
-                b.keys().components.values().collect::<BTreeSet<_>>()
+                a.key_view().original_content().unwrap(),
+                b.key_view().original_content().unwrap()
             );
             assert_eq!(
-                a.keys().atoms.values().collect::<BTreeSet<_>>(),
-                b.keys().atoms.values().collect::<BTreeSet<_>>()
+                a.program()
+                    .components()
+                    .map(|c| a.key_view().component(c.id).unwrap())
+                    .collect::<BTreeSet<_>>(),
+                b.program()
+                    .components()
+                    .map(|c| b.key_view().component(c.id).unwrap())
+                    .collect::<BTreeSet<_>>()
+            );
+            assert_eq!(
+                a.program()
+                    .atoms()
+                    .chain(
+                        a.program()
+                            .original_rules()
+                            .flat_map(|r| r.body.iter().map(|l| &l.term.atom))
+                    )
+                    .map(|atom| a.key_view().atom(atom).unwrap())
+                    .collect::<BTreeSet<_>>(),
+                b.program()
+                    .atoms()
+                    .chain(
+                        b.program()
+                            .original_rules()
+                            .flat_map(|r| r.body.iter().map(|l| &l.term.atom))
+                    )
+                    .map(|a| b.key_view().atom(a).unwrap())
+                    .collect::<BTreeSet<_>>()
             );
             if work == 20_000_000 {
                 let a = a.admit(&(&limits).into()).unwrap();
