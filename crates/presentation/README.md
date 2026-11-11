@@ -54,6 +54,11 @@ participating occurrences, and places them on source locations. It depends only 
   per-tuple frontiers, retaining each tuple's fallback independently and keeping
   the full derivation related. Own-file and unlocated obligations keep old placement.
 - `rewrites` groups proven rewrite warnings and their coverage; they never carry edits.
+  Live instances use the ground graph's direct lookup. One pass counts original
+  instances by source rule; each warning compares that count with its distinct
+  proved instances. This avoids rescanning the full fixed and residual graph for
+  each proof. Removed instances still count toward coverage, while their earlier
+  discharge warnings are hidden. Proof order, wording and placement are unchanged.
 - `summary` builds root-level outcome summaries (backend, selected assumptions, group
   and region outcomes, resource reasons). Resource reasons preserve checker-supplied
   subphase, effective limit and observed demand where available; unknown counts are

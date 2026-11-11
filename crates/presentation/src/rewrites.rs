@@ -1,7 +1,7 @@
 use crate::*;
 use denotate_check::*;
 use denotate_ir::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub struct Rewrite<'a> {
     pub rule: RuleId,
@@ -47,7 +47,7 @@ pub fn rewrites<'a>(corpus: &Corpus, program: &'a GroundProgram) -> Result<Vec<R
         let literal = match proof.kind {
             RewriteKind::RedundantProducer => None,
             RewriteKind::Discharge { literal_occurrence } => {
-                if !program.rules().any(|r| r.id == proof.candidate.rule.id) {
+                if program.rule(proof.candidate.rule.id).is_none() {
                     continue;
                 }
                 Some(literal_occurrence)
@@ -55,11 +55,38 @@ pub fn rewrites<'a>(corpus: &Corpus, program: &'a GroundProgram) -> Result<Vec<R
         };
         grouped.entry((rule, literal)).or_default().push(proof);
     }
-    Ok(grouped.into_iter().map(|((rule,literal),proofs)| {
-        let covers_all_instances = program.original_rules().filter(|r| r.source == rule).all(|r| proofs.iter().any(|p|p.candidate.rule.id == r.id));
-        let message = if !covers_all_instances { "This condition or definition is redundant in some checked cases, but not all its uses are justified for removal." }
-            else if literal.is_some() { "This negated condition is redundant: whenever its settled guard holds, the excluded condition cannot hold." }
-            else { "This definition adds no result: other definitions already cover every case where it could apply." };
-        Rewrite {rule,literal,proofs,covers_all_instances,message}
-    }).collect())
+    if grouped.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Count originals once, including subsequently removed instances. Restrict
+    // the index to sources with warnings, rather than duplicating the graph.
+    let mut instances: BTreeMap<_, usize> = grouped.keys().map(|(rule, _)| (*rule, 0)).collect();
+    for rule in program.original_rules() {
+        if let Some(count) = instances.get_mut(&rule.source) {
+            *count += 1;
+        }
+    }
+    Ok(grouped
+        .into_iter()
+        .map(|((rule, literal), proofs)| {
+            // Every proof candidate is an original instance of this source rule.
+            // Count distinct instances, not proofs, independently for each literal.
+            let proved: BTreeSet<_> = proofs.iter().map(|p| p.candidate.rule.id).collect();
+            let covers_all_instances = proved.len() == instances[&rule];
+            let message = if !covers_all_instances {
+                "This condition or definition is redundant in some checked cases, but not all its uses are justified for removal."
+            } else if literal.is_some() {
+                "This negated condition is redundant: whenever its settled guard holds, the excluded condition cannot hold."
+            } else {
+                "This definition adds no result: other definitions already cover every case where it could apply."
+            };
+            Rewrite {
+                rule,
+                literal,
+                proofs,
+                covers_all_instances,
+                message,
+            }
+        })
+        .collect())
 }

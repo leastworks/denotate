@@ -62,6 +62,176 @@ fn program(root: &str, app: &str, library: &str) -> LoadedProgram {
 }
 const LIB: &str = "sort S; const a,b: S; relation p(x:S); obligation unique: at_most_one(p, group_by: ()); verification checks { assumptions: []; obligations: [unique]; }";
 
+// Independent scan-based definition of the warning inventory and its coverage.
+// It deliberately includes removed instances in coverage, but hides their
+// discharge warnings. No proof IDs or solver choices are pinned across runs.
+fn assert_rewrite_inventory(p: &LoadedProgram, ground: &GroundProgram) {
+    let mut expected = BTreeMap::<_, Vec<_>>::new();
+    for proof in ground.rewrite_proofs() {
+        let literal = match proof.kind {
+            RewriteKind::RedundantProducer => None,
+            RewriteKind::Discharge { literal_occurrence } => {
+                if !ground.rules().any(|r| r.id == proof.candidate.rule.id) {
+                    continue;
+                }
+                Some(literal_occurrence)
+            }
+        };
+        expected
+            .entry((proof.candidate.rule.source, literal))
+            .or_default()
+            .push(proof);
+    }
+    let actual = denotate_presentation::rewrites(&p.corpus, ground).unwrap();
+    assert_eq!(actual.len(), expected.len());
+    for (actual, ((rule, literal), proofs)) in actual.iter().zip(expected) {
+        assert_eq!((actual.rule, actual.literal), (rule, literal));
+        assert_eq!(
+            actual.proofs.iter().map(|p| p.id).collect::<Vec<_>>(),
+            proofs.iter().map(|p| p.id).collect::<Vec<_>>()
+        );
+        let covered = ground
+            .original_rules()
+            .filter(|r| r.source == rule)
+            .all(|r| proofs.iter().any(|p| p.candidate.rule.id == r.id));
+        assert_eq!(actual.covers_all_instances, covered);
+        assert_eq!(
+            actual.message,
+            if !covered {
+                "This condition or definition is redundant in some checked cases, but not all its uses are justified for removal."
+            } else if literal.is_some() {
+                "This negated condition is redundant: whenever its settled guard holds, the excluded condition cannot hold."
+            } else {
+                "This definition adds no result: other definitions already cover every case where it could apply."
+            }
+        );
+    }
+}
+
+fn rewrite_check(
+    p: &LoadedProgram,
+    session: &mut Session,
+    inspect: impl FnOnce(&GroundProgram),
+) -> presentation::Presentation {
+    let limits = Limits::default();
+    let ops = (&limits).into();
+    let request = p.verification_requests(&limits).unwrap().remove(0).1;
+    let fixed = session
+        .prepare_fixed(&p.corpus, &p.keys, &p.domains, &limits)
+        .unwrap();
+    let RequestPreparation::Complete(prepared) = session
+        .prepare_with_fixed(&request, &p.corpus, &p.keys, &ops, &fixed)
+        .unwrap()
+    else {
+        panic!("incomplete preparation")
+    };
+    let prepared = prepared.admit(&ops).unwrap();
+    assert_rewrite_inventory(p, prepared.program());
+    inspect(prepared.program());
+    let LocalCheckOutcome::Complete(report) = session.verify(&prepared, &ops).unwrap() else {
+        panic!("incomplete checking")
+    };
+    presentation::present(p, &report.checked).unwrap()
+}
+
+#[test]
+fn rewrite_coverage_is_per_literal_and_per_original_instance_cold_and_warm() {
+    let p = program(
+        "file:///app/den.root",
+        "relation fixed(s:S); fixed(a); fixed(b);
+        relation extra_fixed(s:S); extra_fixed(X):-fixed(X);
+        input i(s:S); input backup();
+        relation left(s:S); relation right(s:S); relation other(s:S);
+        left(X):-i(X),!right(X),!other(X);
+        right(X):-fixed(X),!i(X),!left(X);
+        other(X):-fixed(X),!i(X),!left(X); other(b):-backup();
+        relation bad(s:S); bad(X):-fixed(X),!bad(X);
+        relation out(s:S); out(X):-i(X),bad(X); out(a):-i(a);",
+        LIB,
+    );
+    let mut session = Session::default();
+    let mut presentations = Vec::new();
+    for _ in 0..2 {
+        presentations.push(rewrite_check(&p, &mut session, |ground| {
+            let rewrites = denotate_presentation::rewrites(&p.corpus, ground).unwrap();
+            let left = p
+                .corpus
+                .rules()
+                .find(|r| p.corpus.relation(r.head.relation()).unwrap().name == "left")
+                .unwrap();
+            let coverage: BTreeMap<_, _> = rewrites
+                .iter()
+                .filter(|r| r.rule == left.id)
+                .map(|r| (r.literal.unwrap(), r.covers_all_instances))
+                .collect();
+            assert_eq!(
+                coverage,
+                BTreeMap::from([
+                    (left.body[1].atom().id(), true),
+                    (left.body[2].atom().id(), false),
+                ])
+            );
+            assert!(
+                rewrites
+                    .iter()
+                    .any(|r| r.literal.is_none() && !r.covers_all_instances)
+            );
+        }));
+    }
+    presentations.push(rewrite_check(&p, &mut Session::default(), |_| {}));
+    // Current spans, all visible fields and structured identities/evidence.
+    // This fixture has no interchangeable counterexample witnesses.
+    let snapshot = |out: &presentation::Presentation| {
+        out.diagnostics
+            .iter()
+            .map(|d| {
+                (
+                    d.data(&p.keys).unwrap(),
+                    d.kind,
+                    d.message.clone(),
+                    d.notes.clone(),
+                    d.primary,
+                    d.related.clone(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    for out in &presentations[1..] {
+        assert_eq!(presentations[0].status, out.status);
+        assert_eq!(snapshot(&presentations[0]), snapshot(out));
+    }
+    assert!(session.fixed_stats().reused > 0);
+}
+
+#[test]
+fn discharge_of_a_later_removed_instance_is_hidden_but_producer_warning_remains() {
+    let p = program(
+        "file:///app/den.root",
+        "input t(); relation first(); relation second();
+        first():-t(),!second(); second():-!t(),!first(),out();
+        relation bad(); bad():-!bad();
+        relation out(); out():-t(),!second(),bad(); out():-first();",
+        LIB,
+    );
+    rewrite_check(&p, &mut Session::default(), |ground| {
+        let removed = ground
+            .rewrite_proofs()
+            .find(|proof| {
+                matches!(proof.kind, RewriteKind::Discharge { .. })
+                    && ground.rule(proof.candidate.rule.id).is_none()
+            })
+            .expect("exercise a discharge followed by producer removal");
+        let rewrites = denotate_presentation::rewrites(&p.corpus, ground).unwrap();
+        let warnings: Vec<_> = rewrites
+            .iter()
+            .filter(|r| r.rule == removed.candidate.rule.source)
+            .collect();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].literal.is_none());
+        assert!(warnings[0].covers_all_instances);
+    });
+}
+
 #[test]
 fn hiding_library_rewrites_preserves_home_warnings_other_findings_and_full_inventory() {
     let library = format!(
