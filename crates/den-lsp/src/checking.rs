@@ -152,7 +152,11 @@ fn check_with_progress(
                 RequestPreparation::Inconclusive { reason, .. } => return Ok(exhausted(reason)),
             };
             let mut detail = context.clone();
-            progress.prepared(&mut detail, ground.program());
+            progress.prepared(
+                &mut detail,
+                ground.program(),
+                session.fixed_stats().retained_bytes,
+            );
             progress.emit(Phase::Admission, detail.clone());
             let ground = ground.admit(&operations)?;
             progress.emit(Phase::Checking, detail.clone());
@@ -1012,6 +1016,11 @@ mod tests {
             assert!(prepared["ground"]["inputAtoms"].as_u64().unwrap() > 0);
             assert!(prepared["ground"]["atoms"].as_u64().unwrap() > 0);
             assert!(prepared["ground"]["components"].as_u64().unwrap() > 0);
+            assert_eq!(
+                prepared["fold"]["retainedBytes"],
+                session.fixed_stats().retained_bytes
+            );
+            assert!(session.fixed_stats().retained_bytes > 0);
         }
     }
     #[test]

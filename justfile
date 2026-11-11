@@ -81,7 +81,7 @@ score-den +args:
 bench-den-origins +args:
     cargo +1.93.0 run --release --locked -p denotate-ir-text --example bench_origins -- "$@"
 
-# Compare cold/warm/edited folding: ITEMS [VERIFICATIONS=4] [--ground-assumption] [--two-selections].
+# Compare cold/warm/edited folding: ITEMS [VERIFICATIONS=4] [--ground-assumption] [--two-selections] [--no-retention].
 [positional-arguments]
 bench-den-fixed +args:
     cargo +1.93.0 run --release --locked -p denotate-ir-text --example bench_fixed -- "$@"

@@ -82,7 +82,12 @@ impl<'a> CheckProgress<'a> {
     }
     /// Inspect the existing prepared program once, before admission. Keep the
     /// resulting detail for later phases; don't ground or evaluate to get sizes.
-    pub fn prepared(&self, detail: &mut Value, program: &GroundProgram) {
+    pub fn prepared(
+        &self,
+        detail: &mut Value,
+        program: &GroundProgram,
+        retained_fold_bytes: usize,
+    ) {
         if self.report.is_some() {
             detail["ground"] = json!({"atoms":program.atoms().count(),
                 "inputAtoms":program.input_atoms().count(),"ruleInstances":program.rules().count(),
@@ -91,6 +96,7 @@ impl<'a> CheckProgress<'a> {
             let (atoms, present, rules, components, dependencies) = program.fixed_size();
             let (residual_atoms, residual_rules, residual_components) = program.residual_size();
             detail["fold"] = json!({"presentFacts":present,"absentFacts":atoms-present,
+                "retainedBytes":retained_fold_bytes,
                 "retainedEvidence":{"atoms":atoms,"ruleInstances":rules,"components":components,"dependencies":dependencies},
                 "residual":{"atoms":residual_atoms,"ruleInstances":residual_rules,"components":residual_components}});
         }

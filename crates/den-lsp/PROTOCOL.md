@@ -91,8 +91,12 @@ Skipped phases need not appear. Startup and discovery remain indeterminate.
 `fixed-facts` runs once before the first verification that can prepare; it is
 independent of selection. Prepared details additionally contain `fold`:
 `presentFacts`, `absentFacts`, `retainedEvidence` (`atoms`, `ruleInstances`,
-`components`, `dependencies`) and `residual` (`atoms`, `ruleInstances`, `components`).
-`ground` continues to include both parts. These are logical sizes, not heap usage.
+`components`, `dependencies`), `residual` (`atoms`, `ruleInstances`, `components`),
+and `retainedBytes`. The latter is the accounted session payload for the keyed fold
+(input schemas, output and slot overhead), separate from the bound evidence graph;
+it is zero when no fold is retained. It has no byte cap and takes no allowance from
+other cache pools. `ground` continues to include both graph parts. These counts and
+accounted bytes are not measured heap usage or RSS.
 Fold exhaustion uses phase `fixed facts` with resource/subphase detail; eligibility
 failures retain phase `input domains`. Neither publishes partial folded facts.
 The phase vocabulary, verification metadata and prepared-size inspection are

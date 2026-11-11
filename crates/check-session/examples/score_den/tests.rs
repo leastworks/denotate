@@ -560,6 +560,41 @@ fn fixed_preparation_exhaustion_is_a_scored_inconclusive_result() {
 }
 
 #[test]
+fn folded_retention_bytes_and_disabled_preparation_are_visible() {
+    let source = snapshot(ALL);
+    let p = source.load(false).unwrap();
+    let c = config();
+    let request = p.verification_requests(&c.limits).unwrap().remove(0).1;
+    let mut session = Some(Session::default());
+    let cold = measure(&p, &request, "folded-bdd", &mut session, &c.limits);
+    let warm = measure(&p, &request, "folded-bdd", &mut session, &c.limits);
+    assert_eq!(cold.outcomes, warm.outcomes);
+    let stats = &warm.row["preparation_cache"]["fixed"];
+    assert!(stats["retained_bytes"].as_u64().unwrap() > 0);
+    assert!(stats["reused"].as_u64().unwrap() > 0);
+    let mut disabled = Some(Session::new(denotate_check_session::Retention {
+        max_entries: 0,
+        ..Default::default()
+    }));
+    let direct = measure(&p, &request, "folded-bdd", &mut disabled, &c.limits);
+    assert_eq!(cold.outcomes, direct.outcomes);
+    assert_eq!(
+        direct.row["preparation_cache"]["fixed"]["retained_bytes"],
+        0
+    );
+    assert!(
+        direct.row["preparation_cache"]["fixed"]["bypassed"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    let report = driver::collect(&c, &source, None).unwrap();
+    let human = report::human(&report);
+    assert!(human.contains("retained keyed fold:"));
+    assert!(human.contains("accounted bytes"));
+}
+
+#[test]
 fn known_exactly_one_failure_survives_incomplete_other_component() {
     let p = snapshot(ALL).load(false).unwrap();
     let l = config().limits;

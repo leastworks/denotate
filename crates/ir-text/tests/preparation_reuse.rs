@@ -161,6 +161,7 @@ fn fold_failure_eviction_and_bypass_recover() {
         session.prepare_fixed(&p.corpus, &p.keys, &p.domains, &exhausted),
         Err(CheckError::LimitExceeded { .. })
     ));
+    assert_eq!(session.fixed_stats().retained_bytes, 0);
     compare(&p, &mut session);
     let cancelled = limits.clone();
     cancelled.cancellation.cancel();
@@ -168,10 +169,23 @@ fn fold_failure_eviction_and_bypass_recover() {
         session.prepare_fixed(&p.corpus, &p.keys, &p.domains, &cancelled),
         Err(CheckError::Cancelled)
     ));
+    assert_eq!(session.fixed_stats().retained_bytes, 0);
+    compare(&p, &mut session);
+    let expired = Limits {
+        timeout: std::time::Duration::ZERO,
+        ..Limits::default()
+    };
+    assert!(matches!(
+        session.prepare_fixed(&p.corpus, &p.keys, &p.domains, &expired),
+        Err(CheckError::Deadline { .. })
+    ));
+    assert_eq!(session.fixed_stats().retained_bytes, 0);
     compare(&p, &mut session);
     session.evict_values();
+    assert_eq!(session.fixed_stats().retained_bytes, 0);
     compare(&p, &mut session);
     session.reset();
+    assert_eq!(session.fixed_stats().retained_bytes, 0);
     compare(&p, &mut session);
     let mut bypass = Session::new(Retention {
         max_entries: 0,

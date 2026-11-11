@@ -92,10 +92,15 @@ next snapshot it reconstructs the evidence with current occurrences. Its explici
 input contains fixed relation/rule schemas, resolved domains and deterministic
 limits, excluding input-dependent rule bodies and source locations. This first query
 covers the entire fixed cone, so an edit within it recomputes the cone; per-SCC
-provider reuse remains a possible refinement. Retention is bounded and oversized
-folds bypass it. Failures and interruptions are cleared, never reused as completed
-folds. Original validation, eligibility evaluation, evidence binding and residual
-preparation/admission still run on each new snapshot. Local verification queries
+provider reuse remains a possible refinement. The session retains one completed
+fold, replacing it when the fixed projection changes. Checker limits bound its
+computation and atom/rule counts; there is no additional byte cap, and the other
+cache pools keep their budgets. The accounted retained bytes are reported separately
+from bound evidence sizes. Failed or interrupted fold preparation clears the query.
+With retention disabled (`max_entries == 0`), preparation uses the current corpus
+directly, without constructing the portable value. Original validation, eligibility
+evaluation, evidence binding and residual preparation/admission still run on each
+new snapshot. Local verification queries
 may reconstruct fixed evidence rules.
 
 Assumption declaration validity is a program-level query. The IR classifies

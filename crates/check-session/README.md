@@ -16,18 +16,23 @@ that warm results (and work receipts) equal a cold check of the same snapshot.
   groups, notices, verification identity and example policy stay separate. This
   path does not use the optional relation-SCC grounding cache. Original assumption
   validation remains shared within a run and fresh across edits.
-- The fold has one recycled slot and at most one quarter of the session byte
-  allowance (including source schemas and retained output). Oversized results
-  bypass retention. `fixed_stats()` reports execution, reuse, bypass and bytes;
-  reset and eviction release the value. Cancellation, deadlines and exhaustion
-  clear the query. Residual preparation and admission are not retained across edits.
+- The fold has one recycled slot, retained whenever preparation completes under
+  checker limits. It has no byte cap and takes no share of the other cache pools.
+  `fixed_stats()` reports execution, reuse, disabled-retention bypass and accounted
+  bytes (schemas, output and slot overhead, not RSS). Reset and eviction release
+  it; failed or interrupted fold preparation clears it. Residual preparation and
+  admission are not retained across edits.
+- `Retention::max_entries == 0` disables fold retention and prepares fixed facts
+  directly from the current corpus, without reconstruction/export. A zero
+  `max_bytes` alone limits the other pools; it does not disable the fold. Retained
+  and direct preparation agree on semantic outcomes; chosen evidence may differ.
 - `Session::verify_with_metrics` and the checker's corresponding methods optionally
   time the actual notice pass. Metrics reset on entry, stay outside semantic results
   and receipts, and are never cached.
 - Retained queries use semantic keys, never arena IDs. Unchanged query inputs reuse
   answers; edits invalidate work at each query's granularity. Source binding and
   run-scoped preparation still execute after trivia-only edits.
-- **Retention** is bounded (`Retention`, recycled slots, per-pool byte limits);
+- **Other cache retention** is bounded (`Retention`, recycled slots, per-pool byte limits);
   oversized entries bypass the cache. `without_retention_limits` exists for
   measurement. `reset` and `evict_values` drop cached state.
 - **Optional mechanisms:** owned join-plan caching (on, with a small-rule bypass) and

@@ -1,6 +1,6 @@
 //! Abstract mostly-fixed workload. Counts/times are measurements, never goldens.
 use denotate_check::*;
-use denotate_check_session::Session;
+use denotate_check_session::{Retention, Session};
 use denotate_ir_text::*;
 use serde_json::json;
 use std::time::{Duration, Instant};
@@ -14,13 +14,24 @@ fn main() {
         .unwrap();
     let verifications: usize = args.next().map(|n| n.parse().unwrap()).unwrap_or(4);
     let flags = args.collect::<Vec<_>>();
-    assert!(
-        flags
-            .iter()
-            .all(|f| matches!(f.as_str(), "--ground-assumption" | "--two-selections"))
-    );
+    assert!(flags.iter().all(|f| matches!(
+        f.as_str(),
+        "--ground-assumption" | "--two-selections" | "--no-retention"
+    )));
     let ground_assumption = flags.iter().any(|f| f == "--ground-assumption");
     let two_selections = flags.iter().any(|f| f == "--two-selections");
+    let retention_disabled = flags.iter().any(|f| f == "--no-retention");
+    let new_session = || {
+        if retention_disabled {
+            Session::new(Retention {
+                max_entries: 0,
+                max_bytes: 0,
+                max_condition_nodes: 0,
+            })
+        } else {
+            Session::default()
+        }
+    };
     assert!(n > 0 && verifications > 0);
     let mut source = String::from(
         "sort S; relation item(s:S); relation tagged(s:S); relation off(s:S); input flag(); relation error(s:S); relation left(); relation right();\n",
@@ -54,7 +65,7 @@ fn main() {
     };
     let operations = (&limits).into();
     let mut controls = Vec::new();
-    let mut session = Session::default();
+    let mut session = new_session();
     for (folded, warm, edited) in [
         (false, false, false),
         (true, false, false),
@@ -74,7 +85,7 @@ fn main() {
         .unwrap();
         let requests = p.verification_requests(&limits).unwrap();
         if !warm {
-            session = Session::default();
+            session = new_session();
         }
         let start = Instant::now();
         let validated =
@@ -131,7 +142,7 @@ fn main() {
         println!(
             "{}",
             json!({"folded":folded,"warm":warm,"edited":edited,"two_selections":two_selections,"fixed_cache":{"executed":session.fixed_stats().executed,"reused":session.fixed_stats().reused,"bypassed":session.fixed_stats().bypassed,"retained_bytes":session.fixed_stats().retained_bytes},"items":n,"verifications":verifications,
-            "ground_assumption":ground_assumption,"validation_ms":validation.as_secs_f64()*1000.,
+            "retention_disabled":retention_disabled,"ground_assumption":ground_assumption,"validation_ms":validation.as_secs_f64()*1000.,
             "fixed_ms":fold.as_secs_f64()*1000., "preparation_ms":preparation.as_secs_f64()*1000.,
             "admission_ms":admission.as_secs_f64()*1000.,"checking_ms":checking.as_secs_f64()*1000.,"size":sizes})
         );

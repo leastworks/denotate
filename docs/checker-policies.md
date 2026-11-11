@@ -8,7 +8,7 @@ it when real programs exist, and change it on evidence.
 | --- | --- | --- |
 | Checker backend | BDD only; cached coarse BDD in editors | Predictable, canonical conditions; good warm reuse |
 | Relation-SCC grounding | Kept opt-in | Warm-run wins; not yet worth the complexity by default |
-| Fixed-fact evaluation | Once per `.den` checking run, shared across verifications | Removes settled static atoms from symbolic execution; retains original evidence explicitly; no cross-edit fold cache yet |
+| Fixed-fact evaluation | Shared across verifications; one retained keyed fold per session, without a byte cap | Checker limits bound the fold; retain completed work for reuse across edits and report its accounted bytes |
 | Plan cache | Small-rule bypass with bounded retention | Avoids caching cost for trivial rules |
 | Coverage results | Recomputed each check; preparation is reused | No measured need for a coverage verdict cache yet |
 
@@ -71,11 +71,12 @@ apply, but the variant's name does not imply verdict-cache reuse.
 
 The `.den` scorecard additionally compares `folded-bdd`, the default CLI/editor
 preparation path. It includes keyed fold projection/binding, with retained fold
-reuse on warm/edit runs when the fixed projection is unchanged and fits retention.
+reuse on warm/edit runs when the fixed projection is unchanged and retention is enabled.
 Samples are still per verification, so they do not amortize preparation/admission
 across other verifications. Existing variants remain unfolded controls; the test
 DSL variants are unchanged. `preparation_cache.fixed` reports cumulative executed,
-reused and bypassed queries plus retained bytes.
+reused queries and retained bytes; bypass counts only direct preparations with
+retention disabled. The human report also shows accounted retained fold bytes.
 
 Use `just bench-den-fixed 4000 4` for an abstract mostly-fixed workload comparing
 unfolded execution with cold and warm folded runs across four verifications. Within
@@ -84,17 +85,30 @@ and results remain per verification. The benchmark asserts outcome agreement and
 reports timings and retained sizes, never timing goldens. It also reloads an edit
 to an input-dependent rule to measure fixed-query reuse. Add `--ground-assumption`
 after the counts to include original ground validation, timed separately and shared
-with all requests; `--two-selections` alternates two restriction sets. The
+with all requests; `--two-selections` alternates two restriction sets and
+`--no-retention` measures direct fixed preparation. The
 scorecard's direct API timer instead includes lazy original validation when needed.
 
-Fold retention uses one Salsa query for the entire fixed cone and a quarter of the
-session byte allowance. Its input excludes input-dependent rules, but a fixed edit
-recomputes the cone; per-relation SCC reuse is not implemented. The retained value
-stores original instance substitutions and true producers, not duplicate grounded
-rule bodies. Oversized values bypass retention. Cold reconstruction/export and warm
-source binding have costs; re-score them against fresh folding on real programs.
-Original validation, eligibility, residual grounding and admission remain fresh
-across snapshots. No policy ceiling or admission semantics change.
+Fold retention uses one Salsa query for the entire fixed cone, with no byte cap.
+The session keeps every completed fold under the checker limits and replaces the
+previous value when its inputs change. Other cache budgets are unaffected. The old
+quarter-of-session allowance made an already-computed fold pay reconstruction and
+export costs repeatedly once it outgrew that pool. Checker limits bound work and
+atom/rule counts; the retained bytes are accounted separately, not claimed to be a
+heap or RSS ceiling.
+
+`Retention::max_entries == 0` disables fold retention. That path calls direct fixed
+preparation on the current corpus, avoiding reconstruction/export altogether.
+`max_bytes` alone applies only to the other pools. Outcomes agree between retained
+and direct preparation; producer/witness choices and transfer receipts may differ.
+Reset, value eviction and failed/interrupted fold preparation release the value.
+
+The query input excludes input-dependent rules, but a fixed edit recomputes the
+cone; per-relation SCC reuse is not implemented. The retained value stores original
+instance substitutions and true producers, not duplicate grounded rule bodies.
+Cold reconstruction/export and warm source binding still have costs; re-score them
+on real programs. Original validation, eligibility, residual grounding and admission
+remain fresh across snapshots. Checker ceilings and admission semantics are unchanged.
 
 ### `.den` measurements
 
@@ -129,7 +143,8 @@ components. The existing size fields include both parts. The fixed evidence is
 currently the full original settled graph plus one derivation per true fact,
 shared within the run; it is not a compact proof store or a heap measurement.
 Residual grounding still seeds fixed possible tuples to preserve rule and finding
-identity, including false guards. Semantic indexes remain per request. This step
+identity, including false guards. Graph indexes are shared within a restriction
+selection; group indexes remain per request. This step
 reduces repeated executable and symbolic work, not all initial grounding or evidence
 storage. Program-level validation is outside the phase timers. The CLI/editor share
 its original-graph summary with folded preparation. Direct API callers compute that

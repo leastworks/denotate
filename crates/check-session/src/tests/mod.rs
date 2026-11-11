@@ -1,4 +1,5 @@
 mod completion;
+mod fixed_retention;
 mod incremental_inventory;
 mod rewrites;
 mod symbolic;

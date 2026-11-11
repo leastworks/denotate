@@ -465,7 +465,11 @@ fn check_program(
                 continue;
             }
         };
-        progress.prepared(&mut detail, prepared.program());
+        progress.prepared(
+            &mut detail,
+            prepared.program(),
+            session.fixed_stats().retained_bytes,
+        );
         progress.emit(Phase::Admission, detail.clone());
         let admitted = prepared
             .admit(&operations)
@@ -704,6 +708,7 @@ mod tests {
                 "Prepared size (before admission):",
                 "rule instances",
                 "largest component",
+                "\"retainedBytes\":",
                 "Session:",
                 "Finished: exit",
             ] {

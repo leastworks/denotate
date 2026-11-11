@@ -94,7 +94,10 @@ Startup and discovery show an indeterminate spinner. When idle, the item resumes
 the active `.den` file's status.
 
 “Evaluating fixed facts” runs once per program check, shared across its
-verifications. The tooltip and Output separate fixed present/absent facts, retained
+verifications. A completed keyed fold is retained across runs without a byte cap;
+its accounted bytes appear in the tooltip and Output separately from bound evidence
+sizes. Other cache allowances are unchanged. The tooltip and Output separate fixed
+present/absent facts, retained
 original evidence and the residual executable graph. A small residual does not mean
 the retained evidence has disappeared; these counts are not memory measurements.
 

@@ -34,7 +34,8 @@ function activity(active) {
     ...(d.files !== undefined ? [`${d.files} source files`] : []),
     ...(d.verification ? [`${d.verification} (${d.verificationIndex}/${d.verificationTotal}); ${d.assumptions} assumptions, ${d.obligations} obligations, ${d.notices} notices`] : []),
     ...(d.ground ? [`Prepared size: ${d.ground.inputAtoms} inputs, ${d.ground.atoms} atoms, ${d.ground.ruleInstances} rule instances, ${d.ground.components} components (largest: ${d.ground.largestComponentAtoms} atoms)`] : []),
-    ...(d.fold ? [`Fixed facts: ${d.fold.presentFacts} present, ${d.fold.absentFacts} absent; retained evidence: ${JSON.stringify(d.fold.retainedEvidence)}; residual graph: ${JSON.stringify(d.fold.residual)}`] : [])
+    ...(d.fold ? [`Fixed facts: ${d.fold.presentFacts} present, ${d.fold.absentFacts} absent; retained evidence: ${JSON.stringify(d.fold.retainedEvidence)}; residual graph: ${JSON.stringify(d.fold.residual)}`,
+      ...(d.fold.retainedBytes !== undefined ? [`Retained keyed fold: ${d.fold.retainedBytes} accounted bytes`] : [])] : [])
   ] : [])].join('\n');
 }
 function details(progress, quietMs = 0) {

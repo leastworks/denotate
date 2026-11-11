@@ -58,12 +58,13 @@ test('one large program reports its phase, verification and prepared size', () =
     detail: { phase: 'admission', elapsedMs: 5000, verification: 'library::checks', verificationIndex: 2, verificationTotal: 3,
       assumptions: 1, obligations: 7, notices: 4,
       ground: { inputAtoms: 120, atoms: 300, ruleInstances: 200, components: 80, largestComponentAtoms: 15 },
-      fold: { presentFacts: 30, absentFacts: 20, retainedEvidence: { atoms: 50 }, residual: { atoms: 250 } } } }] });
+      fold: { presentFacts: 30, absentFacts: 20, retainedBytes: 4096, retainedEvidence: { atoms: 50 }, residual: { atoms: 250 } } } }] });
   assert.match(view.text(p), /Admission · verification 2\/3/);
   assert.match(view.text(p, 9000), /9s since update/);
   assert.match(view.details(p), /120 inputs, 300 atoms, 200 rule instances, 80 components/);
   assert.match(view.details(p), /largest: 15 atoms/);
   assert.match(view.details(p), /30 present, 20 absent; retained evidence:.*50.*residual graph:.*250/);
+  assert.match(view.details(p), /Retained keyed fold: 4096 accounted bytes/);
   assert.match(view.details(p), /library::checks/);
   assert.match(view.details(p, 9000), /not a heartbeat/);
   const lines = [];
@@ -71,6 +72,7 @@ test('one large program reports its phase, verification and prepared size', () =
   view.logProgress(output, undefined, p);
   assert.match(lines[0], /run 12/);
   assert.match(lines[0], /Admission/);
+  assert.match(lines[0], /Retained keyed fold: 4096 accounted bytes/);
   view.logProgress(output, p, p);
   assert.equal(lines.length, 1); // Don't repeat an unchanged phase.
   const restarted = structuredClone(p);

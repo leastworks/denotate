@@ -1,4 +1,5 @@
-//! One bounded, source-independent fixed-cone query per session. Replacing the
+//! One source-independent fixed-cone query per session, bounded by checker limits.
+//! There is no separate byte allowance for this single replaceable result. Replacing the
 //! projection drops the old value; failures are explicitly cleared from Salsa.
 use denotate_check::*;
 use salsa::Setter;
@@ -47,17 +48,23 @@ fn fold(db: &dyn Db, slot: Slot) -> Result<Option<Arc<FixedValue>>, CheckError> 
 pub struct FixedStats {
     pub executed: usize,
     pub reused: usize,
+    /// Direct preparations because session retention is disabled, never size bypasses.
     pub bypassed: usize,
+    /// Accounted input/output payload and slot overhead, not measured heap or RSS.
     pub retained_bytes: usize,
 }
 #[derive(Default)]
 pub(crate) struct FixedCache {
     db: Database,
     slot: Option<Slot>,
-    pub max_bytes: usize,
     pub stats: FixedStats,
 }
 impl FixedCache {
+    pub fn bypass(&mut self) {
+        self.clear();
+        self.stats.bypassed += 1;
+        self.stats.executed += 1;
+    }
     pub fn clear(&mut self) {
         if let Some(slot) = self.slot {
             slot.set_input(&mut self.db).to(None);
@@ -74,13 +81,6 @@ impl FixedStore for FixedCache {
     ) -> Result<Arc<FixedValue>, CheckError> {
         operations.cancellation.check()?;
         *self.db.operations.lock().unwrap() = operations.clone();
-        let bytes = crate::retention::bytes(&input).saturating_add(2048);
-        if bytes > self.max_bytes {
-            self.clear();
-            self.stats.bypassed += 1;
-            self.stats.executed += 1;
-            return fold_owned(&input, operations).map(Arc::new);
-        }
         let slot = *self.slot.get_or_insert_with(|| Slot::new(&self.db, None));
         if slot.input(&self.db).as_deref() == Some(&input) {
             self.stats.reused += 1;
@@ -97,13 +97,11 @@ impl FixedStore for FixedCache {
         });
         match &result {
             Ok(value) => {
-                let bytes = bytes.saturating_add(crate::retention::bytes(value));
-                if bytes > self.max_bytes {
-                    self.stats.bypassed += 1;
-                    self.clear();
-                } else {
-                    self.stats.retained_bytes = bytes;
-                }
+                // On a hit, count the retained input's allocation sharing, not
+                // the equal projection just supplied by the current snapshot.
+                self.stats.retained_bytes = crate::retention::bytes(slot.input(&self.db))
+                    .saturating_add(2048)
+                    .saturating_add(crate::retention::bytes(value));
             }
             Err(_) => self.clear(),
         }

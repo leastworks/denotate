@@ -128,7 +128,10 @@ fn answer(db: &dyn Db, slot: Slot) -> Result<Option<Arc<OwnedAnswer>>, CheckErro
 }
 #[derive(Debug, Clone, Copy)]
 pub struct Retention {
+    /// Local query entry allowance; zero also disables fixed-fold retention.
     pub max_entries: usize,
+    /// Shared allowance for local, plan and optional grounding pools. The single
+    /// completed fixed fold is accounted separately and has no byte cap.
     pub max_bytes: usize,
     pub max_condition_nodes: usize,
 }
@@ -262,21 +265,8 @@ impl Session {
     pub fn fixed_stats(&self) -> crate::FixedStats {
         self.fixed.stats
     }
-    fn reserve_fixed(&mut self) {
-        self.fixed.max_bytes = if self.total_retention.max_entries == 0 {
-            0
-        } else {
-            self.total_retention.max_bytes / 4
-        };
-        self.trim_local(
-            self.total_retention
-                .max_bytes
-                .saturating_sub(self.fixed.max_bytes)
-                .saturating_sub(self.plans.stats.retained_bytes)
-                .saturating_sub(self.grounding_stats().retained_bytes),
-            self.total_retention.max_entries,
-        );
-    }
+    /// Retain the completed fixed cone independently of the other pools' budgets.
+    /// With max_entries == 0, prepare directly without an owned transfer or query.
     pub fn prepare_fixed<'s>(
         &mut self,
         corpus: &'s denotate_ir::Corpus,
@@ -284,7 +274,11 @@ impl Session {
         domains: &Domains,
         limits: &Limits,
     ) -> Result<FixedPreparation<'s>, CheckError> {
-        self.reserve_fixed();
+        if self.total_retention.max_entries == 0 {
+            self.fixed.bypass();
+            keys.validate(corpus).map_err(CheckError::Keys)?;
+            return FixedPreparation::prepare(corpus, domains, limits);
+        }
         let result =
             FixedPreparation::prepare_cached(corpus, keys, domains, limits, &mut self.fixed);
         if result.is_err() {
@@ -297,7 +291,10 @@ impl Session {
         validation: &ValidatedAssumptions<'s>,
         limits: &Limits,
     ) -> Result<FixedPreparation<'s>, CheckError> {
-        self.reserve_fixed();
+        if self.total_retention.max_entries == 0 {
+            self.fixed.bypass();
+            return FixedPreparation::prepare_with_validation(validation, limits);
+        }
         let result =
             FixedPreparation::prepare_cached_with_validation(validation, limits, &mut self.fixed);
         if result.is_err() {
@@ -370,8 +367,7 @@ impl Session {
             self.total_retention
                 .max_bytes
                 .saturating_sub(plan_bytes)
-                .saturating_sub(self.grounding_stats().retained_bytes)
-                .saturating_sub(self.fixed.stats.retained_bytes),
+                .saturating_sub(self.grounding_stats().retained_bytes),
             self.total_retention.max_entries,
         );
         self.plans.begin(plan_entries, plan_bytes);
@@ -397,8 +393,7 @@ impl Session {
             self.total_retention
                 .max_bytes
                 .saturating_sub(stats.retained_bytes)
-                .saturating_sub(self.grounding_stats().retained_bytes)
-                .saturating_sub(self.fixed.stats.retained_bytes),
+                .saturating_sub(self.grounding_stats().retained_bytes),
             self.total_retention.max_entries,
         );
         result

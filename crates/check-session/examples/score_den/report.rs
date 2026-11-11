@@ -193,6 +193,13 @@ pub fn human(report: &Value) -> String {
                     r["size"]["fold"]
                 )
                 .unwrap();
+                if let Some(bytes) = r["preparation_cache"]["fixed"]["retained_bytes"].as_u64() {
+                    writeln!(
+                        out,
+                        "  {phase} retained keyed fold: {bytes} accounted bytes"
+                    )
+                    .unwrap();
+                }
             }
             if let Some(r) = samples.first().and_then(|s| s["global-bdd"].get(phase)) {
                 writeln!(out, "  {phase} size (after preparation): {}", r["size"]).unwrap();

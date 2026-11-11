@@ -83,13 +83,23 @@ real program that the current choice serves badly.
   deterministic limits. Obligation groups, notices, verification identity and
   example policy are separate attachments. Requests sharing a context still check
   their own selections; neither exhaustion nor an attachment can contaminate another.
-  Context graphs remain bound to one source snapshot. Across snapshots, the bounded
+  Context graphs remain bound to one source snapshot. Across snapshots, the single
   Salsa fold query retains semantic keys and original instance substitutions, then
   binds current evidence. The first query covers the whole fixed cone, preserving
   its whole-operation allowance. The existing possibility-grounding SCCs follow
   positive edges and cannot directly cache fixed truth through negative providers;
   finer fixed SCC invalidation is deferred pending measurements. No failed fold or incomplete
   admission is reused as a completed artifact.
+- **Keep a completed fixed fold without a separate byte cap.** There is one
+  replaceable fold per program session, and checker limits already bound its work
+  and atom/rule counts. The old quarter-of-session cap discarded larger completed
+  folds while still paying for their portable form on every run. Retain that work,
+  count its bytes separately, and leave the other cache pools' budgets intact.
+  This accepts additional retained memory; the count is conservative payload
+  accounting, not a measured peak or RSS limit. Reset, eviction and failed or
+  interrupted fold preparation release it. Setting `max_entries` to zero explicitly
+  disables retention and uses direct preparation, avoiding reconstruction/export;
+  semantic outcomes agree, while chosen evidence and transfer receipts may differ.
 - **Cycle diagnostics show retained ground dependencies.** A generic rule can have
   many instances with different recursive behavior. Showing concrete arguments and
   signed edges identifies the reported instance without searching for a new cycle
