@@ -102,3 +102,51 @@ fn producer_removals_agree_fresh_cold_warm_and_after_support_and_context_edits()
         assert_eq!(warm.1.emptiness.values().next().unwrap().proved(), expected);
     }
 }
+
+#[test]
+fn wide_producer_removals_keep_warnings_and_selections_current_in_warm_sessions() {
+    let source = format!(
+        "sort S; const {}: S; input on(x:S);
+relation a(); relation b(); a():-!b(); b():-!a();
+relation out(); out():-on(X); out():-on(X),a(); out():-!on(i00),a();
+assumption none:empty(on); relation absent(); obligation o:empty(absent);
+verification checks{{assumptions:[];obligations:[o];}}",
+        (0..16)
+            .map(|i| format!("i{i:02}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let narrowed = source.replace("out():-on(X);", "out():-on(X),on(i00);");
+    let mut session = Session::default();
+    for (revision, text) in [
+        source.clone(),
+        format!("// moved\n{source}"),
+        narrowed,
+        source.replace("assumptions:[]", "assumptions:[none]"),
+        source,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let file = SourceFile::new("file:///wide.den", revision as u64, text);
+        let p = load(
+            &ProgramMembership::single("root", [file.uri.clone()]),
+            &[file],
+        )
+        .unwrap();
+        let fresh = check(&p, None);
+        let cold = check(&p, Some(&mut Session::default()));
+        let warm = check(&p, Some(&mut session));
+        let repeated = check(&p, Some(&mut session));
+        assert_eq!(fresh, cold);
+        assert_eq!(fresh, warm);
+        assert_eq!(warm, repeated);
+        assert!(
+            warm.2["findings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|f| f["kind"] == "redundant")
+        );
+    }
+}

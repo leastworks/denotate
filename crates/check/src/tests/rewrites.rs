@@ -537,3 +537,132 @@ fn every_small_budget_leaves_an_atomic_sound_rewrite_prefix() {
     }
     assert!(successes > 0);
 }
+
+// Many producers, a mix of removable and uncovered alternatives, and a head
+// that becomes exact only in the next immutable admission snapshot.
+fn wide_removal_program() -> (Corpus, Vec<RuleId>, Vec<RuleId>) {
+    let mut c = Corpus::new();
+    let t = rel(&mut c, "t", true);
+    let u = rel(&mut c, "u", true);
+    let a = rel(&mut c, "a", false);
+    let b = rel(&mut c, "b", false);
+    rule(&mut c, a, &[(b, true)]);
+    rule(&mut c, b, &[(a, true)]);
+    let covered = rel(&mut c, "covered", false);
+    let mixed = rel(&mut c, "mixed", false);
+    let later = rel(&mut c, "later", false);
+    let no_exact = rel(&mut c, "no_exact", false);
+    let mut removed = Vec::new();
+    let mut kept = Vec::new();
+    for i in 0..16 {
+        kept.push(rule(
+            &mut c,
+            covered,
+            &[(if i % 2 == 0 { t } else { u }, false)],
+        ));
+        kept.push(rule(&mut c, mixed, &[(t, false)]));
+        // Interleave heads: a per-head cache must not mix their coverage.
+        removed.push(rule(&mut c, covered, &[(u, false), (a, false)]));
+        removed.push(rule(&mut c, mixed, &[(t, false), (a, false)]));
+        kept.push(rule(&mut c, mixed, &[(u, false), (a, false)]));
+        kept.push(rule(&mut c, no_exact, &[(t, false), (a, false)]));
+    }
+    kept.push(rule(&mut c, later, &[(covered, false)]));
+    removed.push(rule(&mut c, later, &[(t, false), (a, false)]));
+    (c, removed, kept)
+}
+
+#[test]
+fn wide_removal_coverage_keeps_exact_proofs_models_and_snapshot_boundaries() {
+    let (c, removed, kept) = wide_removal_program();
+    let limits = Limits::default();
+    let raw = GroundProgram::prepare(&c, &Domains::new(), &limits).unwrap();
+    let admitted = raw.admit(&limits).unwrap();
+    assert!(admitted.admission_limit().is_none());
+    let proofs: Vec<_> = admitted.rewrite_proofs().collect();
+    assert_eq!(proofs.len(), removed.len());
+    assert!(
+        proofs
+            .iter()
+            .map(|p| p.snapshot)
+            .collect::<BTreeSet<_>>()
+            .len()
+            > 1
+    );
+    for id in &removed {
+        assert!(!admitted.rules().any(|r| r.source == *id));
+    }
+    for id in &kept {
+        assert!(admitted.rules().any(|r| r.source == *id));
+    }
+    for proof in proofs {
+        assert_eq!(proof.kind, RewriteKind::RedundantProducer);
+        assert!(!proof.candidate.exact);
+        assert!(!proof.producers.is_empty());
+        let exact_sources: BTreeSet<_> = kept
+            .iter()
+            .copied()
+            .filter(|id| {
+                c.rule(*id).unwrap().head.relation() == proof.candidate.rule.head.atom.relation
+                    && c.rule(*id)
+                        .unwrap()
+                        .body
+                        .iter()
+                        .all(|l| c.relation(l.atom().relation()).unwrap().name != "a")
+            })
+            .collect();
+        assert_eq!(
+            proof
+                .producers
+                .iter()
+                .map(|p| p.rule.source)
+                .collect::<BTreeSet<_>>(),
+            exact_sources
+        );
+        assert!(
+            proof
+                .producers
+                .iter()
+                .all(|p| p.exact && p.rule.head.atom == proof.candidate.rule.head.atom)
+        );
+        // Check the recorded coverage against its exact producer conditions in
+        // every input world; don't pin BDD layouts or selected evidence tuples.
+        let ctx = admitted.condition_context(&limits).unwrap();
+        for world in subsets(&admitted.input_atoms().cloned().collect::<Vec<_>>()) {
+            let expected = proof.producers.iter().any(|p| {
+                ctx.evaluate(&p.condition, world.iter().cloned(), &limits)
+                    .unwrap()
+            });
+            assert_eq!(
+                ctx.evaluate(&proof.coverage, world.iter().cloned(), &limits)
+                    .unwrap(),
+                expected
+            );
+        }
+    }
+    assert!(compare(&c, &Domains::new(), &admitted) > 0);
+}
+
+#[test]
+fn wide_removal_storage_exhaustion_preserves_only_committed_sound_snapshots() {
+    let (c, _, _) = wide_removal_program();
+    let raw = GroundProgram::prepare(&c, &Domains::new(), &Limits::default()).unwrap();
+    let mut exhausted = false;
+    let mut completed = false;
+    // Explore storage exhaustion without making any threshold or receipt golden.
+    for max_condition_nodes in [0, 32, 128, 512, 2048, 8192, 32768, 1_000_000] {
+        let limits = Limits {
+            max_condition_nodes,
+            ..Limits::default()
+        };
+        let admitted = raw.clone().admit(&limits).unwrap();
+        exhausted |= admitted.admission_limit().is_some();
+        completed |= admitted.admission_limit().is_none();
+        for proof in admitted.rewrite_proofs() {
+            assert_eq!(proof.kind, RewriteKind::RedundantProducer);
+            assert!(admitted.rule(proof.candidate.rule.id).is_none());
+        }
+        assert!(compare(&c, &Domains::new(), &admitted) > 0);
+    }
+    assert!(exhausted && completed);
+}

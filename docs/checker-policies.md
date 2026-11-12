@@ -72,6 +72,18 @@ extra snapshots. Symbolic evaluation and summary construction still cover the
 residual program. No new allowance is introduced; `admission-candidates` profiling
 covers both passes, and progress distinguishes `producer-removals` from `candidates`.
 
+Within one immutable admission snapshot, the removal pass computes a head's union
+of exact producers only when its first non-exact candidate needs it. Subsequent
+candidates reuse that condition and the same ordered producer list. The temporary
+union is charged to `max_condition_nodes` while retained, including its accumulator
+during construction, and its cache entry is released after the head's last
+candidate. The temporary cache never crosses snapshot or verification boundaries;
+candidate order and proof policy stay unchanged. This avoids repeated BDD unions
+without changing symbolic evaluation or upper-bound iteration. Each successful
+removal still clones covering producer summaries into its proof, so evidence
+storage can remain quadratic. BDD result-node traffic and retained-node snapshots
+do not measure that metadata storage.
+
 ### Memory profiling
 
 Phase progress from `check-den` and the `.den` editor includes best-effort process

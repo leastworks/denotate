@@ -297,6 +297,7 @@ impl GroundProgram {
             progress.work(self, "summaries", None, 0, true);
             let mut summaries = BTreeMap::new();
             let mut producers = BTreeMap::<_, Vec<_>>::new();
+            let mut last_candidates = BTreeMap::new();
             let mut retained = self.rewrites.nodes + meaning.metrics().retained_condition_nodes;
             for (position, rule) in self
                 .rules
@@ -331,6 +332,12 @@ impl GroundProgram {
                     }
                 }
                 retained = crate::symbolic::retain(retained, 0, condition.node_count(), budget)?;
+                if !exact {
+                    // Both passes visit active rules in the same order. This is
+                    // the lifetime of a head's temporary coverage, not a new
+                    // candidate ordering or a cache across admission snapshots.
+                    last_candidates.insert(&rule.head.atom, rule.id);
+                }
                 summaries.insert(
                     rule.id,
                     ProducerSummary {
@@ -361,6 +368,10 @@ impl GroundProgram {
             progress.work(self, "producer-removals", None, 0, true);
             let mut batch = Vec::new();
             let mut upper_bounds = BTreeMap::new();
+            // References borrow the already-accounted summaries. Only the union
+            // adds retained condition storage; proofs keep their own existing
+            // conservative charges, including shared coverage per proof.
+            let mut exact_coverage = BTreeMap::new();
             for (position, rule) in self
                 .rules
                 .iter()
@@ -373,18 +384,38 @@ impl GroundProgram {
                 if candidate.exact {
                     continue;
                 }
-                let covering: Vec<_> = producers[&rule.head.atom]
-                    .iter()
-                    .filter_map(|id| summaries.get(id).filter(|s| s.exact))
-                    .collect();
-                let mut coverage = ctx.false_condition();
-                for p in &covering {
-                    coverage = ctx.apply(&coverage, &p.condition, or, budget)?;
+                if let std::collections::btree_map::Entry::Vacant(entry) =
+                    exact_coverage.entry(&rule.head.atom)
+                {
+                    let covering: Vec<_> = producers[&rule.head.atom]
+                        .iter()
+                        .filter_map(|id| summaries.get(id).filter(|s| s.exact))
+                        .collect();
+                    let value = if covering.is_empty() {
+                        // Remember the empty set without retaining a condition.
+                        None
+                    } else {
+                        let mut coverage = ctx.false_condition();
+                        retained =
+                            crate::symbolic::retain(retained, 0, coverage.node_count(), budget)?;
+                        for p in &covering {
+                            let next = ctx.apply(&coverage, &p.condition, or, budget)?;
+                            retained = crate::symbolic::retain(
+                                retained,
+                                coverage.node_count(),
+                                next.node_count(),
+                                budget,
+                            )?;
+                            coverage = next;
+                        }
+                        Some((covering, coverage))
+                    };
+                    entry.insert(value);
                 }
-                if !covering.is_empty()
+                if let Some((covering, coverage)) = &exact_coverage[&rule.head.atom]
                     && ctx
                         .restrict(
-                            &ctx.apply(&candidate.condition, &coverage, and_not, budget)?,
+                            &ctx.apply(&candidate.condition, coverage, and_not, budget)?,
                             budget,
                         )?
                         .is_false()
@@ -392,15 +423,21 @@ impl GroundProgram {
                     self.propose(
                         &mut batch,
                         candidate,
-                        covering,
-                        coverage,
+                        covering.clone(),
+                        coverage.clone(),
                         RewriteKind::RedundantProducer,
                         None,
                         &mut retained,
                         budget,
                     )?;
                 }
+                if last_candidates[&rule.head.atom] == rule.id {
+                    if let Some((_, coverage)) = exact_coverage.remove(&rule.head.atom).flatten() {
+                        retained -= coverage.node_count();
+                    }
+                }
             }
+            debug_assert!(exact_coverage.is_empty());
             // Discharge (including input guards) waits until removals reach a
             // fixed point. Newly settled meanings are read only next round.
             if batch.is_empty() {

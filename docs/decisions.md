@@ -78,6 +78,15 @@ real program that the current choice serves badly.
   justification, and original rules and replay evidence remain available. This is
   an ordering change, not structural body subsumption or a new meaning for unresolved
   atoms. Extra snapshots and changed proof choices are possible; limits stay explicit.
+- **Reuse exact producer coverage only within its admission snapshot.** Non-exact
+  removal candidates for one head all compare against the same exact producers.
+  Rebuilding their disjunction for each candidate repeats potentially expensive BDD
+  work. Compute it lazily, retain it only through that head's last candidate, and
+  count the retained condition against the existing storage allowance. Keep the
+  original candidate and producer order, proof contents and transactional commits.
+  This does not change the symbolic fold, upper bounds or rewrite policy. Covering
+  producer summaries are still cloned per successful proof; reducing that separate
+  evidence cost requires a later change.
 - **Assumption cones may be stratified after grounding.** Generic library relations
   can contain a relation-level negative cycle whose ends are used by different
   tuples. Requiring relation stratification forced authors to split those relations

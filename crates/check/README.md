@@ -26,6 +26,11 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    exact coverage. A nonempty removal batch is committed and the components rebuilt
    before another snapshot; only a snapshot with no removals proceeds to negation
    discharge and cycle bounds. Later exhaustion preserves earlier committed batches.
+   Within a snapshot, exact-producer coverage is computed lazily per head, reused
+   by its non-exact candidates, and removed from the cache after the last candidate.
+   Retained unions count against the existing condition-node limit. Proofs still
+   keep their covering producer summaries; wide sets of successful removals can
+   therefore retain quadratic evidence metadata.
 4. **Concrete replay.** `evaluate(present_inputs)` runs admitted components on a
    complete input snapshot (omitted tuples are absent; observations violating W are
    rejected). Facts are `Settled(true|false)` or `Blocked`; each established fact keeps
