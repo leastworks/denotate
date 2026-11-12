@@ -31,6 +31,11 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    Retained unions count against the existing condition-node limit. Proofs still
    keep their covering producer summaries; wide sets of successful removals can
    therefore retain quadratic evidence metadata.
+   Per-operation BDD limits in individual proof attempts are recoverable skips;
+   shared phases and global exhaustion still stop admission. Skips keep their
+   work charges, release temporary retained storage, and retry only after a
+   relevant rewrite changes the graph or a dependent meaning. See
+   [checker policies](../../docs/checker-policies.md#re-scoring) for the boundaries.
 4. **Concrete replay.** `evaluate(present_inputs)` runs admitted components on a
    complete input snapshot (omitted tuples are absent; observations violating W are
    rejected). Facts are `Settled(true|false)` or `Blocked`; each established fact keeps
@@ -124,7 +129,11 @@ The same artifact shares residual graphs, indexes and completed admission betwee
 requests selecting the same restrictions. Each request still validates its named
 verification and builds only its own obligation groups. Notices and diagnostic
 example policies are never cached as part of that graph. An inconclusive attachment
-or admission does not become a reusable completed result. The source-bound graph
+or globally interrupted admission does not become a reusable completed result.
+Completed admission with local proof skips is reusable, including its skip records
+and receipts. `admission_skips()` exposes current failed attempts;
+`admission_skips_for(component)` selects only targets in that component.
+The source-bound graph
 uses an immutable shared core, copied only when admission rewrites it.
 `GroundKeyIndex` retains shared source schemas and declaration bindings plus the
 request's groups. `PreparedCheck::key_view()` (or `GroundKeyIndex::view` for raw

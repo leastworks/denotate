@@ -30,6 +30,9 @@ pub struct AdmissionProgress {
     pub iteration: Option<usize>,
     pub removed_rules: usize,
     pub discharged_negations: usize,
+    pub skipped_attempts: usize,
+    /// Present only on the immediate, recoverable failure event.
+    pub skipped: Option<AdmissionSkip>,
     pub failure: Option<Inconclusive>,
 }
 pub type AdmissionObserver<'a> = dyn Fn(&AdmissionProgress) + 'a;
@@ -60,6 +63,8 @@ impl<'a> AdmissionReporter<'a> {
                     iteration: None,
                     removed_rules: 0,
                     discharged_negations: 0,
+                    skipped_attempts: 0,
+                    skipped: None,
                     failure: None,
                 },
                 current: None,
@@ -99,6 +104,10 @@ impl<'a> AdmissionReporter<'a> {
                 .rewrite_proofs()
                 .filter(|p| matches!(p.kind, RewriteKind::Discharge { .. }))
                 .count();
+            s.progress.skipped_attempts = s
+                .progress
+                .skipped_attempts
+                .max(program.rewrites.skipped_attempts);
         }
         self.work(program, stage, None, 0, true);
     }
@@ -180,6 +189,21 @@ impl<'a> AdmissionReporter<'a> {
         // is identifiable even when its ordinary progress was throttled.
         drop(s);
         self.emit(program, true);
+    }
+    pub fn skipped(&self, program: &GroundProgram, skip: &AdmissionSkip, count: usize) {
+        if !self.enabled() {
+            return;
+        }
+        {
+            let mut s = self.state.borrow_mut();
+            s.progress.skipped_attempts = count;
+            s.progress.skipped = Some(skip.clone());
+            s.progress.failure = Some(skip.reason);
+        }
+        self.emit(program, true);
+        let mut s = self.state.borrow_mut();
+        s.progress.skipped = None;
+        s.progress.failure = None;
     }
     fn emit(&self, program: &GroundProgram, force: bool) {
         let Some(observer) = self.observer else {

@@ -537,6 +537,14 @@ impl ConditionContext {
         let allowed = budget.limits.max_bdd_tasks.min(budget.remaining() / 2);
         let Some((_, tasks)) = Bdd::check_binary_op(allowed, &a.bdd, &b.bdd, op) else {
             budget.observe("BDD preflight", "BDD tasks", allowed.saturating_add(1));
+            // The failed traversal consumed work too. Charge its task allowance
+            // plus the stopping step (no construction ran). Keep global work
+            // exhaustion distinct from an operation's task bound, including ties.
+            let work_bound = budget.remaining() / 2 <= budget.limits.max_bdd_tasks;
+            budget.charge(allowed.saturating_add(1), "BDD preflight")?;
+            if work_bound {
+                return Err(limit("BDD preflight", "work", budget.limits.max_work, None));
+            }
             return Err(limit("BDD preflight", "BDD tasks", allowed, None));
         };
         budget.observe("BDD operation", "BDD tasks", tasks);
@@ -575,6 +583,69 @@ mod tests {
     use super::*;
     use biodivine_lib_bdd::{BddNode, BddPointer};
     use denotate_ir::{Corpus, RelationRole};
+
+    #[test]
+    fn failed_preflights_are_charged_and_work_bound_stops_are_global() {
+        let mut corpus = Corpus::new();
+        let inputs: Vec<_> = ["x", "y"]
+            .into_iter()
+            .map(|name| {
+                GroundAtom::new(
+                    corpus
+                        .declare_relation(name, RelationRole::Input, [])
+                        .unwrap(),
+                    [],
+                )
+            })
+            .collect();
+        let limits = Limits::default();
+        let program = GroundProgram::prepare(&corpus, &Domains::new(), &limits).unwrap();
+        let ctx = program.condition_context(&limits).unwrap();
+        let x = ctx.input(&inputs[0], &limits).unwrap();
+        let y = ctx.input(&inputs[1], &limits).unwrap();
+        let limited = Limits {
+            max_bdd_tasks: 1,
+            max_work: 40,
+            ..limits.clone()
+        };
+        let mut budget = Budget::tracked(&limited);
+        let mut local = 0;
+        loop {
+            let before = budget.used();
+            let error = ctx
+                .apply(&x, &y, op_function::and, &mut budget)
+                .unwrap_err();
+            match error {
+                CheckError::LimitExceeded {
+                    resource: "BDD tasks",
+                    ..
+                } => {
+                    assert!(
+                        budget.used() > before,
+                        "failed preflight work must remain charged"
+                    );
+                    local += 1;
+                }
+                CheckError::LimitExceeded {
+                    resource: "work", ..
+                } => break,
+                other => panic!("{other:?}"),
+            }
+        }
+        assert!(local > 1);
+        let work_bound = Limits {
+            max_work: 4,
+            ..limits
+        };
+        assert!(matches!(
+            ctx.apply(&x, &y, op_function::and, &mut Budget::new(&work_bound)),
+            Err(CheckError::LimitExceeded {
+                phase: "BDD preflight",
+                resource: "work",
+                ..
+            })
+        ));
+    }
 
     #[test]
     fn stopped_bdd_preflight_reports_its_limit_without_inventing_a_task_count() {

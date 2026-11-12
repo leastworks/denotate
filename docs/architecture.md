@@ -85,6 +85,11 @@ selected restrictions share residual grounding, permitted worlds, semantic index
 and completed admission. Obligation groups, notice selection, verification identity
 and example policy remain request attachments; a failed attachment cannot change
 another request's context.
+Completed admission includes outstanding local proof-skip records, whose identities
+are bound to the same prepared graph. Reuse carries those records and their logical
+receipts; presentation projects current semantic keys and origins. Invocation-local
+retry tracking keeps no BDD cache and uses dependencies from the graph before a
+commit to invalidate attempts affected by rewrites, even when an SCC splits.
 
 Semantic indexing shares source schemas and declaration bindings across those
 contexts. `GroundKeyView` projects atom, instance, component and rewrite keys from

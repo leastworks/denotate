@@ -252,7 +252,39 @@ pub fn summary(results: &ScopedResults) -> Value {
             "reason":c.inconclusive.map(|r|crate::exhaustion_data(&r.phase, &r.resource, r.details))
         })).collect::<Vec<_>>());
     }
+    if !results.admission_skips.is_empty() {
+        summary["admissionSkips"] = json!(
+            results
+                .admission_skips
+                .iter()
+                .map(admission_skip_data)
+                .collect::<Vec<_>>()
+        );
+        for (value, region) in summary["regions"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .zip(results.regions.values())
+        {
+            if !region.admission_skips.is_empty() {
+                value["admissionSkips"] = json!(
+                    region
+                        .admission_skips
+                        .iter()
+                        .map(admission_skip_data)
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+    }
     summary
+}
+
+fn admission_skip_data(s: &KeyedAdmissionSkip) -> Value {
+    json!({"attempt":s.kind.label(), "head":atom_data(&s.head),
+        "rule":s.rule.as_ref().map(|r| json!({"rule":rule(&r.rule),"substitution":r.substitution.iter().map(|(v,c)|json!({"variable":{"sort":qualified(&v.sort.0),"name":v.name.as_ref()},"value":constant(c)})).collect::<Vec<_>>()})),
+        "occurrence":s.occurrence.as_ref().map(occurrence),
+        "reason":crate::exhaustion_data(&s.reason.phase,&s.reason.resource,s.reason.details)})
 }
 
 /// Witnesses carry their own observation and producing occurrences. The world
@@ -331,12 +363,20 @@ pub fn evidence_data(finding: &crate::Finding<'_>, keys: &SemanticKeys) -> Resul
                     ))
                 })
                 .collect::<Result<Vec<_>>>()?;
-            match &r.completion {
+            let mut data = match &r.completion {
                 CompletionOutcome::NoMeaning(n) => {
                     json!({"kind":"no-meaning-observation","observation":observation(&n.observation)?,"producers":producers,"cycles":[cycle]})
                 }
                 _ => json!({"kind":"no-witness","producers":producers,"cycles":[cycle]}),
+            };
+            if !r.admission_skips.is_empty() {
+                data["admissionSkips"] = json!(r.admission_skips.iter().map(|s| -> Result<Value> {
+                    Ok(json!({"attempt":s.kind.label(),"head":atom_data(&AtomKey::from_atom(keys,&s.head)?),
+                        "occurrence":s.occurrence.map(|o|keys.bindings().key(o).map(occurrence)).transpose()?,
+                        "reason":crate::exhaustion_data(s.reason.phase,s.reason.resource,s.reason.details)}))
+                }).collect::<Result<Vec<_>>>()?);
             }
+            data
         }
     })
 }

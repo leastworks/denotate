@@ -568,6 +568,7 @@ impl CheckRequest {
             regions: BTreeMap::new(),
             incomplete: BTreeMap::new(),
             unfinished: Some(ResourceReason::from(reason)),
+            admission_skips: vec![],
         }
     }
 }
@@ -731,9 +732,19 @@ pub enum RegionCompletion {
 pub struct RegionResult {
     pub outcome: ScopedResult,
     pub completion: RegionCompletion,
+    pub admission_skips: Vec<KeyedAdmissionSkip>,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeyedAdmissionSkip {
+    pub kind: AdmissionAttemptKind,
+    pub head: AtomKey,
+    pub rule: Option<InstanceKey>,
+    pub occurrence: Option<OccurrenceKey>,
+    pub reason: ResourceReason,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScopedResults {
+    pub admission_skips: Vec<KeyedAdmissionSkip>,
     pub inconsistent_assumptions: bool,
     pub notices: BTreeMap<NoticeKey, NoticeResult>,
     pub context: CheckRequest,
@@ -1174,7 +1185,33 @@ impl PreparedCheck<'_> {
             })
         };
         let component = |id: &ComponentId| self.key_view().component(*id);
+        let project_skip = |s: &AdmissionSkip| -> Result<KeyedAdmissionSkip> {
+            Ok(KeyedAdmissionSkip {
+                kind: s.kind,
+                head: atom(&s.head)?,
+                rule: s.rule.map(|r| self.key_view().instance(r)).transpose()?,
+                occurrence: s
+                    .occurrence
+                    .map(|o| keys.bindings().key(o).cloned().map_err(CheckError::Keys))
+                    .transpose()?,
+                reason: s.reason.into(),
+            })
+        };
+        let mut admission_skips = self
+            .program
+            .admission_skips()
+            .map(&project_skip)
+            .collect::<Result<Vec<_>>>()?;
+        admission_skips.sort_by(|a, b| {
+            (&a.head, a.kind, &a.rule, &a.occurrence).cmp(&(
+                &b.head,
+                b.kind,
+                &b.rule,
+                &b.occurrence,
+            ))
+        });
         let mut out = ScopedResults {
+            admission_skips,
             inconsistent_assumptions: !self.program.assumptions_consistent(),
             notices: BTreeMap::new(),
             context: self.request.clone(),
@@ -1423,6 +1460,11 @@ impl PreparedCheck<'_> {
                 RegionResult {
                     outcome,
                     completion,
+                    admission_skips: r
+                        .admission_skips
+                        .iter()
+                        .map(&project_skip)
+                        .collect::<Result<_>>()?,
                 },
             );
         }

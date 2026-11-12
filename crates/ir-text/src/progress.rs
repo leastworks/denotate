@@ -144,6 +144,12 @@ impl<'a> AdmissionDetails<'a> {
             "iteration": event.iteration,
             "removedRules": event.removed_rules,
             "dischargedNegations": event.discharged_negations,
+            "skippedAttempts": event.skipped_attempts,
+            "skipped": event.skipped.as_ref().map(|s| s.kind.label()),
+            "skipTarget": event.skipped.as_ref().map(|s| {
+                let names = self.names.get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)));
+                json!({"head":atom_text(&s.head, &**names)})
+            }),
             "failure": event
                 .failure
                 .map(|r| denotate_presentation::exhaustion_text(r.phase, r.resource, r.details)),
@@ -199,6 +205,12 @@ pub fn admission_text(a: &Value) -> String {
         a["removedRules"],
         a["dischargedNegations"]
     );
+    if a["skippedAttempts"].as_u64().unwrap_or(0) > 0 {
+        text.push_str(&format!(
+            "; {} proof attempts skipped",
+            a["skippedAttempts"]
+        ));
+    }
     if a["rule"].as_u64().unwrap_or(0) > 0 {
         text.push_str(&format!("; rule {}/{}", a["rule"], a["rules"]));
     }
@@ -221,7 +233,14 @@ pub fn admission_text(a: &Value) -> String {
         }
     }
     if let Some(failure) = a["failure"].as_str() {
-        text.push_str(&format!("; stopped: {failure}"));
+        if let Some(kind) = a["skipped"].as_str() {
+            text.push_str(&format!(
+                "; skipped {kind} for {}: {failure}; continuing admission",
+                a["skipTarget"]["head"].as_str().unwrap_or("current target")
+            ));
+        } else {
+            text.push_str(&format!("; stopped: {failure}"));
+        }
     }
     text
 }
@@ -297,6 +316,9 @@ impl AdmissionDetails<'_> {
             detail["remainingComponent"] = json!({"position":position+1,"total":remaining.len(),"component":self.component(&summary),
                 "cycle":edges,"cycleEdges":cycle.edges.len(),"truncated":cycle.edges.len()>12,
                 "admissionFailure":ground.admission_limit().map(|r| denotate_presentation::exhaustion_text(r.phase,r.resource,r.details))});
+            detail["remainingComponent"]["admissionSkips"] = json!(ground.admission_skips_for(c).map(|s| {
+                json!({"attempt":s.kind.label(),"head":atom_text(&s.head, &*names),"reason":denotate_presentation::exhaustion_text(s.reason.phase,s.reason.resource,s.reason.details)})
+            }).collect::<Vec<_>>());
             progress.emit(Phase::Admission, detail);
         }
         let progress = progress.clone();
@@ -406,6 +428,16 @@ pub fn remaining_text(v: &Value) -> String {
     );
     if let Some(reason) = v["admissionFailure"].as_str() {
         text.push_str(&format!("; admission stopped: {reason}"));
+    }
+    if let Some(skips) = v["admissionSkips"].as_array() {
+        for skip in skips {
+            text.push_str(&format!(
+                "; skipped {} for {}: {}",
+                skip["attempt"].as_str().unwrap_or("proof"),
+                skip["head"].as_str().unwrap_or("?"),
+                skip["reason"].as_str().unwrap_or("limit")
+            ));
+        }
     }
     if let Some(edges) = v["cycle"].as_array() {
         for e in edges {

@@ -67,6 +67,7 @@ pub struct UnresolvedRegion {
     pub outcome: RegionOutcome,
     /// Separate from admission: a solution does not admit this region.
     pub completion: CompletionOutcome,
+    pub admission_skips: Vec<AdmissionSkip>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegionOutcome {
@@ -384,9 +385,20 @@ impl<'p> SymbolicMeaning<'p> {
                 cycle: cycle.clone(),
                 rules,
                 completion,
+                admission_skips: self
+                    .program
+                    .admission_skips_for(component)
+                    .cloned()
+                    .collect(),
                 outcome: self
                     .program
                     .admission_limit()
+                    .or_else(|| {
+                        self.program
+                            .admission_skips_for(component)
+                            .next()
+                            .map(|s| s.reason)
+                    })
                     .map_or(RegionOutcome::Unsupported, RegionOutcome::Inconclusive),
             });
         }

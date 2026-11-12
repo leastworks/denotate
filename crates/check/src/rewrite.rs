@@ -1,6 +1,7 @@
 //! Conservative rewrites, proved against immutable settled snapshots. Proof
 //! references are metadata, never evaluation/dependency edges.
 use crate::{
+    admission_skips::{Attempt, Attempts},
     limits::{Budget, Result},
     *,
 };
@@ -144,6 +145,8 @@ pub(crate) struct Rewrites {
     // Snapshot-local lookup metadata, never semantic keys or cached query input.
     // Removal proofs occupy no entries; a replay with no discharges misses cheaply.
     discharges: BTreeMap<(GroundRuleId, OccurrenceId), RewriteProofId>,
+    pub(crate) skips: BTreeMap<GroundAtom, Vec<AdmissionSkip>>,
+    pub(crate) skipped_attempts: usize,
     pub inconclusive: Option<Inconclusive>,
     nodes: usize,
 }
@@ -265,6 +268,8 @@ impl GroundProgram {
         budget: &mut Budget<'_>,
         observer: Option<&AdmissionObserver<'_>>,
     ) -> Result<Self> {
+        self.rewrites.skips.clear();
+        self.rewrites.skipped_attempts = 0;
         let progress = crate::admission_progress::AdmissionReporter::new(observer);
         progress.snapshot(&self, 0, "starting");
         let limits = budget.limits;
@@ -274,7 +279,10 @@ impl GroundProgram {
             progress.finish(&self, "inconsistent-assumptions");
             return Ok(self);
         }
-        let result = self.rewrite_loop(budget, &progress);
+        let mut attempts = Attempts::default();
+        let result = self.rewrite_loop(budget, &progress, &mut attempts);
+        self.rewrites.skipped_attempts = attempts.count;
+        self.rewrites.skips = attempts.records();
         if let Err(error) = result {
             progress.failed(&self, &error);
             budget.failure(&error);
@@ -290,6 +298,7 @@ impl GroundProgram {
         &mut self,
         budget: &mut Budget<'_>,
         progress: &crate::admission_progress::AdmissionReporter<'_>,
+        attempts: &mut Attempts,
     ) -> Result<()> {
         let profile = budget.limits.profile.clone();
         let mut round = 0;
@@ -422,30 +431,57 @@ impl GroundProgram {
                         // Remember the empty set without retaining a condition.
                         None
                     } else {
-                        let mut coverage = ctx.false_condition();
-                        retained =
-                            crate::symbolic::retain(retained, 0, coverage.node_count(), budget)?;
-                        for p in &covering {
-                            let next = ctx.apply(&coverage, &p.condition, or, budget)?;
-                            retained = crate::symbolic::retain(
-                                retained,
-                                coverage.node_count(),
-                                next.node_count(),
+                        attempts
+                            .run(
+                                Attempt::Coverage(rule.head.atom.clone()),
+                                &rule.head.atom,
+                                self,
+                                &mut retained,
                                 budget,
-                            )?;
-                            coverage = next;
-                        }
-                        Some((covering, coverage))
+                                progress,
+                                |retained, budget| {
+                                    let mut coverage = ctx.false_condition();
+                                    *retained = crate::symbolic::retain(
+                                        *retained,
+                                        0,
+                                        coverage.node_count(),
+                                        budget,
+                                    )?;
+                                    for p in &covering {
+                                        let next =
+                                            ctx.apply(&coverage, &p.condition, or, budget)?;
+                                        *retained = crate::symbolic::retain(
+                                            *retained,
+                                            coverage.node_count(),
+                                            next.node_count(),
+                                            budget,
+                                        )?;
+                                        coverage = next;
+                                    }
+                                    Ok(coverage)
+                                },
+                            )?
+                            .map(|coverage| (covering, coverage))
                     };
                     entry.insert(value);
                 }
                 if let Some((covering, coverage)) = &exact_coverage[&rule.head.atom]
-                    && ctx
-                        .restrict(
-                            &ctx.apply(&candidate.condition, coverage, and_not, budget)?,
-                            budget,
-                        )?
-                        .is_false()
+                    && attempts.run(
+                        Attempt::Removal(rule.id),
+                        &rule.head.atom,
+                        self,
+                        &mut retained,
+                        budget,
+                        progress,
+                        |_, budget| {
+                            Ok(ctx
+                                .restrict(
+                                    &ctx.apply(&candidate.condition, coverage, and_not, budget)?,
+                                    budget,
+                                )?
+                                .is_false())
+                        },
+                    )? == Some(true)
                 {
                     self.propose(
                         &mut batch,
@@ -485,22 +521,43 @@ impl GroundProgram {
                             p.literal.polarity == Polarity::Negative
                                 && self.inputs.contains(&p.literal.term.atom)
                         }) {
-                            let mut guard = candidate.clone();
-                            guard.settled.retain(|p| {
-                                p.literal.term.occurrence != excluded.literal.term.occurrence
-                            });
-                            guard.condition = ctx.true_condition();
-                            for premise in &guard.settled {
-                                guard.condition =
-                                    ctx.apply(&guard.condition, &premise.condition, and, budget)?;
-                            }
-                            let coverage =
-                                ctx.input_with_budget(&excluded.literal.term.atom, budget)?;
-                            let conflict = ctx.apply(&guard.condition, &coverage, and, budget)?;
-                            if !conflict.is_false()
-                                && !ctx.restrict(&guard.condition, budget)?.is_false()
-                                && ctx.restrict(&conflict, budget)?.is_false()
-                            {
+                            let proof = attempts
+                                .run(
+                                    Attempt::Discharge(rule.id, excluded.literal.term.occurrence),
+                                    &rule.head.atom,
+                                    self,
+                                    &mut retained,
+                                    budget,
+                                    progress,
+                                    |_, budget| {
+                                        let mut guard = candidate.clone();
+                                        guard.settled.retain(|p| {
+                                            p.literal.term.occurrence
+                                                != excluded.literal.term.occurrence
+                                        });
+                                        guard.condition = ctx.true_condition();
+                                        for premise in &guard.settled {
+                                            guard.condition = ctx.apply(
+                                                &guard.condition,
+                                                &premise.condition,
+                                                and,
+                                                budget,
+                                            )?;
+                                        }
+                                        let coverage = ctx.input_with_budget(
+                                            &excluded.literal.term.atom,
+                                            budget,
+                                        )?;
+                                        let conflict =
+                                            ctx.apply(&guard.condition, &coverage, and, budget)?;
+                                        Ok((!conflict.is_false()
+                                            && !ctx.restrict(&guard.condition, budget)?.is_false()
+                                            && ctx.restrict(&conflict, budget)?.is_false())
+                                        .then_some((guard, coverage)))
+                                    },
+                                )?
+                                .flatten();
+                            if let Some((guard, coverage)) = proof {
                                 self.propose(
                                     &mut batch,
                                     &guard,
@@ -547,14 +604,25 @@ impl GroundProgram {
                                 true,
                             );
                             let observe = |iteration| progress.iteration(self, iteration);
-                            entry.insert(crate::upper_bounds::compute(
+                            let head = component.atoms.first().unwrap();
+                            entry.insert(attempts.run(
+                                Attempt::UpperBounds(head.clone()),
+                                head,
                                 self,
-                                component,
-                                &summaries,
-                                ctx,
                                 &mut retained,
                                 budget,
-                                progress.enabled().then_some(&observe),
+                                progress,
+                                |retained, budget| {
+                                    crate::upper_bounds::compute(
+                                        self,
+                                        component,
+                                        &summaries,
+                                        ctx,
+                                        retained,
+                                        budget,
+                                        progress.enabled().then_some(&observe),
+                                    )
+                                },
                             )?);
                             progress.work(
                                 self,
@@ -564,14 +632,26 @@ impl GroundProgram {
                                 true,
                             );
                         }
-                        let bounds = &upper_bounds[&component.id];
+                        let Some(bounds) = &upper_bounds[&component.id] else {
+                            continue;
+                        };
                         let coverage = bounds.conditions[&literal.term.atom].clone();
-                        if ctx
-                            .restrict(
-                                &ctx.apply(&candidate.condition, &coverage, and, budget)?,
-                                budget,
-                            )?
-                            .is_false()
+                        if attempts.run(
+                            Attempt::Discharge(rule.id, literal.term.occurrence),
+                            &rule.head.atom,
+                            self,
+                            &mut retained,
+                            budget,
+                            progress,
+                            |_, budget| {
+                                Ok(ctx
+                                    .restrict(
+                                        &ctx.apply(&candidate.condition, &coverage, and, budget)?,
+                                        budget,
+                                    )?
+                                    .is_false())
+                            },
+                        )? == Some(true)
                         {
                             self.propose(
                                 &mut batch,
@@ -600,7 +680,7 @@ impl GroundProgram {
                                 .values()
                                 .flat_map(ProducerSummary::profile_conditions),
                         )
-                        .chain(upper_bounds.values().flat_map(|b| {
+                        .chain(upper_bounds.values().flatten().flat_map(|b| {
                             b.conditions.values().chain(
                                 b.producers
                                     .iter()
@@ -628,6 +708,7 @@ impl GroundProgram {
                 "rewrite commit",
             )?;
             let mut next = self.clone();
+            let changed = attempts.changed_readers(self, &batch, budget)?;
             for proof in batch {
                 let id = proof.candidate.rule.id;
                 next.rewrites
@@ -647,6 +728,7 @@ impl GroundProgram {
             }
             crate::graph::analyze(&mut next, budget)?;
             *self = next;
+            attempts.invalidate(&changed);
             progress.snapshot(self, round, "committed");
         }
     }

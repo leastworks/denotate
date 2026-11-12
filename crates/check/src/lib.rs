@@ -4,6 +4,8 @@
 mod accounting;
 mod admission_progress;
 pub use admission_progress::{AdmissionComponent, AdmissionObserver, AdmissionProgress};
+mod admission_skips;
+pub use admission_skips::{AdmissionAttemptKind, AdmissionSkip};
 mod assumption_validation;
 mod assumptions;
 mod boolean;

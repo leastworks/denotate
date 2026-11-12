@@ -47,11 +47,12 @@ function activity(active) {
 function admission(a) {
   const c = a.current, l = c?.location;
   return `Admission round ${a.round} · ${a.stage}: ${a.unresolvedComponents} unresolved negation components; ${a.blockedAtoms} blocked atoms; ${a.removedRules} rules removed, ${a.dischargedNegations} negations discharged` +
+    (a.skippedAttempts ? `; ${a.skippedAttempts} proof attempts skipped` : '') +
     (a.rule ? `; rule ${a.rule}/${a.rules}` : '') +
     (a.iteration != null ? `; iteration ${a.iteration}` : '') +
     (c ? `; component ${c.index} (${c.atoms} atoms, ${c.ruleInstances} rule instances), ${c.atom}` : '') +
     (l ? ` at ${l.uri}:${l.line}:${l.column}` : '') +
-    (a.failure ? `; stopped: ${a.failure}` : '');
+    (a.failure ? (a.skipped ? `; skipped ${a.skipped} for ${a.skipTarget?.head || 'current target'}: ${a.failure}; continuing admission` : `; stopped: ${a.failure}`) : '');
 }
 function checking(v) {
   const t = v.target, l = t?.location;
@@ -68,6 +69,7 @@ function remaining(v) {
   const c = v.component;
   return `Unresolved component ${v.position}/${v.total}: component ${c.index} (${c.atoms} atoms, ${c.ruleInstances} rule instances), ${c.atom}` +
     (v.admissionFailure ? `; admission stopped: ${v.admissionFailure}` : '') +
+    (v.admissionSkips || []).map(s => `; skipped ${s.attempt} for ${s.head}: ${s.reason}`).join('') +
     v.cycle.map(e => `\n  ${e.from} ${e.negative ? '-not->' : '->'} ${e.to}` + (e.location ? ` at ${e.location.uri}:${e.location.line}:${e.location.column}` : '')).join('') +
     (v.truncated ? `\n  ... ${v.cycleEdges} cycle edges in total` : '');
 }

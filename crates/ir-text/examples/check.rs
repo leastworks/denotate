@@ -108,6 +108,7 @@ fn print_diagnostics(
                         | "blocking dependency cycle"
                         | "condition being inspected"
                         | "complete enclosing scope"
+                        | "skipped admission proof attempt"
                 )
             {
                 hidden += 1;
@@ -1763,6 +1764,7 @@ verification a {{ assumptions: []; obligations: [one]; }}",
             "producing rule",
             "checked obligation",
             "upstream source origin",
+            "skipped admission proof attempt",
             "contributing occurrence",
             "participating declaration",
             "supporting rewrite proof",
@@ -1792,7 +1794,7 @@ verification a {{ assumptions: []; obligations: [one]; }}",
         assert!(concise.contains("+3 more related locations (use --verbose)"));
         assert!(!verbose.contains("+3 more"));
         for (i, label) in labels.iter().enumerate() {
-            assert_eq!(concise.contains(label), i < 3);
+            assert_eq!(concise.contains(label), i < 4);
             assert!(verbose.contains(label));
         }
         for text in ["kept message", "kept note"] {

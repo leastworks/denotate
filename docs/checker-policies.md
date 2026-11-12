@@ -99,6 +99,34 @@ The up-front index can cost more than filtered scans for a single tiny query in 
 large program; there is no size-based bypass heuristic. Measure that setup cost
 alongside the savings from repeated queries and deeper original closures.
 
+Admission recovers only from per-operation BDD task/node failures inside individual
+proof attempts: exact-producer coverage, a removal check, component bounds, or a
+discharge check. Failed temporary conditions and their retained-node accounting are
+released. Work stays consumed: a failed condition preflight is charged its task
+allowance plus one stopping step, with no construction charge. The bound is still
+`min(max_bdd_tasks, remaining_work / 2)`; when remaining work is the tighter bound
+or ties it, failure reports `BDD preflight: work` and stops admission. Successful
+operation charges are unchanged. Completion-equation preflights are unchanged.
+
+Failures in shared symbolic evaluation or summaries, total work/storage limits,
+deadlines and cancellation still stop the whole admission pass. No pending batch
+is salvaged on these failures. Local skips allow independent proofs to commit.
+Retry tracking uses ground identities stable within the preparation, not changing
+component handles. Before each successful commit, it follows the old graph's
+dependencies of both signs from rewritten heads. A skipped attempt is invalidated
+when its head is reached; this conservatively includes changes to exact producers,
+settled guards, component membership and external premises feeding bounds. The
+invalidation work is charged and can itself stop admission globally. No retry cache
+crosses preparations, and no BDD values are retained for retry detection.
+
+Outstanding skip records travel with the admitted graph and survive shared
+admission reuse. Reporting projects current semantic keys and locations. Only skips
+whose target lies in a remaining negative component make that region's admission
+inconclusive; downstream skips do not contaminate upstream regions. Global summary
+skip records are advisory and do not revoke admission achieved by other proofs.
+Progress counts all failed attempts, including those invalidated and retried later.
+The current record set can therefore be smaller than the progress count.
+
 Concrete replay looks up discharge proofs in a map keyed by ground rule instance
 and literal occurrence, maintained with the rewrite proofs on both admission and
 local-runtime installation. The map holds only proof IDs and is empty when all

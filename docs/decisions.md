@@ -87,6 +87,20 @@ real program that the current choice serves badly.
   This does not change the symbolic fold, upper bounds or rewrite policy. Covering
   producer summaries are still cloned per successful proof; reducing that separate
   evidence cost requires a later change.
+- **An expensive admission proof does not stop independent proofs.** A per-operation
+  BDD task or result-node failure inside coverage, a removal check, component bounds
+  or a discharge check skips that attempt. Partial batches remain sound: each proof
+  uses one immutable snapshot, removals never remove the exact producers covering
+  them, and a discharge does not assume another proposed rewrite. A skip adds no
+  rewrite. Global work, retained storage, deadlines, cancellation and failures in
+  shared evaluation/summaries still stop admission and discard the pending batch.
+  Failed preflights consume their task allowance plus one stopping step; a preflight
+  constrained by remaining work (including a tie with the task cap) reports global
+  work exhaustion. Retry tracking follows both signs of dependencies from changed
+  producer heads through the pre-commit graph, including old SCC members. It may
+  retry conservatively but cannot miss changed external premises or component bounds.
+  Current skips accompany reused admission and explain only their own unresolved
+  components; a downstream skip cannot label an upstream cycle as exhausted.
 - **Index original dependencies within a checking invocation.** Repeated full
   scans made local query construction depend on the size of unrelated fixed
   evidence and on the depth of dependencies restored by rewrite proofs. A borrowed

@@ -75,6 +75,7 @@ pub enum Role {
     Condition,
     EnclosingScope,
     BlockingCycle,
+    AdmissionAttempt,
 }
 impl Role {
     pub fn label(self) -> &'static str {
@@ -87,6 +88,7 @@ impl Role {
             Self::Condition => "condition being inspected",
             Self::EnclosingScope => "complete enclosing scope",
             Self::BlockingCycle => "blocking dependency cycle",
+            Self::AdmissionAttempt => "skipped admission proof attempt",
         }
     }
 }
@@ -537,6 +539,26 @@ pub fn interpret<'a>(
                 RegionOutcome::Inconclusive(c) => (Kind::Inconclusive, format!("Admission of this dependency cycle is inconclusive: {}.", exhaustion_text(c.phase, c.resource, c.details))),
             },
         };
+        for skip in &region.admission_skips {
+            notes.push(format!(
+                "Admission skipped a {} proof for {}: {}. Other proof attempts continued.",
+                skip.kind.label(),
+                atom_name(corpus, names, &skip.head)?,
+                exhaustion_text(skip.reason.phase, skip.reason.resource, skip.reason.details)
+            ));
+            if let Some(rule) = skip.rule.and_then(|id| report.program().original_rule(id)) {
+                contributions.push(Contribution {
+                    occurrence: rule.source.into(),
+                    role: Role::AdmissionAttempt,
+                });
+            }
+            if let Some(occurrence) = skip.occurrence {
+                contributions.push(Contribution {
+                    occurrence,
+                    role: Role::AdmissionAttempt,
+                });
+            }
+        }
         findings.push(Finding {
             identity: Identity::Region(component.atoms.iter().cloned().collect()),
             kind,

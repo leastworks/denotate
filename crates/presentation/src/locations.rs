@@ -87,7 +87,11 @@ impl Placement<'_> {
             Role::Contributor => 1,
             Role::Declaration => 2,
             Role::Obligation => 3,
-            Role::RelatedOnly | Role::Condition | Role::EnclosingScope | Role::BlockingCycle => {
+            Role::RelatedOnly
+            | Role::Condition
+            | Role::EnclosingScope
+            | Role::BlockingCycle
+            | Role::AdmissionAttempt => {
                 unreachable!("related-only origins cannot be primary")
             }
         };
@@ -145,6 +149,7 @@ impl Placement<'_> {
                         | Role::Condition
                         | Role::EnclosingScope
                         | Role::BlockingCycle
+                        | Role::AdmissionAttempt
                 ) {
                     if let Some((_, role)) = current.iter_mut().find(|(s, _)| *s == origin.span) {
                         *role = std::cmp::min(*role, contribution.role);

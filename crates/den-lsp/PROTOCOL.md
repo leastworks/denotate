@@ -122,7 +122,8 @@ During admission, `detail.admission` optionally adds an invocation-local snapsho
  "current":{"index":17,"atoms":12,"ruleInstances":20,"atom":"p(a)",
    "location":{"uri":"file:///app/p.den","line":14,"column":1}},
  "rule":32,"rules":80,"iteration":null,
- "removedRules":4,"dischargedNegations":6,"failure":null}
+ "removedRules":4,"dischargedNegations":6,"skippedAttempts":2,
+ "skipped":null,"skipTarget":null,"failure":null}
 ```
 
 `unresolvedComponents` counts residual ground SCCs containing a negative cycle;
@@ -139,6 +140,15 @@ UTF-16 positions.
 last boundary.
 `iteration` is an optional current upper-bound iteration, not an estimated total.
 Rewrite counts are cumulative committed counts, not proposed changes.
+
+`skippedAttempts` is the cumulative number of failed per-operation proof attempts,
+including later retries. A recoverable failure immediately emits `skipped` as
+`producer-coverage`, `producer-removal`, `upper-bounds` or `negation-discharge`,
+`skipTarget: {head: "p(a)"}`, and the ordinary formatted `failure`. Admission
+continues. Subsequent updates clear `skipped`, `skipTarget` and that local failure;
+`reused` includes the retained attempt count. A failure with `skipped: null` stops
+admission. A preflight constrained by remaining work reports resource `work`,
+not the per-operation `BDD tasks` limit; ties are treated as global work stops.
 
 Stages are `starting`, `symbolic`, `summaries`, `producer-removals`, `candidates`,
 `upper-bounds`, `commit`, `committed`, `complete`, `reused`, and
@@ -171,6 +181,23 @@ The cycle excerpt has at most 12 edges; `cycleEdges` gives the full length.
 `admissionFailure` uses the shared formatted exhaustion explanation. Counts and
 indices describe the admitted graph. A remaining cycle is not itself a no-meaning
 finding. Locations use the same coordinates as admission progress.
+`admissionSkips` lists the current skips whose targets belong to this component:
+`[{attempt, head, reason}]`, with display names and formatted limit reasons. A
+skipped downstream head is not attached to an upstream component.
+
+Verification summaries optionally include `admissionSkips`, an array of current
+failed attempts with `attempt`, keyed `head`, optional `rule` (rule key and complete
+typed substitution), optional `occurrence`, and structured phase/resource `reason`.
+Each affected region summary includes its own subset. Region diagnostics retain
+their existing finding identity and carry the skips in `data.evidence.admissionSkips`
+(`attempt`, keyed `head`, optional `occurrence`, `reason`), notes and current related
+locations. The region's admission outcome is inconclusive when its own proof was
+skipped; independently established no-meaning findings remain failures. Notes name
+the skipped target; available rule/literal spans are related locations labelled
+`skipped admission proof attempt`, not successful supporting proofs. A program
+admitted through other proofs remains admitted. Global skip summaries alone are
+advisory and do not change an otherwise proved result. Empty skip arrays are omitted
+from summaries and diagnostic evidence, preserving ordinary result shapes.
 
 During checking, `detail.checking` describes the current operation:
 

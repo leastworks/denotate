@@ -225,6 +225,10 @@ impl<'a> Budget<'a> {
     }
     pub fn failure(&mut self, error: &CheckError) {
         self.limits.progress.failure(error);
+        self.record_failure(error);
+    }
+    /// Admission emits its own recoverable-skip event, not a stopped query.
+    pub(crate) fn record_failure(&mut self, error: &CheckError) {
         if let (
             Some(charges),
             CheckError::LimitExceeded {

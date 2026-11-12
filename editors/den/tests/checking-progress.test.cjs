@@ -147,3 +147,15 @@ test('checking Output reports target, immediate exhaustion, recovery and remaini
   assert.match(lines.at(-1)[1], /r\(\) -not-> s\(\) at file:\/\/\/p.den:9:2/);
   assert.match(lines.at(-1)[1], /20 cycle edges in total/);
 });
+
+test('admission proof skips continue and survive a reused completion count', () => {
+  const a = { round: 2, stage: 'producer-removals', unresolvedComponents: 2, blockedAtoms: 12,
+    removedRules: 1, dischargedNegations: 0, skippedAttempts: 3,
+    skipped: 'producer-coverage', skipTarget: { head: 'wide()' }, failure: 'BDD preflight: BDD tasks limit 10' };
+  const p = progress({ checking: 1 }, { active: [{ label: 'app', detail: { phase: 'admission', admission: a } }] });
+  assert.match(view.details(p), /3 proof attempts skipped.*skipped producer-coverage for wide\(\).*continuing admission/);
+  assert.doesNotMatch(view.details(p), /stopped:/);
+  a.stage = 'reused'; a.skipped = null; a.failure = null;
+  assert.match(view.details(p), /reused.*3 proof attempts skipped/);
+  assert.doesNotMatch(view.details(p), /continuing admission|stopped:/);
+});
