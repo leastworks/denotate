@@ -308,3 +308,42 @@ fn structural_settled_helpers_support_blocked_removals_without_gaining_warnings(
             .any(|r| r.source == recursive)
     );
 }
+
+#[test]
+fn direct_false_evidence_distinguishes_no_producer_from_positive_recursion() {
+    let mut c = Corpus::new();
+    let u = blocked(&mut c);
+    let p = rel(&mut c, "p", false);
+    let missing = rel(&mut c, "missing", false);
+    let out = rel(&mut c, "out", false);
+    let no_source = rel(&mut c, "no_source", false);
+    let recursive = rule(&mut c, p, &[(p, false)]);
+    let dead_cycle = rule(&mut c, out, &[(p, false), (u, false)]);
+    let dead_missing = rule(&mut c, no_source, &[(missing, false), (u, false)]);
+    let (ground, _) = structural(&c, true);
+    let proof = |source| {
+        ground
+            .rewrite_proofs()
+            .find(|r| r.candidate().source == source)
+            .unwrap()
+            .structural()
+            .unwrap()
+    };
+    assert_eq!(
+        proof(dead_cycle).settlement(&atom(p)),
+        (false, StructuralSettlement::NoDerivation)
+    );
+    assert_eq!(
+        proof(dead_cycle)
+            .direct_rules()
+            .iter()
+            .map(|r| r.source)
+            .collect::<Vec<_>>(),
+        [recursive]
+    );
+    assert_eq!(
+        proof(dead_missing).settlement(&atom(missing)),
+        (false, StructuralSettlement::NoProducer)
+    );
+    assert!(proof(dead_missing).direct_rules().is_empty());
+}

@@ -141,6 +141,14 @@ impl RewriteProof {
             RewriteJustification::Structural(p) => p.supporting_rules(),
         }
     }
+    /// Direct evidence for keys and ordinary presentation. Full structural
+    /// support is expanded only by an explicit detailed-evidence request.
+    pub fn direct_rules(&self) -> Vec<&GroundRule> {
+        match &self.justification {
+            RewriteJustification::Symbolic(p) => p.producers.iter().map(|p| &p.rule).collect(),
+            RewriteJustification::Structural(p) => p.direct_rules(),
+        }
+    }
     pub(crate) fn summaries(&self) -> impl Iterator<Item = &ProducerSummary> {
         self.symbolic().into_iter().flat_map(|p| {
             std::iter::once(&p.candidate)

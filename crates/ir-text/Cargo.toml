@@ -21,6 +21,7 @@ sha2 = "=0.10.9"
 cc = "=1.5.1"
 
 [dev-dependencies]
+denotate-check = { path = "../check", features = ["test-support"] }
 denotate-check-session = { path = "../check-session" }
 
 [[example]]

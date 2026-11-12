@@ -34,6 +34,10 @@ struct Fact {
     value: bool,
     producer: Option<GroundRuleId>,
     removed: Vec<GroundRuleId>,
+    // Concrete absence precedes private rule removal. In particular, a positive
+    // cycle may be false before its own producers are marked dead. Preserve the
+    // explanation's origin rather than inferring it from later removal reasons.
+    concrete: bool,
 }
 #[derive(Debug)]
 pub struct StructuralCertificate {
@@ -47,10 +51,66 @@ pub struct StructuralProof {
     pub reason: StructuralReason,
     certificate: Arc<StructuralCertificate>,
 }
+/// A direct explanation of an already settled atom, read from its certificate.
+/// Absence is not synonymous with having no authored producers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StructuralSettlement {
+    Producer,
+    NoProducer,
+    ProducersRemoved,
+    NoDerivation,
+}
+
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    static SUPPORT_EXPANSIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+#[cfg(any(test, feature = "test-support"))]
+pub(crate) fn support_expansions() -> usize {
+    SUPPORT_EXPANSIONS.get()
+}
+
 impl StructuralProof {
+    pub fn settlement(&self, atom: &GroundAtom) -> (bool, StructuralSettlement) {
+        let fact = &self.certificate.facts[atom];
+        let reason = if fact.producer.is_some() {
+            StructuralSettlement::Producer
+        } else if fact.removed.is_empty() {
+            StructuralSettlement::NoProducer
+        } else if fact.concrete {
+            StructuralSettlement::NoDerivation
+        } else {
+            StructuralSettlement::ProducersRemoved
+        };
+        (fact.value, reason)
+    }
+
+    /// Immediate settling producers, excluded producers and unfolding rules.
+    /// Does not walk their premises or recursively expand removal reasons.
+    pub fn direct_rules(&self) -> Vec<&GroundRule> {
+        let mut atoms = Vec::new();
+        let mut rules = Vec::new();
+        reason_inputs(&self.reason, &mut atoms, &mut rules);
+        for atom in atoms {
+            if let Some(fact) = self.certificate.facts.get(&atom) {
+                rules.extend(fact.producer);
+                rules.extend(&fact.removed);
+            }
+        }
+        let mut rules: Vec<_> = rules
+            .into_iter()
+            .filter_map(|id| self.certificate.rules.get(&id))
+            .collect();
+        rules.sort_by_key(|r| (r.source, r.id));
+        rules.dedup_by_key(|r| r.id);
+        rules
+    }
+
     /// Current snapshot rules supporting this proof, including unfolding and
     /// transitive settling evidence. Never used as executable dependency edges.
     pub fn supporting_rules(&self) -> Vec<&GroundRule> {
+        #[cfg(any(test, feature = "test-support"))]
+        SUPPORT_EXPANSIONS.set(SUPPORT_EXPANSIONS.get() + 1);
         let (_, rules) = closure(
             &self.certificate.facts,
             &self.certificate.reasons,
@@ -188,6 +248,7 @@ impl Pass<'_, '_, '_> {
                 value,
                 producer,
                 removed,
+                concrete: false,
             },
         );
         self.changed.insert(head);
@@ -218,6 +279,7 @@ impl Pass<'_, '_, '_> {
                 value,
                 producer: None,
                 removed: vec![],
+                concrete: true,
             },
         );
         Some(value)
@@ -443,6 +505,7 @@ impl Pass<'_, '_, '_> {
                             value: false,
                             producer: None,
                             removed: vec![],
+                            concrete: true,
                         });
                     }
                 }
@@ -453,6 +516,7 @@ impl Pass<'_, '_, '_> {
                     value,
                     producer,
                     removed,
+                    concrete: true,
                 },
             );
         }
@@ -617,6 +681,7 @@ pub(crate) fn reduce(p: &GroundProgram, budget: &mut Budget<'_>) -> Result<Vec<S
                     value,
                     producer,
                     removed,
+                    concrete: true,
                 },
             );
         }

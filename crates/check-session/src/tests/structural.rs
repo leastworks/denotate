@@ -4,6 +4,83 @@ use denotate_ir_text::{ProgramMembership, SourceFile, load, presentation};
 use serde_json::json;
 
 #[test]
+fn transitive_support_edits_invalidate_warm_queries_without_changing_warning_identity() {
+    let base =
+        "relation leaf(); relation other(); other(); relation missing(); relation bridge(); relation kept(); relation term();
+leaf(); bridge():-leaf(); kept():-bridge(); kept():-term(); term():-!kept();
+sort S; const a,b:S; relation result(s:S); result(a); result(b):-term();
+obligation unique:at_most_one(result, group_by:()); verification checks{assumptions:[];obligations:[unique];}";
+    let mut session = Session::default();
+    let mut identity = None;
+    for (revision, source) in [
+        base.to_owned(),
+        base.replace("leaf(); bridge", "leaf():-other(); bridge"),
+        base.replace("leaf(); bridge", "leaf():-missing(); bridge"),
+        base.to_owned(),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let file = SourceFile::new("file:///program.den", revision as u64, source);
+        let p = load(
+            &ProgramMembership::single("root", [file.uri.clone()]),
+            &[file],
+        )
+        .unwrap();
+        let limits = Limits::default();
+        let ops = (&limits).into();
+        let request = p.verification_requests(&limits).unwrap().remove(0).1;
+        let run = |s: &mut Session| {
+            let fixed = s
+                .prepare_fixed(&p.corpus, &p.keys, &p.domains, &limits)
+                .unwrap();
+            let RequestPreparation::Complete(prepared) = s
+                .prepare_with_fixed(&request, &p.corpus, &p.keys, &ops, &fixed)
+                .unwrap()
+            else {
+                panic!()
+            };
+            let prepared = prepared.admit(&ops).unwrap();
+            let LocalCheckOutcome::Complete(report) = s.verify(&prepared, &ops).unwrap() else {
+                panic!()
+            };
+            let shown = presentation::present_with_rewrite_detail(
+                &p,
+                &report.checked,
+                presentation::RewriteDetail::Full,
+            )
+            .unwrap();
+            let warning = shown
+                .diagnostics
+                .iter()
+                .find(|d| {
+                    d.evidence["kind"] == "rewrite-proof"
+                        && p.sources.text(d.primary).unwrap() == "kept():-term();"
+                })
+                .map(|d| d.data(&p.keys).unwrap()["finding"].clone());
+            let diagnostics: Vec<_> = shown.diagnostics.iter().map(|d|json!({"data":d.data(&p.keys).unwrap(),"notes":d.notes,"primary":p.sources.text(d.primary).unwrap(),"related":d.related.iter().map(|r|p.sources.text(r.span).unwrap()).collect::<Vec<_>>()})).collect();
+            (
+                report.checked.results.value,
+                shown.status,
+                diagnostics,
+                warning,
+            )
+        };
+        let fresh = run(&mut Session::default());
+        assert_eq!(run(&mut session), fresh);
+        assert_eq!(run(&mut session), fresh);
+        if revision == 2 {
+            assert!(fresh.3.is_none());
+        } else if let Some(previous) = &identity {
+            assert_eq!(fresh.3.as_ref(), Some(previous));
+        } else {
+            identity = fresh.3;
+            assert!(identity.is_some());
+        }
+    }
+}
+
+#[test]
 fn structural_rewrites_agree_fresh_cold_warm_and_locate_current_sources() {
     let base = "input i(); relation field(); relation outer(); relation inner(); relation term(); relation constraint(); relation kept();
 field():-outer(); field():-inner(); outer():-i(); inner():-outer(),term();
@@ -77,7 +154,7 @@ verification second{assumptions:[];obligations:[clean];}";
                         warning
                             .related
                             .iter()
-                            .any(|r| r.label == "supporting rewrite proof")
+                            .any(|r| r.label == "direct rewrite justification")
                     );
                     assert_eq!(
                         p.sources.text(warning.primary).unwrap(),

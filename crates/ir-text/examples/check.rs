@@ -64,12 +64,15 @@ fn print_diagnostics(
     output: &mut String,
     verbose: bool,
 ) -> Result<(), Failure> {
-    let location = |span: denotate_ir::SourceSpan| -> Result<_, Failure> {
+    let mut source_index = origins::SourceIndex::new(&p.sources);
+    let mut location = |span: denotate_ir::SourceSpan| -> Result<_, Failure> {
         let source = p
             .sources
             .snapshot(span.snapshot())
             .map_err(|e| (2, e.to_string()))?;
-        let coordinate = origins::coordinate(&source.text, span.byte_range().start)
+        let coordinate = source_index
+            .coordinate(span.snapshot(), span.byte_range().start)
+            .map_err(|e| (2, e.to_string()))?
             .ok_or((2, "Invalid diagnostic source coordinate".into()))?;
         Ok((source.uri.clone(), coordinate))
     };
@@ -103,6 +106,7 @@ fn print_diagnostics(
                 && !matches!(
                     label,
                     "producing rule"
+                        | "direct rewrite justification"
                         | "checked obligation"
                         | "upstream source origin"
                         | "blocking dependency cycle"
@@ -596,8 +600,17 @@ fn check_program(
                         matches!(r.outcome, ScopedResult::Inconclusive(_))
                             || !matches!(r.completion, RegionCompletion::NoMeaning { .. })
                     });
-                let mut presented = denotate_ir_text::presentation::present(&p, &report.checked)
-                    .map_err(|e| (2, e.to_string()))?;
+                let detail = if verbose {
+                    denotate_presentation::RewriteDetail::Full
+                } else {
+                    denotate_presentation::RewriteDetail::Direct
+                };
+                let mut presented = denotate_ir_text::presentation::present_with_rewrite_detail(
+                    &p,
+                    &report.checked,
+                    detail,
+                )
+                .map_err(|e| (2, e.to_string()))?;
                 trace.message(format_args!("Result: {}; {} presented diagnostics, {} uniqueness groups, {} coverage obligations, {} emptiness obligations, {} regions, {} notice results",
                     presented.status["state"].as_str().unwrap_or("unknown"), presented.diagnostics.len(),
                     result.groups.len(), result.coverage.len(), result.emptiness.len(), result.regions.len(), result.notices.len()));
@@ -1747,6 +1760,23 @@ verification a {{ assumptions: []; obligations: [one]; }}",
         let mut reordered = String::new();
         print_diagnostics(&p, &presented, &mut reordered, true).unwrap();
         assert_eq!(first, reordered);
+    }
+    #[test]
+    fn rewrite_direct_justification_is_visible_and_verbose_expands_the_chain() {
+        let f = Fixture::new("relation seed(); seed(); relation middle(); middle():-seed(); relation kept(); relation term();
+kept():-middle(); kept():-term(); term():-!kept(); verification checks{assumptions:[];obligations:[];}");
+        let (code, direct) = f.run(&[]);
+        let (verbose_code, full) = f.run(&["--verbose"]);
+        assert_eq!(code, verbose_code);
+        assert_eq!(code, 1);
+        assert!(direct.contains("direct rewrite justification"), "{direct}");
+        assert!(!direct.contains("supporting rewrite proof"));
+        assert!(full.contains("supporting rewrite proof"), "{full}");
+        assert!(
+            full.lines().filter(|l| l.contains("related:")).count()
+                > direct.lines().filter(|l| l.contains("related:")).count()
+        );
+        assert_eq!(f.run(&["--json"]).1, f.run(&["--json", "--verbose"]).1);
     }
     #[test]
     fn concise_related_locations_are_cli_only_and_verbose_restores_the_full_list() {

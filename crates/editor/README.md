@@ -19,6 +19,11 @@ crate contains no roots, manifests, ownership rules, filesystem policy or DSL co
 
 ## Using it
 
+For a batch of findings, share `presentation::Locations` across the batch. It
+indexes each immutable source snapshot once and preserves LSP UTF-16 positions
+and CR/LF/CRLF boundaries. Single-location convenience functions remain available;
+columns still scan within the containing line.
+
 A frontend calls `parser(language)`, wraps `Document` as needed and implements
 `transport::Handler`. Worker-backed servers implement `checking_server::CheckingHandler`
 and `lifecycle::Lifecycle`.

@@ -97,9 +97,24 @@ the retained fixed graph, with charged traversal. Settled helpers may simplify
 privately to justify a blocked removal, but their rules are never committed as
 removals or warnings by this pass. Warnings preserve per-source-rule instance coverage and
 identify supporting/unfolded rules at current locations. Settling chains are not
-copied into every retained proof. Enumerating those chains for individual warnings
-can still revisit shared evidence; presentation and key projection are not a new
-cache. The `admission-structural` profile span is separate from BDD result-node
+copied into every retained proof. Ordinary presentation and internal structural
+rewrite evidence keys use only direct settling/unfolding support, including
+settled premises needed for subsumption. The transitive certificate is traversed
+only on explicit request (`check-den --verbose`); that traversal can revisit shared
+support across proofs. Symbolic evidence and keys are unchanged. Local session
+inputs still close original dependencies, including transitive support; direct
+evidence keys do not replace that invalidation boundary.
+
+Per source warning, default presentation retains at most eight distinct structural
+notes and sixteen structural related locations, after provenance union, with exact
+omission counts. Notes use lexical order; retained locations use immutable source
+span/label order. Symbolic related locations remain unbounded and are protected
+in mixed warnings. Full detail removes the structural display caps. These are
+presentation policies, not checker budgets: proof coverage, verdicts, limits and
+`data.finding` identities are unchanged. Coordinate indexes and source hashes are
+reused per immutable snapshot within presentation/export; columns still scan the
+containing line, so extremely long lines retain a linear per-column cost.
+The `admission-structural` profile span is separate from BDD result-node
 traffic and retained-condition snapshots.
 
 Within each admission snapshot, producer removal runs before negation discharge.

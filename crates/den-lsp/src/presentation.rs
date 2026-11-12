@@ -35,17 +35,17 @@ fn convert(
     output: denotate_ir_text::presentation::Presentation,
 ) -> Result<Publication, String> {
     let mut diagnostics = BTreeMap::<_, Vec<_>>::new();
+    let mut locations = denotate_editor::presentation::Locations::new(&program.sources);
+    let mut sources = denotate_ir_text::origins::SourceIndex::new(&program.sources);
     for finding in output.diagnostics {
-        let (uri, mut diagnostic) =
-            denotate_editor::presentation::diagnostic(&finding, &program.sources, &program.keys)?;
-        let span_data = |span: denotate_ir::SourceSpan| -> Result<Value, String> {
-            let snapshot = program
-                .sources
-                .snapshot(span.snapshot())
+        let (uri, mut diagnostic) = locations.diagnostic(&finding, &program.keys)?;
+        let mut span_data = |span: denotate_ir::SourceSpan| -> Result<Value, String> {
+            let identity = sources
+                .identity(span.snapshot())
                 .map_err(|e| e.to_string())?;
             let range = span.byte_range();
             Ok(
-                serde_json::json!({"uri":snapshot.uri,"view":snapshot.view,"hash":denotate_ir_text::origins::content_hash(&snapshot.text),"bytes":[range.start,range.end]}),
+                serde_json::json!({"uri":identity.uri,"view":identity.view,"hash":identity.hash,"bytes":[range.start,range.end]}),
             )
         };
         diagnostic.data.as_mut().unwrap()["locations"] = serde_json::json!({
@@ -93,6 +93,7 @@ pub fn configuration(program: &LoadedProgram) -> Result<Publication, String> {
         "consistency": if v.assumptions.iter().all(|id| { let r=&program.corpus.assumption(*id).unwrap().restriction; r.kind()==denotate_ir::Cardinality::AtMostOne && program.corpus.relation(r.relation()).unwrap().role==denotate_ir::RelationRole::Input }) { "consistent" } else { "unknown" }, "checking": "pending", "summary": null,
     })).collect::<Vec<_>>();
     let mut unchecked = vec![];
+    let mut locations = denotate_editor::presentation::Locations::new(&program.sources);
     let mut diagnostics = BTreeMap::<_, Vec<_>>::new();
     for obligation in program
         .corpus
@@ -120,7 +121,7 @@ pub fn configuration(program: &LoadedProgram) -> Result<Publication, String> {
         );
         // The declaration is the sole notice site, including the labeled library fallback.
         if let Some(origin) = program.provenance.origins(obligation.id).first() {
-            let location = denotate_editor::presentation::location(&program.sources, origin.span)?;
+            let location = locations.location(origin.span)?;
             diagnostics.entry(location.uri).or_default().push(Diagnostic {
                 range: location.range,
                 severity: Some(DiagnosticSeverity::INFORMATION),

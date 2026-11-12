@@ -32,7 +32,7 @@ pub fn help() -> String {
         "Usage: check ROOT_FOLDER_OR_DEN.ROOT [OPTIONS]\n\n\
         --verification NAME       Run one verification (a partial run)\n\
         --json                    Print existing status summaries on stdout\n\
-        --verbose                 Expand all related diagnostic locations\n\
+        --verbose                 Expand all related locations and structural proof chains\n\
         --empty-examples N|all    Retain N present tuples per empty obligation (default 3)\n\
         --hide-library-rewrites   Hide library rewrite diagnostics\n\
         --no-progress             Silence progress on stderr\n\

@@ -27,7 +27,9 @@ mod request;
 mod rewrite;
 mod structural;
 mod symbolic;
-pub use structural::{StructuralCertificate, StructuralProof, StructuralReason};
+pub use structural::{
+    StructuralCertificate, StructuralProof, StructuralReason, StructuralSettlement,
+};
 mod upper_bounds;
 
 pub use accounting::*;

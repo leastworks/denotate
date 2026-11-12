@@ -2,6 +2,7 @@
 //! editor's responsibility; loading alone never runs the checker.
 use crate::LoadedProgram;
 use denotate_check::CheckedReport;
+pub use denotate_presentation::RewriteDetail;
 use denotate_presentation::{Diagnostic, Kind, Placement, Result, interpret, rewrites, summary};
 use serde_json::{Value, json};
 
@@ -86,6 +87,18 @@ pub fn present_assumption_validation(
     })
 }
 pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Presentation> {
+    present_with_rewrite_detail(
+        program,
+        report,
+        denotate_presentation::RewriteDetail::Direct,
+    )
+}
+
+pub fn present_with_rewrite_detail(
+    program: &LoadedProgram,
+    report: &CheckedReport<'_>,
+    detail: denotate_presentation::RewriteDetail,
+) -> Result<Presentation> {
     let user_files = program
         .documents
         .iter()
@@ -120,17 +133,7 @@ pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Pr
         diagnostics.extend(placed);
     }
     for rewrite in rewrites(&program.corpus, report.verification.program())? {
-        let mut placed = placement.place(
-            &rewrite.identity(),
-            Kind::Rewrite,
-            rewrite.message,
-            &rewrite.notes(&program.corpus, &names)?,
-            &rewrite.contributions(),
-        )?;
-        for d in &mut placed {
-            d.evidence =
-                json!({"kind":"rewrite-proof","coversAllInstances":rewrite.covers_all_instances});
-        }
+        let placed = placement.rewrite(&rewrite, &program.corpus, &names, detail)?;
         inventory.push(json!({"identity":rewrite.identity().data_in(&program.keys, report.results.value.context.verification.as_ref())?,"kind":Kind::Rewrite.code(),
             "message":rewrite.message,"fallback":placed.iter().any(|d|d.fallback),"located":!placed.is_empty()}));
         diagnostics.extend(placed);

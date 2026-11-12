@@ -108,6 +108,15 @@ fixed evidence and dropped originals, and projects only reached content. The fir
 local query builds it; it is released after the local queries. Neither that index
 nor its handles enter session values, semantic identity or receipts.
 
+Structural rewrite certificates keep their complete shared support graph, but
+ordinary presentation and internal rewrite evidence keys project only direct
+justification. The full original dependency closure above still guards reuse when
+transitive support changes. Presentation bounds structural details per source
+warning and expands chains only on explicit request; public finding identities
+and proof coverage do not change. Immutable snapshot indexes reuse coordinates
+and hashes within presentation/export. `.den` scalar coordinates and LSP UTF-16
+positions keep their separate conventions; neither reads a later buffer revision.
+
 The session's Salsa fold query retains only semantic keys: possible tuples, original
 rule-instance substitutions and the chosen producer/order of each true tuple. On the
 next snapshot it reconstructs the evidence with current occurrences. Its explicit

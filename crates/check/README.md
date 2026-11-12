@@ -72,6 +72,14 @@ is a top-level inconclusive outcome, never an empty success.
 
 ## Requests, keys and results
 
+Structural rewrite proofs expose direct settling/unfolding support through
+`direct_rules` and accurate absence explanations through `settlement`. Internal
+rewrite keys use that direct view. `supporting_rules` explicitly expands the full
+retained certificate for detailed evidence; ordinary presentation does not call it.
+This projection does not narrow the original dependency closure in local query
+inputs, so transitive edits still invalidate reuse. Presentation owns display caps;
+neither proof coverage nor checker limits change.
+
 `PreparedCheck::admit_with_progress` accepts an optional invocation-local observer.
 It reports rounds, stages, unresolved ground components with negation, affected
 atoms, current component sizes and representative atoms/rules, and committed

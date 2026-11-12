@@ -29,6 +29,80 @@ pub struct Coordinate {
     pub line: usize,
     pub column: usize,
 }
+/// Immutable LF line index for `.den` scalar coordinates. Columns scan only the
+/// containing line, including a long line; no per-character table is retained.
+pub struct LineIndex<'a> {
+    text: &'a str,
+    starts: Vec<usize>,
+}
+impl<'a> LineIndex<'a> {
+    pub fn new(text: &'a str) -> Self {
+        Self {
+            text,
+            starts: std::iter::once(0)
+                .chain(
+                    text.bytes()
+                        .enumerate()
+                        .filter_map(|(i, b)| (b == b'\n').then_some(i + 1)),
+                )
+                .collect(),
+        }
+    }
+    pub fn coordinate(&self, byte: usize) -> Option<Coordinate> {
+        self.text.get(..byte)?;
+        let line = self.starts.partition_point(|start| *start <= byte) - 1;
+        Some(Coordinate {
+            line: line + 1,
+            column: self.text[self.starts[line]..byte].chars().count() + 1,
+        })
+    }
+}
+
+/// Presentation/export-local indexes. Keys include immutable snapshot identity,
+/// so a newer buffer revision never supplies an older finding's coordinates/hash.
+pub struct SourceIndex<'a> {
+    sources: &'a Sources,
+    lines: BTreeMap<SnapshotId, LineIndex<'a>>,
+    identities: BTreeMap<SnapshotId, SourceIdentity>,
+}
+impl<'a> SourceIndex<'a> {
+    pub fn new(sources: &'a Sources) -> Self {
+        Self {
+            sources,
+            lines: BTreeMap::new(),
+            identities: BTreeMap::new(),
+        }
+    }
+    pub fn coordinate(
+        &mut self,
+        snapshot: SnapshotId,
+        byte: usize,
+    ) -> Result<Option<Coordinate>, ProvenanceError> {
+        let source = self.sources.snapshot(snapshot)?;
+        Ok(self
+            .lines
+            .entry(snapshot)
+            .or_insert_with(|| LineIndex::new(&source.text))
+            .coordinate(byte))
+    }
+    pub fn identity(&mut self, snapshot: SnapshotId) -> Result<&SourceIdentity, ProvenanceError> {
+        let source = self.sources.snapshot(snapshot)?;
+        Ok(self
+            .identities
+            .entry(snapshot)
+            .or_insert_with(|| SourceIdentity::of(source)))
+    }
+    pub fn descriptor(&mut self, origin: &Origin) -> Result<OriginDescriptor, ProvenanceError> {
+        self.sources.text(origin.span)?;
+        let id = origin.span.snapshot();
+        let range = origin.span.byte_range();
+        Ok(OriginDescriptor {
+            source: self.identity(id)?.clone(),
+            start: self.coordinate(id, range.start)?.unwrap(),
+            end: self.coordinate(id, range.end)?.unwrap(),
+        })
+    }
+}
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct OriginDescriptor {
     pub source: SourceIdentity,
@@ -99,6 +173,70 @@ mod tests {
     use super::*;
 
     #[test]
+    fn indexed_coordinates_and_identities_match_scans_per_immutable_snapshot() {
+        let mut sources = Sources::new();
+        for (version, text) in [
+            "\u{feff}α😀e\u{301}\r\nβ\rγ\n".to_owned(),
+            "α😀".repeat(30_000),
+            String::new(),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let id = sources
+                .add(
+                    "file:///same.den",
+                    version as u64,
+                    "denotate",
+                    text.as_str(),
+                )
+                .unwrap();
+            let mut index = SourceIndex::new(&sources);
+            let offsets: Vec<_> = if text.len() < 100 {
+                (0..=text.len() + 1).collect()
+            } else {
+                vec![
+                    0,
+                    1,
+                    2,
+                    6,
+                    60_000,
+                    text.len() - 1,
+                    text.len(),
+                    text.len() + 1,
+                ]
+            };
+            for offset in offsets {
+                assert_eq!(
+                    index.coordinate(id, offset).unwrap(),
+                    coordinate(text, offset)
+                );
+            }
+            for _ in 0..3 {
+                assert_eq!(
+                    index.identity(id).unwrap(),
+                    &SourceIdentity::of(sources.snapshot(id).unwrap())
+                );
+            }
+            assert_eq!(index.lines.len(), 1);
+            assert_eq!(index.identities.len(), 1);
+        }
+        let snapshots: Vec<_> = sources.snapshots().collect();
+        let mut index = SourceIndex::new(&sources);
+        for source in snapshots.iter().rev() {
+            let span = sources.span(source.id, 0..source.text.len()).unwrap();
+            let descriptor = index.descriptor(&Origin::new(span)).unwrap();
+            assert_eq!(
+                descriptor.end,
+                coordinate(&source.text, source.text.len()).unwrap()
+            );
+            assert_eq!(descriptor.source, SourceIdentity::of(source));
+        }
+        assert_eq!(index.lines.len(), snapshots.len());
+        assert_eq!(index.identities.len(), snapshots.len());
+    }
+
+    #[test]
     fn batched_coordinates_match_scalar_lookup_including_invalid_boundaries() {
         for text in [
             "",
@@ -150,14 +288,7 @@ mod tests {
 }
 impl OriginDescriptor {
     pub fn of(sources: &Sources, origin: &Origin) -> Result<Self, ProvenanceError> {
-        let snapshot = sources.snapshot(origin.span.snapshot())?;
-        sources.text(origin.span)?;
-        let range = origin.span.byte_range();
-        Ok(Self {
-            source: SourceIdentity::of(snapshot),
-            start: coordinate(&snapshot.text, range.start).unwrap(),
-            end: coordinate(&snapshot.text, range.end).unwrap(),
-        })
+        SourceIndex::new(sources).descriptor(origin)
     }
 }
 #[derive(Clone, Debug, PartialEq, Eq)]

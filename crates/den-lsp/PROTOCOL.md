@@ -156,8 +156,23 @@ Stages are `starting`, `structural`, `structural-committed`, `symbolic`, `summar
 `structural` performs no BDD proof operations. `structural-committed` includes
 committed removal and component counts; its source-rule warnings retain the existing
 rewrite identity and `coversAllInstances` convention. Structural notes distinguish
-settled heads, dead premises and signed-body subsumption; related supporting rules
-include the settling/unfolding chain. No source edit is authorized by these proofs.
+settled heads, dead premises and signed-body subsumption. Default related locations
+show direct settling/subsuming/unfolded rules, labeled `direct rewrite justification`;
+subsumption notes retain its settled premises. False atoms distinguish no possible ground producer,
+dead/removed producers and no derivation from existing producers. No source edit
+is authorized by these proofs.
+
+For warnings containing structural proofs, `data.evidence` adds
+`structuralDetail: "direct"`, `omittedNotes` and `omittedRelatedLocations` to the
+existing `kind: "rewrite-proof"` and `coversAllInstances`. Counts describe omitted
+distinct direct structural notes/related locations after union for the source
+warning, not omitted proofs or the length of its transitive chain. The default
+caps are eight notes and sixteen related locations, with an omission note when
+truncated. Shared symbolic evidence is not truncated. Finding identities and
+summary inventory are unchanged. Full evidence uses `structuralDetail: "full"`
+and zero omission counts; the CLI requests it with `--verbose`. Full chains are
+computed only on request. An editor expansion command remains a follow-up;
+ordinary publication never expands them.
 Structural changes commit before the same round's symbolic evaluation.
 Producer removals are committed and components rebuilt before negation candidates
 and cycle bounds are attempted. A round with removals therefore skips those stages.

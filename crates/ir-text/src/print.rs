@@ -289,10 +289,13 @@ struct Line {
     text: String,
     origins: BTreeMap<String, Vec<OriginDescriptor>>,
 }
-fn descriptors(sources: &Sources, origins: &[Origin]) -> Result<Vec<OriginDescriptor>> {
+fn descriptors(
+    index: &mut crate::origins::SourceIndex<'_>,
+    origins: &[Origin],
+) -> Result<Vec<OriginDescriptor>> {
     let values = origins
         .iter()
-        .map(|o| OriginDescriptor::of(sources, o).map_err(|e| fail(e.to_string())))
+        .map(|o| index.descriptor(o).map_err(|e| fail(e.to_string())))
         .collect::<Result<BTreeSet<_>>>()?;
     Ok(values.into_iter().collect())
 }
@@ -411,12 +414,18 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
     }
     let reference = |id, context: &Namespace| reference(c, &symbols, id, context);
     let mut lines: Vec<Vec<Line>> = p.layout.files.iter().map(|_| Vec::new()).collect();
+    let mut source_index = crate::origins::SourceIndex::new(p.sources);
     let mut add =
         |id: OccurrenceId, text: String, positions: BTreeMap<String, OccurrenceId>| -> Result<()> {
             let origins = if options.embedded_origins {
                 positions
                     .into_iter()
-                    .map(|(key, id)| Ok((key, descriptors(p.sources, p.provenance.origins(id))?)))
+                    .map(|(key, id)| {
+                        Ok((
+                            key,
+                            descriptors(&mut source_index, p.provenance.origins(id))?,
+                        ))
+                    })
                     .collect::<Result<_>>()?
             } else {
                 BTreeMap::new()

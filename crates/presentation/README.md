@@ -59,6 +59,13 @@ participating occurrences, and places them on source locations. It depends only 
   proved instances. This avoids rescanning the full fixed and residual graph for
   each proof. Removed instances still count toward coverage, while their earlier
   discharge warnings are hidden. Proof order, wording and placement are unchanged.
+- `Placement::rewrite` displays direct structural justification by default: settling
+  producers, absence reasons, subsuming/unfolded definitions and settled premises.
+  It unions evidence per source warning, retaining eight structural notes and
+  sixteen related locations with exact omission counts. Symbolic evidence is
+  unchanged. `RewriteDetail::Full` explicitly expands the retained transitive
+  certificate and removes those display caps; ordinary presentation and internal
+  evidence keys never request that traversal. Finding identities stay unchanged.
 - `summary` builds root-level outcome summaries (backend, selected assumptions, group
   and region outcomes, resource reasons). Resource reasons preserve checker-supplied
   subphase, effective limit and observed demand where available; unknown counts are

@@ -125,7 +125,9 @@ just test-crate denotate-ir-text
 diagnostics grouped by verification: source URI, one-based line/Unicode-scalar column,
 kind, message, notes and labeled related locations. By default only producing rules,
 the checked obligation and upstream origins are expanded; other related entries
-collapse to "+N more". `--verbose` prints all related locations. `--json` retains the previous
+collapse to "+N more". Direct structural rewrite justifications remain visible.
+`--verbose` prints all related locations and requests full structural rewrite
+chains and notes; the default computes only bounded direct evidence. `--json` retains the previous
 `Results: {...}` status summaries with their existing headers and notices.
 
 Detailed progress goes to **stderr** by default, also with `--json`. It reports
@@ -133,7 +135,7 @@ effective limits, source inventory, loading and assumption validation, each sele
 verification's declarations, preparation/admission/checking/presentation, prepared
 sizes, result counts and session reuse. Every phase starts with a flushed line;
 transitions report elapsed time. `--no-progress` disables this checker trace.
-`--verbose` remains a diagnostic-layout option, independent of progress.
+`--verbose` controls diagnostic detail, independent of progress and checking.
 
 Admission additionally reports rounds, stages, remaining ground components with
 negation, blocked atoms and committed rewrites. Upper-bound analysis identifies

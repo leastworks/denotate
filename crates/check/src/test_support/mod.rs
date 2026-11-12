@@ -1,4 +1,8 @@
 //! Opt-in test probes and independent oracles. No frontend dependency.
+/// Count explicit transitive structural evidence requests on this test thread.
+pub fn structural_support_expansions() -> usize {
+    crate::structural::support_expansions()
+}
 pub mod completion;
 pub mod rewrites;
 pub mod sparse;

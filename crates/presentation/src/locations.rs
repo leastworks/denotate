@@ -4,7 +4,7 @@ use denotate_ir::*;
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct RelatedLocation {
     pub span: SourceSpan,
     pub label: String,
@@ -88,6 +88,7 @@ impl Placement<'_> {
             Role::Declaration => 2,
             Role::Obligation => 3,
             Role::RelatedOnly
+            | Role::DirectRewriteProof
             | Role::Condition
             | Role::EnclosingScope
             | Role::BlockingCycle
@@ -134,38 +135,47 @@ impl Placement<'_> {
         // Unlocated builder IR still remains in the root's finding inventory.
         Ok(out)
     }
-    fn contribution_locations(
+    pub(crate) fn contribution_locations(
         &self,
         contributions: &[Contribution],
     ) -> Result<(Vec<(SourceSpan, Role)>, Vec<RelatedLocation>)> {
         let mut current = Vec::new();
         let mut related = Vec::new();
+        let mut occurrences = BTreeSet::new();
+        let mut related_seen = BTreeSet::new();
+        let mut current_indices = BTreeMap::<SourceSpan, usize>::new();
         for contribution in contributions {
+            if !occurrences.insert((contribution.occurrence, contribution.role)) {
+                continue;
+            }
             for origin in self.current.origins(contribution.occurrence) {
                 self.sources.text(origin.span)?;
                 if !matches!(
                     contribution.role,
                     Role::RelatedOnly
+                        | Role::DirectRewriteProof
                         | Role::Condition
                         | Role::EnclosingScope
                         | Role::BlockingCycle
                         | Role::AdmissionAttempt
                 ) {
-                    if let Some((_, role)) = current.iter_mut().find(|(s, _)| *s == origin.span) {
+                    if let Some(index) = current_indices.get(&origin.span) {
+                        let (_, role): &mut (SourceSpan, Role) = &mut current[*index];
                         *role = std::cmp::min(*role, contribution.role);
                     } else {
+                        current_indices.insert(origin.span, current.len());
                         current.push((origin.span, contribution.role));
                     }
                 }
                 let location = RelatedLocation::new(origin.span, contribution.role.label());
-                if !related.contains(&location) {
+                if related_seen.insert(location.clone()) {
                     related.push(location);
                 }
             }
             for origin in self.upstream.origins(contribution.occurrence) {
                 self.sources.text(origin.span)?;
                 let location = RelatedLocation::new(origin.span, "upstream source origin");
-                if !related.contains(&location) {
+                if related_seen.insert(location.clone()) {
                     related.push(location);
                 }
             }

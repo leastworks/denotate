@@ -446,7 +446,7 @@ impl GroundKeyView<'_> {
                 RewriteKind::RedundantProducer => KeyedRewriteKind::RedundantProducer,
             },
             producers: proof
-                .supporting_rules()
+                .direct_rules()
                 .into_iter()
                 .map(|p| self.instance(p.id))
                 .collect::<Result<_>>()?,

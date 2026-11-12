@@ -8,6 +8,18 @@ real program that the current choice serves badly.
 
 ## Measurement
 
+- **Show direct structural justification; expand chains on request.** A source
+  warning can group thousands of ground proofs sharing a long settling chain.
+  Traversing that chain for every proof, then resolving repeated source locations,
+  made presentation dominate a production run. Default warnings show the immediate
+  justification, including settled premises used by subsumption and accurate
+  absence reasons. Bound the union per source warning and disclose omissions;
+  retain full certificates for explicit verbose expansion. Internal structural
+  evidence keys use direct support, while local cache inputs retain the full
+  original dependency closure. All diagnostic identities, checker proofs and
+  limits stay unchanged. Snapshot-local coordinate/hash indexes avoid rescanning
+  the whole source for each displayed location without using newer buffer text.
+
 - **Measure process memory separately from retained payload.** Cache accounting
   cannot explain a process killed during admission. Phase observations distinguish
   RSS, physical footprint, lifetime peaks and sampled span peaks. Optional checker
