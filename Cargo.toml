@@ -21,3 +21,8 @@ serde_json = "=1.0.145"
 
 [profile.release]
 lto = "thin"
+
+# Release code with line tables, for sampling profilers (`just profile-den`).
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"

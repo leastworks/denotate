@@ -52,6 +52,32 @@ If a grammar changes, run `just generate-den` or `just generate-test-dsl` and co
 the generated files. `just generate-den --force` bypasses the local parser cache;
 CI forces generation to check that the committed files are current.
 
+## Profiling
+
+For CPU hot spots, sample the CLI instead of adding trace points. The recipes build
+the `profiling` Cargo profile (release code with line tables, in `target/profiling`)
+and record it with [samply](https://github.com/mstange/samply)
+(`brew install samply` or `cargo install --locked samply`):
+
+```sh
+just profile-den ROOT [CHECK ARGS...]                 # record, then open the Firefox Profiler
+just profile-den-save OUT.json.gz ROOT [CHECK ARGS...] # record only
+samply load OUT.json.gz                               # view a saved recording later
+```
+
+Paths are relative to the repository root, as with `just check-den`. The viewer shows
+a flame graph, an inverted call tree (self time) and a timeline, with Denotate's
+function names, inlined frames and source lines. The CLI's own exit status is
+reported, not treated as a recipe failure, so incomplete or failing checks can be
+profiled. On Linux, sampling may first need
+`sudo sysctl kernel.perf_event_paranoid=1`.
+
+Sampling shows which code is hot. The CLI's progress output and
+`--profile-memory FILE` show which part of the program (phase, component, rule)
+the time and memory belong to; use them together. A saved recording includes the
+command line and local paths: for private programs, share findings such as the top
+functions by self time, not the file.
+
 ## Layout
 
 | Path | What |

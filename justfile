@@ -91,6 +91,20 @@ bench-den-fixed +args:
 bench-den-memory *args:
     cargo +1.93.0 run --release --locked -p denotate-ir-text --example bench_memory -- "$@"
 
+# Sample the .den CLI with samply and open the Firefox Profiler: ROOT [CHECK ARGS...].
+[positional-arguments]
+profile-den +args:
+    @command -v samply >/dev/null || { echo "samply not found: brew install samply, or cargo install --locked samply" >&2; exit 1; }
+    cargo +1.93.0 build --locked --profile profiling -p denotate-ir-text --example check
+    samply record -- target/profiling/examples/check "$@" || echo "check exited with status $?" >&2
+
+# Record the .den CLI without opening a viewer: OUT.json.gz ROOT [CHECK ARGS...]; view with `samply load OUT.json.gz`.
+[positional-arguments]
+profile-den-save out +args:
+    @command -v samply >/dev/null || { echo "samply not found: brew install samply, or cargo install --locked samply" >&2; exit 1; }
+    cargo +1.93.0 build --locked --profile profiling -p denotate-ir-text --example check
+    out="$1"; shift; samply record --save-only --unstable-presymbolicate -o "$out" -- target/profiling/examples/check "$@" || echo "check exited with status $?" >&2
+
 # Export one combined test DSL program: OUT_DIR FILE... [--without-origins].
 [positional-arguments]
 export-test-dsl +args:
