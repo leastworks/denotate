@@ -4,6 +4,95 @@ use std::collections::BTreeSet;
 
 pub(super) use crate::test_support::rewrites::*;
 
+fn assert_discharge_lookup(program: &GroundProgram) {
+    for rule in program.original_rules() {
+        for literal in &rule.body {
+            let occurrence = literal.term.occurrence;
+            assert_eq!(
+                program.discharge(rule.id, occurrence).map(|p| p.id),
+                program
+                    .discharge_scanning_reference(rule.id, occurrence)
+                    .map(|p| p.id),
+            );
+        }
+        // A head occurrence cannot identify a discharged premise.
+        assert!(program.discharge(rule.id, rule.head.occurrence).is_none());
+    }
+}
+
+#[test]
+fn discharge_lookup_handles_removal_only_and_mixed_snapshots() {
+    for discharges in [false, true] {
+        let mut c = Corpus::new();
+        let t = rel(&mut c, "t", true);
+        let a = rel(&mut c, "a", false);
+        let b = rel(&mut c, "b", false);
+        rule(&mut c, a, &[(b, true)]);
+        rule(&mut c, b, &[(a, true)]);
+        let mut outputs = Vec::new();
+        for i in 0..64 {
+            let out = rel(&mut c, &format!("out{i}"), false);
+            outputs.push(atom(out));
+            rule(&mut c, out, &[(t, false)]);
+            rule(&mut c, out, &[(t, false), (a, false)]);
+        }
+        if discharges {
+            let x = rel(&mut c, "x", false);
+            let y = rel(&mut c, "y", false);
+            rule(&mut c, x, &[(t, false), (y, true)]);
+            rule(&mut c, y, &[(t, true), (x, true)]);
+        }
+        let limits = Limits::default();
+        let raw = GroundProgram::prepare(&c, &Domains::new(), &limits).unwrap();
+        let admitted = raw.clone().admit(&limits).unwrap();
+        assert_eq!(
+            admitted
+                .rewrite_proofs()
+                .filter(|p| p.kind == RewriteKind::RedundantProducer)
+                .count(),
+            64,
+        );
+        assert_eq!(
+            admitted
+                .rewrite_proofs()
+                .any(|p| matches!(p.kind, RewriteKind::Discharge { .. })),
+            discharges,
+        );
+        for snapshot in [&raw, &admitted, &admitted.clone()] {
+            assert_discharge_lookup(snapshot);
+            for proof in snapshot.rewrite_proofs() {
+                if let RewriteKind::Discharge { literal_occurrence } = proof.kind {
+                    // The right occurrence on the wrong rule must not match.
+                    let other = snapshot
+                        .original_rules()
+                        .find(|r| r.id != proof.candidate.rule.id)
+                        .unwrap();
+                    assert!(snapshot.discharge(other.id, literal_occurrence).is_none());
+                }
+            }
+        }
+        for present in [false, true] {
+            let replay = admitted
+                .evaluate(present.then(|| atom(t)), &limits)
+                .unwrap();
+            for out in &outputs {
+                assert_eq!(replay.fact(out).unwrap(), FactState::Settled(present));
+            }
+            assert_eq!(
+                admitted
+                    .atoms()
+                    .filter_map(|a| replay.derivation(a))
+                    .any(|d| {
+                        matches!(&d.evidence, Evidence::Derived { premises, .. }
+                        if premises.iter().any(|p| matches!(p, PremiseEvidence::Discharged { .. })))
+                    }),
+                discharges,
+            );
+        }
+        assert_eq!(raw.rewrite_proofs().count(), 0);
+    }
+}
+
 #[test]
 fn descending_bounds_preserve_self_support_and_do_not_use_least_fixed_point() {
     let mut c = Corpus::new();
@@ -311,6 +400,8 @@ fn newly_settled_components_feed_only_the_next_snapshot() {
     rule(&mut c, y, &[(a, true), (x, true)]);
     let raw = GroundProgram::prepare(&c, &Domains::new(), &Limits::default()).unwrap();
     let p = raw.clone().admit(&Limits::default()).unwrap();
+    assert_discharge_lookup(&raw);
+    assert_discharge_lookup(&p);
     assert!(p.is_admitted());
     let snapshots: BTreeSet<_> = p.rewrite_proofs().map(|p| p.snapshot).collect();
     assert_eq!(snapshots.len(), 2);
@@ -325,6 +416,8 @@ fn newly_settled_components_feed_only_the_next_snapshot() {
                 ..Limits::default()
             })
             .unwrap();
+        assert_discharge_lookup(&p);
+        assert_discharge_lookup(&p.clone());
         if p.admission_limit().is_some() && p.rewrite_proofs().count() == 2 {
             partial = true;
             assert!(p.component_for(&atom(a)).unwrap().blocked_by.is_empty());

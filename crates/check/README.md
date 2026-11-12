@@ -225,6 +225,14 @@ Conservative rewrites remove a literal or rule only with a proof (for example, a
 negation that is redundant under the other premises and W). They are reported as
 rewrite findings with their coverage; they never authorize source edits.
 
+Concrete replay indexes discharge proofs by ground rule and literal occurrence.
+The index stores only proof IDs alongside the committed rewrite state, including
+proofs installed in reconstructed local runtimes. Removal proofs add no entries.
+Cloning a snapshot preserves its lookup; transactional admission publishes the
+updated graph and index together. This metadata changes neither semantic keys nor
+logical work charges. Discharge applicability still builds and checks its condition
+context under the caller's budget on each validation.
+
 ## Limits and cancellation
 
 `Limits::profile` / `OperationalLimits::profile` optionally observe stage boundaries

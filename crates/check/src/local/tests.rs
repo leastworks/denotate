@@ -2,6 +2,100 @@ use super::*;
 use crate::test_support::rewrites::{atom, rel, rule, subsets};
 
 #[test]
+fn reconstructed_runtime_indexes_discharge_proofs_for_replay() {
+    let mut corpus = Corpus::new();
+    let t = rel(&mut corpus, "t", true);
+    let a = rel(&mut corpus, "a", false);
+    let b = rel(&mut corpus, "b", false);
+    let odd = rel(&mut corpus, "odd", false);
+    rule(&mut corpus, a, &[(t, false), (b, true)]);
+    rule(&mut corpus, b, &[(t, true), (a, true)]);
+    rule(&mut corpus, odd, &[(a, false), (odd, true)]);
+    let mut keys = SemanticKeys::default();
+    for relation in corpus.relations() {
+        keys.bind_relation(
+            &corpus,
+            relation.id,
+            RelationKey::Named(QualifiedKey::new("local-replay", relation.name.as_str())),
+        )
+        .unwrap();
+    }
+    for (i, rule) in corpus.rules().enumerate() {
+        let key = RuleKey::Library(QualifiedKey::new("local-replay", format!("r{i}")));
+        keys.bind_rule(&corpus, rule.id, key.clone()).unwrap();
+        for (i, atom) in std::iter::once(&rule.head)
+            .chain(rule.body.iter().map(|l| l.atom()))
+            .enumerate()
+        {
+            keys.bind_occurrence(
+                &corpus,
+                atom.id().into(),
+                OccurrenceKey::Library {
+                    rule: key.clone(),
+                    atom: i,
+                    argument: None,
+                },
+            )
+            .unwrap();
+        }
+    }
+    let limits = Limits::default();
+    let operations = (&limits).into();
+    let request =
+        CheckRequest::all_obligations(&corpus, &keys, &Domains::new(), &[], &limits).unwrap();
+    let RequestPreparation::Complete(prepared) =
+        request.prepare(&corpus, &keys, &operations).unwrap()
+    else {
+        panic!("preparation exhausted");
+    };
+    let prepared = prepared.admit(&operations).unwrap();
+    let LocalCheckOutcome::Complete(report) = prepared.verify_local(&operations).unwrap() else {
+        panic!("checking exhausted");
+    };
+    let input = &report
+        .queries
+        .values()
+        .find(|q| q.input.completion_context.is_some())
+        .unwrap()
+        .input;
+    let runtime = owned::Runtime::new(input, &mut Budget::new(&limits), true).unwrap();
+    assert!(runtime.program.rewrite_proofs().next().is_some());
+    for program in [&runtime.program, &runtime.program.clone()] {
+        for rule in program.original_rules() {
+            for literal in &rule.body {
+                assert_eq!(
+                    program
+                        .discharge(rule.id, literal.term.occurrence)
+                        .map(|p| p.id),
+                    program
+                        .discharge_scanning_reference(rule.id, literal.term.occurrence)
+                        .map(|p| p.id),
+                );
+            }
+        }
+        let input_atom = &runtime.atoms[&AtomKey::from_atom(&keys, &atom(t)).unwrap()];
+        let output_atom = &runtime.atoms[&AtomKey::from_atom(&keys, &atom(a)).unwrap()];
+        let mut replayed_discharge = false;
+        for world in subsets(&program.input_atoms().cloned().collect::<Vec<_>>()) {
+            let present = world.contains(input_atom);
+            let replay = program.evaluate(world, &limits).unwrap();
+            assert_eq!(
+                replay.fact(output_atom).unwrap(),
+                FactState::Settled(present)
+            );
+            replayed_discharge |= program
+                .atoms()
+                .filter_map(|a| replay.derivation(a))
+                .any(|d| {
+                    matches!(&d.evidence, Evidence::Derived { premises, .. }
+                    if premises.iter().any(|p| matches!(p, PremiseEvidence::Discharged { .. })))
+                });
+        }
+        assert!(replayed_discharge);
+    }
+}
+
+#[test]
 fn local_missing_premise_is_an_outer_error_including_blocked_components() {
     for blocked in [false, true] {
         let mut corpus = Corpus::new();

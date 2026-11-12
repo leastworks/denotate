@@ -141,8 +141,23 @@ pub(crate) struct Rewrites {
     pub dropped: BTreeSet<GroundRuleId>,
     originals: BTreeMap<GroundRuleId, GroundRule>,
     proofs: Vec<RewriteProof>,
+    // Snapshot-local lookup metadata, never semantic keys or cached query input.
+    // Removal proofs occupy no entries; a replay with no discharges misses cheaply.
+    discharges: BTreeMap<(GroundRuleId, OccurrenceId), RewriteProofId>,
     pub inconclusive: Option<Inconclusive>,
     nodes: usize,
+}
+
+impl Rewrites {
+    fn push_proof(&mut self, proof: RewriteProof) {
+        if let RewriteKind::Discharge { literal_occurrence } = proof.kind {
+            // Preserve the linear lookup's first-match behavior.
+            self.discharges
+                .entry((proof.candidate.rule.id, literal_occurrence))
+                .or_insert(proof.id);
+        }
+        self.proofs.push(proof);
+    }
 }
 
 impl GroundProgram {
@@ -162,7 +177,7 @@ impl GroundProgram {
             .originals
             .insert(original.id, original.clone());
         let snapshot = self.preparation;
-        self.rewrites.proofs.push(RewriteProof {
+        self.rewrites.push_proof(RewriteProof {
             id,
             snapshot,
             kind: RewriteKind::Discharge {
@@ -211,6 +226,18 @@ impl GroundProgram {
         self.rewrites.inconclusive
     }
     pub(crate) fn discharge(
+        &self,
+        rule: GroundRuleId,
+        occurrence: OccurrenceId,
+    ) -> Option<&RewriteProof> {
+        self.rewrites
+            .discharges
+            .get(&(rule, occurrence))
+            .and_then(|id| self.rewrite_proof(*id))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn discharge_scanning_reference(
         &self,
         rule: GroundRuleId,
         occurrence: OccurrenceId,
@@ -616,7 +643,7 @@ impl GroundProgram {
                         .retain(|l| l.term.occurrence != literal_occurrence),
                 }
                 next.rewrites.nodes += proof.nodes();
-                next.rewrites.proofs.push(proof);
+                next.rewrites.push_proof(proof);
             }
             crate::graph::analyze(&mut next, budget)?;
             *self = next;

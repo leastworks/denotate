@@ -99,6 +99,16 @@ The up-front index can cost more than filtered scans for a single tiny query in 
 large program; there is no size-based bypass heuristic. Measure that setup cost
 alongside the savings from repeated queries and deeper original closures.
 
+Concrete replay looks up discharge proofs in a map keyed by ground rule instance
+and literal occurrence, maintained with the rewrite proofs on both admission and
+local-runtime installation. The map holds only proof IDs and is empty when all
+rewrites are producer removals. Lookup is logarithmic in the number of discharged
+premises, replacing an uncharged scan over every rewrite proof for each replayed
+literal. It adds O(discharged premises) physical metadata, with no new allowance,
+semantic key or cached query input; deterministic charges and receipts are unchanged.
+Condition-context construction in discharge validation and charged proof scans
+remain unchanged. Reusing those requires a separate accounting decision.
+
 ### Memory profiling
 
 Phase progress from `check-den` and the `.den` editor includes best-effort process
