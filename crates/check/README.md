@@ -173,6 +173,15 @@ completion also includes any discharge-proof context. The result's request conte
 and counterexample replay are assembled fresh, so reused work cannot carry a previous
 verification's identity into the current result.
 
+Local query construction lazily indexes original producers and rewrite proofs by
+head once per verification invocation. A worklist follows only the query's original
+dependency closure, including dropped alternatives and upper-bound certificates;
+each reached original and proof is projected once per query. The index borrows the
+current graph and contains no semantic keys or owned evidence. It is released after
+the local queries, never cached in a session or included in a receipt. Its physical
+storage is proportional to original rules and proofs; it does not consume the BDD
+condition allowance. `LocalMetrics.keys` includes the first query's index build.
+
 ## Coverage
 
 `Verification.coverage` and `ScopedResults.coverage` contain per-obligation summaries:

@@ -11,6 +11,8 @@ use std::{
 };
 
 mod input;
+#[cfg(any(test, feature = "test-support"))]
+mod input_reference;
 mod memo;
 mod owned;
 pub use input::*;
@@ -133,6 +135,10 @@ impl PreparedCheck<'_> {
             ..LocalMetrics::default()
         };
         let mut unique = BTreeSet::new();
+        // Borrow this invocation's committed graph, including original fixed
+        // evidence. Checks with no local queries never allocate the index;
+        // general-assumption contexts bypass this path above.
+        let input_index = std::cell::LazyCell::new(|| LocalInputIndex::new(&self.program));
         let mut groups = Vec::new();
         let mut completions = BTreeMap::new();
         let ordered = self
@@ -183,7 +189,8 @@ impl PreparedCheck<'_> {
             };
             let start = Instant::now();
             let input_stage = limits.progress.nested("query-input");
-            let input = self.local_input(scope.clone(), &cone, &presentation.context)?;
+            let input =
+                self.local_input(scope.clone(), &cone, &presentation.context, &input_index)?;
             drop(input_stage);
             metrics.keys += start.elapsed();
             metrics.cone_atoms += input.facts.len();
@@ -296,7 +303,12 @@ impl PreparedCheck<'_> {
                 Ok(cone) => {
                     let start = Instant::now();
                     let input_stage = limits.progress.nested("query-input");
-                    let input = self.local_input(scope.clone(), &cone, &presentation.context)?;
+                    let input = self.local_input(
+                        scope.clone(),
+                        &cone,
+                        &presentation.context,
+                        &input_index,
+                    )?;
                     drop(input_stage);
                     metrics.keys += start.elapsed();
                     metrics.cone_atoms += input.facts.len();
@@ -385,6 +397,7 @@ impl PreparedCheck<'_> {
             )?;
             completions.insert(component.id, completion);
         }
+        drop(input_index);
         metrics.unique_atoms = unique.len();
         let report = PropertyReport {
             whole_program_admitted: self.program.is_admitted(),

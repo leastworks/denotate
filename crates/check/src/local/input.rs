@@ -141,12 +141,39 @@ pub fn validate_local_constraints(constraints: &[InputConstraint]) -> Result<()>
     }
     Ok(())
 }
+
+/// Physical lookup only: borrowed graph handles, no projected keys or owned
+/// evidence. Built once on the first local query and dropped with this check.
+/// Its O(original rules + rewrite proofs) storage is bounded by the prepared
+/// graph, not session retention or the condition-node allowance.
+pub(super) struct LocalInputIndex<'p> {
+    originals: BTreeMap<&'p GroundAtom, Vec<&'p GroundRule>>,
+    proofs: BTreeMap<&'p GroundAtom, Vec<&'p RewriteProof>>,
+}
+impl<'p> LocalInputIndex<'p> {
+    pub(super) fn new(program: &'p GroundProgram) -> Self {
+        let mut originals = BTreeMap::<_, Vec<_>>::new();
+        for rule in program.original_rules() {
+            originals.entry(&rule.head.atom).or_default().push(rule);
+        }
+        let mut proofs = BTreeMap::<_, Vec<_>>::new();
+        for proof in program.rewrite_proofs() {
+            proofs
+                .entry(&proof.candidate.rule.head.atom)
+                .or_default()
+                .push(proof);
+        }
+        Self { originals, proofs }
+    }
+}
+
 impl PreparedCheck<'_> {
     pub(super) fn local_input(
         &self,
         scope: LocalScope,
         cone: &DependencyCone,
         context: &ConditionContext,
+        index: &LocalInputIndex<'_>,
     ) -> Result<LocalInput> {
         let atom =
             |a: &GroundAtom| AtomKey::from_atom(self.semantic_keys, a).map_err(CheckError::Keys);
@@ -173,32 +200,38 @@ impl PreparedCheck<'_> {
             .collect::<Result<_>>()?;
         // Original producer closure carries removed literals and dropped alternatives.
         // Include forwarding certificates too: their dependencies can leave the final cone.
-        let mut needed = cone.facts.clone();
+        let mut needed: BTreeSet<_> = cone.facts.iter().collect();
+        let mut pending: Vec<_> = cone.facts.iter().collect();
         let mut originals = BTreeMap::new();
-        let mut rewrites = BTreeSet::new();
-        loop {
-            let before = (needed.len(), originals.len(), rewrites.len());
-            for rule in self.program.original_rules() {
-                if needed.contains(&rule.head.atom) {
+        let mut rewrite_keys = BTreeMap::new();
+        while let Some(head) = pending.pop() {
+            if let Some(rules) = index.originals.get(head) {
+                for rule in rules {
                     let key = self.key_view().instance(rule.id)?;
                     originals.insert(key, self.key_view().original(rule.id)?);
-                    needed.extend(rule.body.iter().map(|l| l.term.atom.clone()));
+                    for literal in &rule.body {
+                        if needed.insert(&literal.term.atom) {
+                            pending.push(&literal.term.atom);
+                        }
+                    }
                 }
             }
-            for proof in self.program.rewrite_proofs() {
-                if needed.contains(&proof.candidate.rule.head.atom) {
-                    rewrites.insert(self.key_view().rewrite(proof.id)?);
+            if let Some(proofs) = index.proofs.get(head) {
+                for proof in proofs {
+                    rewrite_keys.insert(proof.id, (*proof, self.key_view().rewrite(proof.id)?));
                     for producer in std::iter::once(&proof.candidate)
                         .chain(&proof.producers)
                         .chain(proof.upper_bounds.iter().flat_map(|b| b.producers.iter()))
                     {
-                        needed.insert(producer.rule.head.atom.clone());
-                        needed.extend(producer.rule.body.iter().map(|l| l.term.atom.clone()));
+                        for atom in std::iter::once(&producer.rule.head.atom)
+                            .chain(producer.rule.body.iter().map(|l| &l.term.atom))
+                        {
+                            if needed.insert(atom) {
+                                pending.push(atom);
+                            }
+                        }
                     }
                 }
-            }
-            if before == (needed.len(), originals.len(), rewrites.len()) {
-                break;
             }
         }
         let facts = cone
@@ -211,7 +244,7 @@ impl PreparedCheck<'_> {
             .intersection(&self.program.inputs)
             .map(&atom)
             .collect::<Result<BTreeSet<_>>>()?;
-        let dependency_atoms = needed.iter().map(&atom).collect::<Result<Vec<_>>>()?;
+        let dependency_atoms = needed.into_iter().map(&atom).collect::<Result<Vec<_>>>()?;
         let sorts: BTreeSet<_> = dependency_atoms
             .iter()
             .flat_map(|a| a.arguments.iter().map(|c| c.sort.clone()))
@@ -232,10 +265,11 @@ impl PreparedCheck<'_> {
             LocalScope::Region(_) => None,
         };
         let completion_context = if matches!(scope, LocalScope::Region(_)) {
-            let proofs = self
-                .program
-                .rewrite_proofs()
-                .filter(|p| {
+            // A cone rule's head is in the closure above. Reuse its projected
+            // proof key instead of rescanning all program proofs for each region.
+            let proofs = rewrite_keys
+                .values()
+                .filter(|(p, _)| {
                     matches!(p.kind, RewriteKind::Discharge { .. })
                         && cone.rules.contains(&p.candidate.rule.id)
                 })
@@ -268,9 +302,9 @@ impl PreparedCheck<'_> {
                         .collect::<Result<_>>()?,
                     proofs: proofs
                         .into_iter()
-                        .map(|p| {
+                        .map(|(p, key)| {
                             Ok((
-                                self.key_view().rewrite(p.id)?,
+                                key.clone(),
                                 (
                                     context.export(
                                         &p.candidate.condition,
@@ -315,7 +349,7 @@ impl PreparedCheck<'_> {
                 })
                 .collect::<Result<_>>()?,
             original_dependencies: originals,
-            rewrites,
+            rewrites: rewrite_keys.into_values().map(|(_, key)| key).collect(),
             domains: self
                 .request
                 .domains

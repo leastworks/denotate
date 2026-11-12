@@ -94,6 +94,12 @@ post-admission rebuild. Local cache inputs still own complete relevant schemas,
 bodies and dependencies: stable membership keys alone cannot establish unchanged
 meaning. Only stable keys cross snapshots; compact handles stay within the run.
 
+Local query inputs close original dependencies through an invocation-local index
+of producers and rewrite proofs by head. It borrows the committed graph, including
+fixed evidence and dropped originals, and projects only reached content. The first
+local query builds it; it is released after the local queries. Neither that index
+nor its handles enter session values, semantic identity or receipts.
+
 The session's Salsa fold query retains only semantic keys: possible tuples, original
 rule-instance substitutions and the chosen producer/order of each true tuple. On the
 next snapshot it reconstructs the evidence with current occurrences. Its explicit

@@ -84,6 +84,21 @@ removal still clones covering producer summaries into its proof, so evidence
 storage can remain quadratic. BDD result-node traffic and retained-node snapshots
 do not measure that metadata storage.
 
+Local query construction builds one borrowed head index for original producers and
+rewrite proofs on the first query of each verification invocation. Original closure
+then visits reached heads with a worklist, rather than rescanning every rule and
+proof until no dependencies change. Discharge-context projection reuses the reached
+proof keys. The `LocalInput` value, cache identity and logical receipts are unchanged.
+Index storage is physical graph metadata, O(original rules + proofs), released after
+the local queries; it is not session retention or BDD condition storage and adds no
+new limit. Process memory profiling includes it, and `LocalMetrics.keys` includes
+construction on the first query. Constraint/domain filtering and the global input
+universe required by discharge completion are unchanged. Emptiness and coverage
+do not use this local-input path.
+The up-front index can cost more than filtered scans for a single tiny query in a
+large program; there is no size-based bypass heuristic. Measure that setup cost
+alongside the savings from repeated queries and deeper original closures.
+
 ### Memory profiling
 
 Phase progress from `check-den` and the `.den` editor includes best-effort process

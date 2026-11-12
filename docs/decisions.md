@@ -87,6 +87,15 @@ real program that the current choice serves badly.
   This does not change the symbolic fold, upper bounds or rewrite policy. Covering
   producer summaries are still cloned per successful proof; reducing that separate
   evidence cost requires a later change.
+- **Index original dependencies within a checking invocation.** Repeated full
+  scans made local query construction depend on the size of unrelated fixed
+  evidence and on the depth of dependencies restored by rewrite proofs. A borrowed
+  head index and worklist recover exactly the same originals, dropped alternatives
+  and certificate dependencies, projecting each reached item once per query.
+  Keep the index local to the invocation and release it after the local queries:
+  retaining another keyed copy of the entire graph would reverse the memory savings
+  from on-demand keys. This changes neither cache inputs nor logical receipts;
+  the graph-sized index is physical metadata, not BDD storage or a session cache.
 - **Assumption cones may be stratified after grounding.** Generic library relations
   can contain a relation-level negative cycle whose ends are used by different
   tuples. Requiring relation stratification forced authors to split those relations

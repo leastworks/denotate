@@ -5,6 +5,28 @@ mod corpus;
 use crate::FreshSession;
 use denotate_test_dsl::{attribution::SourceView, presentation};
 
+pub(super) fn assert_reference_inputs(
+    prepared: &PreparedCheck<'_>,
+    report: &LocalCheckedReport<'_>,
+    limits: &Limits,
+) {
+    let context = prepared.program().condition_context(limits).unwrap();
+    for (scope, artifact) in &report.queries {
+        let roots = artifact
+            .input
+            .roots
+            .iter()
+            .map(|a| prepared.key_view().bind_atom(a).unwrap());
+        let cone = prepared.program().dependency_cone(roots, limits).unwrap();
+        assert_eq!(
+            artifact.input,
+            prepared
+                .local_input_scanning_reference(scope.clone(), &cone, &context)
+                .unwrap()
+        );
+    }
+}
+
 pub(super) fn query_inputs(source: &str) -> BTreeMap<LocalScope, LocalInput> {
     let (_, _, p) = lower(source);
     let l = limits();
@@ -12,6 +34,7 @@ pub(super) fn query_inputs(source: &str) -> BTreeMap<LocalScope, LocalInput> {
     let LocalCheckOutcome::Complete(r) = FreshSession.verify(&g, &(&l).into()).unwrap() else {
         panic!()
     };
+    assert_reference_inputs(&g, &r, &l);
     r.queries.into_iter().map(|(k, q)| (k, q.input)).collect()
 }
 
@@ -32,6 +55,7 @@ fn compare(source: &str) {
     else {
         panic!("local exhausted")
     };
+    assert_reference_inputs(&prepared, &local, &l);
     assert_eq!(
         global.results.value, local.checked.results.value,
         "{source}"
@@ -63,6 +87,7 @@ fn compare(source: &str) {
         else {
             panic!("cached exhausted")
         };
+        assert_reference_inputs(&cached_prepared, &cached, &l);
         assert_eq!(cached.checked.results, local.checked.results);
         assert_eq!(
             render(&cached.checked.verification),
