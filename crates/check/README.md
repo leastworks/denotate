@@ -39,7 +39,11 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    Per-operation BDD limits in individual proof attempts are recoverable skips;
    shared phases and global exhaustion still stop admission. Skips keep their
    work charges, release temporary retained storage, and retry only after a
-   relevant rewrite changes the graph or a dependent meaning. See
+   relevant rewrite changes their inputs. Coverage and removal compare exact
+   producers and settled premises, including edits to settled premise cones;
+   blocked-only dependency changes do not retry them. Bounds and discharge retain
+   conservative graph invalidation. Retry comparison is part of the atomic commit.
+   See
    [checker policies](../../docs/checker-policies.md#re-scoring) for the boundaries.
 4. **Concrete replay.** `evaluate(present_inputs)` runs admitted components on a
    complete input snapshot (omitted tuples are absent; observations violating W are

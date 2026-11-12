@@ -143,3 +143,110 @@ fn admission_skips_survive_reuse_and_warm_edits_with_current_diagnostics() {
         assert_eq!(current, run(&p, Some(&mut warm)));
     }
 }
+
+#[test]
+fn precise_retries_agree_fresh_cold_warm_after_dependency_and_source_edits() {
+    let base = "input p(); input q(); input r(); input s(); input t(); input extra();
+relation a(); relation b(); relation x(); relation y(); relation u(); relation v(); relation wide();
+a():-p(),q(),!b(); b():-r(),s(),!x(),!a(); b():-t(),!x(),!a();
+x():-p(),!y(); y():-!p(),!x(); u():-!v(); v():-!u();
+wide():-!p(); wide():-!q(); wide():-!r(); wide():-!s(); wide():-!t(); wide():-extra(); wide():-a(),u();
+relation absent(); obligation no_absent:empty(absent);
+verification first{assumptions:[];obligations:[no_absent];}
+verification second{assumptions:[];obligations:[no_absent];}";
+    let base = format!(
+        "sort S; const {}: S; input choice(item:S); wide():-choice(X);\n{base}",
+        (0..16)
+            .map(|i| format!("c{i}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    let mut warm = Session::default();
+    for (revision, text) in [
+        base.to_owned(),
+        format!("// moved\n{base}"),
+        base.replace("wide():-a(),u()", "wide():-u(); wide():-a()"),
+        base.to_owned(),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let file = SourceFile::new(
+            format!("file:///revision-{revision}/retry.den"),
+            revision as u64,
+            text,
+        );
+        let p = load(
+            &ProgramMembership::single("root", [file.uri.clone()]),
+            &[file],
+        )
+        .unwrap();
+        let limits = Limits {
+            max_bdd_tasks: 8,
+            ..Limits::default()
+        };
+        let ops = (&limits).into();
+        let run = |mut session: Option<&mut Session>| {
+            let fixed = session.as_deref_mut().map(|s| {
+                s.prepare_fixed(&p.corpus, &p.keys, &p.domains, &limits)
+                    .unwrap()
+            });
+            let mut out = Vec::new();
+            for (_, request) in p.verification_requests(&limits).unwrap() {
+                let prepared = if let Some(fixed) = &fixed {
+                    session
+                        .as_deref_mut()
+                        .unwrap()
+                        .prepare_with_fixed(&request, &p.corpus, &p.keys, &ops, fixed)
+                        .unwrap()
+                } else {
+                    request.prepare(&p.corpus, &p.keys, &ops).unwrap()
+                };
+                let RequestPreparation::Complete(prepared) = prepared else {
+                    panic!("preparation")
+                };
+                let events = RefCell::new(Vec::new());
+                let prepared = prepared
+                    .admit_with_progress(&ops, Some(&|e| events.borrow_mut().push(e.clone())))
+                    .unwrap();
+                assert!(prepared.program().admission_limit().is_none());
+                if events.borrow().last().unwrap().stage != "reused" && revision != 2 {
+                    let failures = events
+                        .borrow()
+                        .iter()
+                        .filter(|e| {
+                            e.skipped
+                                .as_ref()
+                                .is_some_and(|s| s.kind == AdmissionAttemptKind::Coverage)
+                        })
+                        .count();
+                    assert_eq!(
+                        failures, 1,
+                        "one failed coverage across several graph commits"
+                    );
+                }
+                let checked = if let Some(s) = session.as_deref_mut() {
+                    s.verify(&prepared, &ops).unwrap()
+                } else {
+                    prepared.verify_local(&ops).unwrap()
+                };
+                let LocalCheckOutcome::Complete(report) = checked else {
+                    panic!("checking")
+                };
+                let shown = presentation::present(&p, &report.checked).unwrap();
+                let diagnostics:Vec<_> = shown.diagnostics.iter().map(|d|json!({"message":d.message,"notes":d.notes,"data":d.data(&p.keys).unwrap(),"primary":d.primary.byte_range(),"related":d.related.iter().map(|r|json!({"range":r.span.byte_range(),"label":r.label})).collect::<Vec<_>>()})).collect();
+                out.push((
+                    report.checked.results.value,
+                    json!({"status":shown.status,"diagnostics":diagnostics}),
+                ));
+            }
+            out
+        };
+        let fresh = run(None);
+        let cold = run(Some(&mut Session::default()));
+        let current = run(Some(&mut warm));
+        assert_eq!(fresh, cold);
+        assert_eq!(cold, current);
+        assert_eq!(current, run(Some(&mut warm)));
+    }
+}

@@ -809,8 +809,9 @@ impl GroundProgram {
             next.rewrites.push_proof(proof);
         }
         crate::graph::analyze(&mut next, budget)?;
+        let invalidated = attempts.invalidated(self, &next, &changed, budget)?;
         *self = next;
-        attempts.invalidate(&changed);
+        attempts.invalidate(&invalidated);
         Ok(())
     }
 

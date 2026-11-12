@@ -151,12 +151,28 @@ Failures in shared symbolic evaluation or summaries, total work/storage limits,
 deadlines and cancellation still stop the whole admission pass. No pending batch
 is salvaged on these failures. Local skips allow independent proofs to commit.
 Retry tracking uses ground identities stable within the preparation, not changing
-component handles. Before each successful commit, it follows the old graph's
-dependencies of both signs from rewritten heads. A skipped attempt is invalidated
-when its head is reached; this conservatively includes changes to exact producers,
-settled guards, component membership and external premises feeding bounds. The
-invalidation work is charged and can itself stop admission globally. No retry cache
-crosses preparations, and no BDD values are retained for retry detection.
+component handles. Bounds and discharge keep conservative invalidation: any rewritten
+head in their old dependency cone invalidates them, through either sign and even
+when an SCC splits. Coverage and removal use a narrower comparison after the
+prospective graph rebuild. Coverage retries when an exact producer enters or leaves,
+its settled body changes, or a previously settled head is rewritten in its premise
+cone. Removal also retries when its own settled premises change. Rewriting a blocked
+premise that stays blocked does not change the summary condition. Comparing current
+bodies catches input-guard discharge even when the producer's rule ID is unchanged.
+
+A single scan shares coverage-change detection across failed attempts for each head;
+there is no per-candidate copy of its wide producer set. Reader closures are built
+only when needed, from pre-commit edges. Metadata work is O(rules + dependencies +
+visited premises + skipped attempts), apart from ordered-map/set lookup costs. It
+is charged and can stop admission globally before the commit. Unchanged skips keep
+their original reason and consumed work; neither graph nor retry invalidation is
+partially published if the rebuild or comparison exhausts. No retry cache crosses
+preparations, and no BDD values are retained for retry detection.
+
+Admission preserves input variables and their prepared order, selected W and limits.
+Unchanged summary operands repeat the same BDD work, while the available preflight
+allowance can only decrease. Input/order changes defensively invalidate all skips.
+The invariant and the outside-W guard case are recorded in [decisions](decisions.md).
 
 Outstanding skip records travel with the admitted graph and survive shared
 admission reuse. Reporting projects current semantic keys and locations. Only skips

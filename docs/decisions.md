@@ -124,11 +124,32 @@ real program that the current choice serves badly.
   shared evaluation/summaries still stop admission and discard the pending batch.
   Failed preflights consume their task allowance plus one stopping step; a preflight
   constrained by remaining work (including a tie with the task cap) reports global
-  work exhaustion. Retry tracking follows both signs of dependencies from changed
-  producer heads through the pre-commit graph, including old SCC members. It may
-  retry conservatively but cannot miss changed external premises or component bounds.
+  work exhaustion. Bounds and discharge retries follow both signs of dependencies
+  from changed producer heads through the pre-commit graph, including old SCC members.
   Current skips accompany reused admission and explain only their own unresolved
   components; a downstream skip cannot label an upstream cycle as exhausted.
+- **Retry coverage and removal only when their summary inputs can change.**
+  A rewrite preserves meaning under the selected assumptions W, but can change
+  unrestricted conditions outside W (for example, dropping `!value(b)` from
+  `value(a), !value(b)` when W forbids both). An already settled atom has no blocked
+  dependency. Changes inside blocked regions therefore cannot change its condition:
+  they can only settle more atoms. Changes to already settled producer heads can
+  affect conditions throughout their reader cone, through either polarity.
+  After each tentative graph rebuild, compare exact-producer membership and the
+  settled premises of their current bodies. Also check whether those premises
+  depend on a rewritten, previously settled head. Removal retries additionally
+  compare the candidate's own settled premises. Rule identity alone is insufficient:
+  an exact producer on a blocked head can lose an input guard without changing ID.
+  Settled premises entering a summary always invalidate it; changes confined to
+  premises that remain blocked do not. Obsolete attempts are discarded.
+  The input universe, order, W and operation limits remain fixed during admission;
+  rewrites change bodies and edges, never inputs or their prepared key order.
+  Identical ordered operands therefore give the same BDD operation, with an equal
+  or smaller remaining-work preflight allowance. Repeating a local failure adds
+  nothing. A defensive input/order comparison invalidates every skip if a future
+  rebuild changes this invariant. No BDD fingerprints or cross-run cache are used.
+  Bounds and discharge retain conservative invalidation. Retry analysis is charged
+  and finishes before committing either the graph or the retry state.
 - **Index original dependencies within a checking invocation.** Repeated full
   scans made local query construction depend on the size of unrelated fixed
   evidence and on the depth of dependencies restored by rewrite proofs. A borrowed

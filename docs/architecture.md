@@ -88,8 +88,11 @@ another request's context.
 Completed admission includes outstanding local proof-skip records, whose identities
 are bound to the same prepared graph. Reuse carries those records and their logical
 receipts; presentation projects current semantic keys and origins. Invocation-local
-retry tracking keeps no BDD cache and uses dependencies from the graph before a
-commit to invalidate attempts affected by rewrites, even when an SCC splits.
+retry tracking keeps no BDD cache. It uses pre-commit edges for bounds/discharge
+invalidation and for changes to settled conditions. Coverage/removal also compare
+producer membership and settled premises across the tentative rebuild, so blocked
+changes that leave their inputs unchanged need no retry. This comparison finishes
+before committing the graph or invalidating attempts, even when an SCC splits.
 
 Semantic indexing shares source schemas and declaration bindings across those
 contexts. `GroundKeyView` projects atom, instance, component and rewrite keys from
