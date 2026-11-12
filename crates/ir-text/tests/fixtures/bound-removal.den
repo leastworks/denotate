@@ -1,0 +1,31 @@
+// Neutral example: a value is visible only once retained. Two independent
+// reasons can retain it: a requirement or coverage of the permitted kinds.
+sort Kind;
+const p, q: Kind;
+sort Value;
+const ten: Value;
+input kind(k: Kind);
+input received(v: Value);
+relation visible(v: Value);
+relation term_a();
+relation unsat_a();
+relation term_c();
+relation unsat_c();
+relation required();
+relation kept();
+relation possible_without();
+visible(V) :- received(V), kept();
+term_a() :- !unsat_a();
+unsat_a() :- !kind(p);
+unsat_a() :- !visible(ten);
+term_c() :- !unsat_c();
+unsat_c() :- !kind(q);
+required() :- term_a();
+kept() :- required();
+possible_without() :- term_c();
+kept() :- !possible_without();
+relation incompatible();
+incompatible() :- term_a(), term_c();
+assumption one_kind: exactly_one(kind, group_by: ());
+obligation exclusive_terms: empty(incompatible);
+verification checks { assumptions: [one_kind]; obligations: [exclusive_terms]; }

@@ -46,6 +46,41 @@ real program that the current choice serves badly.
 
 ## Meaning and checking
 
+- **Strengthen cycle bounds with independent exact guarantees.** A cyclic
+  producer can require a condition implied by another producer only after
+  following several positive and negative dependencies. After cheap removals,
+  union the exact producers for each atom into a lower guarantee and descend
+  upper bounds from true, using the complement of that guarantee for internal
+  negative premises. Remove a non-exact producer only when its body's upper
+  bound implies the head's exact cover under the selected assumptions. Bounds
+  remain proof metadata; they never settle executable atoms. Recursive lower
+  coverage and well-founded bounds are deliberately excluded.
+
+  Soundness must hold in both directions. All guarantees and covering producers
+  have settled premises, independent of the blocked component, and stay present
+  throughout the batch. Consequently the same descending operator bounds the
+  unresolved part of every supported model of both the original graph and any
+  graph with this batch removed. Unknown external premises are relaxed, never
+  treated as absent. A deleted body's truth therefore implies a retained cover
+  in either graph: deletion loses no supported model and creates none. For stable
+  models, that cover has a finite derivation through the settled upstream graph.
+  In the original model's reduct, any use of a deleted producer can be replaced
+  by that independent derivation, preserving the least model. Conversely a stable
+  model after deletion satisfies the deleted rules via the same cover; adding
+  those rules back cannot change its least reduct model. All reasoning is within
+  the selected world's assumptions and the existing settled meanings.
+
+  Reusing a recursive alternative as lower cover would invalidate that argument:
+  in `a :- !i, !b; a :- c; c :- a; b :- a, i`, with `i` absent, removing the first
+  rule changes the stable model from `{a,c}` to `{}`. Exact-only cover prevents
+  such circular support. Independent stable/supported-model oracles check the
+  new pass, including this counterexample and the two-step removal pattern.
+  Bound attempts have separate skip identities and conservative dependency-cone
+  invalidation: even a change confined to blocked premises can tighten a bound.
+  Certificates retain the bounds, exact guarantees and producer summaries;
+  default warnings show the direct cover, with bounded details and full expansion
+  on request. Public finding identities and existing proof keys do not change.
+
 - **Input domains define the universe; assumptions constrain its worlds.** A
   restricted input names an input-free, stratified derived provider. We evaluate
   that provider exactly before grounding inputs, independently of verifications,

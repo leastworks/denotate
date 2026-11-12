@@ -1779,6 +1779,23 @@ kept():-middle(); kept():-term(); term():-!kept(); verification checks{assumptio
         assert_eq!(f.run(&["--json"]).1, f.run(&["--json", "--verbose"]).1);
     }
     #[test]
+    fn bound_removal_reports_direct_cover_and_full_certificate() {
+        let f = Fixture::new(include_str!("../tests/fixtures/bound-removal.den"));
+        let (code, direct) = f.run(&[]);
+        let (verbose_code, full) = f.run(&["--verbose"]);
+        assert_eq!(code, 1); // The successful rewrite is a warning.
+        assert_eq!(verbose_code, code);
+        assert!(direct.contains("Bound proof:"), "{direct}");
+        assert!(direct.contains("direct rewrite justification"));
+        assert!(!direct.contains("supporting rewrite proof"));
+        assert!(full.contains("supporting rewrite proof"));
+        assert!(
+            full.lines().filter(|l| l.contains("related:")).count()
+                > direct.lines().filter(|l| l.contains("related:")).count()
+        );
+        assert_eq!(f.run(&["--json"]), f.run(&["--verbose", "--json"]));
+    }
+    #[test]
     fn concise_related_locations_are_cli_only_and_verbose_restores_the_full_list() {
         let f = Fixture::new(
             "relation p(); p(); obligation one: empty(p); verification checks { assumptions: []; obligations: [one]; }",

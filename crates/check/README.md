@@ -29,8 +29,13 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    graph rebuild. They require no BDD operations. Each settled snapshot then proves
    redundant producer removals from independent
    exact coverage. A nonempty removal batch is committed and the components rebuilt
-   before another snapshot; only a snapshot with no removals proceeds to negation
-   discharge and cycle bounds. Later exhaustion preserves earlier committed batches.
+   before another snapshot. When cheap removals have no batch, lower guarantees
+   from exact producers strengthen descending cycle upper bounds. A non-exact
+   producer is removed if its body's upper bound implies the independent exact
+   head cover under W. Exact producers are retained; recursive lower coverage is
+   excluded. These bounds preserve supported-model possibilities and never settle
+   executable atoms. Only a snapshot with no removals proceeds to negation
+   discharge. Later exhaustion preserves earlier committed batches.
    Within a snapshot, exact-producer coverage is computed lazily per head, reused
    by its non-exact candidates, and removed from the cache after the last candidate.
    Retained unions count against the existing condition-node limit. Proofs still
@@ -42,7 +47,8 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    relevant rewrite changes their inputs. Coverage and removal compare exact
    producers and settled premises, including edits to settled premise cones;
    blocked-only dependency changes do not retry them. Bounds and discharge retain
-   conservative graph invalidation. Retry comparison is part of the atomic commit.
+   conservative graph invalidation, as do bound-removal attempts: a blocked-only
+   dependency change can tighten a bound. Retry comparison is part of the atomic commit.
    See
    [checker policies](../../docs/checker-policies.md#re-scoring) for the boundaries.
 4. **Concrete replay.** `evaluate(present_inputs)` runs admitted components on a
@@ -252,10 +258,12 @@ negation that is redundant under the other premises and W). They are reported as
 rewrite findings with their coverage; they never authorize source edits.
 
 `RewriteProof::candidate()` identifies the removed/changed rule. Its justification
-is either a `SymbolicRewriteProof` with conditions and optional component bounds,
-or a `StructuralProof` with shared settling/unfolding evidence. Use `symbolic()`
-or `structural()` to inspect the corresponding certificate, and
-`supporting_rules()` for current source placement. Structural removals use the
+is a `SymbolicRewriteProof` with conditions and optional component bounds,
+a `StructuralProof` with shared settling/unfolding evidence, or a
+`BoundRemovalProof` with the candidate body's upper bound and the exact-cover
+certificate. Use `symbolic()`, `structural()` or `bound_removal()` to inspect the
+corresponding certificate. `direct_rules()` supplies ordinary source placement;
+`supporting_rules()` requests full support. Structural and bound removals use the
 existing redundant-producer identity, never fabricated BDD conditions.
 
 Concrete replay indexes discharge proofs by ground rule and literal occurrence.

@@ -105,9 +105,16 @@ pub struct SymbolicRewriteProof {
     pub upper_bounds: Option<Arc<ComponentUpperBounds>>,
 }
 #[derive(Debug, Clone)]
+pub struct BoundRemovalProof {
+    pub proof: SymbolicRewriteProof,
+    /// Strengthened upper bound of this producer's complete signed body.
+    pub body_upper: Condition,
+}
+#[derive(Debug, Clone)]
 pub enum RewriteJustification {
     Symbolic(SymbolicRewriteProof),
     Structural(crate::structural::StructuralProof),
+    BoundRemoval(BoundRemovalProof),
 }
 #[derive(Debug, Clone)]
 pub struct RewriteProof {
@@ -121,6 +128,7 @@ impl RewriteProof {
         match &self.justification {
             RewriteJustification::Symbolic(p) => &p.candidate.rule,
             RewriteJustification::Structural(p) => &p.candidate,
+            RewriteJustification::BoundRemoval(p) => &p.proof.candidate.rule,
         }
     }
     pub fn symbolic(&self) -> Option<&SymbolicRewriteProof> {
@@ -135,10 +143,29 @@ impl RewriteProof {
             _ => None,
         }
     }
+    pub fn bound_removal(&self) -> Option<&BoundRemovalProof> {
+        match &self.justification {
+            RewriteJustification::BoundRemoval(p) => Some(p),
+            _ => None,
+        }
+    }
+    pub(crate) fn conditional(&self) -> Option<&SymbolicRewriteProof> {
+        self.symbolic()
+            .or_else(|| self.bound_removal().map(|p| &p.proof))
+    }
     pub fn supporting_rules(&self) -> Vec<&GroundRule> {
         match &self.justification {
             RewriteJustification::Symbolic(p) => p.producers.iter().map(|p| &p.rule).collect(),
             RewriteJustification::Structural(p) => p.supporting_rules(),
+            RewriteJustification::BoundRemoval(p) => p
+                .proof
+                .upper_bounds
+                .as_ref()
+                .expect("bound certificate")
+                .producers
+                .iter()
+                .map(|p| &p.rule)
+                .collect(),
         }
     }
     /// Direct evidence for keys and ordinary presentation. Full structural
@@ -147,42 +174,50 @@ impl RewriteProof {
         match &self.justification {
             RewriteJustification::Symbolic(p) => p.producers.iter().map(|p| &p.rule).collect(),
             RewriteJustification::Structural(p) => p.direct_rules(),
+            RewriteJustification::BoundRemoval(p) => {
+                p.proof.producers.iter().map(|p| &p.rule).collect()
+            }
         }
     }
     pub(crate) fn summaries(&self) -> impl Iterator<Item = &ProducerSummary> {
-        self.symbolic().into_iter().flat_map(|p| {
+        self.conditional().into_iter().flat_map(|p| {
             std::iter::once(&p.candidate)
                 .chain(&p.producers)
                 .chain(p.upper_bounds.iter().flat_map(|b| b.producers.iter()))
         })
     }
     fn profile_conditions(&self) -> impl Iterator<Item = &Condition> {
-        self.symbolic().into_iter().flat_map(|p| {
-            std::iter::once(&p.coverage)
-                .chain(p.candidate.profile_conditions())
-                .chain(
-                    p.producers
-                        .iter()
-                        .flat_map(ProducerSummary::profile_conditions),
-                )
-                .chain(p.upper_bounds.iter().flat_map(|b| {
-                    b.conditions.values().chain(
-                        b.producers
+        self.conditional()
+            .into_iter()
+            .flat_map(|p| {
+                std::iter::once(&p.coverage)
+                    .chain(p.candidate.profile_conditions())
+                    .chain(
+                        p.producers
                             .iter()
                             .flat_map(ProducerSummary::profile_conditions),
                     )
-                }))
-        })
+                    .chain(p.upper_bounds.iter().flat_map(|b| {
+                        b.conditions.values().chain(b.guarantees.values()).chain(
+                            b.producers
+                                .iter()
+                                .flat_map(ProducerSummary::profile_conditions),
+                        )
+                    }))
+            })
+            .chain(self.bound_removal().map(|p| &p.body_upper))
     }
     fn nodes(&self) -> usize {
-        self.symbolic().map_or(0, |p| {
+        self.conditional().map_or(0, |p| {
             std::iter::once(&p.candidate)
                 .chain(&p.producers)
                 .map(ProducerSummary::nodes)
                 .sum::<usize>()
                 + p.coverage.node_count()
                 + p.upper_bounds.as_ref().map_or(0, |b| b.nodes())
-        })
+        }) + self
+            .bound_removal()
+            .map_or(0, |p| p.body_upper.node_count())
     }
 }
 
@@ -580,6 +615,16 @@ impl GroundProgram {
                 }
             }
             debug_assert!(exact_coverage.is_empty());
+            if batch.is_empty() && !last_candidates.is_empty() {
+                batch = self.bound_removals(
+                    &summaries,
+                    ctx,
+                    &mut retained,
+                    budget,
+                    progress,
+                    attempts,
+                )?;
+            }
             // Discharge (including input guards) waits until removals reach a
             // fixed point. Newly settled meanings are read only next round.
             if batch.is_empty() {
@@ -783,6 +828,151 @@ impl GroundProgram {
             self.commit_rewrites(batch, attempts, budget)?;
             progress.snapshot(self, round, "committed");
         }
+    }
+
+    /// Strengthen bounds only after cheap removals reach a fixed point. Covers
+    /// and guarantees are exact and remain in the graph: no proposed deletion
+    /// can justify itself, directly or through another deletion in this batch.
+    fn bound_removals(
+        &self,
+        summaries: &BTreeMap<GroundRuleId, ProducerSummary>,
+        ctx: &ConditionContext,
+        retained: &mut usize,
+        budget: &mut Budget<'_>,
+        progress: &crate::admission_progress::AdmissionReporter<'_>,
+        attempts: &mut Attempts,
+    ) -> Result<Vec<RewriteProof>> {
+        let mut exact_heads = BTreeSet::new();
+        for p in summaries.values() {
+            budget.tick("bound removal candidates")?;
+            if p.exact {
+                exact_heads.insert(&p.rule.head.atom);
+            }
+        }
+        let mut candidates = Vec::new();
+        let mut last = BTreeMap::new();
+        for (position, p) in summaries.values().enumerate() {
+            budget.tick("bound removal candidates")?;
+            if p.exact || !exact_heads.contains(&p.rule.head.atom) {
+                continue;
+            }
+            let component = self.component_for(&p.rule.head.atom)?;
+            if !component.recursive {
+                continue;
+            }
+            candidates.push((position + 1, p, component));
+            last.insert(component.id, p.rule.id);
+        }
+        let mut cache = BTreeMap::new();
+        let mut batch = Vec::new();
+        for (position, candidate, component) in candidates {
+            if let std::collections::btree_map::Entry::Vacant(entry) = cache.entry(component.id) {
+                progress.work(
+                    self,
+                    "guaranteed-bounds",
+                    Some(component.id),
+                    position,
+                    true,
+                );
+                let observe = |iteration| progress.iteration(self, iteration);
+                let head = component.atoms.first().expect("component atom");
+                entry.insert(attempts.run(
+                    Attempt::GuaranteedBounds(head.clone()),
+                    head,
+                    self,
+                    retained,
+                    budget,
+                    progress,
+                    |retained, budget| {
+                        crate::upper_bounds::compute_with_guarantees(
+                            self,
+                            component,
+                            summaries,
+                            ctx,
+                            retained,
+                            budget,
+                            progress.enabled().then_some(&observe),
+                            true,
+                        )
+                    },
+                )?);
+            }
+            if let Some(bounds) = &cache[&component.id] {
+                let coverage = &bounds.guarantees[&candidate.rule.head.atom];
+                progress.rule(self, "bound-removals", candidate.rule.id, position);
+                let upper = attempts
+                    .run(
+                        Attempt::BoundRemoval(candidate.rule.id),
+                        &candidate.rule.head.atom,
+                        self,
+                        retained,
+                        budget,
+                        progress,
+                        |_, budget| {
+                            let mut upper = candidate.condition.clone();
+                            for literal in &candidate.rule.body {
+                                budget.tick("bound removal body")?;
+                                match literal.polarity {
+                                    Polarity::Positive => {
+                                        if let Some(bound) =
+                                            bounds.conditions.get(&literal.term.atom)
+                                        {
+                                            upper = ctx.apply(&upper, bound, and, budget)?;
+                                        }
+                                    }
+                                    Polarity::Negative => {
+                                        if let Some(lower) =
+                                            bounds.guarantees.get(&literal.term.atom)
+                                        {
+                                            upper = ctx.apply(&upper, lower, and_not, budget)?;
+                                        }
+                                    }
+                                }
+                            }
+                            let uncovered = ctx.apply(&upper, coverage, and_not, budget)?;
+                            Ok(ctx
+                                .restrict(&uncovered, budget)?
+                                .is_false()
+                                .then_some(upper))
+                        },
+                    )?
+                    .flatten();
+                if let Some(body_upper) = upper {
+                    let covering = bounds
+                        .producers
+                        .iter()
+                        .filter(|p| p.exact && p.rule.head.atom == candidate.rule.head.atom)
+                        .collect();
+                    self.propose(
+                        &mut batch,
+                        candidate,
+                        covering,
+                        coverage.clone(),
+                        RewriteKind::RedundantProducer,
+                        Some(Arc::clone(bounds)),
+                        retained,
+                        budget,
+                    )?;
+                    *retained =
+                        crate::symbolic::retain(*retained, 0, body_upper.node_count(), budget)?;
+                    // Move the newly allocated proof without cloning its metadata.
+                    let mut owned = batch.pop().unwrap();
+                    let RewriteJustification::Symbolic(proof) = owned.justification else {
+                        unreachable!()
+                    };
+                    owned.justification =
+                        RewriteJustification::BoundRemoval(BoundRemovalProof { proof, body_upper });
+                    batch.push(owned);
+                }
+            }
+            if last[&component.id] == candidate.rule.id {
+                if let Some(bounds) = cache.remove(&component.id).flatten() {
+                    *retained -= bounds.nodes();
+                }
+            }
+        }
+        debug_assert!(cache.is_empty());
+        Ok(batch)
     }
 
     fn commit_rewrites(

@@ -59,6 +59,11 @@ participating occurrences, and places them on source locations. It depends only 
   proved instances. This avoids rescanning the full fixed and residual graph for
   each proof. Removed instances still count toward coverage, while their earlier
   discharge warnings are hidden. Proof order, wording and placement are unchanged.
+- Bound removals show a direct coverage explanation and the retained exact
+  head-cover producers. `boundDetail` distinguishes ordinary and full evidence;
+  full detail includes the component certificate's producers. Bound and structural
+  details share per-source-warning display caps and explicit omission counts.
+  Rewrite finding identities and instance coverage remain unchanged.
 - `Placement::rewrite` displays direct structural justification by default: settling
   producers, absence reasons, subsuming/unfolded definitions and settled premises.
   It unions evidence per source warning, retaining eight structural notes and

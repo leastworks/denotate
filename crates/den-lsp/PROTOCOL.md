@@ -143,7 +143,8 @@ Rewrite counts are cumulative committed counts, not proposed changes.
 
 `skippedAttempts` is the cumulative number of failed per-operation proof attempts,
 including later retries. A recoverable failure immediately emits `skipped` as
-`producer-coverage`, `producer-removal`, `upper-bounds` or `negation-discharge`,
+`producer-coverage`, `producer-removal`, `upper-bounds`, `guaranteed-bounds`,
+`bound-removal` or `negation-discharge`,
 `skipTarget: {head: "p(a)"}`, and the ordinary formatted `failure`. Admission
 continues. Subsequent updates clear `skipped`, `skipTarget` and that local failure;
 `reused` includes the retained attempt count. A failure with `skipped: null` stops
@@ -151,7 +152,7 @@ admission. A preflight constrained by remaining work reports resource `work`,
 not the per-operation `BDD tasks` limit; ties are treated as global work stops.
 
 Stages are `starting`, `structural`, `structural-committed`, `symbolic`, `summaries`, `producer-removals`, `candidates`,
-`upper-bounds`, `commit`, `committed`, `complete`, `reused`, and
+`upper-bounds`, `guaranteed-bounds`, `bound-removals`, `commit`, `committed`, `complete`, `reused`, and
 `inconsistent-assumptions`.
 `structural` performs no BDD proof operations. `structural-committed` includes
 committed removal and component counts; its source-rule warnings retain the existing
@@ -173,6 +174,17 @@ summary inventory are unchanged. Full evidence uses `structuralDetail: "full"`
 and zero omission counts; the CLI requests it with `--verbose`. Full chains are
 computed only on request. An editor expansion command remains a follow-up;
 ordinary publication never expands them.
+
+Bound-removal warnings use the same `rewrite-proof` kind, source-rule finding
+identity and instance coverage. Their direct note explains coverage by retained
+exact producers; related locations label that cover `direct rewrite justification`.
+`data.evidence.boundDetail` is `"direct"` or `"full"`. Bound and structural details
+share the eight-note/sixteen-location caps per source warning and the omission
+counts above; legacy symbolic evidence remains untruncated. Full bound evidence
+includes the producer rules in the component certificate. `guaranteed-bounds`
+progress iterates upper bounds strengthened by exact guarantees; `bound-removals`
+tests candidates against their independent exact head cover. They have separate
+failure-local skip kinds and conservative dependency-cone retry invalidation.
 Structural changes commit before the same round's symbolic evaluation.
 Producer removals are committed and components rebuilt before negation candidates
 and cycle bounds are attempted. A round with removals therefore skips those stages.

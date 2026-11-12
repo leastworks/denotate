@@ -464,6 +464,10 @@ a fixed world never depends on the verification.
   producer can also break the cycle. Before Boolean proofs, structural admission
   removes such producers in blocked regions using settled premises and signed-body
   containment, including bounded unfolding of single-producer positive chains.
+  Boolean removal can also follow cycle bounds strengthened by guarantees from
+  independent exact producers. A cyclic producer is redundant when those bounds
+  show that its head is already covered whenever its body could hold. The exact
+  covering producers stay present; bounds do not themselves settle cyclic atoms.
   Rewrite warnings identify the source rule and its supporting definitions; they
   never authorize edits.
 - Otherwise the affected component and everything depending on it is reported as

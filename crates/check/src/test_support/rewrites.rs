@@ -178,6 +178,17 @@ pub fn supported_models(
 }
 
 pub fn compare(c: &Corpus, domains: &Domains, rewritten: &GroundProgram) -> usize {
+    compare_permitted(c, domains, rewritten, |_| true)
+}
+
+/// The caller independently defines permitted input worlds (not through the
+/// checker's BDD W), so contextual rewrites are compared only where they apply.
+pub fn compare_permitted(
+    c: &Corpus,
+    domains: &Domains,
+    rewritten: &GroundProgram,
+    permitted: impl Fn(&BTreeSet<GroundAtom>) -> bool,
+) -> usize {
     let oracle = GroundProgram::prepare_cartesian(c, domains, &Limits::default()).unwrap();
     let atoms: Vec<_> = oracle.atoms().cloned().collect();
     let inputs: BTreeSet<_> = oracle.input_atoms().cloned().collect();
@@ -186,6 +197,9 @@ pub fn compare(c: &Corpus, domains: &Domains, rewritten: &GroundProgram) -> usiz
     let mut nonempty = 0;
     let meaning = rewritten.symbolic(&Limits::default()).unwrap();
     for world in subsets(&inputs.iter().cloned().collect::<Vec<_>>()) {
+        if !permitted(&world) {
+            continue;
+        }
         let before = stable_models(&atoms, &inputs, &originals, &world);
         assert_eq!(before, stable_models(&atoms, &inputs, &active, &world));
         nonempty += usize::from(!before.is_empty());

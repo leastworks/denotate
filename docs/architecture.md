@@ -89,7 +89,9 @@ Completed admission includes outstanding local proof-skip records, whose identit
 are bound to the same prepared graph. Reuse carries those records and their logical
 receipts; presentation projects current semantic keys and origins. Invocation-local
 retry tracking keeps no BDD cache. It uses pre-commit edges for bounds/discharge
-invalidation and for changes to settled conditions. Coverage/removal also compare
+invalidation and for changes to settled conditions. Bound-removal attempts use
+the same conservative closure: edits within blocked components can tighten bounds.
+Cheap coverage/removal also compare
 producer membership and settled premises across the tentative rebuild, so blocked
 changes that leave their inputs unchanged need no retry. This comparison finishes
 before committing the graph or invalidating attempts, even when an SCC splits.
@@ -116,6 +118,14 @@ warning and expands chains only on explicit request; public finding identities
 and proof coverage do not change. Immutable snapshot indexes reuse coordinates
 and hashes within presentation/export. `.den` scalar coordinates and LSP UTF-16
 positions keep their separate conventions; neither reads a later buffer revision.
+
+Bound-removal certificates retain component upper bounds, lower guarantees from
+exact producers and the independent exact head cover. Bounds are never executable
+truth values. Default evidence and internal keys use the direct head cover, while
+local query dependencies include the certificate's producer summaries and original
+closure. Retained-condition accounting and memory profiling include the guarantee
+and body-bound conditions. Full component support is requested explicitly; public
+source-rule finding identities remain unchanged.
 
 The session's Salsa fold query retains only semantic keys: possible tuples, original
 rule-instance substitutions and the chosen producer/order of each true tuple. On the

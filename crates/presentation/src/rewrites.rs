@@ -35,6 +35,10 @@ impl Rewrite<'_> {
     ) -> Result<Vec<String>> {
         let mut notes = BTreeSet::new();
         for proof in &self.proofs {
+            if let Some(p) = proof.bound_removal() {
+                notes.insert(format!("Bound proof: wherever this producer can apply, independently settled producers already make {} true. Exact producers also guarantee the atoms used to strengthen the cycle bounds; none of those producers is removed by this batch.", crate::evidence::atom_name(corpus, names, &p.proof.candidate.rule.head.atom)?));
+                continue;
+            }
             let Some(p) = proof.structural() else {
                 continue;
             };
@@ -79,7 +83,7 @@ impl Rewrite<'_> {
         let mut seen = BTreeSet::new();
         for proof in &self.proofs {
             let full = detail == RewriteDetail::Full;
-            let structural = proof.structural().is_some();
+            let structural = proof.structural().is_some() || proof.bound_removal().is_some();
             let rules = if full {
                 proof.supporting_rules()
             } else {
@@ -122,6 +126,7 @@ impl Placement<'_> {
         detail: RewriteDetail,
     ) -> Result<Vec<Diagnostic>> {
         let structural = rewrite.proofs.iter().any(|p| p.structural().is_some());
+        let bounded = rewrite.proofs.iter().any(|p| p.bound_removal().is_some());
         let mut notes = rewrite.notes(corpus, names)?;
         let omitted_notes = if detail == RewriteDetail::Direct {
             let omitted = notes.len().saturating_sub(STRUCTURAL_NOTE_LIMIT);
@@ -139,18 +144,23 @@ impl Placement<'_> {
         )?;
         for d in &mut diagnostics {
             d.evidence = serde_json::json!({"kind":"rewrite-proof","coversAllInstances":rewrite.covers_all_instances});
-            if structural {
-                d.evidence["structuralDetail"] =
-                    serde_json::json!(if detail == RewriteDetail::Full {
-                        "full"
-                    } else {
-                        "direct"
-                    });
+            if structural || bounded {
+                let mode = serde_json::json!(if detail == RewriteDetail::Full {
+                    "full"
+                } else {
+                    "direct"
+                });
+                if structural {
+                    d.evidence["structuralDetail"] = mode.clone();
+                }
+                if bounded {
+                    d.evidence["boundDetail"] = mode;
+                }
                 d.evidence["omittedNotes"] = serde_json::json!(0);
                 d.evidence["omittedRelatedLocations"] = serde_json::json!(0);
             }
         }
-        if !structural || detail == RewriteDetail::Full {
+        if !(structural || bounded) || detail == RewriteDetail::Full {
             return Ok(diagnostics);
         }
         // Protect symbolic related locations even in a warning with mixed proofs.
@@ -189,7 +199,8 @@ impl Placement<'_> {
                     .retain(|r| protected.contains(r) || retained.contains(r));
             }
             if omitted_notes > 0 || omitted_locations > 0 {
-                d.notes.push(format!("Omitted {omitted_notes} structural notes and {omitted_locations} related locations; request full rewrite evidence (CLI --verbose)."));
+                let kind = if bounded { "rewrite" } else { "structural" };
+                d.notes.push(format!("Omitted {omitted_notes} {kind} notes and {omitted_locations} related locations; request full rewrite evidence (CLI --verbose)."));
             }
             d.evidence["omittedNotes"] = serde_json::json!(omitted_notes);
             d.evidence["omittedRelatedLocations"] = serde_json::json!(omitted_locations);

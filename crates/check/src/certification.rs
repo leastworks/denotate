@@ -101,7 +101,7 @@ impl GroundProgram {
                 budget.charge(1 + proof.candidate().body.len(), "certification snapshot")?;
             }
             for summary in proof
-                .symbolic()
+                .conditional()
                 .into_iter()
                 .flat_map(|p| std::iter::once(&p.candidate).chain(&p.producers))
             {

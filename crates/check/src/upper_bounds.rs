@@ -1,4 +1,5 @@
-//! Relax negative dependencies, then descend from true. A supported model is
+//! Relax unresolved dependencies, then descend from true. Exact guarantees may
+//! constrain negative premises. A supported model is
 //! contained in every iterate, including the greatest fixed point. Ascending
 //! from false would lose that guarantee for self-supporting positive cycles.
 use crate::{
@@ -8,8 +9,9 @@ use crate::{
 use biodivine_lib_bdd::op_function::{and, and_not, or};
 use std::{collections::BTreeMap, sync::Arc};
 
-/// Shared certificate for discharge through positive forwarding. These are
-/// upper bounds, NOT settled meanings or exact coverage for producer removal.
+/// Shared certificate for discharge or bound-based producer removal. Upper
+/// bounds are NOT settled meanings or exact coverage. Only `guarantees`, from
+/// producers with entirely settled premises, may supply lower coverage.
 #[derive(Debug, Clone)]
 pub struct ComponentUpperBounds {
     pub component: ComponentId,
@@ -17,11 +19,15 @@ pub struct ComponentUpperBounds {
     /// Every active producer in this component at the immutable snapshot.
     pub producers: Vec<ProducerSummary>,
     pub conditions: BTreeMap<GroundAtom, Condition>,
+    /// Optional lower guarantees from exact producers only. Empty for legacy
+    /// discharge bounds. Never propagated through unresolved premises.
+    pub guarantees: BTreeMap<GroundAtom, Condition>,
 }
 impl ComponentUpperBounds {
     pub(crate) fn nodes(&self) -> usize {
         self.conditions
             .values()
+            .chain(self.guarantees.values())
             .map(Condition::node_count)
             .sum::<usize>()
             + self
@@ -41,6 +47,21 @@ pub(crate) fn compute(
     budget: &mut Budget<'_>,
     observe: Option<&dyn Fn(usize)>,
 ) -> Result<Arc<ComponentUpperBounds>> {
+    compute_with_guarantees(
+        program, component, summaries, ctx, retained, budget, observe, false,
+    )
+}
+
+pub(crate) fn compute_with_guarantees(
+    program: &GroundProgram,
+    component: &Component,
+    summaries: &BTreeMap<GroundRuleId, ProducerSummary>,
+    ctx: &ConditionContext,
+    retained: &mut usize,
+    budget: &mut Budget<'_>,
+    observe: Option<&dyn Fn(usize)>,
+    strengthen: bool,
+) -> Result<Arc<ComponentUpperBounds>> {
     let mut producers = Vec::new();
     for index in &program.component_rules[component.id.index] {
         let summary = &summaries[&program.rules[*index].id];
@@ -50,6 +71,29 @@ pub(crate) fn compute(
         )?;
         *retained = crate::symbolic::retain(*retained, 0, summary.nodes(), budget)?;
         producers.push(summary.clone());
+    }
+    let mut guarantees = BTreeMap::new();
+    if strengthen {
+        for producer in &producers {
+            budget.tick("bound guarantees")?;
+            if !producer.exact {
+                continue;
+            }
+            let head = &producer.rule.head.atom;
+            let old = guarantees.get(head);
+            let next = if let Some(old) = old {
+                ctx.apply(old, &producer.condition, or, budget)?
+            } else {
+                producer.condition.clone()
+            };
+            *retained = crate::symbolic::retain(
+                *retained,
+                old.map_or(0, Condition::node_count),
+                next.node_count(),
+                budget,
+            )?;
+            guarantees.insert(head.clone(), next);
+        }
     }
     let mut previous = BTreeMap::new();
     let mut previous_nodes = 0;
@@ -86,9 +130,13 @@ pub(crate) fn compute(
                     if let Some(bound) = previous.get(&literal.term.atom) {
                         body = ctx.apply(&body, bound, and, budget)?;
                     }
+                } else if let Some(guarantee) = guarantees.get(&literal.term.atom) {
+                    body = ctx.apply(&body, guarantee, and_not, budget)?;
                 }
-                // Unresolved external positives and all internal negatives are
-                // omitted. Neither is assumed false or used as exact knowledge.
+                // Unresolved external premises and unguaranteed internal
+                // negatives are omitted. Exact guarantees remain true after
+                // deleting any batch of non-exact producers, so the descending
+                // bounds contain supported models before AND after deletion.
             }
             let head = next
                 .get_mut(&producer.rule.head.atom)
@@ -114,6 +162,7 @@ pub(crate) fn compute(
                 snapshot: program.graph_revision,
                 producers,
                 conditions: previous,
+                guarantees,
             }));
         }
         *retained -= previous_nodes;

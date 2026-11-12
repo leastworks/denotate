@@ -106,10 +106,10 @@ inputs still close original dependencies, including transitive support; direct
 evidence keys do not replace that invalidation boundary.
 
 Per source warning, default presentation retains at most eight distinct structural
-notes and sixteen structural related locations, after provenance union, with exact
+or bound-removal notes and sixteen related locations, after provenance union, with exact
 omission counts. Notes use lexical order; retained locations use immutable source
-span/label order. Symbolic related locations remain unbounded and are protected
-in mixed warnings. Full detail removes the structural display caps. These are
+span/label order. Legacy symbolic coverage/discharge locations remain unbounded and
+are protected in mixed warnings. Full detail removes these display caps. These are
 presentation policies, not checker budgets: proof coverage, verdicts, limits and
 `data.finding` identities are unchanged. Coordinate indexes and source hashes are
 reused per immutable snapshot within presentation/export; columns still scan the
@@ -124,7 +124,29 @@ transactional commit rules are unchanged. This can reduce BDD work and preserve
 useful progress before later exhaustion, but changes work charges and may require
 extra snapshots. Symbolic evaluation and summary construction still cover the
 residual program. No new allowance is introduced; `admission-candidates` profiling
-covers both passes, and progress distinguishes `producer-removals` from `candidates`.
+covers the proof passes. Progress distinguishes `producer-removals`,
+`guaranteed-bounds`, `bound-removals` and discharge `candidates`/`upper-bounds`.
+
+After cheap removals have no batch to commit, a recursive component with a
+non-exact candidate and exact head coverage can use strengthened bounds. Its lower
+guarantees are unions of existing exact producers only. Upper bounds descend from
+true, restricting internal negative premises by the complement of those guarantees.
+A candidate is redundant when its complete body's upper bound is covered by the
+head's exact producers under W. These exact producers remain in the graph; no
+recursive lower cover or new settled meaning is inferred. Supported-model upper
+bounds, including positive self-support, remain the contract. Bound removals commit
+before discharge, so later snapshots can expose further exact producers.
+
+Guaranteed bounds are computed once per eligible component in the snapshot and
+released after its last candidate. Their producer summaries, guarantee unions,
+old/new bound maps and retained proof conditions charge existing work/storage
+limits. A successful proof retains its component certificate through an `Arc`,
+conservatively charged per proof as for discharge certificates; covering summaries
+are still cloned. Default evidence shows exact head-cover producers, with the same
+per-warning display caps as structural evidence; full component support is expanded
+on request. This can retain substantial metadata in a large component and is not a
+memory optimization. An unsuccessful strengthened pass may be followed by legacy
+discharge bounds. Neither computation nor its temporary cache crosses snapshots.
 
 Within one immutable admission snapshot, the removal pass computes a head's union
 of exact producers only when its first non-exact candidate needs it. Subsequent
@@ -154,9 +176,10 @@ large program; there is no size-based bypass heuristic. Measure that setup cost
 alongside the savings from repeated queries and deeper original closures.
 
 Admission recovers only from per-operation BDD task/node failures inside individual
-proof attempts: exact-producer coverage, a removal check, component bounds, or a
-discharge check. Failed temporary conditions and their retained-node accounting are
-released. Work stays consumed: a failed condition preflight is charged its task
+proof attempts: exact-producer coverage, a removal check, component bounds,
+guaranteed bounds, a bound-removal check, or a discharge check. Failed temporary
+conditions and their retained-node accounting are released. Work stays consumed:
+a failed condition preflight is charged its task
 allowance plus one stopping step, with no construction charge. The bound is still
 `min(max_bdd_tasks, remaining_work / 2)`; when remaining work is the tighter bound
 or ties it, failure reports `BDD preflight: work` and stops admission. Successful
@@ -166,8 +189,9 @@ Failures in shared symbolic evaluation or summaries, total work/storage limits,
 deadlines and cancellation still stop the whole admission pass. No pending batch
 is salvaged on these failures. Local skips allow independent proofs to commit.
 Retry tracking uses ground identities stable within the preparation, not changing
-component handles. Bounds and discharge keep conservative invalidation: any rewritten
-head in their old dependency cone invalidates them, through either sign and even
+component handles. Bounds, bound removals and discharge keep conservative
+invalidation: any rewritten head in their old dependency cone invalidates them,
+through either sign and even
 when an SCC splits. Coverage and removal use a narrower comparison after the
 prospective graph rebuild. Coverage retries when an exact producer enters or leaves,
 its settled body changes, or a previously settled head is rewritten in its premise
