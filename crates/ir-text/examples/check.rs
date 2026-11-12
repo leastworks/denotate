@@ -14,6 +14,10 @@ use std::{collections::BTreeSet, fmt::Write};
 type Failure = (u8, String);
 #[path = "check/options.rs"]
 mod options;
+#[cfg(test)]
+#[allow(dead_code)]
+#[path = "schema/generate.rs"]
+mod schema_generator;
 #[path = "check/trace.rs"]
 mod trace;
 
@@ -167,24 +171,24 @@ fn run_streaming(
         return Ok(0);
     }
     let mut options = options::Options::parse(args, limits)?;
-    let _memory_profile = if let Some(path) = &options.profile_memory {
+    let profile_file = if let Some(path) = &options.profile_memory {
         let file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(path)
             .map_err(|e| (3, format!("Cannot create memory profile {path}: {e}")))?;
-        let file = std::sync::Mutex::new(file);
-        let monitor = denotate_check_session::profiling::MemoryProfiler::new(move |event| {
-            use std::io::Write;
-            let mut file = file.lock().unwrap();
-            let _ = writeln!(file, "{}", event.data());
-            let _ = file.flush();
-        });
-        options.limits.profile = monitor.profile.clone();
-        Some(monitor)
+        Some(std::sync::Arc::new(std::sync::Mutex::new(file)))
     } else {
         None
     };
+    let _memory_profile = profile_file.as_ref().map(|file| {
+        let file = Some(file.clone());
+        let monitor = denotate_check_session::profiling::MemoryProfiler::new(move |event| {
+            profile_record(&file, event.data());
+        });
+        options.limits.profile = monitor.profile.clone();
+        monitor
+    });
     let trace = trace::Trace::new(stderr, options.progress);
     trace.message(format_args!("Root: {}", options.root));
     trace.message(
@@ -198,7 +202,11 @@ fn run_streaming(
     let callback_trace = trace.clone();
     let callback_active = active.clone();
     let callback_profile = profile.clone();
+    let callback_file = profile_file.clone();
     let callback = std::sync::Arc::new(move |event: serde_json::Value| {
+        if callback_file.is_some() {
+            profile_record(&callback_file, json!({"type":"progress", "detail":event}));
+        }
         let trace = &callback_trace;
         let active = &callback_active;
         let profile = &callback_profile;
@@ -257,7 +265,25 @@ fn run_streaming(
         )),
         Err((code, error)) => trace.finish(format_args!("Stopped: exit {code}; {error}")),
     }
+    profile_record(
+        &profile_file,
+        json!({"type":"run-end",
+        "exitCode":match &result { Ok(code) => *code, Err((code, _)) => *code },
+        "error":result.as_ref().err().map(|(_, message)| message)}),
+    );
     result
+}
+// Observations are best-effort, just like memory events; they never affect verdicts.
+fn profile_record(
+    file: &Option<std::sync::Arc<std::sync::Mutex<std::fs::File>>>,
+    event: serde_json::Value,
+) {
+    if let Some(file) = file {
+        use std::io::Write;
+        let mut file = file.lock().unwrap();
+        let _ = writeln!(file, "{event}");
+        let _ = file.flush();
+    }
 }
 fn check_program(
     options: options::Options,
@@ -563,16 +589,36 @@ fn check_program(
         let observer =
             |event: &denotate_check::AdmissionProgress| admission.report(progress, &detail, event);
         let admitted = prepared
-            .admit_with_progress(&operations, report_progress.then_some(&observer))
+            .admit_with_progress(
+                &operations,
+                (report_progress || limits.profile.enabled()).then_some(&observer),
+            )
             .map_err(checker_failure)?
             .with_emptiness_examples(empty_examples.unwrap_or_default());
         trace.message(format_args!(
             "Admission complete: admitted={}",
             admitted.program().is_admitted()
         ));
+        // Snapshot the actual post-admission graph, retaining the earlier snapshot
+        // in the streamed admission event. No extra checking or grounding.
+        progress.prepared(
+            &mut detail,
+            admitted.program(),
+            session.fixed_stats().retained_bytes,
+        );
+        detail["admitted"] = json!(admitted.program().is_admitted());
+        if limits.profile.enabled() {
+            detail["unresolvedComponents"] = json!(
+                admitted
+                    .program()
+                    .components()
+                    .filter(|c| c.cycle.is_some())
+                    .count()
+            );
+        }
         let mut operations = operations.clone();
         // The callback owns only a small display catalog and the event sink.
-        operations.progress = if report_progress {
+        operations.progress = if report_progress || limits.profile.enabled() {
             admission.checking(progress, &detail, admitted.program())
         } else {
             Default::default()
@@ -778,6 +824,57 @@ mod tests {
             fs::remove_dir_all(&self.0).unwrap();
         }
     }
+    #[test]
+    fn generated_schema_presets_run_through_the_cli_at_default_limits() {
+        use schema_generator::{Encoding, Shape, source};
+        for encoding in [
+            Encoding::Ambiguous,
+            Encoding::Coverage,
+            Encoding::Negated,
+            Encoding::Assumed,
+        ] {
+            let f = Fixture::new(
+                &source(&Shape {
+                    encoding,
+                    ..Default::default()
+                })
+                .unwrap(),
+            );
+            let path = f.0.join("profile.jsonl");
+            let (code, output, progress) = f.traced(&[
+                "--json",
+                "--no-progress",
+                "--profile-memory",
+                path.to_str().unwrap(),
+            ]);
+            assert!(progress.is_empty());
+            let code = code.unwrap();
+            assert_eq!(
+                code == 2,
+                encoding == Encoding::Ambiguous,
+                "{encoding:?}: {output}"
+            );
+            let status: serde_json::Value =
+                serde_json::from_str(output.split_once("Results: ").unwrap().1).unwrap();
+            assert_eq!(status["consistency"], "consistent");
+            if encoding != Encoding::Ambiguous {
+                assert_eq!(status["emptiness"][0]["outcome"], "proved");
+            }
+            let records = fs::read_to_string(path)
+                .unwrap()
+                .lines()
+                .map(|s| serde_json::from_str::<serde_json::Value>(s).unwrap())
+                .collect::<Vec<_>>();
+            assert!(
+                records
+                    .iter()
+                    .any(|r| r["type"] == "run-end" && r["exitCode"] == code)
+            );
+            assert!(records.iter().any(
+                |r| r["type"] == "progress" && r["detail"]["ground"]["inputAtoms"].is_number()
+            ));
+        }
+    }
     const BODY: &str = "sort S; const x, y: S; input p(x:S); relation q(x:S); q(X) :- p(X); assumption a: at_most_one(p, group_by: ()); obligation o: at_most_one(q, group_by: ());";
     const RESTRICTED: &str = "verification v { assumptions: [a]; obligations: [o]; }";
     impl Fixture {
@@ -821,7 +918,32 @@ mod tests {
         assert!(
             records
                 .iter()
+                .filter(|r| r["type"] == "profile")
                 .all(|r| r["memory"].get("rssBytes").is_some())
+        );
+        for stage in [
+            "grounding",
+            "graph-and-components",
+            "input-key-order",
+            "semantic-keys",
+        ] {
+            assert!(
+                records
+                    .iter()
+                    .any(|r| r["stage"] == stage && r["event"] == "end"),
+                "{stage}"
+            );
+        }
+        assert!(
+            records
+                .iter()
+                .any(|r| r["type"] == "progress" && r["detail"]["admitted"].is_boolean())
+        );
+        assert!(
+            records
+                .iter()
+                .any(|r| r["type"] == "run-end"
+                    && r["exitCode"] == actual.as_ref().copied().unwrap())
         );
         assert!(records.iter().all(|r| !matches!(
             r["stage"].as_str(),

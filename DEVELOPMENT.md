@@ -78,6 +78,12 @@ the time and memory belong to; use them together. A saved recording includes the
 command line and local paths: for private programs, share findings such as the top
 functions by self time, not the file.
 
+To generate a synthetic Shipping News format tree and measure the actual CLI, use
+`just bench-den-schema`. Its [benchmark guide](crates/ir-text/examples/schema/README.md)
+documents the semantic presets, scaling controls, optional CPU sampling and persistent
+reports, including incomplete runs. It builds before measurement and keeps checker
+limits explicit.
+
 ## Layout
 
 | Path | What |

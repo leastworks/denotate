@@ -255,7 +255,8 @@ be summed. An `end` event means the scope exited, including on failure; the CLI
 outcome determines success. Write failures in the profile stream are best-effort.
 
 Stages separate fixed runtime reconstruction, evaluation, export and binding;
-residual preparation; semantic-key construction; each admission round's symbolic,
+residual preparation, including `grounding` and `graph-and-components`;
+`input-key-order` and semantic-key construction; each admission round's symbolic,
 summary, candidate and commit work. Key projection reads the current ground graph
 on demand; there is no longer an `admission-key-refresh` stage. `bddResults`,
 `bddResultNodes` and `bddResultNodeBytes` count new wrapped BDD results produced within a span.
@@ -280,6 +281,20 @@ runs for every verification. Measure through the complete run, since key project
 also serves cache inputs and findings. Profile one process at a time; allocator
 retention and profiling overhead
 affect observations. No default checking policy changes, timing or memory goldens.
+
+The `.den` CLI additionally writes `type: "progress"` records with its existing
+structured phase/admission observations, including sizes before and after admission,
+and a terminal `type: "run-end"` record with the checker exit code and optional error.
+These are additive record types; the fields of `type: "profile"` are unchanged.
+No terminal event means completion was not observed, not success. `--no-progress`
+suppresses human stderr output while keeping these profile observations.
+
+`just bench-den-schema` uses the actual CLI and a synthetic Shipping News format
+tree, rather than session APIs. It shares the `profiling` build between sampled and
+ordinary runs and never raises limits implicitly. Sources, effective configuration,
+partial logs and reports are retained even for exhaustion or process termination.
+See the [schema benchmark](../crates/ir-text/examples/schema/README.md) for its
+explicit semantics, small oracle-checked presets and production-scale target.
 
 ### Outcome scorecards
 

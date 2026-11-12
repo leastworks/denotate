@@ -601,6 +601,10 @@ covers obligation and notice queries together.
 Phase boundaries also report process memory, distinct from retained cache-byte
 accounting. `--profile-memory FILE` creates a new file containing detailed memory
 and admission events as JSON lines; it works independently of `--no-progress`.
+The stream includes separate grounding, graph/component and key-ordering spans,
+structured `progress` records (including sizes before/after admission), and a
+terminal `run-end` record with the checker exit code. A missing terminal record
+means completion was not observed. Existing `profile` record fields are unchanged.
 See [memory profiling](checker-policies.md#memory-profiling) for metric definitions.
 
 `--timeout-ms` sets the cooperative allowance per operation/query, **not** a total

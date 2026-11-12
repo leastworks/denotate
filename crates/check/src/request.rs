@@ -453,7 +453,10 @@ impl CheckRequest {
             }
         };
         let key_start = Instant::now();
-        let mut program = program.with_atom_key_order(keys)?;
+        let mut program = {
+            let _profile = limits.profile.span("input-key-order", None);
+            program.with_atom_key_order(keys)?
+        };
         let key_order_time = key_start.elapsed();
         let general = self
             .constraints

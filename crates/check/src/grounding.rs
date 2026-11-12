@@ -612,6 +612,7 @@ impl GroundProgram {
         receipts: &mut WorkReceipts,
     ) -> Result<Self> {
         let start = Instant::now();
+        let grounding_profile = budget.limits.profile.span("grounding", None);
         let domains = validate_domains(corpus, domains, budget)?;
         let restricted = input_domains::evaluate(corpus, &domains, budget)?;
         let graph = GroundingGraph::project(corpus, keys, &domains, &restricted, budget, plans)?;
@@ -745,7 +746,9 @@ impl GroundProgram {
         p.metrics.grounding_queries = queries;
         p.metrics.grounding_assembly = assembly_start.elapsed();
         p.metrics.grounding = start.elapsed();
+        drop(grounding_profile);
         let start = Instant::now();
+        let _graph_profile = budget.limits.profile.span("graph-and-components", None);
         graph::analyze(&mut p, budget)?;
         p.metrics.admissibility = start.elapsed();
         budget.check("grounding assembly")?;

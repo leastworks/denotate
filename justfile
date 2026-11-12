@@ -91,6 +91,12 @@ bench-den-fixed +args:
 bench-den-memory *args:
     cargo +1.93.0 run --release --locked -p denotate-ir-text --example bench_memory -- "$@"
 
+# Generate a Shipping News schema and profile the actual CLI; use --help for controls.
+[positional-arguments]
+bench-den-schema *args:
+    cargo +1.93.0 build --locked --profile profiling -p denotate-ir-text --example check --example bench_schema
+    target/profiling/examples/bench_schema "$@"
+
 # Sample the .den CLI with samply and open the Firefox Profiler: ROOT [CHECK ARGS...].
 [positional-arguments]
 profile-den +args:

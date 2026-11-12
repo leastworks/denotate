@@ -228,6 +228,7 @@ impl GroundProgram {
         let limits = budget.limits;
         limits.cancellation.check()?;
         let start = Instant::now();
+        let grounding_profile = limits.profile.span("grounding", None);
         let domains = validate_domains(corpus, domains, budget)?;
         let restricted = match fixed {
             Some(fixed) => fixed.input_domains.clone(),
@@ -255,7 +256,9 @@ impl GroundProgram {
         p.build_groups(corpus, budget)?;
         p.build_input_groups(corpus, constraints, budget)?;
         p.metrics.grounding = start.elapsed();
+        drop(grounding_profile);
         let start = Instant::now();
+        let _graph_profile = limits.profile.span("graph-and-components", None);
         graph::analyze(&mut p, budget)?;
         p.metrics.admissibility = start.elapsed();
         limits.cancellation.check()?;

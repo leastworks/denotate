@@ -27,3 +27,7 @@ denotate-check-session = { path = "../check-session" }
 [[example]]
 name = "check"
 test = true
+
+[[example]]
+name = "bench_schema"
+test = true

@@ -148,9 +148,14 @@ and memory format.
 
 Phase boundaries include best-effort process RSS/footprint readings, with OS
 lifetime peaks labeled separately. `--profile-memory FILE` creates a new JSON-lines
-file with detailed fixed preparation, key-index and admission-round events and
+file with detailed fixed preparation, grounding, graph/component analysis, input-key
+ordering, key-index and admission-round events and
 20 ms memory samples summarized per span. It also works with `--no-progress`.
-Unavailable metrics are null; these are process observations, not cache bytes or
+The CLI also emits `type: "progress"` records containing the existing structured
+phase/admission details, and a `type: "run-end"` record with its exit code/error.
+Existing `type: "profile"` fields are unchanged. Post-admission progress carries
+updated sizes and remaining negative-component counts. A missing terminal record
+means completion was not observed. Unavailable metrics are null; these are process observations, not cache bytes or
 per-program allocation totals. See [memory profiling](../../docs/checker-policies.md#memory-profiling)
 for metric definitions and `just bench-den-memory` workload controls.
 
@@ -162,6 +167,11 @@ Prepared-size output separates fixed present/absent facts, retained original
 evidence and the residual executable graph. `fold.retainedBytes` reports the keyed
 session fold's accounted bytes (zero for the direct CLI); that single retained
 fold has no additional byte cap.
+For a generated format tree in Shipping News vocabulary, use `just bench-den-schema`.
+It runs the actual CLI with the same optimized build for ordinary and sampled runs,
+keeps sources and partial results, and reports sizes before/after admission. See the
+[generator's semantics, controls and examples](examples/schema/README.md).
+
 `just bench-den-fixed ITEMS [VERIFICATIONS]`
 compares cold and warm folded runs with ordinary preparation on an abstract workload;
 the optional verification count defaults to four. `--two-selections` alternates
