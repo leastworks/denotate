@@ -170,8 +170,7 @@ fn value_exclusion_message(lowered: &LoweredProgram, proofs: &[&RewriteProof]) -
         return None;
     };
     let excluded = &proof
-        .candidate
-        .rule
+        .candidate()
         .body
         .iter()
         .find(|l| l.term.occurrence == literal_occurrence)?
@@ -180,7 +179,7 @@ fn value_exclusion_message(lowered: &LoweredProgram, proofs: &[&RewriteProof]) -
     if excluded.relation != lowered.library.value {
         return None;
     }
-    let other = proof.candidate.settled.iter().find(|p| {
+    let other = proof.symbolic()?.candidate.settled.iter().find(|p| {
         p.literal.polarity == Polarity::Positive
             && p.literal.term.atom.relation == lowered.library.value
             && p.literal.term.atom.arguments[0] == excluded.arguments[0]

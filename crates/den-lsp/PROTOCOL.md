@@ -150,9 +150,15 @@ continues. Subsequent updates clear `skipped`, `skipTarget` and that local failu
 admission. A preflight constrained by remaining work reports resource `work`,
 not the per-operation `BDD tasks` limit; ties are treated as global work stops.
 
-Stages are `starting`, `symbolic`, `summaries`, `producer-removals`, `candidates`,
+Stages are `starting`, `structural`, `structural-committed`, `symbolic`, `summaries`, `producer-removals`, `candidates`,
 `upper-bounds`, `commit`, `committed`, `complete`, `reused`, and
 `inconsistent-assumptions`.
+`structural` performs no BDD proof operations. `structural-committed` includes
+committed removal and component counts; its source-rule warnings retain the existing
+rewrite identity and `coversAllInstances` convention. Structural notes distinguish
+settled heads, dead premises and signed-body subsumption; related supporting rules
+include the settling/unfolding chain. No source edit is authorized by these proofs.
+Structural changes commit before the same round's symbolic evaluation.
 Producer removals are committed and components rebuilt before negation candidates
 and cycle bounds are attempted. A round with removals therefore skips those stages.
 Round zero means no rewrite round has started in this invocation. `complete`

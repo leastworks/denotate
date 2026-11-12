@@ -87,6 +87,34 @@ real program that the current choice serves badly.
   This does not change the symbolic fold, upper bounds or rewrite policy. Covering
   producer summaries are still cloned per successful proof; reducing that separate
   evidence cost requires a later change.
+- **Reduce structure before asking BDDs to prove redundancy.** Admission first
+  propagates structural truth and falsity, removes dead alternatives, and compares
+  signed bodies after bounded unfolding of single-producer positive premises.
+  A true producer has a finite settling chain; its alternatives add no result.
+  With no live producer a non-input atom is false, so positive consumers cannot
+  fire and negative consumers are satisfied. Existing concrete evaluation supplies
+  input-free settled boundaries; the pass adds no inference about unseeded cycles
+  in blocked regions. These deductions preserve every stable model of the
+  current snapshot, not just one chosen observation.
+  For subsumption, positive unfolding substitutes a unique producer's body.
+  Closure and support give equivalence in each stable model; the terminating
+  positive expansion also preserves finite derivations in its reduct. A producer
+  requiring a superset of a retained producer's signed premises therefore adds
+  neither a model nor support. Negative premises, inputs, multiple producers and
+  cyclic expansion are boundaries. Equal bodies retain a deterministic survivor;
+  mutually dependent proposed deletions cannot delete every duplicate.
+  Structural deletions are sequentially justified inside one private worklist and
+  committed transactionally before symbolic evaluation. Later rounds inherit any
+  earlier assumption-dependent rewrites; the pass makes no new use of assumptions
+  or Boolean conditions. Its flat, shared certificates retain settling and
+  unfolding sources without copying a long chain into each warning. Original
+  rules remain available to replay and local query construction. The fixed fold's
+  original-cycle and assumption-validation policies are unchanged.
+  This increment removes rules only in blocked regions. Settled producers still
+  supply truth and unfolding evidence, but do not gain new warnings: folding has
+  already taken them out of execution on the session path. Whole-program shadowing
+  warnings would require a separate pass over the retained fixed graph. Supporting
+  source chains and their location order agree on folded and unfolded paths.
 - **An expensive admission proof does not stop independent proofs.** A per-operation
   BDD task or result-node failure inside coverage, a removal check, component bounds
   or a discharge check skips that attempt. Partial batches remain sound: each proof

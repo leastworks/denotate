@@ -22,7 +22,12 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
 3. **Admissibility.** Positive cycles are admitted. A negative edge inside an SCC blocks
    that component and its dependents unless a rewrite proves the negation redundant
    under W. Blocked regions are reported (`Unsupported`), never treated as false.
-   Each settled snapshot first proves redundant producer removals from independent
+   Each round first performs structural truth/false propagation, dead-rule removal
+   and bounded signed-body subsumption through single-producer positive chains.
+   Removals target blocked regions; already settled rules supply truth/evidence.
+   Structural changes commit before symbolic evaluation, using the same atomic
+   graph rebuild. They require no BDD operations. Each settled snapshot then proves
+   redundant producer removals from independent
    exact coverage. A nonempty removal batch is committed and the components rebuilt
    before another snapshot; only a snapshot with no removals proceeds to negation
    discharge and cycle bounds. Later exhaustion preserves earlier committed batches.
@@ -233,6 +238,13 @@ remain available. The fresh global and cached local paths follow the same rule.
 Conservative rewrites remove a literal or rule only with a proof (for example, a
 negation that is redundant under the other premises and W). They are reported as
 rewrite findings with their coverage; they never authorize source edits.
+
+`RewriteProof::candidate()` identifies the removed/changed rule. Its justification
+is either a `SymbolicRewriteProof` with conditions and optional component bounds,
+or a `StructuralProof` with shared settling/unfolding evidence. Use `symbolic()`
+or `structural()` to inspect the corresponding certificate, and
+`supporting_rules()` for current source placement. Structural removals use the
+existing redundant-producer identity, never fabricated BDD conditions.
 
 Concrete replay indexes discharge proofs by ground rule and literal occurrence.
 The index stores only proof IDs alongside the committed rewrite state, including

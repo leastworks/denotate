@@ -79,7 +79,7 @@ impl PreparedCheck<'_> {
                 let rewrites = self
                     .program
                     .rewrite_proofs()
-                    .filter(|p| component.atoms.contains(&p.candidate.rule.head.atom))
+                    .filter(|p| component.atoms.contains(&p.candidate().head.atom))
                     .map(|p| p.id)
                     .collect::<Vec<_>>();
                 // Reject stale/missing evidence instead of guessing current sources.

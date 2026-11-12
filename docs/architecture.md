@@ -144,6 +144,17 @@ bounded cycle excerpts, while CLI/editor own delivery. Editor events retain the
 normal ticket filtering. Completed CLI verification reports flush immediately;
 individual tentative findings are not published.
 
+The checker also owns structural admission reduction. A private worklist proves
+truth/falsehood, dead rules and bounded unfolded subsumption against the current
+justified graph. Only blocked heads are removal targets; settled regions supply
+boundary truth and supporting sources. The pass then uses the ordinary transactional commit before BDD evaluation.
+Structural and symbolic rewrite certificates are explicit alternatives; structural
+proofs do not contain placeholder Boolean conditions. Their flat shared evidence
+DAG retains only supporting rules/facts reached by actual removals. Presentation
+owns wording and current locations; source-rule finding identities and instance
+coverage remain shared. Original rules remain in the local query dependency closure
+and replay evidence, so pruning executable edges cannot hide an edit dependency.
+
 Assumption declaration validity is a program-level query. The IR classifies
 relation-stratified cones and those requiring grounding; the checker resolves the
 latter against its unrevised ground dependency graph, without selected assumptions.

@@ -1,6 +1,41 @@
 {
   "creator_warnings": [],
-  "diagnostics": [],
+  "diagnostics": [
+    {
+      "code": "redundant",
+      "message": "This definition adds no result: other definitions already cover every case where it could apply.",
+      "range": {
+        "end": {
+          "character": 65,
+          "line": 0
+        },
+        "start": {
+          "character": 37,
+          "line": 0
+        }
+      },
+      "relatedInformation": [
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 65,
+                "line": 0
+              },
+              "start": {
+                "character": 37,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.testdsl"
+          },
+          "message": "redundant definition"
+        }
+      ],
+      "severity": 2,
+      "source": "test DSL"
+    }
+  ],
   "groups": [],
   "text": "input i; slot a; a <- i; mask a when (available(a) or present(i)) and available(a);",
   "witness_findings": [

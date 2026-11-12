@@ -124,7 +124,7 @@ pub fn present(program: &LoadedProgram, report: &CheckedReport<'_>) -> Result<Pr
             &rewrite.identity(),
             Kind::Rewrite,
             rewrite.message,
-            &[],
+            &rewrite.notes(&program.corpus, &names)?,
             &rewrite.contributions(),
         )?;
         for d in &mut placed {

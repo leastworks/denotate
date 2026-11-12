@@ -63,6 +63,45 @@ notices and optional attribution. This changes observation only, not resource
 allowances or the existing recovery policy. Finished CLI verification reports are
 flushed before later verification work.
 
+Admission starts with a `structural` pass over blocked regions (negative cycles
+and their dependents); an already admitted graph has no structural targets.
+It reaches a worklist fixed point before committing deletions and running any BDD
+proof. After BDD rewrites have admitted an unrestricted program, the existing early
+exit avoids another optional round. Truth/falsehood propagation reads current
+rule bodies, head producer counts and already settled fixed boundaries; it never
+builds a Boolean context. The existing concrete evaluator supplies input-free,
+already settled boundaries, including positive recursion, so folded and unfolded
+preparation agree. This private dependency-closed evaluation does not select or
+validate an input world. Components with discharged premises are excluded from
+that evaluation to avoid BDD replay work; propagation can still use their current
+bodies. No new unfounded-set or positive-cycle inference is added to blocked regions.
+
+Subsumption expands only positive, single-producer premises. Comparisons stop at
+32 expansion levels or 128 visited literals; a cyclic expansion is skipped.
+These are optimization cutoffs: skipping a comparison yields no rewrite, not an
+inconclusive verdict. Within one head visit, normalized bodies are ordered by size
+and deterministic rule order. Exact duplicates use a map; subset searches index
+retained bodies by their first signed premise and inspect at most 64 candidates.
+For N producers and bounded expansion size K, a visit costs
+O(N K log N + N K² + 64 N K log K), rather than an unbounded N² pair scan.
+The index can miss a valid subsumption beyond its candidate cutoff. Changes to
+producers or structural facts invalidate their reader closure, so a head can be
+visited again; the whole pass is still bounded by the ordinary work/deadline limits.
+Indexing, propagation, expansion, comparisons, certificate storage and graph commit
+are charged. Global exhaustion publishes no partial structural batch. No BDD
+condition allowance is consumed by structural certificates.
+
+Structural evidence is a shared flat DAG per pass, trimmed to facts and rules
+needed by actual removals. Fixed-boundary source chains are collected lazily from
+the retained fixed graph, with charged traversal. Settled helpers may simplify
+privately to justify a blocked removal, but their rules are never committed as
+removals or warnings by this pass. Warnings preserve per-source-rule instance coverage and
+identify supporting/unfolded rules at current locations. Settling chains are not
+copied into every retained proof. Enumerating those chains for individual warnings
+can still revisit shared evidence; presentation and key projection are not a new
+cache. The `admission-structural` profile span is separate from BDD result-node
+traffic and retained-condition snapshots.
+
 Within each admission snapshot, producer removal runs before negation discharge.
 A nonempty removal batch rebuilds the graph and starts a fresh snapshot; cycle
 bounds run only after removals reach a fixed point. The coverage proof and

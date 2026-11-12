@@ -30,7 +30,7 @@ fn run(
         prepared
             .program()
             .rewrite_proofs()
-            .any(|p| p.upper_bounds.is_some())
+            .any(|p| p.symbolic().is_some_and(|p| p.upper_bounds.is_some()))
     );
     assert!(
         prepared

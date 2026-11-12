@@ -460,8 +460,12 @@ a fixed world never depends on the verification.
 - A cycle through negation is admitted only with a justification: a proof that the
   negation is redundant under the other premises and the assumptions (for example two
   rules with mutually exclusive guards that each negate the other's head), or a
-  certification of one world's meaning. Redundant negations are reported as warnings;
-  they never authorize edits.
+  certification of one world's meaning. Removing a provably redundant or dead
+  producer can also break the cycle. Before Boolean proofs, structural admission
+  removes such producers in blocked regions using settled premises and signed-body
+  containment, including bounded unfolding of single-producer positive chains.
+  Rewrite warnings identify the source rule and its supporting definitions; they
+  never authorize edits.
 - Otherwise the affected component and everything depending on it is reported as
   **unsupported**, never treated as false, or as **no meaning** where some permitted
   input has no consistent result.

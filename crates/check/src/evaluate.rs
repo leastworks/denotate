@@ -143,6 +143,55 @@ impl GroundProgram {
         selected: Option<&BTreeSet<ComponentId>>,
         budget: &mut Budget<'_>,
     ) -> Result<Replay<'_>> {
+        self.evaluate_scope(present, selected, budget, true)
+    }
+
+    /// Existing concrete evaluation supplies input-free settled boundaries to
+    /// structural admission. No input-dependent component can enter this scope,
+    /// and no world is chosen or assumption tested by this internal operation.
+    pub(crate) fn structural_boundaries(
+        &self,
+        budget: &mut Budget<'_>,
+    ) -> Result<(BTreeSet<ComponentId>, Replay<'_>)> {
+        let mut independent = BTreeSet::new();
+        for component in &self.components {
+            budget.charge(
+                1 + component.atoms.len() + component.dependencies.len(),
+                "structural boundaries",
+            )?;
+            if !component.blocked_by.is_empty()
+                || !component.dependencies.is_subset(&independent)
+                || component.atoms.iter().any(|a| self.inputs.contains(a))
+            {
+                continue;
+            }
+            // Concrete replay validates discharge certificates with BDDs. Keep
+            // such components out of this optional boundary evaluation; ordinary
+            // structural propagation can still read their current rule bodies.
+            let mut discharged = false;
+            for r in &self.component_rules[component.id.index] {
+                budget.tick("structural boundaries")?;
+                let rule = &self.rules[*r];
+                if self.original_rule(rule.id).unwrap().body.len() != rule.body.len() {
+                    discharged = true;
+                    break;
+                }
+            }
+            if !discharged {
+                independent.insert(component.id);
+            }
+        }
+        let replay = self.evaluate_scope([], Some(&independent), budget, false)?;
+        Ok((independent, replay))
+    }
+
+    fn evaluate_scope(
+        &self,
+        present: impl IntoIterator<Item = GroundAtom>,
+        selected: Option<&BTreeSet<ComponentId>>,
+        budget: &mut Budget<'_>,
+        validate_world: bool,
+    ) -> Result<Replay<'_>> {
         let _stage = budget.limits.progress.nested("replay");
         budget.limits.cancellation.check()?;
         let mut snapshot = BTreeSet::new();
@@ -153,7 +202,9 @@ impl GroundProgram {
             }
             snapshot.insert(input);
         }
-        self.validate_input_world(&snapshot, budget)?;
+        if validate_world {
+            self.validate_input_world(&snapshot, budget)?;
+        }
         let mut replay = Replay {
             program: self,
             present: snapshot,
@@ -315,7 +366,7 @@ impl Replay<'_> {
             .program
             .rewrite_proof(id)
             .ok_or(CheckError::Internal("foreign rewrite proof"))?;
-        if proof.candidate.rule.id != rule
+        if proof.candidate().id != rule
             || proof.kind
                 != (RewriteKind::Discharge {
                     literal_occurrence: occurrence,
@@ -325,6 +376,9 @@ impl Replay<'_> {
                 "rewrite proof does not justify this premise",
             ));
         }
+        let proof = proof
+            .symbolic()
+            .ok_or(CheckError::Internal("structural discharge"))?;
         let ctx = ConditionContext::build(self.program, budget)?;
         // Check applicability to this observation, not just the presence of a
         // proof ID. This does not add proof dependencies to the replay cone.

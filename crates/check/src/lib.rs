@@ -25,7 +25,9 @@ pub use profile::*;
 mod local;
 mod request;
 mod rewrite;
+mod structural;
 mod symbolic;
+pub use structural::{StructuralCertificate, StructuralProof, StructuralReason};
 mod upper_bounds;
 
 pub use accounting::*;

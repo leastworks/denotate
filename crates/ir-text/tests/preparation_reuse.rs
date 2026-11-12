@@ -329,7 +329,7 @@ verification open{assumptions:[];obligations:[o];}";
                 restricted
             );
             for proof in prepared.program().rewrite_proofs() {
-                let id = proof.candidate.rule.id;
+                let id = proof.candidate().id;
                 let original = prepared.key_view().original(id).unwrap();
                 assert!(original.body.iter().any(|(negative, _)| *negative));
                 match proof.kind {

@@ -65,7 +65,7 @@ fn discharge_lookup_handles_removal_only_and_mixed_snapshots() {
                     // The right occurrence on the wrong rule must not match.
                     let other = snapshot
                         .original_rules()
-                        .find(|r| r.id != proof.candidate.rule.id)
+                        .find(|r| r.id != proof.candidate().id)
                         .unwrap();
                     assert!(snapshot.discharge(other.id, literal_occurrence).is_none());
                 }
@@ -113,7 +113,16 @@ fn descending_bounds_preserve_self_support_and_do_not_use_least_fixed_point() {
     assert_eq!(p.rewrite_proofs().count(), 1);
     assert_eq!(p.rules().find(|r| r.source == ar).unwrap().body.len(), 2);
     let proof = p.rewrite_proofs().next().unwrap();
-    assert!(proof.upper_bounds.as_ref().unwrap().conditions[&atom(b)].is_true());
+    assert!(
+        proof
+            .symbolic()
+            .unwrap()
+            .upper_bounds
+            .as_ref()
+            .unwrap()
+            .conditions[&atom(b)]
+            .is_true()
+    );
     for world in subsets(&[atom(t), atom(u)]) {
         let before = supported_models(&p, &p.original_rules().cloned().collect::<Vec<_>>(), &world);
         let after = supported_models(&p, &p.rules().cloned().collect::<Vec<_>>(), &world);
@@ -214,7 +223,7 @@ fn mutual_negation_discharge_preserves_original_models_and_evidence() {
             };
             assert_eq!(literal_occurrence, c.rule(ar).unwrap().body[0].atom().id());
             assert_eq!(p.original_rule(*rule).unwrap().body.len(), 2);
-            assert_eq!(p.rewrite_proof(proof).unwrap().candidate.rule.id, *rule);
+            assert_eq!(p.rewrite_proof(proof).unwrap().candidate().id, *rule);
         }
     }
 }
@@ -257,7 +266,7 @@ fn producer_removal_uses_exact_coverage_and_never_admits_bad() {
             .unwrap();
         assert!(!p.is_admitted());
         assert!(p.rules().any(|r| r.source == kept));
-        let should_drop = !matches!(shape, 2 | 4);
+        let should_drop = shape != 4;
         assert_eq!(!p.rules().any(|r| r.source == dropped), should_drop);
         assert_eq!(p.rewrite_proofs().count(), usize::from(should_drop));
         let meaning = p.symbolic(&Limits::default()).unwrap();
@@ -286,7 +295,8 @@ fn producer_removal_uses_exact_coverage_and_never_admits_bad() {
                     assert!(condition.is_true());
                 }
             }
-            _ => assert!(!should_drop),
+            SymbolicFact::Blocked(_) => assert!(matches!(shape, 2 | 4)),
+            _ => panic!("default-limit checking must be conclusive here"),
         }
         let worlds = compare(&c, &Domains::new(), &p);
         if matches!(shape, 1 | 5) {
@@ -673,7 +683,7 @@ fn wide_removal_coverage_keeps_exact_proofs_models_and_snapshot_boundaries() {
     let admitted = raw.admit(&limits).unwrap();
     assert!(admitted.admission_limit().is_none());
     let proofs: Vec<_> = admitted.rewrite_proofs().collect();
-    assert_eq!(proofs.len(), removed.len());
+    assert!(proofs.len() >= removed.len());
     assert!(
         proofs
             .iter()
@@ -686,17 +696,33 @@ fn wide_removal_coverage_keeps_exact_proofs_models_and_snapshot_boundaries() {
         assert!(!admitted.rules().any(|r| r.source == *id));
     }
     for id in &kept {
-        assert!(admitted.rules().any(|r| r.source == *id));
+        let original = admitted.original_rules().find(|r| r.source == *id).unwrap();
+        assert!(admitted.rules().any(|r| {
+            r.head.atom == original.head.atom
+                && r.body
+                    .iter()
+                    .map(|l| (&l.term.atom, l.polarity == Polarity::Positive))
+                    .collect::<Vec<_>>()
+                    == original
+                        .body
+                        .iter()
+                        .map(|l| (&l.term.atom, l.polarity == Polarity::Positive))
+                        .collect::<Vec<_>>()
+        }));
     }
     for proof in proofs {
         assert_eq!(proof.kind, RewriteKind::RedundantProducer);
-        assert!(!proof.candidate.exact);
-        assert!(!proof.producers.is_empty());
+        if proof.structural().is_some() {
+            assert!(!proof.supporting_rules().is_empty());
+            continue;
+        }
+        assert!(!proof.symbolic().unwrap().candidate.exact);
+        assert!(!proof.symbolic().unwrap().producers.is_empty());
         let exact_sources: BTreeSet<_> = kept
             .iter()
             .copied()
             .filter(|id| {
-                c.rule(*id).unwrap().head.relation() == proof.candidate.rule.head.atom.relation
+                c.rule(*id).unwrap().head.relation() == proof.candidate().head.atom.relation
                     && c.rule(*id)
                         .unwrap()
                         .body
@@ -704,31 +730,37 @@ fn wide_removal_coverage_keeps_exact_proofs_models_and_snapshot_boundaries() {
                         .all(|l| c.relation(l.atom().relation()).unwrap().name != "a")
             })
             .collect();
-        assert_eq!(
+        assert!(
             proof
+                .symbolic()
+                .unwrap()
                 .producers
                 .iter()
-                .map(|p| p.rule.source)
-                .collect::<BTreeSet<_>>(),
-            exact_sources
+                .all(|p| exact_sources.contains(&p.rule.source))
         );
         assert!(
             proof
+                .symbolic()
+                .unwrap()
                 .producers
                 .iter()
-                .all(|p| p.exact && p.rule.head.atom == proof.candidate.rule.head.atom)
+                .all(|p| p.exact && p.rule.head.atom == proof.candidate().head.atom)
         );
         // Check the recorded coverage against its exact producer conditions in
         // every input world; don't pin BDD layouts or selected evidence tuples.
         let ctx = admitted.condition_context(&limits).unwrap();
         for world in subsets(&admitted.input_atoms().cloned().collect::<Vec<_>>()) {
-            let expected = proof.producers.iter().any(|p| {
+            let expected = proof.symbolic().unwrap().producers.iter().any(|p| {
                 ctx.evaluate(&p.condition, world.iter().cloned(), &limits)
                     .unwrap()
             });
             assert_eq!(
-                ctx.evaluate(&proof.coverage, world.iter().cloned(), &limits)
-                    .unwrap(),
+                ctx.evaluate(
+                    &proof.symbolic().unwrap().coverage,
+                    world.iter().cloned(),
+                    &limits
+                )
+                .unwrap(),
                 expected
             );
         }
@@ -753,7 +785,7 @@ fn wide_removal_storage_exhaustion_preserves_only_committed_sound_snapshots() {
         completed |= admitted.admission_limit().is_none();
         for proof in admitted.rewrite_proofs() {
             assert_eq!(proof.kind, RewriteKind::RedundantProducer);
-            assert!(admitted.rule(proof.candidate.rule.id).is_none());
+            assert!(admitted.rule(proof.candidate().id).is_none());
         }
         assert!(compare(&c, &Domains::new(), &admitted) > 0);
     }

@@ -434,7 +434,7 @@ impl GroundKeyView<'_> {
             .rewrite_proof(id)
             .ok_or(CheckError::Internal("missing rewrite proof"))?;
         Ok(RewriteEvidenceKey {
-            candidate: self.instance(proof.candidate.rule.id)?,
+            candidate: self.instance(proof.candidate().id)?,
             kind: match proof.kind {
                 RewriteKind::Discharge { literal_occurrence } => KeyedRewriteKind::Discharge(
                     self.keys
@@ -446,9 +446,9 @@ impl GroundKeyView<'_> {
                 RewriteKind::RedundantProducer => KeyedRewriteKind::RedundantProducer,
             },
             producers: proof
-                .producers
-                .iter()
-                .map(|p| self.instance(p.rule.id))
+                .supporting_rules()
+                .into_iter()
+                .map(|p| self.instance(p.id))
                 .collect::<Result<_>>()?,
         })
     }

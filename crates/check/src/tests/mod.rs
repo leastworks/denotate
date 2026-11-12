@@ -12,3 +12,5 @@ mod symbolic;
 
 mod incremental_inventory;
 mod permitted;
+
+mod structural;

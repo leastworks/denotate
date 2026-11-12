@@ -18,10 +18,10 @@ fn lowered_test_dsl_forwarding_agrees_with_cartesian_stable_model_oracle() {
     assert_eq!(p.rewrite_proofs().count(), 2);
     assert_eq!(compare(&lowered.corpus, &domains, &p), 8);
     let proofs: Vec<_> = p.rewrite_proofs().collect();
-    let certificate = proofs[0].upper_bounds.as_ref().unwrap();
+    let certificate = proofs[0].symbolic().unwrap().upper_bounds.as_ref().unwrap();
     assert!(std::sync::Arc::ptr_eq(
         certificate,
-        proofs[1].upper_bounds.as_ref().unwrap()
+        proofs[1].symbolic().unwrap().upper_bounds.as_ref().unwrap()
     ));
     assert_eq!(certificate.snapshot, proofs[0].snapshot);
     // The certificate includes the forwarding rules, not just mapped_to's

@@ -290,11 +290,11 @@ mod tests {
         assert_eq!(
             expected
                 .rewrite_proofs()
-                .map(|p| (&p.kind, p.candidate.rule.id))
+                .map(|p| (&p.kind, p.candidate().id))
                 .collect::<Vec<_>>(),
             actual
                 .rewrite_proofs()
-                .map(|p| (&p.kind, p.candidate.rule.id))
+                .map(|p| (&p.kind, p.candidate().id))
                 .collect::<Vec<_>>()
         );
         events.into_inner()

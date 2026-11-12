@@ -160,7 +160,7 @@ impl SymbolicMeaning<'_> {
         let mut rewrites = Vec::new();
         for proof in self.program.rewrite_proofs() {
             budget.tick("completion rewrite evidence")?;
-            if internal.contains_key(&proof.candidate.rule.head.atom) {
+            if internal.contains_key(&proof.candidate().head.atom) {
                 rewrites.push(proof.id);
             }
         }

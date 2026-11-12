@@ -130,7 +130,7 @@ impl Attempts {
         }
         let mut changed: BTreeSet<_> = batch
             .iter()
-            .map(|p| p.candidate.rule.head.atom.clone())
+            .map(|p| p.candidate().head.atom.clone())
             .collect();
         let mut pending: Vec<_> = changed.iter().cloned().collect();
         while let Some(atom) = pending.pop() {

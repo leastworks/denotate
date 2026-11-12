@@ -98,42 +98,83 @@ impl ProducerSummary {
     }
 }
 #[derive(Debug, Clone)]
+pub struct SymbolicRewriteProof {
+    pub candidate: ProducerSummary,
+    pub producers: Vec<ProducerSummary>,
+    pub coverage: Condition,
+    pub upper_bounds: Option<Arc<ComponentUpperBounds>>,
+}
+#[derive(Debug, Clone)]
+pub enum RewriteJustification {
+    Symbolic(SymbolicRewriteProof),
+    Structural(crate::structural::StructuralProof),
+}
+#[derive(Debug, Clone)]
 pub struct RewriteProof {
     pub id: RewriteProofId,
     pub snapshot: u64,
     pub kind: RewriteKind,
-    pub candidate: ProducerSummary,
-    pub producers: Vec<ProducerSummary>,
-    /// Upper bound for discharge; exact coverage for producer removal.
-    pub coverage: Condition,
-    /// Complete forwarding certificate for discharge, shared within an SCC.
-    /// Producer removal instead uses exact coverage and has no such certificate.
-    pub upper_bounds: Option<Arc<ComponentUpperBounds>>,
+    pub justification: RewriteJustification,
 }
 impl RewriteProof {
+    pub fn candidate(&self) -> &GroundRule {
+        match &self.justification {
+            RewriteJustification::Symbolic(p) => &p.candidate.rule,
+            RewriteJustification::Structural(p) => &p.candidate,
+        }
+    }
+    pub fn symbolic(&self) -> Option<&SymbolicRewriteProof> {
+        match &self.justification {
+            RewriteJustification::Symbolic(p) => Some(p),
+            _ => None,
+        }
+    }
+    pub fn structural(&self) -> Option<&crate::structural::StructuralProof> {
+        match &self.justification {
+            RewriteJustification::Structural(p) => Some(p),
+            _ => None,
+        }
+    }
+    pub fn supporting_rules(&self) -> Vec<&GroundRule> {
+        match &self.justification {
+            RewriteJustification::Symbolic(p) => p.producers.iter().map(|p| &p.rule).collect(),
+            RewriteJustification::Structural(p) => p.supporting_rules(),
+        }
+    }
+    pub(crate) fn summaries(&self) -> impl Iterator<Item = &ProducerSummary> {
+        self.symbolic().into_iter().flat_map(|p| {
+            std::iter::once(&p.candidate)
+                .chain(&p.producers)
+                .chain(p.upper_bounds.iter().flat_map(|b| b.producers.iter()))
+        })
+    }
     fn profile_conditions(&self) -> impl Iterator<Item = &Condition> {
-        std::iter::once(&self.coverage)
-            .chain(self.candidate.profile_conditions())
-            .chain(
-                self.producers
-                    .iter()
-                    .flat_map(ProducerSummary::profile_conditions),
-            )
-            .chain(self.upper_bounds.iter().flat_map(|b| {
-                b.conditions.values().chain(
-                    b.producers
+        self.symbolic().into_iter().flat_map(|p| {
+            std::iter::once(&p.coverage)
+                .chain(p.candidate.profile_conditions())
+                .chain(
+                    p.producers
                         .iter()
                         .flat_map(ProducerSummary::profile_conditions),
                 )
-            }))
+                .chain(p.upper_bounds.iter().flat_map(|b| {
+                    b.conditions.values().chain(
+                        b.producers
+                            .iter()
+                            .flat_map(ProducerSummary::profile_conditions),
+                    )
+                }))
+        })
     }
     fn nodes(&self) -> usize {
-        std::iter::once(&self.candidate)
-            .chain(&self.producers)
-            .map(ProducerSummary::nodes)
-            .sum::<usize>()
-            + self.coverage.node_count()
-            + self.upper_bounds.as_ref().map_or(0, |b| b.nodes())
+        self.symbolic().map_or(0, |p| {
+            std::iter::once(&p.candidate)
+                .chain(&p.producers)
+                .map(ProducerSummary::nodes)
+                .sum::<usize>()
+                + p.coverage.node_count()
+                + p.upper_bounds.as_ref().map_or(0, |b| b.nodes())
+        })
     }
 }
 
@@ -156,7 +197,7 @@ impl Rewrites {
         if let RewriteKind::Discharge { literal_occurrence } = proof.kind {
             // Preserve the linear lookup's first-match behavior.
             self.discharges
-                .entry((proof.candidate.rule.id, literal_occurrence))
+                .entry((proof.candidate().id, literal_occurrence))
                 .or_insert(proof.id);
         }
         self.proofs.push(proof);
@@ -186,15 +227,17 @@ impl GroundProgram {
             kind: RewriteKind::Discharge {
                 literal_occurrence: occurrence,
             },
-            candidate: ProducerSummary {
-                rule: original,
-                settled: vec![],
-                condition,
-                exact: false,
-            },
-            producers: vec![],
-            coverage,
-            upper_bounds: None,
+            justification: RewriteJustification::Symbolic(SymbolicRewriteProof {
+                candidate: ProducerSummary {
+                    rule: original,
+                    settled: vec![],
+                    condition,
+                    exact: false,
+                },
+                producers: vec![],
+                coverage,
+                upper_bounds: None,
+            }),
         });
     }
 
@@ -246,7 +289,7 @@ impl GroundProgram {
         occurrence: OccurrenceId,
     ) -> Option<&RewriteProof> {
         self.rewrite_proofs().find(|p| {
-            p.candidate.rule.id == rule
+            p.candidate().id == rule
                 && p.kind
                     == RewriteKind::Discharge {
                         literal_occurrence: occurrence,
@@ -310,8 +353,36 @@ impl GroundProgram {
                 return Ok(());
             }
             round += 1;
-            progress.snapshot(self, round, "symbolic");
             let _round_profile = profile.span("admission-round", Some(round));
+            progress.snapshot(self, round, "structural");
+            {
+                let _stage = profile.span("admission-structural", Some(round));
+                let structural = crate::structural::reduce(self, budget)?;
+                if !structural.is_empty() {
+                    let batch = structural
+                        .into_iter()
+                        .enumerate()
+                        .map(|(index, proof)| RewriteProof {
+                            id: RewriteProofId {
+                                snapshot: self.graph_revision,
+                                index: self.rewrites.proofs.len() + index,
+                            },
+                            snapshot: self.graph_revision,
+                            kind: RewriteKind::RedundantProducer,
+                            justification: RewriteJustification::Structural(proof),
+                        })
+                        .collect();
+                    self.commit_rewrites(batch, attempts, budget)?;
+                    progress.snapshot(self, round, "structural-committed");
+                }
+            }
+            if self.is_admitted()
+                && self.input_groups.is_empty()
+                && self.assumption_condition.is_none()
+            {
+                return Ok(());
+            }
+            progress.snapshot(self, round, "symbolic");
             budget.tick("rewrite snapshot")?;
             let meaning = {
                 let mut stage = profile.span("admission-symbolic", Some(round));
@@ -701,36 +772,46 @@ impl GroundProgram {
             }
             let _commit_profile = profile.span("admission-commit", Some(round));
             progress.work(self, "commit", None, 0, true);
-            // Transactional graph rebuild: an interrupted batch cannot leave a
-            // half-rewritten graph or publish warnings for uncommitted changes.
-            budget.charge(
-                self.atoms.len() + self.rules.iter().map(|r| 1 + r.body.len()).sum::<usize>(),
-                "rewrite commit",
-            )?;
-            let mut next = self.clone();
-            let changed = attempts.changed_readers(self, &batch, budget)?;
-            for proof in batch {
-                let id = proof.candidate.rule.id;
-                next.rewrites
-                    .originals
-                    .entry(id)
-                    .or_insert_with(|| self.rules[id.index].clone());
-                match proof.kind {
-                    RewriteKind::RedundantProducer => {
-                        next.rewrites.dropped.insert(id);
-                    }
-                    RewriteKind::Discharge { literal_occurrence } => next.rules[id.index]
-                        .body
-                        .retain(|l| l.term.occurrence != literal_occurrence),
-                }
-                next.rewrites.nodes += proof.nodes();
-                next.rewrites.push_proof(proof);
-            }
-            crate::graph::analyze(&mut next, budget)?;
-            *self = next;
-            attempts.invalidate(&changed);
+            self.commit_rewrites(batch, attempts, budget)?;
             progress.snapshot(self, round, "committed");
         }
+    }
+
+    fn commit_rewrites(
+        &mut self,
+        batch: Vec<RewriteProof>,
+        attempts: &mut Attempts,
+        budget: &mut Budget<'_>,
+    ) -> Result<()> {
+        // Transactional graph rebuild: an interrupted batch cannot leave a
+        // half-rewritten graph or publish warnings for uncommitted changes.
+        budget.charge(
+            self.atoms.len() + self.rules.iter().map(|r| 1 + r.body.len()).sum::<usize>(),
+            "rewrite commit",
+        )?;
+        let mut next = self.clone();
+        let changed = attempts.changed_readers(self, &batch, budget)?;
+        for proof in batch {
+            let id = proof.candidate().id;
+            next.rewrites
+                .originals
+                .entry(id)
+                .or_insert_with(|| self.rules[id.index].clone());
+            match proof.kind {
+                RewriteKind::RedundantProducer => {
+                    next.rewrites.dropped.insert(id);
+                }
+                RewriteKind::Discharge { literal_occurrence } => next.rules[id.index]
+                    .body
+                    .retain(|l| l.term.occurrence != literal_occurrence),
+            }
+            next.rewrites.nodes += proof.nodes();
+            next.rewrites.push_proof(proof);
+        }
+        crate::graph::analyze(&mut next, budget)?;
+        *self = next;
+        attempts.invalidate(&changed);
+        Ok(())
     }
 
     fn propose(
@@ -762,10 +843,12 @@ impl GroundProgram {
             },
             snapshot: self.graph_revision,
             kind,
-            candidate: candidate.clone(),
-            producers: producers.into_iter().cloned().collect(),
-            coverage,
-            upper_bounds,
+            justification: RewriteJustification::Symbolic(SymbolicRewriteProof {
+                candidate: candidate.clone(),
+                producers: producers.into_iter().cloned().collect(),
+                coverage,
+                upper_bounds,
+            }),
         };
         batch.push(proof);
         Ok(())

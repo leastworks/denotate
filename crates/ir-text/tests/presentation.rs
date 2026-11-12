@@ -71,14 +71,14 @@ fn assert_rewrite_inventory(p: &LoadedProgram, ground: &GroundProgram) {
         let literal = match proof.kind {
             RewriteKind::RedundantProducer => None,
             RewriteKind::Discharge { literal_occurrence } => {
-                if !ground.rules().any(|r| r.id == proof.candidate.rule.id) {
+                if !ground.rules().any(|r| r.id == proof.candidate().id) {
                     continue;
                 }
                 Some(literal_occurrence)
             }
         };
         expected
-            .entry((proof.candidate.rule.source, literal))
+            .entry((proof.candidate().source, literal))
             .or_default()
             .push(proof);
     }
@@ -93,7 +93,7 @@ fn assert_rewrite_inventory(p: &LoadedProgram, ground: &GroundProgram) {
         let covered = ground
             .original_rules()
             .filter(|r| r.source == rule)
-            .all(|r| proofs.iter().any(|p| p.candidate.rule.id == r.id));
+            .all(|r| proofs.iter().any(|p| p.candidate().id == r.id));
         assert_eq!(actual.covers_all_instances, covered);
         assert_eq!(
             actual.message,
@@ -207,8 +207,11 @@ fn rewrite_coverage_is_per_literal_and_per_original_instance_cold_and_warm() {
 fn discharge_of_a_later_removed_instance_is_hidden_but_producer_warning_remains() {
     let p = program(
         "file:///app/den.root",
-        "input t(); relation first(); relation second();
-        first():-t(),!second(); second():-!t(),!first(),out();
+        // The covering head has two producers, so structural unfolding cannot
+        // bypass the discharge-then-removal sequence this test exercises.
+        "input t(); input u(); relation first(); relation second();
+        first():-t(),u(),!second(); first():-t(),!u(),!second();
+        second():-!t(),!first(),out();
         relation bad(); bad():-!bad();
         relation out(); out():-t(),!second(),bad(); out():-first();",
         LIB,
@@ -218,13 +221,13 @@ fn discharge_of_a_later_removed_instance_is_hidden_but_producer_warning_remains(
             .rewrite_proofs()
             .find(|proof| {
                 matches!(proof.kind, RewriteKind::Discharge { .. })
-                    && ground.rule(proof.candidate.rule.id).is_none()
+                    && ground.rule(proof.candidate().id).is_none()
             })
             .expect("exercise a discharge followed by producer removal");
         let rewrites = denotate_presentation::rewrites(&p.corpus, ground).unwrap();
         let warnings: Vec<_> = rewrites
             .iter()
-            .filter(|r| r.rule == removed.candidate.rule.source)
+            .filter(|r| r.rule == removed.candidate().source)
             .collect();
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].literal.is_none());

@@ -97,7 +97,14 @@ impl GroundProgram {
             )?;
         }
         for proof in self.rewrite_proofs() {
-            for summary in std::iter::once(&proof.candidate).chain(&proof.producers) {
+            if proof.structural().is_some() {
+                budget.charge(1 + proof.candidate().body.len(), "certification snapshot")?;
+            }
+            for summary in proof
+                .symbolic()
+                .into_iter()
+                .flat_map(|p| std::iter::once(&p.candidate).chain(&p.producers))
+            {
                 budget.charge(
                     1 + summary.rule.body.len() + summary.settled.len(),
                     "certification snapshot",

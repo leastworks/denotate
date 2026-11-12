@@ -159,7 +159,7 @@ impl<'p> LocalInputIndex<'p> {
         let mut proofs = BTreeMap::<_, Vec<_>>::new();
         for proof in program.rewrite_proofs() {
             proofs
-                .entry(&proof.candidate.rule.head.atom)
+                .entry(&proof.candidate().head.atom)
                 .or_default()
                 .push(proof);
         }
@@ -219,10 +219,7 @@ impl PreparedCheck<'_> {
             if let Some(proofs) = index.proofs.get(head) {
                 for proof in proofs {
                     rewrite_keys.insert(proof.id, (*proof, self.key_view().rewrite(proof.id)?));
-                    for producer in std::iter::once(&proof.candidate)
-                        .chain(&proof.producers)
-                        .chain(proof.upper_bounds.iter().flat_map(|b| b.producers.iter()))
-                    {
+                    for producer in proof.summaries() {
                         for atom in std::iter::once(&producer.rule.head.atom)
                             .chain(producer.rule.body.iter().map(|l| &l.term.atom))
                         {
@@ -271,7 +268,7 @@ impl PreparedCheck<'_> {
                 .values()
                 .filter(|(p, _)| {
                     matches!(p.kind, RewriteKind::Discharge { .. })
-                        && cone.rules.contains(&p.candidate.rule.id)
+                        && cone.rules.contains(&p.candidate().id)
                 })
                 .collect::<Vec<_>>();
             if proofs.is_empty() {
@@ -307,11 +304,15 @@ impl PreparedCheck<'_> {
                                 key.clone(),
                                 (
                                     context.export(
-                                        &p.candidate.condition,
+                                        &p.symbolic().expect("discharge").candidate.condition,
                                         self.semantic_keys,
                                         &mut budget,
                                     )?,
-                                    context.export(&p.coverage, self.semantic_keys, &mut budget)?,
+                                    context.export(
+                                        &p.symbolic().expect("discharge").coverage,
+                                        self.semantic_keys,
+                                        &mut budget,
+                                    )?,
                                 ),
                             ))
                         })

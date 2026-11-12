@@ -47,12 +47,9 @@ impl PreparedCheck<'_> {
                 }
             }
             for proof in self.program.rewrite_proofs() {
-                if needed.contains(&proof.candidate.rule.head.atom) {
+                if needed.contains(&proof.candidate().head.atom) {
                     rewrites.insert(self.key_view().rewrite(proof.id)?);
-                    for producer in std::iter::once(&proof.candidate)
-                        .chain(&proof.producers)
-                        .chain(proof.upper_bounds.iter().flat_map(|b| b.producers.iter()))
-                    {
+                    for producer in proof.summaries() {
                         needed.insert(producer.rule.head.atom.clone());
                         needed.extend(producer.rule.body.iter().map(|l| l.term.atom.clone()));
                     }
@@ -98,7 +95,7 @@ impl PreparedCheck<'_> {
                 .rewrite_proofs()
                 .filter(|p| {
                     matches!(p.kind, RewriteKind::Discharge { .. })
-                        && cone.rules.contains(&p.candidate.rule.id)
+                        && cone.rules.contains(&p.candidate().id)
                 })
                 .collect::<Vec<_>>();
             if proofs.is_empty() {
@@ -134,11 +131,15 @@ impl PreparedCheck<'_> {
                                 self.key_view().rewrite(p.id)?,
                                 (
                                     context.export(
-                                        &p.candidate.condition,
+                                        &p.symbolic().expect("discharge").candidate.condition,
                                         self.semantic_keys,
                                         &mut budget,
                                     )?,
-                                    context.export(&p.coverage, self.semantic_keys, &mut budget)?,
+                                    context.export(
+                                        &p.symbolic().expect("discharge").coverage,
+                                        self.semantic_keys,
+                                        &mut budget,
+                                    )?,
                                 ),
                             ))
                         })

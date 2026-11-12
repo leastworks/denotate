@@ -149,9 +149,9 @@ fn admission_skips_one_removal_check_and_commits_another_for_the_same_head() {
                     && s.rule
                         .is_some_and(|r| raw.original_rule(r).unwrap().source == hard)
             })
-            && result.rewrite_proofs().any(|p| {
-                p.kind == RewriteKind::RedundantProducer && p.candidate.rule.source == easy
-            })
+            && result
+                .rewrite_proofs()
+                .any(|p| p.kind == RewriteKind::RedundantProducer && p.candidate().source == easy)
         {
             exercised = true;
             assert!(result.rules().any(|r| r.source == hard));
@@ -300,7 +300,7 @@ fn admission_retries_discharge_when_another_heads_external_premise_settles() {
         });
         if skipped
             && result.rewrite_proofs().any(|p| {
-                p.candidate.rule.source == ar && matches!(p.kind, RewriteKind::Discharge { .. })
+                p.candidate().source == ar && matches!(p.kind, RewriteKind::Discharge { .. })
             })
         {
             retried = true;

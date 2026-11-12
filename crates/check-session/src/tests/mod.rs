@@ -15,3 +15,5 @@ mod sparse {
 
 pub mod certification;
 mod certification_search;
+
+mod structural;

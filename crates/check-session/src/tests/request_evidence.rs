@@ -224,10 +224,7 @@ fn committed_key_index_retains_original_bindings_and_indexes_rewrites() {
     );
     for proof in g.program().rewrite_proofs() {
         let key = view.rewrite(proof.id).unwrap();
-        assert_eq!(
-            key.candidate,
-            view.instance(proof.candidate.rule.id).unwrap()
-        );
+        assert_eq!(key.candidate, view.instance(proof.candidate().id).unwrap());
         assert!(content.contains_key(&key.candidate));
         for producer in &key.producers {
             assert!(content.contains_key(producer));

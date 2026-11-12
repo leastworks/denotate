@@ -48,7 +48,8 @@ fn producer_removals_settle_supported_cycles_before_bounds_in_either_rule_order(
             assert!(p.is_admitted());
             assert!(p.admission_limit().is_none());
             assert!(p.rewrite_proofs().all(|proof| {
-                proof.kind == RewriteKind::RedundantProducer && proof.upper_bounds.is_none()
+                proof.kind == RewriteKind::RedundantProducer
+                    && proof.symbolic().is_none_or(|p| p.upper_bounds.is_none())
             }));
             assert!(
                 events.borrow().iter().all(|e| e.stage != "upper-bounds"),
