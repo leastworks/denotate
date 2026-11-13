@@ -178,21 +178,32 @@ coverage remain shared. Original rules remain in the local query dependency clos
 and replay evidence, so pruning executable edges cannot hide an edit dependency.
 
 Assumption declaration validity is a program-level query. The IR classifies
-relation-stratified cones and those requiring grounding; the checker resolves the
-latter against its unrevised ground dependency graph, without selected assumptions.
-The editor and CLI run `validate_assumption_cones_for_run` before their verification loops,
-so unselected declarations and unconfigured programs still get diagnostics. Keyed
-cycle evidence goes through the shared presenter; it is never reconstructed there.
-Validation recomputes from each complete snapshot. Its sealed `ValidatedAssumptions`
-artifact can initialize fixed preparation, so selected restrictions reuse the same
-original-graph check. Only relation-to-cycle summaries and keyed cycle evidence
-survive; the temporary original ground graph is released. Without that artifact,
-folded API preparation computes the check lazily once, including unnamed restrictions
-and later selections. Corpus, domains, keys and deterministic limits bind the reuse.
-Both paths use the original ground dependencies: a fixed-false guard must
-not erase a negative cycle from assumption validation. Logical exhaustion remains
-explicit for requests needing the check; cancellation/deadlines are not cached.
-This original-validation sharing remains run-scoped.
+relation-stratified cones and those requiring grounding. For the latter, the checker
+prepares assumption-independent fixed truth, grounds the residual once and builds
+a specialized view: a fixed-false positive or fixed-true negative premise kills its
+instance; other fixed premises drop out. This is one specialization, with no repeated
+folding, selected assumptions or admission proofs. Blocked fixed atoms remain unknown.
+Validation follows dependencies from each assumption relation's atoms in that view;
+computing W uses the same view. A cycle disconnected from an assumption is still
+subject to ordinary admission and reporting.
+
+The CLI/editor validate before verification loops, so unselected declarations and
+unconfigured programs still get diagnostics. `validate_assumption_cones_for_run`
+prepares directly; `validate_assumption_cones_using` accepts a lazy fold factory so
+the editor can use its session. Relation-stratified validation never calls it.
+Keyed cycle evidence goes through the shared presenter, never reconstructed there.
+The sealed `ValidatedAssumptions` artifact shares fixed evidence, the original
+residual graph, its specialized view and the relation-to-cycle index with subsequent
+requests. Original instances remain intact for admission, provenance and rewrite
+warnings. This replaces separate original-program grounding; it does retain two
+residual views. Copies of those views share their immutable cores across requests.
+
+Without that artifact, a request needing ground validation initializes the same
+preparation lazily, including unnamed restrictions and the optional grounding-cache
+entry point. Corpus, domains, keys and deterministic limits bind reuse. Validation
+and the specialized view recompute each run, even when the session reuses the fixed
+fold across input-dependent edits. Logical exhaustion remains inconclusive;
+cancellation/deadlines never install partial reusable preparation.
 
 Selected general assumptions are another preparation boundary: once their meaning
 is independently established, the checker computes W before admission.

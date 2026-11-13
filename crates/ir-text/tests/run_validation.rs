@@ -180,3 +180,135 @@ fn reused_validation_is_bound_to_corpus_domains_keys_and_limits() {
         Err(CheckError::InvalidRequest(_))
     ));
 }
+
+#[test]
+fn run_preparation_is_shared_and_relation_stratified_validation_stays_lazy() {
+    use std::sync::{Arc, Mutex};
+    let p = parse("input i(); assumption a:empty(i);");
+    validate_assumption_cones_using(&p.corpus, &p.domains, &p.keys, &Limits::default(), || {
+        panic!("relation-stratified validation must not prepare fixed facts")
+    })
+    .unwrap();
+
+    let p = parse(&format!(
+        "{BODY} verification a{{assumptions:[valid];obligations:[];}} verification b{{assumptions:[];obligations:[];}}"
+    ));
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let seen = events.clone();
+    let limits = Limits {
+        profile: Profile::new(move |e| {
+            if !e.finished {
+                seen.lock().unwrap().push(e.stage);
+            }
+        }),
+        ..Limits::default()
+    };
+    let mut session = denotate_check_session::Session::default();
+    for _ in 0..2 {
+        let validated =
+            validate_assumption_cones_using(&p.corpus, &p.domains, &p.keys, &limits, || {
+                session.prepare_fixed(&p.corpus, &p.keys, &p.domains, &limits)
+            })
+            .unwrap();
+        assert!(validated.result().is_valid());
+        events.lock().unwrap().clear();
+        let fixed = session
+            .prepare_fixed_with_validation(&validated, &limits)
+            .unwrap();
+        for (_, request) in p.verification_requests(&limits).unwrap() {
+            assert!(matches!(
+                session
+                    .prepare_with_fixed(&request, &p.corpus, &p.keys, &(&limits).into(), &fixed)
+                    .unwrap(),
+                RequestPreparation::Complete(_)
+            ));
+        }
+        // A reuse contract, not a timing, work-receipt or witness golden.
+        assert!(events.lock().unwrap().iter().all(|stage| !matches!(
+            *stage,
+            "fixed-evaluation" | "fixed-binding" | "residual-preparation" | "grounding"
+        )));
+    }
+    assert!(session.fixed_stats().reused > 0);
+}
+
+#[test]
+fn interruption_during_specialization_does_not_install_a_partial_preparation() {
+    use std::sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    };
+    let p = parse(&format!(
+        "{BODY} verification v{{assumptions:[valid];obligations:[];}}"
+    ));
+    let cancel = Cancellation::default();
+    let trigger = cancel.clone();
+    let limits = Limits {
+        cancellation: cancel,
+        profile: Profile::new(move |e| {
+            if e.stage == "assumption-specialization" && !e.finished {
+                trigger.cancel();
+            }
+        }),
+        ..Limits::default()
+    };
+    let fixed = FixedPreparation::prepare(&p.corpus, &p.domains, &limits).unwrap();
+    let request = p.verification_requests(&limits).unwrap().remove(0).1;
+    assert!(matches!(
+        request.prepare_with_fixed(&p.corpus, &p.keys, &(&limits).into(), &fixed, None),
+        Err(CheckError::Cancelled)
+    ));
+    let fresh = Limits::default();
+    assert!(matches!(
+        request
+            .prepare_with_fixed(&p.corpus, &p.keys, &(&fresh).into(), &fixed, None)
+            .unwrap(),
+        RequestPreparation::Complete(_)
+    ));
+
+    let called = Arc::new(AtomicBool::new(false));
+    let seen = called.clone();
+    let timeout = Limits {
+        timeout: std::time::Duration::ZERO,
+        ..Limits::default()
+    };
+    let validated =
+        validate_assumption_cones_using(&p.corpus, &p.domains, &p.keys, &timeout, || {
+            seen.store(true, Ordering::Relaxed);
+            FixedPreparation::prepare(&p.corpus, &p.domains, &timeout)
+        })
+        .unwrap();
+    assert!(!validated.result().is_valid());
+    assert!(!called.load(Ordering::Relaxed));
+    // Operational limits do not enter the artifact's deterministic identity;
+    // a later non-expired preparation must actually run and succeed.
+    let fixed = FixedPreparation::prepare_with_validation(&validated, &fresh).unwrap();
+    assert!(matches!(
+        request
+            .prepare_with_fixed(&p.corpus, &p.keys, &(&fresh).into(), &fixed, None)
+            .unwrap(),
+        RequestPreparation::Complete(_)
+    ));
+}
+
+#[test]
+fn fold_exhaustion_keeps_already_classified_declarations_valid() {
+    let p = parse(
+        "sort S; const a,b:S; relation fixed(s:S); fixed(a); fixed(b); input i(); assumption fast:empty(i); relation p(); p():-!p(); assumption ground:empty(p);",
+    );
+    let limits = Limits {
+        max_atoms: 1,
+        ..Limits::default()
+    };
+    let validated =
+        validate_assumption_cones_for_run(&p.corpus, &p.domains, &p.keys, &limits).unwrap();
+    for (key, validity) in &validated.result().assumptions {
+        match key.0.name.as_ref() {
+            "fast" => assert!(matches!(validity, AssumptionValidity::Valid)),
+            "ground" => assert!(
+                matches!(validity, AssumptionValidity::Inconclusive(reason) if reason.phase == "assumption validation")
+            ),
+            _ => unreachable!(),
+        }
+    }
+}

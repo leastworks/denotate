@@ -145,20 +145,17 @@ impl<'a> FixedPreparation<'a> {
                 "assumption validation limits do not match fixed preparation",
             ));
         }
-        let fixed = Self::prepare_cached(
+        limits.cancellation.check()?;
+        if let Some(fixed) = &validation.fixed {
+            return Ok(fixed.share());
+        }
+        Self::prepare_cached(
             validation.corpus,
             validation.keys,
             &validation.domains,
             limits,
             store,
-        )?;
-        if let Some(original) = &validation.original {
-            fixed
-                .validation
-                .set((validation.keys, original.clone()))
-                .expect("new validation cell");
-        }
-        Ok(fixed)
+        )
     }
 }
 

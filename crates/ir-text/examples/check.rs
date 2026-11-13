@@ -354,9 +354,19 @@ fn check_program(
     }
     let operations = OperationalLimits::from(&limits);
     progress.emit(Phase::AssumptionValidation, json!({}));
-    let validated =
-        denotate_check::validate_assumption_cones_for_run(&p.corpus, &p.domains, &p.keys, &limits)
-            .map_err(checker_failure)?;
+    let validated = denotate_check::validate_assumption_cones_using(
+        &p.corpus,
+        &p.domains,
+        &p.keys,
+        &limits,
+        || {
+            progress.emit(Phase::FixedFacts, json!({}));
+            let fixed = denotate_check::FixedPreparation::prepare(&p.corpus, &p.domains, &limits)?;
+            progress.emit(Phase::AssumptionValidation, json!({}));
+            Ok(fixed)
+        },
+    )
+    .map_err(checker_failure)?;
     let validation = validated.result();
     trace.message(format_args!(
         "Assumption declarations: {}",

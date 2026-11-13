@@ -269,6 +269,7 @@ fn coverage_keeps_all_candidates_and_correlated_assumptions() {
         let mut p = GroundProgram::prepare(&c, &domains, &limits).unwrap();
         p.install_assumptions(
             &[c.assumption(assumption).unwrap().restriction.clone()],
+            None,
             &mut Budget::new(&limits),
         )
         .unwrap();

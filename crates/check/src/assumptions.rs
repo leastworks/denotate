@@ -16,15 +16,23 @@ impl GroundProgram {
     pub(crate) fn install_assumptions(
         &mut self,
         restrictions: &[Restriction],
+        specialized: Option<&GroundProgram>,
         budget: &mut Budget<'_>,
     ) -> Result<()> {
         let result = (|| {
             // No rewrites and no selected restrictions may establish a constraint's
             // own meaning. Unrelated negative cycles may remain blocked.
-            let mut raw = self.clone();
-            raw.input_groups.clear();
-            raw.assumption_condition = None;
-            let meaning = raw.symbolic_with_budget(budget)?;
+            let mut raw;
+            let independent = match specialized {
+                Some(view) => view,
+                None => {
+                    raw = self.clone();
+                    raw.input_groups.clear();
+                    raw.assumption_condition = None;
+                    &raw
+                }
+            };
+            let meaning = independent.symbolic_with_budget(budget)?;
             let ctx = meaning.context();
             let mut permitted = ConditionContext::build(self, budget)?.permitted_worlds();
             for r in restrictions {

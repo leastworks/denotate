@@ -413,19 +413,23 @@ verification check_presence { assumptions: [required]; obligations: []; }
 An assumption's dependency cone must be stratified independently of assumptions.
 Positive recursion and layered negation are allowed. A cycle between relation names
 is accepted when no negative cycle is reachable from the assumption relation's
-ground atoms. This uses the checker's existing graph before admission: grounding
-removes impossible positive joins, but applies no further simplification of fixed
-facts and no selected assumptions. A cycle outside that ground cone remains an
-ordinary unsupported region. Facts, resolved domains and `within` eligibility can
-therefore introduce or remove an invalid assumption cone when edited. The separate
+ground atoms after one specialization by independently evaluated fixed truth.
+A fixed-false positive or fixed-true negative premise makes its rule instance dead;
+other fixed premises drop out. Blocked fixed atoms never count as false. This happens
+before admission, without selected assumptions or rewrite proofs, and is not repeated
+folding. Validation and evaluation of the assumptions use the same specialized view;
+original rules remain available for diagnostics and ordinary admission. A cycle outside
+that cone remains subject to ordinary admission and reporting. Edits to facts, rules,
+resolved domains or `within` eligibility can therefore introduce or remove an invalid
+assumption cone. The separate
 input-free, relation-stratified restriction on `within` providers is unchanged.
 
 `Corpus::validate_assumptions` and loading classify cones as `RelationStratified` or
 `NeedsGrounding`; loading alone does not establish validity in the latter case.
 The checker validates all declarations once per program, including unselected ones
 and programs without verifications. An invalid cone produces an `invalid-assumption`
-Error on its declaration, with the ground cycle related. Grounding or validation
-exhaustion produces an `unvalidated-assumption` Information diagnostic naming the
+Error on its declaration, with the ground cycle related. Fixed preparation, grounding
+or validation exhaustion produces an `unvalidated-assumption` Information diagnostic naming the
 phase and resource. Verifications selecting invalid or unvalidated assumptions do
 not run; other verifications can still run, but the program is not reported proved.
 Construction clients use `validate_assumption_cones` for this program-level result;

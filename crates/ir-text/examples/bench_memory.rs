@@ -218,7 +218,13 @@ fn run_check(
     };
     let validated = {
         let _span = limits.profile.span("assumption-validation", None);
-        validate_assumption_cones_for_run(&p.corpus, &p.domains, &p.keys, limits)?
+        validate_assumption_cones_using(&p.corpus, &p.domains, &p.keys, limits, || {
+            if folded {
+                session.prepare_fixed(&p.corpus, &p.keys, &p.domains, limits)
+            } else {
+                FixedPreparation::prepare(&p.corpus, &p.domains, limits)
+            }
+        })?
     };
     let fixed = if folded {
         Some(session.prepare_fixed_with_validation(&validated, limits)?)

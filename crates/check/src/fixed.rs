@@ -27,10 +27,7 @@ pub struct FixedPreparation<'a> {
     pub(crate) input_domains: BTreeMap<denotate_ir::RelationId, BTreeSet<GroundAtom>>,
     pub(crate) receipt: WorkReceipt,
     pub(crate) transfer_receipts: WorkReceipts,
-    pub(super) validation: OnceCell<(
-        &'a denotate_ir::SemanticKeys,
-        Arc<OriginalAssumptionValidation>,
-    )>,
+    pub(crate) validation: OnceCell<(&'a denotate_ir::SemanticKeys, Arc<AssumptionPreparation>)>,
 }
 impl<'a> FixedPreparation<'a> {
     pub fn prepare(
@@ -120,25 +117,36 @@ impl<'a> FixedPreparation<'a> {
         result.map_err(|e: CheckError| e.in_phase("fixed facts", None))
     }
 
-    /// Reuse the sealed original-graph check already performed for this run.
-    /// The public, editable diagnostic result is deliberately not accepted here.
+    /// Reuse the sealed run preparation. No caller-editable validity assertion is
+    /// accepted. A relation-stratified declaration query has no fold to reuse.
     pub fn prepare_with_validation(
         validation: &ValidatedAssumptions<'a>,
         limits: &Limits,
     ) -> Result<Self> {
+        limits.cancellation.check()?;
         if validation.limits != DeterministicLimits::from(limits) {
             return Err(CheckError::InvalidRequest(
                 "assumption validation limits do not match fixed preparation",
             ));
         }
-        let fixed = Self::prepare(validation.corpus, &validation.domains, limits)?;
-        if let Some(original) = &validation.original {
-            fixed
-                .validation
-                .set((validation.keys, original.clone()))
-                .expect("new validation cell");
+        if let Some(fixed) = &validation.fixed {
+            return Ok(fixed.share());
         }
-        Ok(fixed)
+        Self::prepare(validation.corpus, &validation.domains, limits)
+    }
+
+    pub(super) fn share(&self) -> Self {
+        Self {
+            contexts: Default::default(),
+            corpus: self.corpus,
+            domains: self.domains.clone(),
+            limits: self.limits.clone(),
+            facts: self.facts.clone(),
+            input_domains: self.input_domains.clone(),
+            receipt: self.receipt.clone(),
+            transfer_receipts: self.transfer_receipts.clone(),
+            validation: self.validation.clone(),
+        }
     }
 
     pub(crate) fn validate_snapshot(
@@ -158,28 +166,26 @@ impl<'a> FixedPreparation<'a> {
         Ok(())
     }
 
-    /// A caller that did not validate declarations still gets exactly the same
-    /// original-graph query, initialized on first use and shared by later requests.
-    pub(crate) fn original_validation(
+    /// Lazily build the independent residual view, shared by validation and W.
+    pub(crate) fn assumption_preparation(
         &self,
         keys: &'a denotate_ir::SemanticKeys,
         limits: &Limits,
-    ) -> Result<&OriginalAssumptionValidation> {
+    ) -> Result<&AssumptionPreparation> {
         limits.cancellation.check()?;
         if self.validation.get().is_none() {
-            let original =
-                OriginalAssumptionValidation::prepare(self.corpus, &self.domains, keys, limits)?;
+            let prepared = AssumptionPreparation::prepare(self, keys, limits)?;
             self.validation
-                .set((keys, Arc::new(original)))
+                .set((keys, Arc::new(prepared)))
                 .expect("uninitialized validation cell");
         }
-        let (source_keys, original) = self.validation.get().unwrap();
+        let (source_keys, prepared) = self.validation.get().unwrap();
         if !std::ptr::eq(*source_keys, keys) {
             return Err(CheckError::InvalidRequest(
                 "assumption validation keys do not match this snapshot",
             ));
         }
-        Ok(original)
+        Ok(prepared)
     }
 }
 

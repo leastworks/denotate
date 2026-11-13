@@ -104,7 +104,7 @@ fn fixed_general_assumptions_and_all_obligation_kinds_keep_meaning() {
 }
 
 #[test]
-fn selected_assumption_validation_still_uses_unfolded_dependencies() {
+fn selected_assumption_validation_uses_fixed_truth_and_keeps_original_evidence() {
     let p = parse(
         "relation t(); t(); relation f(); f():-!t(); relation a(); a():-f(),!b(); relation b(); b():-!a(); assumption no_a:empty(a); verification v{assumptions:[no_a];obligations:[];}",
     );
@@ -113,12 +113,15 @@ fn selected_assumption_validation_still_uses_unfolded_dependencies() {
     let request = p.verification_requests(&limits).unwrap().remove(0).1;
     assert!(matches!(
         request.prepare_with_fixed(&p.corpus, &p.keys, &(&limits).into(), &fixed, None),
-        Err(CheckError::InvalidAssumptionCone { .. })
+        Ok(RequestPreparation::Complete(_))
     ));
     assert!(
-        !validate_assumption_cones(&p.corpus, &p.domains, &p.keys, &limits)
+        validate_assumption_cones(&p.corpus, &p.domains, &p.keys, &limits)
             .unwrap()
             .is_valid()
+    );
+    compare(
+        "relation t(); t(); relation f(); f():-!t(); relation a(); a():-f(),!b(); relation b(); b():-!a(); assumption no_a:empty(a); obligation o:empty(a); verification v{assumptions:[no_a];obligations:[o];}",
     );
 }
 

@@ -25,8 +25,14 @@ See [memory profiling](../../docs/checker-policies.md#memory-profiling).
 - `Session::prepare_with_fixed` shares residual grounding, indexes and admission
   across requests with the same selected restrictions in that run. Obligation
   groups, notices, verification identity and example policy stay separate. This
-  path does not use the optional relation-SCC grounding cache. Original assumption
-  validation remains shared within a run and fresh across edits.
+  path does not use the optional relation-SCC grounding cache. Assumption validation
+  and W share a fixed-truth-specialized view, fresh each run. Use
+  `validate_assumption_cones_using(..., || session.prepare_fixed(...))` before the
+  verification loop, then `prepare_fixed_with_validation` to reuse its fold and
+  residual graph. The factory is lazy for relation-stratified declarations. Direct
+  requests needing ground validation also use this path, including when the
+  optional relation-SCC grounding cache is enabled; their assumption-independent
+  specialization is never cached by that relation cache.
 - The fold has one recycled slot, retained whenever preparation completes under
   checker limits. It has no byte cap and takes no share of the other cache pools.
   `fixed_stats()` reports execution, reuse, disabled-retention bypass and accounted

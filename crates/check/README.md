@@ -117,13 +117,16 @@ retain their local checking path. General input/derived cardinality constraints
 compute W independently during preparation, then use whole-program checking.
 An empty W reports `inconsistent_assumptions` with no obligation results. Unknown W
 is inconclusive. The IR classifies constraint cones before this evaluation; selected
-cones requiring grounding must have no reachable negative cycle in the raw graph.
+cones requiring grounding must have no reachable negative cycle after one
+specialization by independently settled fixed truth.
 
 `validate_assumption_cones(corpus, domains, keys, limits)` is the program-level
 declaration query, called before verification loops, including when none exist. It
-uses relation-stratified cones immediately; others use fresh unrestricted grounding
-with no obligation groups, followed by the existing graph's `blocked_by` and cycle
-evidence. Results identify assumptions and cycle edges with semantic keys. It never
+uses relation-stratified cones immediately; others prepare the fixed fold and one
+residual graph with no obligation groups. A separate view removes dead instances
+and satisfied fixed premises, then supplies `blocked_by` and cycle evidence.
+Blocked fixed atoms never become false, and newly exposed truth does not trigger
+another fold. W uses that same specialized meaning. Results identify assumptions and cycle edges with semantic keys. It never
 uses selected assumptions or admission, and never rejects an unrelated ground cycle.
 An exhausted query retains established results and marks remaining declarations
 inconclusive; cancellation aborts. The query recomputes per run, so facts, domains
@@ -145,8 +148,8 @@ that corpus snapshot, resolved domains and deterministic limits. It follows both
 signs of relation dependencies, concretely evaluates only settled input-independent
 atoms, and shares their original graph and derivations as evidence. Residual
 admission and symbolic evaluation read those facts as constants. Blocked fixed
-atoms remain residual. Selected-assumption validation still uses original ground
-dependencies, as does the program-level validator.
+atoms remain residual. Assumption validation and W use a specialized view of those
+residual dependencies; ordinary admission keeps the original rules and evidence.
 
 The same artifact shares residual graphs, indexes and completed admission between
 requests selecting the same restrictions. Each request still validates its named
@@ -156,8 +159,9 @@ or globally interrupted admission does not become a reusable completed result.
 Completed admission with local proof skips is reusable, including its skip records
 and receipts. `admission_skips()` exposes current failed attempts;
 `admission_skips_for(component)` selects only targets in that component.
-The source-bound graph
-uses an immutable shared core, copied only when admission rewrites it.
+Source-bound graphs use immutable shared cores. Specializing an assumption view,
+attaching a different input context or committing admission rewrites detaches a core
+on mutation; unchanged snapshots share it.
 `GroundKeyIndex` retains shared source schemas and declaration bindings plus the
 request's groups. `PreparedCheck::key_view()` (or `GroundKeyIndex::view` for raw
 programs) projects semantic atoms, instances, components and rewrite evidence on
@@ -169,19 +173,29 @@ optional relation-grounding cache; ordinary checking uses individual lookups.
 its `FixedInput`/`FixedValue` use semantic keys and rebind evidence to current IR.
 The session owns Salsa and bounded retention, not the checker.
 
-To share the program-level original check, use
+To share program-level preparation, use
 `validate_assumption_cones_for_run(corpus, domains, keys, limits)` and then
 `FixedPreparation::prepare_with_validation(&validated, limits)`.
-`validated.result()` supplies the ordinary declaration diagnostics. The artifact's
-private construction prevents a caller-edited diagnostic map from certifying a
-request. It retains a compact relation-to-cycle index, with each keyed cycle once,
-and releases the original graph. It also covers later unnamed API restrictions.
-Without a supplied artifact, the first folded request needing ground validation
-initializes the same query; later requests share it. A changed corpus, domain,
-key table or deterministic limit cannot reuse that check. The original validation
-has its own bounded allowance and `AssumptionValidation` receipt. Logical exhaustion
-is shared as inconclusive within the run; cancellation and deadlines abort without
-initializing the reusable result. Relation-stratified selections need no such query.
+`validate_assumption_cones_using(..., factory)` accepts a lazy fold factory for
+session-backed callers. It calls the factory only when a cone needs grounding;
+`prepare_cached_with_validation` reuses that bound fold instead of transferring it
+again. `validated.result()` supplies declaration diagnostics. The private artifact
+cannot be fabricated from a caller-edited diagnostic map. It retains fixed evidence,
+the original residual and its specialized view, and a compact relation-to-cycle
+index with each keyed cycle once. Original rules/instances stay intact for ordinary
+admission, provenance and rewrite warnings. No separate whole-program grounding
+survives or is rebuilt by subsequent requests.
+
+Without a supplied artifact, the first request needing ground validation initializes
+the same query, including unnamed restrictions and optional grounding-cache calls.
+These requests use fixed preparation rather than relation-SCC cache assembly. Other
+direct requests retain their existing unfolded path. A changed corpus, domain,
+key table or deterministic limit cannot reuse the artifact. Residual preparation,
+specialization and cycle indexing have one bounded allowance and
+`AssumptionValidation` receipt, depending on the separately charged `FixedFacts`.
+Request attachment and W have the preparation allowance. Logical exhaustion is
+shared as inconclusive within the run; cancellation and deadlines install no partial
+reusable preparation. Relation-stratified validation needs no fold or residual query.
 
 `atoms()`, `rules()`, `components()` and `dependencies()` include retained fixed
 evidence; `fixed_size()` and `residual_size()` distinguish it from execution.
@@ -190,8 +204,9 @@ completed provider, not `NoPossibleProducer`. Successful folds carry a `FixedFac
 receipt depended on by preparation; the owned path also records `FixedRuntime`
 and `FixedBinding` transfer work. Fold exhaustion is explicit (`fixed facts`,
 with subphase/resource); eligibility failures retain `input domains`. Cancellation
-publishes no partial fold. The ordinary preparation API remains the unfolded
-control. The `.den` frontends opt into folding; the test DSL's direct path is unchanged.
+publishes no partial fold. The ordinary preparation API remains an unfolded
+control for relation-stratified selections; cyclic assumption cones require the same
+fixed specialization on every path. The test DSL's direct path is unchanged.
 
 `ScopedResults.context` retains the request, including its optional `VerificationKey`.
 Per-group and per-region outcomes use semantic identities (`GroupKey`, `ComponentKey`,

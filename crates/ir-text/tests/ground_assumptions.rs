@@ -150,7 +150,10 @@ fn edit_sequence(texts: &[String], valid: &[bool]) {
         let warm = session.prepare(&request, &p.corpus, &p.keys, &ops);
         let cold = request.prepare(&p.corpus, &p.keys, &ops);
         let validated =
-            validate_assumption_cones_for_run(&p.corpus, &p.domains, &p.keys, &limits).unwrap();
+            validate_assumption_cones_using(&p.corpus, &p.domains, &p.keys, &limits, || {
+                folded_session.prepare_fixed(&p.corpus, &p.keys, &p.domains, &limits)
+            })
+            .unwrap();
         let fixed = FixedPreparation::prepare_with_validation(&validated, &limits).unwrap();
         let folded = folded_session.prepare_with_fixed(&request, &p.corpus, &p.keys, &ops, &fixed);
         if *expected {
@@ -307,13 +310,13 @@ fn exhausted_validation_is_inconclusive_and_cancelled_work_is_not_a_result() {
 }
 
 #[test]
-fn validation_does_not_simplify_negated_fixed_premises() {
+fn validation_specializes_fixed_false_guards() {
     let p = load_text(
         "relation fixed(); fixed(); relation gate(); gate():-!fixed(); relation p(); relation q(); p():-gate(),!q(); q():-!p(); assumption a:empty(p);",
     );
     assert!(matches!(
         state(&validate(&p, &Limits::default())),
-        AssumptionValidity::Invalid { .. }
+        AssumptionValidity::Valid
     ));
 }
 
@@ -389,5 +392,147 @@ fn library_cycle_evidence_uses_labeled_fallback_and_current_source_locations() {
         d.related
             .iter()
             .all(|r| current.sources.snapshot(r.span.snapshot()).unwrap().uri == "moved.den")
+    );
+}
+
+#[test]
+fn specialization_permitted_worlds_agree_with_original_stable_models() {
+    use denotate_check::test_support::rewrites::{stable_models, subsets};
+    use std::collections::BTreeSet;
+    for guard in ["f()", "!t()"] {
+        for restriction in [
+            "empty(p)",
+            "at_least_one(q,group_by:())",
+            "exactly_one(q,group_by:())",
+        ] {
+            let p = load_text(&format!(
+                "relation t(); t(); relation f(); f():-!t(); input i(); input j(); relation p(); relation q(); p():-{guard},!q(); p():-j(); q():-i(),!p(); assumption a:{restriction}; verification v{{assumptions:[a];obligations:[];}}"
+            ));
+            let limits = Limits::default();
+            let raw = GroundProgram::prepare_cartesian(&p.corpus, &p.domains, &limits).unwrap();
+            let atoms = raw.atoms().cloned().collect::<Vec<_>>();
+            let inputs = raw.input_atoms().cloned().collect::<BTreeSet<_>>();
+            let rules = raw.rules().cloned().collect::<Vec<_>>();
+            let target = if restriction.starts_with("empty") {
+                "p"
+            } else {
+                "q"
+            };
+            let target = p.corpus.relations().find(|r| r.name == target).unwrap().id;
+            let validated =
+                validate_assumption_cones_for_run(&p.corpus, &p.domains, &p.keys, &limits).unwrap();
+            assert!(validated.result().is_valid());
+            let fixed = FixedPreparation::prepare_with_validation(&validated, &limits).unwrap();
+            let request = p.verification_requests(&limits).unwrap().remove(0).1;
+            let mut cached = Session::with_grounding();
+            for prepared in [
+                request.prepare(&p.corpus, &p.keys, &(&limits).into()),
+                request.prepare_with_fixed(&p.corpus, &p.keys, &(&limits).into(), &fixed, None),
+                cached.prepare(&request, &p.corpus, &p.keys, &(&limits).into()),
+                cached.prepare(&request, &p.corpus, &p.keys, &(&limits).into()),
+            ] {
+                let RequestPreparation::Complete(prepared) = prepared.unwrap() else {
+                    panic!("incomplete")
+                };
+                // No admission is allowed to help establish W.
+                let symbolic = prepared.program().symbolic(&limits).unwrap();
+                let ctx = symbolic.context();
+                for world in subsets(&inputs.iter().cloned().collect::<Vec<_>>()) {
+                    let models = stable_models(&atoms, &inputs, &rules, &world);
+                    assert_eq!(models.len(), 1);
+                    let present = models
+                        .first()
+                        .unwrap()
+                        .contains(&GroundAtom::new(target, []));
+                    let expected = if restriction.starts_with("empty") {
+                        !present
+                    } else {
+                        present
+                    };
+                    match ctx.evaluate(&ctx.true_condition(), world, &limits) {
+                        Ok(permitted) => assert_eq!(permitted, expected, "{guard}: {restriction}"),
+                        Err(CheckError::InvalidInputGroup(_)) => assert!(!expected),
+                        Err(e) => panic!("{e:?}"),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn blocked_fixed_truth_is_not_absence_and_surviving_cycles_remain_invalid() {
+    for source in [
+        "relation f(); f():-!f(); relation p(); p():-f();",
+        "relation f(); relation g(); f():-!g(); g():-!f(); relation p(); p():-!f();",
+        "input i(); relation p(); p():-i(),!p();",
+    ] {
+        let p = load_text(&format!("{source} assumption a:empty(p);"));
+        assert!(matches!(
+            state(&validate(&p, &Limits::default())),
+            AssumptionValidity::Invalid { .. }
+        ));
+    }
+}
+
+#[test]
+fn a_cycle_cut_off_by_fixed_truth_still_gets_ordinary_reporting() {
+    let p = load_text(
+        "relation t(); t(); relation f(); f():-!t(); relation p(); relation q(); p():-!q(); q():-!p(); relation r(); r():-f(),p(); assumption a:empty(r); verification v{assumptions:[a];obligations:[];}",
+    );
+    let limits = Limits::default();
+    assert!(validate(&p, &limits).is_valid());
+    let request = p.verification_requests(&limits).unwrap().remove(0).1;
+    let RequestPreparation::Complete(prepared) = request
+        .prepare(&p.corpus, &p.keys, &(&limits).into())
+        .unwrap()
+    else {
+        panic!()
+    };
+    let prepared = prepared.admit(&(&limits).into()).unwrap();
+    let CheckOutcome::Complete(report) = prepared.verify(&(&limits).into()).unwrap() else {
+        panic!()
+    };
+    assert!(!report.results.value.regions.is_empty());
+    assert!(!report.results.value.inconsistent_assumptions);
+}
+
+#[test]
+fn fixed_truth_rule_and_fact_edits_revalidate_shared_warm_preparation() {
+    let source = |body: &str| {
+        format!(
+            "relation t(); t(); relation f(); {body} relation p(); relation q(); p():-f(),!q(); q():-!p(); assumption not_broken:empty(p); {VERIFY}"
+        )
+    };
+    edit_sequence(
+        &[
+            source("f():-!t();"),
+            source("f():-t();"),
+            source("f():-!t();"),
+        ],
+        &[true, false, true],
+    );
+    edit_sequence(
+        &[
+            source("f():-!t();"),
+            source("f():-!t(); f();"),
+            source("f():-!t();"),
+        ],
+        &[true, false, true],
+    );
+    let residual = |body: &str| {
+        format!(
+            "relation t(); t(); input i(); relation p(); {body} assumption not_broken:empty(p); {VERIFY}"
+        )
+    };
+    // The fixed schemas are identical; changing only the residual body must still
+    // rebuild assumption dependencies even when the session reuses the fold.
+    edit_sequence(
+        &[
+            residual("p():-i(),t();"),
+            residual("p():-i(),!p();"),
+            residual("p():-i(),t();"),
+        ],
+        &[true, false, true],
     );
 }

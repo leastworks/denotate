@@ -223,7 +223,7 @@ impl CheckRequest {
         self.prepare_using(corpus, keys, operations, Some(plans), Some(grounding), None)
     }
     /// Reuse this run's assumption-independent fixed facts. Declaration checking
-    /// still uses unrestricted, unrevised grounding, including for unnamed requests.
+    /// uses assumption-independent fixed truth, including for unnamed requests.
     pub fn prepare_with_fixed<'s>(
         &self,
         corpus: &'s Corpus,
@@ -345,6 +345,9 @@ impl CheckRequest {
         let limits = self.limits.with_operations(operations);
         let mut budget = Budget::tracked(&limits);
         let mut receipts = WorkReceipts::default();
+        let mut local_fixed = None;
+        let mut fixed = fixed;
+        let mut specialized = None;
         if let Some(fixed) = fixed {
             for (key, receipt) in fixed.transfer_receipts.entries() {
                 receipts
@@ -385,28 +388,54 @@ impl CheckRequest {
         } else {
             obligations.clone()
         };
-        let mut ground_validation = BTreeMap::new();
         let result = (|| {
-            ground_validation = corpus.validate_assumption_relations_with(
+            let ground_validation = corpus.validate_assumption_relations_with(
                 self.constraints
                     .iter()
                     .filter_map(|c| relations.get(c.relation()).copied()),
                 || budget.tick("assumptions"),
             )?;
-            if fixed.is_some()
-                && ground_validation
-                    .values()
-                    .any(|v| *v == denotate_ir::AssumptionCone::NeedsGrounding)
-            {
-                let original = fixed.unwrap().original_validation(keys, &limits)?;
+            let needs_grounding = ground_validation
+                .values()
+                .any(|v| *v == denotate_ir::AssumptionCone::NeedsGrounding);
+            if needs_grounding && fixed.is_none() {
+                // The direct and optional grounding-cache entry points use the
+                // same independently folded meaning for cyclic assumption cones.
+                local_fixed = Some(
+                    FixedPreparation::prepare(corpus, &domains, &limits)
+                        .map_err(|e| e.in_phase("assumption validation", None))?,
+                );
+                fixed = local_fixed.as_ref();
                 receipts
-                    .record(QueryKey::AssumptionValidation, original.receipt.clone())
+                    .record(QueryKey::FixedFacts, fixed.unwrap().receipt.clone())
                     .map_err(CheckError::Receipts)?;
-                for (relation, classification) in &ground_validation {
-                    if *classification != denotate_ir::AssumptionCone::NeedsGrounding {
-                        continue;
+            }
+            if let Some(fixed) = fixed {
+                if needs_grounding || fixed.validation.get().is_some() {
+                    let checked = fixed.assumption_preparation(keys, &limits)?;
+                    if needs_grounding {
+                        receipts
+                            .record(QueryKey::AssumptionValidation, checked.receipt.clone())
+                            .map_err(CheckError::Receipts)?;
                     }
-                    original.check(*relation, keys, &mut budget)?;
+                    for (relation, classification) in &ground_validation {
+                        if *classification == denotate_ir::AssumptionCone::NeedsGrounding {
+                            checked.check(*relation, keys, &mut budget)?;
+                        }
+                    }
+                    // An unrelated exhausted declaration query must not block a
+                    // relation-stratified selection's ordinary preparation.
+                    if let Some((base, view)) = checked.programs() {
+                        receipts
+                            .record(QueryKey::AssumptionValidation, checked.receipt.clone())
+                            .map_err(CheckError::Receipts)?;
+                        specialized = Some(view.clone());
+                        let mut program = base.clone();
+                        program.obligations = prepared_obligations.clone();
+                        program.build_groups(corpus, &mut budget)?;
+                        program.build_input_groups(corpus, &constraints, &mut budget)?;
+                        return Ok(program);
+                    }
                 }
             }
             let _profile = limits.profile.span("residual-preparation", None);
@@ -455,7 +484,11 @@ impl CheckRequest {
         let key_start = Instant::now();
         let mut program = {
             let _profile = limits.profile.span("input-key-order", None);
-            program.with_atom_key_order(keys)?
+            if program.input_order.is_some() {
+                program
+            } else {
+                program.with_atom_key_order(keys)?
+            }
         };
         let key_order_time = key_start.elapsed();
         let general = self
@@ -485,27 +518,10 @@ impl CheckRequest {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        for (relation, classification) in ground_validation {
-            if fixed.is_none() && classification == denotate_ir::AssumptionCone::NeedsGrounding {
-                let cycles = match program.assumption_cycles(relation, keys, &mut budget) {
-                    Ok(cycles) => cycles,
-                    Err(error) => {
-                        budget.failure(&error);
-                        let reason = Inconclusive::from_error(error)?;
-                        budget.record(&mut receipts, QueryKey::Preparation, dependencies)?;
-                        return Ok(RequestPreparation::Inconclusive { reason, receipts });
-                    }
-                };
-                if !cycles.is_empty() {
-                    return Err(CheckError::InvalidAssumptionCone {
-                        relation: keys.relation(relation)?.clone(),
-                        cycles,
-                    });
-                }
-            }
-        }
         if !general.is_empty() {
-            if let Err(error) = program.install_assumptions(&general, &mut budget) {
+            if let Err(error) =
+                program.install_assumptions(&general, specialized.as_ref(), &mut budget)
+            {
                 budget.failure(&error);
                 let reason = Inconclusive::from_error(error)?;
                 budget.record(&mut receipts, QueryKey::Preparation, dependencies)?;

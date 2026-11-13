@@ -42,7 +42,7 @@ fn main() {
     source.push_str("tagged(X):-item(X); off(X):-item(X),!tagged(X); error(X):-off(X),flag(); left():-flag(),!right(); right():-!flag(),!left(); assumption fixed_absence:empty(off); obligation clean:empty(error);\n");
     if ground_assumption {
         // Relation-level negation cycle, stratified after grounding. Exercises
-        // both original-graph validation paths without changing the obligation.
+        // both ground-validation entry points without changing the obligation.
         source.push_str("sort Side; const a,b:Side; input present(s:Side); relation guarded(s:Side); guarded(a); relation gives(s:Side); gives(b); relation holds(s:Side); holds(X):-present(X); holds(X):-guarded(X),!supplied(X); relation supplied(s:Side); supplied(X):-gives(X),!holds(X); relation broken(); broken():-!holds(a); assumption valid:empty(broken);\n");
     }
     if two_selections {
@@ -89,7 +89,14 @@ fn main() {
         }
         let start = Instant::now();
         let validated =
-            validate_assumption_cones_for_run(&p.corpus, &p.domains, &p.keys, &limits).unwrap();
+            validate_assumption_cones_using(&p.corpus, &p.domains, &p.keys, &limits, || {
+                if folded {
+                    session.prepare_fixed(&p.corpus, &p.keys, &p.domains, &limits)
+                } else {
+                    FixedPreparation::prepare(&p.corpus, &p.domains, &limits)
+                }
+            })
+            .unwrap();
         assert!(validated.result().is_valid());
         let validation = start.elapsed();
         let start = Instant::now();

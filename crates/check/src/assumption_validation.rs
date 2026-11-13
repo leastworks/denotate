@@ -7,7 +7,6 @@ use denotate_ir::{
     AssumptionCone, AssumptionKey, Corpus, OccurrenceKey, RelationId, RuleKey, SemanticKeys,
 };
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
 
 /// A retained ground cycle, with keys that can be rebound to current provenance.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,14 +89,14 @@ pub fn validate_assumption_cones(
 }
 
 /// Sealed evidence for this snapshot, not a caller-editable validity assertion.
-/// It retains cycle summaries, never the original ground program. The ordinary
+/// It retains the shared fold and residual preparation. The ordinary
 /// result remains available for diagnostics, including unselected assumptions.
 pub struct ValidatedAssumptions<'a> {
     pub(crate) corpus: &'a Corpus,
     pub(crate) keys: &'a SemanticKeys,
     pub(crate) domains: Domains,
     pub(crate) limits: DeterministicLimits,
-    pub(crate) original: Option<Arc<OriginalAssumptionValidation>>,
+    pub(crate) fixed: Option<FixedPreparation<'a>>,
     result: AssumptionValidation,
 }
 impl ValidatedAssumptions<'_> {
@@ -106,7 +105,7 @@ impl ValidatedAssumptions<'_> {
     }
 }
 
-/// Program validation whose original-graph evidence can be shared with folded
+/// Program validation whose fixed truth and residual view can be shared with folded
 /// requests through `FixedPreparation::prepare_with_validation`.
 pub fn validate_assumption_cones_for_run<'a>(
     corpus: &'a Corpus,
@@ -114,9 +113,24 @@ pub fn validate_assumption_cones_for_run<'a>(
     keys: &'a SemanticKeys,
     limits: &Limits,
 ) -> Result<ValidatedAssumptions<'a>> {
+    validate_assumption_cones_using(corpus, domains, keys, limits, || {
+        FixedPreparation::prepare(corpus, domains, limits)
+    })
+}
+
+/// Supply the run's fold factory (for example a session-backed fold). It is called
+/// only when declaration classification needs grounding, including with no
+/// verifications. No fixed or residual preparation is repeated by later requests.
+pub fn validate_assumption_cones_using<'a>(
+    corpus: &'a Corpus,
+    domains: &Domains,
+    keys: &'a SemanticKeys,
+    limits: &Limits,
+    prepare: impl FnOnce() -> Result<FixedPreparation<'a>>,
+) -> Result<ValidatedAssumptions<'a>> {
     limits.cancellation.check()?;
     let mut result = AssumptionValidation::default();
-    let mut original = None;
+    let mut fixed = None;
     let mut budget = Budget::new(limits);
     let validation: Result<()> = (|| {
         if corpus.assumptions().next().is_none() {
@@ -137,10 +151,13 @@ pub fn validate_assumption_cones_for_run<'a>(
             }
         }
         if !pending.is_empty() {
-            let checked = Arc::new(OriginalAssumptionValidation::prepare(
-                corpus, domains, keys, limits,
-            )?);
-            original = Some(checked.clone());
+            let prepared = prepare()?;
+            prepared.validate_snapshot(corpus, domains, &mut budget)?;
+            fixed = Some(prepared);
+            let checked = fixed
+                .as_ref()
+                .unwrap()
+                .assumption_preparation(keys, limits)?;
             for (relation, names) in pending {
                 for name in names {
                     result
@@ -156,7 +173,11 @@ pub fn validate_assumption_cones_for_run<'a>(
             CheckError::LimitExceeded {
                 resource, details, ..
             } => (resource, details),
-            CheckError::Deadline { details, .. } => ("deadline", details),
+            CheckError::Deadline { details, .. } => {
+                // No partially prepared artifact survives operational interruption.
+                fixed = None;
+                ("deadline", details)
+            }
             other => return Err(other),
         };
         for assumption in corpus.assumptions() {
@@ -175,41 +196,51 @@ pub fn validate_assumption_cones_for_run<'a>(
         keys,
         domains: domains.clone(),
         limits: limits.into(),
-        original,
+        fixed,
         result,
     })
 }
 
-/// A single original grounding answers every relation, including restrictions
-/// supplied by unnamed API requests. Root cycles are stored once; relations refer
-/// to them. Unrelated cycles do not invalidate a relation's cone.
+/// One assumption-independent residual preparation answers every relation,
+/// including later unnamed restrictions. Original instances remain available to
+/// admission; only validation and W read the fixed-truth specialization.
 #[derive(Debug)]
-struct OriginalCones {
+struct AssumptionCones {
+    base: GroundProgram,
+    view: GroundProgram,
     blocked: BTreeMap<RelationId, BTreeSet<ComponentId>>,
     cycles: BTreeMap<ComponentId, AssumptionCycle>,
 }
 #[derive(Debug)]
-pub(crate) struct OriginalAssumptionValidation {
-    outcome: AnalysisOutcome<OriginalCones>,
+pub(crate) struct AssumptionPreparation {
+    outcome: AnalysisOutcome<AssumptionCones>,
     pub receipt: WorkReceipt,
 }
-impl OriginalAssumptionValidation {
+impl AssumptionPreparation {
     pub fn prepare(
-        corpus: &Corpus,
-        domains: &Domains,
+        fixed: &FixedPreparation<'_>,
         keys: &SemanticKeys,
         limits: &Limits,
     ) -> Result<Self> {
         let mut budget = Budget::tracked(limits);
         let result = (|| {
-            let ground = GroundProgram::prepare_using(
-                corpus,
-                domains,
-                &[],
-                &BTreeSet::new(),
-                &mut budget,
-                None,
-            )?;
+            let base = {
+                let _profile = limits.profile.span("residual-preparation", None);
+                GroundProgram::prepare_using_fixed(
+                    fixed.corpus,
+                    &fixed.domains,
+                    &[],
+                    &BTreeSet::new(),
+                    &mut budget,
+                    None,
+                    Some(fixed),
+                )?
+                .with_atom_key_order(keys)?
+            };
+            let ground = {
+                let _profile = limits.profile.span("assumption-specialization", None);
+                base.specialize_fixed(&mut budget)?
+            };
             let mut blocked = BTreeMap::<_, BTreeSet<_>>::new();
             let mut cycles = BTreeMap::new();
             for atom in &ground.atoms {
@@ -222,7 +253,13 @@ impl OriginalAssumptionValidation {
                     }
                 }
             }
-            Ok(OriginalCones { blocked, cycles })
+            budget.check("assumption validation")?;
+            Ok(AssumptionCones {
+                base,
+                view: ground,
+                blocked,
+                cycles,
+            })
         })()
         .map_err(|e: CheckError| e.in_phase("assumption validation", None));
         if let Err(error) = &result {
@@ -236,9 +273,15 @@ impl OriginalAssumptionValidation {
             receipt: WorkReceipt {
                 allowance: limits.into(),
                 own: budget.snapshot(),
-                dependencies: BTreeSet::new(),
+                dependencies: BTreeSet::from([QueryKey::FixedFacts]),
             },
         })
+    }
+    pub(crate) fn programs(&self) -> Option<(&GroundProgram, &GroundProgram)> {
+        match &self.outcome {
+            AnalysisOutcome::Complete(index) => Some((&index.base, &index.view)),
+            AnalysisOutcome::Inconclusive(_) => None,
+        }
     }
     fn validity(
         &self,
@@ -302,29 +345,41 @@ impl OriginalAssumptionValidation {
 }
 
 impl GroundProgram {
-    /// Called only on the unrevised graph. `blocked_by` already contains exactly
-    /// the negative SCCs reachable from each atom; no new graph analysis is needed.
-    pub(crate) fn assumption_cycles(
-        &self,
-        relation: RelationId,
-        keys: &SemanticKeys,
-        budget: &mut Budget<'_>,
-    ) -> Result<Vec<AssumptionCycle>> {
-        let mut blocked = BTreeSet::new();
-        for atom in &self.atoms {
-            budget.tick("assumption validation")?;
-            if atom.relation == relation {
-                for component in &self.component_for(atom)?.blocked_by {
-                    budget.tick("assumption validation")?;
-                    blocked.insert(*component);
+    /// A private evaluation view, never installed as an admission rewrite. Keep
+    /// original instances in `base`; the view's rule IDs belong only to this view.
+    fn specialize_fixed(&self, budget: &mut Budget<'_>) -> Result<Self> {
+        budget.check("assumption specialization")?;
+        if self.fixed.is_none() {
+            return Ok(self.clone());
+        }
+        let mut view = self.clone();
+        // Take the view's owned rules after its one copy-on-write detachment;
+        // do not build a third copy of the residual rules before detaching.
+        let originals = std::mem::take(&mut view.rules);
+        for mut rule in originals {
+            budget.tick("assumption specialization")?;
+            let mut body = Vec::new();
+            let mut dead = false;
+            for literal in std::mem::take(&mut rule.body) {
+                budget.tick("assumption specialization")?;
+                match self.fixed_value(&literal.term.atom) {
+                    Some(value) => {
+                        if value != (literal.polarity == Polarity::Positive) {
+                            dead = true;
+                            break;
+                        }
+                    }
+                    None => body.push(literal),
                 }
             }
+            if !dead {
+                rule.id.index = view.rules.len();
+                rule.body = body;
+                view.rules.push(rule);
+            }
         }
-        let mut cycles = Vec::new();
-        for component in blocked {
-            cycles.push(self.assumption_cycle(component, keys, budget)?);
-        }
-        Ok(cycles)
+        graph::analyze(&mut view, budget)?;
+        Ok(view)
     }
     fn assumption_cycle(
         &self,

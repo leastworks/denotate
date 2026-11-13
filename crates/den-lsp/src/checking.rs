@@ -108,11 +108,22 @@ fn check_with_progress(
     job.limits.cancellation.check()?;
     let mut publication = presentation::configuration(&program).map_err(Failure::Internal)?;
     progress.emit(Phase::AssumptionValidation, json!({}));
-    let validated = validate_assumption_cones_for_run(
+    let validated = validate_assumption_cones_using(
         &program.corpus,
         &program.domains,
         &program.keys,
         &job.limits,
+        || {
+            progress.emit(Phase::FixedFacts, json!({}));
+            let fixed = session.prepare_fixed(
+                &program.corpus,
+                &program.keys,
+                &program.domains,
+                &job.limits,
+            )?;
+            progress.emit(Phase::AssumptionValidation, json!({}));
+            Ok(fixed)
+        },
     )?;
     let validation = validated.result();
     let validation_publication =
@@ -1266,6 +1277,41 @@ mod tests {
         for detail in prepared {
             assert_eq!(detail["fold"]["presentFacts"], 1);
             assert!(detail["fold"]["residual"]["atoms"].as_u64().unwrap() > 0);
+        }
+    }
+    #[test]
+    fn fixed_truth_specialization_updates_editor_validation_and_permitted_worlds() {
+        for verification in [
+            "",
+            "verification v{assumptions:[a];obligations:[];}",
+            "verification v{assumptions:[];obligations:[];}",
+        ] {
+            let mut session = denotate_check_session::Session::default();
+            for fact in ["t();", "", "t();"] {
+                let text = format!("relation t(); {fact} relation f(); f():-!t(); relation p(); relation q(); p():-f(),!q(); q():-!p(); assumption a:empty(p); {verification}");
+                let job = assumption_job(&text, Limits::default());
+                let warm = check(&job, &mut session).unwrap();
+                let cold = check(&job, &mut denotate_check_session::Session::default()).unwrap();
+                assert_eq!(warm.status, cold.status);
+                assert_eq!(warm.diagnostics, cold.diagnostics);
+                let invalid = warm.diagnostics.values().flatten().any(|d| {
+                    d.data
+                        .as_ref()
+                        .is_some_and(|d| d["kind"] == "invalid-assumption")
+                });
+                assert_eq!(invalid, fact.is_empty());
+                if !fact.is_empty() {
+                    assert_eq!(
+                        warm.status["state"],
+                        if verification.is_empty() {
+                            "unconfigured"
+                        } else {
+                            "proved"
+                        }
+                    );
+                }
+            }
+            assert!(session.fixed_stats().executed > 0);
         }
     }
     #[test]

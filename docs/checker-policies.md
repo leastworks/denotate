@@ -336,10 +336,10 @@ a folded run, each distinct restriction selection prepares and admits once; grou
 and results remain per verification. The benchmark asserts outcome agreement and
 reports timings and retained sizes, never timing goldens. It also reloads an edit
 to an input-dependent rule to measure fixed-query reuse. Add `--ground-assumption`
-after the counts to include original ground validation, timed separately and shared
-with all requests; `--two-selections` alternates two restriction sets and
+after the counts to include ground validation and its early fixed/residual preparation,
+timed together and shared with all requests; `--two-selections` alternates two restriction sets and
 `--no-retention` measures direct fixed preparation. The
-scorecard's direct API timer instead includes lazy original validation when needed.
+scorecard's direct API timer instead includes lazy ground validation when needed.
 
 The one-shot CLI uses direct fixed preparation, avoiding portable export and
 binding while still sharing preparation/admission within its invocation. Editors
@@ -402,12 +402,22 @@ Residual grounding still seeds fixed possible tuples to preserve rule and findin
 identity, including false guards. Graph indexes are shared within a restriction
 selection; group indexes remain per request. This step
 reduces repeated executable and symbolic work, not all initial grounding or evidence
-storage. Program-level validation is outside the phase timers. The CLI/editor share
-its original-graph summary with folded preparation. Direct API callers compute that
-summary on the first request needing ground validation and reuse it within the run;
-the temporary original graph is released. The unfolded control still checks its own
-prepared graph. The validation query has a separate bounded allowance and receipt;
-default ceilings are unchanged. No cross-edit validation cache is involved.
+storage. Program-level validation is outside the scorecard's phase timers. When a
+cone needs grounding it now includes the fixed fold and residual preparation; later
+requests reuse both. The CLI memory profile reports the nested `fixed-evaluation`,
+`residual-preparation` and `assumption-specialization` spans. Compare total preparation
+and overall peak footprint, not validation time alone or sums of nested spans.
+
+Validation and W share one view specialized by exact fixed truth. The original
+residual remains for admission/evidence; the specialized view retains its own residual
+rules and dependency graph, sharing fixed evidence. Both are run-scoped. The fold
+has its own allowance; residual grounding, specialization and the cycle index share
+an independently bounded validation allowance and `AssumptionValidation` receipt
+which depends on `FixedFacts`. Request attachment and W remain charged to preparation.
+Default ceilings are unchanged. Exhaustion is inconclusive and interruption does not
+install partial preparation. Direct and optional relation-cache requests requiring
+ground validation use this same fold; other direct requests remain unfolded controls.
+There is no cross-edit validation cache, even when a session reuses the fixed fold.
 
 BDD figures have distinct meanings:
 

@@ -441,7 +441,7 @@ impl GroundProgram {
         Ok(())
     }
 
-    fn build_input_groups(
+    pub(crate) fn build_input_groups(
         &mut self,
         corpus: &Corpus,
         constraints: &[InputAtMostOne],

@@ -210,15 +210,16 @@ real program that the current choice serves badly.
   can contain a relation-level negative cycle whose ends are used by different
   tuples. Requiring relation stratification forced authors to split those relations
   even when no ground cycle existed. The IR now classifies such cones for deferred
-  validation; the checker follows dependencies from the assumption's ground atoms
-  in the existing unrevised graph. Selected assumptions cannot prune this graph,
+  validation; the checker follows independent dependencies from the assumption's
+  ground atoms. Selected assumptions cannot prune this graph,
   and no admission proofs are used, so W's meaning never depends on W. Negative
   cycles elsewhere in the program do not invalidate an independent assumption.
   All declarations are validated at program level, including unselected ones;
   selecting an invalid or unvalidated assumption prevents that verification from
   running. Ground validation is fresh and bounded. This deliberately leaves
-  assumption-free redundancy proofs and further static simplification for later.
-- **Fixed facts are evaluated once per run, without changing assumption validity.**
+  assumption-free redundancy proofs for later. Fixed-truth specialization is now
+  permitted as described below.
+- **Fixed facts are evaluated once per run.**
   Large authored structures should not become repeated symbolic work in every
   verification. Relations reaching no inputs through either polarity can be
   evaluated independently of the selected context. Only settled atoms are folded;
@@ -226,22 +227,36 @@ real program that the current choice serves badly.
   dependencies, completed absences and presence derivations remain shared evidence,
   with their size reported separately from residual execution. This first version
   retains the full fixed graph rather than compacting away diagnostic information.
-  Program-level and selected-assumption validation still inspect the original
-  ground graph: accepting a cycle after simplifying a false guard would change
-  declaration validity, not merely performance. The fold has its own bounded
-  allowance and receipt; retained atoms, rules and dependencies also count against
+  The initial version left assumption validity unchanged. The subsequent
+  fixed-truth specialization below deliberately broadens accepted cones.
+  The fold has its own bounded allowance and receipt; retained atoms, rules and dependencies also count against
   preparation's size limits. Reuse is measured with the `.den` scorecard and the
   multi-verification benchmark.
-- **Original assumption validation is shared within a run.** Rebuilding the entire
-  unrevised program inside every folded request repeated work independent of its
-  selections. The program-level pass now offers a sealed snapshot-bound artifact;
-  folded API callers without it initialize the same query lazily. It indexes all
-  relations so later unnamed restrictions cannot escape validation, stores each
-  cycle once, and releases the original ground graph. A caller-editable diagnostics
-  map is not proof of validity. The query is independently bounded and accounted;
-  exhaustion remains inconclusive and operational interruptions are not cached.
-  Original graph semantics, selective rejection and current-source evidence stay
-  unchanged.
+- **Assumption validation and W share a fixed-truth specialization.** Grounding the
+  entire original program for validation duplicated millions of fixed atoms already
+  evaluated by the fold. Reusing the residual graph alone was insufficient: it keeps
+  dead instances for evidence, so a false guard still connects a syntactic cycle.
+  Validation now performs one specialization using exact assumption-independent
+  fixed truth. False positive or true negative premises kill an instance; satisfied
+  fixed premises disappear. Blocked atoms are never interpreted as false, and no
+  newly exposed truth triggers another fold. This is sound independently of W:
+  removing an impossible producer and substituting known constants preserves the
+  rules' meaning in every input world. Assumptions cannot justify themselves or
+  one another. A genuinely residual negative cycle still invalidates its cone.
+  W is evaluated on that same view, avoiding a later failure on the unsimplified
+  graph. Original instances and evidence remain intact for ordinary admission and
+  rewrite warnings; specialization itself is not a rewrite finding.
+  The sealed artifact retains the fold, original residual graph and specialized
+  view, with one keyed cycle per root. Requests reuse the residual rather than
+  grounding it again. Classification retains its relation-stratified fast path;
+  unnamed restrictions and programs with no verification use the same validity
+  policy. The fold and residual-validation query have separate bounded allowances
+  and receipts; the latter depends on the former. Logical exhaustion is explicit,
+  established validity survives, and operational interruption installs no partial
+  reusable artifact. Sharing is bound to snapshot, domains, keys and deterministic
+  limits, and never caches validation across edits. Direct or relation-cache requests
+  needing ground validation also use this preparation; requests with only
+  relation-stratified restrictions keep their existing path.
 - **Share a context, not its selected checks.** Residual grounding, permitted worlds,
   indexes and admission depend on the program, resolved domains, restrictions and
   deterministic limits. Obligation groups, notices, verification identity and
