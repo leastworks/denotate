@@ -96,7 +96,9 @@ reports the marker as advisory; it never relabels an unsupported region.
 Completed admission includes outstanding local proof-skip records, whose identities
 are bound to the same prepared graph. Reuse carries those records and their logical
 receipts; presentation projects current semantic keys and origins. Invocation-local
-retry tracking keeps no BDD cache. It uses pre-commit edges for bounds/discharge
+retry tracking keeps outcome metadata only. Guarded settlement separately retains
+one restricted bounds computation within a snapshot; it is not a session artifact
+and is released on snapshot replacement. Retry tracking uses pre-commit edges for bounds/discharge
 invalidation and for changes to settled conditions. Bound-removal attempts use
 the same conservative closure: edits within blocked components can tighten bounds.
 Cheap coverage/removal also compare

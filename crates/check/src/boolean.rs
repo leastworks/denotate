@@ -54,6 +54,11 @@ pub struct Condition {
     bdd: Arc<Bdd>,
 }
 impl Condition {
+    // Exact representation equality is a safe cache hit, not a semantic query.
+    // A different layout may miss the cache; it can never create a false hit.
+    pub(crate) fn same_representation(&self, other: &Self) -> bool {
+        self.universe == other.universe && self.bdd == other.bdd
+    }
     /// Raw Boolean falsity, without restricting to permitted input worlds.
     pub fn is_false(&self) -> bool {
         self.bdd.is_false()

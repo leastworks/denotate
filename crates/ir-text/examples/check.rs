@@ -979,6 +979,41 @@ mod tests {
     }
 
     #[test]
+    fn guarded_candidate_cones_and_timings_reach_cli_and_structured_progress() {
+        let f = Fixture::new("input kind(); input ready(); input priority();
+relation booked(); relation fails(); relation claim(); relation inspected(); relation held(); relation cleared();
+booked():-kind(),cleared(); fails():-ready(),!booked(); claim():-!kind(),!fails();
+inspected():-kind(); inspected():-claim(); held():-priority(),inspected(); cleared():-ready(),!held();
+relation bad(); obligation clean:empty(bad); verification checks{assumptions:[];obligations:[clean];}");
+        let path = f.0.join("guarded.jsonl");
+        let (expected, text, _) = f.traced(&["--no-progress"]);
+        let (actual, observed, progress) = f.traced(&["--profile-memory", path.to_str().unwrap()]);
+        assert_eq!(actual, expected);
+        assert_eq!(observed, text);
+        assert!(progress.contains("restricted cone"));
+        assert!(progress.contains("preprocessing"));
+        let records: Vec<serde_json::Value> = fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let completed = records
+            .iter()
+            .map(|r| &r["detail"]["admission"]["guarded"])
+            .filter(|g| g["state"] == "completed")
+            .collect::<Vec<_>>();
+        assert!(!completed.is_empty());
+        for g in completed {
+            assert_eq!(g["restricted"], true);
+            assert!(g["coneAtoms"].as_u64().unwrap() > 0);
+            assert!(g["liveRules"].as_u64().unwrap() <= g["coneRules"].as_u64().unwrap());
+            assert!(g["preprocessingMs"].is_number() && g["iterationMs"].is_number());
+            assert!(g["head"].is_string() && g["premise"].is_string());
+            assert!(g["location"]["uri"].is_string());
+        }
+    }
+
+    #[test]
     fn negative_attempt_counters_reach_progress_and_memory_profile() {
         let f = Fixture::new(
             "input i(); input j();

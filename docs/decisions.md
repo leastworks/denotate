@@ -79,6 +79,38 @@ real program that the current choice serves badly.
   into `h :- h; p :- !h`, which loses a stable model despite preserving supported
   models. Exhaustive stable and supported-model oracles cover both directions.
 
+  **Guarded bounds run in their own domain and live cone.** Conjoin the retained
+  guard with W before iterating. The upper-bound operator is pointwise: starting
+  from G ∧ W, and masking every producer and exact guarantee to that domain,
+  gives the unrestricted candidate-relaxed bounds conjoined with G ∧ W at every
+  iteration and at the fixed point. Comparisons use ordinary Boolean difference;
+  no care-set simplification changes values outside the domain. A distinct
+  `GuardedBounds` certificate carries that domain and cannot be passed to the
+  unrestricted removal/discharge path.
+
+  Follow dependencies backward from the candidate premise, dropping a producer's
+  edges only when its settled condition is false under G ∧ W. The reading
+  producer is relaxed before traversal: keep its guard, omit its cyclic premises,
+  exclude it from exact guarantees and never use it as a live settling producer.
+  This pruning remains valid after replacement. The retained cone is closed under
+  the relaxed operator's dependencies, so its bounds equal the full component's
+  restricted bounds. Dead producers remain certificate evidence; unresolved
+  external producers remain unknown. The supported/stable-model argument above
+  therefore applies unchanged.
+
+  Preprocessing is charged and lazy. Informative guards precede unrestricted ones;
+  smaller guard representations and immediate producer counts estimate cost,
+  with stable original-order ties. One snapshot-local cache entry retains the
+  latest bounds or failed computation's key. A hit requires identical domain,
+  component, cone, snapshot and relaxed rule; the relaxed rule is irrelevant only
+  when its head is outside the cone. Different representations may miss a hit,
+  never invent one. There is no broad-to-narrow failure inference. One entry
+  bounds optional reuse's retention without introducing another tuning limit;
+  metadata and conditions count against storage/work allowances. If cone preparation
+  hits storage pressure, release the optional entry and retry once with the same
+  cap; only a repeated failure becomes a skip. It is also released at replacement
+  or end of the snapshot. Work already spent remains charged.
+
   Existing producer removal and negation discharge get the first opportunity;
   guarded settlement runs only when they have no batch. This deliberately preserves
   established discharge warnings and their failure-local attempts. Bounds and
@@ -228,8 +260,13 @@ real program that the current choice serves badly.
   or a discharge check skips that attempt. Partial batches remain sound: each proof
   uses one immutable snapshot, removals never remove the exact producers covering
   them, and a discharge does not assume another proposed rewrite. A skip adds no
-  rewrite. Global work, retained storage, deadlines, cancellation and failures in
-  shared evaluation/summaries stop the current phase and discard the pending batch;
+  rewrite. Temporary bound computations (including guarded-cone preparation)
+  also skip on retained-condition storage exhaustion: their partial values are
+  dropped and their storage accounting restored before continuing. This lets a
+  small guarded certificate run after an unrestricted bound exceeded storage.
+  Limits are unchanged; successful certificates, shared values and cache entries
+  still count against them. Other retained-storage failures, global work,
+  deadlines, cancellation and failures in shared evaluation/summaries stop the current phase and discard the pending batch;
   downstream exhaustion is recorded separately as above.
   Failed preflights consume their task allowance plus one stopping step; a preflight
   constrained by remaining work (including a tie with the task cap) reports global

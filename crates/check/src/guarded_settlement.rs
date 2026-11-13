@@ -9,6 +9,7 @@ use biodivine_lib_bdd::op_function::{and, or};
 use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
+    time::Instant,
 };
 
 // Optimization cutoffs: no rewrite is installed when a complete certificate does
@@ -28,6 +29,7 @@ pub struct GuardedSettlementStep {
 #[derive(Debug, Clone)]
 pub struct GuardedSettlementProof {
     pub proof: SymbolicRewriteProof,
+    pub bounds: Arc<GuardedBounds>,
     pub occurrence: denotate_ir::OccurrenceId,
     pub replacement: Arc<SettledExpression<GroundAtom>>,
     /// Earlier entries justify later ones. Upper-bound seeds need no marks.
@@ -102,16 +104,26 @@ impl GroundProgram {
         let ctx = meaning.context();
         let mut done = BTreeSet::new();
         let mut proofs = Vec::new();
+        // Cheap structural indexing/ordering only. No candidate BDD or full cone
+        // is computed before the first attempt.
+        let mut producers = BTreeMap::<_, Vec<_>>::new();
+        for p in summaries.values() {
+            budget.tick("guarded producer index")?;
+            producers
+                .entry(&p.rule.head.atom)
+                .or_default()
+                .push(p.rule.id);
+        }
+        let mut candidates = Vec::new();
         for candidate in summaries
             .values()
             .filter(|s| targets.contains(&s.rule.id) && !s.exact)
         {
             budget.tick("guarded settlement candidates")?;
             let component = self.component_for(&candidate.rule.head.atom)?;
-            if component.cycle.is_none() || done.contains(&component.id) {
+            if component.cycle.is_none() {
                 continue;
             }
-            let mut candidates = Vec::new();
             let mut signed_atoms = BTreeSet::new();
             for literal in &candidate.rule.body {
                 budget.tick("guarded settlement candidates")?;
@@ -119,89 +131,204 @@ impl GroundProgram {
                     .atom_index
                     .get(&literal.term.atom)
                     .is_none_or(|i| self.atom_components[*i] != component.id)
+                    || !signed_atoms.insert((
+                        literal.term.atom.clone(),
+                        literal.polarity == Polarity::Positive,
+                    ))
                 {
                     continue;
                 }
-                // The same signed atom under the same guard has the same proof
-                // result. Keep its first source occurrence for this snapshot.
-                if !signed_atoms.insert((
-                    literal.term.atom.clone(),
-                    literal.polarity == Polarity::Positive,
-                )) {
-                    continue;
-                }
-                if !attempts.reuse_negative(
+                // An unrestricted guard cannot prune producers; try informative guards first.
+                let cost = (
+                    candidate.condition.is_true(),
+                    candidate.condition.node_count(),
+                    producers.get(&literal.term.atom).map_or(0, Vec::len),
+                );
+                candidates.push((cost, candidate, literal, component));
+            }
+        }
+        budget.charge(
+            candidates
+                .len()
+                .saturating_mul(candidates.len().max(1).ilog2() as usize + 1),
+            "guarded candidate order",
+        )?;
+        candidates.sort_by_key(|(cost, _, _, _)| *cost); // stable ties preserve source/occurrence order
+        // One-entry snapshot-local cache: retain only the most recent complete
+        // computation (or failure key), so optional reuse cannot accumulate BDDs.
+        let mut cache: Option<(Arc<GuardedCone>, Option<Arc<GuardedBounds>>)> = None;
+        for (index, (_, candidate, literal, component)) in candidates.into_iter().enumerate() {
+            if done.contains(&component.id)
+                || attempts.reuse_negative(
                     &Attempt::GuardedSettlement(candidate.rule.id, literal.term.occurrence),
                     budget,
                     progress,
-                )? {
-                    candidates.push(literal);
-                }
-            }
-            if candidates.is_empty() {
+                )?
+            {
                 continue;
             }
-            progress.rule(self, "guarded-bounds", candidate.rule.id, 0);
-            let observe = |iteration| progress.iteration(self, iteration);
-            let bounds = attempts.run(
-                Attempt::GuardedBounds(candidate.rule.id),
+            progress.guarded_start(self, index + 1, &candidate.rule, &literal.term.atom);
+            let mut preprocessing = None;
+            let before_preparation = *retained;
+            let mut released_cache = 0;
+            let prepared = attempts.run(
+                Attempt::GuardedCone(candidate.rule.id, literal.term.occurrence),
                 &candidate.rule.head.atom,
                 self,
                 retained,
                 budget,
                 progress,
                 |retained, budget| {
-                    crate::upper_bounds::compute_relaxed(
-                        self,
-                        component,
-                        summaries,
-                        ctx,
-                        retained,
-                        budget,
-                        progress.enabled().then_some(&observe),
-                        true,
-                        Some(candidate.rule.id),
-                    )
+                    let started = Instant::now();
+                    let prepare = |retained: &mut usize, budget: &mut Budget<'_>| {
+                        crate::guarded_bounds::prepare(
+                            self,
+                            component,
+                            candidate,
+                            &literal.term.atom,
+                            summaries,
+                            &producers,
+                            ctx,
+                            retained,
+                            budget,
+                        )
+                    };
+                    let mut result = prepare(retained, budget);
+                    if matches!(
+                        &result,
+                        Err(CheckError::LimitExceeded {
+                            phase: "symbolic storage",
+                            resource: "condition nodes",
+                            ..
+                        })
+                    ) {
+                        if let Some(old) = cache.take() {
+                            released_cache =
+                                old.1.as_ref().map_or_else(|| old.0.nodes(), |b| b.nodes());
+                            drop(old);
+                            // The partial cone has dropped. Optional reuse must
+                            // yield storage to the next attempt. Retry once; keep
+                            // all work charges and enforce the same storage cap.
+                            *retained = before_preparation - released_cache;
+                            result = prepare(retained, budget);
+                        }
+                    }
+                    preprocessing = Some(started.elapsed());
+                    result
                 },
-            )?;
+            );
+            if matches!(&prepared, Ok(None)) {
+                // Attempts restored its entry baseline after a local failure;
+                // the evicted cache is no longer part of that baseline.
+                *retained -= released_cache;
+            }
+            progress.guarded_prepared(
+                self,
+                prepared.as_ref().ok().and_then(|c| c.as_deref()),
+                preprocessing.unwrap_or_default(),
+                match &prepared {
+                    Ok(Some(_)) => "iterating",
+                    Ok(None) => "skipped",
+                    Err(_) => "failed",
+                },
+            );
+            let Some(cone) = prepared? else {
+                if preprocessing.is_none() {
+                    progress.guarded_end(self, Default::default(), true, "skipped");
+                }
+                continue;
+            };
+            let reused = match &cache {
+                Some((old, _)) => cone.same_computation(old, budget)?,
+                None => false,
+            };
+            let mut iteration = None;
+            progress.rule(self, "guarded-bounds", candidate.rule.id, 0);
+            if reused {
+                *retained -= cone.nodes(); // newly prepared equivalent key is unnecessary
+                if cache.as_ref().unwrap().1.is_some() {
+                    progress.reused_result(AdmissionAttemptKind::GuardedBounds);
+                } else {
+                    progress.reused(AdmissionAttemptKind::GuardedBounds, true);
+                }
+            } else {
+                if let Some((old, bounds)) = cache.take() {
+                    *retained -= bounds.as_ref().map_or_else(|| old.nodes(), |b| b.nodes());
+                }
+                let observe = |iteration| progress.iteration(self, iteration);
+                let result = attempts.run(
+                    Attempt::GuardedBounds(candidate.rule.id, literal.term.occurrence),
+                    &candidate.rule.head.atom,
+                    self,
+                    retained,
+                    budget,
+                    progress,
+                    |retained, budget| {
+                        let started = Instant::now();
+                        let result = crate::guarded_bounds::compute(
+                            &cone,
+                            ctx,
+                            retained,
+                            budget,
+                            progress.enabled().then_some(&observe),
+                        );
+                        iteration = Some(started.elapsed());
+                        result
+                    },
+                );
+                if result.is_err() {
+                    progress.guarded_end(self, iteration.unwrap_or_default(), false, "failed");
+                }
+                cache = Some((cone, result?));
+            }
+            let bounds = cache.as_ref().unwrap().1.as_ref();
+            progress.guarded_end(
+                self,
+                iteration.unwrap_or_default(),
+                reused || iteration.is_none(),
+                if bounds.is_some() {
+                    "completed"
+                } else {
+                    "skipped"
+                },
+            );
             let Some(bounds) = bounds else {
                 continue;
             };
-            for literal in candidates {
-                progress.rule(self, "guarded-settlement", candidate.rule.id, 0);
-                let proof = attempts
-                    .proof(
-                        Attempt::GuardedSettlement(candidate.rule.id, literal.term.occurrence),
-                        &candidate.rule.head.atom,
-                        self,
-                        retained,
-                        budget,
-                        progress,
-                        Option::is_none,
-                        |retained, budget| {
-                            self.settle_guarded(
-                                candidate, literal, meaning, &bounds, retained, budget, progress,
-                            )
-                        },
-                    )?
-                    .flatten();
-                if let Some(proof) = proof {
-                    done.insert(component.id);
-                    proofs.push(proof);
-                    break; // Independent components may commit together; one replacement per component.
-                }
+            progress.rule(self, "guarded-settlement", candidate.rule.id, 0);
+            let proof = attempts
+                .proof(
+                    Attempt::GuardedSettlement(candidate.rule.id, literal.term.occurrence),
+                    &candidate.rule.head.atom,
+                    self,
+                    retained,
+                    budget,
+                    progress,
+                    Option::is_none,
+                    |retained, budget| {
+                        self.settle_guarded(
+                            candidate, literal, meaning, bounds, retained, budget, progress,
+                        )
+                    },
+                )?
+                .flatten();
+            if let Some(proof) = proof {
+                done.insert(component.id);
+                proofs.push(proof);
             }
-            *retained -= bounds.nodes();
+        }
+        if let Some((cone, bounds)) = cache {
+            *retained -= bounds.as_ref().map_or_else(|| cone.nodes(), |b| b.nodes());
         }
         Ok(proofs)
     }
 
-    fn settle_guarded(
+    pub(crate) fn settle_guarded(
         &self,
         candidate: &ProducerSummary,
         literal: &GroundLiteral,
         meaning: &SymbolicMeaning<'_>,
-        bounds: &Arc<ComponentUpperBounds>,
+        bounds: &Arc<GuardedBounds>,
         retained: &mut usize,
         budget: &mut Budget<'_>,
         progress: &crate::admission_progress::AdmissionReporter<'_>,
@@ -249,7 +376,7 @@ impl GroundProgram {
             }
         }
         let mut producers = BTreeMap::<_, Vec<_>>::new();
-        for p in &bounds.producers {
+        for p in &bounds.cone.producers {
             budget.tick("guarded producer index")?;
             producers.entry(&p.rule.head.atom).or_default().push(p);
         }
@@ -266,6 +393,13 @@ impl GroundProgram {
                 let mut live = Vec::new();
                 for producer in producers.get(atom).into_iter().flatten() {
                     budget.tick("guarded producer")?;
+                    if producer.condition.is_false() {
+                        continue;
+                    }
+                    if producer.rule.id == candidate.rule.id {
+                        exact = false;
+                        break;
+                    }
                     let mut body = producer.condition.clone();
                     let mut terms = producer
                         .rule
@@ -390,7 +524,7 @@ impl GroundProgram {
             .map(|p| (*p).clone())
             .collect();
         budget.charge(
-            candidate.rule.body.len() + expression_nodes + bounds.producers.len(),
+            candidate.rule.body.len() + expression_nodes + bounds.cone.producers.len(),
             "guarded proof storage",
         )?;
         *retained = baseline;
@@ -399,8 +533,9 @@ impl GroundProgram {
                 candidate: candidate.clone(),
                 producers: covering,
                 coverage,
-                upper_bounds: Some(Arc::clone(bounds)),
+                upper_bounds: None,
             },
+            bounds: Arc::clone(bounds),
             occurrence: literal.term.occurrence,
             replacement: expression,
             steps,

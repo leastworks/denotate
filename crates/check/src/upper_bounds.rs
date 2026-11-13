@@ -90,9 +90,47 @@ pub(crate) fn compute_relaxed(
         *retained = crate::symbolic::retain(*retained, 0, summary.nodes(), budget)?;
         producers.push(summary.clone());
     }
+    let (conditions, guarantees) = iterate(
+        &component.atoms,
+        &producers,
+        &ctx.true_condition(),
+        ctx,
+        retained,
+        budget,
+        observe,
+        strengthen,
+        relaxed_rule,
+    )?;
+    Ok(Arc::new(ComponentUpperBounds {
+        component: component.id,
+        snapshot: program.graph_revision,
+        relaxed_rule,
+        producers,
+        conditions,
+        guarantees,
+    }))
+}
+
+// Pointwise descending operator. `top` is either true (global bounds) or the
+// explicit G & W domain of a guarded certificate. Every producer condition must
+// already be masked to top. No care-set simplification is used.
+pub(crate) fn iterate(
+    atoms: &[GroundAtom],
+    producers: &[ProducerSummary],
+    top: &Condition,
+    ctx: &ConditionContext,
+    retained: &mut usize,
+    budget: &mut Budget<'_>,
+    observe: Option<&dyn Fn(usize)>,
+    strengthen: bool,
+    relaxed_rule: Option<GroundRuleId>,
+) -> Result<(
+    BTreeMap<GroundAtom, Condition>,
+    BTreeMap<GroundAtom, Condition>,
+)> {
     let mut guarantees = BTreeMap::new();
     if strengthen {
-        for producer in &producers {
+        for producer in producers {
             budget.tick("bound guarantees")?;
             if !producer.exact || Some(producer.rule.id) == relaxed_rule {
                 continue;
@@ -115,9 +153,9 @@ pub(crate) fn compute_relaxed(
     }
     let mut previous = BTreeMap::new();
     let mut previous_nodes = 0;
-    for atom in &component.atoms {
+    for atom in atoms {
         budget.tick("upper-bound initialization")?;
-        let top = ctx.true_condition();
+        let top = top.clone();
         previous_nodes += top.node_count();
         *retained = crate::symbolic::retain(*retained, 0, top.node_count(), budget)?;
         previous.insert(atom.clone(), top);
@@ -132,14 +170,14 @@ pub(crate) fn compute_relaxed(
         let mut next = BTreeMap::new();
         let mut next_nodes = 0;
         // Account for both maps while the synchronous round is in progress.
-        for atom in &component.atoms {
+        for atom in atoms {
             budget.tick("upper-bound iteration")?;
             let bottom = ctx.false_condition();
             next_nodes += bottom.node_count();
             *retained = crate::symbolic::retain(*retained, 0, bottom.node_count(), budget)?;
             next.insert(atom.clone(), bottom);
         }
-        for producer in &producers {
+        for producer in producers {
             budget.tick("upper-bound iteration")?;
             let mut body = producer.condition.clone(); // all settled signed premises
             for literal in producer
@@ -180,14 +218,7 @@ pub(crate) fn compute_relaxed(
         }
         if !changed {
             *retained -= next_nodes;
-            return Ok(Arc::new(ComponentUpperBounds {
-                component: component.id,
-                snapshot: program.graph_revision,
-                relaxed_rule,
-                producers,
-                conditions: previous,
-                guarantees,
-            }));
+            return Ok((previous, guarantees));
         }
         *retained -= previous_nodes;
         previous = next;

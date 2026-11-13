@@ -3,6 +3,7 @@ mod checking_progress;
 mod completion;
 mod cycle_first;
 mod fixed_retention;
+mod guarded_bounds;
 mod incremental_inventory;
 mod producer_removals;
 mod query_inputs;

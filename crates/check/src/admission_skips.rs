@@ -15,6 +15,7 @@ pub enum AdmissionAttemptKind {
     UpperBounds,
     GuaranteedBounds,
     BoundRemoval,
+    GuardedPreprocessing,
     GuardedBounds,
     GuardedSettlement,
     Discharge,
@@ -27,6 +28,7 @@ impl AdmissionAttemptKind {
             Self::UpperBounds => "upper-bounds",
             Self::GuaranteedBounds => "guaranteed-bounds",
             Self::BoundRemoval => "bound-removal",
+            Self::GuardedPreprocessing => "guarded-preprocessing",
             Self::GuardedBounds => "guarded-bounds",
             Self::GuardedSettlement => "guarded-settlement",
             Self::Discharge => "negation-discharge",
@@ -50,7 +52,8 @@ pub(crate) enum Attempt {
     UpperBounds(GroundAtom),
     GuaranteedBounds(GroundAtom),
     BoundRemoval(GroundRuleId),
-    GuardedBounds(GroundRuleId),
+    GuardedCone(GroundRuleId, OccurrenceId),
+    GuardedBounds(GroundRuleId, OccurrenceId),
     GuardedSettlement(GroundRuleId, OccurrenceId),
     Discharge(GroundRuleId, OccurrenceId),
 }
@@ -62,10 +65,34 @@ impl Attempt {
             Self::UpperBounds(_) => AdmissionAttemptKind::UpperBounds,
             Self::GuaranteedBounds(_) => AdmissionAttemptKind::GuaranteedBounds,
             Self::BoundRemoval(_) => AdmissionAttemptKind::BoundRemoval,
-            Self::GuardedBounds(_) => AdmissionAttemptKind::GuardedBounds,
+            Self::GuardedCone(..) => AdmissionAttemptKind::GuardedPreprocessing,
+            Self::GuardedBounds(..) => AdmissionAttemptKind::GuardedBounds,
             Self::GuardedSettlement(..) => AdmissionAttemptKind::GuardedSettlement,
             Self::Discharge(..) => AdmissionAttemptKind::Discharge,
         }
+    }
+    fn local_failure(&self, error: &CheckError) -> bool {
+        matches!(
+            error,
+            CheckError::LimitExceeded {
+                phase: "BDD operation" | "BDD preflight",
+                resource: "BDD tasks" | "BDD nodes",
+                ..
+            }
+        ) || (matches!(
+            self,
+            Self::UpperBounds(_)
+                | Self::GuaranteedBounds(_)
+                | Self::GuardedBounds(..)
+                | Self::GuardedCone(..)
+        ) && matches!(
+            error,
+            CheckError::LimitExceeded {
+                phase: "symbolic storage",
+                resource: "condition nodes",
+                ..
+            }
+        ))
     }
     fn record(&self, head: &GroundAtom, reason: Inconclusive) -> AdmissionSkip {
         let (kind, rule, occurrence) = match self {
@@ -74,7 +101,16 @@ impl Attempt {
             Self::UpperBounds(_) => (AdmissionAttemptKind::UpperBounds, None, None),
             Self::GuaranteedBounds(_) => (AdmissionAttemptKind::GuaranteedBounds, None, None),
             Self::BoundRemoval(rule) => (AdmissionAttemptKind::BoundRemoval, Some(*rule), None),
-            Self::GuardedBounds(rule) => (AdmissionAttemptKind::GuardedBounds, Some(*rule), None),
+            Self::GuardedCone(rule, occurrence) => (
+                AdmissionAttemptKind::GuardedPreprocessing,
+                Some(*rule),
+                Some(*occurrence),
+            ),
+            Self::GuardedBounds(rule, occurrence) => (
+                AdmissionAttemptKind::GuardedBounds,
+                Some(*rule),
+                Some(*occurrence),
+            ),
             Self::GuardedSettlement(rule, occurrence) => (
                 AdmissionAttemptKind::GuardedSettlement,
                 Some(*rule),
@@ -210,11 +246,7 @@ impl Attempts {
         let outcome = match &result {
             Ok(value) if negative.is_some_and(|f| f(value)) => "negative",
             Ok(_) => "completed",
-            Err(CheckError::LimitExceeded {
-                phase: "BDD operation" | "BDD preflight",
-                resource: "BDD tasks" | "BDD nodes",
-                ..
-            }) => "skipped",
+            Err(error) if attempt.local_failure(error) => "skipped",
             Err(_) => "failed",
         };
         progress.attempt_end(attempt.kind(), started, outcome);
@@ -232,13 +264,7 @@ impl Attempts {
                 }
                 Ok(Some(value))
             }
-            Err(
-                error @ CheckError::LimitExceeded {
-                    phase: "BDD operation" | "BDD preflight",
-                    resource: "BDD tasks" | "BDD nodes",
-                    ..
-                },
-            ) => {
+            Err(error) if attempt.local_failure(&error) => {
                 // The closure's partial values have dropped. Undo only retained
                 // storage; work and failed-operation charges remain consumed.
                 *retained = before;
@@ -279,7 +305,8 @@ impl Attempts {
                 Attempt::UpperBounds(_)
                     | Attempt::GuaranteedBounds(_)
                     | Attempt::BoundRemoval(_)
-                    | Attempt::GuardedBounds(_)
+                    | Attempt::GuardedCone(..)
+                    | Attempt::GuardedBounds(..)
                     | Attempt::GuardedSettlement(..)
                     | Attempt::Discharge(..)
             )
@@ -438,7 +465,8 @@ impl Attempts {
                 Attempt::UpperBounds(_)
                 | Attempt::GuaranteedBounds(_)
                 | Attempt::BoundRemoval(_)
-                | Attempt::GuardedBounds(_)
+                | Attempt::GuardedCone(..)
+                | Attempt::GuardedBounds(..)
                 | Attempt::GuardedSettlement(..)
                 | Attempt::Discharge(..) => changed.all.contains(head),
             };

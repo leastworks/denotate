@@ -149,11 +149,18 @@ impl<'a> AdmissionDetails<'a> {
             "attempts": event.attempts.iter().map(|(kind, a)| json!({
                 "kind":kind.label(), "new":a.new, "rerunNegative":a.rerun_negative,
                 "retriedSkip":a.retried_skip, "reusedNegative":a.reused_negative,
-                "reusedSkip":a.reused_skip, "completed":a.completed, "negative":a.negative,
+                "reusedSkip":a.reused_skip, "reusedResult":a.reused_result, "completed":a.completed, "negative":a.negative,
                 "skipped":a.skipped, "failed":a.failed, "cutoffs":a.cutoffs, "elapsedMs":a.elapsed.as_secs_f64()*1000.,
                 "retryCauses":a.retry_causes,
             })).collect::<Vec<_>>(),
             "prerequisiteMs": event.prerequisites.iter().map(|(k, d)| ((*k).to_string(), json!(d.as_secs_f64()*1000.))).collect::<serde_json::Map<_, _>>(),
+            "guarded": event.guarded.as_ref().map(|g| {
+                let names = self.names.get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)));
+                json!({"index":g.index, "head":atom_text(&g.head, &**names), "premise":atom_text(&g.premise, &**names),
+                    "location":self.location(g.source), "restricted":true, "coneAtoms":g.cone_atoms,
+                    "coneRules":g.cone_rules, "liveRules":g.live_rules, "preprocessingMs":g.preprocessing.as_secs_f64()*1000.,
+                    "iterationMs":g.iteration.as_secs_f64()*1000., "reused":g.reused, "state":g.state})
+            }),
             "skipped": event.skipped.as_ref().map(|s| s.kind.label()),
             "skipTarget": event.skipped.as_ref().map(|s| {
                 let names = self.names.get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)));
@@ -229,9 +236,9 @@ pub fn admission_text(a: &Value) -> String {
         }
         for counts in a["attempts"].as_array().into_iter().flatten() {
             text.push_str(&format!(
-                "; {}: {} new, {} rerun negative, {} retry skip, {} reused negative, {} reused skip; outcomes {} completed, {} negative, {} skipped, {} failed, {} expansion cutoffs ({:.1} ms, retry causes {})",
+                "; {}: {} new, {} rerun negative, {} retry skip, {} reused negative, {} reused skip, {} reused result; outcomes {} completed, {} negative, {} skipped, {} failed, {} expansion cutoffs ({:.1} ms, retry causes {})",
                 counts["kind"].as_str().unwrap_or("?"), counts["new"], counts["rerunNegative"],
-                counts["retriedSkip"], counts["reusedNegative"], counts["reusedSkip"],
+                counts["retriedSkip"], counts["reusedNegative"], counts["reusedSkip"], counts["reusedResult"],
                 counts["completed"], counts["negative"], counts["skipped"], counts["failed"], counts["cutoffs"],
                 counts["elapsedMs"].as_f64().unwrap_or(0.), counts["retryCauses"],
             ));
@@ -257,6 +264,13 @@ pub fn admission_text(a: &Value) -> String {
                 c["location"]["line"], c["location"]["column"]
             ));
         }
+    }
+    if let Some(g) = a.get("guarded").filter(|g| g.is_object()) {
+        text.push_str(&format!("; guarded attempt {} {} reading {}: restricted cone {} atoms, {} live / {} visited rules; {}{}; preprocessing {:.1} ms, iteration {:.1} ms",
+            g["index"], g["head"].as_str().unwrap_or("?"), g["premise"].as_str().unwrap_or("?"),
+            g["coneAtoms"], g["liveRules"], g["coneRules"], g["state"].as_str().unwrap_or("?"),
+            if g["reused"] == true { " (reused)" } else { "" },
+            g["preprocessingMs"].as_f64().unwrap_or(0.), g["iterationMs"].as_f64().unwrap_or(0.)));
     }
     if let Some(failure) = a["failure"].as_str() {
         if let Some(kind) = a["skipped"].as_str() {

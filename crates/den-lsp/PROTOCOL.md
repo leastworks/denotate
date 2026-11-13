@@ -150,7 +150,7 @@ Rewrite counts are cumulative committed counts, not proposed changes.
 `skippedAttempts` is the cumulative number of failed per-operation proof attempts,
 including later retries. A recoverable failure immediately emits `skipped` as
 `producer-coverage`, `producer-removal`, `upper-bounds`, `guaranteed-bounds`,
-`bound-removal`, `negation-discharge`, `guarded-bounds` or `guarded-settlement`,
+`bound-removal`, `negation-discharge`, `guarded-preprocessing`, `guarded-bounds` or `guarded-settlement`,
 `skipTarget: {head: "p(a)"}`, and the ordinary formatted `failure`. Admission
 continues. Subsequent updates clear `skipped`, `skipTarget` and that local failure;
 `reused` includes the retained attempt count. A failure with `skipped: null` stops
@@ -158,15 +158,28 @@ admission. A preflight constrained by remaining work reports resource `work`,
 not the per-operation `BDD tasks` limit; ties are treated as global work stops.
 
 Stages are `starting`, `structural`, `structural-committed`, `symbolic`, `summaries`, `producer-removals`, `candidates`,
-`upper-bounds`, `guaranteed-bounds`, `bound-removals`, `guarded-bounds`, `guarded-settlement`, `commit`, `committed`, `attempt-summary`, `complete`, `reused`, and
+`upper-bounds`, `guaranteed-bounds`, `bound-removals`, `guarded-preprocessing`, `guarded-bounds`, `guarded-settlement`, `commit`, `committed`, `attempt-summary`, `complete`, `reused`, and
 `inconsistent-assumptions`.
 
 `attempts` is an optional array of per-round aggregates, ordered by attempt kind.
 Each entry has `kind` (the same labels as `skipped`), `new`, `rerunNegative`,
-`retriedSkip`, `reusedNegative`, `reusedSkip`, `completed`, `negative`, `skipped`,
+`retriedSkip`, `reusedNegative`, `reusedSkip`, `reusedResult`, `completed`, `negative`, `skipped`,
 `failed`, `cutoffs`, `elapsedMs` and `retryCauses`. The first three counters count executed
-attempts by prior outcome; the two reuse counters count cache hits, without
+attempts by prior outcome; the three reuse counters count cache hits, without
 executing the operation. `completed` counts successful computations/proofs;
+`reusedResult` counts identical completed bounds reused within a snapshot;
+reused failures still count in `reusedSkip`.
+
+During guarded work, `guarded` describes one candidate: `index` (one-based,
+round-local), `head`, `premise`, source `location`, `restricted: true`,
+`coneAtoms`, `coneRules` (visited producers, including dead ones), `liveRules`,
+`preprocessingMs`, `iterationMs`, `reused`, and `state` (`preprocessing`,
+`iterating`, `completed`, `skipped`, `failed`). Counts are null until preprocessing
+finishes; times on a running operation are not final. Each end state is emitted
+without throttling. These are progress observations, never finding identities or
+semantic inputs. The CLI uses the same fields. Temporary bounds/cone storage
+exhaustion is a local skip; other storage and global work exhaustion still stop.
+
 `negative` counts completed proof attempts that supplied no proof. `skipped`
 counts recoverable per-operation failures and `failed` counts stopping failures.
 `cutoffs` counts bounded-expression expansion skips (also counted as negative attempts), not resource exhaustion. Time covers executed operations only. Successful prerequisites are rebuilt each

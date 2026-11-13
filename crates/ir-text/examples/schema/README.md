@@ -253,6 +253,7 @@ For independent shape sweeps, use `just bench-den-zoo`; see the
 [shape-zoo contracts and report guide](../../../../scripts/SHAPE-ZOO.md).
 
 The report also preserves per-round attempt summaries and cumulative-counter timing
-deltas, independently of later progress updates. See [attempt reporting](../../../../scripts/SHAPE-ZOO.md#guarded-bounds-reproduction).
+deltas, independently of later progress updates. `guardedAttempts` preserves each
+restricted candidate's cone size, preprocessing/iteration times and last state. See [attempt reporting](../../../../scripts/SHAPE-ZOO.md#guarded-bounds-reproduction).
 `binarySha256` identifies the measured CLI artifact; the revision and dirty flag
 continue to describe the source checkout.

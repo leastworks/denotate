@@ -30,7 +30,8 @@ before admission (fixed evidence included); the report records actual inventory.
 | certification | n even cycles feeding one emptiness target | 2n+1 / 2n+1 | blocked target, observation certification |
 | removal-heavy | n independently covered output heads beside an ambiguous cycle | n+4 / 3n+2 | at least n removals, no discharges; replay visits residual output rules |
 | presentation | n supported heads with a transitive support chain and cyclic alternatives | 2n+3 / 3n+3 | structural source findings and bounded direct evidence |
-| guarded-ring | n linked guard-relative settlement units; grouped priority/readiness inputs | 8n+1 / 8n | one 6n-atom SCC; small cases settle, tight bounds can skip per reading rule |
+| guarded-ring | n linked guard-relative settlement units; grouped priority/readiness inputs | 8n+1 / 8n | one 6n-atom SCC; guard-live cones settle claims even with tight per-operation bounds |
+| guarded-fan-in | one guarded unit with n input-pair booked producers | 2n+8 / n+6 | one large bound hits a node limit before aggregate storage fills |
 | schema-layered | n payload reads, n+2 fields; depth 2, width 2, assumed acceptance | linear at fixed tree shape; inherited tables have four leaves | shared layout-valid schema preset |
 
 Categorical changes are distinct families. Fixed facts and removed rules remain
@@ -94,6 +95,20 @@ just bench-den-zoo --family guarded-ring --sizes 4,8,12 --repeat 2 \
   --out target/guarded-ring-measurement -- --max-bdd-nodes 128
 ```
 
+`guarded-fan-in` uses one six-atom cycle with n booked producers, each guarded by
+`kind`, one priority bit and one readiness bit. Their union has a large BDD under
+the grouped input order, but under `!kind` the same two-atom cone suffices for the
+claim. Here `held = inspected`, so after settling the claim, every booked tuple
+is false: the large upper approximation does not also force a large final meaning.
+Unlike the ring, it concentrates node pressure in one condition instead of
+retaining that condition at many heads. Both families remain useful: the ring
+exercises total retained storage; fan-in exercises a single BDD operation's cap.
+
+Guarded bounds now prune dead-under-guard producer edges before iteration. At the
+128-node setting the ring's previously failing claims can settle; the earlier
+unrestricted passes still run and may skip. Global work/deadlines remain limits,
+so these examples do not promise admission at every size or allowance.
+
 Each shared report retains `admissionAttemptSummaries` separately from the latest
 progress snapshot. They are keyed by verification, phase and round; `complete`
 means an `attempt-summary` was seen, not that admission avoided limits. An interrupted round keeps its last observed
@@ -109,3 +124,11 @@ component's representative rule is never substituted. Reused attempts have no
 new execution timing. Truncated streams can leave samples missing; the aggregate
 counters remain the authority. Timings are observational, never test goldens.
 The manifest records `binarySha256` for the actual CLI artifact used.
+
+Guarded work additionally reports `guardedAttempts`, one latest per-candidate record
+per verification/phase/round/index. It contains the reading head/premise and source
+location, restricted cone atoms and visited/live rules, preprocessing and iteration
+milliseconds, reuse and state. A failed or interrupted preprocessing has null cone
+sizes. These are actual candidate observations, independent of the older
+counter-delta samples. `completed` here means bounds completed, not that settlement
+subsequently produced a rewrite.

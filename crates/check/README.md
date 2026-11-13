@@ -45,14 +45,21 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    cyclic signed premise by a Boolean expression over globally settled atoms,
    valid under the reading rule's retained guard. Rank-ordered marks use bounds
    computed with that reading producer relaxed to its guard; it cannot justify
-   itself. One replacement per component commits atomically. Later exhaustion
+   itself. Bounds are restricted to G ∧ W and the premise's live dependency cone,
+   in a separate `GuardedBounds` certificate. Preprocessing is lazy and charged;
+   guards with smaller estimates run first. A single snapshot-local entry reuses
+   only identical computations, including failures, never a failure under a
+   broader guard. Conditions and cache metadata are charged and released.
+   One replacement per component commits atomically. Later exhaustion
    preserves earlier committed batches.
    Within a snapshot, exact-producer coverage is computed lazily per head, reused
    by its non-exact candidates, and removed from the cache after the last candidate.
    Retained unions count against the existing condition-node limit. Proofs still
    keep their covering producer summaries; wide sets of successful removals can
    therefore retain quadratic evidence metadata.
-   Per-operation BDD limits in individual proof attempts are recoverable skips;
+   Per-operation BDD limits in individual proof attempts are recoverable skips.
+   Temporary bounds/cone storage exhaustion is also a skip after releasing partial
+   values; proof/shared storage failures still stop. Limits are unchanged;
    shared phases and global exhaustion stop that phase. Phase B records
    `GroundProgram::downstream_incomplete()` and `ScopedResults::downstream_incomplete`
    separately from `admission_limit()`. This advisory result preserves phase A's

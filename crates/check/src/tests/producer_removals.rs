@@ -116,33 +116,38 @@ fn producer_removals_survive_later_cycle_bound_exhaustion() {
             max_condition_nodes,
             ..defaults.clone()
         };
-        let last = RefCell::new(None);
+        let events = RefCell::new(Vec::new());
         let p = raw
             .clone()
             .admit_observed(
                 &mut Budget::new(&limits),
-                Some(&|e| *last.borrow_mut() = Some(e.clone())),
+                Some(&|e| events.borrow_mut().push(e.clone())),
             )
             .unwrap();
-        let event = last.into_inner().unwrap();
-        if event.stage != "upper-bounds" || event.failure.is_none() {
+        let events = events.into_inner();
+        let Some(event) = events.iter().find(|e| {
+            e.skipped
+                .as_ref()
+                .is_some_and(|s| s.kind == AdmissionAttemptKind::UpperBounds)
+        }) else {
             continue;
-        }
+        };
         assert!(event.removed_rules > 0);
-        assert!(p.admission_limit().is_some());
         assert!(!p.rules().any(|r| r.source == redundant));
         assert!(
             p.rewrite_proofs()
-                .all(|r| r.kind == RewriteKind::RedundantProducer)
+                .any(|r| r.candidate().source == redundant)
         );
         let meaning = p.symbolic(&defaults).unwrap();
         assert!(
             matches!(meaning.fact(&atom(kept)).unwrap(), SymbolicFact::Settled(c) if c.is_true())
         );
-        assert!(matches!(
-            meaning.fact(&atom(x)).unwrap(),
-            SymbolicFact::Inconclusive(_)
-        ));
+        if !p.is_admitted() {
+            assert!(matches!(
+                meaning.fact(&atom(x)).unwrap(),
+                SymbolicFact::Inconclusive(_) | SymbolicFact::Blocked(_)
+            ));
+        }
         assert!(compare(&c, &Domains::new(), &p) > 0);
         found = true;
         break;

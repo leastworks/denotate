@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','schema-layered'];
+export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','schema-layered'];
 export function source(family, n) {
   if (!families.includes(family) || !Number.isSafeInteger(n) || n < 1) throw Error('invalid family/positive size');
   let s = 'relation bad();\n';
@@ -39,6 +39,20 @@ export function source(family, n) {
       add(`held${i}() :- priority${i}(), inspected${i}();`);
       add(`cleared${i}() :- ready${i}(), !held${i}();`);
     }
+  } else if (family === 'guarded-fan-in') {
+    // One wide condition, rather than a large condition retained at every ring
+    // head. Grouped variables make OR_i(priority_i AND ready_i) exponential.
+    add('input kind(); input gate();');
+    for (const name of ['booked', 'fails', 'claim', 'inspected', 'held', 'cleared']) add(`relation ${name}();`);
+    for (let i = 0; i < n; i++) {
+      add(`input priority${i}(); input ready${i}();`);
+      add(`booked() :- kind(), priority${i}(), ready${i}(), cleared();`);
+    }
+    add('fails() :- gate(), !booked(); claim() :- !kind(), !fails();');
+    add('inspected() :- kind(); inspected() :- claim();');
+    // Once claim settles, held=inspected makes booked false. The expensive
+    // upper approximation is not also an inherently expensive final meaning.
+    add('held() :- inspected(); cleared() :- gate(), !held();');
   } else if (family==='removal-heavy') {
     add('input flag(); relation a(); relation b(); a() :- !b(); b() :- !a();');
     for(let i=0;i<n;i++) add(`relation output${i}(); output${i}() :- flag(); output${i}() :- flag(), a(); bad() :- output${i}();`);
@@ -188,6 +202,7 @@ function readRun(dir, size, rep) {
       findings: report.outcomes.reduce((sum, outcome) => sum + (outcome.findings?.length ?? 0), 0),
     },
     before: report.beforeAdmission, after: report.afterAdmission,
+    guardedAttempts: report.guardedAttempts ?? [],
     attemptSummaries: report.admissionAttemptSummaries ?? [],
     attemptSamples: report.admissionAttemptSamples ?? [],
     phases: measurements(records, report.outcomes),

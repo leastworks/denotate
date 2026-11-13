@@ -26,12 +26,13 @@ production-scale lowered program showed what remains:
   the exact producers by subtraction (stop when nothing is left) instead of building
   their union; retain successful summaries, coverage and bounds across rounds when
   their inputs did not change.
-- **Guarded settlement at scale.** It computes relaxed bounds per reading rule,
-  commits one replacement per component per snapshot, and a replacement clears all
-  reusable failed attempts. The `guarded-ring` shape-zoo family reproduces repeated
-  bound skips under a tight BDD allowance while each claim has a small certificate
-  under its guard. Next: restrict candidate-relaxed bounds to that guard and its
-  live dependency cone, with charged preprocessing and identical-computation reuse.
+- **Guarded settlement at scale.** Bounds now run under the candidate guard and W,
+  in the live dependency cone, with charged preprocessing and identical-computation
+  reuse within a snapshot. One replacement per component still clears attempts.
+  The `guarded-ring` and `guarded-fan-in` shape-zoo families exercise storage and
+  single-operation node pressure. Remaining global bound work can dominate before
+  guarded attempts; broader reuse across replacements or guard containment needs
+  new evidence and sound invalidation.
 - **Totality and loop formulas** remain research ([below](#research-admission-by-well-founded-totality)).
 
 Cycles that are genuine, with two meanings in some world, belong to the lowering:

@@ -64,13 +64,26 @@ is not checker exhaustion. Temporary construction, dependencies, proof storage a
 traversal charge existing budgets. Real work/node/task limits retain their ordinary
 stop or recoverable-skip behavior. A graph rebuild and proof installation are atomic.
 
-Candidate-relaxed bounds are computed per reading rule and released after that
-rule's attempts; successful proofs retain their certificate. This can be expensive
-for a large unresolved component and is not a memory optimization. Repeated signed
-atoms in one body need only one attempt in a snapshot. Progress distinguishes
-`guarded-bounds` from `guarded-settlement` and reports `cutoffs` per attempt kind.
-Unsuccessful attempts use the existing local reuse mechanism. Any replacement
-conservatively invalidates all those attempts; no BDD result cache crosses rounds.
+Candidate-relaxed bounds are computed under G ∧ W in the premise's live backward
+cone. A producer dead under its settled condition contributes no dependency edges;
+its summary stays as evidence. The reading producer is relaxed before traversal.
+Preprocessing is lazy and charged, and has its own recoverable attempt. Candidates
+with an informative guard run before unrestricted ones, then by guard node count
+and immediate producer count; ties preserve the existing order. No full cones are
+computed for ordering.
+
+One snapshot-local cache entry retains the latest complete bounds or failure key.
+If preparing the next cone hits storage pressure, discard the optional cache and
+retry preparation once under the same cap, retaining all work charges. A repeated
+failure is the ordinary local skip. Reuse requires the same domain representation, cone, component, snapshot and
+relaxed rule (omitted when its head is outside the cone). Metadata conservatively
+uses condition-node storage slots as well as work charges. Different guards never
+inherit another guard's failure. Replacing an entry releases it; successful proofs
+retain their own certificates. No result cache crosses snapshots. Repeated signed
+atoms in one body need only one attempt. Progress distinguishes
+`guarded-preprocessing`, `guarded-bounds` and `guarded-settlement`, with per-candidate
+cone size, preprocessing/iteration elapsed time, reuse and outcome. Expression
+`cutoffs` remain separate. A replacement still invalidates failed/negative attempts.
 
 Default warnings use the existing eight-note/sixteen-location caps, with at most
 32 expression nodes rendered per formula and explicit omission counts. Full
@@ -233,7 +246,7 @@ The up-front index can cost more than filtered scans for a single tiny query in 
 large program; there is no size-based bypass heuristic. Measure that setup cost
 alongside the savings from repeated queries and deeper original closures.
 
-Admission recovers only from per-operation BDD task/node failures inside individual
+Admission recovers from per-operation BDD task/node failures inside individual
 proof attempts: exact-producer coverage, a removal check, component bounds,
 guaranteed bounds, a bound-removal check, or a discharge check. Failed temporary
 conditions and their retained-node accounting are released. Work stays consumed:
@@ -243,8 +256,14 @@ allowance plus one stopping step, with no construction charge. The bound is stil
 or ties it, failure reports `BDD preflight: work` and stops admission. Successful
 operation charges are unchanged. Completion-equation preflights are unchanged.
 
-Failures in shared symbolic evaluation or summaries and total work/storage limits
-stop the current phase, with the separate downstream marker described above.
+Temporary upper/guaranteed/guarded bounds and guarded-cone preprocessing also
+recover from condition-node storage exhaustion, releasing all partial storage.
+This exception does not apply to proof installation or shared evaluation; it does
+not raise or bypass the storage cap. Earlier global work remains charged, so a
+later unrestricted bound can still exhaust work before another guarded attempt.
+
+Failures in shared symbolic evaluation or summaries, total work limits and other
+retained-storage limits stop the current phase, with the separate downstream marker described above.
 Deadlines and cancellation still abort the whole invocation. No pending batch
 is salvaged on these failures. Local skips allow independent proofs to commit.
 Retry tracking uses ground identities stable within the preparation, not changing

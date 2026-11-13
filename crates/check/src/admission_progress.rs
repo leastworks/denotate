@@ -15,6 +15,7 @@ pub struct AdmissionAttempts {
     pub retried_skip: usize,
     pub reused_negative: usize,
     pub reused_skip: usize,
+    pub reused_result: usize,
     pub completed: usize,
     pub negative: usize,
     pub skipped: usize,
@@ -49,6 +50,22 @@ impl AdmissionPhase {
     }
 }
 
+/// One candidate's restricted bounds work. Timings are observations only.
+#[derive(Debug, Clone)]
+pub struct GuardedAttempt {
+    pub index: usize,
+    pub head: GroundAtom,
+    pub premise: GroundAtom,
+    pub source: RuleId,
+    pub cone_atoms: Option<usize>,
+    pub cone_rules: Option<usize>,
+    pub live_rules: Option<usize>,
+    pub preprocessing: Duration,
+    pub iteration: Duration,
+    pub reused: bool,
+    pub state: &'static str,
+}
+
 #[derive(Debug, Clone)]
 pub struct AdmissionProgress {
     pub phase: AdmissionPhase,
@@ -69,6 +86,7 @@ pub struct AdmissionProgress {
     pub skipped: Option<AdmissionSkip>,
     pub failure: Option<Inconclusive>,
     pub attempts: BTreeMap<AdmissionAttemptKind, AdmissionAttempts>,
+    pub guarded: Option<GuardedAttempt>,
     pub prerequisites: BTreeMap<&'static str, Duration>,
 }
 pub type AdmissionObserver<'a> = dyn Fn(&AdmissionProgress) + 'a;
@@ -106,6 +124,7 @@ impl<'a> AdmissionReporter<'a> {
                     failure: None,
                     attempts: BTreeMap::new(),
                     prerequisites: BTreeMap::new(),
+                    guarded: None,
                 },
                 current: None,
                 current_rule: None,
@@ -131,6 +150,87 @@ impl<'a> AdmissionReporter<'a> {
         } else {
             counts.reused_negative += 1;
         }
+    }
+    pub fn reused_result(&self, kind: AdmissionAttemptKind) {
+        if self.enabled() {
+            self.state
+                .borrow_mut()
+                .progress
+                .attempts
+                .entry(kind)
+                .or_default()
+                .reused_result += 1;
+        }
+    }
+    pub fn guarded_start(
+        &self,
+        program: &GroundProgram,
+        index: usize,
+        rule: &GroundRule,
+        premise: &GroundAtom,
+    ) {
+        if !self.enabled() {
+            return;
+        }
+        self.state.borrow_mut().progress.guarded = Some(GuardedAttempt {
+            index,
+            head: rule.head.atom.clone(),
+            premise: premise.clone(),
+            source: rule.source,
+            cone_atoms: None,
+            cone_rules: None,
+            live_rules: None,
+            preprocessing: Duration::ZERO,
+            iteration: Duration::ZERO,
+            reused: false,
+            state: "preprocessing",
+        });
+        self.rule(program, "guarded-preprocessing", rule.id, 0);
+    }
+    pub fn guarded_prepared(
+        &self,
+        program: &GroundProgram,
+        cone: Option<&GuardedCone>,
+        elapsed: Duration,
+        state: &'static str,
+    ) {
+        if !self.enabled() {
+            return;
+        }
+        if let Some(g) = &mut self.state.borrow_mut().progress.guarded {
+            g.preprocessing = elapsed;
+            g.state = state;
+            if let Some(c) = cone {
+                g.cone_atoms = Some(c.atoms.len());
+                g.cone_rules = Some(c.producers.len());
+                g.live_rules = Some(
+                    c.producers
+                        .iter()
+                        .filter(|p| !p.condition.is_false())
+                        .count(),
+                );
+            }
+        }
+        if state != "iterating" {
+            self.emit(program, true);
+        }
+    }
+    pub fn guarded_end(
+        &self,
+        program: &GroundProgram,
+        elapsed: Duration,
+        reused: bool,
+        state: &'static str,
+    ) {
+        if !self.enabled() {
+            return;
+        }
+        if let Some(g) = &mut self.state.borrow_mut().progress.guarded {
+            g.iteration = elapsed;
+            g.reused = reused;
+            g.state = state;
+        }
+        self.emit(program, true);
     }
     pub fn cutoff(&self, kind: AdmissionAttemptKind) {
         if self.enabled() {
@@ -264,6 +364,9 @@ impl<'a> AdmissionReporter<'a> {
         let mut s = self.state.borrow_mut();
         let changed = s.progress.stage != stage;
         s.progress.stage = stage;
+        if !stage.starts_with("guarded-") {
+            s.progress.guarded = None;
+        }
         s.progress.rule = rule;
         s.progress.iteration = None;
         s.current = current;
@@ -284,6 +387,9 @@ impl<'a> AdmissionReporter<'a> {
         let mut s = self.state.borrow_mut();
         let changed = s.progress.stage != stage;
         s.progress.stage = stage;
+        if !stage.starts_with("guarded-") {
+            s.progress.guarded = None;
+        }
         s.progress.rule = position;
         s.progress.iteration = None;
         s.current = None;
@@ -482,7 +588,7 @@ mod tests {
         assert!(last.current.is_none());
     }
     #[test]
-    fn admission_exhaustion_reports_the_current_component_without_committing_partial_work() {
+    fn temporary_bound_storage_exhaustion_reports_the_component_and_continues() {
         let raw = program();
         let mut covered_upper_bounds = false;
         // Find an exhaustion inside the component analysis without pinning a
@@ -495,11 +601,18 @@ mod tests {
                     ..Limits::default()
                 },
             );
-            let last = events.last().unwrap();
-            if last.failure.is_some() && last.stage == "upper-bounds" {
-                assert!(last.current.is_some());
-                assert!(last.unresolved_components > 0);
-                assert!(!events.iter().any(|e| e.stage == "complete"));
+            if let Some((index, event)) = events.iter().enumerate().find(|(_, e)| {
+                e.skipped
+                    .as_ref()
+                    .is_some_and(|s| s.kind == AdmissionAttemptKind::UpperBounds)
+            }) {
+                assert!(event.current.is_some());
+                assert!(event.failure.is_some());
+                assert!(event.unresolved_components > 0);
+                assert!(
+                    events.len() > index + 1,
+                    "a local skip must not stop the run"
+                );
                 covered_upper_bounds = true;
                 break;
             }

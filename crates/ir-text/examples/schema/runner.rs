@@ -244,6 +244,7 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
     let mut active = BTreeMap::<u64, Value>::new();
     let mut rounds = BTreeMap::<String, Value>::new();
     let mut attempts = super::attempts::Attempts::default();
+    let mut guarded = BTreeMap::new();
     let mut malformed = 0;
     if let Ok(file) = fs::File::open(dir.join("memory.jsonl")) {
         for line in BufReader::new(file).lines() {
@@ -266,6 +267,12 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
                 Some("progress") => {
                     let d = &v["detail"];
                     attempts.observe(d);
+                    if let Some(index) = d["admission"]["guarded"]["index"].as_u64() {
+                        let a = &d["admission"];
+                        // Keep the latest state even when iteration is interrupted.
+                        guarded.insert(format!("{}:{}:{}:{index:020}", d["verification"], a["phase"], a["round"]),
+                            json!({"verification":d["verification"], "phase":a["phase"], "round":a["round"], "attempt":a["guarded"]}));
+                    }
                     if let Some(round) = d["admission"]["round"].as_u64() {
                         rounds.insert(
                             format!(
@@ -313,6 +320,7 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
     let (summaries, samples) = attempts.finish();
     report["admissionAttemptSummaries"] = json!(summaries);
     report["admissionAttemptSamples"] = json!(samples);
+    report["guardedAttempts"] = json!(guarded.into_values().collect::<Vec<_>>());
     report["outcomes"] = json!(outcomes);
     report["phases"] = json!(phases);
     report["unfinishedSpans"] = json!(active.into_values().collect::<Vec<_>>());

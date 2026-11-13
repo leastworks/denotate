@@ -5,6 +5,7 @@ mod accounting;
 mod admission_progress;
 pub use admission_progress::{
     AdmissionAttempts, AdmissionComponent, AdmissionObserver, AdmissionPhase, AdmissionProgress,
+    GuardedAttempt,
 };
 mod admission_scope;
 mod admission_skips;
@@ -25,7 +26,9 @@ mod keys;
 mod limits;
 mod profile;
 pub use profile::*;
+mod guarded_bounds;
 mod guarded_settlement;
+pub use guarded_bounds::{GuardedBounds, GuardedCone};
 mod local;
 mod request;
 mod rewrite;

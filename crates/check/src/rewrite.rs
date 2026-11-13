@@ -167,15 +167,9 @@ impl RewriteProof {
         match &self.justification {
             RewriteJustification::Symbolic(p) => p.producers.iter().map(|p| &p.rule).collect(),
             RewriteJustification::Structural(p) => p.supporting_rules(),
-            RewriteJustification::GuardedSettlement(p) => p
-                .proof
-                .upper_bounds
-                .as_ref()
-                .unwrap()
-                .producers
-                .iter()
-                .map(|p| &p.rule)
-                .collect(),
+            RewriteJustification::GuardedSettlement(p) => {
+                p.bounds.cone.producers.iter().map(|p| &p.rule).collect()
+            }
             RewriteJustification::BoundRemoval(p) => p
                 .proof
                 .upper_bounds
@@ -202,11 +196,18 @@ impl RewriteProof {
         }
     }
     pub(crate) fn summaries(&self) -> impl Iterator<Item = &ProducerSummary> {
-        self.conditional().into_iter().flat_map(|p| {
-            std::iter::once(&p.candidate)
-                .chain(&p.producers)
-                .chain(p.upper_bounds.iter().flat_map(|b| b.producers.iter()))
-        })
+        self.conditional()
+            .into_iter()
+            .flat_map(|p| {
+                std::iter::once(&p.candidate)
+                    .chain(&p.producers)
+                    .chain(p.upper_bounds.iter().flat_map(|b| b.producers.iter()))
+            })
+            .chain(
+                self.guarded_settlement()
+                    .into_iter()
+                    .flat_map(|p| &p.bounds.cone.producers),
+            )
     }
     fn profile_conditions(&self) -> impl Iterator<Item = &Condition> {
         self.conditional()
@@ -228,6 +229,18 @@ impl RewriteProof {
                     }))
             })
             .chain(self.bound_removal().map(|p| &p.body_upper))
+            .chain(self.guarded_settlement().into_iter().flat_map(|p| {
+                std::iter::once(&p.bounds.cone.domain)
+                    .chain(p.bounds.conditions.values())
+                    .chain(p.bounds.guarantees.values())
+                    .chain(
+                        p.bounds
+                            .cone
+                            .producers
+                            .iter()
+                            .flat_map(ProducerSummary::profile_conditions),
+                    )
+            }))
     }
     fn nodes(&self) -> usize {
         self.conditional().map_or(0, |p| {
@@ -240,6 +253,7 @@ impl RewriteProof {
         }) + self
             .bound_removal()
             .map_or(0, |p| p.body_upper.node_count())
+            + self.guarded_settlement().map_or(0, |p| p.bounds.nodes())
     }
 }
 
