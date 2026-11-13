@@ -3,6 +3,73 @@
 Ordered roughly by priority. The first real programs are expected to be written
 directly in `.den`.
 
+## Admission of negation cycles
+
+Admission decides whether every permitted world has exactly one meaning. Implemented:
+structural reduction (true/false propagation, dead rules, same-head subsumption after
+bounded unfolding), producer removal by exact coverage, bound-based removal (a cyclic
+producer whose bounded body is covered by exact producers), negation discharge and
+cycle upper bounds, failure-local skips with precise retry (see
+[decisions](decisions.md) and [checker policies](checker-policies.md)). A
+production-scale lowered program showed what remains:
+
+- **Cycle-first ordering.** Attempt rewrites in the unresolved components and their
+  upstream cones before any downstream work, so wide downstream heads cannot exhaust
+  the budget first; downstream exhaustion is reported separately and never relabels
+  the cycles' results.
+- **Guarded settlement.** A cycle edge can be dead under the guard of the rule that
+  reads it, one or more rules away from the negation. Settle the premise under that
+  guard when bounds make it exact there, rewriting only into settled literals. Plain
+  negative unfolding is not used: it can lose stable models (`h :- not p. p :- not h.`
+  unfolded gives `h :- h.`).
+- **Never-active cycles.** More generally, a component whose active dependency graph
+  is acyclic in every permitted world (edges labelled with their guards, checked by a
+  symbolic topological peeling) has one meaning per world without any rewrite. It
+  needs its own evidence kind and evaluation path, and is the same check a schedule
+  needs (below).
+- **Totality and loop formulas** remain research ([below](#research-admission-by-well-founded-totality)).
+
+Cycles that are genuine, with two meanings in some world, belong to the lowering:
+no sound checker can choose between them. See lowering guidance below.
+
+## Testing at scale: shape, not just size
+
+Most scale regressions so far were superlinear scans that small, tutorial-shaped
+programs never exposed; budgets guarantee termination and honest results, not
+throughput. `just bench-den-schema` generates incremental-schema programs at scale
+(Shipping News vocabulary) and runs the real CLI with memory profiles and optional
+sampling ([profiling](../DEVELOPMENT.md#profiling)). Next:
+
+- **Layout-valid coupling:** cross reads only to fields decided earlier in an
+  explicit, recorded execution order, so large generated programs resemble ones a
+  DSL scheduler accepts, with an oracle for presence versus visibility.
+- **Shape zoo:** DSL-independent families (fan-in, breakable and genuine negative
+  loops, certification pressure, removal-heavy replay, presentation), each swept over
+  sizes with per-phase growth exponents fitted only on completed phases, reported
+  against both the knob and measured sizes, as advisory triage signals.
+
+## Lowering guidance
+
+Denotate is generic for stratified programs and for programs that follow a DSL's own
+evaluation order. Advanced Shipping News lessons will show an incremental schema
+(formats, expected and accepted fields, recognition) lowered three ways: directly
+(unsupported, with both meanings shown), with a coverage rule (admitted), and with
+assumed acceptance plus consistency and recognition assumptions (admitted). A second
+lesson and a short reference page cover designing a lowering: follow the DSL's
+evaluation order, defaults without priority, assumptions versus obligations, each
+element's source of truth (message, computation or neither), fixed catalogs, and
+reading unsupported or inconclusive results.
+
+## Schedules from admitted programs
+
+An admitted program's dependency order is an evaluation order valid in every
+permitted world; admission's rewrites justify each early decision. A schedule check,
+before any code generation, would project that order onto the lowerer's statements,
+add producer edges for inputs produced during execution (including assumed inputs),
+accept cycles that are never active or are broken by an early decision proven
+equivalent under the permitted worlds, reject the rest with a cycle and a witness
+world, and export the guarded schedule for comparison with a DSL's own scheduler.
+
 ## Contract vocabulary: follow-ups
 
 `at_most_one`, `at_least_one`, `exactly_one` and `empty` are implemented for obligations
@@ -11,11 +78,13 @@ stratified derived constraints and consistency checking. Deferred until real pro
 ask for them: "why not derived" coverage explanations, conditional group eligibility,
 and explanations of which selected assumptions conflict.
 
-- **Assumption cones admitted without assumptions.** Ground stratification now
-  handles relation-level cycles with no reachable ground negative cycle. A separate
-  admission pass under all input worlds could also justify cycles broken by logically
-  exclusive runtime guards. It must finish before computing W and preserve explicit
-  inconclusive outcomes. Deferred until a real program needs this stronger admission.
+- **Assumption cones admitted under other assumptions.** Validation now uses a view
+  specialized by exact fixed truth, shared with the computation of W, so cycles that
+  exist only through fixed-dead instances no longer invalidate a cone. Next, per
+  verification and in layers: an assumption whose cone has negative cycles joins
+  when admission under the assumptions already established resolves them (a least
+  fixpoint, so no assumption justifies its own cone). Validity then becomes relative
+  to a selection; unselected declarations keep structural validation.
 
 - **Severity on obligations.** Every obligation failure is an Error today. Let a
   declaration choose Error, Warning or Information, where Warning and Information do
