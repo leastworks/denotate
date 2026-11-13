@@ -28,7 +28,10 @@ production-scale lowered program showed what remains:
   their inputs did not change.
 - **Guarded settlement at scale.** It computes relaxed bounds per reading rule,
   commits one replacement per component per snapshot, and a replacement clears all
-  reusable failed attempts. Measure on a large component before refining any of these.
+  reusable failed attempts. The `guarded-ring` shape-zoo family reproduces repeated
+  bound skips under a tight BDD allowance while each claim has a small certificate
+  under its guard. Next: restrict candidate-relaxed bounds to that guard and its
+  live dependency cone, with charged preprocessing and identical-computation reuse.
 - **Totality and loop formulas** remain research ([below](#research-admission-by-well-founded-totality)).
 
 Cycles that are genuine, with two meanings in some world, belong to the lowering:

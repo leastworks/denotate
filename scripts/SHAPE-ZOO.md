@@ -30,6 +30,7 @@ before admission (fixed evidence included); the report records actual inventory.
 | certification | n even cycles feeding one emptiness target | 2n+1 / 2n+1 | blocked target, observation certification |
 | removal-heavy | n independently covered output heads beside an ambiguous cycle | n+4 / 3n+2 | at least n removals, no discharges; replay visits residual output rules |
 | presentation | n supported heads with a transitive support chain and cyclic alternatives | 2n+3 / 3n+3 | structural source findings and bounded direct evidence |
+| guarded-ring | n linked guard-relative settlement units; grouped priority/readiness inputs | 8n+1 / 8n | one 6n-atom SCC; small cases settle, tight bounds can skip per reading rule |
 | schema-layered | n payload reads, n+2 fields; depth 2, width 2, assumed acceptance | linear at fixed tree shape; inherited tables have four leaves | shared layout-valid schema preset |
 
 Categorical changes are distinct families. Fixed facts and removed rules remain
@@ -67,3 +68,44 @@ triage signals, never test failures. Small samples and allocator noise can produ
 flags; investigate with larger sizes and repetitions before changing the checker.
 
 Fan-out, positive recursion, join-width and source-only sweeps remain later work.
+
+## Guarded-bounds reproduction
+
+`guarded-ring` links copies of the guarded-settlement example with:
+
+```den
+booked0() :- kind(), ready0(), priority0(), cleared0();
+booked0() :- kind(), !ready0(), booked1();
+fails0() :- ready0(), !booked0();
+claim0() :- !kind(), !fails0();
+```
+
+The last booked relation links back to the first. The remaining inspected/held/
+cleared rules close each local negative cycle. The ring makes one strongly
+connected component. Descending bounds propagate priority/readiness combinations
+around it; the grouped semantic input order makes this representation grow.
+Under `!kind`, all booked producers are dead, `fails_i = ready_i`, and the claim
+is just `!ready_i`. Thus the wanted guard-relative certificate remains small.
+A tiny independent-world check verifies that equation and both stable and supported
+model preservation. Larger skipped cases are measurements, not verdict goldens.
+
+```sh
+just bench-den-zoo --family guarded-ring --sizes 4,8,12 --repeat 2 \
+  --out target/guarded-ring-measurement -- --max-bdd-nodes 128
+```
+
+Each shared report retains `admissionAttemptSummaries` separately from the latest
+progress snapshot. They are keyed by verification, phase and round; `complete`
+means an `attempt-summary` was seen, not that admission avoided limits. An interrupted round keeps its last observed
+counters with `complete: false`. The zoo copies these into each run and its family's
+`attempts` table, including outcomes and aggregate elapsed time by kind.
+
+`admissionAttemptSamples` (zoo: `attemptSamples`) takes differences of cumulative
+finished-attempt counts and elapsed time. A delta of one is an individual timing;
+a larger delta is explicitly a **batch total**, with its count and outcome counts.
+No average is labeled as an individual measurement. Single skip events identify
+their target head; the stream does not identify the exact rule in general, so the
+component's representative rule is never substituted. Reused attempts have no
+new execution timing. Truncated streams can leave samples missing; the aggregate
+counters remain the authority. Timings are observational, never test goldens.
+The manifest records `binarySha256` for the actual CLI artifact used.

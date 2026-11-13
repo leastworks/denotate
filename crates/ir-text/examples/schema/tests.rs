@@ -431,6 +431,30 @@ fn zoo_tiny_sources_preserve_independent_stable_and_supported_models() {
         let g = g.program();
         compare(&p.corpus, &p.domains, g);
         for world in subsets(&g.input_atoms().cloned().collect::<Vec<_>>()) {
+            if name == "guarded-ring" {
+                let atom = |name: &str| {
+                    GroundAtom::new(
+                        p.corpus.relations().find(|r| r.name == name).unwrap().id,
+                        [],
+                    )
+                };
+                let replay = g.evaluate(world.iter().cloned(), &l).unwrap();
+                for i in 0..2 {
+                    assert_eq!(
+                        replay.fact(&atom(&format!("claim{i}"))).unwrap(),
+                        FactState::Settled(
+                            !world.contains(&atom("kind"))
+                                && !world.contains(&atom(&format!("ready{i}")))
+                        )
+                    );
+                    if !world.contains(&atom("kind")) {
+                        assert_eq!(
+                            replay.fact(&atom(&format!("booked{i}"))).unwrap(),
+                            FactState::Settled(false)
+                        );
+                    }
+                }
+            }
             assert_eq!(
                 supported_models(g, &g.original_rules().cloned().collect::<Vec<_>>(), &world),
                 supported_models(g, &g.rules().cloned().collect::<Vec<_>>(), &world),

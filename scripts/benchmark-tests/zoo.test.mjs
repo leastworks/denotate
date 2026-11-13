@@ -42,8 +42,10 @@ test('each family reaches its semantic and structural path; two-size smoke has n
       if(name==='removal-heavy') {assert.ok(r.sizes.removalProofs>=2);assert.equal(r.sizes.dischargeProofs,0);assert.ok(r.outcomes[0].emptiness.some(e=>e.outcome==='counterexample'));}
       if(name==='presentation')assert.ok(r.sizes.findings>=2);
       if(name.startsWith('fan-in'))assert.ok(r.outcomes[0].emptiness.some(e=>e.outcome==='counterexample'));
+      if(name==='guarded-ring') {assert.equal(r.before.ground.largestComponentAtoms,12);assert.equal(r.after.admitted,true);assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));assert.ok(r.attemptSummaries.some(a=>a.complete&&a.attempts.some(c=>c.kind==='guarded-bounds')));}
       if(name==='schema-layered')assert.equal(r.after.admitted,true);
     }
+    assert.ok(r.families['guarded-ring'].attempts.some(a=>a.kind==='guarded-bounds'));
     const smoke=run({out:path.join(root,'smoke'),binary:'target/debug/examples/bench_schema',family:['fan-in-input','negative-unresolved'],sizes:[1,2],repeat:1,threshold:1.3});
     assert.deepEqual(summarize(path.join(root,'smoke')),smoke);
     const interrupted=path.join(root,'smoke','fan-in-input-2-0');

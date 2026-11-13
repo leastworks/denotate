@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','schema-layered'];
+export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','schema-layered'];
 export function source(family, n) {
   if (!families.includes(family) || !Number.isSafeInteger(n) || n < 1) throw Error('invalid family/positive size');
   let s = 'relation bad();\n';
@@ -24,6 +24,21 @@ export function source(family, n) {
       } else add(`a${i}() :- !b${i}(); b${i}() :- !a${i}();`);
     }
     if (family==='certification') add(`bad() :- ${Array.from({length:n},(_,i)=>`a${i}()`).join(', ')};`);
+  } else if (family === 'guarded-ring') {
+    // Grouped input names deliberately order priorities before readiness bits.
+    // The positive ring is cut by ready_i; under !kind every booked_i is false.
+    add('input kind();');
+    for (let i = 0; i < n; i++) {
+      add(`input priority${i}(); input ready${i}();`);
+      for (const name of ['booked', 'fails', 'claim', 'inspected', 'held', 'cleared']) add(`relation ${name}${i}();`);
+      add(`booked${i}() :- kind(), ready${i}(), priority${i}(), cleared${i}();`);
+      add(`booked${i}() :- kind(), !ready${i}(), booked${(i + 1) % n}();`);
+      add(`fails${i}() :- ready${i}(), !booked${i}();`);
+      add(`claim${i}() :- !kind(), !fails${i}();`);
+      add(`inspected${i}() :- kind(); inspected${i}() :- claim${i}();`);
+      add(`held${i}() :- priority${i}(), inspected${i}();`);
+      add(`cleared${i}() :- ready${i}(), !held${i}();`);
+    }
   } else if (family==='removal-heavy') {
     add('input flag(); relation a(); relation b(); a() :- !b(); b() :- !a();');
     for(let i=0;i<n;i++) add(`relation output${i}(); output${i}() :- flag(); output${i}() :- flag(), a(); bad() :- output${i}();`);
@@ -118,6 +133,14 @@ export function measurements(records, outcomes) {
   }
   return result;
 }
+export function attemptTable(runs) {
+  return runs.flatMap(run => (run.attemptSummaries ?? []).flatMap(round =>
+    (round.attempts ?? []).map(counts => ({
+      size: run.size, rep: run.rep, verification: round.verification,
+      phase: round.phase, round: round.round, complete: round.complete, ...counts,
+    }))));
+}
+
 export function aggregate(runs, sizes, repeat, threshold) {
   const phases = {};
   for (const phase of stages) {
@@ -165,6 +188,8 @@ function readRun(dir, size, rep) {
       findings: report.outcomes.reduce((sum, outcome) => sum + (outcome.findings?.length ?? 0), 0),
     },
     before: report.beforeAdmission, after: report.afterAdmission,
+    attemptSummaries: report.admissionAttemptSummaries ?? [],
+    attemptSamples: report.admissionAttemptSamples ?? [],
     phases: measurements(records, report.outcomes),
   };
 }
@@ -183,7 +208,7 @@ export function summarize(out) {
       if (proc.error || proc.status !== 0) throw Error(proc.error?.message || proc.stderr);
       runs.push(readRun(dir, size, rep));
     }
-    report.families[name] = { runs, phases: aggregate(runs, sizes, repeat, threshold) };
+    report.families[name] = { runs, attempts: attemptTable(runs), phases: aggregate(runs, sizes, repeat, threshold) };
   }
   fs.writeFileSync(path.join(out, 'zoo.json'), JSON.stringify(report, null, 2));
   return report;
@@ -206,7 +231,7 @@ export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3
       const proc=spawnSync(binary,args,{stdio:'pipe',encoding:'utf8'});
       if(proc.error || proc.status!==0) throw Error(proc.error?.message||proc.stderr);
       runs.push(readRun(dir, size, rep));
-      report.families[name]={runs,phases:aggregate(runs,sizes,repeat,threshold)};
+      report.families[name]={runs,attempts:attemptTable(runs),phases:aggregate(runs,sizes,repeat,threshold)};
       fs.writeFileSync(path.join(out,'zoo.json'),JSON.stringify(report,null,2));
     }
     const flags=Object.entries(report.families[name].phases).filter(([,p])=>Object.values(p.fits).some(f=>f.knob.flag||f.measured.flag)).map(([p])=>p);

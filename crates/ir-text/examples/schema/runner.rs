@@ -1,5 +1,6 @@
 use super::{check_options, generate::*};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fs,
@@ -164,12 +165,15 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         .status()
         .ok()
         .map(|s| !s.success());
+    let binary_hash = fs::read(&binary)
+        .ok()
+        .map(|bytes| format!("{:x}", Sha256::digest(bytes)));
     let mut manifest = json!({"state":if generate_only {"generated"} else {"running"}, "sourceOverride":source_path,"buildProfile":"profiling", "sampled":sampled, "revision":revision,"trackedChanges":dirty,
         "layout":layout(&shape)?.iter().map(|(step,deps)|json!({"step":format!("{step:?}"),"field":match step {Step::Accept(i)=>Some(format!("f{}",shape.depth+i)), _=>None},"requires":deps.iter().map(|d|format!("{d:?}")).collect::<Vec<_>>(),"acceptanceJustification":matches!(step,Step::Accept(_)).then_some("owner match accepts; owner nonmatch excludes declaration and every subordinate shadow/wide producer")})).collect::<Vec<_>>(),
         "crossReadCount":(0..shape.reads).filter(|i|cross_read(&shape,*i).is_some()).count(),
         "layoutDepth":if shape.topology==Topology::Layered {Some(shape.depth+2)} else {None},
         "shape":{"couplingPercent":shape.coupling_percent,"fields":shape.fields,"reads":shape.reads,"depth":shape.depth,"width":shape.width,"encoding":format!("{:?}",shape.encoding).to_lowercase(),"topology":format!("{:?}",shape.topology).to_lowercase(),"overlaps":shape.overlaps,"shadowed":shape.shadowed,"wideHeads":shape.wide_heads,"producers":shape.producers,"computed":shape.computed,"catalog":shape.catalog,"catalogLayers":shape.catalog_layers},
-        "limits":limits,"binary":binary,"checkArgs":check_args});
+        "limits":limits,"binary":binary,"binarySha256":binary_hash,"checkArgs":check_args});
     if source_path.is_some() {
         for key in ["shape", "layout", "layoutDepth", "crossReadCount"] {
             manifest.as_object_mut().unwrap().remove(key);
@@ -239,6 +243,7 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
     let mut phases = Vec::new();
     let mut active = BTreeMap::<u64, Value>::new();
     let mut rounds = BTreeMap::<String, Value>::new();
+    let mut attempts = super::attempts::Attempts::default();
     let mut malformed = 0;
     if let Ok(file) = fs::File::open(dir.join("memory.jsonl")) {
         for line in BufReader::new(file).lines() {
@@ -260,6 +265,7 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
                 }
                 Some("progress") => {
                     let d = &v["detail"];
+                    attempts.observe(d);
                     if let Some(round) = d["admission"]["round"].as_u64() {
                         rounds.insert(
                             format!(
@@ -304,6 +310,9 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
             outcomes.push(v);
         }
     }
+    let (summaries, samples) = attempts.finish();
+    report["admissionAttemptSummaries"] = json!(summaries);
+    report["admissionAttemptSamples"] = json!(samples);
     report["outcomes"] = json!(outcomes);
     report["phases"] = json!(phases);
     report["unfinishedSpans"] = json!(active.into_values().collect::<Vec<_>>());
