@@ -25,6 +25,10 @@ jobs:
           rustup toolchain install 1.93.0 --profile minimal
       - name: Rust crates (IR, checker, sessions, presentation, editor, ir-text, test DSL)
         run: cargo +1.93.0 test --locked --workspace --exclude denotate-lsp --exclude denotate-lsp-tests
+      - name: Scorecard correctness
+        run: |
+          cargo +1.93.0 test --locked -p denotate-check-session --features test-support --example score_den
+          cargo +1.93.0 test --locked -p denotate-check-session --features test-support --example scorecard
       - name: Install .den editor dependencies
         run: npm ci --prefix editors/den
       - name: Shared .den generated parser is current

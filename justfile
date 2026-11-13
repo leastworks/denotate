@@ -39,13 +39,13 @@ test-shipping-news:
 
 # Check the .den scorecard.
 test-score-den:
-    cargo +1.93.0 test --release --locked -p denotate-check-session --features test-support --example score_den
+    cargo +1.93.0 test --locked -p denotate-check-session --features test-support --example score_den
 
 # Check the test DSL scorecard.
 test-score-test-dsl:
-    cargo +1.93.0 test --release --locked -p denotate-check-session --features test-support --example scorecard
+    cargo +1.93.0 test --locked -p denotate-check-session --features test-support --example scorecard
 
-# Check both scorecards (release builds; not part of `verify`).
+# Check both scorecards' correctness (normal test profile; included in `verify`).
 test-scorecards: test-score-den test-score-test-dsl
 
 # Format all Rust crates.
@@ -57,7 +57,7 @@ fmt-check:
     cargo +1.93.0 fmt --all --check
 
 # Run the verification gate without launching VS Code.
-verify: test-crates test-den test-dsl-lsp test-dsl-extension fmt-check
+verify: test-crates test-scorecards test-den test-dsl-lsp test-dsl-extension fmt-check
 
 # Run the installed VS Code smokes, one after the other.
 verify-vscode: test-den-vscode test-dsl-vscode

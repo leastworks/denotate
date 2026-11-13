@@ -38,15 +38,32 @@ Open the folder containing all of a program's `den.root` roots.
 ## Verification
 
 ```sh
-just verify          # Rust, editor/LSP/package tests and formatting; no GUI
-just verify-vscode   # both installed VS Code smokes, one at a time
+just verify          # correctness tests, including scorecards, and formatting; no GUI
+just verify-vscode   # both installed VS Code smokes when needed, one at a time
 ```
 
 The individual recipes (`just test-crates`, `just test-den`, `just test-dsl-lsp`,
 `just test-dsl-extension`, `just fmt-check`) remain available for focused work.
 Use `just test-crate denotate-check` for one crate and `just fmt` to format Rust.
-The scorecards' own tests are release builds outside `verify`; run them with
-`just test-scorecards` when changing scorecard code or the checker paths they compare.
+
+Use focused tests during implementation, then run `just verify` once for the
+completed code change. After a small follow-up fix, rerun the affected tests;
+repeat the full gate only when the change or an unresolved failure warrants it.
+Documentation and sample-only changes need their relevant link, example or
+tutorial checks, rather than the full code gate.
+
+The scorecards' correctness tests run in the normal test profile as part of
+`verify`; `just test-scorecards` runs them separately for focused work. They check
+outcome agreement, cold/warm and edited/fresh behavior, instrumentation and report
+contents. They do not enforce timing or memory thresholds. Run release scorecards
+and benchmarks when evaluating a performance claim, on a relevant workload.
+Reuse the workspace's `target/` directory unless isolation is necessary.
+
+Run the affected editor's installed smoke (`just test-den-vscode` or
+`just test-dsl-vscode`) when activation, packaging, client behavior or editor
+integration changes. Pure checker changes normally rely on the gate's LSP and
+publication tests. Run both smokes before a release or after changes affecting
+both extensions. On macOS, run GUI smokes outside the sandbox and sequentially.
 
 If a grammar changes, run `just generate-den` or `just generate-test-dsl` and commit
 the generated files. `just generate-den --force` bypasses the local parser cache;
