@@ -211,3 +211,43 @@ Add `--generate-only` to save a target's sources without checking it. Limits aft
 `--` are validated by the CLI's own parser and recorded before launching; none are
 raised automatically. `just verify` runs all four small encodings through the CLI,
 the oracle, topology and overlap checks, and partial-report recovery tests.
+
+## Layout-valid layered topology
+
+`--topology layered --coupling-percent 50` moves payload allocation to the parent
+of its previous owning leaf. That parent declares the field optional; the leaf
+retains its explicit required/absent value tests. First classify internal formats
+using root-allocated selectors, then decide every payload's acceptance, then run
+leaf tests. A matching owner supplies acceptance directly. A nonmatching owner
+rules out **all** its expected producers: the declaration, shadowed definitions
+and wide producers all require that same owner. No speculative field visibility
+is used for these decisions. The recorded layout and prerequisites are in
+`run.json`/`report.json`, alongside layout depth and cross-read count.
+
+For example, classify parent A from the selector; accept its optional field f2
+iff A matches; then evaluate leaf B's read of f2. When A does not match, raw f2
+is invisible even if present. When A matches, changing raw f2 can change B's
+recognition. With depth 2, other parents can fail independently; with depth 1,
+root allocation also permits tests of accepted-but-absent fields.
+
+The first requested percentage of payload indices (rounded up) introduces a read
+of the next payload cyclically in a sibling of that payload's original owning
+leaf. This sibling has no local presence test on the payload, so the new read
+can change recognition without duplicating or contradicting a local test. All
+these acceptance decisions precede every leaf. Connectivity need not produce
+a large SCC. Existing coupled/mixed topologies remain exploratory. Assumed
+acceptance is checked exhaustively against an independent selector/visibility
+oracle; coverage is measured under its different permitted-world convention and
+is not promised the same admission result. Assumption validation uses the existing
+fixed-truth specialization; no new checker admission policy is introduced.
+
+```sh
+just bench-den-schema --topology layered --coupling-percent 50 --encoding assumed \
+  --fields 2000 --reads 64 --depth 3 --width 4 --shadowed 409 \
+  --wide-heads 2 --producers 5800 --computed 300 --catalog 4000 --catalog-layers 8 \
+  -- --max-atoms 500000 --max-rules 1000000 --max-dependencies 5000000 \
+  --max-work 200000000 --timeout-ms 30000
+```
+
+For independent shape sweeps, use `just bench-den-zoo`; see the
+[shape-zoo contracts and report guide](../../../../scripts/SHAPE-ZOO.md).

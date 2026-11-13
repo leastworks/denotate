@@ -29,6 +29,10 @@ jobs:
         run: |
           cargo +1.93.0 test --locked -p denotate-check-session --features test-support --example score_den
           cargo +1.93.0 test --locked -p denotate-check-session --features test-support --example scorecard
+      - name: Shape-zoo correctness and tiny CLI sweep
+        run: |
+          cargo +1.93.0 build --locked -p denotate-ir-text --example check --example bench_schema
+          node --test scripts/benchmark-tests/zoo.test.mjs
       - name: Install .den editor dependencies
         run: npm ci --prefix editors/den
       - name: Shared .den generated parser is current

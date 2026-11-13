@@ -24,6 +24,7 @@ pub enum Topology {
     Independent,
     Coupled,
     Mixed,
+    Layered,
 }
 impl Topology {
     pub fn parse(s: &str) -> Result<Self, String> {
@@ -31,6 +32,7 @@ impl Topology {
             "independent" => Ok(Self::Independent),
             "coupled" => Ok(Self::Coupled),
             "mixed" => Ok(Self::Mixed),
+            "layered" => Ok(Self::Layered),
             _ => Err(format!("unknown topology {s}")),
         }
     }
@@ -46,6 +48,7 @@ pub struct Shape {
     pub encoding: Encoding,
     pub topology: Topology,
     pub overlaps: bool,
+    pub coupling_percent: usize,
     pub shadowed: usize,
     pub wide_heads: usize,
     pub producers: usize,
@@ -63,6 +66,7 @@ impl Default for Shape {
             encoding: Encoding::Coverage,
             topology: Topology::Independent,
             overlaps: false,
+            coupling_percent: 50,
             shadowed: 2,
             wide_heads: 0,
             producers: 0,
@@ -93,6 +97,9 @@ impl Shape {
         }
         if self.wide_heads > 0 && self.catalog == 0 {
             return Err("wide producers need a nonempty catalog".into());
+        }
+        if self.coupling_percent > 100 {
+            return Err("coupling-percent must be 0..100".into());
         }
         self.tree()?;
         Ok(())
@@ -195,9 +202,15 @@ pub fn source(s: &Shape) -> Result<String, String> {
         writeln!(
             out,
             "declaration(format{}, f{}, {});",
-            leaves[(i % (leaves.len() / s.width)) * s.width],
+            owner(s, &nodes, &leaves, i),
             s.depth + i,
-            if i % 3 == 2 { "absent" } else { "required" }
+            if s.topology == Topology::Layered {
+                "optional"
+            } else if i % 3 == 2 {
+                "absent"
+            } else {
+                "required"
+            }
         )
         .unwrap();
     }
@@ -257,12 +270,27 @@ pub fn source(s: &Shape) -> Result<String, String> {
                     }
                 }
             }
+            // A sibling consumes an earlier parent's optional allocation. It has
+            // no own required/absent test on that field, so this cross read can
+            // change recognition rather than duplicate or contradict a local test.
+            for i in 0..s.reads {
+                if let Some(j) = cross_read(s, i) {
+                    if leaves[(j % (leaves.len() / s.width)) * s.width] + 1 == t {
+                        writeln!(
+                            out,
+                            "unsatisfied{t}() :- !visible(f{}, present);",
+                            s.depth + j
+                        )
+                        .unwrap();
+                    }
+                }
+            }
         }
     }
     // Duplicates add producers. The existing declaration is never overridden.
     for i in 0..s.shadowed {
         let f = s.depth + i % s.reads;
-        let t = leaves[((i % s.reads) % (leaves.len() / s.width)) * s.width];
+        let t = owner(s, &nodes, &leaves, i % s.reads);
         writeln!(out, "relation shadow{i}();\nshadow{i}() :- {}visible(f{f}, present);\nexpected(f{f}) :- term{t}(), shadow{i}();", if (i % s.reads) % 3 == 2 { "!" } else { "" }).unwrap();
     }
     let mut obligations = Vec::new();
@@ -307,7 +335,7 @@ pub fn source(s: &Shape) -> Result<String, String> {
                 )
                 .unwrap();
             }
-            let owner = leaves[((h % s.reads) % (leaves.len() / s.width)) * s.width];
+            let owner = owner(s, &nodes, &leaves, h % s.reads);
             writeln!(
                 out,
                 "expected(f{}) :- term{owner}(), wide{h}();",
@@ -332,4 +360,99 @@ pub fn source(s: &Shape) -> Result<String, String> {
     }
     writeln!(out, " ];\n  obligations: [{}];\n}}", obligations.join(", ")).unwrap();
     Ok(out)
+}
+
+fn owner(s: &Shape, nodes: &[Node], leaves: &[usize], i: usize) -> usize {
+    let leaf = leaves[(i % (leaves.len() / s.width)) * s.width];
+    if s.topology == Topology::Layered {
+        nodes[leaf].parent.unwrap()
+    } else {
+        leaf
+    }
+}
+pub fn cross_read(s: &Shape, i: usize) -> Option<usize> {
+    (s.topology == Topology::Layered && s.reads > 1 && i * 100 / s.reads < s.coupling_percent)
+        .then_some((i + 1) % s.reads)
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Step {
+    Classify(usize),
+    Accept(usize),
+}
+/// Explicit prerequisites: all alternative expected producers are subordinate
+/// to the same owner, so a nonmatching owner rules all of them out.
+pub fn layout(s: &Shape) -> Result<Vec<(Step, Vec<Step>)>, String> {
+    if s.topology != Topology::Layered {
+        return Ok(vec![]);
+    }
+    let nodes = s.tree()?;
+    let leaves: Vec<_> = nodes
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.level == s.depth)
+        .map(|(i, _)| i)
+        .collect();
+    let mut steps = Vec::new();
+    for (t, n) in nodes.iter().enumerate().filter(|(_, n)| n.level < s.depth) {
+        steps.push((
+            Step::Classify(t),
+            n.parent.into_iter().map(Step::Classify).collect(),
+        ));
+    }
+    for i in 0..s.reads {
+        steps.push((
+            Step::Accept(i),
+            vec![Step::Classify(owner(s, &nodes, &leaves, i))],
+        ));
+    }
+    for t in &leaves {
+        let mut deps = vec![Step::Classify(nodes[*t].parent.unwrap())];
+        for i in 0..s.reads {
+            if leaves[(i % (leaves.len() / s.width)) * s.width] == *t {
+                deps.push(Step::Accept(i));
+            }
+            if let Some(j) = cross_read(s, i) {
+                if leaves[(j % (leaves.len() / s.width)) * s.width] + 1 == *t {
+                    deps.push(Step::Accept(j));
+                }
+            }
+        }
+
+        steps.push((Step::Classify(*t), deps));
+    }
+    check_layout(&steps)?;
+    Ok(steps)
+}
+pub fn check_layout(steps: &[(Step, Vec<Step>)]) -> Result<(), String> {
+    if !has_layout(steps) {
+        return Err("no layout exists".into());
+    }
+    check_order(steps)
+}
+pub fn check_order(steps: &[(Step, Vec<Step>)]) -> Result<(), String> {
+    let mut done = std::collections::BTreeSet::new();
+    for (i, (step, deps)) in steps.iter().enumerate() {
+        if let Some(d) = deps.iter().find(|d| !done.contains(*d)) {
+            return Err(format!("step {i} {step:?} reads undecided {d:?}"));
+        }
+        done.insert(*step);
+    }
+    Ok(())
+}
+pub fn has_layout(steps: &[(Step, Vec<Step>)]) -> bool {
+    let mut done = std::collections::BTreeSet::new();
+    loop {
+        let before = done.len();
+        for (s, ds) in steps {
+            if ds.iter().all(|d| done.contains(d)) {
+                done.insert(*s);
+            }
+        }
+        if done.len() == steps.len() {
+            return true;
+        }
+        if before == done.len() {
+            return false;
+        }
+    }
 }

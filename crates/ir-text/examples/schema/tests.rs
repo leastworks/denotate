@@ -71,22 +71,45 @@ fn reference(s: &Shape, raw: &[bool], selector_choices: &[Option<usize>]) -> Opt
         leaf = leaf * s.width + (*choice)?;
     }
     let leaves = s.width.pow(s.depth as u32);
-    let mut accepted = 0;
+    let accepted = (0..s.reads)
+        .filter(|i| {
+            let owner_leaf = (i % (leaves / s.width)) * s.width;
+            if s.topology == Topology::Layered {
+                owner_leaf / s.width == leaf / s.width
+            } else {
+                owner_leaf == leaf
+            }
+        })
+        .fold(0, |m, i| m | (1 << i));
     for (i, present) in raw.iter().enumerate() {
         if (i % (leaves / s.width)) * s.width == leaf {
             if *present != (i % 3 != 2) {
                 return None;
             }
-            accepted |= 1 << i;
+        }
+        if s.topology == Topology::Layered && s.reads > 1 && i * 100 / s.reads < s.coupling_percent
+        {
+            let j = (i + 1) % s.reads;
+            if (j % (leaves / s.width)) * s.width + 1 == leaf
+                && (accepted & (1 << j) == 0 || !raw[j])
+            {
+                return None;
+            }
         }
     }
     Some(accepted)
 }
 #[test]
 fn assumed_acceptance_matches_the_independent_layout_for_every_tiny_raw_message() {
-    for depth in [1, 2] {
+    for (depth, topology) in [
+        (1, Topology::Independent),
+        (2, Topology::Independent),
+        (1, Topology::Layered),
+        (2, Topology::Layered),
+    ] {
         let s = Shape {
             depth,
+            topology,
             fields: depth + 3,
             reads: 3,
             wide_heads: 2,
@@ -110,6 +133,7 @@ fn assumed_acceptance_matches_the_independent_layout_for_every_tiny_raw_message(
         let raw_id = relation("raw_value");
         let guess_id = relation("assumed_accepted");
         let expected_id = relation("expected");
+        let visible_id = relation("visible");
         for selectors in 0..(s.width + 1).pow(depth as u32) {
             let mut n = selectors;
             let mut choices = Vec::new();
@@ -155,6 +179,14 @@ fn assumed_acceptance_matches_the_independent_layout_for_every_tiny_raw_message(
                                 assert_eq!(
                                     replay.fact(&a).unwrap(),
                                     FactState::Settled(guesses & (1 << i) != 0)
+                                );
+                                let visible = GroundAtom::new(
+                                    visible_id,
+                                    [constant(&format!("f{}", depth + i)), constant("present")],
+                                );
+                                assert_eq!(
+                                    replay.fact(&visible).unwrap(),
+                                    FactState::Settled(raw[i] && guesses & (1 << i) != 0)
                                 );
                             }
                         }
@@ -319,4 +351,138 @@ fn coupled_conditions_connect_otherwise_separate_ambiguous_components() {
             .unwrap()
     };
     assert!(largest(Topology::Coupled) > largest(Topology::Independent));
+}
+
+#[test]
+fn layered_order_and_genuine_cycle_are_distinct() {
+    let s = Shape {
+        topology: Topology::Layered,
+        depth: 2,
+        ..tiny(Encoding::Assumed)
+    };
+    let steps = layout(&s).unwrap();
+    assert!(has_layout(&steps));
+    let mut reordered = steps.clone();
+    reordered.swap(0, 1);
+    assert!(check_layout(&reordered).unwrap_err().contains("step 0"));
+    assert!(has_layout(&reordered));
+    let cycle = vec![
+        (Step::Classify(0), vec![Step::Accept(0)]),
+        (Step::Accept(0), vec![Step::Classify(0)]),
+    ];
+    assert!(!has_layout(&cycle));
+    assert_eq!(check_layout(&cycle).unwrap_err(), "no layout exists");
+}
+#[test]
+fn layered_all_encodings_report_faithfully() {
+    for encoding in [
+        Encoding::Ambiguous,
+        Encoding::Coverage,
+        Encoding::Negated,
+        Encoding::Assumed,
+    ] {
+        let s = Shape {
+            topology: Topology::Layered,
+            ..tiny(encoding)
+        };
+        assert!(has_layout(&layout(&s).unwrap()));
+        let p = load_shape(&s);
+        let l = Limits::default();
+        let ops = (&l).into();
+        let req = p.verification_requests(&l).unwrap().remove(0).1;
+        let RequestPreparation::Complete(g) = req.prepare(&p.corpus, &p.keys, &ops).unwrap() else {
+            panic!()
+        };
+        let g = g.admit(&ops).unwrap();
+        if encoding == Encoding::Assumed {
+            assert!(g.program().is_admitted());
+        }
+        assert!(g.program().admission_limit().is_none());
+        assert!(matches!(g.verify(&ops).unwrap(), CheckOutcome::Complete(_)));
+    }
+}
+
+#[test]
+fn zoo_tiny_sources_preserve_independent_stable_and_supported_models() {
+    use denotate_check::test_support::rewrites::{compare, subsets, supported_models};
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/bench-den-zoo.mjs");
+    let output = std::process::Command::new("node").args(["--input-type=module", "-e", "import {pathToFileURL} from 'node:url'; const m=await import(pathToFileURL(process.argv[1])); console.log(JSON.stringify(m.families.filter(f=>f!=='schema-layered').map(f=>[f,m.source(f,2)])));" ]).arg(script).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let sources: Vec<(String, String)> = serde_json::from_slice(&output.stdout).unwrap();
+    for (name, text) in sources {
+        let doc = SourceFile::new("file:///zoo.den", 0, text);
+        let p = load(
+            &ProgramMembership::single("root", [doc.uri.clone()]),
+            &[doc],
+        )
+        .unwrap();
+        let l = Limits::default();
+        let ops = (&l).into();
+        let req = p.verification_requests(&l).unwrap().remove(0).1;
+        let RequestPreparation::Complete(g) = req.prepare(&p.corpus, &p.keys, &ops).unwrap() else {
+            panic!("{name}")
+        };
+        let g = g.admit(&ops).unwrap();
+        let g = g.program();
+        compare(&p.corpus, &p.domains, g);
+        for world in subsets(&g.input_atoms().cloned().collect::<Vec<_>>()) {
+            assert_eq!(
+                supported_models(g, &g.original_rules().cloned().collect::<Vec<_>>(), &world),
+                supported_models(g, &g.rules().cloned().collect::<Vec<_>>(), &world),
+                "{name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn no_layout_does_not_imply_inconsistent_guesses() {
+    let doc = SourceFile::new(
+        "file:///cycle.den",
+        0,
+        "input guessed(); relation matched(); matched() :- guessed(); relation invalid(); invalid() :- guessed(), !matched(); invalid() :- matched(), !guessed(); assumption consistent: empty(invalid); verification v {assumptions: [consistent]; obligations: [];}",
+    );
+    let p = load(
+        &ProgramMembership::single("root", [doc.uri.clone()]),
+        &[doc],
+    )
+    .unwrap();
+    let l = Limits::default();
+    let ops = (&l).into();
+    let req = p.verification_requests(&l).unwrap().remove(0).1;
+    let RequestPreparation::Complete(g) = req.prepare(&p.corpus, &p.keys, &ops).unwrap() else {
+        panic!()
+    };
+    let g = g.admit(&ops).unwrap();
+    let ctx = g.program().condition_context(&l).unwrap();
+    let guesses = denotate_check::test_support::rewrites::subsets(
+        &g.program().input_atoms().cloned().collect::<Vec<_>>(),
+    );
+    let consistent = guesses
+        .into_iter()
+        .filter(|w| {
+            ctx.evaluate(&ctx.true_condition(), w.iter().cloned(), &l)
+                .unwrap()
+        })
+        .count();
+    assert_eq!(consistent, 2);
+    assert!(!has_layout(&[
+        (Step::Accept(0), vec![Step::Classify(0)]),
+        (Step::Classify(0), vec![Step::Accept(0)])
+    ]));
+}
+
+#[test]
+fn layered_cross_value_changes_recognition() {
+    let s = Shape {
+        topology: Topology::Layered,
+        ..tiny(Encoding::Assumed)
+    };
+    assert_eq!(reference(&s, &[true, true], &[Some(1)]), Some(3));
+    assert_eq!(reference(&s, &[true, false], &[Some(1)]), None);
 }

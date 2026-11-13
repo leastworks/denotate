@@ -101,6 +101,11 @@ documents the semantic presets, scaling controls, optional CPU sampling and pers
 reports, including incomplete runs. It builds before measurement and keeps checker
 limits explicit.
 
+`just bench-den-zoo` sweeps independent shape families, with fresh-process repetitions,
+completion-aware phase fits and advisory growth flags. See the
+[shape-zoo guide](scripts/SHAPE-ZOO.md). `just test-zoo` runs its correctness checks
+and tiny CLI smoke; it is included in `just verify`.
+
 ## Layout
 
 | Path | What |

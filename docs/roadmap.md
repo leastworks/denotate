@@ -40,15 +40,20 @@ Most scale regressions so far were superlinear scans that small, tutorial-shaped
 programs never exposed; budgets guarantee termination and honest results, not
 throughput. `just bench-den-schema` generates incremental-schema programs at scale
 (Shipping News vocabulary) and runs the real CLI with memory profiles and optional
-sampling ([profiling](../DEVELOPMENT.md#profiling)). Next:
+sampling ([profiling](../DEVELOPMENT.md#profiling)). Its layered topology records
+an explicit acceptance order and checks presence versus visibility against an
+independent oracle. At production-like size, the assumed encoding exhausts
+assumption construction's BDD preflight, and coverage leaves one component
+(763 atoms before admission, 288 after) unresolved.
 
-- **Layout-valid coupling:** cross reads only to fields decided earlier in an
-  explicit, recorded execution order, so large generated programs resemble ones a
-  DSL scheduler accepts, with an oracle for presence versus visibility.
-- **Shape zoo:** DSL-independent families (fan-in, breakable and genuine negative
-  loops, certification pressure, removal-heavy replay, presentation), each swept over
-  sizes with per-phase growth exponents fitted only on completed phases, reported
-  against both the knob and measured sizes, as advisory triage signals.
+`just bench-den-zoo` now sweeps fan-in, breakable and genuine negative loops,
+certification pressure, removal-heavy replay, presentation, and the layered schema
+preset. Completed-phase fits compare both the knob and measured sizes; flags are
+advisory triage signals, not gates ([guide](../scripts/SHAPE-ZOO.md)).
+
+Next: fan-out, positive recursion depth and SCC size, fixed/residual ratios and
+fixed-chain depth, inputs and `within` domains, assumptions, join arity/width,
+and source-size sweeps. Each family needs its own semantic and target-path check.
 
 ## Lowering guidance
 

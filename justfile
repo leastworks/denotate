@@ -57,7 +57,7 @@ fmt-check:
     cargo +1.93.0 fmt --all --check
 
 # Run the verification gate without launching VS Code.
-verify: test-crates test-scorecards test-den test-dsl-lsp test-dsl-extension fmt-check
+verify: test-crates test-scorecards test-den test-dsl-lsp test-dsl-extension test-zoo fmt-check
 
 # Run the installed VS Code smokes, one after the other.
 verify-vscode: test-den-vscode test-dsl-vscode
@@ -194,3 +194,14 @@ bench-lsp:
 [private]
 _check-node:
     @node -e 'if (Number(process.versions.node.split(".")[0]) < 22) { console.error("Denotate needs Node 22+. Check node --version and your PATH."); process.exit(1); }'
+
+# Sweep independent shape families; growth flags are advisory.
+[positional-arguments]
+bench-den-zoo *args:
+    cargo +1.93.0 build --locked --profile profiling -p denotate-ir-text --example check --example bench_schema
+    node scripts/bench-den-zoo.mjs "$@"
+
+# Fitter, semantic path checks and a tiny real-CLI sweep (no timing thresholds).
+test-zoo:
+    cargo +1.93.0 build --locked -p denotate-ir-text --example check --example bench_schema
+    node --test scripts/benchmark-tests/zoo.test.mjs
