@@ -162,13 +162,29 @@ real program that the current choice serves badly.
   already taken them out of execution on the session path. Whole-program shadowing
   warnings would require a separate pass over the retained fixed graph. Supporting
   source chains and their location order agree on folded and unfolded paths.
+- **Cycle-relevant admission precedes downstream rewrites.** Negative components
+  and their blocked provider cones receive structural reduction, producer-removal
+  proofs and discharge before downstream proof/evaluation work. A wide consumer
+  cannot consume the proof budget before a small cycle that would settle it.
+  Supporting settled producers remain available; whole-program graph maintenance
+  and the full input universe remain necessary shared work. Proof rules and
+  transactional commits are unchanged. Downstream work still checks blocked heads
+  and assumption-dependent input negations on settled rules. It may produce fewer
+  warnings when previously blocked producers become exact; preserving all earlier
+  warnings would require a separate lint policy. Logical downstream exhaustion is
+  advisory, recorded separately from admission limits and displayed at the
+  verification. It cannot relabel phase A's admitted or unsupported regions. The
+  graph, marker and logical receipt are reusable together at the same limits;
+  cancellation/deadlines remain operational aborts and are not reused.
+
 - **An expensive admission proof does not stop independent proofs.** A per-operation
   BDD task or result-node failure inside coverage, a removal check, component bounds
   or a discharge check skips that attempt. Partial batches remain sound: each proof
   uses one immutable snapshot, removals never remove the exact producers covering
   them, and a discharge does not assume another proposed rewrite. A skip adds no
   rewrite. Global work, retained storage, deadlines, cancellation and failures in
-  shared evaluation/summaries still stop admission and discard the pending batch.
+  shared evaluation/summaries stop the current phase and discard the pending batch;
+  downstream exhaustion is recorded separately as above.
   Failed preflights consume their task allowance plus one stopping step; a preflight
   constrained by remaining work (including a tie with the task cap) reports global
   work exhaustion. Bounds and discharge retries follow both signs of dependencies
@@ -267,8 +283,9 @@ real program that the current choice serves badly.
   binds current evidence. The first query covers the whole fixed cone, preserving
   its whole-operation allowance. The existing possibility-grounding SCCs follow
   positive edges and cannot directly cache fixed truth through negative providers;
-  finer fixed SCC invalidation is deferred pending measurements. No failed fold or incomplete
-  admission is reused as a completed artifact.
+  finer fixed SCC invalidation is deferred pending measurements. No failed fold or
+  incomplete cycle-relevant admission is reused as a completed artifact. Completed
+  cycle admission may retain explicitly marked logical downstream exhaustion.
 - **Keep a completed fixed fold without a separate byte cap.** There is one
   replaceable fold per program session, and checker limits already bound its work
   and atom/rule counts. The old quarter-of-session cap discarded larger completed

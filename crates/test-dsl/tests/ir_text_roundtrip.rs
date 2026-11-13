@@ -690,6 +690,7 @@ fn finding_identity(
 ) -> FindingIdentity {
     use denotate_presentation::Identity;
     match id {
+        Identity::DownstreamWork => panic!("corpus must complete downstream rewrite work"),
         Identity::Assumption(_)
         | Identity::InconsistentAssumptions
         | Identity::AssumedConclusion(..)

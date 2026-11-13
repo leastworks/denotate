@@ -118,13 +118,18 @@ its local clock displays time since the last report without polling the server.
 During admission, `detail.admission` optionally adds an invocation-local snapshot:
 
 ```json
-{"round":2,"stage":"upper-bounds","unresolvedComponents":3,"blockedAtoms":120,
+{"phase":"relevant","round":2,"stage":"upper-bounds","unresolvedComponents":3,"blockedAtoms":120,
  "current":{"index":17,"atoms":12,"ruleInstances":20,"atom":"p(a)",
    "location":{"uri":"file:///app/p.den","line":14,"column":1}},
  "rule":32,"rules":80,"iteration":null,
  "removedRules":4,"dischargedNegations":6,"skippedAttempts":2,
  "skipped":null,"skipTarget":null,"failure":null}
 ```
+
+`phase` is `relevant` (negative components and their blocked provider cones) or
+`downstream` (remaining blocked-head removals and settled input-guard warnings).
+Supporting settled providers are evaluated as needed in either phase. Rounds
+continue across the phase boundary. The phase is observational, not a finding key.
 
 `unresolvedComponents` counts residual ground SCCs containing a negative cycle;
 `blockedAtoms` includes their downstream dependents. Counts are refreshed at round
@@ -135,9 +140,10 @@ representative ground atom and optional current-source location identify the
 component without expanding semantic component keys. Location line/column are
 one-based Unicode-scalar coordinates, as in CLI diagnostics, not LSP zero-based
 UTF-16 positions.
-`rule` is the one-based current active rule in summaries/removals/candidates
-(zero outside rule scans); `rules` counts active residual rule instances at the
-last boundary.
+`rule` is the one-based position in the current scoped summaries/removals/candidates
+scan (zero outside rule scans); `rules` counts all active residual rule instances at
+the last boundary. A scoped scan can visit fewer rules, so these are not a
+completion fraction.
 `iteration` is an optional current upper-bound iteration, not an estimated total.
 Rewrite counts are cumulative committed counts, not proposed changes.
 
@@ -190,7 +196,7 @@ Producer removals are committed and components rebuilt before negation candidate
 and cycle bounds are attempted. A round with removals therefore skips those stages.
 Round zero means no rewrite round has started in this invocation. `complete`
 means admission finished, possibly leaving unsupported components; `reused` means
-previously completed admission was reused. Neither is an obligation verdict.
+previously computed admission was reused, including any downstream incomplete marker. Neither is an obligation verdict.
 `failure`, when present, is the shared formatted phase/resource/limit explanation;
 the last stage/component is preserved on exhaustion. Ordinary traversal and
 iteration updates are throttled to at most one every 250 ms. Stage transitions,
@@ -217,6 +223,17 @@ finding. Locations use the same coordinates as admission progress.
 `admissionSkips` lists the current skips whose targets belong to this component:
 `[{attempt, head, reason}]`, with display names and formatted limit reasons. A
 skipped downstream head is not attached to an upstream component.
+
+Verification summaries optionally include `downstreamIncomplete`, using the shared
+structured phase/resource/limit explanation. It means optional downstream rewrite
+work exhausted after cycle-relevant admission finished. It does not change summary
+state, obligation verdicts, region classifications or CLI exit codes. A verification
+also receives an Information diagnostic with kind/code `incomplete-downstream-work`,
+finding `{ "context": "downstream-work", "verification": ... }`, and evidence
+`{ "kind": "incomplete-downstream-work", "phase": ..., "resource": ..., ... }`.
+Normal declaration placement and labeled library fallback apply. The field is
+omitted when work finished; logical reuse retains the marker. Deadlines and
+cancellation remain invocation aborts.
 
 Verification summaries optionally include `admissionSkips`, an array of current
 failed attempts with `attempt`, keyed `head`, optional `rule` (rule key and complete

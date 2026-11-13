@@ -96,11 +96,13 @@ impl GroundProgram {
         &self,
         budget: &mut Budget<'_>,
         observe: Option<&dyn Fn(ComponentId)>,
+        cone: &DependencyCone,
     ) -> Result<SymbolicMeaning<'_>> {
         self.symbolic_selected_impl(
             budget,
             false,
-            None,
+            Some(cone),
+            true,
             observe,
             #[cfg(any(test, feature = "test-support"))]
             None,
@@ -133,6 +135,7 @@ impl GroundProgram {
             budget,
             partial,
             cone,
+            false,
             None,
             #[cfg(any(test, feature = "test-support"))]
             None,
@@ -146,13 +149,14 @@ impl GroundProgram {
         cone: Option<&DependencyCone>,
         measured: &mut dyn FnMut(ComponentId, Duration),
     ) -> Result<SymbolicMeaning<'_>> {
-        self.symbolic_selected_impl(budget, partial, cone, None, Some(measured))
+        self.symbolic_selected_impl(budget, partial, cone, false, None, Some(measured))
     }
     fn symbolic_selected_impl(
         &self,
         budget: &mut Budget<'_>,
         partial: bool,
         cone: Option<&DependencyCone>,
+        admission: bool,
         observe: Option<&dyn Fn(ComponentId)>,
         #[cfg(any(test, feature = "test-support"))] mut measured: Option<
             &mut dyn FnMut(ComponentId, Duration),
@@ -160,7 +164,15 @@ impl GroundProgram {
     ) -> Result<SymbolicMeaning<'_>> {
         let _stage = budget.limits.progress.nested("symbolic-evaluation");
         let start = Instant::now();
-        let context = ConditionContext::build_selected(self, cone.map(|c| &c.facts), budget)?;
+        let context = ConditionContext::build_selected(
+            self,
+            if admission {
+                None
+            } else {
+                cone.map(|c| &c.facts)
+            },
+            budget,
+        )?;
         let mut meaning = SymbolicMeaning {
             program: self,
             context,
@@ -174,6 +186,9 @@ impl GroundProgram {
         };
         let mut retained = meaning.context.permitted_worlds().node_count();
         for input in meaning.context.inputs().cloned().collect::<Vec<_>>() {
+            if admission && cone.is_some_and(|c| !c.facts.contains(&input)) {
+                continue;
+            }
             let input = &input;
             let condition = meaning.context.input_with_budget(input, budget)?;
             retained = retain(retained, 0, condition.node_count(), budget)?;

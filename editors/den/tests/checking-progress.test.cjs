@@ -99,14 +99,18 @@ test('Output names every effective limit without estimating unfinished work', ()
 });
 
 test('admission snapshots identify unresolved components, current work, reuse and exhaustion', () => {
-  const a = { round: 2, stage: 'upper-bounds', unresolvedComponents: 3, blockedAtoms: 12,
+  const a = { phase: 'relevant', round: 2, stage: 'upper-bounds', unresolvedComponents: 3, blockedAtoms: 12,
     removedRules: 1, dischargedNegations: 2, rule: 7, rules: 20, iteration: 4,
     current: { index: 6, atoms: 5, ruleInstances: 8, atom: "p('a')",
       location: { uri: 'file:///p.den', line: 3, column: 2 } } };
   const p = progress({ checking: 1 }, { active: [{ label: 'app', program: 'app', revision: 4,
     detail: { phase: 'admission', elapsedMs: 10, verification: '::v', verificationIndex: 1, verificationTotal: 1,
       assumptions: 0, obligations: 1, notices: 0, admission: a } }] });
-  assert.match(view.text(p), /round 2 · 3 unresolved components/);
+  assert.match(view.text(p), /relevant · round 2 · 3 unresolved components/);
+  assert.match(view.details(p), /Admission \(relevant\)/);
+  a.phase = 'downstream';
+  assert.match(view.text(p), /downstream · round 2/);
+  assert.match(view.details(p), /Admission \(downstream\)/);
   assert.match(view.details(p), /upper-bounds.*12 blocked atoms.*component 6.*5 atoms.*p\('a'\).*file:\/\/\/p.den:3:2/);
   assert.match(view.details(p), /iteration 4/);
   const lines = [];

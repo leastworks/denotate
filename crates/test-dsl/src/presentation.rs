@@ -19,6 +19,7 @@ pub enum DiagnosticKind {
     NoMeaning,
     UnsupportedGroup,
     Inconclusive,
+    IncompleteDownstreamWork,
     ImpossibleCondition,
     AlwaysTrueCondition,
     UnanalysedCondition,
@@ -33,6 +34,7 @@ impl DiagnosticKind {
             Self::NoMeaning => Kind::NoMeaning,
             Self::UnsupportedGroup => Kind::UnsupportedGroup,
             Self::Inconclusive => Kind::Inconclusive,
+            Self::IncompleteDownstreamWork => Kind::IncompleteDownstreamWork,
             Self::ImpossibleCondition => Kind::ImpossibleCondition,
             Self::AlwaysTrueCondition => Kind::AlwaysTrueCondition,
             Self::UnanalysedCondition => Kind::UnanalysedCondition,
@@ -124,6 +126,31 @@ pub fn present_checked(
     // presenter. This adapter only selects the current DSL source view.
     for finding in denotate_presentation::context_findings(&lowered.corpus, &lowered.keys, report)?
     {
+        if finding.identity == denotate_presentation::Identity::DownstreamWork {
+            let primary = lowered
+                .placements
+                .values()
+                .filter_map(|p| match p {
+                    crate::lowering::FilePlacement::Source(snapshot) => {
+                        sources.snapshot(*snapshot).ok()
+                    }
+                    _ => None,
+                })
+                .filter(|s| s.view == view.as_str())
+                .min_by(|a, b| a.uri.cmp(&b.uri))
+                .map(|s| sources.span(s.id, 0..0))
+                .transpose()?;
+            if let Some(primary) = primary {
+                let r = report.results.value.downstream_incomplete.as_ref().unwrap();
+                diagnostics.push(Diagnostic {
+                    identity: finding.identity,
+                    evidence: denotate_presentation::with_limit_details(serde_json::json!({"kind":finding.kind.code(),"phase":r.phase,"resource":r.resource}), r.details),
+                    kind: DiagnosticKind::IncompleteDownstreamWork,
+                    message: finding.message, primary, related: vec![], notes: finding.notes, cycle_rules: vec![],
+                });
+            }
+            continue;
+        }
         let denotate_presentation::Identity::Notice(id) = finding.identity else {
             continue;
         };

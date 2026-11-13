@@ -69,12 +69,14 @@ fn inspect(
 
 #[test]
 fn structural_direct_evidence_retains_true_false_and_both_dead_polarities() {
+    // Keep the whole false chain in the cycle's provider cone. A purely
+    // downstream chain now settles before phase B and need not get lint warnings.
     inspect("relation a(); relation b(); relation d(); relation dead(); relation after(); relation cycle();
-        a(); b():-a(); d():-b(); d():-cycle(); cycle():-!d(); dead():-!d(); after():-dead();",
+        a(); b():-a(); d():-b(); d():-cycle(); cycle():-!d(),after(); dead():-!d(); after():-dead();",
         |p, direct, full| {
             let at = |out: &presentation::Presentation, text: &str| out.diagnostics.iter().find(|d| p.sources.text(d.primary).unwrap()==text).unwrap().notes.join("\n");
             assert!(at(direct,"d():-cycle();").contains("d() is structurally true through a settling producer"));
-            assert!(at(direct,"cycle():-!d();").contains("!d() cannot hold"));
+            assert!(at(direct,"cycle():-!d(),after();").contains("!d() cannot hold"));
             assert!(at(direct,"after():-dead();").contains("all producers are dead or removed"));
             let sources = |out: &presentation::Presentation| out.diagnostics.iter().find(|d| p.sources.text(d.primary).unwrap()=="d():-cycle();").unwrap().related.iter().map(|r|p.sources.text(r.span).unwrap()).collect::<Vec<_>>();
             assert!(sources(direct).contains(&"d():-b();"));

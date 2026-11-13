@@ -154,6 +154,13 @@ pub fn present_with_rewrite_detail(
                         &report.results.value.notices[program.keys.notice(*id)?],
                     )
                 }
+                denotate_presentation::Identity::DownstreamWork => {
+                    let r = report.results.value.downstream_incomplete.as_ref().unwrap();
+                    denotate_presentation::with_limit_details(
+                        json!({"kind":finding.kind.code(),"phase":r.phase,"resource":r.resource}),
+                        r.details,
+                    )
+                }
                 _ => json!({"kind":finding.kind.code()}),
             };
         }

@@ -577,6 +577,7 @@ impl CheckRequest {
     }
     pub fn exhausted(&self, reason: Inconclusive) -> ScopedResults {
         ScopedResults {
+            downstream_incomplete: None,
             inconsistent_assumptions: false,
             notices: BTreeMap::new(),
             context: self.clone(),
@@ -763,6 +764,8 @@ pub struct KeyedAdmissionSkip {
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScopedResults {
+    /// Optional rewrite work exhausted after cycle-relevant admission finished.
+    pub downstream_incomplete: Option<ResourceReason>,
     pub admission_skips: Vec<KeyedAdmissionSkip>,
     pub inconsistent_assumptions: bool,
     pub notices: BTreeMap<NoticeKey, NoticeResult>,
@@ -984,6 +987,9 @@ impl PreparedCheck<'_> {
         // Keys are projected from the current graph on demand. Admission already
         // stores its changed bodies and original proofs there; no key refresh.
         operations.cancellation.check()?;
+        // Logical downstream exhaustion is reusable with the same limits. The
+        // graph and its explicit incomplete marker travel together; operational
+        // deadlines/cancellation returned above and never reach this cache.
         if self.program.admission_limit().is_none() {
             if let Some(cell) = &self.shared_admission {
                 let _ = cell.set((
@@ -1230,6 +1236,7 @@ impl PreparedCheck<'_> {
             ))
         });
         let mut out = ScopedResults {
+            downstream_incomplete: self.program.downstream_incomplete().map(Into::into),
             admission_skips,
             inconsistent_assumptions: !self.program.assumptions_consistent(),
             notices: BTreeMap::new(),

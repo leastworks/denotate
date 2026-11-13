@@ -679,6 +679,7 @@ fn check_program(
                                     | "impossible-condition"
                                     | "always-true-condition"
                                     | "unanalysed-condition"
+                                    | "incomplete-downstream-work"
                             )
                         )
                     })
@@ -1394,6 +1395,67 @@ mod tests {
             break;
         }
         assert!(found);
+    }
+    #[test]
+    fn downstream_exhaustion_is_presented_with_fallback_without_changing_exit_codes() {
+        let mut text = String::from(
+            "sort V; const first,second:V; input value(v:V); assumption exclusive:at_most_one(value,group_by:()); relation no(); obligation clean:empty(no); verification checks{assumptions:[exclusive];obligations:[clean];}\n",
+        );
+        for n in 0..80 {
+            text.push_str(&format!(
+                "relation g{n}(); g{n}():-value(first),!value(second);\n"
+            ));
+        }
+        for library in [false, true] {
+            let f = Fixture::new(if library { "" } else { &text });
+            if library {
+                fs::create_dir(f.0.join("library")).unwrap();
+                fs::write(f.0.join("library/den.root"), "{}").unwrap();
+                fs::write(
+                    f.0.join("den.root"),
+                    r#"{"libraries":["library/den.root"]}"#,
+                )
+                .unwrap();
+                fs::write(f.0.join("library/lib.den"), &text).unwrap();
+            }
+            let mut exercised = false;
+            for max_work in (2_000..50_000).step_by(1_000) {
+                let limits = Limits {
+                    max_work,
+                    ..Limits::default()
+                };
+                let args = [f.0.to_str().unwrap().to_owned(), "--no-progress".into()];
+                let mut output = String::new();
+                let code = run_with_limits(args.clone(), &mut output, limits.clone()).unwrap();
+                if !output.contains("incomplete-downstream-work:")
+                    || !output.contains("Result: proved")
+                {
+                    continue;
+                }
+                assert_eq!(code, 0, "{output}");
+                assert_eq!(
+                    output.contains("incomplete-downstream-work: in "),
+                    library,
+                    "{output}"
+                );
+                assert!(output.contains("budget"));
+                output.clear();
+                assert_eq!(
+                    run_with_limits(
+                        args.into_iter().chain(["--json".into()]),
+                        &mut output,
+                        limits
+                    )
+                    .unwrap(),
+                    0
+                );
+                assert!(output.contains("downstreamIncomplete"));
+                assert!(output.contains("downstream-work"));
+                exercised = true;
+                break;
+            }
+            assert!(exercised);
+        }
     }
     #[test]
     fn notice_library_fallback_is_labeled_and_advisory() {

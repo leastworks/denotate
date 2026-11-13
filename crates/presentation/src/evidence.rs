@@ -19,6 +19,7 @@ pub enum Kind {
     UnsupportedGroup,
     UnsupportedRegion,
     Inconclusive,
+    IncompleteDownstreamWork,
     Rewrite,
 }
 impl Kind {
@@ -37,6 +38,7 @@ impl Kind {
             Self::UnsupportedGroup => "unsupported-group",
             Self::UnsupportedRegion => "unsupported-region",
             Self::Inconclusive => "inconclusive",
+            Self::IncompleteDownstreamWork => "incomplete-downstream-work",
             Self::Rewrite => "redundant",
         }
     }
@@ -53,6 +55,7 @@ impl Kind {
             Self::UnvalidatedAssumption
             | Self::UnsupportedGroup
             | Self::Inconclusive
+            | Self::IncompleteDownstreamWork
             | Self::EmptyGroupingDomain
             | Self::AlwaysTrueCondition
             | Self::UnanalysedCondition => Severity::Information,
@@ -789,6 +792,15 @@ pub fn context_findings(
         role: Role::Declaration,
     };
     let mut findings = Vec::new();
+    if let Some(reason) = &report.results.value.downstream_incomplete {
+        findings.push(ContextFinding {
+            identity: Identity::DownstreamWork,
+            kind: Kind::IncompleteDownstreamWork,
+            message: format!("Downstream rewrite work is incomplete ({}). Cycle admission results are unchanged.", exhaustion_text(&reason.phase, &reason.resource, reason.details)),
+            notes: vec![],
+            contributions: vec![primary],
+        });
+    }
     if report.results.value.inconsistent_assumptions {
         let mut contributions = vec![primary];
         contributions.extend(v.assumptions.iter().map(|a| Contribution {

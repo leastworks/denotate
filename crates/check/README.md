@@ -22,6 +22,12 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
 3. **Admissibility.** Positive cycles are admitted. A negative edge inside an SCC blocks
    that component and its dependents unless a rewrite proves the negation redundant
    under W. Blocked regions are reported (`Unsupported`), never treated as false.
+   Admission first targets negative components and their blocked providers
+   (`relevant`), retaining their complete support. Then `downstream` handles
+   still-blocked downstream removals and assumption-dependent input-negation
+   warnings on settled heads, including programs with no cycles. Structural
+   worklists, symbolic evaluation and summaries are scoped to the current targets'
+   providers; input variables/W and transactional graph maintenance remain shared.
    Each round first performs structural truth/false propagation, dead-rule removal
    and bounded signed-body subsumption through single-producer positive chains.
    Removals target blocked regions; already settled rules supply truth/evidence.
@@ -42,7 +48,13 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    keep their covering producer summaries; wide sets of successful removals can
    therefore retain quadratic evidence metadata.
    Per-operation BDD limits in individual proof attempts are recoverable skips;
-   shared phases and global exhaustion still stop admission. Skips keep their
+   shared phases and global exhaustion stop that phase. Phase B records
+   `GroundProgram::downstream_incomplete()` and `ScopedResults::downstream_incomplete`
+   separately from `admission_limit()`. This advisory result preserves phase A's
+   admitted/unsupported classifications, survives same-context reuse with its
+   receipt, and does not change exit codes. Deadlines/cancellation still abort.
+   Downstream producers that become exact before phase B may lose their old rewrite
+   warnings; retaining every warning is not part of this ordering policy. Skips keep their
    work charges, release temporary retained storage, and retry only after a
    relevant rewrite changes their inputs. Coverage and removal compare exact
    producers and settled premises, including edits to settled premise cones;
@@ -87,7 +99,7 @@ inputs, so transitive edits still invalidate reuse. Presentation owns display ca
 neither proof coverage nor checker limits change.
 
 `PreparedCheck::admit_with_progress` accepts an optional invocation-local observer.
-It reports rounds, stages, unresolved ground components with negation, affected
+It reports relevant/downstream phases, rounds, stages, unresolved ground components with negation, affected
 atoms, current component sizes and representative atoms/rules, and committed
 rewrite counts. It also reports reused admission and exhaustion. Traversal and
 upper-bound iteration updates are throttled; component upper-bound starts, stage
@@ -95,7 +107,8 @@ transitions and exhaustion are immediate. Callbacks perform no checking or key
 projection, and are absent from semantic keys, receipts and retained admission.
 Frontends resolve the representative's names and current source location. Counts
 are snapshots, not percentages; completed admission can still leave unsupported
-components. A single BDD operation has no inner progress heartbeat.
+components or an explicit downstream incomplete marker. A single BDD operation
+has no inner progress heartbeat.
 
 `OperationalLimits::progress` optionally carries an owned `CheckingProgress`
 callback through direct and cached verification. It reports current targets and

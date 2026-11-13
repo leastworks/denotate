@@ -5,6 +5,7 @@ mod certification;
 mod certification_search;
 mod completion;
 mod core;
+mod cycle_first;
 mod findings;
 mod producer_removals;
 mod rewrites;

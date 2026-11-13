@@ -232,6 +232,7 @@ pub(crate) struct Rewrites {
     pub(crate) skips: BTreeMap<GroundAtom, Vec<AdmissionSkip>>,
     pub(crate) skipped_attempts: usize,
     pub inconclusive: Option<Inconclusive>,
+    pub downstream_incomplete: Option<Inconclusive>,
     nodes: usize,
 }
 
@@ -314,6 +315,10 @@ impl GroundProgram {
     pub fn admission_limit(&self) -> Option<Inconclusive> {
         self.rewrites.inconclusive
     }
+    /// Optional downstream rewrite work exhausted; admission verdicts are intact.
+    pub fn downstream_incomplete(&self) -> Option<Inconclusive> {
+        self.rewrites.downstream_incomplete
+    }
     pub(crate) fn discharge(
         &self,
         rule: GroundRuleId,
@@ -361,18 +366,31 @@ impl GroundProgram {
         let limits = budget.limits;
         limits.cancellation.check()?;
         self.rewrites.inconclusive = None;
+        self.rewrites.downstream_incomplete = None;
         if !self.assumptions_consistent() {
             progress.finish(&self, "inconsistent-assumptions");
             return Ok(self);
         }
         let mut attempts = Attempts::default();
-        let result = self.rewrite_loop(budget, &progress, &mut attempts);
+        let mut round = 0;
+        let mut phase = AdmissionPhase::Relevant;
+        let result = self
+            .rewrite_loop(budget, &progress, &mut attempts, phase, &mut round)
+            .and_then(|()| {
+                phase = AdmissionPhase::Downstream;
+                progress.phase(phase);
+                self.rewrite_loop(budget, &progress, &mut attempts, phase, &mut round)
+            });
         self.rewrites.skipped_attempts = attempts.count;
         self.rewrites.skips = attempts.records();
         if let Err(error) = result {
             progress.failed(&self, &error);
             budget.failure(&error);
-            self.rewrites.inconclusive = Some(Inconclusive::from_error(error)?);
+            let cause = Inconclusive::from_error(error)?;
+            match phase {
+                AdmissionPhase::Relevant => self.rewrites.inconclusive = Some(cause),
+                AdmissionPhase::Downstream => self.rewrites.downstream_incomplete = Some(cause),
+            }
         } else {
             progress.finish(&self, "complete");
         }
@@ -385,53 +403,53 @@ impl GroundProgram {
         budget: &mut Budget<'_>,
         progress: &crate::admission_progress::AdmissionReporter<'_>,
         attempts: &mut Attempts,
+        phase: AdmissionPhase,
+        round: &mut usize,
     ) -> Result<()> {
         let profile = budget.limits.profile.clone();
-        let mut round = 0;
         loop {
             if self.is_admitted()
-                && self.input_groups.is_empty()
-                && self.assumption_condition.is_none()
+                && (phase == AdmissionPhase::Relevant
+                    || (self.input_groups.is_empty() && self.assumption_condition.is_none()))
             {
                 return Ok(());
             }
-            round += 1;
-            let _round_profile = profile.span("admission-round", Some(round));
-            progress.snapshot(self, round, "structural");
+            let mut scope = crate::admission_scope::AdmissionScope::build(self, phase, budget)?;
+            if scope.targets.is_empty() {
+                return Ok(());
+            }
+            *round += 1;
+            let _round_profile = profile.span("admission-round", Some(*round));
+            progress.snapshot(self, *round, "structural");
             {
-                let _stage = profile.span("admission-structural", Some(round));
-                let structural = crate::structural::reduce(self, budget)?;
+                let _stage = profile.span("admission-structural", Some(*round));
+                let structural = crate::structural::reduce_selected(self, Some(&scope), budget)?;
                 if !structural.is_empty() {
-                    let batch = structural
-                        .into_iter()
-                        .enumerate()
-                        .map(|(index, proof)| RewriteProof {
-                            id: RewriteProofId {
-                                snapshot: self.graph_revision,
-                                index: self.rewrites.proofs.len() + index,
-                            },
-                            snapshot: self.graph_revision,
-                            kind: RewriteKind::RedundantProducer,
-                            justification: RewriteJustification::Structural(proof),
-                        })
-                        .collect();
-                    self.commit_rewrites(batch, attempts, budget)?;
-                    progress.snapshot(self, round, "structural-committed");
+                    self.commit_structural(structural, attempts, budget)?;
+                    progress.snapshot(self, *round, "structural-committed");
+                    if self.is_admitted()
+                        && (phase == AdmissionPhase::Relevant
+                            || (self.input_groups.is_empty()
+                                && self.assumption_condition.is_none()))
+                    {
+                        return Ok(());
+                    }
+                    scope = crate::admission_scope::AdmissionScope::build(self, phase, budget)?;
                 }
             }
-            if self.is_admitted()
-                && self.input_groups.is_empty()
-                && self.assumption_condition.is_none()
-            {
+            if scope.targets.is_empty() {
                 return Ok(());
             }
-            progress.snapshot(self, round, "symbolic");
+            progress.snapshot(self, *round, "symbolic");
             budget.tick("rewrite snapshot")?;
             let meaning = {
-                let mut stage = profile.span("admission-symbolic", Some(round));
+                let mut stage = profile.span("admission-symbolic", Some(*round));
                 let observe = |id| progress.work(self, "symbolic", Some(id), 0, false);
-                let meaning =
-                    self.symbolic_for_admission(budget, progress.enabled().then_some(&observe))?;
+                let meaning = self.symbolic_for_admission(
+                    budget,
+                    progress.enabled().then_some(&observe),
+                    &scope.cone,
+                )?;
                 if profile.enabled() {
                     stage.retained(crate::boolean::condition_storage(
                         meaning
@@ -443,7 +461,7 @@ impl GroundProgram {
                 meaning
             };
             let ctx = meaning.context();
-            let mut summaries_profile = profile.span("admission-summaries", Some(round));
+            let mut summaries_profile = profile.span("admission-summaries", Some(*round));
             progress.work(self, "summaries", None, 0, true);
             let mut summaries = BTreeMap::new();
             let mut producers = BTreeMap::<_, Vec<_>>::new();
@@ -452,7 +470,7 @@ impl GroundProgram {
             for (position, rule) in self
                 .rules
                 .iter()
-                .filter(|r| !self.rewrites.dropped.contains(&r.id))
+                .filter(|r| scope.cone.rules.contains(&r.id))
                 .enumerate()
             {
                 progress.rule(self, "summaries", rule.id, position + 1);
@@ -482,7 +500,7 @@ impl GroundProgram {
                     }
                 }
                 retained = crate::symbolic::retain(retained, 0, condition.node_count(), budget)?;
-                if !exact {
+                if !exact && scope.targets.contains(&rule.id) {
                     // Both passes visit active rules in the same order. This is
                     // the lifetime of a head's temporary coverage, not a new
                     // candidate ordering or a cache across admission snapshots.
@@ -512,7 +530,7 @@ impl GroundProgram {
                 ));
             }
             drop(summaries_profile);
-            let mut candidates_profile = profile.span("admission-candidates", Some(round));
+            let mut candidates_profile = profile.span("admission-candidates", Some(*round));
             // Commit exact-coverage removals before computing bounds on a graph
             // they may already break. All proofs still use this immutable snapshot.
             progress.work(self, "producer-removals", None, 0, true);
@@ -525,7 +543,7 @@ impl GroundProgram {
             for (position, rule) in self
                 .rules
                 .iter()
-                .filter(|r| !self.rewrites.dropped.contains(&r.id))
+                .filter(|r| scope.targets.contains(&r.id))
                 .enumerate()
             {
                 progress.rule(self, "producer-removals", rule.id, position + 1);
@@ -618,6 +636,7 @@ impl GroundProgram {
             if batch.is_empty() && !last_candidates.is_empty() {
                 batch = self.bound_removals(
                     &summaries,
+                    &scope.targets,
                     ctx,
                     &mut retained,
                     budget,
@@ -632,7 +651,7 @@ impl GroundProgram {
                 for (position, rule) in self
                     .rules
                     .iter()
-                    .filter(|r| !self.rewrites.dropped.contains(&r.id))
+                    .filter(|r| scope.targets.contains(&r.id))
                     .enumerate()
                 {
                     progress.rule(self, "candidates", rule.id, position + 1);
@@ -699,6 +718,9 @@ impl GroundProgram {
                                 break;
                             }
                         }
+                        continue;
+                    }
+                    if phase == AdmissionPhase::Downstream {
                         continue;
                     }
                     let component = self.component_for(&rule.head.atom)?;
@@ -823,11 +845,50 @@ impl GroundProgram {
             if batch.is_empty() {
                 return Ok(());
             }
-            let _commit_profile = profile.span("admission-commit", Some(round));
+            let _commit_profile = profile.span("admission-commit", Some(*round));
             progress.work(self, "commit", None, 0, true);
             self.commit_rewrites(batch, attempts, budget)?;
-            progress.snapshot(self, round, "committed");
+            progress.snapshot(self, *round, "committed");
         }
+    }
+
+    fn commit_structural(
+        &mut self,
+        structural: Vec<crate::structural::StructuralProof>,
+        attempts: &mut Attempts,
+        budget: &mut Budget<'_>,
+    ) -> Result<()> {
+        let batch = structural
+            .into_iter()
+            .enumerate()
+            .map(|(index, proof)| RewriteProof {
+                id: RewriteProofId {
+                    snapshot: self.graph_revision,
+                    index: self.rewrites.proofs.len() + index,
+                },
+                snapshot: self.graph_revision,
+                kind: RewriteKind::RedundantProducer,
+                justification: RewriteJustification::Structural(proof),
+            })
+            .collect();
+        self.commit_rewrites(batch, attempts, budget)
+    }
+
+    /// Exercise the structural algorithm independently of admission scheduling.
+    #[cfg(test)]
+    pub(crate) fn structural_for_test(mut self, limits: &Limits) -> Result<Self> {
+        let mut budget = Budget::new(limits);
+        let result = crate::structural::reduce(&self, &mut budget).and_then(|proofs| {
+            if proofs.is_empty() {
+                Ok(())
+            } else {
+                self.commit_structural(proofs, &mut Attempts::default(), &mut budget)
+            }
+        });
+        if let Err(error) = result {
+            self.rewrites.inconclusive = Some(Inconclusive::from_error(error)?);
+        }
+        Ok(self)
     }
 
     /// Strengthen bounds only after cheap removals reach a fixed point. Covers
@@ -836,6 +897,7 @@ impl GroundProgram {
     fn bound_removals(
         &self,
         summaries: &BTreeMap<GroundRuleId, ProducerSummary>,
+        targets: &BTreeSet<GroundRuleId>,
         ctx: &ConditionContext,
         retained: &mut usize,
         budget: &mut Budget<'_>,
@@ -853,7 +915,8 @@ impl GroundProgram {
         let mut last = BTreeMap::new();
         for (position, p) in summaries.values().enumerate() {
             budget.tick("bound removal candidates")?;
-            if p.exact || !exact_heads.contains(&p.rule.head.atom) {
+            if !targets.contains(&p.rule.id) || p.exact || !exact_heads.contains(&p.rule.head.atom)
+            {
                 continue;
             }
             let component = self.component_for(&p.rule.head.atom)?;

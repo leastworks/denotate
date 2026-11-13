@@ -151,10 +151,14 @@ impl GroundProgram {
     /// and no world is chosen or assumption tested by this internal operation.
     pub(crate) fn structural_boundaries(
         &self,
+        selected: Option<&BTreeSet<ComponentId>>,
         budget: &mut Budget<'_>,
     ) -> Result<(BTreeSet<ComponentId>, Replay<'_>)> {
         let mut independent = BTreeSet::new();
         for component in &self.components {
+            if selected.is_some_and(|s| !s.contains(&component.id)) {
+                continue;
+            }
             budget.charge(
                 1 + component.atoms.len() + component.dependencies.len(),
                 "structural boundaries",

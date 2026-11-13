@@ -63,6 +63,31 @@ notices and optional attribution. This changes observation only, not resource
 allowances or the existing recovery policy. Finished CLI verification reports are
 flushed before later verification work.
 
+Admission prioritizes unresolved negative components and their blocked providers
+(phase `relevant`). Only after that work reaches a fixed point does phase
+`downstream` attempt removals on other still-blocked heads and discharge redundant
+input negations on settled rules. The latter also runs without cycles when selected
+assumptions can justify warnings. Each phase keeps the existing structural,
+exact-coverage, strengthened-bound, then discharge ordering. Relevance is recomputed
+after commits. Targets and support differ: proofs keep all providers they need,
+including settled components, while unrelated structural worklists, evaluation and
+summaries wait. Graph maintenance and the full input universe/W remain shared;
+proof conditions retain the original variable order and universe for replay.
+
+Phase A exhaustion retains the ordinary admission limit. Global/shared logical
+exhaustion in phase B instead sets `downstream_incomplete`, with phase/resource details, and
+leaves cycle admission classifications intact. It produces an Information diagnostic
+at the verification and an optional summary field; it does not change verdicts or
+exit codes. Same-context admission reuse retains this marker and its receipt under
+the same logical limits. Deadlines/cancellation still abort and are never cached.
+Phase B has no new allowance: both phases share the existing budget. Committed
+batches survive exhaustion; pending batches remain transactional.
+
+Ordering can remove warnings: a downstream producer that becomes exact after a
+cycle is resolved is no longer a removal target. Preserving those warnings would
+require a separate lint policy. Existing finding identities and proof rules stay
+unchanged; each migration records the observed warning differences.
+
 Admission starts with a `structural` pass over blocked regions (negative cycles
 and their dependents); an already admitted graph has no structural targets.
 It reaches a worklist fixed point before committing deletions and running any BDD
@@ -185,8 +210,9 @@ allowance plus one stopping step, with no construction charge. The bound is stil
 or ties it, failure reports `BDD preflight: work` and stops admission. Successful
 operation charges are unchanged. Completion-equation preflights are unchanged.
 
-Failures in shared symbolic evaluation or summaries, total work/storage limits,
-deadlines and cancellation still stop the whole admission pass. No pending batch
+Failures in shared symbolic evaluation or summaries and total work/storage limits
+stop the current phase, with the separate downstream marker described above.
+Deadlines and cancellation still abort the whole invocation. No pending batch
 is salvaged on these failures. Local skips allow independent proofs to commit.
 Retry tracking uses ground identities stable within the preparation, not changing
 component handles. Bounds, bound removals and discharge keep conservative

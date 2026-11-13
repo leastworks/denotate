@@ -72,6 +72,14 @@ fn admission_skips_wide_coverage_and_finishes_independent_proofs() {
                 .filter_map(|e| e.skipped.as_ref())
                 .filter(|s| s.kind == AdmissionAttemptKind::Coverage && s.head == atom(out))
                 .collect();
+            if !unrelated && p.is_admitted() && p.admission_limit().is_none() {
+                assert!(
+                    skips.is_empty(),
+                    "cycle-first admission settles this head before any coverage attempt"
+                );
+                exercised = true;
+                continue;
+            }
             if !skips.is_empty() && p.admission_limit().is_none() && p.rewrite_proofs().count() > 0
             {
                 exercised = true;
@@ -335,7 +343,13 @@ fn downstream(kind: AdmissionAttemptKind, changing_candidate: bool) -> (Corpus, 
     rule(&mut c, b, &[(*t, false), (x, true), (a, true)]);
     rule(&mut c, x, &[(*p, false), (y, true)]);
     rule(&mut c, y, &[(*p, true), (x, true)]);
-    rule(&mut c, u, &[(v, true)]);
+    if changing_candidate {
+        // Retry tests need a cycle-relevant target; purely downstream targets
+        // now wait until these changes have already settled.
+        rule(&mut c, u, &[(v, true), (wide, false)]);
+    } else {
+        rule(&mut c, u, &[(v, true)]);
+    }
     rule(&mut c, v, &[(u, true)]);
     if kind == AdmissionAttemptKind::Coverage {
         for input in &inputs {
@@ -428,7 +442,9 @@ fn admission_retries_coverage_when_a_new_exact_producer_settles() {
     let (mut c, wide) = wide(false);
     let u = rel(&mut c, "u", false);
     let v = rel(&mut c, "v", false);
-    rule(&mut c, u, &[(v, true)]);
+    // Keep wide upstream of a remaining cycle so its changing cover is
+    // attempted during phase A, before and after the independent cycle settles.
+    rule(&mut c, u, &[(v, true), (wide, false)]);
     rule(&mut c, v, &[(u, true)]);
     rule(&mut c, wide, &[(u, false)]);
     let raw = GroundProgram::prepare(&c, &Domains::new(), &Limits::default()).unwrap();

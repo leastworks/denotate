@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 pub enum Identity {
     Assumption(AssumptionId),
     InconsistentAssumptions,
+    DownstreamWork,
     Notice(NoticeId),
     AssumedConclusion(AssumptionId, ObligationId),
     Coverage(ObligationId),
@@ -97,6 +98,7 @@ impl Identity {
                 json!({"assumption":qualified(&keys.assumption(*id)?.0),"check":"ground-cone"})
             }
             Self::Notice(id) => json!({"notice":qualified(&keys.notice(*id)?.0)}),
+            Self::DownstreamWork => json!({"context":"downstream-work"}),
             Self::InconsistentAssumptions => json!({"context":"inconsistent-assumptions"}),
             Self::AssumedConclusion(a, o) => {
                 json!({"assumption":qualified(&keys.assumption(*a)?.0),"obligation":qualified(&keys.obligation(*o)?.0),"notice":"assumed-conclusion"})
@@ -251,6 +253,9 @@ pub fn summary(results: &ScopedResults) -> Value {
             "complete":c.complete(),"noGroups":c.no_groups,"unsupportedGroups":c.unsupported,
             "reason":c.inconclusive.map(|r|crate::exhaustion_data(&r.phase, &r.resource, r.details))
         })).collect::<Vec<_>>());
+    }
+    if let Some(r) = &results.downstream_incomplete {
+        summary["downstreamIncomplete"] = crate::exhaustion_data(&r.phase, &r.resource, r.details);
     }
     if !results.admission_skips.is_empty() {
         summary["admissionSkips"] = json!(

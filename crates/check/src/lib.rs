@@ -3,7 +3,10 @@
 
 mod accounting;
 mod admission_progress;
-pub use admission_progress::{AdmissionComponent, AdmissionObserver, AdmissionProgress};
+pub use admission_progress::{
+    AdmissionComponent, AdmissionObserver, AdmissionPhase, AdmissionProgress,
+};
+mod admission_scope;
 mod admission_skips;
 pub use admission_skips::{AdmissionAttemptKind, AdmissionSkip};
 mod assumption_validation;

@@ -85,6 +85,14 @@ selected restrictions share residual grounding, permitted worlds, semantic index
 and completed admission. Obligation groups, notice selection, verification identity
 and example policy remain request attachments; a failed attachment cannot change
 another request's context.
+Admission runs cycle-relevant proof targets before downstream work. Each phase
+selects a dependency-closed support graph, including settled providers, without
+changing the full input-variable universe or selected assumptions. Transactional
+graph rebuilds remain global. Logical downstream exhaustion is separate from
+admission exhaustion: the completed cycle result and the optional downstream
+incomplete marker are reused together under identical logical limits. Presentation
+reports the marker as advisory; it never relabels an unsupported region.
+
 Completed admission includes outstanding local proof-skip records, whose identities
 are bound to the same prepared graph. Reuse carries those records and their logical
 receipts; presentation projects current semantic keys and origins. Invocation-local

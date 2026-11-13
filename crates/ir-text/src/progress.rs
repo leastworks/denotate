@@ -134,6 +134,7 @@ impl<'a> AdmissionDetails<'a> {
         }
         let mut detail = context.clone();
         detail["admission"] = json!({
+            "phase": event.phase.label(),
             "round": event.round,
             "stage": event.stage,
             "unresolvedComponents": event.unresolved_components,
@@ -197,7 +198,8 @@ impl<'a> AdmissionDetails<'a> {
 
 pub fn admission_text(a: &Value) -> String {
     let mut text = format!(
-        "Admission round {} · {}: {} unresolved negation components; {} blocked atoms; {} rules removed, {} negations discharged",
+        "Admission ({}) round {} · {}: {} unresolved negation components; {} blocked atoms; {} rules removed, {} negations discharged",
+        a["phase"].as_str().unwrap_or("relevant"),
         a["round"],
         a["stage"].as_str().unwrap_or("unknown"),
         a["unresolvedComponents"],

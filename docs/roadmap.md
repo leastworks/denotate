@@ -9,14 +9,12 @@ Admission decides whether every permitted world has exactly one meaning. Impleme
 structural reduction (true/false propagation, dead rules, same-head subsumption after
 bounded unfolding), producer removal by exact coverage, bound-based removal (a cyclic
 producer whose bounded body is covered by exact producers), negation discharge and
-cycle upper bounds, failure-local skips with precise retry (see
-[decisions](decisions.md) and [checker policies](checker-policies.md)). A
+cycle upper bounds, failure-local skips with precise retry, and cycle-first
+ordering (see [decisions](decisions.md) and [checker policies](checker-policies.md)).
+Cycle-relevant proofs and supporting evaluation precede downstream work; downstream
+exhaustion is reported separately without relabeling the cycles' results. A
 production-scale lowered program showed what remains:
 
-- **Cycle-first ordering.** Attempt rewrites in the unresolved components and their
-  upstream cones before any downstream work, so wide downstream heads cannot exhaust
-  the budget first; downstream exhaustion is reported separately and never relabels
-  the cycles' results.
 - **Guarded settlement.** A cycle edge can be dead under the guard of the rule that
   reads it, one or more rules away from the negation. Settle the premise under that
   guard when bounds make it exact there, rewriting only into settled literals. Plain

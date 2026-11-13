@@ -12,7 +12,7 @@ function text(progress, quietMs = 0) {
   if (progress.awaitingSnapshots) return '$(sync~spin) Denotate: Synchronizing sources';
   const detail = progress.active[0]?.detail;
   if (detail) return `$(sync~spin) Denotate: ${phase(detail)}` +
-    (detail.admission ? ` · ${detail.admission.stage === 'reused' ? 'reused' : `round ${detail.admission.round}`} · ${detail.admission.unresolvedComponents} unresolved components` : '') +
+    (detail.admission ? ` · ${detail.admission.phase ? detail.admission.phase + ' · ' : ''}${detail.admission.stage === 'reused' ? 'reused' : `round ${detail.admission.round}`} · ${detail.admission.unresolvedComponents} unresolved components` : '') +
     (detail.checking ? ` · ${detail.checking.stage}` : '') +
     (detail.verificationIndex ? ` · verification ${detail.verificationIndex}/${detail.verificationTotal}` : '') +
     (quietMs >= 1000 ? ` · ${Math.floor(quietMs / 1000)}s since update` : '');
@@ -46,7 +46,7 @@ function activity(active) {
 }
 function admission(a) {
   const c = a.current, l = c?.location;
-  return `Admission round ${a.round} · ${a.stage}: ${a.unresolvedComponents} unresolved negation components; ${a.blockedAtoms} blocked atoms; ${a.removedRules} rules removed, ${a.dischargedNegations} negations discharged` +
+  return `Admission ${a.phase ? `(${a.phase}) ` : ''}round ${a.round} · ${a.stage}: ${a.unresolvedComponents} unresolved negation components; ${a.blockedAtoms} blocked atoms; ${a.removedRules} rules removed, ${a.dischargedNegations} negations discharged` +
     (a.skippedAttempts ? `; ${a.skippedAttempts} proof attempts skipped` : '') +
     (a.rule ? `; rule ${a.rule}/${a.rules}` : '') +
     (a.iteration != null ? `; iteration ${a.iteration}` : '') +

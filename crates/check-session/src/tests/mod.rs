@@ -1,6 +1,7 @@
 mod admission_skips;
 mod checking_progress;
 mod completion;
+mod cycle_first;
 mod fixed_retention;
 mod incremental_inventory;
 mod producer_removals;

@@ -1,9 +1,9 @@
 use super::rewrites::{atom, compare, rel, rule};
 use crate::{limits::Budget, *};
 use denotate_ir::*;
-use std::{cell::RefCell, collections::BTreeSet};
+use std::collections::BTreeSet;
 
-fn structural(c: &Corpus, cartesian: bool) -> (GroundProgram, Vec<AdmissionProgress>) {
+fn structural(c: &Corpus, cartesian: bool) -> GroundProgram {
     let defaults = Limits::default();
     let raw = if cartesian {
         GroundProgram::prepare_cartesian(c, &Domains::new(), &defaults)
@@ -11,21 +11,15 @@ fn structural(c: &Corpus, cartesian: bool) -> (GroundProgram, Vec<AdmissionProgr
         GroundProgram::prepare(c, &Domains::new(), &defaults)
     }
     .unwrap();
-    let events = RefCell::new(vec![]);
     let limits = Limits {
         max_bdd_tasks: 0,
         max_bdd_nodes: 0,
         ..defaults
     };
-    let p = raw
-        .admit_observed(
-            &mut Budget::new(&limits),
-            Some(&|e| events.borrow_mut().push(e.clone())),
-        )
-        .unwrap();
+    let p = raw.structural_for_test(&limits).unwrap();
     compare(c, &Domains::new(), &p);
     assert!(p.rewrite_proofs().all(|p| p.structural().is_some()));
-    (p, events.into_inner())
+    p
 }
 fn blocked(c: &mut Corpus) -> denotate_ir::RelationId {
     let u = rel(c, "u", false);
@@ -50,15 +44,9 @@ fn structural_truth_false_and_dead_rules_propagate_with_shared_evidence() {
     let killed = rule(&mut c, cycle, &[(d, true)]);
     let dead_rule = rule(&mut c, dead, &[(d, true)]);
     let after_rule = rule(&mut c, after, &[(dead, false)]);
-    let (p, events) = structural(&c, false);
+    let p = structural(&c, false);
     assert!(p.is_admitted());
     assert!(p.admission_limit().is_none());
-    assert!(
-        events
-            .iter()
-            .any(|e| e.stage == "structural-committed" && e.removed_rules > 0)
-    );
-    assert!(!events.iter().any(|e| e.stage == "symbolic"));
     for r in [redundant, killed, dead_rule, after_rule] {
         assert!(!p.rules().any(|x| x.source == r));
     }
@@ -112,11 +100,10 @@ fn structural_shadowed_definitions_unfold_both_chains_and_break_three_negations(
                 redundant = Some(r);
             }
         }
-        let (p, events) = structural(&c, false);
+        let p = structural(&c, false);
         assert!(p.is_admitted());
         assert!(p.admission_limit().is_none());
         assert!(!p.rules().any(|r| Some(r.source) == redundant));
-        assert!(!events.iter().any(|e| e.stage == "symbolic"));
         let proof = p
             .rewrite_proofs()
             .find(|p| Some(p.candidate().source) == redundant)
@@ -150,7 +137,7 @@ fn structural_subsumption_keeps_polarity_multi_producers_negative_and_recursive_
         rule(&mut c, out, &[(u, false), (looped, false)]),
         rule(&mut c, out, &[(u, false), (looped, false), (j, false)]),
     ];
-    let (p, _) = structural(&c, true);
+    let p = structural(&c, true);
     for r in kept {
         assert!(p.rules().any(|x| x.source == r), "retained {r:?}");
     }
@@ -165,7 +152,7 @@ fn structural_duplicate_input_dependent_bodies_keep_one_real_survivor() {
     rule(&mut c, a, &[(u, false), (i, false)]);
     rule(&mut c, a, &[(u, false), (i, false)]);
     rule(&mut c, a, &[(u, false), (j, false), (i, false)]);
-    let (p, _) = structural(&c, false);
+    let p = structural(&c, false);
     assert_eq!(p.rules().filter(|r| r.head.atom.relation == a).count(), 1);
     assert_eq!(p.rewrite_proofs().count(), 2);
     for proof in p.rewrite_proofs() {
@@ -212,7 +199,7 @@ fn structural_worklist_revisits_consumers_after_a_producer_becomes_unique() {
     rule(&mut c, a, &[(b, false)]);
     rule(&mut c, b, &[(u, false), (i, false)]);
     rule(&mut c, b, &[(u, false), (i, false), (j, false)]);
-    let (p, _) = structural(&c, false);
+    let p = structural(&c, false);
     assert!(!p.rules().any(|r| r.source == removed));
     assert_eq!(p.rewrite_proofs().count(), 2);
 }
@@ -233,7 +220,7 @@ fn structural_exhaustion_commits_no_partial_worklist() {
     for max_work in (0..2000).step_by(11) {
         let p = raw
             .clone()
-            .admit(&Limits {
+            .structural_for_test(&Limits {
                 max_work,
                 ..Limits::default()
             })
@@ -288,7 +275,7 @@ fn structural_settled_helpers_support_blocked_removals_without_gaining_warnings(
     // evaluator, exactly as on folded preparation. It is not a removal target.
     let recursive = rule(&mut c, positive, &[(positive, false)]);
     let dead = rule(&mut c, out, &[(positive, false), (u, false)]);
-    let (p, _) = structural(&c, true);
+    let p = structural(&c, true);
     for source in [fact, alternative, recursive] {
         assert!(p.rules().any(|r| r.source == source));
         assert!(!p.rewrite_proofs().any(|r| r.candidate().source == source));
@@ -320,7 +307,7 @@ fn direct_false_evidence_distinguishes_no_producer_from_positive_recursion() {
     let recursive = rule(&mut c, p, &[(p, false)]);
     let dead_cycle = rule(&mut c, out, &[(p, false), (u, false)]);
     let dead_missing = rule(&mut c, no_source, &[(missing, false), (u, false)]);
-    let (ground, _) = structural(&c, true);
+    let ground = structural(&c, true);
     let proof = |source| {
         ground
             .rewrite_proofs()

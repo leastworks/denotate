@@ -16,8 +16,23 @@ pub struct AdmissionComponent {
     pub source: Option<RuleId>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdmissionPhase {
+    Relevant,
+    Downstream,
+}
+impl AdmissionPhase {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Relevant => "relevant",
+            Self::Downstream => "downstream",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AdmissionProgress {
+    pub phase: AdmissionPhase,
     pub round: usize,
     pub stage: &'static str,
     pub unresolved_components: usize,
@@ -53,6 +68,7 @@ impl<'a> AdmissionReporter<'a> {
             observer,
             state: RefCell::new(State {
                 progress: AdmissionProgress {
+                    phase: AdmissionPhase::Relevant,
                     round: 0,
                     stage: "starting",
                     unresolved_components: 0,
@@ -72,6 +88,9 @@ impl<'a> AdmissionReporter<'a> {
                 last: None,
             }),
         }
+    }
+    pub fn phase(&self, phase: AdmissionPhase) {
+        self.state.borrow_mut().progress.phase = phase;
     }
     pub fn enabled(&self) -> bool {
         self.observer.is_some()

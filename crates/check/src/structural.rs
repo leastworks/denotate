@@ -610,13 +610,23 @@ impl Pass<'_, '_, '_> {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn reduce(p: &GroundProgram, budget: &mut Budget<'_>) -> Result<Vec<StructuralProof>> {
+    reduce_selected(p, None, budget)
+}
+pub(crate) fn reduce_selected(
+    p: &GroundProgram,
+    scope: Option<&crate::admission_scope::AdmissionScope>,
+    budget: &mut Budget<'_>,
+) -> Result<Vec<StructuralProof>> {
     // This increment removes only rules whose heads were blocked in this
     // snapshot. Settled regions supply premises, not new rewrite warnings.
     let mut targets = BTreeSet::new();
     for component in &p.components {
         budget.tick("structural targets")?;
-        if !component.blocked_by.is_empty() {
+        if !component.blocked_by.is_empty()
+            && scope.is_none_or(|s| s.cone.components.contains(&component.id))
+        {
             budget.charge(
                 p.component_rules[component.id.index].len(),
                 "structural targets",
@@ -624,7 +634,8 @@ pub(crate) fn reduce(p: &GroundProgram, budget: &mut Budget<'_>) -> Result<Vec<S
             targets.extend(
                 p.component_rules[component.id.index]
                     .iter()
-                    .map(|r| p.rules[*r].id),
+                    .map(|r| p.rules[*r].id)
+                    .filter(|id| scope.is_none_or(|s| s.targets.contains(id))),
             );
         }
     }
@@ -638,6 +649,9 @@ pub(crate) fn reduce(p: &GroundProgram, budget: &mut Budget<'_>) -> Result<Vec<S
     let mut pending = VecDeque::new();
     let mut dirty = BTreeSet::new();
     for (r, rule) in p.rules.iter().enumerate() {
+        if scope.is_some_and(|s| !s.cone.facts.contains(&rule.head.atom)) {
+            continue;
+        }
         budget.tick("structural index")?;
         let head = p.atom_index[&rule.head.atom];
         producers[head].push(r);
@@ -655,7 +669,8 @@ pub(crate) fn reduce(p: &GroundProgram, budget: &mut Budget<'_>) -> Result<Vec<S
             }
         }
     }
-    let (independent, boundary) = p.structural_boundaries(budget)?;
+    let (independent, boundary) =
+        p.structural_boundaries(scope.map(|s| &s.cone.components), budget)?;
     let mut facts = BTreeMap::new();
     for id in independent {
         for atom in &p.components[id.index].atoms {
