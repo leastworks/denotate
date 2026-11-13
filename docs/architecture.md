@@ -120,6 +120,13 @@ leaves; original dependency closure still invalidates transitive edits. Replacem
 commits conservatively clear invocation-local negative/failed attempts, while later
 ordinary commits also detect changes through expression leaves. Presentation owns
 wording and display limits, and the CLI treats the equivalence warning as advisory.
+Temporary guarded cones borrow immutable producer summaries from the current
+round; they own only their domain, live/dead flags and traversal metadata. Bound
+values are restricted while accumulating rather than retaining masked copies for
+every producer. A successful certificate promotes only the referenced summaries
+to individually shared ownership, preserving its executable snapshot after later
+rewrites. Its storage remains conservatively charged after the round ends; no
+borrow or ownership of the entire previous round escapes into the certificate.
 
 Semantic indexing shares source schemas and declaration bindings across those
 contexts. `GroundKeyView` projects atom, instance, component and rewrite keys from

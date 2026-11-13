@@ -28,7 +28,7 @@ mod profile;
 pub use profile::*;
 mod guarded_bounds;
 mod guarded_settlement;
-pub use guarded_bounds::{GuardedBounds, GuardedCone};
+pub use guarded_bounds::{GuardedBounds, GuardedCone, GuardedProducer};
 mod local;
 mod request;
 mod rewrite;

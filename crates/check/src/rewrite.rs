@@ -206,7 +206,7 @@ impl RewriteProof {
             .chain(
                 self.guarded_settlement()
                     .into_iter()
-                    .flat_map(|p| &p.bounds.cone.producers),
+                    .flat_map(|p| p.bounds.cone.producers.iter().map(|p| p.summary.as_ref())),
             )
     }
     fn profile_conditions(&self) -> impl Iterator<Item = &Condition> {
@@ -238,7 +238,7 @@ impl RewriteProof {
                             .cone
                             .producers
                             .iter()
-                            .flat_map(ProducerSummary::profile_conditions),
+                            .flat_map(|p| p.summary.profile_conditions()),
                     )
             }))
     }

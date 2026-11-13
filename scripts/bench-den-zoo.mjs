@@ -3,10 +3,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','schema-layered'];
+export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','schema-layered'];
 export function source(family, n) {
   if (!families.includes(family) || !Number.isSafeInteger(n) || n < 1) throw Error('invalid family/positive size');
   let s = 'relation bad();\n';
+  let assumptions = '';
   const add = x => { s += x + '\n'; };
   if (family.startsWith('fan-in')) {
     add('relation result();');
@@ -53,6 +54,27 @@ export function source(family, n) {
     // Once claim settles, held=inspected makes booked false. The expensive
     // upper approximation is not also an inherently expensive final meaning.
     add('held() :- inspected(); cleared() :- gate(), !held();');
+  } else if (family === 'guarded-worlds') {
+    // W is linear in n, but retaining W AND ready_i for each of n producers
+    // makes cone preparation quadratic. There are only two atoms in the
+    // claim's guard-live cone. Each input group stays adjacent in key order.
+    add('sort Group; sort Choice; const left, right: Choice;');
+    add(`const ${Array.from({length:2*n},(_,i)=>`g${i}`).join(', ')}: Group;`);
+    add('input option(group: Group, choice: Choice);');
+    add('assumption exclusive: at_most_one(option, group_by: (group));');
+    assumptions = 'exclusive';
+    add('input kind(); input gate();');
+    for (const name of ['booked', 'fails', 'claim', 'inspected', 'held', 'cleared']) add(`relation ${name}();`);
+    add('booked() :- kind(), gate(), cleared();');
+    for (let i = 0; i < n; i++) {
+      // The two-input condition makes !kind the first guarded candidate without
+      // duplicating expression leaves: each settled ready_i remains one atom.
+      add(`input flag${i}(); relation ready${i}(); ready${i}() :- gate(), flag${i}();`);
+      add(`fails() :- ready${i}(), !booked();`);
+    }
+    add('claim() :- !kind(), !fails();');
+    add('inspected() :- kind(); inspected() :- claim();');
+    add('held() :- inspected(); cleared() :- !held();');
   } else if (family==='removal-heavy') {
     add('input flag(); relation a(); relation b(); a() :- !b(); b() :- !a();');
     for(let i=0;i<n;i++) add(`relation output${i}(); output${i}() :- flag(); output${i}() :- flag(), a(); bad() :- output${i}();`);
@@ -60,7 +82,7 @@ export function source(family, n) {
     add('relation seed(); seed(); relation a(); relation b(); a() :- !b(); b() :- !a();');
     for(let i=0;i<n;i++) add(`relation support${i}(); support${i}() :- ${i?`support${i-1}`:'seed'}(); relation result${i}(); result${i}() :- support${i}(); result${i}() :- a();`);
   } else throw Error('schema-layered uses the schema generator');
-  return s+'obligation no_bad: empty(bad); verification checks { assumptions: []; obligations: [no_bad]; }\n';
+  return s+`obligation no_bad: empty(bad); verification checks { assumptions: [${assumptions}]; obligations: [no_bad]; }\n`;
 }
 export function fit(points, threshold = 1.3) {
   const usable = points.filter(([x, y]) => Number.isFinite(x) && x > 0 && Number.isFinite(y) && y > 0);

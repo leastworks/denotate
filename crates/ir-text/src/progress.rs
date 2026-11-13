@@ -158,7 +158,9 @@ impl<'a> AdmissionDetails<'a> {
                 let names = self.names.get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)));
                 json!({"index":g.index, "head":atom_text(&g.head, &**names), "premise":atom_text(&g.premise, &**names),
                     "location":self.location(g.source), "restricted":true, "coneAtoms":g.cone_atoms,
-                    "coneRules":g.cone_rules, "liveRules":g.live_rules, "preprocessingMs":g.preprocessing.as_secs_f64()*1000.,
+                    "liveAtoms":g.live_atoms, "coneRules":g.cone_rules, "liveRules":g.live_rules,
+                    "domainNodes":g.domain_nodes, "existingConditionNodes":g.existing_condition_nodes,
+                    "addedConditionNodes":g.added_condition_nodes, "preprocessingMs":g.preprocessing.as_secs_f64()*1000.,
                     "iterationMs":g.iteration.as_secs_f64()*1000., "reused":g.reused, "state":g.state})
             }),
             "skipped": event.skipped.as_ref().map(|s| s.kind.label()),
@@ -266,9 +268,10 @@ pub fn admission_text(a: &Value) -> String {
         }
     }
     if let Some(g) = a.get("guarded").filter(|g| g.is_object()) {
-        text.push_str(&format!("; guarded attempt {} {} reading {}: restricted cone {} atoms, {} live / {} visited rules; {}{}; preprocessing {:.1} ms, iteration {:.1} ms",
+        text.push_str(&format!("; guarded attempt {} {} reading {}: restricted cone {} atoms ({} live), {} live / {} visited rules; domain {} nodes, storage {} existing + {} added condition nodes; {}{}; preprocessing {:.1} ms, iteration {:.1} ms",
             g["index"], g["head"].as_str().unwrap_or("?"), g["premise"].as_str().unwrap_or("?"),
-            g["coneAtoms"], g["liveRules"], g["coneRules"], g["state"].as_str().unwrap_or("?"),
+            g["coneAtoms"], g["liveAtoms"], g["liveRules"], g["coneRules"],
+            g["domainNodes"], g["existingConditionNodes"], g["addedConditionNodes"], g["state"].as_str().unwrap_or("?"),
             if g["reused"] == true { " (reused)" } else { "" },
             g["preprocessingMs"].as_f64().unwrap_or(0.), g["iterationMs"].as_f64().unwrap_or(0.)));
     }

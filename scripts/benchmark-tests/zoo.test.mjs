@@ -42,7 +42,7 @@ test('each family reaches its semantic and structural path; two-size smoke has n
       if(name==='removal-heavy') {assert.ok(r.sizes.removalProofs>=2);assert.equal(r.sizes.dischargeProofs,0);assert.ok(r.outcomes[0].emptiness.some(e=>e.outcome==='counterexample'));}
       if(name==='presentation')assert.ok(r.sizes.findings>=2);
       if(name.startsWith('fan-in'))assert.ok(r.outcomes[0].emptiness.some(e=>e.outcome==='counterexample'));
-      if(name==='guarded-ring'||name==='guarded-fan-in') {assert.equal(r.before.ground.largestComponentAtoms,name==='guarded-ring'?12:6);assert.equal(r.after.admitted,true);assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));assert.ok(r.attemptSummaries.some(a=>a.complete&&a.attempts.some(c=>c.kind==='guarded-bounds')));}
+      if(name==='guarded-ring'||name==='guarded-fan-in'||name==='guarded-worlds') {assert.equal(r.before.ground.largestComponentAtoms,name==='guarded-ring'?12:6);assert.equal(r.after.admitted,true);assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));assert.ok(r.attemptSummaries.some(a=>a.complete&&a.attempts.some(c=>c.kind==='guarded-bounds')));}
       if(name.startsWith('guarded-')) {assert.ok(r.guardedAttempts.some(g=>g.attempt.state==='completed'&&g.attempt.restricted&&g.attempt.coneAtoms>0));assert.ok(r.guardedAttempts.every(g=>Number.isFinite(g.attempt.preprocessingMs)&&Number.isFinite(g.attempt.iterationMs)));}
       if(name==='schema-layered')assert.equal(r.after.admitted,true);
     }

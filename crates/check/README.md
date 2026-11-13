@@ -50,6 +50,12 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    guards with smaller estimates run first. A single snapshot-local entry reuses
    only identical computations, including failures, never a failure under a
    broader guard. Conditions and cache metadata are charged and released.
+   Temporary cones borrow already-accounted round summaries and store explicit
+   live/dead flags. They retain no masked producer conditions: bounds and settlement
+   restrict contributions transiently before accumulation. Successful proofs own
+   just their referenced snapshot summaries and bound values, with conservative
+   ownership charges after the round/cache is dropped. Failed preparation reports
+   partial cone counts and existing/added storage before releasing its values.
    One replacement per component commits atomically. Later exhaustion
    preserves earlier committed batches.
    Within a snapshot, exact-producer coverage is computed lazily per head, reused

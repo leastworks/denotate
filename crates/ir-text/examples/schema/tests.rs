@@ -404,7 +404,7 @@ fn layered_all_encodings_report_faithfully() {
 
 #[test]
 fn zoo_tiny_sources_preserve_independent_stable_and_supported_models() {
-    use denotate_check::test_support::rewrites::{compare, subsets, supported_models};
+    use denotate_check::test_support::rewrites::{compare_permitted, subsets, supported_models};
     let script =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/bench-den-zoo.mjs");
     let output = std::process::Command::new("node").args(["--input-type=module", "-e", "import {pathToFileURL} from 'node:url'; const m=await import(pathToFileURL(process.argv[1])); console.log(JSON.stringify(m.families.filter(f=>f!=='schema-layered').map(f=>[f,m.source(f,2)])));" ]).arg(script).output().unwrap();
@@ -429,8 +429,29 @@ fn zoo_tiny_sources_preserve_independent_stable_and_supported_models() {
         };
         let g = g.admit(&ops).unwrap();
         let g = g.program();
-        compare(&p.corpus, &p.domains, g);
+        // Independent interpretation of the worlds family's authored input-only
+        // assumption: at most one choice for each group. Do not ask BDD W.
+        let permitted = |world: &std::collections::BTreeSet<GroundAtom>| {
+            if name != "guarded-worlds" {
+                return true;
+            }
+            let option = p
+                .corpus
+                .relations()
+                .find(|r| r.name == "option")
+                .unwrap()
+                .id;
+            let mut groups = std::collections::BTreeSet::new();
+            world
+                .iter()
+                .filter(|a| a.relation == option)
+                .all(|a| groups.insert(a.arguments[0]))
+        };
+        compare_permitted(&p.corpus, &p.domains, g, permitted);
         for world in subsets(&g.input_atoms().cloned().collect::<Vec<_>>()) {
+            if !permitted(&world) {
+                continue;
+            }
             if name == "guarded-ring" {
                 let atom = |name: &str| {
                     GroundAtom::new(
@@ -475,6 +496,21 @@ fn zoo_tiny_sources_preserve_independent_stable_and_supported_models() {
                         FactState::Settled(false)
                     );
                 }
+            }
+            if name == "guarded-worlds" {
+                let atom = |name: &str| {
+                    GroundAtom::new(
+                        p.corpus.relations().find(|r| r.name == name).unwrap().id,
+                        [],
+                    )
+                };
+                let replay = g.evaluate(world.iter().cloned(), &l).unwrap();
+                let ready = world.contains(&atom("gate"))
+                    && (0..2).any(|i| world.contains(&atom(&format!("flag{i}"))));
+                assert_eq!(
+                    replay.fact(&atom("claim")).unwrap(),
+                    FactState::Settled(!world.contains(&atom("kind")) && !ready)
+                );
             }
             assert_eq!(
                 supported_models(g, &g.original_rules().cloned().collect::<Vec<_>>(), &world),

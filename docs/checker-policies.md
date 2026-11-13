@@ -66,7 +66,14 @@ stop or recoverable-skip behavior. A graph rebuild and proof installation are at
 
 Candidate-relaxed bounds are computed under G ∧ W in the premise's live backward
 cone. A producer dead under its settled condition contributes no dependency edges;
-its summary stays as evidence. The reading producer is relaxed before traversal.
+its summary stays as evidence with an explicit domain-relative live/dead flag.
+Temporary cones borrow the round's already-accounted summaries. They retain only
+their domain and metadata, not a masked condition per producer. Iteration restricts
+each contribution transiently before accumulating per-atom upper bounds and lower
+guarantees, avoiding large intermediate unions outside the domain. Successful
+certificates own the referenced snapshot summaries individually and retain their
+conservative proof charges after the round ends. No whole old round is retained.
+The reading producer is relaxed before traversal.
 Preprocessing is lazy and charged, and has its own recoverable attempt. Candidates
 with an informative guard run before unrestricted ones, then by guard node count
 and immediate producer count; ties preserve the existing order. No full cones are
@@ -84,6 +91,12 @@ atoms in one body need only one attempt. Progress distinguishes
 `guarded-preprocessing`, `guarded-bounds` and `guarded-settlement`, with per-candidate
 cone size, preprocessing/iteration elapsed time, reuse and outcome. Expression
 `cutoffs` remain separate. A replacement still invalidates failed/negative attempts.
+Preparation also reports domain BDD size and existing versus added condition-node
+storage, including partial visited/live counts on failure. Added storage is the
+amount successfully retained before cleanup, not the failed requested increment
+or a byte measurement. These counters do not alter limits. Deduplicated BDD payload,
+process RSS and physical footprint are separate measurements; none is inferred
+from the conservative condition-node allowance.
 
 Default warnings use the existing eight-note/sixteen-location caps, with at most
 32 expression nodes rendered per formula and explicit omission counts. Full

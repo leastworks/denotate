@@ -32,6 +32,7 @@ before admission (fixed evidence included); the report records actual inventory.
 | presentation | n supported heads with a transitive support chain and cyclic alternatives | 2n+3 / 3n+3 | structural source findings and bounded direct evidence |
 | guarded-ring | n linked guard-relative settlement units; grouped priority/readiness inputs | 8n+1 / 8n | one 6n-atom SCC; guard-live cones settle claims even with tight per-operation bounds |
 | guarded-fan-in | one guarded unit with n input-pair booked producers | 2n+8 / n+6 | one large bound hits a node limit before aggregate storage fills |
+| guarded-worlds | 2n independent exclusive input groups, n guarded producers | 6n+8 / 2n+6 | large W exercises temporary cone storage and retained proof ownership |
 | schema-layered | n payload reads, n+2 fields; depth 2, width 2, assumed acceptance | linear at fixed tree shape; inherited tables have four leaves | shared layout-valid schema preset |
 
 Categorical changes are distinct families. Fixed facts and removed rules remain
@@ -109,6 +110,20 @@ Guarded bounds now prune dead-under-guard producer edges before iteration. At th
 unrestricted passes still run and may skip. Global work/deadlines remain limits,
 so these examples do not promise admission at every size or allowance.
 
+`guarded-worlds` gives W a linear BDD (2n independent two-choice input groups),
+then reaches n producers of `fails` under the reading guard `!kind`. Each reads a
+settled `ready_i = gate AND flag_i` and `!booked`; every booked producer is dead
+under that guard. Thus only two atoms need restricted bounds. Retaining W masked
+into every producer used quadratic storage before iteration even though the final
+claim is simply `!kind AND !(OR_i ready_i)`. Temporary cones now borrow summaries
+and retain one domain plus metadata; successful proofs own their original,
+unmasked summaries. Both per-operation and global limits still apply.
+
+```sh
+just bench-den-zoo --family guarded-worlds --sizes 200,300,520 --repeat 2 \
+  --out target/guarded-worlds-measurement
+```
+
 Each shared report retains `admissionAttemptSummaries` separately from the latest
 progress snapshot. They are keyed by verification, phase and round; `complete`
 means an `attempt-summary` was seen, not that admission avoided limits. An interrupted round keeps its last observed
@@ -127,8 +142,11 @@ The manifest records `binarySha256` for the actual CLI artifact used.
 
 Guarded work additionally reports `guardedAttempts`, one latest per-candidate record
 per verification/phase/round/index. It contains the reading head/premise and source
-location, restricted cone atoms and visited/live rules, preprocessing and iteration
-milliseconds, reuse and state. A failed or interrupted preprocessing has null cone
-sizes. These are actual candidate observations, independent of the older
+location, visited/live cone atoms and rules, domain BDD size, existing/added
+condition-node storage, preprocessing and iteration milliseconds, reuse and state.
+Failed preprocessing reports partial counts before releasing its storage; an
+interrupted running operation can still have null counts. Retained accounting is
+distinct from the profiler's deduplicated BDD payload, RSS and physical footprint.
+These are actual candidate observations, independent of the older
 counter-delta samples. `completed` here means bounds completed, not that settlement
 subsequently produced a rewrite.

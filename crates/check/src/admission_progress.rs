@@ -58,8 +58,12 @@ pub struct GuardedAttempt {
     pub premise: GroundAtom,
     pub source: RuleId,
     pub cone_atoms: Option<usize>,
+    pub live_atoms: Option<usize>,
     pub cone_rules: Option<usize>,
     pub live_rules: Option<usize>,
+    pub domain_nodes: Option<usize>,
+    pub existing_condition_nodes: Option<usize>,
+    pub added_condition_nodes: Option<usize>,
     pub preprocessing: Duration,
     pub iteration: Duration,
     pub reused: bool,
@@ -178,8 +182,12 @@ impl<'a> AdmissionReporter<'a> {
             premise: premise.clone(),
             source: rule.source,
             cone_atoms: None,
+            live_atoms: None,
             cone_rules: None,
             live_rules: None,
+            domain_nodes: None,
+            existing_condition_nodes: None,
+            added_condition_nodes: None,
             preprocessing: Duration::ZERO,
             iteration: Duration::ZERO,
             reused: false,
@@ -190,7 +198,7 @@ impl<'a> AdmissionReporter<'a> {
     pub fn guarded_prepared(
         &self,
         program: &GroundProgram,
-        cone: Option<&GuardedCone>,
+        preparation: Option<&crate::guarded_bounds::Preparation>,
         elapsed: Duration,
         state: &'static str,
     ) {
@@ -200,15 +208,14 @@ impl<'a> AdmissionReporter<'a> {
         if let Some(g) = &mut self.state.borrow_mut().progress.guarded {
             g.preprocessing = elapsed;
             g.state = state;
-            if let Some(c) = cone {
-                g.cone_atoms = Some(c.atoms.len());
-                g.cone_rules = Some(c.producers.len());
-                g.live_rules = Some(
-                    c.producers
-                        .iter()
-                        .filter(|p| !p.condition.is_false())
-                        .count(),
-                );
+            if let Some(p) = preparation {
+                g.cone_atoms = Some(p.visited_atoms);
+                g.live_atoms = Some(p.live_atoms);
+                g.cone_rules = Some(p.visited_producers);
+                g.live_rules = Some(p.live_producers);
+                g.domain_nodes = p.domain_nodes;
+                g.existing_condition_nodes = Some(p.existing_nodes);
+                g.added_condition_nodes = Some(p.added_nodes);
             }
         }
         if state != "iterating" {

@@ -2,6 +2,7 @@
 //! are computed and cannot supply a live settling producer for its own proof.
 use crate::{
     admission_skips::{Attempt, Attempts},
+    guarded_bounds::{BorrowedBounds, BorrowedCone, Preparation},
     limits::{Budget, Result},
     *,
 };
@@ -156,7 +157,7 @@ impl GroundProgram {
         candidates.sort_by_key(|(cost, _, _, _)| *cost); // stable ties preserve source/occurrence order
         // One-entry snapshot-local cache: retain only the most recent complete
         // computation (or failure key), so optional reuse cannot accumulate BDDs.
-        let mut cache: Option<(Arc<GuardedCone>, Option<Arc<GuardedBounds>>)> = None;
+        let mut cache: Option<(Arc<BorrowedCone<'_>>, Option<Arc<BorrowedBounds<'_>>>)> = None;
         for (index, (_, candidate, literal, component)) in candidates.into_iter().enumerate() {
             if done.contains(&component.id)
                 || attempts.reuse_negative(
@@ -169,6 +170,7 @@ impl GroundProgram {
             }
             progress.guarded_start(self, index + 1, &candidate.rule, &literal.term.atom);
             let mut preprocessing = None;
+            let mut preparation = Preparation::default();
             let before_preparation = *retained;
             let mut released_cache = 0;
             let prepared = attempts.run(
@@ -180,7 +182,7 @@ impl GroundProgram {
                 progress,
                 |retained, budget| {
                     let started = Instant::now();
-                    let prepare = |retained: &mut usize, budget: &mut Budget<'_>| {
+                    let mut prepare = |retained: &mut usize, budget: &mut Budget<'_>| {
                         crate::guarded_bounds::prepare(
                             self,
                             component,
@@ -191,6 +193,7 @@ impl GroundProgram {
                             ctx,
                             retained,
                             budget,
+                            &mut preparation,
                         )
                     };
                     let mut result = prepare(retained, budget);
@@ -203,8 +206,10 @@ impl GroundProgram {
                         })
                     ) {
                         if let Some(old) = cache.take() {
-                            released_cache =
-                                old.1.as_ref().map_or_else(|| old.0.nodes(), |b| b.nodes());
+                            released_cache = old
+                                .1
+                                .as_ref()
+                                .map_or_else(|| old.0.temporary_nodes(), |b| b.temporary_nodes());
                             drop(old);
                             // The partial cone has dropped. Optional reuse must
                             // yield storage to the next attempt. Retry once; keep
@@ -224,7 +229,7 @@ impl GroundProgram {
             }
             progress.guarded_prepared(
                 self,
-                prepared.as_ref().ok().and_then(|c| c.as_deref()),
+                preprocessing.map(|_| &preparation),
                 preprocessing.unwrap_or_default(),
                 match &prepared {
                     Ok(Some(_)) => "iterating",
@@ -245,7 +250,7 @@ impl GroundProgram {
             let mut iteration = None;
             progress.rule(self, "guarded-bounds", candidate.rule.id, 0);
             if reused {
-                *retained -= cone.nodes(); // newly prepared equivalent key is unnecessary
+                *retained -= cone.temporary_nodes(); // equivalent key is unnecessary
                 if cache.as_ref().unwrap().1.is_some() {
                     progress.reused_result(AdmissionAttemptKind::GuardedBounds);
                 } else {
@@ -253,7 +258,9 @@ impl GroundProgram {
                 }
             } else {
                 if let Some((old, bounds)) = cache.take() {
-                    *retained -= bounds.as_ref().map_or_else(|| old.nodes(), |b| b.nodes());
+                    *retained -= bounds
+                        .as_ref()
+                        .map_or_else(|| old.temporary_nodes(), |b| b.temporary_nodes());
                 }
                 let observe = |iteration| progress.iteration(self, iteration);
                 let result = attempts.run(
@@ -318,7 +325,9 @@ impl GroundProgram {
             }
         }
         if let Some((cone, bounds)) = cache {
-            *retained -= bounds.as_ref().map_or_else(|| cone.nodes(), |b| b.nodes());
+            *retained -= bounds
+                .as_ref()
+                .map_or_else(|| cone.temporary_nodes(), |b| b.temporary_nodes());
         }
         Ok(proofs)
     }
@@ -328,7 +337,7 @@ impl GroundProgram {
         candidate: &ProducerSummary,
         literal: &GroundLiteral,
         meaning: &SymbolicMeaning<'_>,
-        bounds: &Arc<GuardedBounds>,
+        bounds: &Arc<BorrowedBounds<'_>>,
         retained: &mut usize,
         budget: &mut Budget<'_>,
         progress: &crate::admission_progress::AdmissionReporter<'_>,
@@ -393,14 +402,20 @@ impl GroundProgram {
                 let mut live = Vec::new();
                 for producer in producers.get(atom).into_iter().flatten() {
                     budget.tick("guarded producer")?;
-                    if producer.condition.is_false() {
+                    if !producer.live {
                         continue;
                     }
                     if producer.rule.id == candidate.rule.id {
                         exact = false;
                         break;
                     }
-                    let mut body = producer.condition.clone();
+                    let mut body = crate::upper_bounds::scoped_condition(
+                        &producer.condition,
+                        true,
+                        Some(&bounds.cone.domain),
+                        ctx,
+                        budget,
+                    )?;
                     let mut terms = producer
                         .rule
                         .replacements
@@ -521,13 +536,14 @@ impl GroundProgram {
             .get(&literal.term.atom)
             .into_iter()
             .flatten()
-            .map(|p| (*p).clone())
+            .map(|p| p.summary.clone())
             .collect();
         budget.charge(
             candidate.rule.body.len() + expression_nodes + bounds.cone.producers.len(),
             "guarded proof storage",
         )?;
         *retained = baseline;
+        let owned_bounds = bounds.owned(budget)?;
         let proof = GuardedSettlementProof {
             proof: SymbolicRewriteProof {
                 candidate: candidate.clone(),
@@ -535,7 +551,7 @@ impl GroundProgram {
                 coverage,
                 upper_bounds: None,
             },
-            bounds: Arc::clone(bounds),
+            bounds: owned_bounds,
             occurrence: literal.term.occurrence,
             replacement: expression,
             steps,
@@ -544,7 +560,7 @@ impl GroundProgram {
         *retained = crate::symbolic::retain(
             *retained,
             0,
-            bounds.nodes()
+            proof.bounds.nodes()
                 + candidate.nodes()
                 + proof.proof.coverage.node_count()
                 + proof

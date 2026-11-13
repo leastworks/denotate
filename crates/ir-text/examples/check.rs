@@ -992,6 +992,7 @@ relation bad(); obligation clean:empty(bad); verification checks{assumptions:[];
         assert_eq!(observed, text);
         assert!(progress.contains("restricted cone"));
         assert!(progress.contains("preprocessing"));
+        assert!(progress.contains("existing +"));
         let records: Vec<serde_json::Value> = fs::read_to_string(path)
             .unwrap()
             .lines()
@@ -1007,6 +1008,10 @@ relation bad(); obligation clean:empty(bad); verification checks{assumptions:[];
             assert_eq!(g["restricted"], true);
             assert!(g["coneAtoms"].as_u64().unwrap() > 0);
             assert!(g["liveRules"].as_u64().unwrap() <= g["coneRules"].as_u64().unwrap());
+            assert!(g["liveAtoms"].as_u64().unwrap() <= g["coneAtoms"].as_u64().unwrap());
+            assert!(g["domainNodes"].as_u64().unwrap() > 0);
+            assert!(g["existingConditionNodes"].is_u64());
+            assert!(g["addedConditionNodes"].as_u64().unwrap() > 0);
             assert!(g["preprocessingMs"].is_number() && g["iterationMs"].is_number());
             assert!(g["head"].is_string() && g["premise"].is_string());
             assert!(g["location"]["uri"].is_string());

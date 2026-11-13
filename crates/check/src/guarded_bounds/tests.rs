@@ -126,6 +126,7 @@ fn restricted_cone_bounds_equal_full_relaxed_bounds_masked_by_guard_and_worlds()
                     m.context(),
                     &mut retained,
                     &mut budget,
+                    &mut Preparation::default(),
                 )
                 .unwrap();
                 let restricted =
@@ -148,7 +149,28 @@ fn restricted_cone_bounds_equal_full_relaxed_bounds_masked_by_guard_and_worlds()
                         "case {case}"
                     );
                 }
-                assert_eq!(retained, full.nodes() + restricted.nodes());
+                // Lower guarantees also have to remain restricted. Missing
+                // guarantees mean false, independently of map representation.
+                for atom in &cone.atoms {
+                    let no = m.context().false_condition();
+                    let expected = m
+                        .context()
+                        .and(full.guarantees.get(atom).unwrap_or(&no), &cone.domain, &l)
+                        .unwrap();
+                    assert!(
+                        m.context()
+                            .apply(
+                                &expected,
+                                restricted.guarantees.get(atom).unwrap_or(&no),
+                                biodivine_lib_bdd::op_function::xor,
+                                &mut budget,
+                            )
+                            .unwrap()
+                            .is_false(),
+                        "guarantee case {case}"
+                    );
+                }
+                assert_eq!(retained, full.nodes() + restricted.temporary_nodes());
             }
         }
     }
@@ -185,6 +207,242 @@ fn wide(n: usize) -> (Corpus, RuleId, RuleId) {
     rule(&mut c, h, &[(priority, false), (i, false)]);
     rule(&mut c, clear, &[(gate, false), (h, true)]);
     (c, broad, narrow)
+}
+
+#[test]
+fn guarded_preparation_borrows_summaries_and_keeps_domain_deadness_separate() {
+    let (c, broad, _) = wide(8);
+    let l = Limits::default();
+    let mut p = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+    let ctx = p.condition_context(&l).unwrap();
+    let mut w = ctx.true_condition();
+    for i in 0..8 {
+        let relation = c
+            .relations()
+            .find(|r| r.name == format!("p{i}"))
+            .unwrap()
+            .id;
+        let value = ctx.input(&atom(relation), &l).unwrap();
+        let value = if i == 0 {
+            ctx.not(&value, &l).unwrap()
+        } else {
+            value
+        };
+        w = ctx.and(&w, &value, &l).unwrap();
+    }
+    p.assumption_condition = Some(w);
+    let m = p.symbolic(&l).unwrap();
+    let summaries = summaries(&p, &m, &l);
+    let mut index = BTreeMap::<_, Vec<_>>::new();
+    for s in summaries.values() {
+        index.entry(&s.rule.head.atom).or_default().push(s.rule.id);
+    }
+    let candidate = summaries.values().find(|s| s.rule.source == broad).unwrap();
+    let root = &candidate.rule.body.last().unwrap().term.atom;
+    let existing: usize = summaries.values().map(ProducerSummary::nodes).sum();
+    let mut retained = existing;
+    let mut stats = Preparation::default();
+    let cone = prepare(
+        &p,
+        p.component_for(root).unwrap(),
+        candidate,
+        root,
+        &summaries,
+        &index,
+        m.context(),
+        &mut retained,
+        &mut Budget::new(&l),
+        &mut stats,
+    )
+    .unwrap();
+    assert_eq!(stats.existing_nodes, existing);
+    assert_eq!(stats.added_nodes, cone.temporary_nodes());
+    assert_eq!(retained, existing + cone.temporary_nodes());
+    assert_eq!(stats.visited_atoms, cone.atoms.len());
+    assert_eq!(stats.visited_producers, cone.producers.len());
+    assert!(
+        cone.producers
+            .iter()
+            .any(|p| !p.live && !p.condition.is_false())
+    );
+    assert!(cone.producers.iter().any(|p| p.live));
+    for producer in &cone.producers {
+        assert!(std::ptr::eq(
+            producer.summary,
+            &summaries[&producer.rule.id]
+        ));
+    }
+    let original_conditions = || {
+        summaries.values().flat_map(|p| {
+            std::iter::once(&p.condition).chain(p.settled.iter().map(|p| &p.condition))
+        })
+    };
+    let originals = crate::boolean::condition_storage(original_conditions());
+    let with_borrows = crate::boolean::condition_storage(original_conditions().chain(
+        cone.producers.iter().flat_map(|p| {
+            std::iter::once(&p.condition).chain(p.settled.iter().map(|p| &p.condition))
+        }),
+    ));
+    assert!(with_borrows.references > originals.references);
+    assert_eq!(with_borrows.distinct_arrays, originals.distinct_arrays);
+    assert_eq!(with_borrows.nodes, originals.nodes);
+}
+
+#[test]
+fn guarded_preparation_failure_reports_partial_counts_before_storage_rollback() {
+    use std::cell::RefCell;
+    let (c, broad, _) = wide(8);
+    let l = Limits::default();
+    let p = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+    let m = p.symbolic(&l).unwrap();
+    let summaries = summaries(&p, &m, &l);
+    let mut index = BTreeMap::<_, Vec<_>>::new();
+    for s in summaries.values() {
+        index.entry(&s.rule.head.atom).or_default().push(s.rule.id);
+    }
+    let candidate = summaries.values().find(|s| s.rule.source == broad).unwrap();
+    let literal = candidate.rule.body.last().unwrap();
+    let existing = summaries
+        .values()
+        .map(ProducerSummary::nodes)
+        .sum::<usize>();
+    let domain = m
+        .context()
+        .restrict(&candidate.condition, &mut Budget::new(&l))
+        .unwrap();
+    let l = Limits {
+        max_condition_nodes: existing + domain.node_count() + 3,
+        ..l
+    };
+    let mut retained = existing;
+    let mut stats = Preparation::default();
+    let events = RefCell::new(Vec::new());
+    let observe = |e: &AdmissionProgress| events.borrow_mut().push(e.clone());
+    let progress = AdmissionReporter::new(Some(&observe));
+    progress.guarded_start(&p, 1, &candidate.rule, &literal.term.atom);
+    let result = Attempts::default()
+        .run(
+            Attempt::GuardedCone(candidate.rule.id, literal.term.occurrence),
+            &candidate.rule.head.atom,
+            &p,
+            &mut retained,
+            &mut Budget::new(&l),
+            &progress,
+            |retained, budget| {
+                prepare(
+                    &p,
+                    p.component_for(&candidate.rule.head.atom).unwrap(),
+                    candidate,
+                    &literal.term.atom,
+                    &summaries,
+                    &index,
+                    m.context(),
+                    retained,
+                    budget,
+                    &mut stats,
+                )
+            },
+        )
+        .unwrap();
+    assert!(result.is_none());
+    assert_eq!(retained, existing);
+    progress.guarded_prepared(&p, Some(&stats), Default::default(), "skipped");
+    let events = events.borrow();
+    let last = events.last().unwrap().guarded.as_ref().unwrap();
+    assert_eq!(last.state, "skipped");
+    assert_eq!(last.domain_nodes, Some(domain.node_count()));
+    assert_eq!(last.existing_condition_nodes, Some(existing));
+    assert!(last.added_condition_nodes.unwrap() > 0);
+    assert!(last.cone_atoms.unwrap() > 0);
+    assert!(last.live_atoms.unwrap() > 0);
+    assert!(last.cone_rules.unwrap() > 0);
+    assert!(last.live_rules.unwrap() > 0);
+}
+
+#[test]
+fn guarded_bounds_restrict_before_wide_accumulation_for_upper_and_lower_values() {
+    let mut c = Corpus::new();
+    let z = rel(&mut c, "z", true);
+    let xs: Vec<_> = (0..10)
+        .map(|i| rel(&mut c, &format!("a{i}"), true))
+        .collect();
+    let ys: Vec<_> = (0..10)
+        .map(|i| rel(&mut c, &format!("b{i}"), true))
+        .collect();
+    let a = rel(&mut c, "target", false);
+    let b = rel(&mut c, "reader", false);
+    for (i, (x, y)) in xs.into_iter().zip(ys).enumerate() {
+        let ready = rel(&mut c, &format!("ready{i}"), false);
+        rule(&mut c, ready, &[(z, false)]);
+        rule(&mut c, ready, &[(x, false), (y, false)]);
+        rule(&mut c, a, &[(ready, false)]);
+    }
+    rule(&mut c, a, &[(b, true)]);
+    let reader = rule(&mut c, b, &[(z, false), (a, true)]);
+    let l = Limits::default();
+    let p = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+    let m = p.symbolic(&l).unwrap();
+    let summaries = summaries(&p, &m, &l);
+    let mut index = BTreeMap::<_, Vec<_>>::new();
+    for s in summaries.values() {
+        index.entry(&s.rule.head.atom).or_default().push(s.rule.id);
+    }
+    let candidate = summaries
+        .values()
+        .find(|s| s.rule.source == reader)
+        .unwrap();
+    let component = p.component_for(&atom(a)).unwrap();
+    let l = Limits {
+        max_bdd_nodes: 128,
+        ..l
+    };
+    assert!(matches!(
+        crate::upper_bounds::compute_relaxed(
+            &p,
+            component,
+            &summaries,
+            m.context(),
+            &mut 0,
+            &mut Budget::new(&l),
+            None,
+            true,
+            Some(candidate.rule.id)
+        ),
+        Err(CheckError::LimitExceeded {
+            resource: "BDD nodes",
+            ..
+        })
+    ));
+    let mut retained = 0;
+    let mut budget = Budget::new(&l);
+    let cone = prepare(
+        &p,
+        component,
+        candidate,
+        &atom(a),
+        &summaries,
+        &index,
+        m.context(),
+        &mut retained,
+        &mut budget,
+        &mut Preparation::default(),
+    )
+    .unwrap();
+    let bounds = compute(&cone, m.context(), &mut retained, &mut budget, None).unwrap();
+    let expected = m.context().input(&atom(z), &l).unwrap();
+    for value in [&bounds.conditions[&atom(a)], &bounds.guarantees[&atom(a)]] {
+        assert!(
+            m.context()
+                .apply(
+                    value,
+                    &expected,
+                    biodivine_lib_bdd::op_function::xor,
+                    &mut budget
+                )
+                .unwrap()
+                .is_false()
+        );
+    }
 }
 
 #[test]
@@ -231,6 +489,7 @@ fn broad_failure_never_suppresses_a_smaller_guard_cone_and_storage_is_released()
             m.context(),
             &mut retained,
             &mut budget,
+            &mut Preparation::default(),
         )
         .unwrap();
         let result = attempts
@@ -247,7 +506,9 @@ fn broad_failure_never_suppresses_a_smaller_guard_cone_and_storage_is_released()
         assert_eq!(result.is_some(), success);
         assert_eq!(
             retained,
-            result.as_ref().map_or_else(|| cone.nodes(), |r| r.nodes())
+            result
+                .as_ref()
+                .map_or_else(|| cone.temporary_nodes(), |r| r.temporary_nodes())
         );
         if let Some(bounds) = result {
             assert!(
@@ -303,6 +564,7 @@ fn broad_failure_never_suppresses_a_smaller_guard_cone_and_storage_is_released()
                     m.context(),
                     retained,
                     budget,
+                    &mut Preparation::default(),
                 )
             },
         )

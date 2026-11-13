@@ -92,8 +92,8 @@ pub(crate) fn compute_relaxed(
     }
     let (conditions, guarantees) = iterate(
         &component.atoms,
-        &producers,
-        &ctx.true_condition(),
+        producers.iter().map(|p| (p, true)),
+        None,
         ctx,
         retained,
         budget,
@@ -111,13 +111,34 @@ pub(crate) fn compute_relaxed(
     }))
 }
 
-// Pointwise descending operator. `top` is either true (global bounds) or the
-// explicit G & W domain of a guarded certificate. Every producer condition must
-// already be masked to top. No care-set simplification is used.
-pub(crate) fn iterate(
+/// Restrict a producer transiently, before combining it with other producers.
+/// Delaying this until after an unrestricted union can blow up outside `domain`.
+pub(crate) fn scoped_condition(
+    condition: &Condition,
+    live: bool,
+    domain: Option<&Condition>,
+    ctx: &ConditionContext,
+    budget: &mut Budget<'_>,
+) -> Result<Condition> {
+    if !live {
+        return Ok(ctx.false_condition());
+    }
+    match domain {
+        Some(domain) if condition.is_true() => Ok(domain.clone()),
+        Some(domain) if !domain.is_true() && !domain.same_representation(condition) => {
+            ctx.apply(domain, condition, and, budget)
+        }
+        _ => Ok(condition.clone()),
+    }
+}
+
+// Pointwise descending operator. The top is true globally, or the explicit G & W
+// domain of a guarded certificate. Summaries stay unmasked; only accumulated
+// per-atom values are retained. No care-set simplification is used.
+pub(crate) fn iterate<'a>(
     atoms: &[GroundAtom],
-    producers: &[ProducerSummary],
-    top: &Condition,
+    producers: impl Iterator<Item = (&'a ProducerSummary, bool)> + Clone,
+    domain: Option<&Condition>,
     ctx: &ConditionContext,
     retained: &mut usize,
     budget: &mut Budget<'_>,
@@ -128,19 +149,21 @@ pub(crate) fn iterate(
     BTreeMap<GroundAtom, Condition>,
     BTreeMap<GroundAtom, Condition>,
 )> {
+    let top = domain.cloned().unwrap_or_else(|| ctx.true_condition());
     let mut guarantees = BTreeMap::new();
     if strengthen {
-        for producer in producers {
+        for (producer, live) in producers.clone() {
             budget.tick("bound guarantees")?;
             if !producer.exact || Some(producer.rule.id) == relaxed_rule {
                 continue;
             }
             let head = &producer.rule.head.atom;
             let old = guarantees.get(head);
+            let condition = scoped_condition(&producer.condition, live, domain, ctx, budget)?;
             let next = if let Some(old) = old {
-                ctx.apply(old, &producer.condition, or, budget)?
+                ctx.apply(old, &condition, or, budget)?
             } else {
-                producer.condition.clone()
+                condition
             };
             *retained = crate::symbolic::retain(
                 *retained,
@@ -177,9 +200,13 @@ pub(crate) fn iterate(
             *retained = crate::symbolic::retain(*retained, 0, bottom.node_count(), budget)?;
             next.insert(atom.clone(), bottom);
         }
-        for producer in producers {
+        for (producer, live) in producers.clone() {
             budget.tick("upper-bound iteration")?;
-            let mut body = producer.condition.clone(); // all settled signed premises
+            // Dead producers remain in the certificate, but cannot contribute.
+            if !live {
+                continue;
+            }
+            let mut body = scoped_condition(&producer.condition, live, domain, ctx, budget)?;
             for literal in producer
                 .rule
                 .body

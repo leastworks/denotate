@@ -172,10 +172,21 @@ reused failures still count in `reusedSkip`.
 
 During guarded work, `guarded` describes one candidate: `index` (one-based,
 round-local), `head`, `premise`, source `location`, `restricted: true`,
-`coneAtoms`, `coneRules` (visited producers, including dead ones), `liveRules`,
+`coneAtoms`, `liveAtoms`, `coneRules`, `liveRules`, `domainNodes`,
+`existingConditionNodes`, `addedConditionNodes`,
 `preprocessingMs`, `iterationMs`, `reused`, and `state` (`preprocessing`,
-`iterating`, `completed`, `skipped`, `failed`). Counts are null until preprocessing
-finishes; times on a running operation are not final. Each end state is emitted
+`iterating`, `completed`, `skipped`, `failed`). Cone counts are visited atoms and
+producers so far, including dead ones; live atoms have at least one producer whose
+settled guard intersects the domain (this does not establish the atom's truth).
+The domain is G ∧ W; its size counts BDD nodes. Existing condition nodes are the
+retained baseline on entry to preparation; added nodes are successfully retained
+domain/metadata nodes before cleanup, excluding shared round summaries. A rejected
+allocation is described by the ordinary failure, not added to retained storage.
+Preparation supplies partial counts on failure too. Counts are null until a
+preparation returns or fails; `domainNodes` stays null if constructing the domain
+failed. An optional-cache eviction/retry reports the final attempt's counts and
+baseline, with elapsed preprocessing time covering both attempts. Times on a
+running operation are not final. Each end state is emitted
 without throttling. These are progress observations, never finding identities or
 semantic inputs. The CLI uses the same fields. Temporary bounds/cone storage
 exhaustion is a local skip; other storage and global work exhaustion still stop.

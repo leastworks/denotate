@@ -81,7 +81,7 @@ real program that the current choice serves badly.
 
   **Guarded bounds run in their own domain and live cone.** Conjoin the retained
   guard with W before iterating. The upper-bound operator is pointwise: starting
-  from G ∧ W, and masking every producer and exact guarantee to that domain,
+  from G ∧ W, and restricting producer contributions and exact guarantees to that domain,
   gives the unrestricted candidate-relaxed bounds conjoined with G ∧ W at every
   iteration and at the fixed point. Comparisons use ordinary Boolean difference;
   no care-set simplification changes values outside the domain. A distinct
@@ -97,6 +97,30 @@ real program that the current choice serves badly.
   restricted bounds. Dead producers remain certificate evidence; unresolved
   external producers remain unknown. The supported/stable-model argument above
   therefore applies unchanged.
+
+  **Temporary cones retain only their own storage.** Borrow immutable producer
+  summaries already charged to the current round; keep domain-relative live/dead
+  flags rather than a masked BDD per producer. With a large W, retaining W conjoined
+  into every producer multiplied storage by the number of producers, and also
+  charged shared settled-premise conditions again. Dead producers remain evidence
+  through their snapshot summaries without storing their false masked conditions.
+
+  Restriction stays inside accumulation: `D ∧ (C ∧ X) = (D ∧ C) ∧ X`, and
+  restriction distributes over the union of producers. Upper and lower per-atom
+  values therefore remain exactly the previous restricted functions, including
+  false outside D. Restrict each live contribution transiently before joining it;
+  building an unrestricted union first can exhaust a BDD limit on worlds outside
+  D even when the restricted result is small. Global bounds keep their existing
+  unrestricted computation and accounting.
+
+  On success, a certificate owns only its referenced immutable summaries, shared
+  individually, and its bound values. It never retains the whole old round or
+  resolves old rule IDs against a later executable graph. Committed certificates
+  keep conservative storage charges after round-local summaries and caches drop;
+  borrowing removes duplicate temporary charges, not ownership accounting. Domain
+  size, partial visited/live counts and existing/added retained storage are reported
+  even when preparation fails. Failed attempts release partial storage and retain
+  spent work; limits and failure classification are unchanged.
 
   Preprocessing is charged and lazy. Informative guards precede unrestricted ones;
   smaller guard representations and immediate producer counts estimate cost,
