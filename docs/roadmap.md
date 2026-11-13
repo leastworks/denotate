@@ -9,8 +9,8 @@ Admission decides whether every permitted world has exactly one meaning. Impleme
 structural reduction (true/false propagation, dead rules, same-head subsumption after
 bounded unfolding), producer removal by exact coverage, bound-based removal (a cyclic
 producer whose bounded body is covered by exact producers), negation discharge and
-cycle upper bounds, failure-local skips with precise retry, and cycle-first
-ordering (see [decisions](decisions.md) and [checker policies](checker-policies.md)).
+cycle upper bounds, failure-local skips with precise retry, reuse of completed
+negative attempts across rounds, and cycle-first ordering (see [decisions](decisions.md) and [checker policies](checker-policies.md)).
 Cycle-relevant proofs and supporting evaluation precede downstream work; downstream
 exhaustion is reported separately without relabeling the cycles' results. A
 production-scale lowered program showed what remains:
@@ -25,6 +25,11 @@ production-scale lowered program showed what remains:
   symbolic topological peeling) has one meaning per world without any rewrite. It
   needs its own evidence kind and evaluation path, and is the same check a schedule
   needs (below).
+- **Wide heads.** A head with tens of thousands of producers can dominate a run even
+  downstream, since obligations may read it. Check each removal candidate against
+  the exact producers by subtraction (stop when nothing is left) instead of building
+  their union; retain successful summaries, coverage and bounds across rounds when
+  their inputs did not change.
 - **Totality and loop formulas** remain research ([below](#research-admission-by-well-founded-totality)).
 
 Cycles that are genuine, with two meanings in some world, belong to the lowering:
