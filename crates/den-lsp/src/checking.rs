@@ -107,11 +107,13 @@ fn check_with_progress(
             .map_err(Failure::Invalid)?;
     job.limits.cancellation.check()?;
     let mut publication = presentation::configuration(&program).map_err(Failure::Internal)?;
+    let requests = program.verification_requests(&job.limits)?;
     progress.emit(Phase::AssumptionValidation, json!({}));
-    let validated = validate_assumption_cones_using(
+    let validated = validate_selected_assumption_cones_using(
         &program.corpus,
         &program.domains,
         &program.keys,
+        requests.iter().map(|(_, request)| request),
         &job.limits,
         || {
             progress.emit(Phase::FixedFacts, json!({}));
@@ -140,7 +142,6 @@ fn check_with_progress(
             .extend(diagnostics);
     }
     publication.status["findings"] = validation_publication.status["findings"].clone();
-    let requests = program.verification_requests(&job.limits)?;
     let admission = denotate_ir_text::progress::AdmissionDetails::new(&program);
     let fixed = std::cell::OnceCell::new();
     for (i, (key, request)) in requests.iter().enumerate() {
@@ -270,7 +271,7 @@ fn check_with_progress(
     } else {
         "complete"
     };
-    let state = if !validation.is_valid() {
+    let state = if validation.has_failures() {
         "incomplete"
     } else if verifications.is_empty() {
         "unconfigured"
@@ -1299,7 +1300,7 @@ mod tests {
                         .as_ref()
                         .is_some_and(|d| d["kind"] == "invalid-assumption")
                 });
-                assert_eq!(invalid, fact.is_empty());
+                assert_eq!(invalid, fact.is_empty() && verification.contains("[a]"));
                 if !fact.is_empty() {
                     assert_eq!(
                         warm.status["state"],
@@ -1311,30 +1312,40 @@ mod tests {
                     );
                 }
             }
-            assert!(session.fixed_stats().executed > 0);
+            assert_eq!(session.fixed_stats().executed > 0, !verification.is_empty());
         }
     }
     #[test]
-    fn assumption_validation_publishes_without_verifications_and_clears_on_edit() {
+    fn selected_assumption_validation_clears_on_eligibility_edit() {
         let mut session = denotate_check_session::Session::with_grounding();
         for fact in ["", "eligible();", ""] {
-            let text = format!("relation eligible(); {fact} input i() within eligible; relation p(); p():-i(),!p(); assumption invalid:empty(p);");
+            let text = format!("relation eligible(); {fact} input i() within eligible; relation p(); p():-i(),!p(); assumption invalid:empty(p); verification v{{assumptions:[invalid];obligations:[];}}");
             let job = assumption_job(&text, Limits::default());
             let warm = check(&job, &mut session).unwrap();
             let cold = check(&job, &mut denotate_check_session::Session::default()).unwrap();
             assert_eq!(warm.status, cold.status);
             assert_eq!(warm.diagnostics, cold.diagnostics);
             if fact.is_empty() {
-                assert_eq!(warm.status["state"], "unconfigured");
-                assert!(warm.diagnostics.values().all(Vec::is_empty));
+                assert_eq!(warm.status["state"], "proved");
+                assert!(!warm.diagnostics.values().flatten().any(|d| d
+                    .data
+                    .as_ref()
+                    .is_some_and(|d| d["kind"] == "invalid-assumption")));
             } else {
                 assert_eq!(warm.status["state"], "incomplete");
                 let ds = warm.diagnostics.values().flatten().collect::<Vec<_>>();
-                assert_eq!(ds.len(), 1);
-                let data = ds[0].data.as_ref().unwrap();
+                let diagnostic = ds
+                    .iter()
+                    .find(|d| {
+                        d.data
+                            .as_ref()
+                            .is_some_and(|d| d["kind"] == "invalid-assumption")
+                    })
+                    .unwrap();
+                let data = diagnostic.data.as_ref().unwrap();
                 assert_eq!(data["kind"], "invalid-assumption");
                 assert_eq!(data["finding"]["verification"], Value::Null);
-                assert!(!ds[0].related_information.as_ref().unwrap().is_empty());
+                assert!(!diagnostic.related_information.as_ref().unwrap().is_empty());
             }
         }
     }
@@ -1364,9 +1375,62 @@ mod tests {
         );
     }
     #[test]
-    fn exhausted_assumption_validation_is_visible_without_a_verification() {
+    fn selecting_and_unselecting_an_assumption_updates_warm_publication() {
+        let mut session = denotate_check_session::Session::default();
+        let mut identity = None;
+        for verification in ["", "verification v{assumptions:[a];obligations:[];}", ""] {
+            let job = assumption_job(
+                &format!(
+                    "input i(); relation p(); p():-i(),!p(); assumption a:empty(p); {verification}"
+                ),
+                Limits::default(),
+            );
+            let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let seen = events.clone();
+            let warm = check_with_progress(
+                &job,
+                &mut session,
+                Some(std::sync::Arc::new(move |e| seen.lock().unwrap().push(e))),
+            )
+            .unwrap();
+            let fresh = check(&job, &mut denotate_check_session::Session::default()).unwrap();
+            assert_eq!(warm.status, fresh.status);
+            assert_eq!(warm.diagnostics, fresh.diagnostics);
+            let data = warm
+                .diagnostics
+                .values()
+                .flatten()
+                .find_map(|d| {
+                    d.data
+                        .as_ref()
+                        .filter(|d| d["finding"]["check"] == "ground-cone")
+                })
+                .unwrap();
+            if let Some(identity) = &identity {
+                assert_eq!(&data["finding"], identity);
+            } else {
+                identity = Some(data["finding"].clone());
+            }
+            if verification.is_empty() {
+                assert_eq!(warm.status["state"], "unconfigured");
+                assert_eq!(data["kind"], "unvalidated-assumption");
+                assert_eq!(data["evidence"]["state"], "not-selected");
+                assert!(!events
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .any(|e| e["phase"] == "fixed-facts"));
+            } else {
+                assert_eq!(warm.status["state"], "incomplete");
+                assert_eq!(data["kind"], "invalid-assumption");
+                assert!(!data["evidence"]["cycles"].as_array().unwrap().is_empty());
+            }
+        }
+    }
+    #[test]
+    fn exhausted_selected_assumption_validation_is_visible() {
         let job = assumption_job(
-            "input i(); relation p(); p():-i(),!p(); assumption a:empty(p);",
+            "input i(); relation p(); p():-i(),!p(); assumption a:empty(p); verification v{assumptions:[a];obligations:[];}",
             Limits {
                 max_atoms: 0,
                 ..Limits::default()
@@ -1378,8 +1442,20 @@ mod tests {
             result.status["assumptionValidation"]["state"],
             "inconclusive"
         );
-        let d = result.diagnostics.values().flatten().next().unwrap();
-        assert_eq!(d.data.as_ref().unwrap()["kind"], "unvalidated-assumption");
+        let d = result
+            .diagnostics
+            .values()
+            .flatten()
+            .find(|d| {
+                d.data
+                    .as_ref()
+                    .is_some_and(|d| d["kind"] == "unvalidated-assumption")
+            })
+            .unwrap();
+        assert_eq!(
+            d.data.as_ref().unwrap()["evidence"]["state"],
+            "inconclusive"
+        );
     }
     #[test]
     fn an_exhausted_verification_does_not_prevent_the_next_one() {

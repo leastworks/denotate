@@ -72,8 +72,9 @@ Named assumptions use the same `Restriction` cardinality shape as `Requirement`:
 are complete, `validate_assumptions` returns a classification per target relation:
 `RelationStratified` or `NeedsGrounding`. Positive recursion and input dependencies
 are allowed. Relation-level negative cycles defer validity to the checker's
-`validate_assumption_cones` over resolved domains. They are not load errors or
-implicitly accepted. The IR has no grounder or checker dependency. The checker
+selected-cone validation over resolved domains (or explicit all-declaration
+`validate_assumption_cones`). Unselected ground cones remain deferred. They are not
+load errors or implicitly accepted. The IR has no grounder or checker dependency. The checker
 owns final validation, evaluation and consistency, independently of any selected
 assumptions.
 

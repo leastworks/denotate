@@ -1,4 +1,5 @@
-//! Program-level declaration validation, independent of selected assumptions.
+//! Run-level declaration validation. Selection controls which cones are checked;
+//! no assumption's truth is used to validate another assumption.
 use crate::{
     limits::{Budget, Result},
     *,
@@ -24,21 +25,26 @@ pub struct AssumptionCycleEdge {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AssumptionValidity {
     Valid,
-    Invalid { cycles: Vec<AssumptionCycle> },
+    /// Ground validation is deferred until a run selects this declaration.
+    NotSelected,
+    Invalid {
+        cycles: Vec<AssumptionCycle>,
+    },
     Inconclusive(ResourceReason),
 }
 impl AssumptionValidity {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Valid => "valid",
+            Self::NotSelected => "not-selected",
             Self::Invalid { .. } => "invalid",
             Self::Inconclusive(_) => "inconclusive",
         }
     }
 }
 
-/// Fresh for one complete program snapshot. No assumption activates a constraint
-/// here, and no verification is needed to validate a declaration.
+/// Fresh for one program snapshot and run selection. No assumption activates a
+/// constraint here. Unselected ground cones remain explicitly unvalidated.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct AssumptionValidation {
     pub assumptions: BTreeMap<AssumptionKey, AssumptionValidity>,
@@ -49,6 +55,15 @@ impl AssumptionValidation {
             .values()
             .all(|v| matches!(v, AssumptionValidity::Valid))
     }
+    /// Deferred unselected declarations do not make the run incomplete.
+    pub fn has_failures(&self) -> bool {
+        self.assumptions.values().any(|v| {
+            matches!(
+                v,
+                AssumptionValidity::Invalid { .. } | AssumptionValidity::Inconclusive(_)
+            )
+        })
+    }
     pub fn selected_failure<'a>(
         &'a self,
         corpus: &Corpus,
@@ -56,21 +71,24 @@ impl AssumptionValidation {
         request: &CheckRequest,
     ) -> Result<Option<&'a AssumptionValidity>> {
         let mut unknown = None;
+        let selected = request.assumption_keys(corpus, keys)?;
         for assumption in corpus.assumptions() {
-            let relation = keys.relation(assumption.restriction.relation())?;
-            if !request.constraints.iter().any(|c| c.relation() == relation) {
+            let key = keys.assumption(assumption.id)?;
+            if !selected.contains(key) {
                 continue;
             }
-            let state = self
-                .assumptions
-                .get(keys.assumption(assumption.id)?)
-                .ok_or(CheckError::InvalidRequest(
-                    "assumption validation does not cover program",
-                ))?;
+            let state = self.assumptions.get(key).ok_or(CheckError::InvalidRequest(
+                "assumption validation does not cover program",
+            ))?;
             match state {
                 AssumptionValidity::Invalid { .. } => return Ok(Some(state)),
                 AssumptionValidity::Inconclusive(_) => unknown = Some(state),
                 AssumptionValidity::Valid => {}
+                AssumptionValidity::NotSelected => {
+                    return Err(CheckError::InvalidRequest(
+                        "selected assumption was not covered by run validation",
+                    ));
+                }
             }
         }
         Ok(unknown)
@@ -128,6 +146,37 @@ pub fn validate_assumption_cones_using<'a>(
     limits: &Limits,
     prepare: impl FnOnce() -> Result<FixedPreparation<'a>>,
 ) -> Result<ValidatedAssumptions<'a>> {
+    validate_assumption_selection_using(corpus, domains, keys, None, limits, prepare)
+}
+
+/// Validate the union of named assumptions selected by the executed requests.
+/// Classify every declaration, but invoke the fold factory only if a selected
+/// cone needs grounding. An empty request list performs no ground validation.
+pub fn validate_selected_assumption_cones_using<'a, 'r>(
+    corpus: &'a Corpus,
+    domains: &Domains,
+    keys: &'a SemanticKeys,
+    requests: impl IntoIterator<Item = &'r CheckRequest>,
+    limits: &Limits,
+    prepare: impl FnOnce() -> Result<FixedPreparation<'a>>,
+) -> Result<ValidatedAssumptions<'a>> {
+    limits.cancellation.check()?;
+    let mut selected = BTreeSet::new();
+    for request in requests {
+        limits.cancellation.check()?;
+        selected.extend(request.assumption_keys(corpus, keys)?);
+    }
+    validate_assumption_selection_using(corpus, domains, keys, Some(&selected), limits, prepare)
+}
+
+fn validate_assumption_selection_using<'a>(
+    corpus: &'a Corpus,
+    domains: &Domains,
+    keys: &'a SemanticKeys,
+    selected: Option<&BTreeSet<AssumptionKey>>,
+    limits: &Limits,
+    prepare: impl FnOnce() -> Result<FixedPreparation<'a>>,
+) -> Result<ValidatedAssumptions<'a>> {
     limits.cancellation.check()?;
     let mut result = AssumptionValidation::default();
     let mut fixed = None;
@@ -146,6 +195,11 @@ pub fn validate_assumption_cones_using<'a>(
             match classified[&relation] {
                 AssumptionCone::RelationStratified => {
                     result.assumptions.insert(key, AssumptionValidity::Valid);
+                }
+                AssumptionCone::NeedsGrounding if selected.is_some_and(|s| !s.contains(&key)) => {
+                    result
+                        .assumptions
+                        .insert(key, AssumptionValidity::NotSelected);
                 }
                 AssumptionCone::NeedsGrounding => pending.entry(relation).or_default().push(key),
             }
@@ -181,14 +235,18 @@ pub fn validate_assumption_cones_using<'a>(
             other => return Err(other),
         };
         for assumption in corpus.assumptions() {
-            result
-                .assumptions
-                .entry(keys.assumption(assumption.id)?.clone())
-                .or_insert(AssumptionValidity::Inconclusive(ResourceReason {
-                    phase: "assumption validation".into(),
-                    resource: resource.into(),
-                    details,
-                }));
+            let key = keys.assumption(assumption.id)?.clone();
+            result.assumptions.entry(key.clone()).or_insert_with(|| {
+                if selected.is_some_and(|s| !s.contains(&key)) {
+                    AssumptionValidity::NotSelected
+                } else {
+                    AssumptionValidity::Inconclusive(ResourceReason {
+                        phase: "assumption validation".into(),
+                        resource: resource.into(),
+                        details,
+                    })
+                }
+            });
         }
     }
     Ok(ValidatedAssumptions {
@@ -339,7 +397,7 @@ impl AssumptionPreparation {
                 cycles,
             }),
             AssumptionValidity::Valid => Ok(()),
-            AssumptionValidity::Inconclusive(_) => unreachable!(),
+            AssumptionValidity::Inconclusive(_) | AssumptionValidity::NotSelected => unreachable!(),
         }
     }
 }

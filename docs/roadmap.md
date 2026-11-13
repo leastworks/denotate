@@ -78,7 +78,9 @@ and explanations of which selected assumptions conflict.
 
 - **Assumption cones admitted under other assumptions.** Validation now uses a view
   specialized by exact fixed truth, shared with the computation of W, so cycles that
-  exist only through fixed-dead instances no longer invalidate a cone. Next, per
+  exist only through fixed-dead instances no longer invalidate a cone. Runs now
+  ground-validate only assumptions selected by their executed verifications;
+  unselected ground cones get advisory deferred-validation diagnostics. Next, per
   verification and in layers: an assumption whose cone has negative cycles joins
   when admission under the assumptions already established resolves them (a least
   fixpoint, so no assumption justifies its own cone). Validity then becomes relative

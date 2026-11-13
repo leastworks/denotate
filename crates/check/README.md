@@ -133,16 +133,21 @@ is inconclusive. The IR classifies constraint cones before this evaluation; sele
 cones requiring grounding must have no reachable negative cycle after one
 specialization by independently settled fixed truth.
 
-`validate_assumption_cones(corpus, domains, keys, limits)` is the program-level
-declaration query, called before verification loops, including when none exist. It
-uses relation-stratified cones immediately; others prepare the fixed fold and one
+`validate_selected_assumption_cones_using(corpus, domains, keys, requests, limits, factory)`
+is the run-level declaration query. It takes the executed requests before their
+verification loops, selects declarations by semantic key and uses relation-stratified
+cones immediately. Unselected cones needing grounding return `NotSelected`; they
+neither call the factory nor make the run incomplete. `is_valid()` still means every
+declaration was validated; `has_failures()` tests for invalid/inconclusive results
+that affect the run. `selected_failure` rejects an attempt to use a deferred result
+for a newly selected request. Selected cones needing grounding prepare the fixed fold and one
 residual graph with no obligation groups. A separate view removes dead instances
 and satisfied fixed premises, then supplies `blocked_by` and cycle evidence.
 Blocked fixed atoms never become false, and newly exposed truth does not trigger
 another fold. W uses that same specialized meaning. Results identify assumptions and cycle edges with semantic keys. It never
 uses selected assumptions or admission, and never rejects an unrelated ground cycle.
-An exhausted query retains established results and marks remaining declarations
-inconclusive; cancellation aborts. The query recomputes per run, so facts, domains
+An exhausted query retains established results and marks remaining selected declarations
+inconclusive; unselected ones stay deferred and cancellation aborts. The query recomputes per run, so facts, domains
 and input eligibility cannot leave stale validation. Request preparation also checks
 selected restrictions, including unnamed API requests, before computing W, returning
 `InvalidAssumptionCone` with keyed evidence on failure. Program-level invalid
@@ -186,11 +191,12 @@ optional relation-grounding cache; ordinary checking uses individual lookups.
 its `FixedInput`/`FixedValue` use semantic keys and rebind evidence to current IR.
 The session owns Salsa and bounded retention, not the checker.
 
-To share program-level preparation, use
-`validate_assumption_cones_for_run(corpus, domains, keys, limits)` and then
+To share selected validation with verification preparation, use
+`validate_selected_assumption_cones_using(..., requests, limits, factory)` and then
 `FixedPreparation::prepare_with_validation(&validated, limits)`.
-`validate_assumption_cones_using(..., factory)` accepts a lazy fold factory for
-session-backed callers. It calls the factory only when a cone needs grounding;
+`validate_assumption_cones`, `validate_assumption_cones_for_run` and
+`validate_assumption_cones_using` retain explicit all-declaration validation for
+authoring tools. The factory runs only when a cone in the validation selection needs grounding;
 `prepare_cached_with_validation` reuses that bound fold instead of transferring it
 again. `validated.result()` supplies declaration diagnostics. The private artifact
 cannot be fabricated from a caller-edited diagnostic map. It retains fixed evidence,

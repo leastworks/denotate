@@ -12,6 +12,133 @@ fn parse(text: &str) -> LoadedProgram {
 }
 
 #[test]
+fn selected_validation_skips_unselected_cones_and_preserves_selected_evidence() {
+    let p = parse(&format!(
+        "{BODY} assumption also_valid:empty(broken); input i(); relation bad(); bad():-i(),!bad(); assumption invalid:empty(bad); assumption alias:at_least_one(bad,group_by:()); assumption fast:empty(i); verification free{{assumptions:[fast];obligations:[];}} verification a{{assumptions:[valid];obligations:[];}} verification b{{assumptions:[invalid];obligations:[];}}"
+    ));
+    let limits = Limits::default();
+    let all = validate_assumption_cones(&p.corpus, &p.domains, &p.keys, &limits).unwrap();
+    let requests = p.verification_requests(&limits).unwrap();
+    for names in [
+        vec![],
+        vec!["free"],
+        vec!["a"],
+        vec!["b"],
+        vec!["a", "b", "free"],
+    ] {
+        let selected: Vec<_> = requests
+            .iter()
+            .filter(|(key, _)| names.contains(&key.0.name.as_ref()))
+            .map(|(_, r)| r)
+            .collect();
+        let needs_ground = names.contains(&"a") || names.contains(&"b");
+        let validated = validate_selected_assumption_cones_using(
+            &p.corpus,
+            &p.domains,
+            &p.keys,
+            selected.iter().copied(),
+            &limits,
+            || {
+                assert!(
+                    needs_ground,
+                    "unselected declarations must not invoke the fold factory"
+                );
+                FixedPreparation::prepare(&p.corpus, &p.domains, &limits)
+            },
+        )
+        .unwrap();
+        let v = validated.result();
+        let chosen = selected
+            .iter()
+            .flat_map(|r| r.assumption_keys(&p.corpus, &p.keys).unwrap())
+            .collect::<std::collections::BTreeSet<_>>();
+        for (key, state) in &v.assumptions {
+            if chosen.contains(key) || key.0.name.as_ref() == "fast" {
+                assert_eq!(state, &all.assumptions[key]);
+            } else {
+                assert_eq!(state, &AssumptionValidity::NotSelected);
+            }
+        }
+        assert_eq!(v.has_failures(), names.contains(&"b"));
+        for request in selected {
+            assert_eq!(
+                v.selected_failure(&p.corpus, &p.keys, request).unwrap(),
+                all.selected_failure(&p.corpus, &p.keys, request).unwrap()
+            );
+        }
+        // The alias constrains the same relation as invalid, but isn't selected.
+        let shown = presentation::present_assumption_validation(&p, v).unwrap();
+        assert!(
+            shown
+                .diagnostics
+                .iter()
+                .any(|d| d.message.contains("alias is not selected")
+                    && d.kind.code() == "unvalidated-assumption")
+        );
+    }
+}
+
+#[test]
+fn deferred_validation_cannot_be_used_to_skip_a_later_selected_check() {
+    let p = parse(
+        "relation p(); p():-!p(); assumption a:empty(p); verification v{assumptions:[a];obligations:[];}",
+    );
+    let limits = Limits::default();
+    let validated = validate_selected_assumption_cones_using(
+        &p.corpus,
+        &p.domains,
+        &p.keys,
+        [],
+        &limits,
+        || panic!("no selected assumptions"),
+    )
+    .unwrap();
+    let request = p.verification_requests(&limits).unwrap().remove(0).1;
+    assert!(matches!(
+        validated
+            .result()
+            .selected_failure(&p.corpus, &p.keys, &request),
+        Err(CheckError::InvalidRequest(_))
+    ));
+    let fixed = FixedPreparation::prepare_with_validation(&validated, &limits).unwrap();
+    assert!(matches!(
+        request.prepare_with_fixed(&p.corpus, &p.keys, &(&limits).into(), &fixed, None),
+        Err(CheckError::InvalidAssumptionCone { .. })
+    ));
+}
+
+#[test]
+fn exhaustion_does_not_relabel_unselected_ground_cones() {
+    let p = parse(
+        "input i(); relation p(); p():-i(),!p(); assumption a:empty(p); assumption b:empty(p); verification v{assumptions:[a];obligations:[];}",
+    );
+    for max_work in [0, Limits::default().max_work] {
+        let limits = Limits {
+            max_work,
+            max_atoms: 0,
+            ..Limits::default()
+        };
+        let requests = p.verification_requests(&limits).unwrap();
+        let validated = validate_selected_assumption_cones_using(
+            &p.corpus,
+            &p.domains,
+            &p.keys,
+            requests.iter().map(|(_, r)| r),
+            &limits,
+            || FixedPreparation::prepare(&p.corpus, &p.domains, &limits),
+        )
+        .unwrap();
+        for (key, state) in &validated.result().assumptions {
+            if key.0.name.as_ref() == "a" {
+                assert!(matches!(state, AssumptionValidity::Inconclusive(_)));
+            } else {
+                assert_eq!(state, &AssumptionValidity::NotSelected);
+            }
+        }
+    }
+}
+
+#[test]
 fn shared_and_lazy_validation_agree_across_selections_and_with_original_preparation() {
     for text in [
         format!("{BODY} input i(); relation bad(); bad():-i(),!bad(); assumption invalid:empty(bad); obligation o:empty(broken); verification free{{assumptions:[];obligations:[o];}} verification a{{assumptions:[valid];obligations:[o];}} verification b{{assumptions:[invalid];obligations:[o];}} verification c{{assumptions:[valid];obligations:[o];}}"),

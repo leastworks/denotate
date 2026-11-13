@@ -27,9 +27,12 @@ See [memory profiling](../../docs/checker-policies.md#memory-profiling).
   groups, notices, verification identity and example policy stay separate. This
   path does not use the optional relation-SCC grounding cache. Assumption validation
   and W share a fixed-truth-specialized view, fresh each run. Use
-  `validate_assumption_cones_using(..., || session.prepare_fixed(...))` before the
-  verification loop, then `prepare_fixed_with_validation` to reuse its fold and
-  residual graph. The factory is lazy for relation-stratified declarations. Direct
+  `validate_selected_assumption_cones_using(..., requests, limits, || session.prepare_fixed(...))`
+  before the verification loop, then `prepare_fixed_with_validation` to reuse its
+  fold and residual graph. Resolve the run's requests first: unselected ground cones
+  are deferred and never invoke the factory; relation-stratified declarations also
+  need no factory. Adding/removing a selecting verification recomputes validation,
+  while the assumption-independent fixed fold remains eligible for reuse. Direct
   requests needing ground validation also use this path, including when the
   optional relation-SCC grounding cache is enabled; their assumption-independent
   specialization is never cached by that relation cache.
@@ -77,7 +80,11 @@ and resolved domains; no coverage verdict is reused across context changes.
 verifications, with optional edited-root measurements and JSON output.
 `just score-test-dsl FILE` (`examples/scorecard.rs`) retains the test DSL scorecard.
 See [checker policies](../../docs/checker-policies.md). Both need the `test-support`
-feature, which their recipes enable. Their tests:
+feature, which their recipes enable. The .den scorecard validates only assumptions
+selected by its executed verifications; deferred declarations appear in the human
+report and JSON `assumption_validation.base`/`edit` summaries. Its correctness tests
+use the normal test profile and belong to `just verify`; measured runs stay release
+builds. Focused tests:
 
 ```sh
 just test-score-test-dsl

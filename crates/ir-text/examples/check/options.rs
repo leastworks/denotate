@@ -6,6 +6,7 @@ pub const USAGE: &str = "Usage: check ROOT_FOLDER_OR_DEN.ROOT [OPTIONS]\nRun jus
 pub struct Options {
     pub root: String,
     pub selection: Option<String>,
+    pub validate_all_assumptions: bool,
     pub json: bool,
     pub verbose: bool,
     pub empty_examples: Option<EmptinessExamples>,
@@ -31,6 +32,7 @@ pub fn help() -> String {
     let mut text = String::from(
         "Usage: check ROOT_FOLDER_OR_DEN.ROOT [OPTIONS]\n\n\
         --verification NAME       Run one verification (a partial run)\n\
+        --validate-all-assumptions Validate unselected declarations too (authoring aid)\n\
         --json                    Print existing status summaries on stdout\n\
         --verbose                 Expand all related locations and structural proof chains\n\
         --empty-examples N|all    Retain N present tuples per empty obligation (default 3)\n\
@@ -59,6 +61,7 @@ impl Options {
         let mut options = Self {
             root,
             selection: None,
+            validate_all_assumptions: false,
             json: false,
             verbose: false,
             empty_examples: None,
@@ -77,6 +80,7 @@ impl Options {
             }
             let mut value = || args.next().ok_or((2, format!("{option} requires a value")));
             match option.as_str() {
+                "--validate-all-assumptions" => options.validate_all_assumptions = true,
                 "--json" => options.json = true,
                 "--verbose" => options.verbose = true,
                 "--no-progress" => options.progress = false,

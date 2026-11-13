@@ -79,8 +79,10 @@ invalid or duplicate API labels. Both frontends use this callback for shared tup
 notes; the test DSL retains its own decoded observation vocabulary.
 
 `at_least_one`, `exactly_one` and `empty` obligations load and print through ordinary
-contract declarations and named assumptions. Assumption dependency cones must be
-independently stratified; loading and construction requests share IR validation.
+contract declarations and named assumptions. Loading classifies assumption cones
+through shared IR validation; selected cones needing grounding are validated by the
+checker after fixed-truth specialization, independently of selected constraints.
+Unselected ground cones stay deferred; loading alone does not establish their validity.
 `empty(R)` has no grouping argument, and supplying one is a syntax error. Exactly-one
 remains one declaration and selection through printing and reloading. Grouping uses
 resolved domains, including explicit overrides. Coverage results and diagnostics are described in the
@@ -129,6 +131,11 @@ collapse to "+N more". Direct structural rewrite justifications remain visible.
 `--verbose` prints all related locations and requests full structural rewrite
 chains and notes; the default computes only bounded direct evidence. `--json` retains the previous
 `Results: {...}` status summaries with their existing headers and notices.
+Ground validation covers the assumptions selected by the executed verifications
+(`--verification` narrows this union). Deferred unselected assumptions receive
+Information diagnostics without making the run incomplete. For an authoring check
+of every declaration, including without verifications, use `--validate-all-assumptions`;
+this validates their cones without activating their constraints.
 
 Detailed progress goes to **stderr** by default, also with `--json`. It reports
 effective limits, source inventory, loading and assumption validation, each selected

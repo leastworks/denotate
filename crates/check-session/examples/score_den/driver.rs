@@ -353,16 +353,30 @@ fn configuration(p: &LoadedProgram, requests: &[(VerificationKey, CheckRequest)]
 pub fn collect(c: &Config, base: &Snapshot, edit: Option<&Snapshot>) -> Result<Value, String> {
     let p = base.load(false)?;
     let e = edit.map(|s| s.load(false)).transpose()?;
+    let mut validation_summaries = Vec::new();
     for program in std::iter::once(&p).chain(e.as_ref()) {
-        let validation =
-            validate_assumption_cones(&program.corpus, &program.domains, &program.keys, &c.limits)
-                .map_err(|e| e.to_string())?;
-        if !validation.is_valid() {
+        let requests = program
+            .verification_requests(&c.limits)
+            .map_err(|e| e.to_string())?;
+        let validated = validate_selected_assumption_cones_using(
+            &program.corpus,
+            &program.domains,
+            &program.keys,
+            requests.iter().map(|(_, request)| request),
+            &c.limits,
+            || FixedPreparation::prepare(&program.corpus, &program.domains, &c.limits),
+        )
+        .map_err(|e| e.to_string())?;
+        let validation = validated.result();
+        validation_summaries.push(
+            denotate_ir_text::presentation::present_assumption_validation(program, validation)
+                .map_err(|e| e.to_string())?
+                .status,
+        );
+        if validation.has_failures() {
             return Err(format!(
                 "Assumption validation: {}",
-                denotate_ir_text::presentation::present_assumption_validation(program, &validation)
-                    .map_err(|e| e.to_string())?
-                    .status
+                validation_summaries.last().unwrap()
             ));
         }
     }
@@ -521,7 +535,7 @@ pub fn collect(c: &Config, base: &Snapshot, edit: Option<&Snapshot>) -> Result<V
             .push(json!({"name":outcomes::name(&key.0),"change":change,"samples":samples}));
     }
     Ok(
-        json!({"schema_version":1,"root":c.root,"edit_root":c.edit,"samples":c.samples,
+        json!({"assumption_validation":{"base":validation_summaries.first(),"edit":validation_summaries.get(1)},"schema_version":1,"root":c.root,"edit_root":c.edit,"samples":c.samples,
         "configuration":configurations,"limits":report::limits(&c.limits),
         "variants":MODES.iter().map(|m|report::variant(m,c.unconstrained)).collect::<Vec<_>>(),
         "verifications":verifications,"failures":failures,

@@ -230,8 +230,8 @@ real program that the current choice serves badly.
   ground atoms. Selected assumptions cannot prune this graph,
   and no admission proofs are used, so W's meaning never depends on W. Negative
   cycles elsewhere in the program do not invalidate an independent assumption.
-  All declarations are validated at program level, including unselected ones;
-  selecting an invalid or unvalidated assumption prevents that verification from
+  Validation is reported at program level; its selection policy is described below.
+  Selecting an invalid or inconclusive assumption prevents that verification from
   running. Ground validation is fresh and bounded. This deliberately leaves
   assumption-free redundancy proofs for later. Fixed-truth specialization is now
   permitted as described below.
@@ -265,14 +265,27 @@ real program that the current choice serves badly.
   The sealed artifact retains the fold, original residual graph and specialized
   view, with one keyed cycle per root. Requests reuse the residual rather than
   grounding it again. Classification retains its relation-stratified fast path;
-  unnamed restrictions and programs with no verification use the same validity
-  policy. The fold and residual-validation query have separate bounded allowances
+  unnamed restrictions use the same validity policy. Explicit all-declaration
+  validation also works without verifications. The fold and residual-validation query have separate bounded allowances
   and receipts; the latter depends on the former. Logical exhaustion is explicit,
   established validity survives, and operational interruption installs no partial
   reusable artifact. Sharing is bound to snapshot, domains, keys and deterministic
   limits, and never caches validation across edits. Direct or relation-cache requests
   needing ground validation also use this preparation; requests with only
   relation-stratified restrictions keep their existing path.
+- **Ground-validate only assumptions selected by the run.** Whole-program declaration
+  validation spent substantial time grounding unused library assumptions, even for
+  a partial CLI run. Resolve executed verifications first, then validate the union
+  of their assumption keys once. Relation-stratified classification stays universal;
+  unselected ground cones get Information with state `not-selected`, not an invalid
+  or inconclusive result. They do not affect verdicts or exit codes. Selection uses
+  declaration identity rather than relation identity, so aliases are not accidentally
+  selected. No selected assumption supplies truth to validation; this is a scheduling
+  change, not layered assumptions. When a selected cone needs it, the existing shared
+  residual preparation and cycle index remain whole-program. Run selection and
+  validation are fresh across edits, with the independent fixed fold still reusable.
+  The explicit all-declaration API and `check-den --validate-all-assumptions` preserve
+  the authoring check on demand, including without verifications.
 - **Share a context, not its selected checks.** Residual grounding, permitted worlds,
   indexes and admission depend on the program, resolved domains, restrictions and
   deterministic limits. Obligation groups, notices, verification identity and

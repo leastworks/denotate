@@ -7,6 +7,9 @@ use serde_json::{Value, json};
 pub fn assumption_validity_data(state: &AssumptionValidity) -> Value {
     match state {
         AssumptionValidity::Valid => json!({"kind":"assumption-validation","state":"valid"}),
+        AssumptionValidity::NotSelected => {
+            json!({"kind":"assumption-validation","state":"not-selected"})
+        }
         AssumptionValidity::Invalid { cycles } => json!({
             "kind":"assumption-validation", "state":"invalid",
             "cycles":cycles.iter().map(|c| c.0.iter().map(|e|
@@ -26,7 +29,8 @@ pub fn assumption_validity_data(state: &AssumptionValidity) -> Value {
 pub fn assumption_validation_summary(validation: &AssumptionValidation) -> Value {
     json!({
         "state":if validation.assumptions.values().any(|s| matches!(s, AssumptionValidity::Invalid {..})) {"invalid"}
-            else if !validation.is_valid() {"inconclusive"} else {"valid"},
+            else if validation.has_failures() {"inconclusive"}
+            else if !validation.is_valid() {"not-selected"} else {"valid"},
         "assumptions":validation.assumptions.iter().map(|(key, state)| json!({
             "assumption":[key.0.namespace.as_ref(),key.0.name.as_ref()],
             "validation":assumption_validity_data(state)
@@ -55,6 +59,13 @@ pub fn assumption_validation_findings(
         let mut notes = Vec::new();
         let (kind, message) = match state {
             AssumptionValidity::Valid => continue,
+            AssumptionValidity::NotSelected => (
+                Kind::UnvalidatedAssumption,
+                format!(
+                    "Assumption {} is not selected by this run; its ground cone is validated when a verification selects it.",
+                    assumption.name
+                ),
+            ),
             AssumptionValidity::Invalid { cycles } => {
                 for cycle in cycles {
                     notes.push(crate::cycles::assumption_cycle_note(keys, names, cycle)?);

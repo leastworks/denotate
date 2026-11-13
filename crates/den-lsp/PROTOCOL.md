@@ -453,23 +453,32 @@ Its selecting verification is primary and selected assumption declarations are
 related; ordinary labeled library fallback applies. No unsatisfiable core is claimed.
 
 Assumption declaration validity is reported once per program, before verifications,
-including unselected declarations and programs without a verification. `invalid-assumption`
-is an Error on the assumption; `unvalidated-assumption` is Information when grounding
-or validation exhausts. Both use finding identity
+using the union of assumptions selected by the checked closure's verifications.
+All declarations still receive relation-level classification. `invalid-assumption`
+is an Error on a selected assumption; `unvalidated-assumption` is Information when
+grounding or validation exhausts, or when a declaration needing grounding is not
+selected. Both use finding identity
 `{"verification": null, "assumption": [namespaceKey, name], "check": "ground-cone"}`.
-Evidence kind is `assumption-validation`, with state `invalid` or `inconclusive`.
+Evidence kind is `assumption-validation`, with state `invalid`, `inconclusive` or
+`not-selected`. The latter explains that ground validation happens when a verification
+selects the assumption; it has no exhaustion phase/resource or cycle evidence.
 Invalid evidence contains `cycles`: arrays of edges with keyed `consumer`, `provider`
 atoms and `polarity` (`positive` or `negative`). Cycle rules and premise occurrences
 are related locations labeled `blocking dependency cycle`; normal library fallback
 and upstream-origin placement apply. Inconclusive evidence names `phase` and `resource`.
 
 The program summary's `assumptionValidation` contains a state (`valid`, `invalid`,
-`inconclusive`), an `assumptions` array of keyed declarations with `validation`
-evidence, and its finding inventory. A verification selecting an invalid or
-unvalidated assumption has an `incomplete` summary, unknown consistency, and
-`assumptionValidation` evidence explaining why it was not checked. Other
-verifications still run. Any invalid or unvalidated declaration keeps the program
-summary `incomplete`, even without verifications; diagnostics remain program-scoped.
+`inconclusive`, `not-selected`), an `assumptions` array of keyed declarations with
+`validation` evidence, and its finding inventory. Aggregate precedence is invalid,
+inconclusive, not-selected, then valid; `not-selected` can coexist with validated
+selected declarations. A verification selecting an invalid or inconclusive assumption
+has an `incomplete` summary, unknown consistency, and `assumptionValidation` evidence
+explaining why it was not checked. Other verifications still run. Invalid or
+inconclusive validation keeps the program summary `incomplete`; `not-selected` is
+advisory and leaves the run's status unchanged. Without verifications the program
+remains `unconfigured`, with deferred-assumption Information diagnostics and no ground
+validation. Diagnostics remain program-scoped and retain their identity as selection
+changes.
 
 A directional `assumed-conclusion` Warning uses identity
 `{"verification": [...], "assumption": [...], "obligation": [...], "notice": "assumed-conclusion"}`.

@@ -10,6 +10,7 @@ it when real programs exist, and change it on evidence.
 | Relation-SCC grounding | Kept opt-in | Warm-run wins; not yet worth the complexity by default |
 | Fixed-fact evaluation | Shared across verifications; one retained keyed fold per session, without a byte cap | Checker limits bound the fold; retain completed work for reuse across edits and report its accounted bytes |
 | Admission rewrite order | Commit exact-coverage producer removals before cycle bounds | Avoid analysing cycles that independent support already makes redundant; preserve removals if later bounds exhaust |
+| Assumption validation | Ground-validate the union selected by executed verifications | Unselected cones need no grounding; selected cones still share whole-residual preparation |
 | Plan cache | Small-rule bypass with bounded retention | Avoids caching cost for trivial rules |
 | Coverage results | Recomputed each check; preparation is reused | No measured need for a coverage verdict cache yet |
 

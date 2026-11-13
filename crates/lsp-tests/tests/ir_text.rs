@@ -178,6 +178,23 @@ fn ground_cycle_diagnostics_distinguish_instances_and_follow_open_buffer_edits()
     c.change(&uri, 5, &format!("{negative} assumption invalid:empty(p);"));
     checking_idle(&mut c);
     let all = c.diagnostics(&uri);
+    let deferred = all
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["code"] == "unvalidated-assumption")
+        .unwrap();
+    assert_eq!(deferred["severity"], 3);
+    assert_eq!(deferred["data"]["evidence"]["state"], "not-selected");
+    assert!(!all
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "invalid-assumption"));
+    let identity = deferred["data"]["finding"].clone();
+    c.change(&uri, 6, &format!("{negative} assumption invalid:empty(p); verification v{{assumptions:[invalid];obligations:[];}}"));
+    checking_idle(&mut c);
+    let all = c.diagnostics(&uri);
     let d = all
         .as_array()
         .unwrap()
@@ -190,9 +207,26 @@ fn ground_cycle_diagnostics_distinguish_instances_and_follow_open_buffer_edits()
     );
     assert_eq!(d["data"]["evidence"]["cycles"].as_array().unwrap().len(), 2);
     assert!(d["data"]["finding"]["verification"].is_null());
+    assert_eq!(d["data"]["finding"], identity);
+    c.change(&uri, 7, &format!("{negative} assumption invalid:empty(p);"));
+    checking_idle(&mut c);
+    let all = c.diagnostics(&uri);
+    let deferred = all
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|d| d["code"] == "unvalidated-assumption")
+        .unwrap();
+    assert_eq!(deferred["data"]["finding"], identity);
+    assert_eq!(deferred["data"]["evidence"]["state"], "not-selected");
+    assert!(!all
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "invalid-assumption"));
     c.change(
         &uri,
-        6,
+        8,
         &format!("{declarations} assumption invalid:empty(p);"),
     );
     checking_idle(&mut c);

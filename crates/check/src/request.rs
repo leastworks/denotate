@@ -129,6 +129,36 @@ pub struct CheckRequest {
     pub limits: DeterministicLimits,
 }
 impl CheckRequest {
+    /// Named assumptions selected by this request. Named verifications use exact
+    /// declaration identity, even when several assumptions constrain one relation.
+    /// Unnamed requests retain relation matching for declaration diagnostics;
+    /// preparation independently validates all restrictions, including unnamed ones.
+    pub fn assumption_keys(
+        &self,
+        corpus: &Corpus,
+        keys: &SemanticKeys,
+    ) -> Result<BTreeSet<AssumptionKey>> {
+        if let Some(key) = &self.verification {
+            let declaration = corpus
+                .verifications()
+                .find(|v| keys.verification(v.id).is_ok_and(|k| k == key))
+                .ok_or(CheckError::InvalidRequest("unknown verification key"))?;
+            return declaration
+                .assumptions
+                .iter()
+                .map(|id| keys.assumption(*id).cloned().map_err(CheckError::Keys))
+                .collect();
+        }
+        let mut selected = BTreeSet::new();
+        for assumption in corpus.assumptions() {
+            let relation = keys.relation(assumption.restriction.relation())?;
+            if self.constraints.iter().any(|c| c.relation() == relation) {
+                selected.insert(keys.assumption(assumption.id)?.clone());
+            }
+        }
+        Ok(selected)
+    }
+
     pub fn for_verification(
         corpus: &Corpus,
         keys: &SemanticKeys,

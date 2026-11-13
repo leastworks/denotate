@@ -295,6 +295,7 @@ fn check_program(
     let options::Options {
         root,
         selection,
+        validate_all_assumptions,
         json,
         verbose,
         empty_examples,
@@ -353,42 +354,6 @@ fn check_program(
         .unwrap();
     }
     let operations = OperationalLimits::from(&limits);
-    progress.emit(Phase::AssumptionValidation, json!({}));
-    let validated = denotate_check::validate_assumption_cones_using(
-        &p.corpus,
-        &p.domains,
-        &p.keys,
-        &limits,
-        || {
-            progress.emit(Phase::FixedFacts, json!({}));
-            let fixed = denotate_check::FixedPreparation::prepare(&p.corpus, &p.domains, &limits)?;
-            progress.emit(Phase::AssumptionValidation, json!({}));
-            Ok(fixed)
-        },
-    )
-    .map_err(checker_failure)?;
-    let validation = validated.result();
-    trace.message(format_args!(
-        "Assumption declarations: {}",
-        if validation.is_valid() {
-            "valid"
-        } else {
-            "invalid or inconclusive (see diagnostics)"
-        }
-    ));
-    if !validation.is_valid() {
-        let presented = presentation::present_assumption_validation(&p, &validation)
-            .map_err(|e| (2, e.to_string()))?;
-        for message in denotate_presentation::exhaustion_messages(&presented.status) {
-            trace.message(message);
-        }
-        if json {
-            writeln!(output, "Assumption validation: {:#}", presented.status).unwrap();
-        } else {
-            writeln!(output, "Assumption validation").unwrap();
-            print_diagnostics(&p, &presented, output, verbose)?;
-        }
-    }
     let mut requests = p
         .verification_requests(&limits)
         .map_err(|e| (2, e.to_string()))?;
@@ -414,10 +379,6 @@ fn check_program(
             .unwrap();
             unchecked = true;
         }
-    }
-    if requests.is_empty() {
-        writeln!(output, "No verification configured").unwrap();
-        return Ok(2);
     }
     let partial = selection.is_some();
     if let Some(raw) = selection {
@@ -451,8 +412,58 @@ fn check_program(
         )
         .unwrap();
     }
+    progress.emit(Phase::AssumptionValidation, json!({}));
+    let prepare = || {
+        progress.emit(Phase::FixedFacts, json!({}));
+        let fixed = denotate_check::FixedPreparation::prepare(&p.corpus, &p.domains, &limits)?;
+        progress.emit(Phase::AssumptionValidation, json!({}));
+        Ok(fixed)
+    };
+    let validated = if validate_all_assumptions {
+        denotate_check::validate_assumption_cones_using(
+            &p.corpus, &p.domains, &p.keys, &limits, prepare,
+        )
+    } else {
+        denotate_check::validate_selected_assumption_cones_using(
+            &p.corpus,
+            &p.domains,
+            &p.keys,
+            requests.iter().map(|(_, request)| request),
+            &limits,
+            prepare,
+        )
+    }
+    .map_err(checker_failure)?;
+    let validation = validated.result();
+    trace.message(format_args!(
+        "Assumption declarations: {}",
+        if validation.is_valid() {
+            "valid"
+        } else if validation.has_failures() {
+            "invalid or inconclusive (see diagnostics)"
+        } else {
+            "selected declarations valid; unselected ground cones deferred"
+        }
+    ));
+    if !validation.is_valid() {
+        let presented = presentation::present_assumption_validation(&p, &validation)
+            .map_err(|e| (2, e.to_string()))?;
+        for message in denotate_presentation::exhaustion_messages(&presented.status) {
+            trace.message(message);
+        }
+        if json {
+            writeln!(output, "Assumption validation: {:#}", presented.status).unwrap();
+        } else {
+            writeln!(output, "Assumption validation").unwrap();
+            print_diagnostics(&p, &presented, output, verbose)?;
+        }
+    }
+    if requests.is_empty() {
+        writeln!(output, "No verification configured").unwrap();
+        return Ok(2);
+    }
     // Unchecked obligations are incomplete configuration, not findings.
-    let mut incomplete = partial || unchecked || !validation.is_valid();
+    let mut incomplete = partial || unchecked || validation.has_failures();
     let mut findings = false;
     let mut session = Session::default();
     let verification_total = requests.len();
@@ -1243,14 +1254,19 @@ mod tests {
         assert!(!progress.contains("Starting assumption-validation"));
     }
     #[test]
-    fn invalid_assumptions_are_located_without_verifications_and_block_only_selection() {
+    fn selected_invalid_assumptions_are_located_and_all_declarations_can_be_requested() {
         let body = "input i(); relation p(); p():-i(),!p(); assumption invalid:empty(p); assumption exclude:empty(i);";
         for verifications in [
             "",
             "verification bad { assumptions:[invalid]; obligations:[]; } verification good { assumptions:[exclude]; obligations:[]; }",
         ] {
             let fixture = Fixture::new(&format!("{body}{verifications}"));
-            let (code, output) = fixture.run(&[]);
+            let flags: &[&str] = if verifications.is_empty() {
+                &["--validate-all-assumptions"]
+            } else {
+                &[]
+            };
+            let (code, output) = fixture.run(flags);
             assert_eq!(code, 2, "{output}");
             assert!(
                 output.contains("invalid-assumption: Assumption invalid"),
@@ -1276,13 +1292,53 @@ mod tests {
                     "{output}"
                 );
             }
-            let (json_code, json) = fixture.run(&["--json"]);
+            let mut json_flags = flags.to_vec();
+            json_flags.push("--json");
+            let (json_code, json) = fixture.run(&json_flags);
             assert_eq!(json_code, code);
             assert!(
                 json.contains("\"cycles\"") && json.contains("\"state\": \"invalid\""),
                 "{json}"
             );
         }
+    }
+    #[test]
+    fn unselected_assumptions_are_advisory_and_partial_runs_select_validation() {
+        let body = "input i(); relation p(); p():-i(),!p(); assumption invalid:empty(p); assumption exclude:empty(i);";
+        let none = Fixture::new(body);
+        let (code, output, progress) = none.traced(&["--max-atoms", "0"]);
+        assert_eq!(code.unwrap(), 2);
+        assert!(
+            output.contains("unvalidated-assumption: Assumption invalid is not selected"),
+            "{output}"
+        );
+        assert!(!output.contains("blocking dependency cycle"));
+        assert!(!progress.contains("Starting fixed-facts"), "{progress}");
+
+        let fixture = Fixture::new(&format!(
+            "{body} verification bad{{assumptions:[invalid];obligations:[];}} verification good{{assumptions:[exclude];obligations:[];}}"
+        ));
+        let (code, output) = fixture.run(&["--verification", "good"]);
+        assert_eq!(code, 2); // Partial-run exit code is unchanged.
+        assert!(
+            output.contains("Assumption invalid is not selected"),
+            "{output}"
+        );
+        assert!(!output.contains("invalid-assumption:"), "{output}");
+        let (_, output) = fixture.run(&["--verification", "bad"]);
+        assert!(
+            output.contains("invalid-assumption: Assumption invalid"),
+            "{output}"
+        );
+        assert!(output.contains("blocking dependency cycle"), "{output}");
+
+        // A deferred declaration must not turn an otherwise proved run incomplete.
+        let clean = Fixture::new(
+            "relation no(); relation p(); p():-no(),!p(); assumption a:empty(p); obligation o:empty(no); verification v{assumptions:[];obligations:[o];}",
+        );
+        let (code, output) = clean.run(&[]);
+        assert_eq!(code, 0, "{output}");
+        assert!(output.contains("Assumption a is not selected"), "{output}");
     }
     #[test]
     fn region_diagnostics_print_ground_instances_and_preserve_exit_codes() {

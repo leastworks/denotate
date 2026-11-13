@@ -426,14 +426,28 @@ input-free, relation-stratified restriction on `within` providers is unchanged.
 
 `Corpus::validate_assumptions` and loading classify cones as `RelationStratified` or
 `NeedsGrounding`; loading alone does not establish validity in the latter case.
-The checker validates all declarations once per program, including unselected ones
-and programs without verifications. An invalid cone produces an `invalid-assumption`
-Error on its declaration, with the ground cycle related. Fixed preparation, grounding
-or validation exhaustion produces an `unvalidated-assumption` Information diagnostic naming the
-phase and resource. Verifications selecting invalid or unvalidated assumptions do
-not run; other verifications can still run, but the program is not reported proved.
-Construction clients use `validate_assumption_cones` for this program-level result;
-request preparation independently enforces validity of its selected restrictions.
+Each run validates the union of assumptions selected by its executed verifications.
+Relation-stratified declarations are checked cheaply whether selected or not. An
+unselected declaration needing grounding instead gets an `unvalidated-assumption`
+Information diagnostic: its ground cone is validated when a verification selects
+it. Its evidence state is `not-selected`, distinct from inconclusive; it does not
+make the run incomplete. With no verifications, no ground validation runs.
+
+A selected invalid cone produces an `invalid-assumption` Error on its declaration,
+with the ground cycle related. Fixed preparation, grounding or validation exhaustion
+produces an `unvalidated-assumption` Information diagnostic naming the phase and
+resource. Verifications selecting invalid or inconclusive assumptions do not run;
+other verifications can still run, but the program is not reported proved.
+Selection changes which declarations are validated, not how: validation uses no
+assumption's truth, and the same selected declaration has the same meaning regardless
+of other selections. Constraints sharing a relation still have distinct declaration
+identities. Ground validation remains bounded and may be inconclusive.
+
+Construction clients use `validate_selected_assumption_cones_using` with the run's
+requests and a lazy fixed-preparation factory. The explicit all-declaration APIs
+(`validate_assumption_cones` and its run/factory variants) remain available.
+Request preparation independently enforces validity of its selected restrictions,
+including unnamed ones.
 
 Before admission, the checker evaluates these cones without assumptions or rewrites
 and conjoins their cardinality conditions into the permitted-world condition W.
@@ -631,11 +645,15 @@ controls through `denotate.timeoutMs` and `denotate.limits` (see the
 instead of human diagnostics. Root/verification headers and configuration notices
 remain, so this mode is not a single JSON document. Exit codes are the same in both
 modes. `--verbose` has no effect with `--json`. With no verification it prints
-`No verification configured` and runs no verification checks; program-level
-assumption-declaration validation still runs. `--verification` selects one
+`No verification configured` and runs no ground assumption validation by default.
+`--validate-all-assumptions` is an authoring aid that validates every declaration,
+including unselected ones and programs with no verifications; it does not activate
+their constraints. Invalid or inconclusive results make the run incomplete.
+`--verification` selects one
 declaration using the usual quoted/qualified name syntax; a bare name must be unique
 across the closure. Unknown or ambiguous names are errors. Every filtered run is labeled
-partial, even if the program contains only one verification.
+partial, even if the program contains only one verification. By default only that
+verification's assumptions receive ground validation.
 
 Obligations that no verification in the closure selects are listed as unchecked, also
 in a filtered run. A verification with `obligations: []` is reported as consistency-only.

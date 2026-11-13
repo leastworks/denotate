@@ -120,6 +120,17 @@ pub fn human(report: &Value) -> String {
             config["unchecked_obligations"].as_array().unwrap().len()
         )
         .unwrap();
+        if let Some(findings) = report["assumption_validation"][label]["findings"].as_array() {
+            for finding in findings {
+                writeln!(
+                    out,
+                    "  {}: {}",
+                    finding["kind"].as_str().unwrap(),
+                    finding["message"].as_str().unwrap()
+                )
+                .unwrap();
+            }
+        }
     }
     for v in report["verifications"].as_array().unwrap() {
         writeln!(

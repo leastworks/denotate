@@ -185,7 +185,7 @@ owns wording and current locations; source-rule finding identities and instance
 coverage remain shared. Original rules remain in the local query dependency closure
 and replay evidence, so pruning executable edges cannot hide an edit dependency.
 
-Assumption declaration validity is a program-level query. The IR classifies
+Assumption declaration validity is a program-level query with an explicit run selection. The IR classifies
 relation-stratified cones and those requiring grounding. For the latter, the checker
 prepares assumption-independent fixed truth, grounds the residual once and builds
 a specialized view: a fixed-false positive or fixed-true negative premise kills its
@@ -195,10 +195,16 @@ Validation follows dependencies from each assumption relation's atoms in that vi
 computing W uses the same view. A cycle disconnected from an assumption is still
 subject to ordinary admission and reporting.
 
-The CLI/editor validate before verification loops, so unselected declarations and
-unconfigured programs still get diagnostics. `validate_assumption_cones_for_run`
-prepares directly; `validate_assumption_cones_using` accepts a lazy fold factory so
-the editor can use its session. Relation-stratified validation never calls it.
+The CLI/editor resolve the executed requests before validation, then pass them to
+`validate_selected_assumption_cones_using`. Their union selects declarations by
+semantic key; a partial CLI run selects only its executed verification. Unselected
+cones needing grounding get an advisory `not-selected` result, including without
+verifications. They never trigger the fold factory or make the run incomplete.
+Relation-stratified classification still covers all declarations. The explicit
+all-declaration APIs remain for authoring tools (`check-den --validate-all-assumptions`).
+The lazy factory lets the editor use its session. When any selected cone needs
+grounding, residual preparation, specialization and cycle indexing still cover the
+shared graph; this increment does not restrict that graph to selected cones.
 Keyed cycle evidence goes through the shared presenter, never reconstructed there.
 The sealed `ValidatedAssumptions` artifact shares fixed evidence, the original
 residual graph, its specialized view and the relation-to-cycle index with subsequent
@@ -209,7 +215,7 @@ residual views. Copies of those views share their immutable cores across request
 Without that artifact, a request needing ground validation initializes the same
 preparation lazily, including unnamed restrictions and the optional grounding-cache
 entry point. Corpus, domains, keys and deterministic limits bind reuse. Validation
-and the specialized view recompute each run, even when the session reuses the fixed
+and the specialized view recompute each run that needs them, even when the session reuses the fixed
 fold across input-dependent edits. Logical exhaustion remains inconclusive;
 cancellation/deadlines never install partial reusable preparation.
 

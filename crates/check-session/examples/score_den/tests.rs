@@ -44,8 +44,10 @@ fn config() -> Config {
     Config::parse(["/score".into(), "--samples".into(), "1".into()]).unwrap()
 }
 #[test]
-fn invalid_unselected_assumptions_are_not_silently_scored_as_unconfigured() {
-    let source = snapshot("relation p(); p():-!p(); assumption a:empty(p);");
+fn invalid_selected_assumptions_prevent_scoring() {
+    let source = snapshot(
+        "relation p(); p():-!p(); assumption a:empty(p); verification v{assumptions:[a];obligations:[];}",
+    );
     let error = driver::collect(&config(), &source, None).unwrap_err();
     assert!(
         error.contains("Assumption validation") && error.contains("invalid-assumption"),
@@ -630,4 +632,26 @@ fn known_exactly_one_failure_survives_incomplete_other_component() {
         obligation(&o, "exact")["components"]["coverage"]["count_kind"],
         "lower-bound"
     );
+}
+
+#[test]
+fn unselected_assumptions_are_reported_without_ground_validation() {
+    let mut c = config();
+    c.limits.max_atoms = 0;
+    let report = driver::collect(
+        &c,
+        &snapshot("relation p(); p():-!p(); assumption a:empty(p);"),
+        None,
+    )
+    .unwrap();
+    assert_eq!(report["configuration"]["base"]["state"], "unconfigured");
+    assert_eq!(
+        report["assumption_validation"]["base"]["state"],
+        "not-selected"
+    );
+    assert_eq!(
+        report["assumption_validation"]["base"]["findings"][0]["kind"],
+        "unvalidated-assumption"
+    );
+    assert_eq!(report["failures"], json!([]));
 }
