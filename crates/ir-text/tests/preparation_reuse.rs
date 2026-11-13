@@ -333,7 +333,8 @@ verification open{assumptions:[];obligations:[o];}";
                 let original = prepared.key_view().original(id).unwrap();
                 assert!(original.body.iter().any(|(negative, _)| *negative));
                 match proof.kind {
-                    RewriteKind::Discharge { literal_occurrence } => {
+                    RewriteKind::Discharge { literal_occurrence }
+                    | RewriteKind::GuardedSettlement { literal_occurrence } => {
                         let key = p.keys.bindings().key(literal_occurrence).unwrap();
                         assert!(original.body.iter().any(|(_, o)| &o.occurrence == key));
                         assert!(

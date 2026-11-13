@@ -9,17 +9,13 @@ Admission decides whether every permitted world has exactly one meaning. Impleme
 structural reduction (true/false propagation, dead rules, same-head subsumption after
 bounded unfolding), producer removal by exact coverage, bound-based removal (a cyclic
 producer whose bounded body is covered by exact producers), negation discharge and
-cycle upper bounds, failure-local skips with precise retry, reuse of completed
+cycle upper bounds, guarded settlement into bounded expressions over settled atoms,
+failure-local skips with precise retry, reuse of completed
 negative attempts across rounds, and cycle-first ordering (see [decisions](decisions.md) and [checker policies](checker-policies.md)).
 Cycle-relevant proofs and supporting evaluation precede downstream work; downstream
 exhaustion is reported separately without relabeling the cycles' results. A
 production-scale lowered program showed what remains:
 
-- **Guarded settlement.** A cycle edge can be dead under the guard of the rule that
-  reads it, one or more rules away from the negation. Settle the premise under that
-  guard when bounds make it exact there, rewriting only into settled literals. Plain
-  negative unfolding is not used: it can lose stable models (`h :- not p. p :- not h.`
-  unfolded gives `h :- h.`).
 - **Never-active cycles.** More generally, a component whose active dependency graph
   is acyclic in every permitted world (edges labelled with their guards, checked by a
   symbolic topological peeling) has one meaning per world without any rewrite. It
@@ -30,6 +26,9 @@ production-scale lowered program showed what remains:
   the exact producers by subtraction (stop when nothing is left) instead of building
   their union; retain successful summaries, coverage and bounds across rounds when
   their inputs did not change.
+- **Guarded settlement at scale.** It computes relaxed bounds per reading rule,
+  commits one replacement per component per snapshot, and a replacement clears all
+  reusable failed attempts. Measure on a large component before refining any of these.
 - **Totality and loop formulas** remain research ([below](#research-admission-by-well-founded-totality)).
 
 Cycles that are genuine, with two meanings in some world, belong to the lowering:

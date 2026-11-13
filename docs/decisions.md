@@ -46,6 +46,52 @@ real program that the current choice serves badly.
 
 ## Meaning and checking
 
+- **Replace cyclic premises only with a guard-relative, non-circular certificate.**
+  A premise need not be always false to cut its cycle edge. Under a rule's settled
+  guard G, it may equal an input-dependent expression over globally settled atoms.
+  For example, under `!perishable`, `claim_fails :- docked, !reefer_booked` can
+  equal `docked` when every producer of `reefer_booked` requires `perishable`.
+  Replace the signed premise by that expression while retaining the reading
+  rule's guard. Store one bounded Boolean expression on the ground rule rather
+  than distributing negative formulas into rule variants. This avoids branch
+  growth and preserves the authored rule and occurrence identities.
+
+  The certificate starts with atoms whose descending upper bounds are false
+  under G. Further atoms are marked only when all live producers depend on
+  earlier marks and globally settled facts; unresolved external providers stay
+  unknown. The reading producer is never a live producer of its own certificate.
+  Bounds used here relax that producer to G and exclude it from exact guarantees.
+  This is essential: bounds must survive the replacement, rather than rely on
+  the very cyclic premise being removed. One replacement per component is committed
+  per snapshot; independent components can share the atomic batch.
+
+  For supported models in either graph, the relaxed operator bounds the component
+  because the reading producer can imply no more than G. By induction on the
+  certificate ranks, every marked atom therefore equals its expression in either
+  graph whenever G holds. Outside G the changed rule is dead. The original and
+  rewritten rule consequently accept the same supported models.
+  For stable models, globally settled facts have finite derivations independent
+  of the unresolved component. Each positive mark that is true expands into a
+  finite derivation through earlier marks; false marks have no live producer.
+  With negative premises fixed by a candidate model, these expansions preserve
+  the least reduct model in both directions. No support can be supplied by the
+  changed rule itself. This excludes the unsound unfolding of `h :- !p; p :- !h`
+  into `h :- h; p :- !h`, which loses a stable model despite preserving supported
+  models. Exhaustive stable and supported-model oracles cover both directions.
+
+  Existing producer removal and negation discharge get the first opportunity;
+  guarded settlement runs only when they have no batch. This deliberately preserves
+  established discharge warnings and their failure-local attempts. Bounds and
+  settlement have separate attempt identities. A replacement conservatively
+  invalidates all invocation-local failed/negative attempts; subsequent ordinary
+  commits track expression leaves as settled dependencies. Replay, completion,
+  certification and keyed local queries execute the same attached expression.
+  The certificate stays separate from the executable condition and points back
+  to original source. New `guarded-settlement` warnings describe an equivalence,
+  not redundancy; they are advisory for CLI exit codes. Existing warning behavior
+  and finding identities are unchanged. Display is bounded, with full steps on
+  request; no source edit is authorized.
+
 - **Strengthen cycle bounds with independent exact guarantees.** A cyclic
   producer can require a condition implied by another producer only after
   following several positive and negative dependencies. After cheap removals,

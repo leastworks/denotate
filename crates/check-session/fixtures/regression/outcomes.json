@@ -291,15 +291,10 @@
       "expected": {
         "groups": [
           {
-            "status": "unsupported"
+            "status": "counterexample"
           }
         ],
-        "regions": [
-          {
-            "completion": "no_contradiction",
-            "outcome": "Unsupported"
-          }
-        ]
+        "regions": []
       }
     },
     {

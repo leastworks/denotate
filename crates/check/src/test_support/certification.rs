@@ -28,10 +28,42 @@ pub fn compare(c: &Corpus, domains: &Domains, admit: bool) -> usize {
                     replay.facts
                 );
                 for step in &replay.pruning {
-                    assert_ne!(step.value, step.premise.polarity == Polarity::Positive);
-                    assert!(p.rule(step.rule).unwrap().body.contains(&step.premise));
-                    if let CompletedProvider::Component(id) = &step.provider {
-                        assert!(replay.providers[id].contains(&step.premise.term.atom));
+                    match &step.reason {
+                        ObservationPruningReason::Literal {
+                            premise,
+                            value,
+                            provider,
+                        } => {
+                            assert_ne!(*value, premise.polarity == Polarity::Positive);
+                            assert!(p.rule(step.rule).unwrap().body.contains(premise));
+                            if let CompletedProvider::Component(id) = provider {
+                                assert!(replay.providers[id].contains(&premise.term.atom));
+                            }
+                        }
+                        ObservationPruningReason::SettledExpression {
+                            replacement,
+                            leaves,
+                        } => {
+                            assert!(
+                                p.rule(step.rule)
+                                    .unwrap()
+                                    .replacements
+                                    .contains(replacement)
+                            );
+                            for (atom, value, provider) in leaves {
+                                assert_eq!(*value, replay.facts.contains(atom));
+                                if let CompletedProvider::Component(id) = provider {
+                                    assert!(replay.providers[id].contains(atom));
+                                }
+                            }
+                            // Independent truth evaluation from the final certified model.
+                            assert!(!super::rewrites::expression(
+                                &replacement.expression,
+                                &replay.facts,
+                                &replay.facts,
+                                false
+                            ));
+                        }
                     }
                 }
                 for (fact, step) in &replay.evidence {
@@ -50,7 +82,8 @@ pub fn compare(c: &Corpus, domains: &Domains, admit: bool) -> usize {
                                             assert!(replay.providers[id].contains(fact));
                                         }
                                     }
-                                    PremiseEvidence::Discharged { proof, .. } => {
+                                    PremiseEvidence::Discharged { proof, .. }
+                                    | PremiseEvidence::Replaced { proof, .. } => {
                                         assert!(p.rewrite_proof(*proof).is_some());
                                     }
                                 }

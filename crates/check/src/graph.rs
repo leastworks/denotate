@@ -52,7 +52,7 @@ pub(crate) fn analyze(p: &mut GroundProgram, budget: &mut Budget<'_>) -> Result<
             continue;
         }
         let consumer = p.atom_index[&rule.head.atom];
-        for literal in &rule.body {
+        for literal in rule.dependency_literals() {
             budget.tick("dependencies")?;
             let Some(&provider) = p.atom_index.get(&literal.term.atom) else {
                 if p.fixed_value(&literal.term.atom).is_some() {

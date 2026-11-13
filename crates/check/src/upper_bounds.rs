@@ -16,6 +16,8 @@ use std::{collections::BTreeMap, sync::Arc};
 pub struct ComponentUpperBounds {
     pub component: ComponentId,
     pub snapshot: u64,
+    /// This producer is relaxed to its settled guard, so bounds survive its replacement.
+    pub relaxed_rule: Option<GroundRuleId>,
     /// Every active producer in this component at the immutable snapshot.
     pub producers: Vec<ProducerSummary>,
     pub conditions: BTreeMap<GroundAtom, Condition>,
@@ -62,6 +64,22 @@ pub(crate) fn compute_with_guarantees(
     observe: Option<&dyn Fn(usize)>,
     strengthen: bool,
 ) -> Result<Arc<ComponentUpperBounds>> {
+    compute_relaxed(
+        program, component, summaries, ctx, retained, budget, observe, strengthen, None,
+    )
+}
+
+pub(crate) fn compute_relaxed(
+    program: &GroundProgram,
+    component: &Component,
+    summaries: &BTreeMap<GroundRuleId, ProducerSummary>,
+    ctx: &ConditionContext,
+    retained: &mut usize,
+    budget: &mut Budget<'_>,
+    observe: Option<&dyn Fn(usize)>,
+    strengthen: bool,
+    relaxed_rule: Option<GroundRuleId>,
+) -> Result<Arc<ComponentUpperBounds>> {
     let mut producers = Vec::new();
     for index in &program.component_rules[component.id.index] {
         let summary = &summaries[&program.rules[*index].id];
@@ -76,7 +94,7 @@ pub(crate) fn compute_with_guarantees(
     if strengthen {
         for producer in &producers {
             budget.tick("bound guarantees")?;
-            if !producer.exact {
+            if !producer.exact || Some(producer.rule.id) == relaxed_rule {
                 continue;
             }
             let head = &producer.rule.head.atom;
@@ -124,7 +142,12 @@ pub(crate) fn compute_with_guarantees(
         for producer in &producers {
             budget.tick("upper-bound iteration")?;
             let mut body = producer.condition.clone(); // all settled signed premises
-            for literal in &producer.rule.body {
+            for literal in producer
+                .rule
+                .body
+                .iter()
+                .filter(|_| Some(producer.rule.id) != relaxed_rule)
+            {
                 budget.tick("upper-bound iteration")?;
                 if literal.polarity == Polarity::Positive {
                     if let Some(bound) = previous.get(&literal.term.atom) {
@@ -160,6 +183,7 @@ pub(crate) fn compute_with_guarantees(
             return Ok(Arc::new(ComponentUpperBounds {
                 component: component.id,
                 snapshot: program.graph_revision,
+                relaxed_rule,
                 producers,
                 conditions: previous,
                 guarantees,

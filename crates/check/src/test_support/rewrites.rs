@@ -62,9 +62,10 @@ pub fn candidates(
         .filter(|a| {
             let producers: Vec<_> = rules.iter().filter(|r| r.head.atom == **a).collect();
             !producers.is_empty()
-                && producers
-                    .iter()
-                    .all(|r| r.body.iter().all(|l| l.polarity == Polarity::Positive))
+                && producers.iter().all(|r| {
+                    r.replacements.is_empty()
+                        && r.body.iter().all(|l| l.polarity == Polarity::Positive)
+                })
                 && (producers
                     .iter()
                     .all(|r| r.body.iter().all(|l| inputs.contains(&l.term.atom)))
@@ -134,6 +135,9 @@ pub fn stable_models(
                         .iter()
                         .filter(|l| l.polarity == Polarity::Positive)
                         .all(|l| least.contains(&l.term.atom))
+                        && r.replacements
+                            .iter()
+                            .all(|r| expression(&r.expression, &least, &candidate, false))
                     {
                         least.insert(r.head.atom.clone());
                     }
@@ -169,6 +173,9 @@ pub fn supported_models(
                                 && r.body.iter().all(|l| {
                                     candidate.contains(&l.term.atom)
                                         == (l.polarity == Polarity::Positive)
+                                })
+                                && r.replacements.iter().all(|r| {
+                                    expression(&r.expression, &candidate, &candidate, false)
                                 })
                         })
                 })
@@ -231,4 +238,36 @@ pub fn compare_permitted(
         }
     }
     nonempty
+}
+
+// Independent Boolean-tree evaluator for the normal-form reduct. Negative
+// leaves are pinned by the candidate; positive leaves read its growing least
+// model. This uses neither BDDs nor the production expression evaluator.
+pub(super) fn expression(
+    e: &SettledExpression<GroundAtom>,
+    positive: &BTreeSet<GroundAtom>,
+    negative: &BTreeSet<GroundAtom>,
+    negated: bool,
+) -> bool {
+    match e {
+        SettledExpression::Constant(v) => *v != negated,
+        SettledExpression::Atom(a) => {
+            if negated {
+                !negative.contains(a)
+            } else {
+                positive.contains(a)
+            }
+        }
+        SettledExpression::Not(c) => expression(c, positive, negative, !negated),
+        SettledExpression::All(cs) | SettledExpression::Any(cs) => {
+            let all = matches!(e, SettledExpression::All(_)) != negated;
+            if all {
+                cs.iter()
+                    .all(|c| expression(c, positive, negative, negated))
+            } else {
+                cs.iter()
+                    .any(|c| expression(c, positive, negative, negated))
+            }
+        }
+    }
 }

@@ -150,7 +150,7 @@ impl<'a> AdmissionDetails<'a> {
                 "kind":kind.label(), "new":a.new, "rerunNegative":a.rerun_negative,
                 "retriedSkip":a.retried_skip, "reusedNegative":a.reused_negative,
                 "reusedSkip":a.reused_skip, "completed":a.completed, "negative":a.negative,
-                "skipped":a.skipped, "failed":a.failed, "elapsedMs":a.elapsed.as_secs_f64()*1000.,
+                "skipped":a.skipped, "failed":a.failed, "cutoffs":a.cutoffs, "elapsedMs":a.elapsed.as_secs_f64()*1000.,
                 "retryCauses":a.retry_causes,
             })).collect::<Vec<_>>(),
             "prerequisiteMs": event.prerequisites.iter().map(|(k, d)| ((*k).to_string(), json!(d.as_secs_f64()*1000.))).collect::<serde_json::Map<_, _>>(),
@@ -229,10 +229,10 @@ pub fn admission_text(a: &Value) -> String {
         }
         for counts in a["attempts"].as_array().into_iter().flatten() {
             text.push_str(&format!(
-                "; {}: {} new, {} rerun negative, {} retry skip, {} reused negative, {} reused skip; outcomes {} completed, {} negative, {} skipped, {} failed ({:.1} ms, retry causes {})",
+                "; {}: {} new, {} rerun negative, {} retry skip, {} reused negative, {} reused skip; outcomes {} completed, {} negative, {} skipped, {} failed, {} expansion cutoffs ({:.1} ms, retry causes {})",
                 counts["kind"].as_str().unwrap_or("?"), counts["new"], counts["rerunNegative"],
                 counts["retriedSkip"], counts["reusedNegative"], counts["reusedSkip"],
-                counts["completed"], counts["negative"], counts["skipped"], counts["failed"],
+                counts["completed"], counts["negative"], counts["skipped"], counts["failed"], counts["cutoffs"],
                 counts["elapsedMs"].as_f64().unwrap_or(0.), counts["retryCauses"],
             ));
         }

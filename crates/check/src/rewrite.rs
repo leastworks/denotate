@@ -67,6 +67,7 @@ pub struct RewriteProofId {
 pub enum RewriteKind {
     Discharge { literal_occurrence: OccurrenceId },
     RedundantProducer,
+    GuardedSettlement { literal_occurrence: OccurrenceId },
 }
 
 #[derive(Debug, Clone)]
@@ -115,6 +116,7 @@ pub enum RewriteJustification {
     Symbolic(SymbolicRewriteProof),
     Structural(crate::structural::StructuralProof),
     BoundRemoval(BoundRemovalProof),
+    GuardedSettlement(GuardedSettlementProof),
 }
 #[derive(Debug, Clone)]
 pub struct RewriteProof {
@@ -129,6 +131,7 @@ impl RewriteProof {
             RewriteJustification::Symbolic(p) => &p.candidate.rule,
             RewriteJustification::Structural(p) => &p.candidate,
             RewriteJustification::BoundRemoval(p) => &p.proof.candidate.rule,
+            RewriteJustification::GuardedSettlement(p) => &p.proof.candidate.rule,
         }
     }
     pub fn symbolic(&self) -> Option<&SymbolicRewriteProof> {
@@ -149,14 +152,30 @@ impl RewriteProof {
             _ => None,
         }
     }
+    pub fn guarded_settlement(&self) -> Option<&GuardedSettlementProof> {
+        match &self.justification {
+            RewriteJustification::GuardedSettlement(p) => Some(p),
+            _ => None,
+        }
+    }
     pub(crate) fn conditional(&self) -> Option<&SymbolicRewriteProof> {
         self.symbolic()
             .or_else(|| self.bound_removal().map(|p| &p.proof))
+            .or_else(|| self.guarded_settlement().map(|p| &p.proof))
     }
     pub fn supporting_rules(&self) -> Vec<&GroundRule> {
         match &self.justification {
             RewriteJustification::Symbolic(p) => p.producers.iter().map(|p| &p.rule).collect(),
             RewriteJustification::Structural(p) => p.supporting_rules(),
+            RewriteJustification::GuardedSettlement(p) => p
+                .proof
+                .upper_bounds
+                .as_ref()
+                .unwrap()
+                .producers
+                .iter()
+                .map(|p| &p.rule)
+                .collect(),
             RewriteJustification::BoundRemoval(p) => p
                 .proof
                 .upper_bounds
@@ -174,6 +193,9 @@ impl RewriteProof {
         match &self.justification {
             RewriteJustification::Symbolic(p) => p.producers.iter().map(|p| &p.rule).collect(),
             RewriteJustification::Structural(p) => p.direct_rules(),
+            RewriteJustification::GuardedSettlement(p) => {
+                p.proof.producers.iter().map(|p| &p.rule).collect()
+            }
             RewriteJustification::BoundRemoval(p) => {
                 p.proof.producers.iter().map(|p| &p.rule).collect()
             }
@@ -229,6 +251,7 @@ pub(crate) struct Rewrites {
     // Snapshot-local lookup metadata, never semantic keys or cached query input.
     // Removal proofs occupy no entries; a replay with no discharges misses cheaply.
     discharges: BTreeMap<(GroundRuleId, OccurrenceId), RewriteProofId>,
+    replacements: BTreeMap<(GroundRuleId, OccurrenceId), RewriteProofId>,
     pub(crate) skips: BTreeMap<GroundAtom, Vec<AdmissionSkip>>,
     pub(crate) skipped_attempts: usize,
     pub inconclusive: Option<Inconclusive>,
@@ -243,6 +266,10 @@ impl Rewrites {
             self.discharges
                 .entry((proof.candidate().id, literal_occurrence))
                 .or_insert(proof.id);
+        }
+        if let RewriteKind::GuardedSettlement { literal_occurrence } = proof.kind {
+            self.replacements
+                .insert((proof.candidate().id, literal_occurrence), proof.id);
         }
         self.proofs.push(proof);
     }
@@ -293,6 +320,16 @@ impl GroundProgram {
         AnalysisOutcome::from_result(Self::prepare(corpus, domains, limits))
     }
 
+    pub(crate) fn replacement_proof(
+        &self,
+        rule: GroundRuleId,
+        occurrence: OccurrenceId,
+    ) -> Option<&RewriteProof> {
+        self.rewrites
+            .replacements
+            .get(&(rule, occurrence))
+            .and_then(|id| self.rewrite_proof(*id))
+    }
     pub fn rewrite_proofs(&self) -> impl Iterator<Item = &RewriteProof> {
         self.rewrites.proofs.iter()
     }
@@ -518,6 +555,10 @@ impl GroundProgram {
                         }
                     }
                 }
+                for replacement in &rule.replacements {
+                    let value = meaning.settled_expression(&replacement.expression, budget)?;
+                    condition = ctx.apply(&condition, &value, and, budget)?;
+                }
                 retained = crate::symbolic::retain(retained, 0, condition.node_count(), budget)?;
                 if !exact && scope.targets.contains(&rule.id) {
                     // Both passes visit active rules in the same order. This is
@@ -719,6 +760,14 @@ impl GroundProgram {
                                                 != excluded.literal.term.occurrence
                                         });
                                         guard.condition = ctx.true_condition();
+                                        for replacement in &rule.replacements {
+                                            let value = meaning.settled_expression(
+                                                &replacement.expression,
+                                                budget,
+                                            )?;
+                                            guard.condition =
+                                                ctx.apply(&guard.condition, &value, and, budget)?;
+                                        }
                                         for premise in &guard.settled {
                                             guard.condition = ctx.apply(
                                                 &guard.condition,
@@ -861,6 +910,33 @@ impl GroundProgram {
                             )?;
                         }
                     }
+                }
+            }
+            // Preserve established discharge proofs before trying the more general
+            // guarded replacement. Each successful batch reads a fresh snapshot.
+            if batch.is_empty() && phase == AdmissionPhase::Relevant && !last_candidates.is_empty()
+            {
+                let guarded = self.guarded_settlements(
+                    &meaning,
+                    &summaries,
+                    &scope.targets,
+                    &mut retained,
+                    budget,
+                    progress,
+                    attempts,
+                )?;
+                for proof in guarded {
+                    batch.push(RewriteProof {
+                        id: RewriteProofId {
+                            snapshot: self.graph_revision,
+                            index: self.rewrites.proofs.len() + batch.len(),
+                        },
+                        snapshot: self.graph_revision,
+                        kind: RewriteKind::GuardedSettlement {
+                            literal_occurrence: proof.occurrence,
+                        },
+                        justification: RewriteJustification::GuardedSettlement(proof),
+                    });
                 }
             }
             if profile.enabled() {
@@ -1108,7 +1184,12 @@ impl GroundProgram {
         // Transactional graph rebuild: an interrupted batch cannot leave a
         // half-rewritten graph or publish warnings for uncommitted changes.
         budget.charge(
-            self.atoms.len() + self.rules.iter().map(|r| 1 + r.body.len()).sum::<usize>(),
+            self.atoms.len()
+                + self
+                    .rules
+                    .iter()
+                    .map(|r| 1 + r.body.len() + r.replacements.len())
+                    .sum::<usize>(),
             "rewrite commit",
         )?;
         let mut next = self.clone();
@@ -1122,6 +1203,16 @@ impl GroundProgram {
             match proof.kind {
                 RewriteKind::RedundantProducer => {
                     next.rewrites.dropped.insert(id);
+                }
+                RewriteKind::GuardedSettlement { literal_occurrence } => {
+                    let p = proof.guarded_settlement().expect("guarded certificate");
+                    next.rules[id.index]
+                        .body
+                        .retain(|l| l.term.occurrence != literal_occurrence);
+                    next.rules[id.index].replacements.push(SettledReplacement {
+                        occurrence: literal_occurrence,
+                        expression: Arc::clone(&p.replacement),
+                    });
                 }
                 RewriteKind::Discharge { literal_occurrence } => next.rules[id.index]
                     .body

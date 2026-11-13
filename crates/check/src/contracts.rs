@@ -68,7 +68,7 @@ impl<'p> ConeIndex<'p> {
                 for rule in rules {
                     budget.tick("dependency cones")?;
                     cone.rules.insert(rule.id);
-                    for literal in &rule.body {
+                    for literal in rule.dependency_literals() {
                         budget.tick("dependency cones")?;
                         pending.push(literal.term.atom.clone());
                     }

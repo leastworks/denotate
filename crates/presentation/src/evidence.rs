@@ -21,6 +21,7 @@ pub enum Kind {
     Inconclusive,
     IncompleteDownstreamWork,
     Rewrite,
+    GuardedSettlement,
 }
 impl Kind {
     pub fn code(self) -> &'static str {
@@ -40,6 +41,7 @@ impl Kind {
             Self::Inconclusive => "inconclusive",
             Self::IncompleteDownstreamWork => "incomplete-downstream-work",
             Self::Rewrite => "redundant",
+            Self::GuardedSettlement => "guarded-settlement",
         }
     }
     pub fn severity(self) -> Severity {
@@ -50,6 +52,7 @@ impl Kind {
             | Self::InconsistentAssumptions => Severity::Error,
             Self::UnsupportedRegion
             | Self::Rewrite
+            | Self::GuardedSettlement
             | Self::AssumedConclusion
             | Self::ImpossibleCondition => Severity::Warning,
             Self::UnvalidatedAssumption
@@ -182,6 +185,9 @@ pub(crate) fn step_contributions(
             let occurrence = match premise {
                 PremiseEvidence::Positive { occurrence, .. }
                 | PremiseEvidence::Absent { occurrence, .. } => *occurrence,
+                PremiseEvidence::Replaced {
+                    literal_occurrence, ..
+                } => *literal_occurrence,
                 PremiseEvidence::Discharged {
                     literal_occurrence, ..
                 } => *literal_occurrence,

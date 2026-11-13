@@ -1,0 +1,15 @@
+sort Class; const perishable, hazardous: Class;
+relation classes(c: Class); classes(perishable); classes(hazardous);
+input declared(c: Class) within classes;
+input docked(); input priority_call();
+assumption one_class: at_most_one(declared, group_by: ());
+
+relation reefer_booked(); reefer_booked() :- declared(perishable), cleared();
+relation claim_fails();   claim_fails()   :- docked(), !reefer_booked();
+relation hazard_claim();  hazard_claim()  :- declared(hazardous), !claim_fails();
+relation inspected();     inspected()     :- declared(perishable);
+                          inspected()     :- hazard_claim();
+relation held();          held()          :- priority_call(), inspected();
+relation cleared();       cleared()       :- docked(), !held();
+notice cleared_varies: varies(cleared);
+verification v { assumptions: [one_class]; obligations: []; notices: [cleared_varies]; }

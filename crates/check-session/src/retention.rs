@@ -205,11 +205,32 @@ fields!(KeyedGroundOccurrence {
     occurrence,
     arguments
 });
-fields!(GroundInstance { schema, head, body });
+fields!(GroundInstance {
+    schema,
+    head,
+    body,
+    replacements
+});
+impl<A: Retained> Retained for SettledExpression<A> {
+    fn heap(&self, p: &mut Payload) {
+        match self {
+            Self::Constant(_) => {}
+            Self::Atom(a) => a.heap(p),
+            Self::Not(c) => c.heap(p),
+            Self::All(cs) | Self::Any(cs) => cs.heap(p),
+        }
+    }
+}
+impl<A: Retained, O: Retained> Retained for SettledReplacement<A, O> {
+    fn heap(&self, p: &mut Payload) {
+        self.occurrence.heap(p);
+        self.expression.heap(p);
+    }
+}
 impl Retained for KeyedRewriteKind {
     fn heap(&self, p: &mut Payload) {
         match self {
-            Self::Discharge(k) => k.heap(p),
+            Self::Discharge(k) | Self::GuardedSettlement(k) => k.heap(p),
             Self::RedundantProducer => {}
         }
     }

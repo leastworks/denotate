@@ -150,7 +150,7 @@ Rewrite counts are cumulative committed counts, not proposed changes.
 `skippedAttempts` is the cumulative number of failed per-operation proof attempts,
 including later retries. A recoverable failure immediately emits `skipped` as
 `producer-coverage`, `producer-removal`, `upper-bounds`, `guaranteed-bounds`,
-`bound-removal` or `negation-discharge`,
+`bound-removal`, `negation-discharge`, `guarded-bounds` or `guarded-settlement`,
 `skipTarget: {head: "p(a)"}`, and the ordinary formatted `failure`. Admission
 continues. Subsequent updates clear `skipped`, `skipTarget` and that local failure;
 `reused` includes the retained attempt count. A failure with `skipped: null` stops
@@ -158,21 +158,21 @@ admission. A preflight constrained by remaining work reports resource `work`,
 not the per-operation `BDD tasks` limit; ties are treated as global work stops.
 
 Stages are `starting`, `structural`, `structural-committed`, `symbolic`, `summaries`, `producer-removals`, `candidates`,
-`upper-bounds`, `guaranteed-bounds`, `bound-removals`, `commit`, `committed`, `attempt-summary`, `complete`, `reused`, and
+`upper-bounds`, `guaranteed-bounds`, `bound-removals`, `guarded-bounds`, `guarded-settlement`, `commit`, `committed`, `attempt-summary`, `complete`, `reused`, and
 `inconsistent-assumptions`.
 
 `attempts` is an optional array of per-round aggregates, ordered by attempt kind.
 Each entry has `kind` (the same labels as `skipped`), `new`, `rerunNegative`,
 `retriedSkip`, `reusedNegative`, `reusedSkip`, `completed`, `negative`, `skipped`,
-`failed`, `elapsedMs` and `retryCauses`. The first three counters count executed
+`failed`, `cutoffs`, `elapsedMs` and `retryCauses`. The first three counters count executed
 attempts by prior outcome; the two reuse counters count cache hits, without
 executing the operation. `completed` counts successful computations/proofs;
 `negative` counts completed proof attempts that supplied no proof. `skipped`
 counts recoverable per-operation failures and `failed` counts stopping failures.
-Time covers executed operations only. Successful prerequisites are rebuilt each
+`cutoffs` counts bounded-expression expansion skips (also counted as negative attempts), not resource exhaustion. Time covers executed operations only. Successful prerequisites are rebuilt each
 round and count as `new`, since their results are not remembered across rounds.
 `retryCauses` aggregates a bounded vocabulary: `exact-cover`, `settled-summary`,
-`reader-cone` and defensively `input-order` (`unchanged` in a test with reuse
+`reader-cone`, `guarded-replacement` and defensively `input-order` (`unchanged` in a test with reuse
 disabled). It describes invalidation triggers, not a claim that a conservative
 retry's BDD inputs actually changed.
 
@@ -208,6 +208,19 @@ summary inventory are unchanged. Full evidence uses `structuralDetail: "full"`
 and zero omission counts; the CLI requests it with `--verbose`. Full chains are
 computed only on request. An editor expansion command remains a follow-up;
 ordinary publication never expands them.
+
+Guarded-settlement warnings use diagnostic code/kind `guarded-settlement` (Warning),
+with the existing `(verification, source rule, premise occurrence)` finding identity.
+`data.evidence.kind` remains `rewrite-proof`; `coversAllInstances` retains its meaning.
+`guardedDetail` is `"direct"` or `"full"`, alongside the shared omission counts.
+Default notes name the retained guard and its equivalent settled expression;
+related source rules are labeled `direct rewrite justification`. The same
+source-warning note/location caps apply, and formula text is bounded to 32 nodes,
+with an explicit omitted-node count. Full evidence shows rank-ordered marks and
+candidate-relaxed bounds. No synthetic source declaration or edit is produced.
+The summary inventory uses this same kind. It is advisory for `check-den` exit
+codes; existing `redundant` warnings keep their behavior. A source occurrence with
+both legacy and guarded proofs retains the legacy `redundant` kind.
 
 Bound-removal warnings use the same `rewrite-proof` kind, source-rule finding
 identity and instance coverage. Their direct note explains coverage by retained

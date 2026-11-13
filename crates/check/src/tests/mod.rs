@@ -17,3 +17,5 @@ mod incremental_inventory;
 mod permitted;
 
 mod structural;
+
+mod guarded_settlement;

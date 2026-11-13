@@ -392,3 +392,50 @@ fn named_witness_and_context_survive_declaration_reordering() {
         "canonical tuple work survives declaration reordering"
     );
 }
+
+#[test]
+fn guarded_settlement_admits_the_independently_supplied_mapping_regression() {
+    use denotate_check::test_support::rewrites::{compare_permitted, subsets, supported_models};
+    // j supplies a unconditionally. Thus b cannot get j when a is absent;
+    // b is always absent, and a can receive both i and j. Previously the
+    // syntactic cycle prevented the checker from reaching that counterexample.
+    let (_, _, p) = lower(
+        "input i, j; slot a, b; a <- i when not available(b); b <- j when not available(a); a <- j;",
+    );
+    let checked = checked(&p, &Limits::default());
+    let ground = checked.program();
+    assert!(ground.is_admitted());
+    assert!(
+        ground
+            .rewrite_proofs()
+            .any(|p| p.guarded_settlement().is_some())
+    );
+    let restrictions = constraints(&p);
+    let permitted = |world: &BTreeSet<GroundAtom>| {
+        restrictions.iter().all(|r| {
+            let mut groups = BTreeSet::new();
+            world.iter().filter(|a| a.relation == r.relation).all(|a| {
+                groups.insert(
+                    r.group_by
+                        .iter()
+                        .map(|i| a.arguments[*i])
+                        .collect::<Vec<_>>(),
+                )
+            })
+        })
+    };
+    compare_permitted(&p.corpus, &p.domains(), ground, permitted);
+    for world in subsets(&ground.input_atoms().cloned().collect::<Vec<_>>())
+        .into_iter()
+        .filter(permitted)
+    {
+        assert_eq!(
+            supported_models(
+                ground,
+                &ground.original_rules().cloned().collect::<Vec<_>>(),
+                &world
+            ),
+            supported_models(ground, &ground.rules().cloned().collect::<Vec<_>>(), &world)
+        );
+    }
+}

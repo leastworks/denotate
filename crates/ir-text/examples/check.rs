@@ -691,6 +691,7 @@ fn check_program(
                                     | "always-true-condition"
                                     | "unanalysed-condition"
                                     | "incomplete-downstream-work"
+                                    | "guarded-settlement"
                             )
                         )
                     })
@@ -2080,6 +2081,39 @@ kept():-middle(); kept():-term(); term():-!kept(); verification checks{assumptio
         );
         assert_eq!(f.run(&["--json"]).1, f.run(&["--json", "--verbose"]).1);
     }
+    #[test]
+    fn guarded_settlement_cli_admits_and_explains_without_failing_the_run() {
+        for source in [
+            include_str!("../tests/fixtures/guarded-settlement.den"),
+            include_str!("../tests/fixtures/guarded-settlement-boolean.den"),
+            include_str!("../tests/fixtures/guarded-settlement-producers.den"),
+        ] {
+            let f = Fixture::new(source);
+            let (code, direct) = f.run(&["--no-progress"]);
+            assert_eq!(code, 0, "{direct}");
+            assert!(direct.contains("guarded-settlement"));
+            assert!(direct.contains("Retained guard:"));
+            assert!(direct.contains("direct rewrite justification"));
+            assert!(!direct.contains("Settlement step"));
+            let (code, full) = f.run(&["--no-progress", "--verbose"]);
+            assert_eq!(code, 0, "{full}");
+            assert!(full.contains("Settlement step"));
+            assert!(full.contains("reading producer relaxed to its guard"));
+            let failing = source
+                .replace(
+                    "notice cleared_varies",
+                    "obligation no_bookings: empty(reefer_booked); notice cleared_varies",
+                )
+                .replace("obligations: []", "obligations: [no_bookings]");
+            let (code, output) = Fixture::new(&failing).run(&["--no-progress"]);
+            assert_eq!(code, 1, "{output}");
+            assert!(output.contains("Replayed present tuple: reefer_booked()"));
+        }
+        let source = include_str!("../tests/fixtures/guarded-settlement.den")
+            .replace("assumptions: [one_class]", "assumptions: []");
+        assert_eq!(Fixture::new(&source).run(&["--no-progress"]).0, 2);
+    }
+
     #[test]
     fn bound_removal_reports_direct_cover_and_full_certificate() {
         let f = Fixture::new(include_str!("../tests/fixtures/bound-removal.den"));

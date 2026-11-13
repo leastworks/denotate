@@ -3,7 +3,7 @@
 use crate::LoadedProgram;
 use denotate_check::CheckedReport;
 pub use denotate_presentation::RewriteDetail;
-use denotate_presentation::{Diagnostic, Kind, Placement, Result, interpret, rewrites, summary};
+use denotate_presentation::{Diagnostic, Placement, Result, interpret, rewrites, summary};
 use serde_json::{Value, json};
 
 pub struct Presentation {
@@ -134,7 +134,7 @@ pub fn present_with_rewrite_detail(
     }
     for rewrite in rewrites(&program.corpus, report.verification.program())? {
         let placed = placement.rewrite(&rewrite, &program.corpus, &names, detail)?;
-        inventory.push(json!({"identity":rewrite.identity().data_in(&program.keys, report.results.value.context.verification.as_ref())?,"kind":Kind::Rewrite.code(),
+        inventory.push(json!({"identity":rewrite.identity().data_in(&program.keys, report.results.value.context.verification.as_ref())?,"kind":rewrite.kind().code(),
             "message":rewrite.message,"fallback":placed.iter().any(|d|d.fallback),"located":!placed.is_empty()}));
         diagnostics.extend(placed);
     }

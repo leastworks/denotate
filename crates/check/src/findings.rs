@@ -544,6 +544,17 @@ pub(crate) fn collect_evidence(
                 for premise in premises {
                     budget.tick("evidence")?;
                     match premise {
+                        PremiseEvidence::Replaced {
+                            literal_occurrence,
+                            proof,
+                        } => {
+                            replay.validate_replacement(
+                                rule.id,
+                                *literal_occurrence,
+                                *proof,
+                                budget,
+                            )?;
+                        }
                         PremiseEvidence::Discharged {
                             literal_occurrence,
                             proof,

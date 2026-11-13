@@ -22,6 +22,10 @@ pub enum CompletedProvider {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PremiseEvidence {
+    Replaced {
+        literal_occurrence: OccurrenceId,
+        proof: RewriteProofId,
+    },
     Discharged {
         literal_occurrence: OccurrenceId,
         proof: RewriteProofId,
@@ -253,6 +257,13 @@ impl GroundProgram {
                         .ok_or(CheckError::Internal("missing authored rule"))?;
                     for literal in &authored.body {
                         budget.tick("evaluation")?;
+                        if rule
+                            .replacements
+                            .iter()
+                            .any(|r| r.occurrence == literal.term.occurrence)
+                        {
+                            continue;
+                        }
                         if let Some(proof) = self.discharge(rule.id, literal.term.occurrence) {
                             premises.push(PremiseEvidence::Discharged {
                                 literal_occurrence: literal.term.occurrence,
@@ -314,6 +325,58 @@ impl GroundProgram {
                                     } else {
                                         CompletedProvider::Component(provider.id)
                                     },
+                                });
+                            }
+                        }
+                    }
+                    if enabled {
+                        for replacement in &rule.replacements {
+                            let mut observed = BTreeMap::new();
+                            let holds = replacement.expression.evaluate(
+                                &mut |atom| {
+                                    let FactState::Settled(value) = replay.fact(atom)? else {
+                                        return Err(CheckError::Internal(
+                                            "replacement reads blocked fact",
+                                        ));
+                                    };
+                                    observed.insert(atom.clone(), value);
+                                    Ok(value)
+                                },
+                                budget,
+                            )?;
+                            if !holds {
+                                enabled = false;
+                                break;
+                            }
+                            for (fact, value) in observed {
+                                premises.push(if value {
+                                    PremiseEvidence::Positive {
+                                        fact,
+                                        occurrence: replacement.occurrence,
+                                    }
+                                } else {
+                                    let provider = replay.absence_provider(&fact)?.ok_or(
+                                        CheckError::Internal("replacement absence not settled"),
+                                    )?;
+                                    PremiseEvidence::Absent {
+                                        fact,
+                                        occurrence: replacement.occurrence,
+                                        provider,
+                                    }
+                                });
+                            }
+                            if let Some(proof) =
+                                self.replacement_proof(rule.id, replacement.occurrence)
+                            {
+                                replay.validate_replacement(
+                                    rule.id,
+                                    replacement.occurrence,
+                                    proof.id,
+                                    budget,
+                                )?;
+                                premises.push(PremiseEvidence::Replaced {
+                                    literal_occurrence: replacement.occurrence,
+                                    proof: proof.id,
                                 });
                             }
                         }
@@ -395,6 +458,65 @@ impl Replay<'_> {
             return Err(CheckError::Internal(
                 "discharge proof does not apply to observation",
             ));
+        }
+        Ok(())
+    }
+}
+
+impl Replay<'_> {
+    pub(crate) fn validate_replacement(
+        &self,
+        rule: GroundRuleId,
+        occurrence: OccurrenceId,
+        id: RewriteProofId,
+        budget: &mut Budget<'_>,
+    ) -> Result<()> {
+        budget.tick("replacement evidence")?;
+        let proof = self
+            .program
+            .rewrite_proof(id)
+            .ok_or(CheckError::Internal("foreign replacement proof"))?;
+        if proof.candidate().id != rule
+            || proof.kind
+                != (RewriteKind::GuardedSettlement {
+                    literal_occurrence: occurrence,
+                })
+        {
+            return Err(CheckError::Internal(
+                "replacement proof does not justify this premise",
+            ));
+        }
+        let p = proof
+            .guarded_settlement()
+            .ok_or(CheckError::Internal("missing replacement certificate"))?;
+        for premise in &p.proof.candidate.settled {
+            budget.tick("replacement guard")?;
+            if self.fact(&premise.literal.term.atom)?
+                != FactState::Settled(premise.literal.polarity == Polarity::Positive)
+            {
+                return Err(CheckError::Internal("replacement guard does not hold"));
+            }
+        }
+        for expression in p
+            .proof
+            .candidate
+            .rule
+            .replacements
+            .iter()
+            .map(|r| &r.expression)
+            .chain(std::iter::once(&p.replacement))
+        {
+            if !expression.evaluate(
+                &mut |a| match self.fact(a)? {
+                    FactState::Settled(v) => Ok(v),
+                    FactState::Blocked(_) => {
+                        Err(CheckError::Internal("replacement evidence is blocked"))
+                    }
+                },
+                budget,
+            )? {
+                return Err(CheckError::Internal("replacement does not hold"));
+            }
         }
         Ok(())
     }

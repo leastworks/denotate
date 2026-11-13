@@ -101,7 +101,8 @@ pub fn assert_symbolic_agrees(program: &GroundProgram) {
                     assert_eq!(rule.body.len(), premises.len());
                     for premise in premises {
                         match premise {
-                            PremiseEvidence::Discharged { .. } => {
+                            PremiseEvidence::Discharged { .. }
+                            | PremiseEvidence::Replaced { .. } => {
                                 panic!("baseline did not run admission rewrites")
                             }
                             PremiseEvidence::Positive { fact, .. } => {

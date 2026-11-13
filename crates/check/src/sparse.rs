@@ -325,6 +325,7 @@ impl Instances {
         self.rules.insert(
             key,
             GroundRule {
+                replacements: vec![],
                 id: GroundRuleId {
                     preparation,
                     index: 0,

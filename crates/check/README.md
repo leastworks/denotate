@@ -41,7 +41,12 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    head cover under W. Exact producers are retained; recursive lower coverage is
    excluded. These bounds preserve supported-model possibilities and never settle
    executable atoms. Only a snapshot with no removals proceeds to negation
-   discharge. Later exhaustion preserves earlier committed batches.
+   discharge. If discharge also has no batch, guarded settlement can replace a
+   cyclic signed premise by a Boolean expression over globally settled atoms,
+   valid under the reading rule's retained guard. Rank-ordered marks use bounds
+   computed with that reading producer relaxed to its guard; it cannot justify
+   itself. One replacement per component commits atomically. Later exhaustion
+   preserves earlier committed batches.
    Within a snapshot, exact-producer coverage is computed lazily per head, reused
    by its non-exact candidates, and removed from the cache after the last candidate.
    Retained unions count against the existing condition-node limit. Proofs still
@@ -74,7 +79,11 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    complete input snapshot (omitted tuples are absent; observations violating W are
    rejected). Facts are `Settled(true|false)` or `Blocked`; each established fact keeps
    its first grounded derivation; absence evidence names its provider component, the
-   input snapshot or `NoPossibleProducer`.
+   input snapshot or `NoPossibleProducer`. Attached settled expressions are
+   evaluated against the same replay; `PremiseEvidence::Replaced` refers to the
+   original occurrence and certificate. Consulted expression leaves supply ordinary
+   presence/absence evidence. Observation certification can prune a false composite
+   condition and records that condition and its settled leaves explicitly.
 5. **Symbolic meaning.** `symbolic` computes a condition per fact over the input
    variables; `check_at_most_one` gives scoped group results: `Proved`,
    `Overlap(condition)`, `Unsupported` or `Inconclusive { phase, resource }`.
@@ -96,6 +105,15 @@ Reporting callers use the `*_checked` entry points: exhaustion before a report e
 is a top-level inconclusive outcome, never an empty success.
 
 ## Requests, keys and results
+
+Guarded settlement uses bounded `SettledExpression` trees on `GroundRule` and keyed
+`GroundInstance` values. Graph edges, symbolic meaning, completion, replay and local
+reconstruction all read their leaves. Source identities remain the original rule
+and replaced occurrence; `KeyedRewriteKind::GuardedSettlement` distinguishes the new
+internal proof. The default `guarded-settlement` warning is advisory, with direct
+support and the retained guard; full evidence shows rank-ordered settlement and
+relaxed bounds. See [the soundness argument](../../docs/decisions.md#meaning-and-checking)
+and [cutoffs](../../docs/checker-policies.md#guarded-settlement).
 
 Structural rewrite proofs expose direct settling/unfolding support through
 `direct_rules` and accurate absence explanations through `settlement`. Internal

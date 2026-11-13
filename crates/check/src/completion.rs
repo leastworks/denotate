@@ -63,7 +63,7 @@ impl SymbolicMeaning<'_> {
         for index in &self.program.component_rules[component.id.index] {
             let rule = &self.program.rules[*index];
             budget.charge(1 + rule.body.len(), "completion rules")?;
-            for literal in &rule.body {
+            for literal in rule.dependency_literals() {
                 let atom = &literal.term.atom;
                 if internal.contains_key(atom) || upstream.contains_key(atom) {
                     continue;
@@ -211,6 +211,11 @@ fn equations(
                 }
                 body = eq.apply(&body, &value, and, budget)?;
             }
+            for replacement in &rule.replacements {
+                let value =
+                    settled_equation(&replacement.expression, eq, upstream, pinned, budget)?;
+                body = eq.apply(&body, &value, and, budget)?;
+            }
             alternatives = eq.apply(&alternatives, &body, or, budget)?;
         }
         let variable = eq.variable(*index, budget)?;
@@ -218,4 +223,40 @@ fn equations(
         result = eq.apply(&result, &equality, and, budget)?;
     }
     Ok(result)
+}
+
+fn settled_equation(
+    expression: &SettledExpression<GroundAtom>,
+    eq: &EquationContext<'_>,
+    upstream: &BTreeMap<GroundAtom, Condition>,
+    pinned: Option<&BTreeMap<GroundAtom, bool>>,
+    budget: &mut Budget<'_>,
+) -> Result<crate::boolean::Formula> {
+    budget.tick("settled completion expression")?;
+    match expression {
+        SettledExpression::Constant(v) => eq.constant(*v, budget),
+        SettledExpression::Atom(a) => {
+            if let Some(values) = pinned {
+                eq.constant(values[a], budget)
+            } else {
+                eq.lift(&upstream[a], budget)
+            }
+        }
+        SettledExpression::Not(c) => {
+            eq.not(&settled_equation(c, eq, upstream, pinned, budget)?, budget)
+        }
+        SettledExpression::All(cs) | SettledExpression::Any(cs) => {
+            let all = matches!(expression, SettledExpression::All(_));
+            let mut value = eq.constant(all, budget)?;
+            for c in cs {
+                value = eq.apply(
+                    &value,
+                    &settled_equation(c, eq, upstream, pinned, budget)?,
+                    if all { and } else { or },
+                    budget,
+                )?;
+            }
+            Ok(value)
+        }
+    }
 }

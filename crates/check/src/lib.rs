@@ -25,10 +25,14 @@ mod keys;
 mod limits;
 mod profile;
 pub use profile::*;
+mod guarded_settlement;
 mod local;
 mod request;
 mod rewrite;
+pub use guarded_settlement::{GuardedSettlementProof, GuardedSettlementStep};
+mod settled_expression;
 mod structural;
+pub use settled_expression::{SettledExpression, SettledReplacement};
 mod symbolic;
 pub use structural::{
     StructuralCertificate, StructuralProof, StructuralReason, StructuralSettlement,

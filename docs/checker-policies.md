@@ -46,6 +46,38 @@ conclusive outcomes under comparable limits, while matching the independent sema
 oracles; inconclusive or unsupported answers are not wins. A second backend is not a
 standing feature-parity requirement.
 
+## Guarded settlement
+
+After producer removal and discharge have no batch, the relevant phase can replace
+a cyclic premise by a formula over globally settled atoms, under its rule's guard.
+The guard stays executable. Bounds relax the reading producer to its guard so the
+certificate applies before and after replacement. Earlier marks alone justify later
+ones, and an unresolved external component supplies no value. Existing discharges
+run first to preserve their warnings and failure-local budget behavior.
+
+One replacement is allowed per component per snapshot. Expressions use shared
+Boolean trees, without distributing conjunction/disjunction into rule variants.
+A complete expression has at most 1,024 nodes and depth 64; a certificate retains
+at most 8,192 expression nodes across its marks. These are optimization cutoffs:
+exceeding one leaves the rule intact, reports an expansion cutoff in progress, and
+is not checker exhaustion. Temporary construction, dependencies, proof storage and
+traversal charge existing budgets. Real work/node/task limits retain their ordinary
+stop or recoverable-skip behavior. A graph rebuild and proof installation are atomic.
+
+Candidate-relaxed bounds are computed per reading rule and released after that
+rule's attempts; successful proofs retain their certificate. This can be expensive
+for a large unresolved component and is not a memory optimization. Repeated signed
+atoms in one body need only one attempt in a snapshot. Progress distinguishes
+`guarded-bounds` from `guarded-settlement` and reports `cutoffs` per attempt kind.
+Unsuccessful attempts use the existing local reuse mechanism. Any replacement
+conservatively invalidates all those attempts; no BDD result cache crosses rounds.
+
+Default warnings use the existing eight-note/sixteen-location caps, with at most
+32 expression nodes rendered per formula and explicit omission counts. Full
+`--verbose` evidence includes guard, settlement ranks and supporting component
+rules. Stable/supported-model oracles and fresh/cold/warm tests are correctness
+gates; CLI benchmark timings and sampled memory remain measurements only.
+
 ## Re-scoring
 
 Admission progress in CLI stderr and the `.den` editor reports round/stage,
@@ -69,7 +101,7 @@ Admission prioritizes unresolved negative components and their blocked providers
 `downstream` attempt removals on other still-blocked heads and discharge redundant
 input negations on settled rules. The latter also runs without cycles when selected
 assumptions can justify warnings. Each phase keeps the existing structural,
-exact-coverage, strengthened-bound, then discharge ordering. Relevance is recomputed
+exact-coverage, strengthened-bound, discharge, then guarded-settlement ordering. Relevance is recomputed
 after commits. Targets and support differ: proofs keep all providers they need,
 including settled components, while unrelated structural worklists, evaluation and
 summaries wait. Graph maintenance and the full input universe/W remain shared;

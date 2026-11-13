@@ -287,6 +287,7 @@ impl FixedValue {
                 index: program.rules.len(),
             };
             let rule = GroundRule {
+                replacements: vec![],
                 id,
                 source: source.id,
                 head: ground_atom(&source.head, &binding, budget)?,

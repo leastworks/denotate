@@ -486,6 +486,12 @@ a fixed world never depends on the verification.
   independent exact producers. A cyclic producer is redundant when those bounds
   show that its head is already covered whenever its body could hold. The exact
   covering producers stay present; bounds do not themselves settle cyclic atoms.
+  A cyclic premise can also be replaced by a Boolean expression over settled
+  facts when a non-circular proof establishes that equivalence under the reading
+  rule's guard. The guard remains in force; an unresolved external dependency is
+  never assumed absent. The `guarded-settlement` warning identifies the original
+  premise, shows its replacement and retained guard, and is advisory for CLI exit
+  codes. Full justification is available with `--verbose`.
   Rewrite warnings identify the source rule and its supporting definitions; they
   never authorize edits.
 - Otherwise the affected component and everything depending on it is reported as

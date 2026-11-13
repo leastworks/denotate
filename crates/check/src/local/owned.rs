@@ -24,6 +24,12 @@ impl Runtime {
         {
             all.insert(rule.head.atom.clone());
             all.extend(rule.body.iter().map(|(_, l)| l.atom.clone()));
+            all.extend(
+                rule.replacements
+                    .iter()
+                    .flat_map(|r| r.expression.atoms())
+                    .cloned(),
+            );
         }
         let mut corpus = Corpus::new();
         let mut keys = SemanticKeys::default();
@@ -140,6 +146,16 @@ impl Runtime {
                     "local premise outside dependency cone",
                 ));
             }
+            if rule
+                .replacements
+                .iter()
+                .flat_map(|r| r.expression.atoms())
+                .any(|a| !input.facts.contains(a))
+            {
+                return Err(CheckError::Internal(
+                    "local replacement outside dependency cone",
+                ));
+            }
             let mut make = |r: &GroundInstance| -> Result<(
                 RuleId,
                 GroundOccurrence,
@@ -179,15 +195,38 @@ impl Runtime {
                         term: g,
                     });
                 }
+                for replacement in &r.replacements {
+                    let original = input
+                        .original_dependencies
+                        .get(key)
+                        .and_then(|r| {
+                            r.body
+                                .iter()
+                                .find(|(_, o)| o.occurrence == replacement.occurrence)
+                        })
+                        .ok_or(CheckError::Internal("missing replaced occurrence"))?;
+                    atom(&original.1)?;
+                }
                 let source = corpus.add_rule(head, body).map_err(build_error)?;
                 Ok((source, ghead, ground, occurrences))
             };
-            let (source, head, body, _) = make(rule)?;
+            let (source, head, body, occurrences) = make(rule)?;
             let id = GroundRuleId {
                 preparation: program.preparation,
                 index: program.rules.len(),
             };
+            let replacements = rule
+                .replacements
+                .iter()
+                .map(|r| {
+                    Ok(SettledReplacement {
+                        occurrence: occurrences[&r.occurrence],
+                        expression: r.expression.map(&mut |a| Ok(atoms[a].clone()))?,
+                    })
+                })
+                .collect::<Result<_>>()?;
             program.rules.push(GroundRule {
+                replacements,
                 id,
                 source,
                 head,
@@ -207,6 +246,7 @@ impl Runtime {
                 originals.insert(
                     key.clone(),
                     GroundRule {
+                        replacements: vec![],
                         id,
                         source,
                         head,

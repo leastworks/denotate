@@ -77,6 +77,7 @@ impl GroundProgram {
                 }
                 let index = p.rules.len();
                 p.rules.push(GroundRule {
+                    replacements: vec![],
                     id: GroundRuleId { preparation, index },
                     source: rule.id,
                     head,

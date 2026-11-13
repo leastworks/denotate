@@ -19,6 +19,7 @@ pub struct AdmissionAttempts {
     pub negative: usize,
     pub skipped: usize,
     pub failed: usize,
+    pub cutoffs: usize,
     pub elapsed: Duration,
     /// A fixed vocabulary of causes, aggregated without storing target lists.
     pub retry_causes: BTreeMap<&'static str, usize>,
@@ -129,6 +130,17 @@ impl<'a> AdmissionReporter<'a> {
             counts.reused_skip += 1;
         } else {
             counts.reused_negative += 1;
+        }
+    }
+    pub fn cutoff(&self, kind: AdmissionAttemptKind) {
+        if self.enabled() {
+            self.state
+                .borrow_mut()
+                .progress
+                .attempts
+                .entry(kind)
+                .or_default()
+                .cutoffs += 1;
         }
     }
     pub fn attempt_start(

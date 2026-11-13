@@ -141,6 +141,7 @@ pub struct GroundInstance {
     pub schema: Arc<RuleSchema>,
     pub head: KeyedGroundOccurrence,
     pub body: Vec<(bool, KeyedGroundOccurrence)>,
+    pub replacements: Vec<SettledReplacement<AtomKey, OccurrenceKey>>,
 }
 /// Tracks empty and singleton groups without materializing a Cartesian product
 /// of grouping domains. Every legal tuple has a GroupKey, even when not in members.
@@ -172,6 +173,7 @@ impl KeyedGroups {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum KeyedRewriteKind {
     Discharge(OccurrenceKey),
+    GuardedSettlement(OccurrenceKey),
     RedundantProducer,
 }
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -364,6 +366,21 @@ impl GroundKeyView<'_> {
     }
     fn body(&self, rule: &GroundRule) -> Result<GroundInstance> {
         Ok(GroundInstance {
+            replacements: rule
+                .replacements
+                .iter()
+                .map(|r| {
+                    Ok(SettledReplacement {
+                        occurrence: self
+                            .keys
+                            .bindings()
+                            .key(r.occurrence)
+                            .map_err(CheckError::Keys)?
+                            .clone(),
+                        expression: r.expression.map(&mut |a| self.atom(a))?,
+                    })
+                })
+                .collect::<Result<_>>()?,
             schema: self
                 .index
                 .core
@@ -444,6 +461,15 @@ impl GroundKeyView<'_> {
                         .clone(),
                 ),
                 RewriteKind::RedundantProducer => KeyedRewriteKind::RedundantProducer,
+                RewriteKind::GuardedSettlement { literal_occurrence } => {
+                    KeyedRewriteKind::GuardedSettlement(
+                        self.keys
+                            .bindings()
+                            .key(literal_occurrence)
+                            .map_err(CheckError::Keys)?
+                            .clone(),
+                    )
+                }
             },
             producers: proof
                 .direct_rules()

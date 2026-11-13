@@ -317,7 +317,7 @@ impl Pass<'_, '_, '_> {
                     continue;
                 }
             }
-            let mut all = true;
+            let mut all = rule.replacements.is_empty();
             let mut dead = None;
             for literal in &rule.body {
                 self.budget.tick("structural propagation")?;
@@ -372,6 +372,11 @@ impl Pass<'_, '_, '_> {
                     .iter()
                     .find(|r| self.active[**r])
                     .unwrap();
+                if !self.p.rules[r].replacements.is_empty() {
+                    path.remove(atom);
+                    out.body.insert((atom.clone(), positive));
+                    continue;
+                }
                 out.unfolded.insert(self.p.rules[r].id);
                 if !self.expand(&self.p.rules[r].body, path, out, depth + 1)? {
                     return Ok(false);
@@ -391,6 +396,9 @@ impl Pass<'_, '_, '_> {
         for r in self.producers[head].clone() {
             self.budget.tick("structural subsumption")?;
             if !self.active[r] {
+                continue;
+            }
+            if !self.p.rules[r].replacements.is_empty() {
                 continue;
             }
             let mut expanded = Expanded::default();

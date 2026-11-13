@@ -15,6 +15,8 @@ pub enum AdmissionAttemptKind {
     UpperBounds,
     GuaranteedBounds,
     BoundRemoval,
+    GuardedBounds,
+    GuardedSettlement,
     Discharge,
 }
 impl AdmissionAttemptKind {
@@ -25,6 +27,8 @@ impl AdmissionAttemptKind {
             Self::UpperBounds => "upper-bounds",
             Self::GuaranteedBounds => "guaranteed-bounds",
             Self::BoundRemoval => "bound-removal",
+            Self::GuardedBounds => "guarded-bounds",
+            Self::GuardedSettlement => "guarded-settlement",
             Self::Discharge => "negation-discharge",
         }
     }
@@ -46,6 +50,8 @@ pub(crate) enum Attempt {
     UpperBounds(GroundAtom),
     GuaranteedBounds(GroundAtom),
     BoundRemoval(GroundRuleId),
+    GuardedBounds(GroundRuleId),
+    GuardedSettlement(GroundRuleId, OccurrenceId),
     Discharge(GroundRuleId, OccurrenceId),
 }
 impl Attempt {
@@ -56,6 +62,8 @@ impl Attempt {
             Self::UpperBounds(_) => AdmissionAttemptKind::UpperBounds,
             Self::GuaranteedBounds(_) => AdmissionAttemptKind::GuaranteedBounds,
             Self::BoundRemoval(_) => AdmissionAttemptKind::BoundRemoval,
+            Self::GuardedBounds(_) => AdmissionAttemptKind::GuardedBounds,
+            Self::GuardedSettlement(..) => AdmissionAttemptKind::GuardedSettlement,
             Self::Discharge(..) => AdmissionAttemptKind::Discharge,
         }
     }
@@ -66,6 +74,12 @@ impl Attempt {
             Self::UpperBounds(_) => (AdmissionAttemptKind::UpperBounds, None, None),
             Self::GuaranteedBounds(_) => (AdmissionAttemptKind::GuaranteedBounds, None, None),
             Self::BoundRemoval(rule) => (AdmissionAttemptKind::BoundRemoval, Some(*rule), None),
+            Self::GuardedBounds(rule) => (AdmissionAttemptKind::GuardedBounds, Some(*rule), None),
+            Self::GuardedSettlement(rule, occurrence) => (
+                AdmissionAttemptKind::GuardedSettlement,
+                Some(*rule),
+                Some(*occurrence),
+            ),
             Self::Discharge(rule, occurrence) => (
                 AdmissionAttemptKind::Discharge,
                 Some(*rule),
@@ -265,6 +279,8 @@ impl Attempts {
                 Attempt::UpperBounds(_)
                     | Attempt::GuaranteedBounds(_)
                     | Attempt::BoundRemoval(_)
+                    | Attempt::GuardedBounds(_)
+                    | Attempt::GuardedSettlement(..)
                     | Attempt::Discharge(..)
             )
         });
@@ -317,6 +333,21 @@ impl Attempts {
         budget: &mut Budget<'_>,
     ) -> Result<BTreeMap<Attempt, &'static str>> {
         let mut invalid = BTreeMap::new();
+        // Replacements add settled dependencies as well as cutting a cycle edge.
+        // Start conservatively: clear every live entry transactionally. Ordinary
+        // removal/discharge commits keep their existing precise invalidation.
+        if after
+            .rules
+            .iter()
+            .zip(&before.rules)
+            .any(|(a, b)| a.replacements != b.replacements)
+        {
+            budget.charge(self.len() + after.rules.len(), "guarded retry invalidation")?;
+            return Ok(self
+                .tracked()
+                .map(|(a, _)| (a.clone(), "guarded-replacement"))
+                .collect());
+        }
         if self.len() == 0 {
             return Ok(invalid);
         }
@@ -374,11 +405,13 @@ impl Attempts {
             let obsolete = match attempt {
                 Attempt::Coverage(_) => !candidates.contains(head),
                 Attempt::Removal(id) | Attempt::BoundRemoval(id) => after.rule(*id).is_none(),
-                // Admission removes a literal only through a discharge. Use
+                // Discharge and guarded settlement both remove a literal. Use
                 // the existing index, not a body scan for every cached literal
                 // (which would be quadratic for a rule with many negations).
-                Attempt::Discharge(id, occurrence) => {
-                    after.rule(*id).is_none() || after.discharge(*id, *occurrence).is_some()
+                Attempt::Discharge(id, occurrence) | Attempt::GuardedSettlement(id, occurrence) => {
+                    after.rule(*id).is_none()
+                        || after.discharge(*id, *occurrence).is_some()
+                        || after.replacement_proof(*id, *occurrence).is_some()
                 }
                 _ => false,
             };
@@ -405,6 +438,8 @@ impl Attempts {
                 Attempt::UpperBounds(_)
                 | Attempt::GuaranteedBounds(_)
                 | Attempt::BoundRemoval(_)
+                | Attempt::GuardedBounds(_)
+                | Attempt::GuardedSettlement(..)
                 | Attempt::Discharge(..) => changed.all.contains(head),
             };
             if retry {
@@ -449,7 +484,7 @@ fn is_settled(program: &GroundProgram, atom: &GroundAtom) -> bool {
     })
 }
 fn exact(program: &GroundProgram, rule: &GroundRule, budget: &mut Budget<'_>) -> Result<bool> {
-    for literal in &rule.body {
+    for literal in rule.dependency_literals() {
         budget.tick("admission retry inputs")?;
         if !is_settled(program, &literal.term.atom) {
             return Ok(false);
@@ -466,6 +501,17 @@ fn summary_changed(
     budget: &mut Budget<'_>,
 ) -> Result<bool> {
     let Some(next) = next else { return Ok(true) };
+    if rule.replacements != next.replacements {
+        return Ok(true);
+    }
+    for replacement in &rule.replacements {
+        for atom in replacement.expression.atoms() {
+            budget.tick("admission retry inputs")?;
+            if changed_settled.contains(atom) {
+                return Ok(true);
+            }
+        }
+    }
     budget.charge(rule.body.len() + next.body.len(), "admission retry inputs")?;
     let mut left = rule
         .body

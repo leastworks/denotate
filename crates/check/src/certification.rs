@@ -13,10 +13,23 @@ pub(crate) use search::CertificationDependencies;
 pub struct ObservationPruning {
     pub round: usize,
     pub rule: GroundRuleId,
+    pub reason: ObservationPruningReason,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ObservationPruningReason {
     /// This signed premise was false, with its fact settled to `value`.
-    pub premise: GroundLiteral,
-    pub value: bool,
-    pub provider: CompletedProvider,
+    Literal {
+        premise: GroundLiteral,
+        value: bool,
+        provider: CompletedProvider,
+    },
+    /// A guarded replacement was false. Keep the expression and its consulted
+    /// settled leaves rather than inventing a false atom for a Boolean formula.
+    SettledExpression {
+        replacement: SettledReplacement<GroundAtom, denotate_ir::OccurrenceId>,
+        leaves: Vec<(GroundAtom, bool, CompletedProvider)>,
+    },
 }
 
 /// A complete replay for exactly this observation, not all permitted inputs.
@@ -88,6 +101,7 @@ impl GroundProgram {
         for rule in self.original_rules().chain(self.rules()) {
             budget.charge(
                 1 + rule.head.arguments.len()
+                    + rule.replacements.len()
                     + rule
                         .body
                         .iter()
@@ -158,6 +172,7 @@ impl GroundProgram {
                 for index in rules {
                     let rule = &residual.rules[*index];
                     budget.tick("certification pruning")?;
+                    let mut pruned = false;
                     for premise in &rule.body {
                         budget.tick("certification pruning")?;
                         let fact = &premise.term.atom;
@@ -178,11 +193,54 @@ impl GroundProgram {
                         batch.push(ObservationPruning {
                             round,
                             rule: rule.id,
-                            premise: premise.clone(),
-                            value,
-                            provider,
+                            reason: ObservationPruningReason::Literal {
+                                premise: premise.clone(),
+                                value,
+                                provider,
+                            },
                         });
+                        pruned = true;
                         break; // One settled false premise suffices to disable a rule.
+                    }
+                    if pruned {
+                        continue;
+                    }
+                    for replacement in &rule.replacements {
+                        let mut leaves = Vec::new();
+                        let value = replacement.expression.evaluate(
+                            &mut |fact| {
+                                let FactState::Settled(value) = replay.fact(fact)? else {
+                                    return Err(CheckError::Internal(
+                                        "guarded replacement leaf became blocked",
+                                    ));
+                                };
+                                let provider = if residual.inputs.contains(fact) {
+                                    CompletedProvider::InputSnapshot
+                                } else if !residual.is_possible(fact)? {
+                                    CompletedProvider::NoPossibleProducer
+                                } else {
+                                    CompletedProvider::Component(residual.component_for(fact)?.id)
+                                };
+                                leaves.push((fact.clone(), value, provider));
+                                Ok(value)
+                            },
+                            budget,
+                        )?;
+                        if value {
+                            continue;
+                        }
+                        for (_, _, provider) in &leaves {
+                            retain_provider(&residual, provider, &mut providers, budget)?;
+                        }
+                        batch.push(ObservationPruning {
+                            round,
+                            rule: rule.id,
+                            reason: ObservationPruningReason::SettledExpression {
+                                replacement: replacement.clone(),
+                                leaves,
+                            },
+                        });
+                        break;
                     }
                 }
             }

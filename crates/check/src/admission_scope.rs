@@ -80,7 +80,7 @@ impl AdmissionScope {
                 // Includes impossible and folded boundary atoms, which do not
                 // necessarily have executable components in this graph.
                 cone.facts
-                    .extend(rule.body.iter().map(|l| l.term.atom.clone()));
+                    .extend(rule.dependency_literals().map(|l| l.term.atom));
             }
         }
         Ok(Self { targets, cone })

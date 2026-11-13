@@ -70,7 +70,8 @@ fn assert_rewrite_inventory(p: &LoadedProgram, ground: &GroundProgram) {
     for proof in ground.rewrite_proofs() {
         let literal = match proof.kind {
             RewriteKind::RedundantProducer => None,
-            RewriteKind::Discharge { literal_occurrence } => {
+            RewriteKind::Discharge { literal_occurrence }
+            | RewriteKind::GuardedSettlement { literal_occurrence } => {
                 if !ground.rules().any(|r| r.id == proof.candidate().id) {
                     continue;
                 }

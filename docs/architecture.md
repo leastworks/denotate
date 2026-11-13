@@ -108,6 +108,17 @@ invalidation. Their metadata avoids repeated proofs and otherwise-unused bounds
 or coverage; it is discarded after admission and never becomes a diagnostic skip
 or part of a session's retained admission result.
 
+Guarded settlement adds executable Boolean expressions to ground rules, preserving
+the authored rule and premise occurrence. They mention only globally settled atoms;
+the original guard stays in the body. Certificates retain rank-ordered reasoning and
+candidate-relaxed bounds separately. Graph construction, symbolic evaluation, concrete
+replay, completion, observation certification and owned local queries all consume
+this representation. Local cache inputs include keyed expressions and their dependency
+leaves; original dependency closure still invalidates transitive edits. Replacement
+commits conservatively clear invocation-local negative/failed attempts, while later
+ordinary commits also detect changes through expression leaves. Presentation owns
+wording and display limits, and the CLI treats the equivalence warning as advisory.
+
 Semantic indexing shares source schemas and declaration bindings across those
 contexts. `GroundKeyView` projects atom, instance, component and rewrite keys from
 the current graph when needed. It reads original and committed bodies from the

@@ -1,0 +1,10 @@
+input perishable(); input docked(); input priority_call();
+relation reefer_booked(); reefer_booked() :- perishable(), cleared();
+relation claim_fails();   claim_fails()   :- docked(), !reefer_booked();
+relation hazard_claim();  hazard_claim()  :- !perishable(), !claim_fails();
+relation inspected();     inspected()     :- perishable();
+                          inspected()     :- hazard_claim();
+relation held();          held()          :- priority_call(), inspected();
+relation cleared();       cleared()       :- docked(), !held();
+notice cleared_varies: varies(cleared);
+verification v { assumptions: []; obligations: []; notices: [cleared_varies]; }

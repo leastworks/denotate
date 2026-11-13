@@ -203,7 +203,7 @@ impl GroundProgram {
             // Missing conditions may mean false only inside the selected cone.
             if let Some(cone) = cone {
                 for rule in &self.component_rules[index] {
-                    for literal in &self.rules[*rule].body {
+                    for literal in self.rules[*rule].dependency_literals() {
                         if !cone.facts.contains(&literal.term.atom) {
                             return Err(CheckError::Internal(
                                 "local premise outside dependency cone",
@@ -275,6 +275,14 @@ impl GroundProgram {
                             if body.is_false() {
                                 break;
                             }
+                        }
+                        for replacement in &rule.replacements {
+                            let value =
+                                meaning.settled_expression(&replacement.expression, budget)?;
+                            body =
+                                meaning
+                                    .context
+                                    .apply(&body, &value, op_function::and, budget)?;
                         }
                         // Only extend the head if this body adds input worlds.
                         // Node-vector equality is not Boolean equivalence.
@@ -366,4 +374,24 @@ pub(crate) fn retain(
         ));
     }
     Ok(next)
+}
+
+impl SymbolicMeaning<'_> {
+    pub(crate) fn settled_expression(
+        &self,
+        expression: &SettledExpression<GroundAtom>,
+        budget: &mut Budget<'_>,
+    ) -> Result<Condition> {
+        expression.symbolic(
+            &self.context,
+            &mut |atom| match self.fact(atom)? {
+                SymbolicFact::Settled(value) => Ok(value),
+                SymbolicFact::Inconclusive(cause) => Err(cause.into()),
+                SymbolicFact::Blocked(_) => {
+                    Err(CheckError::Internal("replacement reads unresolved atom"))
+                }
+            },
+            budget,
+        )
+    }
 }

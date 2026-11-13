@@ -1440,6 +1440,10 @@ impl PreparedCheck<'_> {
                                     PremiseEvidence::Discharged {
                                         literal_occurrence,
                                         proof,
+                                    }
+                                    | PremiseEvidence::Replaced {
+                                        literal_occurrence,
+                                        proof,
                                     } => {
                                         evidence.occurrences.insert(
                                             keys.bindings()

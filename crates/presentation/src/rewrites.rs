@@ -22,6 +22,13 @@ pub struct Rewrite<'a> {
     pub message: &'static str,
 }
 impl Rewrite<'_> {
+    pub fn kind(&self) -> Kind {
+        if self.proofs.iter().all(|p| p.guarded_settlement().is_some()) {
+            Kind::GuardedSettlement
+        } else {
+            Kind::Rewrite
+        }
+    }
     pub fn identity(&self) -> Identity {
         Identity::Rewrite {
             rule: self.rule,
@@ -32,9 +39,87 @@ impl Rewrite<'_> {
         &self,
         corpus: &Corpus,
         names: &dyn Fn(OccurrenceId) -> String,
+        detail: RewriteDetail,
     ) -> Result<Vec<String>> {
         let mut notes = BTreeSet::new();
         for proof in &self.proofs {
+            if let Some(p) = proof.guarded_settlement() {
+                let mut remaining = if detail == RewriteDetail::Full {
+                    usize::MAX
+                } else {
+                    32
+                };
+                let replacement = expression_text(&p.replacement, corpus, names, &mut remaining)?;
+                notes.insert(format!("Guarded settlement: under this rule's settled guard, replace this premise by {replacement}. The guard remains in force; the justification ends at settled facts."));
+                if detail == RewriteDetail::Direct && p.replacement.nodes() > 32 {
+                    notes.insert(format!("Omitted {} expression nodes; request full rewrite evidence (CLI --verbose).", p.replacement.nodes() - 32));
+                }
+                let mut guards = Vec::new();
+                let guard_limit = if detail == RewriteDetail::Full {
+                    usize::MAX
+                } else {
+                    32
+                };
+                for premise in p.proof.candidate.settled.iter().take(guard_limit) {
+                    guards.push(format!(
+                        "{}{}",
+                        if premise.literal.polarity == Polarity::Negative {
+                            "!"
+                        } else {
+                            ""
+                        },
+                        crate::evidence::atom_name(corpus, names, &premise.literal.term.atom)?
+                    ));
+                }
+                for expression in &p.proof.candidate.rule.replacements {
+                    let mut remaining = if detail == RewriteDetail::Full {
+                        usize::MAX
+                    } else {
+                        32
+                    };
+                    guards.push(expression_text(
+                        &expression.expression,
+                        corpus,
+                        names,
+                        &mut remaining,
+                    )?);
+                }
+                let omitted = p.proof.candidate.settled.len().saturating_sub(guard_limit);
+                if omitted > 0 {
+                    guards.push(format!("… ({omitted} more guard premises)"));
+                }
+                notes.insert(format!(
+                    "Retained guard: {}.",
+                    if guards.is_empty() {
+                        "true".to_owned()
+                    } else {
+                        guards.join(" and ")
+                    }
+                ));
+                if detail == RewriteDetail::Full {
+                    for (rank, step) in p.steps.iter().enumerate() {
+                        let mut remaining = usize::MAX;
+                        let value =
+                            expression_text(&step.expression, corpus, names, &mut remaining)?;
+                        let reason = if step.false_by_bound {
+                            "the upper bound is false under the guard, with the reading producer relaxed to its guard".to_owned()
+                        } else if step.producers.is_empty() {
+                            "no live producer remains under the guard".to_owned()
+                        } else {
+                            format!(
+                                "all {} live producers use only earlier marks and settled facts",
+                                step.producers.len()
+                            )
+                        };
+                        notes.insert(format!(
+                            "Settlement step {:04}: {} = {value}; {reason}.",
+                            rank + 1,
+                            crate::evidence::atom_name(corpus, names, &step.atom)?
+                        ));
+                    }
+                }
+                continue;
+            }
             if let Some(p) = proof.bound_removal() {
                 notes.insert(format!("Bound proof: wherever this producer can apply, independently settled producers already make {} true. Exact producers also guarantee the atoms used to strengthen the cycle bounds; none of those producers is removed by this batch.", crate::evidence::atom_name(corpus, names, &p.proof.candidate.rule.head.atom)?));
                 continue;
@@ -83,7 +168,9 @@ impl Rewrite<'_> {
         let mut seen = BTreeSet::new();
         for proof in &self.proofs {
             let full = detail == RewriteDetail::Full;
-            let structural = proof.structural().is_some() || proof.bound_removal().is_some();
+            let structural = proof.structural().is_some()
+                || proof.bound_removal().is_some()
+                || proof.guarded_settlement().is_some();
             let rules = if full {
                 proof.supporting_rules()
             } else {
@@ -127,7 +214,11 @@ impl Placement<'_> {
     ) -> Result<Vec<Diagnostic>> {
         let structural = rewrite.proofs.iter().any(|p| p.structural().is_some());
         let bounded = rewrite.proofs.iter().any(|p| p.bound_removal().is_some());
-        let mut notes = rewrite.notes(corpus, names)?;
+        let guarded = rewrite
+            .proofs
+            .iter()
+            .any(|p| p.guarded_settlement().is_some());
+        let mut notes = rewrite.notes(corpus, names, detail)?;
         let omitted_notes = if detail == RewriteDetail::Direct {
             let omitted = notes.len().saturating_sub(STRUCTURAL_NOTE_LIMIT);
             notes.truncate(STRUCTURAL_NOTE_LIMIT);
@@ -137,14 +228,14 @@ impl Placement<'_> {
         };
         let mut diagnostics = self.place(
             &rewrite.identity(),
-            Kind::Rewrite,
+            rewrite.kind(),
             rewrite.message,
             &notes,
             &rewrite.contributions(detail),
         )?;
         for d in &mut diagnostics {
             d.evidence = serde_json::json!({"kind":"rewrite-proof","coversAllInstances":rewrite.covers_all_instances});
-            if structural || bounded {
+            if structural || bounded || guarded {
                 let mode = serde_json::json!(if detail == RewriteDetail::Full {
                     "full"
                 } else {
@@ -153,6 +244,9 @@ impl Placement<'_> {
                 if structural {
                     d.evidence["structuralDetail"] = mode.clone();
                 }
+                if guarded {
+                    d.evidence["guardedDetail"] = mode.clone();
+                }
                 if bounded {
                     d.evidence["boundDetail"] = mode;
                 }
@@ -160,7 +254,7 @@ impl Placement<'_> {
                 d.evidence["omittedRelatedLocations"] = serde_json::json!(0);
             }
         }
-        if !(structural || bounded) || detail == RewriteDetail::Full {
+        if !(structural || bounded || guarded) || detail == RewriteDetail::Full {
             return Ok(diagnostics);
         }
         // Protect symbolic related locations even in a warning with mixed proofs.
@@ -199,7 +293,11 @@ impl Placement<'_> {
                     .retain(|r| protected.contains(r) || retained.contains(r));
             }
             if omitted_notes > 0 || omitted_locations > 0 {
-                let kind = if bounded { "rewrite" } else { "structural" };
+                let kind = if bounded || guarded {
+                    "rewrite"
+                } else {
+                    "structural"
+                };
                 d.notes.push(format!("Omitted {omitted_notes} {kind} notes and {omitted_locations} related locations; request full rewrite evidence (CLI --verbose)."));
             }
             d.evidence["omittedNotes"] = serde_json::json!(omitted_notes);
@@ -219,7 +317,8 @@ pub fn rewrites<'a>(corpus: &Corpus, program: &'a GroundProgram) -> Result<Vec<R
         }
         let literal = match proof.kind {
             RewriteKind::RedundantProducer => None,
-            RewriteKind::Discharge { literal_occurrence } => {
+            RewriteKind::Discharge { literal_occurrence }
+            | RewriteKind::GuardedSettlement { literal_occurrence } => {
                 if program.rule(proof.candidate().id).is_none() {
                     continue;
                 }
@@ -246,7 +345,10 @@ pub fn rewrites<'a>(corpus: &Corpus, program: &'a GroundProgram) -> Result<Vec<R
             // Count distinct instances, not proofs, independently for each literal.
             let proved: BTreeSet<_> = proofs.iter().map(|p| p.candidate().id).collect();
             let covers_all_instances = proved.len() == instances[&rule];
-            let message = if !covers_all_instances {
+            let message = if proofs.iter().any(|p| p.guarded_settlement().is_some()) {
+                if covers_all_instances { "This cyclic premise can be expressed using settled facts under its rule's guard." }
+                else { "This cyclic premise can be expressed using settled facts in some checked cases." }
+            } else if !covers_all_instances {
                 "This condition or definition is redundant in some checked cases, but not all its uses are justified for removal."
             } else if literal.is_some() {
                 "This negated condition is redundant: whenever its settled guard holds, the excluded condition cannot hold."
@@ -264,4 +366,41 @@ pub fn rewrites<'a>(corpus: &Corpus, program: &'a GroundProgram) -> Result<Vec<R
             }
         })
         .collect())
+}
+
+fn expression_text(
+    expression: &SettledExpression<GroundAtom>,
+    corpus: &Corpus,
+    names: &dyn Fn(OccurrenceId) -> String,
+    remaining: &mut usize,
+) -> Result<String> {
+    if *remaining == 0 {
+        return Ok("…".into());
+    }
+    *remaining -= 1;
+    Ok(match expression {
+        SettledExpression::Constant(v) => v.to_string(),
+        SettledExpression::Atom(a) => crate::evidence::atom_name(corpus, names, a)?,
+        SettledExpression::Not(c) => {
+            format!("!({})", expression_text(c, corpus, names, remaining)?)
+        }
+        SettledExpression::All(cs) | SettledExpression::Any(cs) => {
+            let mut text = Vec::new();
+            for c in cs {
+                if *remaining == 0 {
+                    text.push("…".into());
+                    break;
+                }
+                text.push(expression_text(c, corpus, names, remaining)?);
+            }
+            format!(
+                "({})",
+                text.join(if matches!(expression, SettledExpression::All(_)) {
+                    " and "
+                } else {
+                    " or "
+                })
+            )
+        }
+    })
 }

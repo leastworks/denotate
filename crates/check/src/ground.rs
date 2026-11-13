@@ -105,6 +105,7 @@ pub struct GroundRule {
     pub source: RuleId,
     pub head: GroundOccurrence,
     pub body: Vec<GroundLiteral>,
+    pub replacements: Vec<SettledReplacement<GroundAtom, OccurrenceId>>,
 }
 
 /// A nontrivial group of distinct possible tuples. This is preparation data,

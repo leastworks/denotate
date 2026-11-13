@@ -717,6 +717,7 @@ impl GroundProgram {
                 installed.insert(
                     (source.id, binding.values().copied().collect::<Vec<_>>()),
                     GroundRule {
+                        replacements: vec![],
                         id: GroundRuleId {
                             preparation: p.preparation,
                             index: 0,
