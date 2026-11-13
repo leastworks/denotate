@@ -235,6 +235,28 @@ their original reason and consumed work; neither graph nor retry invalidation is
 partially published if the rebuild or comparison exhausts. No retry cache crosses
 preparations, and no BDD values are retained for retry detection.
 
+Completed negative producer-removal, bound-removal and discharge attempts are
+also remembered for this admission invocation. They follow the same invalidation
+rules as skips; conservative cone changes can retry bounds/discharge even if the
+computed conditions would be equal. Cache lookup costs one work step. Cache
+invalidation is charged as above, now including remembered negatives. Entries hold
+only an attempt identity and head, with bounded observational history when progress
+is enabled: no producer lists, BDD conditions or cross-round successful results.
+Obsolete attempts are removed and all metadata is released when admission ends.
+Negatives never become skip records, exhaustion counts or inconclusive findings.
+
+The negative lookup precedes per-head coverage and component bounds, so no such
+prerequisite is built solely for cached consumers. Shared symbolic evaluation and
+summaries still run each round. Profiling/progress aggregate run reasons, outcomes
+and elapsed time per attempt kind and round; coverage/bounds time is separate from
+proof operations and from symbolic/summary time. These observations do not enter
+receipts or retained checking results. Finer skip invalidation and retaining
+successful intermediate conditions across rounds remain separate measured work.
+Saving work can improve bounded outcomes; cache bookkeeping can also cost work
+when little is reused. Compare complete runs for proof/diagnostic equality and
+review constrained-limit differences against semantic oracles, rather than
+requiring identical exhausted paths or receipts.
+
 Admission preserves input variables and their prepared order, selected W and limits.
 Unchanged summary operands repeat the same BDD work, while the available preflight
 allowance can only decrease. Input/order changes defensively invalidate all skips.

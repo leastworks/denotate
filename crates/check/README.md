@@ -61,6 +61,13 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    blocked-only dependency changes do not retry them. Bounds and discharge retain
    conservative graph invalidation, as do bound-removal attempts: a blocked-only
    dependency change can tighten a bound. Retry comparison is part of the atomic commit.
+   Completed negative removal, bound-removal and discharge attempts use the same
+   invalidation, within this admission invocation. Their cache contains identities
+   and metadata only, and is consulted before computing coverage or bounds used
+   solely by cached consumers. Negatives are not skips and never mark a region
+   inconclusive. Symbolic results, summaries and successful bounds are rebuilt
+   each round. Progress reports per-round attempts run/reused, outcomes, retry
+   causes and elapsed time, separately from symbolic evaluation and summaries.
    See
    [checker policies](../../docs/checker-policies.md#re-scoring) for the boundaries.
 4. **Concrete replay.** `evaluate(present_inputs)` runs admitted components on a

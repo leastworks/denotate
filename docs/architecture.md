@@ -103,6 +103,10 @@ Cheap coverage/removal also compare
 producer membership and settled premises across the tentative rebuild, so blocked
 changes that leave their inputs unchanged need no retry. This comparison finishes
 before committing the graph or invalidating attempts, even when an SCC splits.
+Completed negative removal/discharge attempts share that invocation-local
+invalidation. Their metadata avoids repeated proofs and otherwise-unused bounds
+or coverage; it is discarded after admission and never becomes a diagnostic skip
+or part of a session's retained admission result.
 
 Semantic indexing shares source schemas and declaration bindings across those
 contexts. `GroundKeyView` projects atom, instance, component and rewrite keys from

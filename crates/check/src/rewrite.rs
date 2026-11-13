@@ -355,9 +355,25 @@ impl GroundProgram {
         self.admit_observed(budget, None)
     }
     pub(crate) fn admit_observed(
+        self,
+        budget: &mut Budget<'_>,
+        observer: Option<&AdmissionObserver<'_>>,
+    ) -> Result<Self> {
+        self.admit_attempts(budget, observer, Attempts::default())
+    }
+    #[cfg(test)]
+    pub(crate) fn admit_without_negative_reuse(
+        self,
+        budget: &mut Budget<'_>,
+        observer: Option<&AdmissionObserver<'_>>,
+    ) -> Result<Self> {
+        self.admit_attempts(budget, observer, Attempts::without_negative_reuse())
+    }
+    fn admit_attempts(
         mut self,
         budget: &mut Budget<'_>,
         observer: Option<&AdmissionObserver<'_>>,
+        mut attempts: Attempts,
     ) -> Result<Self> {
         self.rewrites.skips.clear();
         self.rewrites.skipped_attempts = 0;
@@ -371,16 +387,17 @@ impl GroundProgram {
             progress.finish(&self, "inconsistent-assumptions");
             return Ok(self);
         }
-        let mut attempts = Attempts::default();
         let mut round = 0;
         let mut phase = AdmissionPhase::Relevant;
         let result = self
             .rewrite_loop(budget, &progress, &mut attempts, phase, &mut round)
             .and_then(|()| {
+                progress.round_end(&self);
                 phase = AdmissionPhase::Downstream;
                 progress.phase(phase);
                 self.rewrite_loop(budget, &progress, &mut attempts, phase, &mut round)
             });
+        progress.round_end(&self);
         self.rewrites.skipped_attempts = attempts.count;
         self.rewrites.skips = attempts.records();
         if let Err(error) = result {
@@ -443,6 +460,7 @@ impl GroundProgram {
             progress.snapshot(self, *round, "symbolic");
             budget.tick("rewrite snapshot")?;
             let meaning = {
+                let _timer = progress.time("symbolic");
                 let mut stage = profile.span("admission-symbolic", Some(*round));
                 let observe = |id| progress.work(self, "symbolic", Some(id), 0, false);
                 let meaning = self.symbolic_for_admission(
@@ -461,6 +479,7 @@ impl GroundProgram {
                 meaning
             };
             let ctx = meaning.context();
+            let summaries_timer = progress.time("summaries");
             let mut summaries_profile = profile.span("admission-summaries", Some(*round));
             progress.work(self, "summaries", None, 0, true);
             let mut summaries = BTreeMap::new();
@@ -530,6 +549,7 @@ impl GroundProgram {
                 ));
             }
             drop(summaries_profile);
+            drop(summaries_timer);
             let mut candidates_profile = profile.span("admission-candidates", Some(*round));
             // Commit exact-coverage removals before computing bounds on a graph
             // they may already break. All proofs still use this immutable snapshot.
@@ -539,7 +559,8 @@ impl GroundProgram {
             // References borrow the already-accounted summaries. Only the union
             // adds retained condition storage; proofs keep their own existing
             // conservative charges, including shared coverage per proof.
-            let mut exact_coverage = BTreeMap::new();
+            let mut exact_coverage: BTreeMap<_, Option<(Vec<&ProducerSummary>, Condition)>> =
+                BTreeMap::new();
             for (position, rule) in self
                 .rules
                 .iter()
@@ -550,6 +571,16 @@ impl GroundProgram {
                 budget.tick("rewrite candidates")?;
                 let candidate = &summaries[&rule.id];
                 if candidate.exact {
+                    continue;
+                }
+                if attempts.reuse_negative(&Attempt::Removal(rule.id), budget, progress)? {
+                    if last_candidates[&rule.head.atom] == rule.id {
+                        if let Some((_, coverage)) =
+                            exact_coverage.remove(&rule.head.atom).flatten()
+                        {
+                            retained -= coverage.node_count();
+                        }
+                    }
                     continue;
                 }
                 if let std::collections::btree_map::Entry::Vacant(entry) =
@@ -598,13 +629,14 @@ impl GroundProgram {
                     entry.insert(value);
                 }
                 if let Some((covering, coverage)) = &exact_coverage[&rule.head.atom]
-                    && attempts.run(
+                    && attempts.proof(
                         Attempt::Removal(rule.id),
                         &rule.head.atom,
                         self,
                         &mut retained,
                         budget,
                         progress,
+                        |proved| !proved,
                         |_, budget| {
                             Ok(ctx
                                 .restrict(
@@ -664,14 +696,22 @@ impl GroundProgram {
                             p.literal.polarity == Polarity::Negative
                                 && self.inputs.contains(&p.literal.term.atom)
                         }) {
+                            if attempts.reuse_negative(
+                                &Attempt::Discharge(rule.id, excluded.literal.term.occurrence),
+                                budget,
+                                progress,
+                            )? {
+                                continue;
+                            }
                             let proof = attempts
-                                .run(
+                                .proof(
                                     Attempt::Discharge(rule.id, excluded.literal.term.occurrence),
                                     &rule.head.atom,
                                     self,
                                     &mut retained,
                                     budget,
                                     progress,
+                                    Option::is_none,
                                     |_, budget| {
                                         let mut guard = candidate.clone();
                                         guard.settled.retain(|p| {
@@ -733,6 +773,13 @@ impl GroundProgram {
                         {
                             continue;
                         }
+                        if attempts.reuse_negative(
+                            &Attempt::Discharge(rule.id, literal.term.occurrence),
+                            budget,
+                            progress,
+                        )? {
+                            continue;
+                        }
                         let covering: Vec<_> = producers
                             .get(&literal.term.atom)
                             .into_iter()
@@ -782,13 +829,14 @@ impl GroundProgram {
                             continue;
                         };
                         let coverage = bounds.conditions[&literal.term.atom].clone();
-                        if attempts.run(
+                        if attempts.proof(
                             Attempt::Discharge(rule.id, literal.term.occurrence),
                             &rule.head.atom,
                             self,
                             &mut retained,
                             budget,
                             progress,
+                            |proved| !proved,
                             |_, budget| {
                                 Ok(ctx
                                     .restrict(
@@ -926,9 +974,21 @@ impl GroundProgram {
             candidates.push((position + 1, p, component));
             last.insert(component.id, p.rule.id);
         }
-        let mut cache = BTreeMap::new();
+        let mut cache: BTreeMap<_, Option<Arc<ComponentUpperBounds>>> = BTreeMap::new();
         let mut batch = Vec::new();
         for (position, candidate, component) in candidates {
+            if attempts.reuse_negative(
+                &Attempt::BoundRemoval(candidate.rule.id),
+                budget,
+                progress,
+            )? {
+                if last[&component.id] == candidate.rule.id {
+                    if let Some(bounds) = cache.remove(&component.id).flatten() {
+                        *retained -= bounds.nodes();
+                    }
+                }
+                continue;
+            }
             if let std::collections::btree_map::Entry::Vacant(entry) = cache.entry(component.id) {
                 progress.work(
                     self,
@@ -964,13 +1024,14 @@ impl GroundProgram {
                 let coverage = &bounds.guarantees[&candidate.rule.head.atom];
                 progress.rule(self, "bound-removals", candidate.rule.id, position);
                 let upper = attempts
-                    .run(
+                    .proof(
                         Attempt::BoundRemoval(candidate.rule.id),
                         &candidate.rule.head.atom,
                         self,
                         retained,
                         budget,
                         progress,
+                        Option::is_none,
                         |_, budget| {
                             let mut upper = candidate.condition.clone();
                             for literal in &candidate.rule.body {

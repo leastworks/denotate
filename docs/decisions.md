@@ -213,6 +213,20 @@ real program that the current choice serves badly.
   rebuild changes this invariant. No BDD fingerprints or cross-run cache are used.
   Bounds and discharge retain conservative invalidation. Retry analysis is charged
   and finishes before committing either the graph or the retry state.
+- **Remember completed negative admission proofs within an invocation.** A proof
+  attempt that found no justification need not repeat after an unrelated rewrite.
+  Removal, bound-removal and discharge cache only that outcome and the stable
+  ground attempt identity; they use the existing skip invalidation, including
+  unrestricted settled-condition changes under assumption-relative rewrites.
+  Bounds and discharge remain conservative across either sign of dependency and
+  SCC splits. Cache lookup happens before otherwise-unused coverage/bounds work.
+  Computed coverage, bounds and summaries are data, not negative proofs, and are
+  not retained across rounds by this change. A negative is never an exhaustion
+  record and cannot turn an unsupported region inconclusive. Metadata and
+  invalidation work are charged, and cache state ends with admission. Complete
+  runs must preserve proofs and diagnostics; saved work may improve limited runs,
+  whose differences must be reviewed for soundness. Per-round measurements separate
+  proof savings from rebuilt prerequisites before extending reuse further.
 - **Index original dependencies within a checking invocation.** Repeated full
   scans made local query construction depend on the size of unrelated fixed
   evidence and on the depth of dependencies restored by rewrite proofs. A borrowed

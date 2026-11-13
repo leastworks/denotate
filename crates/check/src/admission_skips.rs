@@ -1,4 +1,4 @@
-//! Failed proof attempts, local to one admission run. Retry dependencies use
+//! Completed negative and failed attempts, local to one admission run. Dependencies use
 //! ground atoms/rules stable across that run's graph rebuilds, never SCC handles.
 use crate::{
     admission_progress::AdmissionReporter,
@@ -49,6 +49,16 @@ pub(crate) enum Attempt {
     Discharge(GroundRuleId, OccurrenceId),
 }
 impl Attempt {
+    pub fn kind(&self) -> AdmissionAttemptKind {
+        match self {
+            Self::Coverage(_) => AdmissionAttemptKind::Coverage,
+            Self::Removal(_) => AdmissionAttemptKind::Removal,
+            Self::UpperBounds(_) => AdmissionAttemptKind::UpperBounds,
+            Self::GuaranteedBounds(_) => AdmissionAttemptKind::GuaranteedBounds,
+            Self::BoundRemoval(_) => AdmissionAttemptKind::BoundRemoval,
+            Self::Discharge(..) => AdmissionAttemptKind::Discharge,
+        }
+    }
     fn record(&self, head: &GroundAtom, reason: Inconclusive) -> AdmissionSkip {
         let (kind, rule, occurrence) = match self {
             Self::Coverage(_) => (AdmissionAttemptKind::Coverage, None, None),
@@ -72,10 +82,24 @@ impl Attempt {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct Attempts {
     skipped: BTreeMap<Attempt, AdmissionSkip>,
+    negative: BTreeMap<Attempt, GroundAtom>,
+    // Bounded metadata, one last outcome/cause per live attempt, never BDDs.
+    history: BTreeMap<Attempt, (bool, Option<&'static str>)>,
+    reuse_negatives: bool,
     pub count: usize,
+}
+impl Default for Attempts {
+    fn default() -> Self {
+        Self {
+            skipped: BTreeMap::new(),
+            negative: BTreeMap::new(),
+            history: BTreeMap::new(),
+            reuse_negatives: true,
+            count: 0,
+        }
+    }
 }
 pub(crate) struct RetryChanges {
     all: BTreeSet<GroundAtom>,
@@ -83,6 +107,59 @@ pub(crate) struct RetryChanges {
 }
 
 impl Attempts {
+    #[cfg(test)]
+    pub fn without_negative_reuse() -> Self {
+        Self {
+            reuse_negatives: false,
+            ..Self::default()
+        }
+    }
+    fn tracked(&self) -> impl Iterator<Item = (&Attempt, &GroundAtom)> {
+        self.skipped
+            .iter()
+            .map(|(a, s)| (a, &s.head))
+            .chain(self.negative.iter())
+    }
+    fn len(&self) -> usize {
+        self.skipped.len() + self.negative.len()
+    }
+
+    /// Consult before constructing a cover/bounds used only by this consumer.
+    pub fn reuse_negative(
+        &self,
+        attempt: &Attempt,
+        budget: &mut Budget<'_>,
+        progress: &AdmissionReporter<'_>,
+    ) -> Result<bool> {
+        budget.tick("admission attempt lookup")?;
+        let reused = self.reuse_negatives && self.negative.contains_key(attempt);
+        if reused {
+            progress.reused(attempt.kind(), false);
+        }
+        Ok(reused)
+    }
+    pub fn proof<T>(
+        &mut self,
+        attempt: Attempt,
+        head: &GroundAtom,
+        program: &GroundProgram,
+        retained: &mut usize,
+        budget: &mut Budget<'_>,
+        progress: &AdmissionReporter<'_>,
+        negative: fn(&T) -> bool,
+        run: impl FnOnce(&mut usize, &mut Budget<'_>) -> Result<T>,
+    ) -> Result<Option<T>> {
+        self.run_classified(
+            attempt,
+            head,
+            program,
+            retained,
+            budget,
+            progress,
+            Some(negative),
+            run,
+        )
+    }
     pub fn run<T>(
         &mut self,
         attempt: Attempt,
@@ -93,12 +170,54 @@ impl Attempts {
         progress: &AdmissionReporter<'_>,
         run: impl FnOnce(&mut usize, &mut Budget<'_>) -> Result<T>,
     ) -> Result<Option<T>> {
+        self.run_classified(
+            attempt, head, program, retained, budget, progress, None, run,
+        )
+    }
+    fn run_classified<T>(
+        &mut self,
+        attempt: Attempt,
+        head: &GroundAtom,
+        program: &GroundProgram,
+        retained: &mut usize,
+        budget: &mut Budget<'_>,
+        progress: &AdmissionReporter<'_>,
+        negative: Option<fn(&T) -> bool>,
+        run: impl FnOnce(&mut usize, &mut Budget<'_>) -> Result<T>,
+    ) -> Result<Option<T>> {
         if self.skipped.contains_key(&attempt) {
+            progress.reused(attempt.kind(), true);
             return Ok(None);
         }
         let before = *retained;
-        match run(retained, budget) {
-            Ok(value) => Ok(Some(value)),
+        let previous = self.history.get(&attempt).copied();
+        let started = progress.attempt_start(attempt.kind(), previous);
+        let result = run(retained, budget);
+        let outcome = match &result {
+            Ok(value) if negative.is_some_and(|f| f(value)) => "negative",
+            Ok(_) => "completed",
+            Err(CheckError::LimitExceeded {
+                phase: "BDD operation" | "BDD preflight",
+                resource: "BDD tasks" | "BDD nodes",
+                ..
+            }) => "skipped",
+            Err(_) => "failed",
+        };
+        progress.attempt_end(attempt.kind(), started, outcome);
+        match result {
+            Ok(value) => {
+                if negative.is_some_and(|f| f(&value)) {
+                    if self.reuse_negatives {
+                        self.negative.insert(attempt.clone(), head.clone());
+                    }
+                    if progress.enabled() {
+                        self.history.insert(attempt, (false, None));
+                    }
+                } else {
+                    self.history.remove(&attempt);
+                }
+                Ok(Some(value))
+            }
             Err(
                 error @ CheckError::LimitExceeded {
                     phase: "BDD operation" | "BDD preflight",
@@ -114,6 +233,9 @@ impl Attempts {
                 self.count += 1;
                 progress.skipped(program, &record, self.count);
                 budget.record_failure(&error);
+                if progress.enabled() {
+                    self.history.insert(attempt.clone(), (true, None));
+                }
                 self.skipped.insert(attempt, record);
                 Ok(None)
             }
@@ -133,11 +255,11 @@ impl Attempts {
     ) -> Result<RetryChanges> {
         let mut all = BTreeSet::new();
         let mut settled = BTreeSet::new();
-        if self.skipped.is_empty() {
+        if self.len() == 0 {
             return Ok(RetryChanges { all, settled });
         }
-        budget.charge(self.skipped.len(), "admission retry dependencies")?;
-        let conservative = self.skipped.keys().any(|a| {
+        budget.charge(self.len(), "admission retry dependencies")?;
+        let conservative = self.tracked().any(|(a, _)| {
             matches!(
                 a,
                 Attempt::UpperBounds(_)
@@ -147,9 +269,8 @@ impl Attempts {
             )
         });
         let precise = self
-            .skipped
-            .keys()
-            .any(|a| matches!(a, Attempt::Coverage(_) | Attempt::Removal(_)));
+            .tracked()
+            .any(|(a, _)| matches!(a, Attempt::Coverage(_) | Attempt::Removal(_)));
         for proof in batch {
             budget.tick("admission retry dependencies")?;
             let head = &proof.candidate().head.atom;
@@ -194,9 +315,9 @@ impl Attempts {
         after: &GroundProgram,
         changed: &RetryChanges,
         budget: &mut Budget<'_>,
-    ) -> Result<BTreeSet<Attempt>> {
-        let mut invalid = BTreeSet::new();
-        if self.skipped.is_empty() {
+    ) -> Result<BTreeMap<Attempt, &'static str>> {
+        let mut invalid = BTreeMap::new();
+        if self.len() == 0 {
             return Ok(invalid);
         }
         budget.charge(
@@ -206,17 +327,20 @@ impl Attempts {
         // Admission currently preserves these exactly. If a future rebuild
         // changes the universe/order, every BDD attempt must be tried again.
         if before.inputs != after.inputs || before.input_order != after.input_order {
-            budget.charge(self.skipped.len(), "admission retry inputs")?;
-            return Ok(self.skipped.keys().cloned().collect());
+            budget.charge(self.len(), "admission retry inputs")?;
+            return Ok(self
+                .tracked()
+                .map(|(a, _)| (a.clone(), "input-order"))
+                .collect());
         }
         // One scan per commit, shared by coverage and all removal attempts for
         // the same head, rather than one scan of its producers per failed rule.
         let mut coverage = BTreeMap::<_, bool>::new();
         let mut candidates = BTreeSet::new();
-        for (attempt, skip) in &self.skipped {
+        for (attempt, head) in self.tracked() {
             budget.tick("admission retry inputs")?;
             if matches!(attempt, Attempt::Coverage(_) | Attempt::Removal(_)) {
-                coverage.insert(&skip.head, false);
+                coverage.insert(head, false);
             }
         }
         if !coverage.is_empty() {
@@ -245,12 +369,27 @@ impl Attempts {
                 }
             }
         }
-        for (attempt, skip) in &self.skipped {
+        for (attempt, head) in self.tracked() {
             budget.tick("admission retry inputs")?;
+            let obsolete = match attempt {
+                Attempt::Coverage(_) => !candidates.contains(head),
+                Attempt::Removal(id) | Attempt::BoundRemoval(id) => after.rule(*id).is_none(),
+                // Admission removes a literal only through a discharge. Use
+                // the existing index, not a body scan for every cached literal
+                // (which would be quadratic for a rule with many negations).
+                Attempt::Discharge(id, occurrence) => {
+                    after.rule(*id).is_none() || after.discharge(*id, *occurrence).is_some()
+                }
+                _ => false,
+            };
+            if obsolete {
+                invalid.insert(attempt.clone(), "obsolete");
+                continue;
+            }
             let retry = match attempt {
-                Attempt::Coverage(_) => coverage[&skip.head] || !candidates.contains(&skip.head),
+                Attempt::Coverage(_) => coverage[head],
                 Attempt::Removal(id) => {
-                    coverage[&skip.head]
+                    coverage[head]
                         || match before.rule(*id) {
                             Some(rule) => summary_changed(
                                 before,
@@ -266,16 +405,30 @@ impl Attempts {
                 Attempt::UpperBounds(_)
                 | Attempt::GuaranteedBounds(_)
                 | Attempt::BoundRemoval(_)
-                | Attempt::Discharge(..) => changed.all.contains(&skip.head),
+                | Attempt::Discharge(..) => changed.all.contains(head),
             };
             if retry {
-                invalid.insert(attempt.clone());
+                let cause = match attempt {
+                    Attempt::Coverage(_) => "exact-cover",
+                    Attempt::Removal(_) if coverage[head] => "exact-cover",
+                    Attempt::Removal(_) => "settled-summary",
+                    _ => "reader-cone",
+                };
+                invalid.insert(attempt.clone(), cause);
             }
         }
         Ok(invalid)
     }
-    pub fn invalidate(&mut self, invalid: &BTreeSet<Attempt>) {
-        self.skipped.retain(|attempt, _| !invalid.contains(attempt));
+    pub fn invalidate(&mut self, invalid: &BTreeMap<Attempt, &'static str>) {
+        for (attempt, cause) in invalid {
+            self.skipped.remove(attempt);
+            self.negative.remove(attempt);
+            if *cause == "obsolete" {
+                self.history.remove(attempt);
+            } else if let Some(previous) = self.history.get_mut(attempt) {
+                previous.1 = Some(cause);
+            }
+        }
     }
     pub fn records(self) -> BTreeMap<GroundAtom, Vec<AdmissionSkip>> {
         let mut records = BTreeMap::<_, Vec<_>>::new();
@@ -349,124 +502,245 @@ mod tests {
     use crate::test_support::rewrites::{atom, rel, rule};
 
     #[test]
-    fn bound_attempts_retry_tighter_bounds_while_the_component_stays_blocked() {
+    fn obsolete_negative_discharge_is_removed_without_becoming_a_skip() {
         let mut c = denotate_ir::Corpus::new();
         let i = rel(&mut c, "i", true);
         let a = rel(&mut c, "a", false);
         let b = rel(&mut c, "b", false);
-        let s = rel(&mut c, "s", false);
-        let v = rel(&mut c, "v", false);
-        let sr = rule(&mut c, s, &[(i, false), (v, true)]);
-        let vr = rule(&mut c, v, &[(i, true), (s, true)]);
-        rule(&mut c, a, &[(i, false)]);
-        let candidate = rule(&mut c, a, &[(b, false)]);
-        rule(&mut c, b, &[(s, false), (a, true)]);
-        // Discharging the independent s/v cycle settles s=i. a/b still form a
-        // negative SCC, but b's bound tightens from !i to i & !i = false.
-        // a's exact cover and its candidate's settled summary are unchanged.
+        rule(&mut c, a, &[(i, false), (b, true)]);
+        rule(&mut c, b, &[(i, true), (a, true)]);
         let limits = Limits::default();
         let before = GroundProgram::prepare(&c, &Domains::new(), &limits).unwrap();
-        let completed = before.clone().admit(&limits).unwrap();
-        let batch: Vec<_> = completed
-            .rewrite_proofs()
-            .filter(|p| {
-                [sr, vr].contains(&p.candidate().source)
-                    && matches!(p.kind, RewriteKind::Discharge { .. })
-            })
-            .cloned()
-            .collect();
-        assert_eq!(batch.len(), 2);
-        let id = before.rules().find(|r| r.source == candidate).unwrap().id;
-        let bound = Attempt::GuaranteedBounds(atom(a));
-        let removal = Attempt::BoundRemoval(id);
-        let cheap = Attempt::Removal(id);
-        let reason =
-            Inconclusive::from_error(CheckError::limit("BDD operation", "BDD tasks", 1, None))
-                .unwrap();
+        let after = before.clone().admit(&limits).unwrap();
+        let proof = after.rewrite_proofs().next().unwrap();
+        let RewriteKind::Discharge { literal_occurrence } = proof.kind else {
+            panic!("discharge")
+        };
+        let attempt = Attempt::Discharge(proof.candidate().id, literal_occurrence);
         let mut attempts = Attempts::default();
-        for attempt in [bound.clone(), removal.clone(), cheap.clone()] {
-            // Inject prior local failures without pinning a resource threshold.
-            // Retry uses production graph traversal and invalidation below.
-            attempts
-                .skipped
-                .insert(attempt.clone(), attempt.record(&atom(a), reason));
-        }
-        let changed = attempts
-            .changed_readers(&before, &batch, &mut Budget::new(&limits))
-            .unwrap();
-        let mut after = before.clone();
-        for proof in &batch {
-            let RewriteKind::Discharge { literal_occurrence } = proof.kind else {
-                unreachable!()
-            };
-            after.rules[proof.candidate().id.index]
-                .body
-                .retain(|l| l.term.occurrence != literal_occurrence);
-        }
-        crate::graph::analyze(&mut after, &mut Budget::new(&limits)).unwrap();
-        for (p, false_bound) in [(&before, false), (&after, true)] {
-            let component = p.component_for(&atom(a)).unwrap();
-            assert!(!component.blocked_by.is_empty());
-            let meaning = p.symbolic(&limits).unwrap();
-            let ctx = meaning.context();
-            let mut summaries = BTreeMap::new();
-            for rule in p.rules() {
-                let mut condition = ctx.true_condition();
-                let mut settled = Vec::new();
-                let mut exact = true;
-                for literal in &rule.body {
-                    match meaning.fact(&literal.term.atom).unwrap() {
-                        SymbolicFact::Settled(mut value) => {
-                            if literal.polarity == Polarity::Negative {
-                                value = ctx.not(&value, &limits).unwrap();
-                            }
-                            condition = ctx.and(&condition, &value, &limits).unwrap();
-                            settled.push(SettledPremise {
-                                literal: literal.clone(),
-                                condition: value,
-                            });
-                        }
-                        SymbolicFact::Blocked(_) => exact = false,
-                        SymbolicFact::Inconclusive(_) => panic!(),
-                    }
-                }
-                summaries.insert(
-                    rule.id,
-                    ProducerSummary {
-                        rule: rule.clone(),
-                        settled,
-                        condition,
-                        exact,
-                    },
-                );
-            }
-            let bounds = crate::upper_bounds::compute_with_guarantees(
-                p,
-                component,
-                &summaries,
-                ctx,
-                &mut 0,
-                &mut Budget::new(&limits),
-                None,
-                true,
-            )
-            .unwrap();
-            assert_eq!(bounds.conditions[&atom(b)].is_false(), false_bound);
-            assert_eq!(
-                ctx.evaluate(&bounds.conditions[&atom(b)], [], &limits)
-                    .unwrap(),
-                !false_bound
-            );
-        }
+        attempts
+            .negative
+            .insert(attempt.clone(), proof.candidate().head.atom.clone());
+        attempts.history.insert(attempt.clone(), (false, None));
+        let changed = RetryChanges {
+            all: BTreeSet::new(),
+            settled: BTreeSet::new(),
+        };
         let invalid = attempts
             .invalidated(&before, &after, &changed, &mut Budget::new(&limits))
             .unwrap();
-        assert_eq!(invalid, BTreeSet::from([bound, removal]));
+        assert_eq!(invalid[&attempt], "obsolete");
         attempts.invalidate(&invalid);
-        assert_eq!(
-            attempts.skipped.keys().cloned().collect::<Vec<_>>(),
-            vec![cheap]
-        );
+        assert!(attempts.negative.is_empty());
+        assert!(attempts.history.is_empty());
+        assert_eq!(attempts.count, 0);
+        assert!(attempts.records().is_empty());
+    }
+
+    #[test]
+    fn negative_invalidation_covers_producer_edits_settlement_and_scc_splits() {
+        let mut c = denotate_ir::Corpus::new();
+        let i = rel(&mut c, "i", true);
+        let j = rel(&mut c, "j", true);
+        let u = rel(&mut c, "u", false);
+        let v = rel(&mut c, "v", false);
+        let h = rel(&mut c, "h", false);
+        let base = rule(&mut c, h, &[(i, false)]);
+        let candidate = rule(&mut c, h, &[(j, false), (u, false)]);
+        rule(&mut c, u, &[(i, false)]);
+        let cyclic = rule(&mut c, u, &[(v, false)]);
+        let back = rule(&mut c, v, &[(u, true)]);
+        let limits = Limits::default();
+        let before = GroundProgram::prepare(&c, &Domains::new(), &limits).unwrap();
+        let id = |source| before.rules().find(|r| r.source == source).unwrap().id;
+        for edit in [
+            "lost-producer",
+            "producer-body",
+            "candidate-body",
+            "settlement",
+        ] {
+            let attempt = Attempt::Removal(id(candidate));
+            let mut attempts = Attempts::default();
+            attempts.negative.insert(attempt.clone(), atom(h));
+            let mut after = before.clone();
+            let mut changed = RetryChanges {
+                all: BTreeSet::new(),
+                settled: BTreeSet::new(),
+            };
+            match edit {
+                "lost-producer" => {
+                    after.rewrites.dropped.insert(id(base));
+                }
+                "producer-body" => {
+                    after.rules[id(base).index].body.clear();
+                }
+                "candidate-body" => {
+                    after.rules[id(candidate).index].body.remove(0);
+                }
+                "settlement" => {
+                    after.rewrites.dropped.insert(id(back));
+                    changed.all.extend([atom(v), atom(u), atom(h)]);
+                }
+                _ => unreachable!(),
+            }
+            crate::graph::analyze(&mut after, &mut Budget::new(&limits)).unwrap();
+            let invalid = attempts
+                .invalidated(&before, &after, &changed, &mut Budget::new(&limits))
+                .unwrap();
+            assert!(invalid.contains_key(&attempt), "{edit}");
+            attempts.invalidate(&invalid);
+            assert!(attempts.negative.is_empty());
+            assert!(attempts.records().is_empty());
+        }
+        let mut attempts = Attempts::default();
+        let bound = Attempt::BoundRemoval(id(cyclic));
+        attempts.negative.insert(bound.clone(), atom(u));
+        let mut after = before.clone();
+        after.rewrites.dropped.insert(id(back));
+        crate::graph::analyze(&mut after, &mut Budget::new(&limits)).unwrap();
+        assert!(before.component_for(&atom(u)).unwrap().cycle.is_some());
+        assert!(after.component_for(&atom(u)).unwrap().cycle.is_none());
+        let changed = RetryChanges {
+            all: BTreeSet::from([atom(v), atom(u), atom(h)]),
+            settled: BTreeSet::new(),
+        };
+        let invalid = attempts
+            .invalidated(&before, &after, &changed, &mut Budget::new(&limits))
+            .unwrap();
+        assert_eq!(invalid[&bound], "reader-cone");
+    }
+
+    #[test]
+    fn bound_attempts_retry_tighter_bounds_while_the_component_stays_blocked() {
+        for negative in [false, true] {
+            let mut c = denotate_ir::Corpus::new();
+            let i = rel(&mut c, "i", true);
+            let a = rel(&mut c, "a", false);
+            let b = rel(&mut c, "b", false);
+            let s = rel(&mut c, "s", false);
+            let v = rel(&mut c, "v", false);
+            let sr = rule(&mut c, s, &[(i, false), (v, true)]);
+            let vr = rule(&mut c, v, &[(i, true), (s, true)]);
+            rule(&mut c, a, &[(i, false)]);
+            let candidate = rule(&mut c, a, &[(b, false)]);
+            rule(&mut c, b, &[(s, false), (a, true)]);
+            // Discharging the independent s/v cycle settles s=i. a/b still form a
+            // negative SCC, but b's bound tightens from !i to i & !i = false.
+            // a's exact cover and its candidate's settled summary are unchanged.
+            let limits = Limits::default();
+            let before = GroundProgram::prepare(&c, &Domains::new(), &limits).unwrap();
+            let completed = before.clone().admit(&limits).unwrap();
+            let batch: Vec<_> = completed
+                .rewrite_proofs()
+                .filter(|p| {
+                    [sr, vr].contains(&p.candidate().source)
+                        && matches!(p.kind, RewriteKind::Discharge { .. })
+                })
+                .cloned()
+                .collect();
+            assert_eq!(batch.len(), 2);
+            let id = before.rules().find(|r| r.source == candidate).unwrap().id;
+            let bound = Attempt::GuaranteedBounds(atom(a));
+            let removal = Attempt::BoundRemoval(id);
+            let cheap = Attempt::Removal(id);
+            let reason =
+                Inconclusive::from_error(CheckError::limit("BDD operation", "BDD tasks", 1, None))
+                    .unwrap();
+            let mut attempts = Attempts::default();
+            for attempt in [bound.clone(), removal.clone(), cheap.clone()] {
+                // Inject completed negatives or local failures without a resource golden.
+                // Retry uses production graph traversal and invalidation below.
+                if negative && !matches!(attempt, Attempt::GuaranteedBounds(_)) {
+                    attempts.negative.insert(attempt.clone(), atom(a));
+                } else {
+                    attempts
+                        .skipped
+                        .insert(attempt.clone(), attempt.record(&atom(a), reason));
+                }
+            }
+            let changed = attempts
+                .changed_readers(&before, &batch, &mut Budget::new(&limits))
+                .unwrap();
+            let mut after = before.clone();
+            for proof in &batch {
+                let RewriteKind::Discharge { literal_occurrence } = proof.kind else {
+                    unreachable!()
+                };
+                after.rules[proof.candidate().id.index]
+                    .body
+                    .retain(|l| l.term.occurrence != literal_occurrence);
+            }
+            crate::graph::analyze(&mut after, &mut Budget::new(&limits)).unwrap();
+            for (p, false_bound) in [(&before, false), (&after, true)] {
+                let component = p.component_for(&atom(a)).unwrap();
+                assert!(!component.blocked_by.is_empty());
+                let meaning = p.symbolic(&limits).unwrap();
+                let ctx = meaning.context();
+                let mut summaries = BTreeMap::new();
+                for rule in p.rules() {
+                    let mut condition = ctx.true_condition();
+                    let mut settled = Vec::new();
+                    let mut exact = true;
+                    for literal in &rule.body {
+                        match meaning.fact(&literal.term.atom).unwrap() {
+                            SymbolicFact::Settled(mut value) => {
+                                if literal.polarity == Polarity::Negative {
+                                    value = ctx.not(&value, &limits).unwrap();
+                                }
+                                condition = ctx.and(&condition, &value, &limits).unwrap();
+                                settled.push(SettledPremise {
+                                    literal: literal.clone(),
+                                    condition: value,
+                                });
+                            }
+                            SymbolicFact::Blocked(_) => exact = false,
+                            SymbolicFact::Inconclusive(_) => panic!(),
+                        }
+                    }
+                    summaries.insert(
+                        rule.id,
+                        ProducerSummary {
+                            rule: rule.clone(),
+                            settled,
+                            condition,
+                            exact,
+                        },
+                    );
+                }
+                let bounds = crate::upper_bounds::compute_with_guarantees(
+                    p,
+                    component,
+                    &summaries,
+                    ctx,
+                    &mut 0,
+                    &mut Budget::new(&limits),
+                    None,
+                    true,
+                )
+                .unwrap();
+                assert_eq!(bounds.conditions[&atom(b)].is_false(), false_bound);
+                assert_eq!(
+                    ctx.evaluate(&bounds.conditions[&atom(b)], [], &limits)
+                        .unwrap(),
+                    !false_bound
+                );
+            }
+            let invalid = attempts
+                .invalidated(&before, &after, &changed, &mut Budget::new(&limits))
+                .unwrap();
+            assert_eq!(
+                invalid.keys().cloned().collect::<BTreeSet<_>>(),
+                BTreeSet::from([bound, removal])
+            );
+            attempts.invalidate(&invalid);
+            assert_eq!(
+                attempts
+                    .tracked()
+                    .map(|(a, _)| a.clone())
+                    .collect::<Vec<_>>(),
+                vec![cheap]
+            );
+        }
     }
 
     #[test]
@@ -490,6 +764,7 @@ mod tests {
         let attempts = Attempts {
             skipped: BTreeMap::from([(attempt.clone(), attempt.record(&atom(out), reason))]),
             count: 1,
+            ..Attempts::default()
         };
         let changes = RetryChanges {
             all: BTreeSet::new(),
@@ -506,7 +781,9 @@ mod tests {
         assert_eq!(
             attempts
                 .invalidated(&before, &after, &changes, &mut Budget::new(&limits))
-                .unwrap(),
+                .unwrap()
+                .into_keys()
+                .collect::<BTreeSet<_>>(),
             BTreeSet::from([attempt])
         );
     }

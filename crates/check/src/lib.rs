@@ -4,7 +4,7 @@
 mod accounting;
 mod admission_progress;
 pub use admission_progress::{
-    AdmissionComponent, AdmissionObserver, AdmissionPhase, AdmissionProgress,
+    AdmissionAttempts, AdmissionComponent, AdmissionObserver, AdmissionPhase, AdmissionProgress,
 };
 mod admission_scope;
 mod admission_skips;

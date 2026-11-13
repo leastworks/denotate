@@ -532,6 +532,21 @@ fn admission_retries_coverage_after_w_relative_guard_rewrite_with_stable_rule_id
             &Limits::default(),
         )
         .unwrap();
+        let (default, negative_events) = admit(&raw, &Limits::default());
+        let reference = raw
+            .clone()
+            .admit_without_negative_reuse(&mut Budget::new(&Limits::default()), None)
+            .unwrap();
+        super::unchanged_attempts::equal(&default, &reference);
+        assert!(
+            negative_events.iter().any(|e| e.stage == "attempt-summary"
+                && e.attempts
+                    .get(&AdmissionAttemptKind::Removal)
+                    .is_some_and(
+                        |a| a.rerun_negative > 0 && a.retry_causes.contains_key("exact-cover")
+                    )),
+            "completed negatives must retry an unrestricted cover changed by a W-relative guard rewrite"
+        );
         let mut exercised = false;
         for max_bdd_tasks in 0..20 {
             let (p, events) = admit(

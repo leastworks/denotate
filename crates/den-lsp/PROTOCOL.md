@@ -158,8 +158,36 @@ admission. A preflight constrained by remaining work reports resource `work`,
 not the per-operation `BDD tasks` limit; ties are treated as global work stops.
 
 Stages are `starting`, `structural`, `structural-committed`, `symbolic`, `summaries`, `producer-removals`, `candidates`,
-`upper-bounds`, `guaranteed-bounds`, `bound-removals`, `commit`, `committed`, `complete`, `reused`, and
+`upper-bounds`, `guaranteed-bounds`, `bound-removals`, `commit`, `committed`, `attempt-summary`, `complete`, `reused`, and
 `inconsistent-assumptions`.
+
+`attempts` is an optional array of per-round aggregates, ordered by attempt kind.
+Each entry has `kind` (the same labels as `skipped`), `new`, `rerunNegative`,
+`retriedSkip`, `reusedNegative`, `reusedSkip`, `completed`, `negative`, `skipped`,
+`failed`, `elapsedMs` and `retryCauses`. The first three counters count executed
+attempts by prior outcome; the two reuse counters count cache hits, without
+executing the operation. `completed` counts successful computations/proofs;
+`negative` counts completed proof attempts that supplied no proof. `skipped`
+counts recoverable per-operation failures and `failed` counts stopping failures.
+Time covers executed operations only. Successful prerequisites are rebuilt each
+round and count as `new`, since their results are not remembered across rounds.
+`retryCauses` aggregates a bounded vocabulary: `exact-cover`, `settled-summary`,
+`reader-cone` and defensively `input-order` (`unchanged` in a test with reuse
+disabled). It describes invalidation triggers, not a claim that a conservative
+retry's BDD inputs actually changed.
+
+`prerequisiteMs` separately records `symbolic` and `summaries` time. Coverage,
+upper-bounds and guaranteed-bounds times are their respective `attempts` entries;
+the other entries measure proof operations. These do not add up to total round
+time: structural work, graph commits, invalidation and other overhead remain.
+The `attempt-summary` stage emits final counters once per entered round, including
+rounds stopped by exhaustion; earlier snapshots can show a running attempt whose
+outcome is not yet counted. Counters reset at a new round and are not retained on
+admission reuse. They are observations only, never verdicts, finding identities
+or receipt inputs. Completed negatives do not affect `skippedAttempts` or region
+inconclusiveness. CLI progress and memory-profile progress records use these same
+fields.
+
 `structural` performs no BDD proof operations. `structural-committed` includes
 committed removal and component counts; its source-rule warnings retain the existing
 rewrite identity and `coversAllInstances` convention. Structural notes distinguish

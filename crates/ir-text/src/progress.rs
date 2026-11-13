@@ -146,6 +146,14 @@ impl<'a> AdmissionDetails<'a> {
             "removedRules": event.removed_rules,
             "dischargedNegations": event.discharged_negations,
             "skippedAttempts": event.skipped_attempts,
+            "attempts": event.attempts.iter().map(|(kind, a)| json!({
+                "kind":kind.label(), "new":a.new, "rerunNegative":a.rerun_negative,
+                "retriedSkip":a.retried_skip, "reusedNegative":a.reused_negative,
+                "reusedSkip":a.reused_skip, "completed":a.completed, "negative":a.negative,
+                "skipped":a.skipped, "failed":a.failed, "elapsedMs":a.elapsed.as_secs_f64()*1000.,
+                "retryCauses":a.retry_causes,
+            })).collect::<Vec<_>>(),
+            "prerequisiteMs": event.prerequisites.iter().map(|(k, d)| ((*k).to_string(), json!(d.as_secs_f64()*1000.))).collect::<serde_json::Map<_, _>>(),
             "skipped": event.skipped.as_ref().map(|s| s.kind.label()),
             "skipTarget": event.skipped.as_ref().map(|s| {
                 let names = self.names.get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)));
@@ -212,6 +220,22 @@ pub fn admission_text(a: &Value) -> String {
             "; {} proof attempts skipped",
             a["skippedAttempts"]
         ));
+    }
+    if a["stage"] == "attempt-summary" {
+        if let Some(times) = a["prerequisiteMs"].as_object() {
+            for (kind, ms) in times {
+                text.push_str(&format!("; {kind} {:.1} ms", ms.as_f64().unwrap_or(0.)));
+            }
+        }
+        for counts in a["attempts"].as_array().into_iter().flatten() {
+            text.push_str(&format!(
+                "; {}: {} new, {} rerun negative, {} retry skip, {} reused negative, {} reused skip; outcomes {} completed, {} negative, {} skipped, {} failed ({:.1} ms, retry causes {})",
+                counts["kind"].as_str().unwrap_or("?"), counts["new"], counts["rerunNegative"],
+                counts["retriedSkip"], counts["reusedNegative"], counts["reusedSkip"],
+                counts["completed"], counts["negative"], counts["skipped"], counts["failed"],
+                counts["elapsedMs"].as_f64().unwrap_or(0.), counts["retryCauses"],
+            ));
+        }
     }
     if a["rule"].as_u64().unwrap_or(0) > 0 {
         text.push_str(&format!("; rule {}/{}", a["rule"], a["rules"]));

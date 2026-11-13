@@ -112,10 +112,14 @@ fn random_small_bound_removals_preserve_stable_and_supported_models() {
                 .collect();
             rule(&mut c, head, &body);
         }
-        let p = GroundProgram::prepare(&c, &Domains::new(), &Limits::default())
-            .unwrap()
-            .admit(&Limits::default())
+        let limits = Limits::default();
+        let raw = GroundProgram::prepare(&c, &Domains::new(), &limits).unwrap();
+        let reference = raw
+            .clone()
+            .admit_without_negative_reuse(&mut Budget::new(&limits), None)
             .unwrap();
+        let p = raw.admit(&limits).unwrap();
+        super::unchanged_attempts::equal(&p, &reference);
         removals += p
             .rewrite_proofs()
             .filter(|p| p.bound_removal().is_some())

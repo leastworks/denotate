@@ -3,8 +3,26 @@ use crate::*;
 use denotate_ir::RuleId;
 use std::{
     cell::RefCell,
+    collections::BTreeMap,
     time::{Duration, Instant},
 };
+
+/// Per-round observations, never part of a proof, receipt, or cache identity.
+#[derive(Debug, Clone, Default)]
+pub struct AdmissionAttempts {
+    pub new: usize,
+    pub rerun_negative: usize,
+    pub retried_skip: usize,
+    pub reused_negative: usize,
+    pub reused_skip: usize,
+    pub completed: usize,
+    pub negative: usize,
+    pub skipped: usize,
+    pub failed: usize,
+    pub elapsed: Duration,
+    /// A fixed vocabulary of causes, aggregated without storing target lists.
+    pub retry_causes: BTreeMap<&'static str, usize>,
+}
 
 #[derive(Debug, Clone)]
 pub struct AdmissionComponent {
@@ -49,6 +67,8 @@ pub struct AdmissionProgress {
     /// Present only on the immediate, recoverable failure event.
     pub skipped: Option<AdmissionSkip>,
     pub failure: Option<Inconclusive>,
+    pub attempts: BTreeMap<AdmissionAttemptKind, AdmissionAttempts>,
+    pub prerequisites: BTreeMap<&'static str, Duration>,
 }
 pub type AdmissionObserver<'a> = dyn Fn(&AdmissionProgress) + 'a;
 
@@ -57,6 +77,7 @@ struct State {
     current: Option<ComponentId>,
     current_rule: Option<GroundRuleId>,
     last: Option<Instant>,
+    round_reported: bool,
 }
 pub(crate) struct AdmissionReporter<'a> {
     observer: Option<&'a AdmissionObserver<'a>>,
@@ -82,10 +103,13 @@ impl<'a> AdmissionReporter<'a> {
                     skipped_attempts: 0,
                     skipped: None,
                     failure: None,
+                    attempts: BTreeMap::new(),
+                    prerequisites: BTreeMap::new(),
                 },
                 current: None,
                 current_rule: None,
                 last: None,
+                round_reported: false,
             }),
         }
     }
@@ -95,9 +119,93 @@ impl<'a> AdmissionReporter<'a> {
     pub fn enabled(&self) -> bool {
         self.observer.is_some()
     }
+    pub fn reused(&self, kind: AdmissionAttemptKind, skipped: bool) {
+        if !self.enabled() {
+            return;
+        }
+        let mut s = self.state.borrow_mut();
+        let counts = s.progress.attempts.entry(kind).or_default();
+        if skipped {
+            counts.reused_skip += 1;
+        } else {
+            counts.reused_negative += 1;
+        }
+    }
+    pub fn attempt_start(
+        &self,
+        kind: AdmissionAttemptKind,
+        previous: Option<(bool, Option<&'static str>)>,
+    ) -> Option<Instant> {
+        if !self.enabled() {
+            return None;
+        }
+        let mut s = self.state.borrow_mut();
+        let counts = s.progress.attempts.entry(kind).or_default();
+        match previous {
+            None => counts.new += 1,
+            Some((true, cause)) => {
+                counts.retried_skip += 1;
+                *counts
+                    .retry_causes
+                    .entry(cause.unwrap_or("unchanged"))
+                    .or_default() += 1;
+            }
+            Some((false, cause)) => {
+                counts.rerun_negative += 1;
+                *counts
+                    .retry_causes
+                    .entry(cause.unwrap_or("unchanged"))
+                    .or_default() += 1;
+            }
+        }
+        Some(Instant::now())
+    }
+    pub fn attempt_end(&self, kind: AdmissionAttemptKind, started: Option<Instant>, outcome: &str) {
+        let Some(started) = started else {
+            return;
+        };
+        let mut s = self.state.borrow_mut();
+        let counts = s.progress.attempts.entry(kind).or_default();
+        counts.elapsed += started.elapsed();
+        match outcome {
+            "negative" => counts.negative += 1,
+            "skipped" => counts.skipped += 1,
+            "failed" => counts.failed += 1,
+            _ => counts.completed += 1,
+        }
+    }
+    pub fn time(&self, stage: &'static str) -> AdmissionTimer<'_, 'a> {
+        AdmissionTimer {
+            reporter: self,
+            stage,
+            started: self.enabled().then(Instant::now),
+        }
+    }
+    pub fn round_end(&self, program: &GroundProgram) {
+        if !self.enabled() {
+            return;
+        }
+        let mut s = self.state.borrow_mut();
+        if s.round_reported || s.progress.round == 0 {
+            return;
+        }
+        s.round_reported = true;
+        let old = s.progress.stage;
+        s.progress.stage = "attempt-summary";
+        drop(s);
+        self.emit(program, true);
+        self.state.borrow_mut().progress.stage = old;
+    }
     pub fn snapshot(&self, program: &GroundProgram, round: usize, stage: &'static str) {
         if !self.enabled() {
             return;
+        }
+        if self.state.borrow().progress.round != round {
+            self.round_end(program);
+            let mut s = self.state.borrow_mut();
+            s.progress.attempts.clear();
+            s.progress.prerequisites.clear();
+            s.round_reported = false;
         }
         {
             let mut s = self.state.borrow_mut();
@@ -264,6 +372,26 @@ impl<'a> AdmissionReporter<'a> {
             })
         });
         observer(&s.progress);
+    }
+}
+
+pub(crate) struct AdmissionTimer<'r, 'a> {
+    reporter: &'r AdmissionReporter<'a>,
+    stage: &'static str,
+    started: Option<Instant>,
+}
+impl Drop for AdmissionTimer<'_, '_> {
+    fn drop(&mut self) {
+        if let Some(started) = self.started {
+            *self
+                .reporter
+                .state
+                .borrow_mut()
+                .progress
+                .prerequisites
+                .entry(self.stage)
+                .or_default() += started.elapsed();
+        }
     }
 }
 

@@ -976,6 +976,58 @@ mod tests {
             Err((3, _))
         ));
     }
+
+    #[test]
+    fn negative_attempt_counters_reach_progress_and_memory_profile() {
+        let f = Fixture::new(
+            "input i(); input j();
+relation a(); relation b(); a():-i(); a():-!b(); b():-!a();
+relation kept(); relation term(); kept():-j(); kept():-!j(); kept():-term(); term():-i(),!kept();
+relation x(); relation y(); x():-j(),!y(); y():-!j(),!x();
+relation absent(); obligation no_absent:empty(absent);
+verification checks{assumptions:[];obligations:[no_absent];}",
+        );
+        let path = f.0.join("attempts.jsonl");
+        let (expected, text, _) = f.traced(&["--no-progress"]);
+        let (actual, observed, progress) = f.traced(&["--profile-memory", path.to_str().unwrap()]);
+        assert_eq!(actual, expected);
+        assert_eq!(observed, text);
+        assert!(progress.contains("reused negative"));
+        let records: Vec<serde_json::Value> = fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        let summaries: Vec<_> = records
+            .iter()
+            .map(|r| &r["detail"]["admission"])
+            .filter(|a| a["stage"] == "attempt-summary")
+            .collect();
+        assert!(!summaries.is_empty());
+        assert!(summaries.iter().any(|a| {
+            a["attempts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|k| k["reusedNegative"].as_u64().unwrap() > 0)
+        }));
+        assert!(summaries.iter().all(|a| a["skippedAttempts"] == 0));
+        assert!(
+            summaries
+                .iter()
+                .all(|a| a["prerequisiteMs"]["symbolic"].is_number()
+                    && a["prerequisiteMs"]["summaries"].is_number())
+        );
+        for summary in summaries {
+            for kind in summary["attempts"].as_array().unwrap() {
+                let count = |name| kind[name].as_u64().unwrap();
+                assert_eq!(
+                    count("new") + count("rerunNegative") + count("retriedSkip"),
+                    count("completed") + count("negative") + count("skipped") + count("failed")
+                );
+            }
+        }
+    }
     #[test]
     fn progress_is_separate_from_results_and_reports_each_selected_verification() {
         let f = Fixture::new(&format!(
