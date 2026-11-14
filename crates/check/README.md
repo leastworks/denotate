@@ -311,6 +311,23 @@ the local queries, never cached in a session or included in a receipt. Its physi
 storage is proportional to original rules and proofs; it does not consume the BDD
 condition allowance. `LocalMetrics.keys` includes the first query's index build.
 
+## Diagnostic SAT probe
+
+`PreparedCheck::sat_probe(component, probe_limits, operations)` examines an immutable
+pre-admission component. It uses only that component's upstream cone and the selected
+assumptions, returning `SatProbeReport`: SAT with a reduct-verified pair, UNSAT
+(at most one stable meaning, without checking existence), or unknown with a reason.
+It does not change normal results, admission, caches or backend identity. The CLI
+opts in with `--sat-probe`; no probe runs by default.
+
+The probe encodes Clark completion using batsat, refines unfounded candidates with
+external-support clauses and independently evaluates each reduct by a positive
+worklist. Fixed values are constants; upstream positive loops are checked too.
+Unresolved negative upstream components produce unknown. CNF and cone size/work
+use separate invocations of the existing limits; time and refinement limits are
+probe-specific. Cancellation propagates. See the [policy](../../docs/checker-policies.md#diagnostic-sat-probe)
+for the precise meaning, bounds and reporting contract.
+
 ## Coverage
 
 `Verification.coverage` and `ScopedResults.coverage` contain per-obligation summaries:

@@ -518,10 +518,21 @@ real program that the current choice serves badly.
   work for every obligation kind and made diagnostics depend on a setting. We retired
   it before extending the vocabulary further. Reintroduce an alternative only for a
   real program that exhausts BDD evaluation within reasonable limits, re-scored with
-  the `.den` scorecard (a prerequisite still on the roadmap), with better conclusive
+  the `.den` scorecard, with better conclusive
   outcomes under comparable limits and agreement with the independent semantic oracles.
   The existing protocol backend/configuration identity remains fixed BDD metadata for
   result validation and compatibility; it is not a user-selectable option.
+- **SAT returns only as an opt-in diagnostic probe.** A real program exhausted
+  BDD admission after several optimizations, leaving ambiguity versus proof cost
+  unresolved. A two-completion SAT query separates those questions without changing
+  checking behavior. It runs on the prepared graph before admission, avoiding both
+  admission exhaustion and retention of an extra graph snapshot. Candidates must
+  pass independent reduct evaluation; external-support refinements remove unfounded
+  candidates without losing stable models. UNSAT establishes at most one stable
+  meaning, never existence or admissibility. The first increment declines unresolved
+  negative upstream components rather than assuming them settled. BDD remains the
+  only backend; progress-only probe results do not alter findings or exit codes.
+  See [the probe policy](checker-policies.md#diagnostic-sat-probe) for bounds and scope.
 - **Assumptions take effect only through an explicit verification.** Assumptions are
   the domain constraints a library author chooses. When every declared assumption was
   active, declaring or importing one silently changed every check, and one obligation

@@ -24,6 +24,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "batsat"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec82b6bbce8ea42f5003417b699267860a9f4dd869fc9ba8faceac761d5afed1"
+dependencies = [
+ "bit-vec",
+]
+
+[[package]]
 name = "biodivine-lib-bdd"
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -35,6 +44,12 @@ dependencies = [
  "num-traits",
  "rand",
 ]
+
+[[package]]
+name = "bit-vec"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f59bbe95d4e52a6398ec21238d31577f2b28a9d86807f06ca59d191d8440d0bb"
 
 [[package]]
 name = "bitflags"
@@ -159,6 +174,7 @@ dependencies = [
 name = "denotate-check"
 version = "0.0.1"
 dependencies = [
+ "batsat",
  "biodivine-lib-bdd",
  "denotate-ir",
 ]

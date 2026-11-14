@@ -14,6 +14,7 @@ pub enum Phase {
     FixedFacts,
     Preparation,
     Admission,
+    SatProbe,
     Checking,
     Presentation,
     Publication,
@@ -27,6 +28,7 @@ impl Phase {
             Self::FixedFacts => "fixed-facts",
             Self::Preparation => "preparation",
             Self::Admission => "admission",
+            Self::SatProbe => "sat-probe",
             Self::Checking => "checking",
             Self::Presentation => "presentation",
             Self::Publication => "publication",
@@ -173,6 +175,69 @@ impl<'a> AdmissionDetails<'a> {
                 .map(|r| denotate_presentation::exhaustion_text(r.phase, r.resource, r.details)),
         });
         progress.emit(Phase::Admission, detail);
+    }
+    /// Diagnostic-only, local report. Names and locations intentionally remain
+    /// here rather than in the solver; this is not a normal finding or status.
+    pub fn sat_probe(
+        &self,
+        ground: &GroundProgram,
+        report: &denotate_check::SatProbeReport,
+        index: usize,
+    ) -> Value {
+        let names = self
+            .names
+            .get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)));
+        let mut relevant = std::collections::BTreeSet::new();
+        if let Some(pair) = &report.pair {
+            relevant.extend(pair.differing.iter());
+            relevant.extend(pair.world.iter());
+        }
+        let component = ground.component(report.component);
+        let representative = component.and_then(|c| c.atoms.first());
+        let mut sources = std::collections::BTreeMap::new();
+        for r in ground
+            .rules()
+            .take(if relevant.is_empty() { 0 } else { usize::MAX })
+        {
+            if relevant.contains(&r.head.atom) {
+                sources.entry(&r.head.atom).or_insert(r.source);
+            }
+        }
+        let describe = |a: &denotate_check::GroundAtom| {
+            let location = sources
+                .get(a)
+                .map(|id| self.location(*id))
+                .unwrap_or_else(|| {
+                    self.program
+                        .provenance
+                        .origins(a.relation)
+                        .first()
+                        .and_then(|o| {
+                            let source = self.program.sources.snapshot(o.span.snapshot()).ok()?;
+                            let at = crate::origins::coordinate(
+                                &source.text,
+                                o.span.byte_range().start,
+                            )?;
+                            Some(json!({"uri":source.uri,"line":at.line,"column":at.column}))
+                        })
+                        .unwrap_or(Value::Null)
+                });
+            json!({"atom":atom_text(a, &**names),"location":location})
+        };
+        json!({"component":index,"state":report.answer.label(),"scope":"prepared-component-and-upstream",
+            "meaning": match report.answer {
+                denotate_check::SatProbeAnswer::Sat => "two verified stable meanings in one permitted world",
+                denotate_check::SatProbeAnswer::Unsat => "at most one stable meaning per permitted world; existence not checked",
+                denotate_check::SatProbeAnswer::Unknown => "uniqueness not determined",
+            },
+            "atoms":component.map(|c|c.atoms.len()),"representative":representative.map(describe),
+            "verifiedStablePair":report.pair.is_some(),"supportedPairSeen":report.supported_pair_seen,
+            "refinements":report.refinements,"solves":report.solves,"variables":report.variables,
+            "clauses":report.clauses,"literals":report.literals,"coneAtoms":report.cone_atoms,"coneRules":report.cone_rules,
+            "solveMs":report.solve_time.as_secs_f64()*1000.,"elapsedMs":report.elapsed.as_secs_f64()*1000.,"reason":report.reason,
+            "world":report.pair.as_ref().map(|p|p.world.iter().map(describe).collect::<Vec<_>>()),
+            "differing":report.pair.as_ref().map(|p|p.differing.iter().map(describe).collect::<Vec<_>>()),
+            "models":report.pair.as_ref().map(|p|p.models.iter().map(|m|m.iter().map(|a|atom_text(a,&**names)).collect::<Vec<_>>()).collect::<Vec<_>>())})
     }
     fn component(&self, c: &AdmissionComponent) -> Value {
         let names = self

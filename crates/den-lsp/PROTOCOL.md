@@ -110,6 +110,23 @@ shared with `check-den` through `denotate_ir_text::progress`. The CLI additional
 reports its filesystem discovery phase; the editor retains its snapshot-driven
 discovery and publication policy.
 
+The CLI's opt-in `--sat-probe` additionally emits phase `sat-probe` before admission.
+It is not an LSP setting, backend or finding. `satProbe` records carry a run-local
+`component` index and `state`: `starting`, `sat`, `unsat` or `unknown`. Completed
+records include `meaning`, `scope` (`prepared-component-and-upstream`), `atoms`,
+`representative`, `verifiedStablePair`, `supportedPairSeen`, `refinements`, `solves`,
+`variables`, `clauses`, `literals`, `coneAtoms`, `coneRules`, `solveMs`, `elapsedMs`
+and nullable `reason`. CNF counts are emitted encoding size, not solver heap or
+learned clauses. `world` lists true cone inputs (others false), `differing` lists
+target atoms on which the pair differs, and `models` lists each target assignment's
+true atoms; these three fields are null without a verified pair. Tuple descriptions
+in `world`, `differing` and `representative` include `atom` and nullable `location`
+with `uri` and one-based scalar `line`/`column`. These local reports contain source
+information. UNSAT means at most one stable meaning, not existence or admissibility.
+Neither normal diagnostic data nor status/exit codes change. The schema/zoo runners
+retain the latest record per verification/component in `satProbes`, including an
+unfinished `starting` record when recovering an interrupted run.
+
 Updates carry the job's ticket through the shared scheduler, and the owner drops
 updates for superseded tickets. A progress-only owner turn does not rebuild source
 snapshots. The client renders active progress without requesting program status;

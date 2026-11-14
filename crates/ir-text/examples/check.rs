@@ -210,6 +210,14 @@ fn run_streaming(
         let trace = &callback_trace;
         let active = &callback_active;
         let profile = &callback_profile;
+        if let Some(v) = event.get("satProbe") {
+            trace.message(format!(
+                "{}: SAT probe {}",
+                event["verification"].as_str().unwrap_or("verification"),
+                v
+            ));
+            return;
+        }
         if let Some(v) = event.get("checking") {
             trace.message(format!(
                 "{}: {}",
@@ -240,6 +248,7 @@ fn run_streaming(
             "fixed-facts",
             "preparation",
             "admission",
+            "sat-probe",
             "checking",
             "presentation",
             "publication",
@@ -301,6 +310,8 @@ fn check_program(
         empty_examples,
         hide_library_rewrites,
         input_order,
+        sat_probe,
+        sat_probe_limits,
         limits,
         progress: report_progress,
         ..
@@ -618,6 +629,27 @@ fn check_program(
             prepared.program(),
             session.fixed_stats().retained_bytes,
         );
+        if sat_probe {
+            // Independent budgets and immutable prepared graph. Ordinary admission
+            // and checking begin afterwards with exactly their usual inputs.
+            progress.emit(Phase::SatProbe, detail.clone());
+            for (i, component) in prepared
+                .program()
+                .components()
+                .filter(|c| c.cycle.is_some())
+                .enumerate()
+            {
+                let mut probing = detail.clone();
+                probing["satProbe"] =
+                    json!({"component":i+1,"state":"starting","atoms":component.atoms.len()});
+                progress.emit(Phase::SatProbe, probing.clone());
+                let report = prepared
+                    .sat_probe(component.id, &sat_probe_limits, &operations)
+                    .map_err(checker_failure)?;
+                probing["satProbe"] = admission.sat_probe(prepared.program(), &report, i + 1);
+                progress.emit(Phase::SatProbe, probing);
+            }
+        }
         progress.emit(Phase::Admission, detail.clone());
         let observer =
             |event: &denotate_check::AdmissionProgress| admission.report(progress, &detail, event);
@@ -913,6 +945,76 @@ mod tests {
     const BODY: &str = "sort S; const x, y: S; input p(x:S); relation q(x:S); q(X) :- p(X); assumption a: at_most_one(p, group_by: ()); obligation o: at_most_one(q, group_by: ());";
     const RESTRICTED: &str = "verification v { assumptions: [a]; obligations: [o]; }";
 
+    #[test]
+    fn sat_probe_preserves_output_and_exit_codes_and_reports_only_to_progress() {
+        for (text, answer) in [
+            (
+                "input x();relation a();relation b();a():-x(),!b();b():-x(),!a();verification v{assumptions:[];obligations:[];}",
+                "sat",
+            ),
+            (
+                include_str!("../tests/fixtures/guarded-settlement.den"),
+                "unsat",
+            ),
+            (
+                "input x();relation a();a():-x(),!a();verification v{assumptions:[];obligations:[];}",
+                "unsat",
+            ),
+        ] {
+            let f = Fixture::new(text);
+            for json in [false, true] {
+                let flags = if json { vec!["--json"] } else { vec![] };
+                let (normal_code, normal_output, normal_trace) = f.traced(&flags);
+                assert!(!normal_trace.contains("satProbe"));
+                for limited in [false, true] {
+                    let path = f.0.join(format!("probe-{json}-{limited}.jsonl"));
+                    let mut flags = flags.clone();
+                    flags.extend(["--sat-probe", "--profile-memory", path.to_str().unwrap()]);
+                    if limited {
+                        flags.extend(["--sat-probe-timeout-ms", "0"]);
+                    }
+                    let (code, output, trace) = f.traced(&flags);
+                    assert_eq!(code, normal_code);
+                    assert_eq!(output, normal_output);
+                    assert!(trace.contains("SAT probe"), "{trace}");
+                    let records: Vec<serde_json::Value> = fs::read_to_string(path)
+                        .unwrap()
+                        .lines()
+                        .map(|l| serde_json::from_str(l).unwrap())
+                        .collect();
+                    let reports: Vec<_> = records
+                        .iter()
+                        .filter_map(|r| r["detail"].get("satProbe"))
+                        .filter(|p| p["state"] != "starting")
+                        .collect();
+                    assert!(!reports.is_empty());
+                    for p in reports {
+                        assert_eq!(p["state"], if limited { "unknown" } else { answer });
+                        assert_eq!(p["verifiedStablePair"], !limited && answer == "sat");
+                        if !limited && answer == "sat" {
+                            assert!(!p["differing"].as_array().unwrap().is_empty());
+                            for a in p["differing"]
+                                .as_array()
+                                .unwrap()
+                                .iter()
+                                .chain(p["world"].as_array().unwrap())
+                            {
+                                assert!(a["location"]["line"].as_u64().unwrap() > 0);
+                            }
+                        }
+                        if !limited && answer == "unsat" {
+                            assert!(
+                                p["meaning"]
+                                    .as_str()
+                                    .unwrap()
+                                    .contains("existence not checked")
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
     #[test]
     fn diagnostic_input_orders_preserve_answers_and_report_configuration() {
         for (body, expected) in [

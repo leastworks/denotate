@@ -144,6 +144,16 @@ sizes, result counts and session reuse. Every phase starts with a flushed line;
 transitions report elapsed time. `--no-progress` disables this checker trace.
 `--verbose` controls diagnostic detail, independent of progress and checking.
 
+`just check-den <program> --sat-probe` adds a diagnostic search before admission:
+does each component with a negative cycle have two stable meanings in a permitted
+world? SAT reports a concretely verified pair; UNSAT means at most one, **not** that
+one exists. `--sat-probe-timeout-ms N` (default 10000) and
+`--sat-probe-refinements N` (default 64) bound each probe independently of ordinary
+checking. Unknown includes the stopping reason. Reports appear only in progress
+and memory-profile records, including local input tuples and differing atoms with
+source locations. Ordinary output and exit codes are unchanged. See the
+[probe policy](../../docs/checker-policies.md#diagnostic-sat-probe) for scope and limits.
+
 Admission additionally reports rounds, stages, remaining ground components with
 negation, blocked atoms and committed rewrites. Upper-bound analysis identifies
 its component before work starts, with a representative tuple, source location

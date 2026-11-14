@@ -13,6 +13,7 @@ use std::{
 const HELP: &str = "Usage: just bench-den-schema [OPTIONS] [-- CHECKER_LIMITS...]\n\n\
 --out DIR                 New persistent run directory (default target/bench-den-schema/<timestamp>)\n\
 --input-order ORDER       Diagnostic BDD order: key | reverse-key | structural\n\
+--sat-probe               Enable diagnostic SAT probes (limits may follow --)\n\
 --encoding NAME           ambiguous | coverage (default) | negated | assumed\n\
 --topology NAME           independent (default) | coupled | mixed | layered\n\
 --coupling-percent N      Layered conditions with cross reads (0..100; default 50)\n\
@@ -71,6 +72,10 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
                 generate_only = true;
                 continue;
             }
+            "--sat-probe" => {
+                forwarded.push(arg);
+                continue;
+            }
             _ => {}
         }
         let value = args.next().ok_or_else(|| format!("{arg} needs a value"))?;
@@ -103,12 +108,23 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
     }
     shape.validate()?;
     let flags = check_options::limit_values(&denotate_check::Limits::default());
-    if forwarded.len() % 2 != 0
-        || forwarded
-            .chunks(2)
-            .any(|p| p[0] != "--input-order" && !flags.iter().any(|(flag, _)| *flag == p[0]))
-    {
-        return Err("after --, supply check-den limits or --input-order and their values".into());
+    let mut check_flags = forwarded.iter();
+    while let Some(flag) = check_flags.next() {
+        if flag == "--sat-probe" {
+            continue;
+        }
+        if flag != "--input-order"
+            && flag != "--sat-probe-timeout-ms"
+            && flag != "--sat-probe-refinements"
+            && !flags.iter().any(|(f, _)| *f == flag)
+        {
+            return Err(
+                "after --, supply checker/probe limits, --sat-probe or --input-order".into(),
+            );
+        }
+        if check_flags.next().is_none() {
+            return Err(format!("missing value for {flag}"));
+        }
     }
     let parsed = check_options::Options::parse(
         std::iter::once("program".into()).chain(forwarded.clone()),
@@ -175,7 +191,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         "crossReadCount":(0..shape.reads).filter(|i|cross_read(&shape,*i).is_some()).count(),
         "layoutDepth":if shape.topology==Topology::Layered {Some(shape.depth+2)} else {None},
         "shape":{"couplingPercent":shape.coupling_percent,"fields":shape.fields,"reads":shape.reads,"depth":shape.depth,"width":shape.width,"encoding":format!("{:?}",shape.encoding).to_lowercase(),"topology":format!("{:?}",shape.topology).to_lowercase(),"overlaps":shape.overlaps,"shadowed":shape.shadowed,"wideHeads":shape.wide_heads,"producers":shape.producers,"computed":shape.computed,"catalog":shape.catalog,"catalogLayers":shape.catalog_layers},
-        "inputOrder":parsed.input_order.label(),"limits":limits,"binary":binary,"binarySha256":binary_hash,"checkArgs":check_args});
+        "inputOrder":parsed.input_order.label(),"satProbe":{"enabled":parsed.sat_probe,"timeoutMs":parsed.sat_probe_limits.timeout.as_millis(),"maxRefinements":parsed.sat_probe_limits.max_refinements},"limits":limits,"binary":binary,"binarySha256":binary_hash,"checkArgs":check_args});
     if source_path.is_some() {
         for key in ["shape", "layout", "layoutDepth", "crossReadCount"] {
             manifest.as_object_mut().unwrap().remove(key);
@@ -247,6 +263,7 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
     let mut rounds = BTreeMap::<String, Value>::new();
     let mut attempts = super::attempts::Attempts::default();
     let mut guarded = BTreeMap::new();
+    let mut sat_probes = BTreeMap::new();
     let mut malformed = 0;
     if let Ok(file) = fs::File::open(dir.join("memory.jsonl")) {
         for line in BufReader::new(file).lines() {
@@ -269,6 +286,12 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
                 Some("progress") => {
                     let d = &v["detail"];
                     attempts.observe(d);
+                    if let Some(component) = d["satProbe"]["component"].as_u64() {
+                        sat_probes.insert(
+                            format!("{}:{component:020}", d["verification"]),
+                            json!({"verification":d["verification"],"probe":d["satProbe"]}),
+                        );
+                    }
                     if let Some(index) = d["admission"]["guarded"]["index"].as_u64() {
                         let a = &d["admission"];
                         // Keep the latest state even when iteration is interrupted.
@@ -323,6 +346,7 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
     let (summaries, samples) = attempts.finish();
     report["admissionAttemptSummaries"] = json!(summaries);
     report["admissionAttemptSamples"] = json!(samples);
+    report["satProbes"] = json!(sat_probes.into_values().collect::<Vec<_>>());
     report["guardedAttempts"] = json!(guarded.into_values().collect::<Vec<_>>());
     report["outcomes"] = json!(outcomes);
     report["phases"] = json!(phases);

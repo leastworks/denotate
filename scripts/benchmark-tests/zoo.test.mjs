@@ -82,6 +82,30 @@ test('BDD work sums while accepted condition storage takes a peak',()=>{
   assert.equal(measurements(records,[]).admission.peakAccountedConditionNodes,null);
 });
 
+test('SAT probes preserve checker outcomes and survive report recovery',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-sat-probe-'));
+  try {
+    const config={binary:'target/debug/examples/bench_schema',family:['negative-unresolved','guarded-ring'],sizes:[2],repeat:1};
+    const normal=run({...config,out:path.join(root,'normal')});
+    const probed=run({...config,out:path.join(root,'probed'),satProbe:true});
+    assert.equal(probed.satProbe,true);
+    for(const name of config.family) {
+      const a=normal.families[name].runs[0], b=probed.families[name].runs[0];
+      // Each runner owns a different temporary root; compare every status field
+      // except that root URI. CLI parity on the same root is tested separately.
+      const statuses=r=>r.outcomes.map(({program,...status})=>status);
+      assert.equal(a.exit,b.exit);assert.deepEqual(statuses(a),statuses(b));
+      assert.equal(a.satProbes.length,0);assert.ok(b.satProbes.length>0);
+      for(const {probe:p} of b.satProbes) {
+        assert.equal(p.state,name==='guarded-ring'?'unsat':'sat');
+        assert.equal(p.verifiedStablePair,name!=='guarded-ring');
+        assert.ok(p.variables>0);assert.ok(p.clauses>0);assert.ok(Number.isFinite(p.solveMs));
+      }
+    }
+    assert.deepEqual(summarize(path.join(root,'probed')),probed);
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
 
 test('a recoverable admission skip does not discard a later completed result',()=>{
   const records=[{type:'profile',span:1,stage:'admission',event:'start'},

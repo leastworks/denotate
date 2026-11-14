@@ -15,6 +15,8 @@ pub struct Options {
     pub profile_memory: Option<String>,
     pub limits: Limits,
     pub input_order: InputOrder,
+    pub sat_probe: bool,
+    pub sat_probe_limits: denotate_check::SatProbeLimits,
 }
 pub fn limit_values(l: &Limits) -> [(&'static str, u128); 9] {
     [
@@ -35,6 +37,9 @@ pub fn help() -> String {
         --verification NAME       Run one verification (a partial run)\n\
         --validate-all-assumptions Validate unselected declarations too (authoring aid)\n\
         --input-order ORDER       Diagnostic BDD order: key (default), reverse-key, structural\n\
+        --sat-probe               Diagnostic stable-pair search before admission (progress only)\n\
+        --sat-probe-timeout-ms N   Time per probe, independent of checker timeout (default 10000)\n\
+        --sat-probe-refinements N  Maximum unfounded-set refinement rounds (default 64)\n\
         --json                    Print existing status summaries on stdout\n\
         --verbose                 Expand all related locations and structural proof chains\n\
         --empty-examples N|all    Retain N present tuples per empty obligation (default 3)\n\
@@ -72,6 +77,8 @@ impl Options {
             profile_memory: None,
             limits,
             input_order: InputOrder::Key,
+            sat_probe: false,
+            sat_probe_limits: Default::default(),
         };
         let mut seen = BTreeSet::new();
         while let Some(option) = args.next() {
@@ -105,6 +112,18 @@ impl Options {
                             )
                         })?)
                     });
+                }
+                "--sat-probe" => options.sat_probe = true,
+                "--sat-probe-timeout-ms" => {
+                    let n = value()?
+                        .parse::<u64>()
+                        .map_err(|_| (2, format!("{option} requires a nonnegative integer")))?;
+                    options.sat_probe_limits.timeout = Duration::from_millis(n);
+                }
+                "--sat-probe-refinements" => {
+                    options.sat_probe_limits.max_refinements = value()?
+                        .parse()
+                        .map_err(|_| (2, format!("{option} requires a nonnegative integer")))?;
                 }
                 "--timeout-ms" => {
                     let n: u64 = value()?.parse().map_err(|_| {

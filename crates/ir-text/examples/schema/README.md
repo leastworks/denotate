@@ -59,6 +59,14 @@ nodes are cumulative work, not peak live memory. RSS and footprint remain separa
 See [memory profiling](../../../../docs/checker-policies.md#memory-profiling).
 The observer adds no checking pass and changes no deterministic limit.
 
+`--sat-probe` forwards the opt-in uniqueness diagnostic to `check-den`, before
+admission. Each verification/component's latest record is kept in `satProbes` in
+`report.json`, including recovered runs. Optional `--sat-probe-timeout-ms` and
+`--sat-probe-refinements` follow `--` with the checker limits. SAT requires a
+concretely verified pair; UNSAT establishes at most one meaning and says nothing
+about existence. Normal outcomes and exit codes are unchanged. Reports contain
+local names, worlds and source locations; see the [probe policy](../../../../docs/checker-policies.md#diagnostic-sat-probe).
+
 ## Synthetic semantics
 
 A raw message assigns at most one value to each field. One selector field per tree

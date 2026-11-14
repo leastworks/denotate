@@ -80,14 +80,58 @@ BDD is the only supported backend. The SAT experiment showed wins on synthetic a
 test-DSL workloads, but no demonstrated need on real programs. Maintaining it multiplied
 implementation and validation work for each obligation kind and made diagnostics depend
 on a setting. Its coverage path still depended on BDD evaluation, so it could not help
-when that evaluation exhausted. The implementation, dependency and selectors are retired;
-Git history retains the experiment.
+when that evaluation exhausted. Its backend implementation and selectors remain retired;
+Git history retains the experiment. The diagnostic probe below separately uses batsat.
 
 Revisit only for a real program that exhausts BDD evaluation within reasonable limits,
 re-scored with the `.den` scorecard below. An alternative must demonstrate better
 conclusive outcomes under comparable limits, while matching the independent semantic
 oracles; inconclusive or unsupported answers are not wins. A second backend is not a
 standing feature-parity requirement.
+
+## Diagnostic SAT probe
+
+`just check-den ROOT --sat-probe` asks whether each prepared component with a
+negative cycle has two stable meanings in one permitted world. It is off by
+default and runs **before admission**, so an admission limit cannot prevent the
+answer. This examines the larger original component, not a residual component
+after rewrites. Results go to stderr progress and `--profile-memory` records;
+ordinary BDD verdicts, findings, stdout and exit codes are unchanged. Neither an
+editor setting nor a second checking backend is introduced.
+
+The encoding is two Clark completions with a difference in the target component,
+shared inputs and upstream definitions, and only the verification's selected
+assumptions. All four cardinality restrictions use the resolved domains; inputs
+excluded by `within` remain absent. It walks the target and assumption dependency
+cones, treats folded facts as constants and does not convert BDD conditions to CNF.
+Positive upstream recursion is included. An unresolved negative component outside
+the target gives `unknown`; it cannot be treated as settled. Definitions downstream
+of the target, if reached by an assumption, follow each copy.
+
+Every candidate pair is independently evaluated as the least model of its reduct
+over the whole encoded cone. Unfounded candidates add external-support clauses
+valid for every stable model in every world. A verified pair is `sat`; `unsat`
+proves **at most one** stable meaning per permitted world. It does not establish
+existence, consistent assumptions or admissibility. Only UNSAT before any
+refinement also excludes two supported models. Unrelated regions outside the cone
+are not certified, so a verified pair is a component result, not a claim that the
+entire program has two stable models.
+
+Each component receives a fresh independent allowance. `--sat-probe-timeout-ms`
+defaults to 10,000 ms for encoding, solving and replay; the deadline is cooperative.
+`--sat-probe-refinements` defaults to 64. Existing `max_atoms`, `max_rules`,
+`max_dependencies` and `max_work` bound the cone and encoding: CNF variables,
+emitted clauses and literal occurrences respectively share those size ceilings.
+They do not consume the ordinary checker's allowance. The solver's learned clauses
+are internal solver storage, not counted as emitted CNF; solving is time-bounded,
+not a process-memory cap. Exhaustion gives `unknown` with a reason. Cancellation
+propagates. No solver state or arena indices are retained between invocations.
+
+Reports contain emitted CNF counts, solve time, refinement/solve counts and the
+verified pair, with local source locations. These are observations, never goldens.
+Use `just bench-den-schema --sat-probe` or `just bench-den-zoo --sat-probe` to retain
+them alongside normal outcomes. The first increment answers uniqueness only;
+existence search and admitting programs based on SAT are separate future choices.
 
 ## Guarded settlement
 

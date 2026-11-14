@@ -22,6 +22,12 @@ with `just bench-den-zoo --summarize DIR`. The saved `sweep.json` records reques
 runs; `zoo.json` is updated after each child. Recovery includes interrupted
 children and keeps missing repetitions visible in the requested counts.
 
+Use `--sat-probe` to retain independent SAT uniqueness results alongside each run's
+BDD outcomes. `satProbes` contains the latest record per verification/component,
+including during `--summarize` recovery. Probe limits can follow `--`, for example
+`--sat-probe-timeout-ms 10000`. No ordinary verdict changes; UNSAT proves at most
+one stable meaning, not existence. See the [probe policy](../docs/checker-policies.md#diagnostic-sat-probe).
+
 ## Preset contracts
 
 Each preset has one verification. `n` is the requested size; all other shape
