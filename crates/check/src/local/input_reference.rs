@@ -149,7 +149,9 @@ impl PreparedCheck<'_> {
         } else {
             None
         };
+        let input_order = self.local_variable_order(cone, context, completion_context.is_some())?;
         Ok(LocalInput {
+            input_order,
             completion_context,
             obligation,
             scope,

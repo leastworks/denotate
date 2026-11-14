@@ -7,6 +7,13 @@ limit overrides after `--` use the existing schema runner. `just test-zoo` runs
 fitter tests, tiny semantic/path checks for every preset, and a two-size smoke.
 The normal `just verify` gate includes these checks.
 
+Use `--input-order key|reverse-key|structural` to compare diagnostic BDD layouts
+(default `key`). It is recorded in the sweep and child manifests; each run keeps
+the effective layout and any structural-cutoff fallback. Use separate output
+directories for comparisons, with the same sizes and limits. Semantic conclusions
+must agree when conclusive; admission paths and rewrite warnings can differ and
+need review. This option does not select a new default.
+
 The recipe builds the profiling CLI and shared runner once. Each repetition is a
 fresh process, run sequentially. Every child directory has the schema runner's
 source, manifest, profile stream, stdout, stderr and recoverable report. Recover a
@@ -49,6 +56,13 @@ run (including multiple verifications); nested admission rounds are not added to
 those parent durations. Memory takes the maximum sampled phase RSS and footprint,
 separately. These include retained earlier work, not allocations caused by the phase.
 Unavailable memory stays null.
+
+Each completed phase also reports cumulative `bddResultNodes` and
+`peakAccountedConditionNodes`, the maximum accepted condition-storage accounting
+observed in that phase. The latter excludes rejected demands and is a peak over
+individual accounting pools, not their sum or physical live BDD memory. These
+measurements retain the same completion counts; old logs without the storage
+measure report null. Interrupted phase records remain in the child's profile.
 
 A profiler end event alone is insufficient: a later phase boundary must confirm
 progress, and observed exhaustion or unfinished spans invalidate the affected

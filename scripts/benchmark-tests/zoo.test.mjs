@@ -47,7 +47,9 @@ test('each family reaches its semantic and structural path; two-size smoke has n
       if(name==='schema-layered')assert.equal(r.after.admitted,true);
     }
     assert.ok(r.families['guarded-ring'].attempts.some(a=>a.kind==='guarded-bounds'));
-    const smoke=run({out:path.join(root,'smoke'),binary:'target/debug/examples/bench_schema',family:['fan-in-input','negative-unresolved'],sizes:[1,2],repeat:1,threshold:1.3});
+    const smoke=run({out:path.join(root,'smoke'),binary:'target/debug/examples/bench_schema',family:['fan-in-input','negative-unresolved'],sizes:[1,2],repeat:1,threshold:1.3,inputOrder:'structural'});
+    assert.equal(smoke.inputOrder,'structural');
+    for(const f of Object.values(smoke.families))for(const r of f.runs) {assert.equal(r.inputOrder.requested,'structural');assert.equal(r.inputOrder.effective,'structural');assert.ok(Number.isFinite(r.phases.admission.bddResultNodes));assert.ok(Number.isFinite(r.phases.admission.peakAccountedConditionNodes));}
     assert.deepEqual(summarize(path.join(root,'smoke')),smoke);
     const interrupted=path.join(root,'smoke','fan-in-input-2-0');
     const profile=fs.readFileSync(path.join(interrupted,'memory.jsonl'),'utf8').split('\n');
@@ -62,4 +64,13 @@ test('each family reaches its semantic and structural path; two-size smoke has n
     assert.equal(recovered.phases.checking.rows[1].requested,1);
     for(const f of Object.values(smoke.families))for(const p of Object.values(f.phases))assert.equal(p.fits.ms.knob.state,'insufficient data');
   } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('BDD work sums while accepted condition storage takes a peak',()=>{
+  const records=[1,2].flatMap(span=>[{type:'profile',span,stage:'admission',event:'start'}, {type:'profile',span,stage:'admission',event:'end',elapsedMs:1,bddResultNodes:span*7,peakAccountedConditionNodes:span*3}, {type:'profile',span:10+span,stage:'checking',event:'start'}]);
+  const measured=measurements(records,[]).admission;
+  assert.equal(measured.bddResultNodes,21);
+  assert.equal(measured.peakAccountedConditionNodes,6);
+  for(const r of records)delete r.peakAccountedConditionNodes;
+  assert.equal(measurements(records,[]).admission.peakAccountedConditionNodes,null);
 });

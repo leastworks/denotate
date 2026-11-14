@@ -300,11 +300,12 @@ fn check_program(
         verbose,
         empty_examples,
         hide_library_rewrites,
+        input_order,
         limits,
         progress: report_progress,
         ..
     } = options;
-    let backend = BackendIdentity::bdd();
+    let backend = BackendIdentity::bdd_with_order(input_order);
     progress.emit(Phase::Discovery, json!({}));
     let (membership, sources) = filesystem::discover_classified(std::path::Path::new(&root))
         .map_err(|e| {
@@ -357,6 +358,9 @@ fn check_program(
     let mut requests = p
         .verification_requests(&limits)
         .map_err(|e| (2, e.to_string()))?;
+    for (_, request) in &mut requests {
+        request.backend = backend.clone();
+    }
     let checked = requests
         .iter()
         .flat_map(|(_, r)| r.obligations.iter().cloned())
@@ -601,6 +605,14 @@ fn check_program(
                 continue;
             }
         };
+        let order = prepared.program().input_order_report();
+        let ordering = json!({"requested":order.requested.label(), "effective":order.effective.label(), "fallback":order.fallback,
+            "inputs":order.inputs, "structuralEntries":order.structural_entries, "hyperedges":order.hyperedges, "passes":order.passes});
+        detail["inputOrder"] = ordering.clone();
+        trace.message(format_args!("Input order: {ordering}"));
+        if input_order != denotate_check::InputOrder::Key {
+            writeln!(output, "Input order: {ordering}").unwrap();
+        }
         progress.prepared(
             &mut detail,
             prepared.program(),
@@ -900,6 +912,62 @@ mod tests {
     }
     const BODY: &str = "sort S; const x, y: S; input p(x:S); relation q(x:S); q(X) :- p(X); assumption a: at_most_one(p, group_by: ()); obligation o: at_most_one(q, group_by: ());";
     const RESTRICTED: &str = "verification v { assumptions: [a]; obligations: [o]; }";
+
+    #[test]
+    fn diagnostic_input_orders_preserve_answers_and_report_configuration() {
+        for (body, expected) in [
+            (format!("{BODY}{RESTRICTED}"), 0),
+            (
+                format!("{BODY}verification v {{assumptions:[];obligations:[o];}}"),
+                1,
+            ),
+        ] {
+            let f = Fixture::new(&body);
+            for order in ["key", "reverse-key", "structural"] {
+                let path = f.0.join(format!("{order}.jsonl"));
+                let (code, output) = f.run(&[
+                    "--json",
+                    "--no-progress",
+                    "--input-order",
+                    order,
+                    "--profile-memory",
+                    path.to_str().unwrap(),
+                ]);
+                assert_eq!(code, expected, "{order}: {output}");
+                let status: serde_json::Value =
+                    serde_json::from_str(output.split_once("Results: ").unwrap().1).unwrap();
+                assert_eq!(
+                    status["state"],
+                    if expected == 0 { "proved" } else { "findings" }
+                );
+                let events: Vec<serde_json::Value> = fs::read_to_string(path)
+                    .unwrap()
+                    .lines()
+                    .map(|l| serde_json::from_str(l).unwrap())
+                    .collect();
+                let report = events
+                    .iter()
+                    .find_map(|e| e["detail"].get("inputOrder"))
+                    .unwrap();
+                assert_eq!(report["requested"], order);
+                assert_eq!(report["effective"], order);
+                assert!(report["fallback"].is_null());
+                assert!(
+                    events
+                        .iter()
+                        .filter(|e| e["type"] == "profile")
+                        .all(|e| e["peakAccountedConditionNodes"].is_number())
+                );
+            }
+            for options in [
+                vec!["--input-order", "nope"],
+                vec!["--input-order"],
+                vec!["--input-order", "key", "--input-order", "structural"],
+            ] {
+                assert_eq!(f.run(&options).0, 2);
+            }
+        }
+    }
     impl Fixture {
         fn traced(&self, flags: &[&str]) -> (Result<u8, Failure>, String, String) {
             let mut output = String::new();

@@ -30,6 +30,8 @@ pub struct LocalInput {
     pub facts: BTreeSet<AtomKey>,
     pub possible: BTreeSet<AtomKey>,
     pub inputs: BTreeSet<AtomKey>,
+    /// Actual prepared variable map, projected to this runtime's input universe.
+    pub input_order: Vec<AtomKey>,
     pub components: BTreeMap<ComponentKey, LocalComponent>,
     pub rules: BTreeMap<InstanceKey, GroundInstance>,
     pub original_dependencies: BTreeMap<InstanceKey, GroundInstance>,
@@ -322,7 +324,9 @@ impl PreparedCheck<'_> {
         } else {
             None
         };
+        let input_order = self.local_variable_order(cone, context, completion_context.is_some())?;
         Ok(LocalInput {
+            input_order,
             completion_context,
             obligation,
             scope,
@@ -459,5 +463,32 @@ impl LocalInput {
             input.completion_context = None;
         }
         input
+    }
+}
+
+impl PreparedCheck<'_> {
+    pub(super) fn local_variable_order(
+        &self,
+        cone: &DependencyCone,
+        context: &ConditionContext,
+        full_context: bool,
+    ) -> Result<Vec<AtomKey>> {
+        let selected: Box<dyn Iterator<Item = &GroundAtom> + '_> = if full_context {
+            Box::new(self.program.inputs.iter())
+        } else {
+            Box::new(cone.facts.intersection(&self.program.inputs))
+        };
+        let mut order = selected
+            .map(|a| {
+                Ok((
+                    context
+                        .input_position(a)
+                        .ok_or(CheckError::Internal("missing ordered input"))?,
+                    AtomKey::from_atom(self.semantic_keys, a).map_err(CheckError::Keys)?,
+                ))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        order.sort_by_key(|(position, _)| *position);
+        Ok(order.into_iter().map(|(_, key)| key).collect())
     }
 }

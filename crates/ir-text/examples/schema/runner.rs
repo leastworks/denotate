@@ -12,6 +12,7 @@ use std::{
 
 const HELP: &str = "Usage: just bench-den-schema [OPTIONS] [-- CHECKER_LIMITS...]\n\n\
 --out DIR                 New persistent run directory (default target/bench-den-schema/<timestamp>)\n\
+--input-order ORDER       Diagnostic BDD order: key | reverse-key | structural\n\
 --encoding NAME           ambiguous | coverage (default) | negated | assumed\n\
 --topology NAME           independent (default) | coupled | mixed | layered\n\
 --coupling-percent N      Layered conditions with cross reads (0..100; default 50)\n\
@@ -78,6 +79,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
             "--source" => source_path = Some(PathBuf::from(value)),
             "--encoding" => shape.encoding = Encoding::parse(&value)?,
             "--topology" => shape.topology = Topology::parse(&value)?,
+            "--input-order" => forwarded.extend([arg, value]),
             _ => {
                 let target = match arg.as_str() {
                     "--fields" => &mut shape.fields,
@@ -104,9 +106,9 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
     if forwarded.len() % 2 != 0
         || forwarded
             .chunks(2)
-            .any(|p| !flags.iter().any(|(flag, _)| *flag == p[0]))
+            .any(|p| p[0] != "--input-order" && !flags.iter().any(|(flag, _)| *flag == p[0]))
     {
-        return Err("after --, supply only check-den limit flags and their values".into());
+        return Err("after --, supply check-den limits or --input-order and their values".into());
     }
     let parsed = check_options::Options::parse(
         std::iter::once("program".into()).chain(forwarded.clone()),
@@ -173,7 +175,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         "crossReadCount":(0..shape.reads).filter(|i|cross_read(&shape,*i).is_some()).count(),
         "layoutDepth":if shape.topology==Topology::Layered {Some(shape.depth+2)} else {None},
         "shape":{"couplingPercent":shape.coupling_percent,"fields":shape.fields,"reads":shape.reads,"depth":shape.depth,"width":shape.width,"encoding":format!("{:?}",shape.encoding).to_lowercase(),"topology":format!("{:?}",shape.topology).to_lowercase(),"overlaps":shape.overlaps,"shadowed":shape.shadowed,"wideHeads":shape.wide_heads,"producers":shape.producers,"computed":shape.computed,"catalog":shape.catalog,"catalogLayers":shape.catalog_layers},
-        "limits":limits,"binary":binary,"binarySha256":binary_hash,"checkArgs":check_args});
+        "inputOrder":parsed.input_order.label(),"limits":limits,"binary":binary,"binarySha256":binary_hash,"checkArgs":check_args});
     if source_path.is_some() {
         for key in ["shape", "layout", "layoutDepth", "crossReadCount"] {
             manifest.as_object_mut().unwrap().remove(key);
@@ -288,6 +290,7 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
                         && d.get("remainingComponent").is_none()
                     {
                         report["beforeAdmission"] = sizes(d);
+                        report["inputOrderDetails"] = d["inputOrder"].clone();
                     }
                     if d["phase"] == "checking"
                         && d["admitted"].is_boolean()

@@ -166,6 +166,15 @@ rejects unknown obligation or verification keys and requests whose constraints o
 obligations do not match their named verification. Input-only `at_most_one` contexts
 retain their local checking path. General input/derived cardinality constraints
 compute W independently during preparation, then use whole-program checking.
+`BackendIdentity::bdd_with_order(InputOrder::{Key, ReverseKey, Structural})` selects
+an experimental variable layout; `bdd()` still means key order. Preparation chooses
+one map after grounding and copies it to the assumption-specialized view before W.
+Structural placement uses only dependencies and selected constraints, with charged
+cutoffs that fall back to key order. `GroundProgram::input_order_report()` describes
+the requested/effective order and any fallback; `ordered_input_atoms()` exposes the
+map. Order participates in shared-context and local-query reuse; local inputs also
+carry the actual projected sequence. See the [policy](../../docs/checker-policies.md#diagnostic-input-ordering)
+for the deterministic heuristic and its bounds.
 An empty W reports `inconsistent_assumptions` with no obligation results. Unknown W
 is inconclusive. The IR classifies constraint cones before this evaluation; selected
 cones requiring grounding must have no reachable negative cycle after one
@@ -268,7 +277,8 @@ fixed specialization on every path. The test DSL's direct path is unchanged.
 `ScopedResults.context` retains the request, including its optional `VerificationKey`.
 Per-group and per-region outcomes use semantic identities (`GroupKey`, `ComponentKey`,
 `AtomKey`), so results correspond across snapshots without arena IDs. Witness ordering
-follows canonical `AtomKey` order, independent of declaration order.
+follows the configured variable map (semantic `AtomKey` order by default),
+independent of arena allocation. Witness choices are not semantic goldens.
 
 Sessions share join plans and possible-tuple grounding independently of verification
 selection. Group construction and admission run for the current request. Cached local

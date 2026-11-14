@@ -20,6 +20,12 @@ to save `cpu.json.gz` beside the report; it requires the same `samply` installat
 as [the profiling recipes](../../../../DEVELOPMENT.md#profiling).
 Sampling adds overhead, and the report records whether it was enabled.
 
+`--input-order key|reverse-key|structural` forwards the diagnostic BDD layout to
+the CLI (default `key`). `run.json` records the requested order;
+`report.json.inputOrderDetails` records the effective order and any fallback.
+Compare separate runs with identical shape and limit flags. The order can affect
+costs, witness choice and rewrite-warning inventory, but not conclusive semantics.
+
 Each invocation creates a new persistent directory under `target/bench-den-schema/`.
 Use `--out DIR` to choose it; an existing directory is rejected. The files are:
 

@@ -17,7 +17,7 @@ pub use portable::OwnedCondition;
 mod portable_tests;
 
 // Historical-order probes. Thread-local scope and RAII restoration isolate
-// parallel tests/panics; production request preparation uses AtomKey order.
+// parallel tests/panics; production requests use their configured input order.
 #[cfg(any(test, feature = "test-support"))]
 thread_local! {
     static TEST_INPUT_ORDER: std::cell::RefCell<Option<BTreeMap<GroundAtom, usize>>> = const { std::cell::RefCell::new(None) };
@@ -140,7 +140,7 @@ impl GroundProgram {
     ) -> Result<Option<BTreeMap<GroundAtom, bool>>> {
         let mut budget = Budget::new(limits);
         budget.tick("condition summary")?;
-        if condition.universe != (self.preparation, 0)
+        if condition.universe != (self.variable_map, 0)
             || usize::from(condition.bdd.num_vars()) != self.inputs.len()
         {
             return Err(CheckError::ForeignCondition);
@@ -184,6 +184,10 @@ impl GroundProgram {
 }
 
 impl ConditionContext {
+    pub(crate) fn input_position(&self, atom: &GroundAtom) -> Option<usize> {
+        self.inputs.get(atom).map(|v| v.to_index())
+    }
+
     pub(crate) fn build(program: &GroundProgram, budget: &mut Budget<'_>) -> Result<Self> {
         Self::build_selected(program, None, budget)
     }
@@ -202,7 +206,7 @@ impl ConditionContext {
         use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT_LOCAL: AtomicU64 = AtomicU64::new(1);
         let universe = (
-            program.preparation,
+            program.variable_map,
             if selected.is_some() {
                 NEXT_LOCAL.fetch_add(1, Ordering::Relaxed)
             } else {

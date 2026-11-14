@@ -119,88 +119,95 @@ fn assumed_acceptance_matches_the_independent_layout_for_every_tiny_raw_message(
         let p = load_shape(&s);
         let l = Limits::default();
         let ops = (&l).into();
-        let r = p.verification_requests(&l).unwrap().remove(0).1;
-        let RequestPreparation::Complete(check) = r.prepare(&p.corpus, &p.keys, &ops).unwrap()
-        else {
-            panic!()
-        };
-        let check = check.admit(&ops).unwrap();
-        let g = check.program();
-        assert!(g.is_admitted());
-        let context = g.condition_context(&l).unwrap();
-        let constant = |name: &str| p.corpus.constants().find(|c| c.name == name).unwrap().id;
-        let relation = |name: &str| p.corpus.relations().find(|r| r.name == name).unwrap().id;
-        let raw_id = relation("raw_value");
-        let guess_id = relation("assumed_accepted");
-        let expected_id = relation("expected");
-        let visible_id = relation("visible");
-        for selectors in 0..(s.width + 1).pow(depth as u32) {
-            let mut n = selectors;
-            let mut choices = Vec::new();
-            let mut selected = Vec::new();
-            for d in 0..depth {
-                let choice = n % (s.width + 1);
-                n /= s.width + 1;
-                choices.push((choice < s.width).then_some(choice));
-                if choice < s.width {
-                    selected.push(GroundAtom::new(
-                        raw_id,
-                        [
-                            constant(&format!("f{d}")),
-                            constant(&format!("choice{choice}")),
-                        ],
-                    ));
-                }
-            }
-            for raw_mask in 0..1usize << s.reads {
-                let raw: Vec<_> = (0..s.reads).map(|i| raw_mask & (1 << i) != 0).collect();
-                let intended = reference(&s, &raw, &choices);
-                let mut assignments = Vec::new();
-                for guesses in 0..1usize << s.reads {
-                    let mut world = selected.clone();
-                    for (i, present) in raw.iter().enumerate() {
-                        let f = constant(&format!("f{}", depth + i));
-                        if *present {
-                            world.push(GroundAtom::new(raw_id, [f, constant("present")]));
-                        }
-                        if guesses & (1 << i) != 0 {
-                            world.push(GroundAtom::new(guess_id, [f]));
-                        }
+        for order in [
+            InputOrder::Key,
+            InputOrder::ReverseKey,
+            InputOrder::Structural,
+        ] {
+            let mut r = p.verification_requests(&l).unwrap().remove(0).1;
+            r.backend = BackendIdentity::bdd_with_order(order);
+            let RequestPreparation::Complete(check) = r.prepare(&p.corpus, &p.keys, &ops).unwrap()
+            else {
+                panic!()
+            };
+            let check = check.admit(&ops).unwrap();
+            let g = check.program();
+            assert!(g.is_admitted());
+            let context = g.condition_context(&l).unwrap();
+            let constant = |name: &str| p.corpus.constants().find(|c| c.name == name).unwrap().id;
+            let relation = |name: &str| p.corpus.relations().find(|r| r.name == name).unwrap().id;
+            let raw_id = relation("raw_value");
+            let guess_id = relation("assumed_accepted");
+            let expected_id = relation("expected");
+            let visible_id = relation("visible");
+            for selectors in 0..(s.width + 1).pow(depth as u32) {
+                let mut n = selectors;
+                let mut choices = Vec::new();
+                let mut selected = Vec::new();
+                for d in 0..depth {
+                    let choice = n % (s.width + 1);
+                    n /= s.width + 1;
+                    choices.push((choice < s.width).then_some(choice));
+                    if choice < s.width {
+                        selected.push(GroundAtom::new(
+                            raw_id,
+                            [
+                                constant(&format!("f{d}")),
+                                constant(&format!("choice{choice}")),
+                            ],
+                        ));
                     }
-                    match context.evaluate(&context.true_condition(), world.clone(), &l) {
-                        Ok(true) => {
-                            assignments.push(guesses);
-                            let replay = g.evaluate(world, &l).unwrap();
-                            for i in 0..s.reads {
-                                let a = GroundAtom::new(
-                                    expected_id,
-                                    [constant(&format!("f{}", depth + i))],
-                                );
-                                assert_eq!(
-                                    replay.fact(&a).unwrap(),
-                                    FactState::Settled(guesses & (1 << i) != 0)
-                                );
-                                let visible = GroundAtom::new(
-                                    visible_id,
-                                    [constant(&format!("f{}", depth + i)), constant("present")],
-                                );
-                                assert_eq!(
-                                    replay.fact(&visible).unwrap(),
-                                    FactState::Settled(raw[i] && guesses & (1 << i) != 0)
-                                );
+                }
+                for raw_mask in 0..1usize << s.reads {
+                    let raw: Vec<_> = (0..s.reads).map(|i| raw_mask & (1 << i) != 0).collect();
+                    let intended = reference(&s, &raw, &choices);
+                    let mut assignments = Vec::new();
+                    for guesses in 0..1usize << s.reads {
+                        let mut world = selected.clone();
+                        for (i, present) in raw.iter().enumerate() {
+                            let f = constant(&format!("f{}", depth + i));
+                            if *present {
+                                world.push(GroundAtom::new(raw_id, [f, constant("present")]));
+                            }
+                            if guesses & (1 << i) != 0 {
+                                world.push(GroundAtom::new(guess_id, [f]));
                             }
                         }
-                        Err(CheckError::InvalidInputGroup(
-                            "observation violates selected assumptions",
-                        )) => {}
-                        other => panic!("unexpected world result: {other:?}"),
+                        match context.evaluate(&context.true_condition(), world.clone(), &l) {
+                            Ok(true) => {
+                                assignments.push(guesses);
+                                let replay = g.evaluate(world, &l).unwrap();
+                                for i in 0..s.reads {
+                                    let a = GroundAtom::new(
+                                        expected_id,
+                                        [constant(&format!("f{}", depth + i))],
+                                    );
+                                    assert_eq!(
+                                        replay.fact(&a).unwrap(),
+                                        FactState::Settled(guesses & (1 << i) != 0)
+                                    );
+                                    let visible = GroundAtom::new(
+                                        visible_id,
+                                        [constant(&format!("f{}", depth + i)), constant("present")],
+                                    );
+                                    assert_eq!(
+                                        replay.fact(&visible).unwrap(),
+                                        FactState::Settled(raw[i] && guesses & (1 << i) != 0)
+                                    );
+                                }
+                            }
+                            Err(CheckError::InvalidInputGroup(
+                                "observation violates selected assumptions",
+                            )) => {}
+                            other => panic!("unexpected world result: {other:?}"),
+                        }
                     }
+                    assert_eq!(
+                        assignments,
+                        intended.into_iter().collect::<Vec<_>>(),
+                        "depth={depth} selectors={choices:?} raw={raw:?}"
+                    );
                 }
-                assert_eq!(
-                    assignments,
-                    intended.into_iter().collect::<Vec<_>>(),
-                    "depth={depth} selectors={choices:?} raw={raw:?}"
-                );
             }
         }
     }
@@ -423,100 +430,108 @@ fn zoo_tiny_sources_preserve_independent_stable_and_supported_models() {
         .unwrap();
         let l = Limits::default();
         let ops = (&l).into();
-        let req = p.verification_requests(&l).unwrap().remove(0).1;
-        let RequestPreparation::Complete(g) = req.prepare(&p.corpus, &p.keys, &ops).unwrap() else {
-            panic!("{name}")
-        };
-        let g = g.admit(&ops).unwrap();
-        let g = g.program();
-        // Independent interpretation of the worlds family's authored input-only
-        // assumption: at most one choice for each group. Do not ask BDD W.
-        let permitted = |world: &std::collections::BTreeSet<GroundAtom>| {
-            if name != "guarded-worlds" {
-                return true;
-            }
-            let option = p
-                .corpus
-                .relations()
-                .find(|r| r.name == "option")
-                .unwrap()
-                .id;
-            let mut groups = std::collections::BTreeSet::new();
-            world
-                .iter()
-                .filter(|a| a.relation == option)
-                .all(|a| groups.insert(a.arguments[0]))
-        };
-        compare_permitted(&p.corpus, &p.domains, g, permitted);
-        for world in subsets(&g.input_atoms().cloned().collect::<Vec<_>>()) {
-            if !permitted(&world) {
-                continue;
-            }
-            if name == "guarded-ring" {
-                let atom = |name: &str| {
-                    GroundAtom::new(
-                        p.corpus.relations().find(|r| r.name == name).unwrap().id,
-                        [],
-                    )
-                };
-                let replay = g.evaluate(world.iter().cloned(), &l).unwrap();
-                for i in 0..2 {
+        for order in [
+            denotate_check::InputOrder::Key,
+            denotate_check::InputOrder::ReverseKey,
+            denotate_check::InputOrder::Structural,
+        ] {
+            let mut req = p.verification_requests(&l).unwrap().remove(0).1;
+            req.backend = denotate_check::BackendIdentity::bdd_with_order(order);
+            let RequestPreparation::Complete(g) = req.prepare(&p.corpus, &p.keys, &ops).unwrap()
+            else {
+                panic!("{name}")
+            };
+            let g = g.admit(&ops).unwrap();
+            let g = g.program();
+            // Independent interpretation of the worlds family's authored input-only
+            // assumption: at most one choice for each group. Do not ask BDD W.
+            let permitted = |world: &std::collections::BTreeSet<GroundAtom>| {
+                if name != "guarded-worlds" {
+                    return true;
+                }
+                let option = p
+                    .corpus
+                    .relations()
+                    .find(|r| r.name == "option")
+                    .unwrap()
+                    .id;
+                let mut groups = std::collections::BTreeSet::new();
+                world
+                    .iter()
+                    .filter(|a| a.relation == option)
+                    .all(|a| groups.insert(a.arguments[0]))
+            };
+            compare_permitted(&p.corpus, &p.domains, g, permitted);
+            for world in subsets(&g.input_atoms().cloned().collect::<Vec<_>>()) {
+                if !permitted(&world) {
+                    continue;
+                }
+                if name == "guarded-ring" {
+                    let atom = |name: &str| {
+                        GroundAtom::new(
+                            p.corpus.relations().find(|r| r.name == name).unwrap().id,
+                            [],
+                        )
+                    };
+                    let replay = g.evaluate(world.iter().cloned(), &l).unwrap();
+                    for i in 0..2 {
+                        assert_eq!(
+                            replay.fact(&atom(&format!("claim{i}"))).unwrap(),
+                            FactState::Settled(
+                                !world.contains(&atom("kind"))
+                                    && !world.contains(&atom(&format!("ready{i}")))
+                            )
+                        );
+                        if !world.contains(&atom("kind")) {
+                            assert_eq!(
+                                replay.fact(&atom(&format!("booked{i}"))).unwrap(),
+                                FactState::Settled(false)
+                            );
+                        }
+                    }
+                }
+                if name == "guarded-fan-in" {
+                    let atom = |name: &str| {
+                        GroundAtom::new(
+                            p.corpus.relations().find(|r| r.name == name).unwrap().id,
+                            [],
+                        )
+                    };
+                    let replay = g.evaluate(world.iter().cloned(), &l).unwrap();
                     assert_eq!(
-                        replay.fact(&atom(&format!("claim{i}"))).unwrap(),
+                        replay.fact(&atom("claim")).unwrap(),
                         FactState::Settled(
-                            !world.contains(&atom("kind"))
-                                && !world.contains(&atom(&format!("ready{i}")))
+                            !world.contains(&atom("kind")) && !world.contains(&atom("gate"))
                         )
                     );
                     if !world.contains(&atom("kind")) {
                         assert_eq!(
-                            replay.fact(&atom(&format!("booked{i}"))).unwrap(),
+                            replay.fact(&atom("booked")).unwrap(),
                             FactState::Settled(false)
                         );
                     }
                 }
-            }
-            if name == "guarded-fan-in" {
-                let atom = |name: &str| {
-                    GroundAtom::new(
-                        p.corpus.relations().find(|r| r.name == name).unwrap().id,
-                        [],
-                    )
-                };
-                let replay = g.evaluate(world.iter().cloned(), &l).unwrap();
-                assert_eq!(
-                    replay.fact(&atom("claim")).unwrap(),
-                    FactState::Settled(
-                        !world.contains(&atom("kind")) && !world.contains(&atom("gate"))
-                    )
-                );
-                if !world.contains(&atom("kind")) {
+                if name == "guarded-worlds" {
+                    let atom = |name: &str| {
+                        GroundAtom::new(
+                            p.corpus.relations().find(|r| r.name == name).unwrap().id,
+                            [],
+                        )
+                    };
+                    let replay = g.evaluate(world.iter().cloned(), &l).unwrap();
+                    let ready = world.contains(&atom("gate"))
+                        && (0..2).any(|i| world.contains(&atom(&format!("flag{i}"))));
                     assert_eq!(
-                        replay.fact(&atom("booked")).unwrap(),
-                        FactState::Settled(false)
+                        replay.fact(&atom("claim")).unwrap(),
+                        FactState::Settled(!world.contains(&atom("kind")) && !ready)
                     );
                 }
-            }
-            if name == "guarded-worlds" {
-                let atom = |name: &str| {
-                    GroundAtom::new(
-                        p.corpus.relations().find(|r| r.name == name).unwrap().id,
-                        [],
-                    )
-                };
-                let replay = g.evaluate(world.iter().cloned(), &l).unwrap();
-                let ready = world.contains(&atom("gate"))
-                    && (0..2).any(|i| world.contains(&atom(&format!("flag{i}"))));
                 assert_eq!(
-                    replay.fact(&atom("claim")).unwrap(),
-                    FactState::Settled(!world.contains(&atom("kind")) && !ready)
+                    supported_models(g, &g.original_rules().cloned().collect::<Vec<_>>(), &world),
+                    supported_models(g, &g.rules().cloned().collect::<Vec<_>>(), &world),
+                    "{name}"
                 );
             }
-            assert_eq!(
-                supported_models(g, &g.original_rules().cloned().collect::<Vec<_>>(), &world),
-                supported_models(g, &g.rules().cloned().collect::<Vec<_>>(), &world),
-                "{name}"
-            );
         }
     }
 }

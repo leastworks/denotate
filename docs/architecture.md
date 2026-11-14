@@ -250,6 +250,18 @@ whole-program BDD evaluation, with W shared only within the same selection:
 local absent-extension and constraint-projection shortcuts are not sound for general
 constraints. No context-dependent BDD or verdict is reused across selections.
 
+BDD variable order is an explicit request configuration. The default is semantic
+input-key order; diagnostic reverse and bounded structural orders use the ground
+graph after fixed/`within` preparation, before W. Structural analysis never asks
+for symbolic meaning. The request and its assumption-specialized view share the
+same chosen map and condition-universe identity; changing the map changes that
+identity without changing ground instance IDs. Shared contexts partition by both
+assumption selection and backend configuration. Local query inputs carry their
+actual ordered input keys, projected from this map (including a global completion
+context when required), and runtime reconstruction consumes that sequence.
+Structural validation artifacts contain no BDDs and can still share their graphs
+across order configurations. See [ordering policy](checker-policies.md#diagnostic-input-ordering).
+
 Contextual condition notices are ordinary keyed IR declarations selected by a
 verification. The checker decides reachability and variation under that context and
 replays witnesses; presentation supplies advisory wording and source-use placement.

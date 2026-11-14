@@ -311,6 +311,7 @@ fields!(LocalComponent {
     blocked_by
 });
 fields!(LocalInput {
+    input_order,
     completion_context,
     scope,
     roots,

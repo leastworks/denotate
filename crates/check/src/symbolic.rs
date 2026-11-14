@@ -373,6 +373,7 @@ pub(crate) fn retain(
             Some(next),
         ));
     }
+    budget.limits.profile.retained_conditions(next);
     Ok(next)
 }
 

@@ -102,13 +102,24 @@ impl Runtime {
                 .inputs
                 .extend(c.inputs.iter().map(|k| atoms[k].clone()));
         }
-        program.input_order = Some(
-            atoms
-                .iter()
-                .filter(|(_, a)| program.inputs.contains(*a))
-                .map(|(_, a)| a.clone())
-                .collect(),
-        );
+        let order = input
+            .input_order
+            .iter()
+            .map(|k| {
+                atoms
+                    .get(k)
+                    .cloned()
+                    .ok_or(CheckError::InvalidRequest("unknown ordered local input"))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        if order.len() != program.inputs.len()
+            || order.iter().cloned().collect::<BTreeSet<_>>() != program.inputs
+        {
+            return Err(CheckError::InvalidRequest(
+                "local input order does not match inputs",
+            ));
+        }
+        program.input_order = Some(order);
         program.input_groups = input
             .completion_context
             .as_ref()

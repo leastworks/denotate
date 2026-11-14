@@ -150,6 +150,8 @@ pub struct GroundCore {
     pub(crate) inputs: BTreeSet<GroundAtom>,
     pub(crate) input_domains: BTreeMap<RelationId, BTreeSet<GroundAtom>>,
     pub(crate) input_order: Option<Vec<GroundAtom>>,
+    pub(crate) variable_map: u64,
+    pub(crate) order_report: InputOrderReport,
     pub(crate) rules: Vec<GroundRule>,
     pub(crate) rewrites: crate::rewrite::Rewrites,
     pub(crate) components: Vec<Component>,
@@ -294,7 +296,15 @@ impl GroundProgram {
             })
             .collect::<Result<Vec<_>>>()?;
         ordered.sort_by(|a, b| a.0.cmp(&b.0));
-        self.input_order = Some(ordered.into_iter().map(|(_, a)| a).collect());
+        let ordered: Vec<_> = ordered.into_iter().map(|(_, a)| a).collect();
+        if self.input_order.as_ref() != Some(&ordered) {
+            self.variable_map = next_identity();
+        }
+        self.input_order = Some(ordered);
+        self.order_report = InputOrderReport {
+            inputs: self.inputs.len(),
+            ..Default::default()
+        };
         Ok(self)
     }
     pub(crate) fn ordered_inputs(&self) -> Vec<&GroundAtom> {
@@ -312,11 +322,13 @@ impl GroundProgram {
     }
 
     pub(crate) fn empty(corpus: &Corpus, domains: Domains) -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(1);
+        let identity = next_identity();
         Self {
             core: std::sync::Arc::new(GroundCore {
                 fixed: None,
-                preparation: NEXT.fetch_add(1, Ordering::Relaxed),
+                preparation: identity,
+                variable_map: identity,
+                order_report: Default::default(),
                 graph_revision: 0,
                 rewrites: Default::default(),
                 signatures: corpus
@@ -700,4 +712,9 @@ fn each_tuple(
             positions[at] = 0;
         }
     }
+}
+
+pub(crate) fn next_identity() -> u64 {
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
 }

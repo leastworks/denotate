@@ -69,7 +69,7 @@ impl DeterministicLimits {
         }
     }
 }
-/// Fixed BDD algorithm identity for request/result validation, not a selector.
+/// BDD algorithm/configuration identity, including the diagnostic input order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BackendIdentity {
     pub backend: String,
@@ -77,10 +77,27 @@ pub struct BackendIdentity {
 }
 impl BackendIdentity {
     pub fn bdd() -> Self {
+        Self::bdd_with_order(InputOrder::Key)
+    }
+    pub fn bdd_with_order(order: InputOrder) -> Self {
+        let configuration = match order {
+            InputOrder::Key => "atom-key-order-v1/per-query-budgets-v1",
+            InputOrder::ReverseKey => "reverse-atom-key-order-v1/per-query-budgets-v1",
+            InputOrder::Structural => "structural-order-v1/per-query-budgets-v1",
+        };
         Self {
             backend: "bdd".into(),
-            configuration: "atom-key-order-v1/per-query-budgets-v1".into(),
+            configuration: configuration.into(),
         }
+    }
+    pub fn input_order(&self) -> Option<InputOrder> {
+        [
+            InputOrder::Key,
+            InputOrder::ReverseKey,
+            InputOrder::Structural,
+        ]
+        .into_iter()
+        .find(|order| *self == Self::bdd_with_order(*order))
     }
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -275,7 +292,7 @@ impl CheckRequest {
     ) -> Result<RequestPreparation<'s>> {
         operations.cancellation.check()?;
         keys.validate(corpus).map_err(CheckError::Keys)?;
-        if self.backend != BackendIdentity::bdd() {
+        if self.backend.input_order().is_none() {
             return Err(CheckError::InvalidRequest("unknown backend/configuration"));
         }
         let all = corpus
@@ -403,7 +420,7 @@ impl CheckRequest {
                 .contexts
                 .borrow()
                 .iter()
-                .find(|c| c.constraints == self.constraints)
+                .find(|c| c.constraints == self.constraints && c.backend == self.backend)
             {
                 if !std::ptr::eq(context.semantic_keys, keys) {
                     return Err(CheckError::InvalidRequest(
@@ -512,14 +529,29 @@ impl CheckRequest {
             }
         };
         let key_start = Instant::now();
-        let mut program = {
+        let program = {
             let _profile = limits.profile.span("input-key-order", None);
-            if program.input_order.is_some() {
-                program
-            } else {
-                program.with_atom_key_order(keys)?
+            program.choose_input_order(
+                keys,
+                &self.constraints,
+                self.backend.input_order().unwrap(),
+                &mut budget,
+            )
+        };
+        let mut program = match program {
+            Ok(program) => program,
+            Err(error) => {
+                budget.failure(&error);
+                budget.record(&mut receipts, QueryKey::Preparation, dependencies)?;
+                return Ok(RequestPreparation::Inconclusive {
+                    reason: Inconclusive::from_error(error)?,
+                    receipts,
+                });
             }
         };
+        if let Some(view) = &mut specialized {
+            view.inherit_input_order(&program)?;
+        }
         let key_order_time = key_start.elapsed();
         let general = self
             .constraints
@@ -576,6 +608,7 @@ impl CheckRequest {
         let key_computation = key_order_time + index.elapsed;
         if let Some(fixed) = fixed {
             let context = SharedContext {
+                backend: self.backend.clone(),
                 constraints: self.constraints.clone(),
                 semantic_keys: keys,
                 program,
@@ -845,6 +878,7 @@ type SharedAdmission =
 
 /// Bound to one source snapshot. No arena handles escape into a session cache.
 pub(crate) struct SharedContext<'a> {
+    backend: BackendIdentity,
     constraints: Vec<InputConstraint>,
     semantic_keys: &'a SemanticKeys,
     program: GroundProgram,

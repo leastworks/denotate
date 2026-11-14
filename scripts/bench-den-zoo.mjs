@@ -165,7 +165,7 @@ export function measurements(records, outcomes) {
     const rows=complete.filter(r=>r.stage===stage);
     if(!rows.length || rows.some(r=>!successors.has(r.span)) || failed.has(stage)) {result[stage]={complete:false};continue;}
     const peak=key=>rows.every(r=>Number.isFinite(r.sampledPeak?.[key]))?Math.max(...rows.map(r=>r.sampledPeak[key])):null;
-    result[stage]={complete:true,ms:rows.reduce((s,r)=>s+r.elapsedMs,0),rss:peak('rssBytes'),footprint:peak('footprintBytes')};
+    result[stage]={complete:true,ms:rows.reduce((s,r)=>s+r.elapsedMs,0),rss:peak('rssBytes'),footprint:peak('footprintBytes'),bddResultNodes:rows.every(r=>Number.isFinite(r.bddResultNodes))?rows.reduce((s,r)=>s+r.bddResultNodes,0):null,peakAccountedConditionNodes:rows.every(r=>Number.isFinite(r.peakAccountedConditionNodes))?Math.max(...rows.map(r=>r.peakAccountedConditionNodes)):null};
   }
   return result;
 }
@@ -190,6 +190,8 @@ export function aggregate(runs, sizes, repeat, threshold) {
         ms: stats(completed.map(r => r.phases[phase].ms), repeat),
         rss: stats(completed.map(r => r.phases[phase].rss), repeat),
         footprint: stats(completed.map(r => r.phases[phase].footprint), repeat),
+        bddResultNodes: stats(completed.map(r => r.phases[phase].bddResultNodes), repeat),
+        peakAccountedConditionNodes: stats(completed.map(r => r.phases[phase].peakAccountedConditionNodes), repeat),
       };
     });
     const fits = {};
@@ -215,7 +217,7 @@ function readRun(dir, size, rep) {
   const ground = report.beforeAdmission?.ground ?? {};
   const rounds = report.admissionRounds ?? [];
   return {
-    size, rep, dir, checkerFinished: report.checkerFinished,
+    size, rep, dir, inputOrder: report.inputOrderDetails, checkerFinished: report.checkerFinished,
     exit: report.checkerExitCode, outcomes: report.outcomes,
     sizes: {
       sourceBytes: fs.statSync(path.join(dir, 'program/schema.den')).size, ...ground,
@@ -235,7 +237,7 @@ function readRun(dir, size, rep) {
 export function summarize(out) {
   const config = JSON.parse(fs.readFileSync(path.join(out, 'sweep.json')));
   const { family, sizes, repeat, threshold, binary } = config;
-  const report = { threshold, repeat, sizes, families: {} };
+  const report = { threshold, repeat, sizes, inputOrder: config.inputOrder ?? 'key', families: {} };
   for (const name of family) {
     const runs = [];
     for (const size of sizes) for (let rep = 0; rep < repeat; rep++) {
@@ -251,16 +253,17 @@ export function summarize(out) {
   return report;
 }
 
-export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3,binary='target/profiling/examples/bench_schema',samply=false,limits=[]}) {
+export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3,binary='target/profiling/examples/bench_schema',samply=false,limits=[],inputOrder='key'}) {
+  if (!['key','reverse-key','structural'].includes(inputOrder)) throw Error('invalid input order');
   fs.mkdirSync(path.dirname(out),{recursive:true});
   fs.mkdirSync(out,{recursive:false});
-  fs.writeFileSync(path.join(out, 'sweep.json'), JSON.stringify({family, sizes, repeat, threshold, binary: path.resolve(binary)}, null, 2));
-  const report={threshold,repeat,sizes,families:{}};
+  fs.writeFileSync(path.join(out, 'sweep.json'), JSON.stringify({family, sizes, repeat, threshold, inputOrder, binary: path.resolve(binary)}, null, 2));
+  const report={threshold,repeat,sizes,inputOrder,families:{}};
   for(const name of family) {
     const runs=[];
     for(const size of sizes) for(let rep=0;rep<repeat;rep++) {
       const dir=path.resolve(out,`${name}-${size}-${rep}`);
-      let args=['--out',dir];
+      let args=['--out',dir,'--input-order',inputOrder];
       if(name==='schema-layered') args.push('--topology','layered','--fields',String(size+2),'--reads',String(size),'--depth','2','--encoding','assumed');
       else {const input=path.resolve(out,`${name}-${size}.den`);fs.writeFileSync(input,source(name,size));args.push('--source',input);}
       if(samply) args.push('--samply');
@@ -287,9 +290,10 @@ if(!process.execArgv.some(a=>a==='-e'||a==='--eval') && process.argv[1] && path.
     for(let i=0;i<args.length;i++) {
       const key=args[i];if(key==='--'){opts.limits=args.slice(i+1);break;}
       if(key==='--samply'){opts.samply=true;continue;}
-      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
+      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
       const val=args[++i];
       if(key==='--family')opts.family=val.split(',');else if(key==='--sizes')opts.sizes=val.split(',').map(Number);
+      else if(key==='--input-order')opts.inputOrder=val;
       else if(key==='--repeat')opts.repeat=Number(val);else if(key==='--threshold')opts.threshold=Number(val);else if(key==='--out')opts.out=val;
       else throw Error(`unknown option ${key}`);
     }

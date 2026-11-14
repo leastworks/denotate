@@ -89,6 +89,7 @@ impl MemoryEvent {
         serde_json::json!({"type":"profile","stage":p.stage,"span":p.id,"round":p.round,
             "event":if p.finished {"end"} else {"start"},"elapsedMs":p.elapsed.as_secs_f64()*1000.,
             "memory":self.memory,"sampledPeak":self.sampled_peak,"sampleIntervalMs":MemoryProfiler::INTERVAL.as_millis(),
+            "peakAccountedConditionNodes":p.peak_accounted_condition_nodes,
             "bddResults":p.bdd_results,"bddResultNodes":p.bdd_result_nodes,"bddResultNodeBytes":p.bdd_result_node_bytes,
             "retainedBdd":p.retained.map(|s|serde_json::json!({"references":s.references,"distinctArrays":s.distinct_arrays,"nodes":s.nodes,"nodeBytes":s.node_bytes}))})
     }

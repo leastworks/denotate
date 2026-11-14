@@ -7,6 +7,7 @@ it when real programs exist, and change it on evidence.
 | Path / policy | Decision | Why |
 | --- | --- | --- |
 | Checker backend | BDD only; cached coarse BDD in editors | Predictable, canonical conditions; good warm reuse |
+| BDD input order | Semantic-key order; opt-in reverse and structural orders for diagnosis | Measure representation costs before choosing a different default |
 | Relation-SCC grounding | Kept opt-in | Warm-run wins; not yet worth the complexity by default |
 | Fixed-fact evaluation | Shared across verifications; one retained keyed fold per session, without a byte cap | Checker limits bound the fold; retain completed work for reuse across edits and report its accounted bytes |
 | Admission rewrite order | Commit exact-coverage producer removals before cycle bounds | Avoid analysing cycles that independent support already makes redundant; preserve removals if later bounds exhaust |
@@ -30,6 +31,40 @@ subphase, effective ceiling and observed demand where available. A stopped BDD
 operation may not expose an exact count; no count is fabricated. Counts can include
 rejected demand, and an effective ceiling can be tightened by remaining work/storage
 or backend capacity. These diagnostics do not change accounting or semantic outcomes.
+
+## Diagnostic input ordering
+
+`just check-den ROOT --input-order key|reverse-key|structural` selects a BDD
+variable order for that invocation. `key` is the unchanged default; the editor
+and scorecards keep it. The schema and zoo runners accept the same option. This
+is a diagnostic configuration, not a new limit or a new backend.
+
+Ordering happens after fixed/`within` preparation and grounding, before W or any
+input-dependent BDD. Structural ordering traverses the dependency graph, with no
+symbolic evaluation: settled rule premises contribute input-support hyperedges,
+as do selected assumptions. Input-only uniqueness groups receive extra weight.
+Groups disjoint from all other groups are contiguous blocks; overlapping groups
+are preferences, and every constraint remains enforced. Eight FORCE placement
+passes use integer centers and semantic-key ties, retaining the best weighted
+span cost seen. No platform-dependent floating-point ordering is used.
+
+The heuristic charges preparation work and stops at one million cumulative
+structural entries or four million traversal/placement visits. These optimization
+cutoffs return key order, with the reason and spent work retained in the report.
+They bound expanded support and metadata, not bytes or BDD nodes. Global work
+exhaustion and cancellation still propagate. CLI progress/profile records expose
+`inputOrder` (requested/effective order, fallback, inputs, structural entries,
+hyperedges and completed passes); non-default runs also print it on stdout.
+
+The backend configuration includes the requested order. Shared contexts partition
+by selection and configuration; the assumption-specialized graph receives the
+request's exact map before W is built. Local query inputs retain the actual ordered
+input keys, including any completion context, so structural edits and switching
+orders cannot reuse a result with the wrong map. Structural ordering currently
+recomputes with preparation; choosing a default and an edit-stability policy are
+separate work. Witness choices and rewrite-warning inventories may differ, since
+guarded candidate priorities also use BDD sizes. Conclusive semantic answers must
+agree; compare independent tiny-world oracles as well as completed workload runs.
 
 ## Backend retirement
 
@@ -366,6 +401,12 @@ periodic samples, lower bounds on true phase peaks. The `peak*` fields remain OS
 lifetime high waters. Nested spans overlap: their durations and peak sizes must not
 be summed. An `end` event means the scope exited, including on failure; the CLI
 outcome determines success. Write failures in the profile stream are best-effort.
+
+`peakAccountedConditionNodes` is the maximum accepted condition-storage accounting
+observed within a span, excluding rejected demands. It is a peak of the checker's
+individual accounting pools, not their sum, physical BDD live storage or heap
+bytes. Nested spans observe the same events. The zoo reports this maximum beside
+cumulative `bddResultNodes` for each phase; neither is a timing or memory golden.
 
 Stages separate fixed runtime reconstruction, evaluation, export and binding;
 residual preparation, including `grounding` and `graph-and-components`;

@@ -80,3 +80,6 @@ pub use coverage::{CoverageExample, CoverageReport, CoverageResult, CoverageSumm
 
 mod notices;
 pub use notices::*;
+
+mod input_order;
+pub use input_order::{InputOrder, InputOrderReport};

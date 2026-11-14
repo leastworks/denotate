@@ -1,4 +1,5 @@
-//! Canonical low-first postorder graph. Equality never performs Boolean solving.
+//! Low-first postorder graph, canonical within its explicit variable map.
+//! Equality never performs Boolean solving.
 use super::*;
 use biodivine_lib_bdd::{BddNode, BddPointer};
 use denotate_ir::SemanticKeys;
@@ -59,11 +60,8 @@ impl ConditionContext {
             .map(|(_, k)| k)
             .collect::<Vec<_>>()
             .into();
-        if inputs.windows(2).any(|w| w[0] >= w[1]) {
-            return Err(CheckError::Internal(
-                "local inputs are not in AtomKey order",
-            ));
-        }
+        // Preserve variable order, not key order. Import checks that this exact
+        // sequence maps monotonically into the destination context.
         let bdd = &condition.bdd;
         let mut assigned = BTreeMap::from([(BddPointer::zero(), 0), (BddPointer::one(), 1)]);
         let mut pending = vec![(bdd.root_pointer(), false)];

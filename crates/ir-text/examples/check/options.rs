@@ -1,5 +1,5 @@
 use super::Failure;
-use denotate_check::{EmptinessExamples, Limits};
+use denotate_check::{EmptinessExamples, InputOrder, Limits};
 use std::{collections::BTreeSet, fmt::Write, time::Duration};
 
 pub const USAGE: &str = "Usage: check ROOT_FOLDER_OR_DEN.ROOT [OPTIONS]\nRun just check-den --help for options and limit defaults.";
@@ -14,6 +14,7 @@ pub struct Options {
     pub progress: bool,
     pub profile_memory: Option<String>,
     pub limits: Limits,
+    pub input_order: InputOrder,
 }
 pub fn limit_values(l: &Limits) -> [(&'static str, u128); 9] {
     [
@@ -33,6 +34,7 @@ pub fn help() -> String {
         "Usage: check ROOT_FOLDER_OR_DEN.ROOT [OPTIONS]\n\n\
         --verification NAME       Run one verification (a partial run)\n\
         --validate-all-assumptions Validate unselected declarations too (authoring aid)\n\
+        --input-order ORDER       Diagnostic BDD order: key (default), reverse-key, structural\n\
         --json                    Print existing status summaries on stdout\n\
         --verbose                 Expand all related locations and structural proof chains\n\
         --empty-examples N|all    Retain N present tuples per empty obligation (default 3)\n\
@@ -69,6 +71,7 @@ impl Options {
             progress: true,
             profile_memory: None,
             limits,
+            input_order: InputOrder::Key,
         };
         let mut seen = BTreeSet::new();
         while let Some(option) = args.next() {
@@ -87,6 +90,9 @@ impl Options {
                 "--profile-memory" => options.profile_memory = Some(value()?),
                 "--hide-library-rewrites" => options.hide_library_rewrites = true,
                 "--verification" => options.selection = Some(value()?),
+                "--input-order" => {
+                    options.input_order = value()?.parse().map_err(|e: &str| (2, e.into()))?
+                }
                 "--empty-examples" => {
                     let text = value()?;
                     options.empty_examples = Some(if text == "all" {
