@@ -156,7 +156,7 @@ impl<'a> AdmissionDetails<'a> {
             "prerequisiteMs": event.prerequisites.iter().map(|(k, d)| ((*k).to_string(), json!(d.as_secs_f64()*1000.))).collect::<serde_json::Map<_, _>>(),
             "guarded": event.guarded.as_ref().map(|g| {
                 let names = self.names.get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)));
-                json!({"index":g.index, "head":atom_text(&g.head, &**names), "premise":atom_text(&g.premise, &**names),
+                json!({"index":g.index, "position":g.position, "deferred":g.deferred, "componentAtoms":g.component_atoms, "head":atom_text(&g.head, &**names), "premise":atom_text(&g.premise, &**names),
                     "location":self.location(g.source), "restricted":true, "coneAtoms":g.cone_atoms,
                     "liveAtoms":g.live_atoms, "coneRules":g.cone_rules, "liveRules":g.live_rules,
                     "domainNodes":g.domain_nodes, "existingConditionNodes":g.existing_condition_nodes,
@@ -274,6 +274,14 @@ pub fn admission_text(a: &Value) -> String {
             g["domainNodes"], g["existingConditionNodes"], g["addedConditionNodes"], g["state"].as_str().unwrap_or("?"),
             if g["reused"] == true { " (reused)" } else { "" },
             g["preprocessingMs"].as_f64().unwrap_or(0.), g["iterationMs"].as_f64().unwrap_or(0.)));
+    }
+    if let Some(g) = a.get("guarded").filter(|g| g.is_object()) {
+        if g["deferred"] == true {
+            text.push_str("; ranked as full/nearly full");
+        }
+        if let Some(position) = g["position"].as_u64() {
+            text.push_str(&format!("; bounds position {position}"));
+        }
     }
     if let Some(failure) = a["failure"].as_str() {
         if let Some(kind) = a["skipped"].as_str() {

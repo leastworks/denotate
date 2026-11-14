@@ -18,6 +18,9 @@ use std::{
 pub(crate) const EXPRESSION_NODES: usize = 1024;
 pub(crate) const EXPRESSION_DEPTH: usize = 64;
 pub(crate) const CERTIFICATE_NODES: usize = 8192;
+// Provisional scheduling only; neither the cone nor its certificate changes.
+const LOOKAHEAD: usize = 32;
+const RANK_STORAGE: usize = 16;
 
 #[derive(Debug, Clone)]
 pub struct GuardedSettlementStep {
@@ -182,15 +185,52 @@ impl GroundProgram {
         let mut union_cache = None;
         let mut pending_inference = false;
         let mut release_inference = 0;
-        while let Some(((cost, index), (candidate, literal, component, discover, inferred))) =
-            queue.pop_first()
-        {
+        // Only metadata waits in this bounded window, never cones or inferred
+        // source snapshots. Reconstruct the selected candidate at the same graph
+        // snapshot under the same budgets. Completed proofs still own their data.
+        let mut ranked = BTreeMap::new();
+        let mut remaining = LOOKAHEAD;
+        let mut position = 0;
+        let mut ranking = true;
+        loop {
             *retained -= release_inference;
+            release_inference = 0;
+            let selected = ranking && (remaining == 0 || queue.is_empty());
+            let entry = if selected {
+                if let Some(((deferred, _, _, cost, index), value)) = ranked.pop_first() {
+                    *retained -= RANK_STORAGE;
+                    let (candidate, literal, component) = value;
+                    Some((
+                        (cost, index),
+                        (candidate, literal, component, true, None),
+                        Some(deferred),
+                    ))
+                } else if queue.is_empty() {
+                    break;
+                } else {
+                    // Every preparation in the previous window failed locally.
+                    remaining = LOOKAHEAD;
+                    continue;
+                }
+            } else {
+                queue.pop_first().map(|(key, value)| (key, value, None))
+            };
+            let Some((
+                (cost, index),
+                (candidate, literal, component, discover, mut inferred),
+                deferred,
+            )) = entry
+            else {
+                break;
+            };
             release_inference = inferred
                 .as_ref()
                 .map_or(0, crate::implied_guard::Inferred::nodes);
-            if inferred.is_some() {
+            if inferred.is_some() && !selected {
                 pending_inference = false;
+            }
+            if selected {
+                remaining = LOOKAHEAD - ranked.len();
             }
             budget.tick("guarded candidate queue")?;
             if done.contains(&component.id)
@@ -203,11 +243,10 @@ impl GroundProgram {
                 continue;
             }
             if discover {
-                let mut inferred = None;
                 // At most one refined candidate waits in the queue. This prevents
                 // global inference before the first proof. Others retain their
                 // ordinary priority while that candidate awaits its turn.
-                if !pending_inference {
+                if !pending_inference || selected {
                     progress.rule(self, "implied-guard", candidate.rule.id, index + 1);
                     if let Some(result) = attempts.run(
                         Attempt::ImpliedGuard(candidate.rule.id),
@@ -243,18 +282,32 @@ impl GroundProgram {
                     .as_ref()
                     .map_or(&candidate.condition, |i| &i.condition);
                 let actual = (guard.is_true(), guard.node_count(), cost.2);
-                pending_inference |= inferred.is_some();
-                queue.insert(
-                    (actual, index),
-                    (candidate, literal, component, false, inferred),
-                );
-                continue;
+                if !selected {
+                    pending_inference |= inferred.is_some();
+                    queue.insert(
+                        (actual, index),
+                        (candidate, literal, component, false, inferred),
+                    );
+                    continue;
+                }
+                release_inference = inferred
+                    .as_ref()
+                    .map_or(0, crate::implied_guard::Inferred::nodes);
+            }
+            if !selected && ranking {
+                remaining -= 1;
             }
             let mut effective = candidate.clone();
             if let Some(i) = &inferred {
                 effective.condition = i.condition.clone();
             }
-            progress.guarded_start(self, index + 1, &candidate.rule, &literal.term.atom);
+            progress.guarded_start(
+                self,
+                index + 1,
+                &candidate.rule,
+                &literal.term.atom,
+                deferred.unwrap_or(false),
+            );
             let mut preprocessing = None;
             let mut preparation = Preparation::default();
             let before_preparation = *retained;
@@ -268,7 +321,9 @@ impl GroundProgram {
                 progress,
                 |retained, budget| {
                     let started = Instant::now();
-                    let mut prepare = |retained: &mut usize, budget: &mut Budget<'_>| {
+                    let mut prepare = |retained: &mut usize,
+                                       budget: &mut Budget<'_>,
+                                       rank: bool| {
                         crate::guarded_bounds::prepare(
                             self,
                             component,
@@ -281,8 +336,15 @@ impl GroundProgram {
                             budget,
                             &mut preparation,
                         )
+                        .and_then(|cone| {
+                            if rank {
+                                *retained =
+                                    crate::symbolic::retain(*retained, 0, RANK_STORAGE, budget)?;
+                            }
+                            Ok(cone)
+                        })
                     };
-                    let mut result = prepare(retained, budget);
+                    let mut result = prepare(retained, budget, ranking && !selected);
                     if matches!(
                         &result,
                         Err(CheckError::LimitExceeded {
@@ -296,12 +358,23 @@ impl GroundProgram {
                                 .as_ref()
                                 .map_or_else(|| old.0.temporary_nodes(), |b| b.temporary_nodes())
                         }) + union_cache.take().map_or(0, |old| old.nodes());
-                        if released_cache > 0 {
+                        let was_ranking = ranking;
+                        // Ranking is optional too. Return waiting candidates to
+                        // their original queue and retry without its metadata.
+                        released_cache += ranked.len() * RANK_STORAGE;
+                        for ((_, _, _, cost, index), (candidate, literal, component)) in
+                            std::mem::take(&mut ranked)
+                        {
+                            queue
+                                .insert((cost, index), (candidate, literal, component, true, None));
+                        }
+                        ranking = false;
+                        if released_cache > 0 || was_ranking {
                             // The partial cone has dropped. Optional reuse must
                             // yield storage to the next attempt. Retry once; keep
                             // all work charges and enforce the same storage cap.
                             *retained = before_preparation - released_cache;
-                            result = prepare(retained, budget);
+                            result = prepare(retained, budget, false);
                         }
                     }
                     preprocessing = Some(started.elapsed());
@@ -318,7 +391,8 @@ impl GroundProgram {
                 preprocessing.map(|_| &preparation),
                 preprocessing.unwrap_or_default(),
                 match &prepared {
-                    Ok(Some(_)) => "iterating",
+                    Ok(Some(_)) if selected => "iterating",
+                    Ok(Some(_)) => "ranked",
                     Ok(None) => "skipped",
                     Err(_) => "failed",
                 },
@@ -329,6 +403,33 @@ impl GroundProgram {
                 }
                 continue;
             };
+            if !selected && ranking {
+                // Compare live atoms with all atoms in the candidate's current
+                // unresolved SCC, not just the visited cone. Near-full cones are
+                // deliberately deferred too (e.g. 621/622).
+                let deferred = preparation.live_atoms.saturating_mul(10)
+                    >= component.atoms.len().saturating_mul(9);
+                progress.guarded_order(self, deferred, None, component.atoms.len());
+                ranked.insert(
+                    (
+                        deferred,
+                        preparation.live_atoms,
+                        preparation.live_producers,
+                        cost,
+                        index,
+                    ),
+                    (candidate, literal, component),
+                );
+                *retained -= cone.temporary_nodes();
+                continue;
+            }
+            position += 1;
+            progress.guarded_order(
+                self,
+                deferred.unwrap_or(false),
+                Some(position),
+                component.atoms.len(),
+            );
             let reused = match &cache {
                 Some((old, _)) => cone.same_computation(old, budget)?,
                 None => false,
@@ -417,7 +518,7 @@ impl GroundProgram {
                 proofs.push(proof);
             }
         }
-        *retained -= release_inference;
+        *retained -= release_inference + ranked.len() * RANK_STORAGE;
         if let Some(union) = union_cache {
             *retained -= union.nodes();
         }

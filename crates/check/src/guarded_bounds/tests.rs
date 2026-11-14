@@ -281,7 +281,7 @@ fn guarded_preparation_failure_reports_partial_counts_before_storage_rollback() 
     let events = RefCell::new(Vec::new());
     let observe = |e: &AdmissionProgress| events.borrow_mut().push(e.clone());
     let progress = AdmissionReporter::new(Some(&observe));
-    progress.guarded_start(&p, 1, &candidate.rule, &literal.term.atom);
+    progress.guarded_start(&p, 1, &candidate.rule, &literal.term.atom, false);
     let result = Attempts::default()
         .run(
             Attempt::GuardedCone(candidate.rule.id, literal.term.occurrence),

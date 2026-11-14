@@ -174,8 +174,15 @@ During guarded work, `guarded` describes one candidate: `index` (one-based,
 round-local), `head`, `premise`, source `location`, `restricted: true`,
 `coneAtoms`, `liveAtoms`, `coneRules`, `liveRules`, `domainNodes`,
 `existingConditionNodes`, `addedConditionNodes`,
-`preprocessingMs`, `iterationMs`, `reused`, and `state` (`preprocessing`,
-`iterating`, `completed`, `skipped`, `failed`). Cone counts are visited atoms and
+`preprocessingMs`, `iterationMs`, `reused`, `componentAtoms`, `deferred`, `position`,
+and `state` (`preprocessing`, `ranked`, `deferred`, `iterating`, `completed`,
+`skipped`, `failed`). `componentAtoms` is the current component's total atom count
+used by ranking. `deferred` records whether ranking classified the cone as full or
+nearly full; it remains true if the candidate later runs. `position` is its
+one-based bounds-attempt order within that guarded pass, or null while waiting.
+`index` remains the original candidate identity within the round; it is not the
+execution order. These fields distinguish deferred candidates in saved reports,
+including candidates made unnecessary by another reader's successful rewrite. Cone counts are visited atoms and
 producers so far, including dead ones; live atoms have at least one producer whose
 settled guard intersects the domain (this does not establish the atom's truth).
 The domain is G ∧ W; its size counts BDD nodes. Existing condition nodes are the

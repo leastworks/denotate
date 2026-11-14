@@ -136,6 +136,12 @@ attached executable expression and participates in key projection and local quer
 dependencies. Discovery is lazy and bounded; a local failure uses the original
 guard and is reported as an `implied-guard` attempt, without making that fallback
 inconclusive. Finding identities and the earlier admission passes are unchanged.
+A bounded lookahead ranks prepared cones before attempting their bounds, deferring
+full and nearly full cones. Waiting candidates retain only size metadata; their
+cones and guards are reconstructed when selected. All-deferred windows still
+attempt bounds, and optional ranking yields under preparation storage pressure.
+The [checker policies](../../docs/checker-policies.md#guarded-settlement) describe
+its provisional window, threshold and progress fields.
 
 Structural rewrite proofs expose direct settling/unfolding support through
 `direct_rules` and accurate absence explanations through `settlement`. Internal

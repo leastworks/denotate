@@ -194,3 +194,28 @@ just bench-den-zoo --family guarded-hub --sizes 53,106 --repeat 1 \
 Inspect both the reader replacement and the attempt table. Earlier unrestricted
 bound passes still run and can dominate at raised BDD limits. A small inferred
 guard does not promise cheap admission at every limit or size.
+
+## Cone-order reproduction
+
+`guarded-hub --hub-decoys 12 --hub-decoy-shape full|near-full` adds split readers
+before the useful class reader in source order. Their inferred `docked` guard
+leaves the wide producer fan-in live. `full` visits the whole component;
+`near-full` adds one side atom excluded by that guard. Both exercise scheduling
+without changing what a valid certificate must prove.
+
+In this variant the classes are complementary tests of one input bit, and the
+held test does not require priority. This keeps the final meaning small even with
+`--hub-no-routes`, while full-cone bounds encounter a large intermediate Boolean
+function. These deliberate workload choices apply only when decoys are requested.
+Options are saved in the sweep and recovered report.
+
+```sh
+just bench-den-zoo --family guarded-hub --sizes 53 --repeat 1 \
+  --hub-no-routes --hub-decoys 12 --hub-decoy-shape near-full \
+  --out target/hub-decoys
+```
+
+Inspect `guardedAttempts`: `deferred` and `componentAtoms` explain the ranking;
+`position` distinguishes actual bounds attempts from waiting candidates. Compare
+admission and downstream work separately. A scheduling improvement can leave
+ordinary downstream warning work incomplete at the same limits.

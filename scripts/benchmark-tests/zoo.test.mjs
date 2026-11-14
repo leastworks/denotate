@@ -91,3 +91,21 @@ test('a recoverable admission skip does not discard a later completed result',()
   assert.equal(measurements(records,[{state:'proved'}]).admission.complete,true);
   assert.equal(measurements(records,[{state:'incomplete',admissionSkips:[{reason:{phase:'BDD operation',resource:'BDD tasks'}}]}]).admission.complete,false);
 });
+
+test('decoy options and deferred candidate positions survive saved reports',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-cone-order-'));
+  try {
+    for(const hubDecoyShape of ['full','near-full']) {
+      const out=path.join(root,hubDecoyShape);
+      const report=run({out,binary:'target/debug/examples/bench_schema',family:['guarded-hub'],sizes:[53],repeat:1,hubRoutes:false,hubDecoys:12,hubDecoyShape});
+      assert.equal(report.hubDecoys,12);assert.equal(report.hubDecoyShape,hubDecoyShape);
+      const r=report.families['guarded-hub'].runs[0];
+      assert.equal(r.after.admitted,true);
+      const attempts=r.guardedAttempts.filter(a=>a.phase==='relevant').map(a=>a.attempt);
+      assert.ok(attempts.some(a=>a.deferred&&a.position===null));
+      const first=attempts.filter(a=>a.position!==null).sort((a,b)=>a.position-b.position)[0];
+      assert.equal(first.head,'hazard_claim()');
+      assert.deepEqual(summarize(out),report);
+    }
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});

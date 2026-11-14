@@ -133,6 +133,55 @@ fn guarded_settlement_does_not_unfold_unresolved_self_support() {
 }
 
 #[test]
+fn all_deferred_candidates_still_attempt_bounds_and_release_the_window() {
+    // More candidates than a lookahead window, none with a useful guard.
+    let mut c = Corpus::new();
+    for i in 0..40 {
+        let a = rel(&mut c, &format!("a{i}"), false);
+        let b = rel(&mut c, &format!("b{i}"), false);
+        rule(&mut c, a, &[(b, true)]);
+        rule(&mut c, b, &[(a, true)]);
+    }
+    let l = Limits::default();
+    let p = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+    let m = p.symbolic(&l).unwrap();
+    let summaries = test_support::rewrites::summaries(&p, &m, &l);
+    let events = RefCell::new(Vec::new());
+    let observer = |e: &AdmissionProgress| events.borrow_mut().push(e.clone());
+    let progress = crate::admission_progress::AdmissionReporter::new(Some(&observer));
+    let mut retained = 0;
+    let proofs = p
+        .guarded_settlements(
+            &m,
+            &summaries,
+            &summaries.keys().copied().collect(),
+            &mut retained,
+            &mut Budget::new(&l),
+            &progress,
+            &mut crate::admission_skips::Attempts::default(),
+        )
+        .unwrap();
+    assert!(proofs.is_empty());
+    assert_eq!(retained, 0);
+    let attempted = events
+        .borrow()
+        .iter()
+        .filter_map(|e| e.guarded.as_ref())
+        .filter(|g| g.state == "completed")
+        .map(|g| {
+            assert!(g.deferred);
+            assert!(g.position.is_some());
+            g.head.clone()
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        attempted.len(),
+        80,
+        "every ambiguous reader still gets an attempt"
+    );
+}
+
+#[test]
 fn guarded_settlement_randomized_and_constrained_runs_preserve_models() {
     let mut seed = 1234567u64;
     let mut random = || {
@@ -376,4 +425,85 @@ fn implied_guard_cutoff_does_not_starve_a_later_small_component() {
         p.evaluate([], &l).unwrap().fact(&atom(claim)).unwrap(),
         FactState::Settled(true)
     );
+}
+
+#[test]
+fn positive_implied_certificate_owns_support_and_preserves_models_independent_of_order() {
+    use crate::test_support::rewrites::{stable_models, summaries};
+    let mut c = Corpus::new();
+    let kind = rel(&mut c, "kind", true);
+    let ready = rel(&mut c, "ready", true);
+    let priority = rel(&mut c, "priority", true);
+    let booked = rel(&mut c, "booked", false);
+    let fails = rel(&mut c, "fails", false);
+    let inner = rel(&mut c, "inner", false);
+    let claim = rel(&mut c, "claim", false);
+    let inspected = rel(&mut c, "inspected", false);
+    let held = rel(&mut c, "held", false);
+    let cleared = rel(&mut c, "cleared", false);
+    rule(&mut c, booked, &[(kind, false), (cleared, false)]);
+    rule(&mut c, fails, &[(ready, false), (booked, true)]);
+    rule(&mut c, inner, &[(kind, true), (fails, true)]);
+    rule(&mut c, claim, &[(inner, false)]);
+    rule(&mut c, inspected, &[(kind, false)]);
+    rule(&mut c, inspected, &[(claim, false)]);
+    rule(&mut c, held, &[(priority, false), (inspected, false)]);
+    rule(&mut c, cleared, &[(ready, false), (held, true)]);
+    let l = Limits::default();
+    let p = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+    let m = p.symbolic(&l).unwrap();
+    let summaries = summaries(&p, &m, &l);
+    let targets = summaries
+        .values()
+        .filter(|s| s.rule.head.atom == atom(claim))
+        .map(|s| s.rule.id)
+        .collect();
+    let proofs = p
+        .guarded_settlements(
+            &m,
+            &summaries,
+            &targets,
+            &mut 0,
+            &mut Budget::new(&l),
+            &crate::admission_progress::AdmissionReporter::new(None),
+            &mut crate::admission_skips::Attempts::default(),
+        )
+        .unwrap();
+    let proof = &proofs[0];
+    assert!(
+        proof
+            .implied_guard
+            .as_ref()
+            .unwrap()
+            .premises
+            .iter()
+            .any(|p| p.literal.polarity == Polarity::Positive && !p.producers.is_empty())
+    );
+    // Interpret the proposed replacement with both independent oracles, without
+    // relying on which other candidate the full admission scheduler selects.
+    let before = p.rules().cloned().collect::<Vec<_>>();
+    let mut after = before.clone();
+    let target = after
+        .iter_mut()
+        .find(|r| r.id == proof.proof.candidate.rule.id)
+        .unwrap();
+    target
+        .body
+        .retain(|l| l.term.occurrence != proof.occurrence);
+    target.replacements.push(SettledReplacement {
+        occurrence: proof.occurrence,
+        expression: std::sync::Arc::clone(&proof.replacement),
+    });
+    let atoms = p.atoms().cloned().collect::<Vec<_>>();
+    let inputs = p.input_atoms().cloned().collect::<BTreeSet<_>>();
+    for world in subsets(&inputs.iter().cloned().collect::<Vec<_>>()) {
+        assert_eq!(
+            stable_models(&atoms, &inputs, &before, &world),
+            stable_models(&atoms, &inputs, &after, &world)
+        );
+        assert_eq!(
+            supported_models(&p, &before, &world),
+            supported_models(&p, &after, &world)
+        );
+    }
 }

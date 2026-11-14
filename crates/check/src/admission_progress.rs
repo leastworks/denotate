@@ -54,6 +54,11 @@ impl AdmissionPhase {
 #[derive(Debug, Clone)]
 pub struct GuardedAttempt {
     pub index: usize,
+    /// Actual bounds-attempt position; absent while waiting in the lookahead.
+    pub position: Option<usize>,
+    /// The candidate was ranked as full or nearly full, even if later attempted.
+    pub deferred: bool,
+    pub component_atoms: Option<usize>,
     pub head: GroundAtom,
     pub premise: GroundAtom,
     pub source: RuleId,
@@ -172,12 +177,16 @@ impl<'a> AdmissionReporter<'a> {
         index: usize,
         rule: &GroundRule,
         premise: &GroundAtom,
+        deferred: bool,
     ) {
         if !self.enabled() {
             return;
         }
         self.state.borrow_mut().progress.guarded = Some(GuardedAttempt {
             index,
+            position: None,
+            deferred,
+            component_atoms: None,
             head: rule.head.atom.clone(),
             premise: premise.clone(),
             source: rule.source,
@@ -194,6 +203,30 @@ impl<'a> AdmissionReporter<'a> {
             state: "preprocessing",
         });
         self.rule(program, "guarded-preprocessing", rule.id, 0);
+    }
+    pub fn guarded_order(
+        &self,
+        program: &GroundProgram,
+        deferred: bool,
+        position: Option<usize>,
+        component_atoms: usize,
+    ) {
+        if !self.enabled() {
+            return;
+        }
+        if let Some(g) = &mut self.state.borrow_mut().progress.guarded {
+            g.deferred = deferred;
+            g.position = position;
+            g.component_atoms = Some(component_atoms);
+            g.state = if position.is_some() {
+                "iterating"
+            } else if deferred {
+                "deferred"
+            } else {
+                "ranked"
+            };
+        }
+        self.emit(program, true);
     }
     pub fn guarded_prepared(
         &self,

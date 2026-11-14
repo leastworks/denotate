@@ -148,6 +148,20 @@ real program that the current choice serves badly.
   and finding identities are unchanged. Display is bounded, with full steps on
   request; no source edit is authorized.
 
+- **Rank a bounded window of guarded candidates by their prepared cones.** An
+  informative guard can leave almost the entire component live. Running expensive
+  bounds on each such candidate first can consume the budget before a useful
+  reader is reached. Prepare a bounded window in the existing order, defer full
+  and nearly full cones, and try the smallest prepared cone. If every candidate
+  is deferred, still attempt the smallest; do not require a successful shrink to
+  make progress. Window size and the near-full threshold are provisional policies.
+  Retain only charged size metadata for waiting candidates, reconstruct the chosen
+  cone and guard, and yield optional ranking storage under pressure. Global work
+  and cancellation still apply to preparation. This changes scheduling, not
+  certificates or admission semantics. It does not truncate cones or batch more
+  replacements. Stable/supported-model oracles and fresh/cold/warm agreement guard
+  correctness; workload measurements assess the scheduling benefit.
+
 - **Use one-hop implied guards when the reader's guard is in another rule.**
   A reading rule's settled guard G can omit conditions already necessary for its
   unresolved body. For a negative premise `!q`, exact producers of q give a lower

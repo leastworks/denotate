@@ -4,7 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','guarded-hub','schema-layered'];
-export function source(family, n, {hubReader='split',hubRoutes=true}={}) {
+export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full'}={}) {
   if (!families.includes(family) || !Number.isSafeInteger(n) || n < 1) throw Error('invalid family/positive size');
   let s = 'relation bad();\n';
   let assumptions = '';
@@ -77,6 +77,7 @@ export function source(family, n, {hubReader='split',hubRoutes=true}={}) {
     add('held() :- inspected(); cleared() :- !held();');
   } else if (family==='guarded-hub') {
     if(!['split','merged'].includes(hubReader))throw Error('hub reader must be split or merged');
+    if(!Number.isSafeInteger(hubDecoys)||hubDecoys<0||!['full','near-full'].includes(hubDecoyShape))throw Error('invalid hub decoys');
     add('sort Class; const perishable, hazardous: Class; input declared(kind: Class);');
     add('sort Lane;');
     add(`const ${Array.from({length:n},(_,i)=>`l${i}`).join(', ')}: Lane; input route(lane: Lane);`);
@@ -94,6 +95,23 @@ export function source(family, n, {hubReader='split',hubRoutes=true}={}) {
     } else add('hazard_claim() :- declared(hazardous), !claim_fails();');
     add('inspected() :- declared(perishable); inspected() :- hazard_claim();');
     add('held() :- priority_call(), inspected(); cleared() :- docked(), !held();');
+    if(hubDecoys) {
+      // The class bit makes the two class tests complementary even without a
+      // selected assumption. Final meanings stay small without route exclusivity.
+      s=s.replace('input declared(kind: Class);', 'relation declared(kind: Class); input class_bit(); declared(perishable) :- class_bit(); declared(hazardous) :- !class_bit();');
+      s=s.replace('cleared() :- docked(), !held();', '').replace('priority_call(), inspected()', 'inspected()');
+      let decoys='';
+      for(let i=0;i<hubDecoys;i++) {
+        // Split readers infer docked, which leaves the wide tagged fan-in live.
+        decoys+=`relation decoy_held${i}(); relation decoy_unsat${i}(); decoy_held${i}() :- inspected(); decoy_unsat${i}() :- !docked(); decoy_unsat${i}() :- decoy_held${i}(); cleared() :- !decoy_unsat${i}();\n`;
+      }
+      if(hubDecoyShape==='near-full') {
+        decoys+='relation decoy_side(); decoy_side() :- !cleared();\n';
+        for(let i=0;i<hubDecoys;i++)decoys+=`decoy_held${i}() :- !docked(), decoy_side();\n`;
+      }
+      // Source order deliberately puts decoys before the useful shared reader.
+      s=decoys+s;
+    }
     add('notice hazard_condition: varies(hazard_claim);');
   } else if (family==='removal-heavy') {
     add('input flag(); relation a(); relation b(); a() :- !b(); b() :- !a();');
@@ -259,7 +277,7 @@ function readRun(dir, size, rep) {
 export function summarize(out) {
   const config = JSON.parse(fs.readFileSync(path.join(out, 'sweep.json')));
   const { family, sizes, repeat, threshold, binary } = config;
-  const report = { threshold, repeat, sizes, inputOrder: config.inputOrder ?? 'key', hubReader: config.hubReader ?? 'split', hubRoutes: config.hubRoutes ?? true, families: {} };
+  const report = { threshold, repeat, sizes, inputOrder: config.inputOrder ?? 'key', hubReader: config.hubReader ?? 'split', hubRoutes: config.hubRoutes ?? true, hubDecoys: config.hubDecoys ?? 0, hubDecoyShape: config.hubDecoyShape ?? 'full', families: {} };
   for (const name of family) {
     const runs = [];
     for (const size of sizes) for (let rep = 0; rep < repeat; rep++) {
@@ -275,20 +293,20 @@ export function summarize(out) {
   return report;
 }
 
-export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3,binary='target/profiling/examples/bench_schema',samply=false,limits=[],inputOrder='key',hubReader='split',hubRoutes=true}) {
+export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3,binary='target/profiling/examples/bench_schema',samply=false,limits=[],inputOrder='key',hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full'}) {
   if (!['split','merged'].includes(hubReader)) throw Error('hub reader must be split or merged');
   if (!['key','reverse-key','structural'].includes(inputOrder)) throw Error('invalid input order');
   fs.mkdirSync(path.dirname(out),{recursive:true});
   fs.mkdirSync(out,{recursive:false});
-  fs.writeFileSync(path.join(out, 'sweep.json'), JSON.stringify({family, sizes, repeat, threshold, inputOrder, hubReader, hubRoutes, binary: path.resolve(binary)}, null, 2));
-  const report={threshold,repeat,sizes,inputOrder,hubReader,hubRoutes,families:{}};
+  fs.writeFileSync(path.join(out, 'sweep.json'), JSON.stringify({family, sizes, repeat, threshold, inputOrder, hubReader, hubRoutes, hubDecoys, hubDecoyShape, binary: path.resolve(binary)}, null, 2));
+  const report={threshold,repeat,sizes,inputOrder,hubReader,hubRoutes,hubDecoys,hubDecoyShape,families:{}};
   for(const name of family) {
     const runs=[];
     for(const size of sizes) for(let rep=0;rep<repeat;rep++) {
       const dir=path.resolve(out,`${name}-${size}-${rep}`);
       let args=['--out',dir,'--input-order',inputOrder];
       if(name==='schema-layered') args.push('--topology','layered','--fields',String(size+2),'--reads',String(size),'--depth','2','--encoding','assumed');
-      else {const input=path.resolve(out,`${name}-${size}.den`);fs.writeFileSync(input,source(name,size,{hubReader,hubRoutes}));args.push('--source',input);}
+      else {const input=path.resolve(out,`${name}-${size}.den`);fs.writeFileSync(input,source(name,size,{hubReader,hubRoutes,hubDecoys,hubDecoyShape}));args.push('--source',input);}
       if(samply) args.push('--samply');
       if(limits.length) args.push('--',...limits);
       const proc=spawnSync(binary,args,{stdio:'pipe',encoding:'utf8'});
@@ -314,11 +332,13 @@ if(!process.execArgv.some(a=>a==='-e'||a==='--eval') && process.argv[1] && path.
       const key=args[i];if(key==='--'){opts.limits=args.slice(i+1);break;}
       if(key==='--hub-no-routes'){opts.hubRoutes=false;continue;}
       if(key==='--samply'){opts.samply=true;continue;}
-      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [--hub-reader split|merged] [--hub-no-routes] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
+      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [--hub-reader split|merged] [--hub-no-routes] [--hub-decoys N] [--hub-decoy-shape full|near-full] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
       const val=args[++i];
       if(key==='--family')opts.family=val.split(',');else if(key==='--sizes')opts.sizes=val.split(',').map(Number);
       else if(key==='--input-order')opts.inputOrder=val;
       else if(key==='--hub-reader')opts.hubReader=val;
+      else if(key==='--hub-decoys')opts.hubDecoys=Number(val);
+      else if(key==='--hub-decoy-shape')opts.hubDecoyShape=val;
       else if(key==='--repeat')opts.repeat=Number(val);else if(key==='--threshold')opts.threshold=Number(val);else if(key==='--out')opts.out=val;
       else throw Error(`unknown option ${key}`);
     }

@@ -382,7 +382,7 @@ obligation unique_classless: at_most_one(classless_claim, group_by: ());
 }
 
 #[test]
-fn implied_guard_positive_reader_owns_support_and_preserves_models() {
+fn positive_reader_preserves_models_and_session_results() {
     use test_support::rewrites::{compare_permitted, subsets, supported_models};
     let text=HUB.replace("relation hazard_claim();", "relation hazard_claim(); relation hc_read_ok(); hazard_claim() :- hc_read_ok();")
         .replace("relation hc_type_ok(); relation hc_read_ok(); relation hc_unsat();", "")
@@ -399,17 +399,8 @@ fn implied_guard_positive_reader_owns_support_and_preserves_models() {
     let prepared = prepared.admit(&ops).unwrap();
     let g = prepared.program();
     assert!(g.is_admitted());
-    let implied = g
-        .rewrite_proofs()
-        .filter_map(|p| p.guarded_settlement())
-        .find_map(|p| p.implied_guard.as_ref())
-        .unwrap();
-    assert!(
-        implied
-            .premises
-            .iter()
-            .any(|p| p.literal.polarity == Polarity::Positive && !p.producers.is_empty())
-    );
+    // Cone ranking may settle the smaller inner reader directly. Positive
+    // inferred certificates are exercised separately with an explicit target.
     let declared = p
         .corpus
         .relations()
@@ -497,5 +488,102 @@ fn implied_guard_owns_producers_outside_the_replaced_premise_cone() {
         let fresh = check(&p, None);
         assert_eq!(fresh, check(&p, Some(&mut warm)));
         assert_eq!(fresh, check(&p, Some(&mut warm)));
+    }
+}
+
+fn decoy_hub(n: usize, decoys: usize, shape: &str) -> String {
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/bench-den-zoo.mjs");
+    let output = std::process::Command::new("node")
+        .args(["--input-type=module", "-e", "import {pathToFileURL} from 'node:url'; const m=await import(pathToFileURL(process.argv[1])); process.stdout.write(m.source('guarded-hub',Number(process.argv[2]),{hubRoutes:false,hubDecoys:Number(process.argv[3]),hubDecoyShape:process.argv[4]}));"])
+        .arg(script).arg(n.to_string()).arg(decoys.to_string()).arg(shape).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout).unwrap()
+}
+
+#[test]
+fn cone_order_defers_full_and_near_full_decoys_and_agrees_fresh_cold_warm() {
+    use std::cell::RefCell;
+    for shape in ["full", "near-full"] {
+        let p = loaded(&decoy_hub(53, 12, shape), 0);
+        let l = Limits::default();
+        let ops = (&l).into();
+        let req = p.verification_requests(&l).unwrap().remove(0).1;
+        let RequestPreparation::Complete(raw) = req.prepare(&p.corpus, &p.keys, &ops).unwrap()
+        else {
+            panic!()
+        };
+        let events = RefCell::new(Vec::new());
+        let prepared = raw
+            .admit_with_progress(&ops, Some(&|e| events.borrow_mut().push(e.clone())))
+            .unwrap();
+        assert!(prepared.program().is_admitted());
+        let reader = p
+            .corpus
+            .relations()
+            .find(|r| r.name == "hazard_claim")
+            .unwrap()
+            .id;
+        assert!(
+            prepared
+                .program()
+                .rewrite_proofs()
+                .filter_map(|p| p.guarded_settlement())
+                .any(|p| p.proof.candidate.rule.head.atom.relation == reader)
+        );
+        let events = events.borrow();
+        let first = events
+            .iter()
+            .filter_map(|e| e.guarded.as_ref())
+            .find(|g| g.position.is_some())
+            .unwrap();
+        assert_eq!(
+            first.head.relation, reader,
+            "useful reader gets bounds before the decoys"
+        );
+        assert!(events.iter().filter_map(|e| e.guarded.as_ref()).any(|g| {
+            g.state == "deferred"
+                && g.position.is_none()
+                && if shape == "full" {
+                    g.live_atoms == g.component_atoms
+                } else {
+                    g.live_atoms.unwrap() + 1 == g.component_atoms.unwrap()
+                }
+        }));
+        let fresh = check(&p, None);
+        let mut session = Session::default();
+        assert_eq!(fresh, check(&p, Some(&mut session)));
+        assert_eq!(fresh, check(&p, Some(&mut session)));
+    }
+}
+
+#[test]
+fn decoy_hub_rewrites_preserve_stable_and_supported_models() {
+    use test_support::rewrites::{compare_permitted, subsets, supported_models};
+    for shape in ["full", "near-full"] {
+        let p = loaded(&decoy_hub(1, 1, shape), 0);
+        let l = Limits::default();
+        let ops = (&l).into();
+        let req = p.verification_requests(&l).unwrap().remove(0).1;
+        let RequestPreparation::Complete(raw) = req.prepare(&p.corpus, &p.keys, &ops).unwrap()
+        else {
+            panic!()
+        };
+        let prepared = raw.admit(&ops).unwrap();
+        let g = prepared.program();
+        assert!(g.is_admitted());
+        compare_permitted(&p.corpus, &p.domains, g, |_| true);
+        let before = g.original_rules().cloned().collect::<Vec<_>>();
+        let after = g.rules().cloned().collect::<Vec<_>>();
+        for world in subsets(&g.input_atoms().cloned().collect::<Vec<_>>()) {
+            assert_eq!(
+                supported_models(g, &before, &world),
+                supported_models(g, &after, &world)
+            );
+        }
     }
 }

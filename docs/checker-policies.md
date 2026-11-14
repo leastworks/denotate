@@ -119,8 +119,25 @@ conservative proof charges after the round ends. No whole old round is retained.
 The reading producer is relaxed before traversal.
 Preprocessing is lazy and charged, and has its own recoverable attempt. Candidates
 with an informative guard run before unrestricted ones, then by guard node count
-and immediate producer count; ties preserve the existing order. No full cones are
-computed for ordering.
+and immediate producer count; ties preserve the existing order. That order now
+feeds a bounded lookahead of 32 prepared candidates. Prefer cones with fewer live
+atoms, then fewer live producers, preserving the preceding order on ties. A cone
+with at least 90% of its current unresolved component's atoms live is deferred
+behind cones below that threshold. The denominator is all ground atoms in that
+component at the current snapshot, not atoms visited during cone traversal; a
+621/622 cone is therefore deferred. Live producer count breaks size ties only.
+
+Only size metadata waits in the window (charged conservatively as 16 condition
+slots per entry); cones and inferred guards are released and reconstructed for
+the chosen attempt. Vacant slots are refilled before choosing again. If every
+prepared candidate is deferred, attempt the smallest anyway. Unexamined candidates
+may have smaller cones: this is bounded lookahead, not a global sort. Each window
+admits at most 32 preparations, including locally failed preparations. Global
+work, deadlines and cancellation can still stop that work. On preparation storage
+pressure, release optional ranking metadata, return its candidates to their
+original queue, and retry without ranking for the remainder of the snapshot.
+The 32-entry window and 90% threshold are provisional; neither changes proofs,
+cones or the one-replacement-per-component rule.
 
 One-hop implied guards can strengthen G before the cone is prepared. A negative
 unresolved premise excludes the union of its exact producers' settled guards;
@@ -132,7 +149,9 @@ keeps the existing attempt with G.
 
 Cheap producer-summary hints promote otherwise unrestricted readers. Discovery
 runs only when reached, with at most one refined candidate waiting for its new
-priority; others retain their ordinary priority while it waits. It stops after
+priority; others retain their ordinary priority while it waits. A candidate
+selected from the lookahead reconstructs its guard independently; at most that
+candidate and one waiting discovery retain inferred guards. It stops after
 8,192 visited summary/body/expression units per candidate and uses the existing
 1,024-node/depth-64 expression caps. BDD operations retain the existing per-operation
 limits and global work charges. A most-recent signed producer union is shared
@@ -158,7 +177,10 @@ inherit another guard's failure. Replacing an entry releases it; successful proo
 retain their own certificates. No result cache crosses snapshots. Repeated signed
 atoms in one body need only one attempt. Progress distinguishes
 `guarded-preprocessing`, `guarded-bounds` and `guarded-settlement`, with per-candidate
-cone size, preprocessing/iteration elapsed time, reuse and outcome. Expression
+cone size, preprocessing/iteration elapsed time, reuse and outcome. Progress also
+records whether ranking deferred the candidate, its component atom count, and its
+actual bounds-attempt position (absent while it is waiting). Saved reports retain
+the deferral flag even if the candidate later runs. Expression
 `cutoffs` remain separate. A replacement still invalidates failed/negative attempts.
 Preparation also reports domain BDD size and existing versus added condition-node
 storage, including partial visited/live counts on failure. Added storage is the

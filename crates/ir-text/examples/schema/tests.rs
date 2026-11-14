@@ -305,6 +305,12 @@ fn partial_and_completed_reports_preserve_logs_and_distinguish_completion() {
         concat!(
             r#"{"type":"progress","detail":{"phase":"checking","admitted":false,"ground":{"ruleInstances":8},"fold":{"retainedEvidence":{"ruleInstances":3},"residual":{"ruleInstances":9}}}}"#,
             "\n",
+            r#"{"type":"progress","detail":{"verification":"v","admission":{"phase":"relevant","round":1,"guarded":{"index":1,"state":"deferred","deferred":true,"position":null,"componentAtoms":622,"liveAtoms":621}}}}"#,
+            "\n",
+            r#"{"type":"progress","detail":{"verification":"v","admission":{"phase":"relevant","round":1,"guarded":{"index":2,"state":"completed","deferred":false,"position":1,"componentAtoms":622,"liveAtoms":3}}}}"#,
+            "\n",
+            r#"{"type":"progress","detail":{"verification":"v","admission":{"phase":"relevant","round":1,"guarded":{"index":1,"state":"completed","deferred":true,"position":2,"componentAtoms":622,"liveAtoms":621}}}}"#,
+            "\n",
             "{\"type\":\"run-end\",\"exitCode\":2,\"error\":\"exhausted\"}\n"
         ),
     )
@@ -325,6 +331,13 @@ fn partial_and_completed_reports_preserve_logs_and_distinguish_completion() {
         9
     );
     assert_eq!(read()["outcomes"][0]["state"], "inconclusive");
+    let report = read();
+    let guarded = report["guardedAttempts"].as_array().unwrap();
+    assert_eq!(guarded.len(), 2);
+    assert_eq!(guarded[0]["attempt"]["deferred"], true);
+    assert_eq!(guarded[0]["attempt"]["position"], 2);
+    assert_eq!(guarded[0]["attempt"]["liveAtoms"], 621);
+    assert_eq!(guarded[1]["attempt"]["position"], 1);
     fs::remove_dir_all(dir).unwrap();
 }
 
