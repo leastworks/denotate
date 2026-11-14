@@ -167,9 +167,18 @@ impl RewriteProof {
         match &self.justification {
             RewriteJustification::Symbolic(p) => p.producers.iter().map(|p| &p.rule).collect(),
             RewriteJustification::Structural(p) => p.supporting_rules(),
-            RewriteJustification::GuardedSettlement(p) => {
-                p.bounds.cone.producers.iter().map(|p| &p.rule).collect()
-            }
+            RewriteJustification::GuardedSettlement(p) => p
+                .bounds
+                .cone
+                .producers
+                .iter()
+                .map(|p| &p.rule)
+                .chain(
+                    p.implied_guard
+                        .iter()
+                        .flat_map(|g| g.summaries().map(|s| &s.rule)),
+                )
+                .collect(),
             RewriteJustification::BoundRemoval(p) => p
                 .proof
                 .upper_bounds
@@ -187,9 +196,17 @@ impl RewriteProof {
         match &self.justification {
             RewriteJustification::Symbolic(p) => p.producers.iter().map(|p| &p.rule).collect(),
             RewriteJustification::Structural(p) => p.direct_rules(),
-            RewriteJustification::GuardedSettlement(p) => {
-                p.proof.producers.iter().map(|p| &p.rule).collect()
-            }
+            RewriteJustification::GuardedSettlement(p) => p
+                .proof
+                .producers
+                .iter()
+                .map(|p| &p.rule)
+                .chain(
+                    p.implied_guard
+                        .iter()
+                        .flat_map(|g| g.summaries().map(|s| &s.rule)),
+                )
+                .collect(),
             RewriteJustification::BoundRemoval(p) => {
                 p.proof.producers.iter().map(|p| &p.rule).collect()
             }
@@ -203,11 +220,14 @@ impl RewriteProof {
                     .chain(&p.producers)
                     .chain(p.upper_bounds.iter().flat_map(|b| b.producers.iter()))
             })
-            .chain(
-                self.guarded_settlement()
-                    .into_iter()
-                    .flat_map(|p| p.bounds.cone.producers.iter().map(|p| p.summary.as_ref())),
-            )
+            .chain(self.guarded_settlement().into_iter().flat_map(|p| {
+                p.bounds
+                    .cone
+                    .producers
+                    .iter()
+                    .map(|p| p.summary.as_ref())
+                    .chain(p.implied_guard.iter().flat_map(|g| g.summaries()))
+            }))
     }
     fn profile_conditions(&self) -> impl Iterator<Item = &Condition> {
         self.conditional()
@@ -230,7 +250,10 @@ impl RewriteProof {
             })
             .chain(self.bound_removal().map(|p| &p.body_upper))
             .chain(self.guarded_settlement().into_iter().flat_map(|p| {
-                std::iter::once(&p.bounds.cone.domain)
+                p.implied_guard
+                    .iter()
+                    .flat_map(|g| g.summaries().flat_map(|s| s.profile_conditions()))
+                    .chain(std::iter::once(&p.bounds.cone.domain))
                     .chain(p.bounds.conditions.values())
                     .chain(p.bounds.guarantees.values())
                     .chain(
@@ -253,7 +276,9 @@ impl RewriteProof {
         }) + self
             .bound_removal()
             .map_or(0, |p| p.body_upper.node_count())
-            + self.guarded_settlement().map_or(0, |p| p.bounds.nodes())
+            + self.guarded_settlement().map_or(0, |p| {
+                p.bounds.nodes() + p.implied_guard.as_ref().map_or(0, ImpliedGuardProof::nodes)
+            })
     }
 }
 

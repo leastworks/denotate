@@ -83,3 +83,6 @@ pub use notices::*;
 
 mod input_order;
 pub use input_order::{InputOrder, InputOrderReport};
+
+mod implied_guard;
+pub use implied_guard::{ImpliedGuardPremise, ImpliedGuardProof};

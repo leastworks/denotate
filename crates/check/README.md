@@ -128,6 +128,15 @@ support and the retained guard; full evidence shows rank-ordered settlement and
 relaxed bounds. See [the soundness argument](../../docs/decisions.md#meaning-and-checking)
 and [cutoffs](../../docs/checker-policies.md#guarded-settlement).
 
+Guarded settlement can infer a stronger guard from one hop of producer summaries:
+negative unresolved premises exclude exact producer guards; positive ones require
+some producer's settled guard. `ImpliedGuardProof` owns those source snapshots,
+including producers outside the replaced premise's cone. The guard remains in the
+attached executable expression and participates in key projection and local query
+dependencies. Discovery is lazy and bounded; a local failure uses the original
+guard and is reported as an `implied-guard` attempt, without making that fallback
+inconclusive. Finding identities and the earlier admission passes are unchanged.
+
 Structural rewrite proofs expose direct settling/unfolding support through
 `direct_rules` and accurate absence explanations through `settlement`. Internal
 rewrite keys use that direct view. `supporting_rules` explicitly expands the full

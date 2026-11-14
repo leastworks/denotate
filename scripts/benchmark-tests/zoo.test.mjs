@@ -44,6 +44,7 @@ test('each family reaches its semantic and structural path; two-size smoke has n
       if(name.startsWith('fan-in'))assert.ok(r.outcomes[0].emptiness.some(e=>e.outcome==='counterexample'));
       if(name==='guarded-ring'||name==='guarded-fan-in'||name==='guarded-worlds') {assert.equal(r.before.ground.largestComponentAtoms,name==='guarded-ring'?12:6);assert.equal(r.after.admitted,true);assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));assert.ok(r.attemptSummaries.some(a=>a.complete&&a.attempts.some(c=>c.kind==='guarded-bounds')));}
       if(name.startsWith('guarded-')) {assert.ok(r.guardedAttempts.some(g=>g.attempt.state==='completed'&&g.attempt.restricted&&g.attempt.coneAtoms>0));assert.ok(r.guardedAttempts.every(g=>Number.isFinite(g.attempt.preprocessingMs)&&Number.isFinite(g.attempt.iterationMs)));}
+      if(name==='guarded-hub') {assert.equal(r.after.admitted,true);assert.equal(r.exit,0);assert.equal(r.outcomes[0].findings.filter(f=>f.kind==='guarded-settlement').length,1);assert.equal(r.outcomes[0].notices[0].result.state,'varying');}
       if(name==='schema-layered')assert.equal(r.after.admitted,true);
     }
     assert.ok(r.families['guarded-ring'].attempts.some(a=>a.kind==='guarded-bounds'));
@@ -51,6 +52,12 @@ test('each family reaches its semantic and structural path; two-size smoke has n
     assert.equal(smoke.inputOrder,'structural');
     for(const f of Object.values(smoke.families))for(const r of f.runs) {assert.equal(r.inputOrder.requested,'structural');assert.equal(r.inputOrder.effective,'structural');assert.ok(Number.isFinite(r.phases.admission.bddResultNodes));assert.ok(Number.isFinite(r.phases.admission.peakAccountedConditionNodes));}
     assert.deepEqual(summarize(path.join(root,'smoke')),smoke);
+    for(const hubReader of ['split','merged'])for(const hubRoutes of [true,false]) {
+      const variant=run({out:path.join(root,`hub-${hubReader}-${hubRoutes}`),binary:'target/debug/examples/bench_schema',family:['guarded-hub'],sizes:[1],repeat:1,hubReader,hubRoutes});
+      assert.equal(variant.hubReader,hubReader);assert.equal(variant.hubRoutes,hubRoutes);
+      const checked=variant.families['guarded-hub'].runs[0];assert.equal(checked.exit,0);assert.equal(checked.after.admitted,true);assert.equal(checked.outcomes[0].notices[0].result.state,'varying');
+      assert.deepEqual(summarize(path.join(root,`hub-${hubReader}-${hubRoutes}`)),variant);
+    }
     const interrupted=path.join(root,'smoke','fan-in-input-2-0');
     const profile=fs.readFileSync(path.join(interrupted,'memory.jsonl'),'utf8').split('\n');
     const stop=profile.findIndex(l=>{try {const r=JSON.parse(l);return r.type==='profile'&&r.event==='start'&&r.stage==='checking';}catch{return false;}});
@@ -73,4 +80,14 @@ test('BDD work sums while accepted condition storage takes a peak',()=>{
   assert.equal(measured.peakAccountedConditionNodes,6);
   for(const r of records)delete r.peakAccountedConditionNodes;
   assert.equal(measurements(records,[]).admission.peakAccountedConditionNodes,null);
+});
+
+
+test('a recoverable admission skip does not discard a later completed result',()=>{
+  const records=[{type:'profile',span:1,stage:'admission',event:'start'},
+    {type:'progress',detail:{admission:{failure:'BDD tasks',skipped:'guaranteed-bounds'}}},
+    {type:'profile',span:1,stage:'admission',event:'end',elapsedMs:3,sampledPeak:{rssBytes:7,footprintBytes:null}},
+    {type:'profile',span:2,stage:'checking',event:'start'}];
+  assert.equal(measurements(records,[{state:'proved'}]).admission.complete,true);
+  assert.equal(measurements(records,[{state:'incomplete',admissionSkips:[{reason:{phase:'BDD operation',resource:'BDD tasks'}}]}]).admission.complete,false);
 });

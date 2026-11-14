@@ -122,6 +122,32 @@ with an informative guard run before unrestricted ones, then by guard node count
 and immediate producer count; ties preserve the existing order. No full cones are
 computed for ordering.
 
+One-hop implied guards can strengthen G before the cone is prepared. A negative
+unresolved premise excludes the union of its exact producers' settled guards;
+a positive one requires the union of all its producers' settled guards. Their
+conjunction I is retained with the executable replacement. Original summaries
+alone supply the inference; a reading producer contributes only G. The cone uses
+I ∧ W. If I equals G under W, or excludes every permitted world, this increment
+keeps the existing attempt with G.
+
+Cheap producer-summary hints promote otherwise unrestricted readers. Discovery
+runs only when reached, with at most one refined candidate waiting for its new
+priority; others retain their ordinary priority while it waits. It stops after
+8,192 visited summary/body/expression units per candidate and uses the existing
+1,024-node/depth-64 expression caps. BDD operations retain the existing per-operation
+limits and global work charges. A most-recent signed producer union is shared
+within the snapshot. Its metadata, temporary expressions, conditions and owned
+source snapshots charge condition-node slots conservatively; intermediate charges
+are released together after discovery. Cone preparation evicts this optional union
+as well as optional bounds before retrying under storage pressure.
+
+An inference cutoff or recoverable BDD/storage failure discards partial inference
+and returns to G and its ordinary priority. Progress records `implied-guard`
+attempts/skips/cutoffs. A failed inference does not itself make the fallback's
+region inconclusive; subsequent proof attempts determine that result. Global
+work, cancellation and deadlines propagate. Discovery is one hop, not a fixpoint,
+and does not replace the preceding unrestricted bounds/removal/discharge passes.
+
 One snapshot-local cache entry retains the latest complete bounds or failure key.
 If preparing the next cone hits storage pressure, discard the optional cache and
 retry preparation once under the same cap, retaining all work charges. A repeated
@@ -143,8 +169,9 @@ from the conservative condition-node allowance.
 
 Default warnings use the existing eight-note/sixteen-location caps, with at most
 32 expression nodes rendered per formula and explicit omission counts. Full
-`--verbose` evidence includes guard, settlement ranks and supporting component
-rules. Stable/supported-model oracles and fresh/cold/warm tests are correctness
+`--verbose` evidence includes guard, settlement ranks, supporting component
+rules and each implied guard's producer conditions. Inferred sources outside
+the replaced premise's cone remain owned proof dependencies. Stable/supported-model oracles and fresh/cold/warm tests are correctness
 gates; CLI benchmark timings and sampled memory remain measurements only.
 
 ## Re-scoring

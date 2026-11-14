@@ -150,7 +150,7 @@ Rewrite counts are cumulative committed counts, not proposed changes.
 `skippedAttempts` is the cumulative number of failed per-operation proof attempts,
 including later retries. A recoverable failure immediately emits `skipped` as
 `producer-coverage`, `producer-removal`, `upper-bounds`, `guaranteed-bounds`,
-`bound-removal`, `negation-discharge`, `guarded-preprocessing`, `guarded-bounds` or `guarded-settlement`,
+`bound-removal`, `negation-discharge`, `implied-guard`, `guarded-preprocessing`, `guarded-bounds` or `guarded-settlement`,
 `skipTarget: {head: "p(a)"}`, and the ordinary formatted `failure`. Admission
 continues. Subsequent updates clear `skipped`, `skipTarget` and that local failure;
 `reused` includes the retained attempt count. A failure with `skipped: null` stops
@@ -158,7 +158,7 @@ admission. A preflight constrained by remaining work reports resource `work`,
 not the per-operation `BDD tasks` limit; ties are treated as global work stops.
 
 Stages are `starting`, `structural`, `structural-committed`, `symbolic`, `summaries`, `producer-removals`, `candidates`,
-`upper-bounds`, `guaranteed-bounds`, `bound-removals`, `guarded-preprocessing`, `guarded-bounds`, `guarded-settlement`, `commit`, `committed`, `attempt-summary`, `complete`, `reused`, and
+`upper-bounds`, `guaranteed-bounds`, `bound-removals`, `implied-guard`, `guarded-preprocessing`, `guarded-bounds`, `guarded-settlement`, `commit`, `committed`, `attempt-summary`, `complete`, `reused`, and
 `inconsistent-assumptions`.
 
 `attempts` is an optional array of per-round aggregates, ordered by attempt kind.
@@ -242,6 +242,12 @@ related source rules are labeled `direct rewrite justification`. The same
 source-warning note/location caps apply, and formula text is bounded to 32 nodes,
 with an explicit omitted-node count. Full evidence shows rank-ordered marks and
 candidate-relaxed bounds. No synthetic source declaration or edit is produced.
+When a guard is inferred from producer summaries, notes name the retained implied
+guard and the source premise/producer set. Full detail expands the settled producer
+conditions. Supporting sources outside the replaced premise's cone are related
+locations too. The evidence kind, finding identity and omission fields are unchanged.
+An `implied-guard` attempt cutoff or local skip uses the original guard; it is
+progress information and does not itself create an inconclusive region.
 The summary inventory uses this same kind. It is advisory for `check-den` exit
 codes; existing `redundant` warnings keep their behavior. A source occurrence with
 both legacy and guarded proofs retains the legacy `redundant` kind.

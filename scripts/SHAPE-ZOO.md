@@ -40,6 +40,7 @@ before admission (fixed evidence included); the report records actual inventory.
 | guarded-ring | n linked guard-relative settlement units; grouped priority/readiness inputs | 8n+1 / 8n | one 6n-atom SCC; guard-live cones settle claims even with tight per-operation bounds |
 | guarded-fan-in | one guarded unit with n input-pair booked producers | 2n+8 / n+6 | one large bound hits a node limit before aggregate storage fills |
 | guarded-worlds | 2n independent exclusive input groups, n guarded producers | 6n+8 / 2n+6 | large W exercises temporary cone storage and retained proof ownership |
+| guarded-hub | n lane producers, one reader whose class guard sits in a sibling rule | 3n+13 / n+10 (split reader) | implied guard cuts the shared cycle at its reader |
 | schema-layered | n payload reads, n+2 fields; depth 2, width 2, assumed acceptance | linear at fixed tree shape; inherited tables have four leaves | shared layout-valid schema preset |
 
 Categorical changes are distinct families. Fixed facts and removed rules remain
@@ -69,7 +70,9 @@ progress, and observed exhaustion or unfinished spans invalidate the affected
 phase. Failure progress and status reasons identify the affected phase; without enough
 attribution, the latest substantive phase is excluded conservatively. A later
 checking exhaustion does not discard completed admission. Earlier completed
-phases remain usable. Unsupported regions and an unresolved emptiness target
+phases remain usable. A recoverable admission attempt skip alone does not discard
+the phase if a later proof completes it; final unfinished/status reasons still do.
+Unsupported regions and an unresolved emptiness target
 without a resource failure are valid workloads; the word “inconclusive” alone
 does not establish exhaustion. Medians/min/max retain completed/requested
 counts so a surviving sample is visible. Fits use medians, at least three distinct
@@ -164,3 +167,30 @@ distinct from the profiler's deduplicated BDD payload, RSS and physical footprin
 These are actual candidate observations, independent of the older
 counter-delta samples. `completed` here means bounds completed, not that settlement
 subsequently produced a rewrite.
+
+## Implied-guard reproduction
+
+`guarded-hub` has n producers of `tagged`, each requiring a distinct route, two
+input bits, `declared(perishable)` and the cyclic `cleared` relation. A shared
+reader combines `declared(hazardous)` with a negated check of `tagged`. The two
+declared classes are exclusive. By default, the reader's conjunction is lowered
+into separate statement rules, so its class guard is implicit in an exact
+producer of `hc_unsat`. One-hop inference retains that class guard and settles
+the shared reader, instead of settling one lane in each round.
+
+Use `--hub-reader split|merged` (default `split`) to compare that lowering with a
+single conjunctive rule. `--hub-no-routes` removes the at-most-one route assumption;
+the class assumption remains. Both settings are recorded in the sweep and report.
+The notice on `hazard_claim` varies in every variant; the tiny split case checks
+stable and supported models under independently enumerated permitted worlds.
+
+```sh
+just bench-den-zoo --family guarded-hub --sizes 53,106 --repeat 1 \
+  --out target/hub-split
+just bench-den-zoo --family guarded-hub --sizes 53,106 --repeat 1 \
+  --hub-reader merged --hub-no-routes --out target/hub-merged
+```
+
+Inspect both the reader replacement and the attempt table. Earlier unrestricted
+bound passes still run and can dominate at raised BDD limits. A small inferred
+guard does not promise cheap admission at every limit or size.

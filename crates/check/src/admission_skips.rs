@@ -15,6 +15,7 @@ pub enum AdmissionAttemptKind {
     UpperBounds,
     GuaranteedBounds,
     BoundRemoval,
+    ImpliedGuard,
     GuardedPreprocessing,
     GuardedBounds,
     GuardedSettlement,
@@ -28,6 +29,7 @@ impl AdmissionAttemptKind {
             Self::UpperBounds => "upper-bounds",
             Self::GuaranteedBounds => "guaranteed-bounds",
             Self::BoundRemoval => "bound-removal",
+            Self::ImpliedGuard => "implied-guard",
             Self::GuardedPreprocessing => "guarded-preprocessing",
             Self::GuardedBounds => "guarded-bounds",
             Self::GuardedSettlement => "guarded-settlement",
@@ -52,6 +54,7 @@ pub(crate) enum Attempt {
     UpperBounds(GroundAtom),
     GuaranteedBounds(GroundAtom),
     BoundRemoval(GroundRuleId),
+    ImpliedGuard(GroundRuleId),
     GuardedCone(GroundRuleId, OccurrenceId),
     GuardedBounds(GroundRuleId, OccurrenceId),
     GuardedSettlement(GroundRuleId, OccurrenceId),
@@ -65,6 +68,7 @@ impl Attempt {
             Self::UpperBounds(_) => AdmissionAttemptKind::UpperBounds,
             Self::GuaranteedBounds(_) => AdmissionAttemptKind::GuaranteedBounds,
             Self::BoundRemoval(_) => AdmissionAttemptKind::BoundRemoval,
+            Self::ImpliedGuard(..) => AdmissionAttemptKind::ImpliedGuard,
             Self::GuardedCone(..) => AdmissionAttemptKind::GuardedPreprocessing,
             Self::GuardedBounds(..) => AdmissionAttemptKind::GuardedBounds,
             Self::GuardedSettlement(..) => AdmissionAttemptKind::GuardedSettlement,
@@ -85,6 +89,7 @@ impl Attempt {
                 | Self::GuaranteedBounds(_)
                 | Self::GuardedBounds(..)
                 | Self::GuardedCone(..)
+                | Self::ImpliedGuard(..)
         ) && matches!(
             error,
             CheckError::LimitExceeded {
@@ -101,6 +106,7 @@ impl Attempt {
             Self::UpperBounds(_) => (AdmissionAttemptKind::UpperBounds, None, None),
             Self::GuaranteedBounds(_) => (AdmissionAttemptKind::GuaranteedBounds, None, None),
             Self::BoundRemoval(rule) => (AdmissionAttemptKind::BoundRemoval, Some(*rule), None),
+            Self::ImpliedGuard(rule) => (AdmissionAttemptKind::ImpliedGuard, Some(*rule), None),
             Self::GuardedCone(rule, occurrence) => (
                 AdmissionAttemptKind::GuardedPreprocessing,
                 Some(*rule),
@@ -305,6 +311,7 @@ impl Attempts {
                 Attempt::UpperBounds(_)
                     | Attempt::GuaranteedBounds(_)
                     | Attempt::BoundRemoval(_)
+                    | Attempt::ImpliedGuard(..)
                     | Attempt::GuardedCone(..)
                     | Attempt::GuardedBounds(..)
                     | Attempt::GuardedSettlement(..)
@@ -465,6 +472,7 @@ impl Attempts {
                 Attempt::UpperBounds(_)
                 | Attempt::GuaranteedBounds(_)
                 | Attempt::BoundRemoval(_)
+                | Attempt::ImpliedGuard(..)
                 | Attempt::GuardedCone(..)
                 | Attempt::GuardedBounds(..)
                 | Attempt::GuardedSettlement(..)
@@ -496,6 +504,11 @@ impl Attempts {
     pub fn records(self) -> BTreeMap<GroundAtom, Vec<AdmissionSkip>> {
         let mut records = BTreeMap::<_, Vec<_>>::new();
         for skip in self.skipped.into_values() {
+            // Optional inference falls back to the original settled guard. Its
+            // failure is progress evidence, not an unfinished admission proof.
+            if skip.kind == AdmissionAttemptKind::ImpliedGuard {
+                continue;
+            }
             records.entry(skip.head.clone()).or_default().push(skip);
         }
         records

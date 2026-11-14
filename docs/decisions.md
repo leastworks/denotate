@@ -148,6 +148,56 @@ real program that the current choice serves badly.
   and finding identities are unchanged. Display is bounded, with full steps on
   request; no source edit is authorized.
 
+- **Use one-hop implied guards when the reader's guard is in another rule.**
+  A reading rule's settled guard G can omit conditions already necessary for its
+  unresolved body. For a negative premise `!q`, exact producers of q give a lower
+  guarantee L, so `!L` is necessary. For a positive q, the union of *all* producer
+  settled guards gives a necessary upper condition. Conjoin these conditions with
+  G to obtain I. This is one hop over immutable producer summaries, not recursive
+  inference. A reading producer in the union contributes only its original G;
+  its loop premises cannot justify its own guard, and it supplies no exact lower
+  guarantee.
+
+  Keep I in the executable replacement, not just in the proof's domain. For
+  example, `claim() :- !unsatisfied()` can imply a class test through an exact
+  producer `unsatisfied() :- !class_ok()`. Replacing its premise with `!docked()`
+  alone would invent a claim when the class is absent. The executable expression
+  must include `class_ok() and !docked()`.
+  When constructing guard and replacement expressions, known constant conditions
+  remain constants. Complementing a producer with `!never()` must not manufacture
+  a positive dependency on an impossible atom omitted by sparse grounding. The
+  original producer and its premises remain in the proof's source evidence.
+
+  Every original supported model satisfies body ⇒ I: a true positive premise has
+  a supporting producer, and a false negative premise's atom excludes every exact
+  producer. The same implication holds after adding I, since all other producers
+  are unchanged and the reading producer still requires G. Thus adding I neither
+  loses nor creates supported models. Its leaves are settled independently of the
+  unresolved component. For each fixed lower interpretation, I is either true
+  (the rule is unchanged) or false (the original body is false in every candidate
+  model). In the latter case its reduct cannot fire in any subset of that model,
+  so its removal cannot alter reduct minimality. Stable models are preserved too.
+  Guarded settlement then uses I under the existing candidate-relaxed bounds and
+  rank-ordered replacement argument. The original G still relaxes the reading
+  producer; inside I the two relaxations agree.
+
+  Certificates own each inference's producer snapshots, including sources outside
+  the replaced premise's cone. They participate in structural keys, original
+  dependency closure, local reconstruction and warning evidence. The finding's
+  source-rule/occurrence identity is unchanged. Direct notes name I and its source
+  premises; full notes expand producer conditions.
+
+  Cheap summary hints promote potentially informative readers before discovery.
+  Only the next candidate is inferred, with at most one refined candidate waiting
+  in the priority queue; other waiting candidates keep their ordinary priorities.
+  A single most-recent signed producer union is reused within the snapshot.
+  Discovery and expression cutoffs, or recoverable BDD/storage failures, discard
+  incomplete inference and use G. Optional failures are reported in progress but
+  do not turn a completed fallback into an inconclusive region. Global work,
+  cancellation and deadlines still stop the run. All retained metadata and
+  conditions are charged; temporary accounting is conservative. See the
+  [provisional cutoffs](checker-policies.md#guarded-settlement).
+
 - **Strengthen cycle bounds with independent exact guarantees.** A cyclic
   producer can require a condition implied by another producer only after
   following several positive and negative dependencies. After cheap removals,

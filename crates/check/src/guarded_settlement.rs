@@ -35,13 +35,14 @@ pub struct GuardedSettlementProof {
     pub replacement: Arc<SettledExpression<GroundAtom>>,
     /// Earlier entries justify later ones. Upper-bound seeds need no marks.
     pub steps: Vec<GuardedSettlementStep>,
+    pub implied_guard: Option<ImpliedGuardProof>,
 }
 
-type Expr = Arc<SettledExpression<GroundAtom>>;
-fn constant(v: bool) -> Expr {
+pub(crate) type Expr = Arc<SettledExpression<GroundAtom>>;
+pub(crate) fn constant(v: bool) -> Expr {
     Arc::new(SettledExpression::Constant(v))
 }
-fn signed(e: Expr, negative: bool) -> Expr {
+pub(crate) fn signed(e: Expr, negative: bool) -> Expr {
     if !negative {
         return e;
     }
@@ -51,7 +52,7 @@ fn signed(e: Expr, negative: bool) -> Expr {
         _ => Arc::new(SettledExpression::Not(e)),
     }
 }
-fn join(mut expressions: Vec<Expr>, all: bool) -> Expr {
+pub(crate) fn join(mut expressions: Vec<Expr>, all: bool) -> Expr {
     expressions.retain(|e| !matches!(e.as_ref(), SettledExpression::Constant(v) if *v == all));
     if expressions
         .iter()
@@ -71,7 +72,7 @@ fn join(mut expressions: Vec<Expr>, all: bool) -> Expr {
         SettledExpression::Any(expressions)
     })
 }
-fn bounded(e: &Expr, budget: &mut Budget<'_>) -> Result<bool> {
+pub(crate) fn bounded(e: &Expr, budget: &mut Budget<'_>) -> Result<bool> {
     let mut pending = vec![(e.as_ref(), 1)];
     let mut nodes = 0;
     while let Some((node, depth)) = pending.pop() {
@@ -108,8 +109,10 @@ impl GroundProgram {
         // Cheap structural indexing/ordering only. No candidate BDD or full cone
         // is computed before the first attempt.
         let mut producers = BTreeMap::<_, Vec<_>>::new();
+        let mut hints = BTreeMap::<GroundAtom, crate::implied_guard::Hint>::new();
         for p in summaries.values() {
             budget.tick("guarded producer index")?;
+            hints.entry(p.rule.head.atom.clone()).or_default().add(p);
             producers
                 .entry(&p.rule.head.atom)
                 .or_default()
@@ -125,6 +128,7 @@ impl GroundProgram {
             if component.cycle.is_none() {
                 continue;
             }
+            let hint = crate::implied_guard::hint(candidate, &hints, budget)?;
             let mut signed_atoms = BTreeSet::new();
             for literal in &candidate.rule.body {
                 budget.tick("guarded settlement candidates")?;
@@ -141,8 +145,8 @@ impl GroundProgram {
                 }
                 // An unrestricted guard cannot prune producers; try informative guards first.
                 let cost = (
-                    candidate.condition.is_true(),
-                    candidate.condition.node_count(),
+                    candidate.condition.is_true() && hint.is_none(),
+                    hint.unwrap_or(candidate.condition.node_count()),
                     producers.get(&literal.term.atom).map_or(0, Vec::len),
                 );
                 candidates.push((cost, candidate, literal, component));
@@ -154,11 +158,41 @@ impl GroundProgram {
                 .saturating_mul(candidates.len().max(1).ilog2() as usize + 1),
             "guarded candidate order",
         )?;
-        candidates.sort_by_key(|(cost, _, _, _)| *cost); // stable ties preserve source/occurrence order
+        // The queue sorts priorities; keep the original source/occurrence index
+        // for ties even when discovery later demotes an unhelpful hint.
         // One-entry snapshot-local cache: retain only the most recent complete
         // computation (or failure key), so optional reuse cannot accumulate BDDs.
         let mut cache: Option<(Arc<BorrowedCone<'_>>, Option<Arc<BorrowedBounds<'_>>>)> = None;
-        for (index, (_, candidate, literal, component)) in candidates.into_iter().enumerate() {
+        let mut queue = candidates
+            .into_iter()
+            .enumerate()
+            .map(|(index, (cost, candidate, literal, component))| {
+                (
+                    (cost, index),
+                    (
+                        candidate,
+                        literal,
+                        component,
+                        true,
+                        None::<crate::implied_guard::Inferred>,
+                    ),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut union_cache = None;
+        let mut pending_inference = false;
+        let mut release_inference = 0;
+        while let Some(((cost, index), (candidate, literal, component, discover, inferred))) =
+            queue.pop_first()
+        {
+            *retained -= release_inference;
+            release_inference = inferred
+                .as_ref()
+                .map_or(0, crate::implied_guard::Inferred::nodes);
+            if inferred.is_some() {
+                pending_inference = false;
+            }
+            budget.tick("guarded candidate queue")?;
             if done.contains(&component.id)
                 || attempts.reuse_negative(
                     &Attempt::GuardedSettlement(candidate.rule.id, literal.term.occurrence),
@@ -167,6 +201,58 @@ impl GroundProgram {
                 )?
             {
                 continue;
+            }
+            if discover {
+                let mut inferred = None;
+                // At most one refined candidate waits in the queue. This prevents
+                // global inference before the first proof. Others retain their
+                // ordinary priority while that candidate awaits its turn.
+                if !pending_inference {
+                    progress.rule(self, "implied-guard", candidate.rule.id, index + 1);
+                    if let Some(result) = attempts.run(
+                        Attempt::ImpliedGuard(candidate.rule.id),
+                        &candidate.rule.head.atom,
+                        self,
+                        retained,
+                        budget,
+                        progress,
+                        |retained, budget| {
+                            crate::implied_guard::discover(
+                                candidate,
+                                summaries,
+                                &producers,
+                                union_cache.as_ref(),
+                                ctx,
+                                retained,
+                                budget,
+                            )
+                        },
+                    )? {
+                        if result.cutoff {
+                            progress.cutoff(AdmissionAttemptKind::ImpliedGuard);
+                        }
+                        if let Some(next) = result.union {
+                            if let Some(old) = union_cache.replace(next) {
+                                *retained -= old.nodes();
+                            }
+                        }
+                        inferred = result.inferred;
+                    }
+                }
+                let guard = inferred
+                    .as_ref()
+                    .map_or(&candidate.condition, |i| &i.condition);
+                let actual = (guard.is_true(), guard.node_count(), cost.2);
+                pending_inference |= inferred.is_some();
+                queue.insert(
+                    (actual, index),
+                    (candidate, literal, component, false, inferred),
+                );
+                continue;
+            }
+            let mut effective = candidate.clone();
+            if let Some(i) = &inferred {
+                effective.condition = i.condition.clone();
             }
             progress.guarded_start(self, index + 1, &candidate.rule, &literal.term.atom);
             let mut preprocessing = None;
@@ -186,7 +272,7 @@ impl GroundProgram {
                         crate::guarded_bounds::prepare(
                             self,
                             component,
-                            candidate,
+                            &effective,
                             &literal.term.atom,
                             summaries,
                             &producers,
@@ -205,12 +291,12 @@ impl GroundProgram {
                             ..
                         })
                     ) {
-                        if let Some(old) = cache.take() {
-                            released_cache = old
-                                .1
+                        released_cache = cache.take().map_or(0, |old| {
+                            old.1
                                 .as_ref()
-                                .map_or_else(|| old.0.temporary_nodes(), |b| b.temporary_nodes());
-                            drop(old);
+                                .map_or_else(|| old.0.temporary_nodes(), |b| b.temporary_nodes())
+                        }) + union_cache.take().map_or(0, |old| old.nodes());
+                        if released_cache > 0 {
                             // The partial cone has dropped. Optional reuse must
                             // yield storage to the next attempt. Retry once; keep
                             // all work charges and enforce the same storage cap.
@@ -314,7 +400,14 @@ impl GroundProgram {
                     Option::is_none,
                     |retained, budget| {
                         self.settle_guarded(
-                            candidate, literal, meaning, bounds, retained, budget, progress,
+                            candidate,
+                            literal,
+                            meaning,
+                            bounds,
+                            inferred.as_ref(),
+                            retained,
+                            budget,
+                            progress,
                         )
                     },
                 )?
@@ -323,6 +416,10 @@ impl GroundProgram {
                 done.insert(component.id);
                 proofs.push(proof);
             }
+        }
+        *retained -= release_inference;
+        if let Some(union) = union_cache {
+            *retained -= union.nodes();
         }
         if let Some((cone, bounds)) = cache {
             *retained -= bounds
@@ -338,13 +435,14 @@ impl GroundProgram {
         literal: &GroundLiteral,
         meaning: &SymbolicMeaning<'_>,
         bounds: &Arc<BorrowedBounds<'_>>,
+        implied: Option<&crate::implied_guard::Inferred>,
         retained: &mut usize,
         budget: &mut Budget<'_>,
         progress: &crate::admission_progress::AdmissionReporter<'_>,
     ) -> Result<Option<GuardedSettlementProof>> {
         let baseline = *retained;
         let ctx = meaning.context();
-        let guard = &candidate.condition;
+        let guard = implied.map_or(&candidate.condition, |i| &i.condition);
         if ctx.restrict(guard, budget)?.is_false() {
             return Ok(None);
         }
@@ -428,7 +526,17 @@ impl GroundProgram {
                         let negative = premise.polarity == Polarity::Negative;
                         let pair = match meaning.fact(&premise.term.atom)? {
                             SymbolicFact::Settled(v) => Some((
-                                Arc::new(SettledExpression::Atom(premise.term.atom.clone())),
+                                // A surrounding negation can flip this leaf's
+                                // polarity. Preserve static truth directly so an
+                                // impossible atom never becomes a positive edge
+                                // in the sparse executable dependency graph.
+                                if v.is_true() {
+                                    constant(true)
+                                } else if v.is_false() {
+                                    constant(false)
+                                } else {
+                                    Arc::new(SettledExpression::Atom(premise.term.atom.clone()))
+                                },
                                 v,
                             )),
                             SymbolicFact::Inconclusive(c) => return Err(c.into()),
@@ -522,6 +630,10 @@ impl GroundProgram {
             Arc::clone(expression),
             literal.polarity == Polarity::Negative,
         );
+        let expression = match implied {
+            Some(i) => join(vec![Arc::clone(&i.proof.expression), expression], true),
+            None => expression,
+        };
         if !bounded(&expression, budget)? {
             cutoff(progress);
             *retained = baseline;
@@ -555,12 +667,17 @@ impl GroundProgram {
             occurrence: literal.term.occurrence,
             replacement: expression,
             steps,
+            implied_guard: implied.map(|i| i.proof.clone()),
         };
         // Retained certificate accounting is conservative, as for other rewrites.
         *retained = crate::symbolic::retain(
             *retained,
             0,
-            proof.bounds.nodes()
+            proof
+                .implied_guard
+                .as_ref()
+                .map_or(0, ImpliedGuardProof::nodes)
+                + proof.bounds.nodes()
                 + candidate.nodes()
                 + proof.proof.coverage.node_count()
                 + proof

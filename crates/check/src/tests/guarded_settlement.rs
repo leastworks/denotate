@@ -10,6 +10,9 @@ fn fixture(depth: usize) -> (Corpus, RelationId) {
     fixture_width(depth, 1)
 }
 fn fixture_width(depth: usize, width: usize) -> (Corpus, RelationId) {
+    fixture_guard(depth, width, false)
+}
+fn fixture_guard(depth: usize, width: usize, split: bool) -> (Corpus, RelationId) {
     fn add(c: &mut Corpus, head: RelationId, body: &[(RelationId, bool)], width: usize) {
         let repeated = body
             .iter()
@@ -37,7 +40,14 @@ fn fixture_width(depth: usize, width: usize) -> (Corpus, RelationId) {
     }
     add(&mut c, booked, &[(kind, false), (next, false)], width);
     add(&mut c, fails, &[(ready, false), (booked, true)], width);
-    add(&mut c, claim, &[(kind, true), (fails, true)], width);
+    if split {
+        let unsat = rel(&mut c, "unsat", false);
+        add(&mut c, unsat, &[(kind, false)], width);
+        add(&mut c, unsat, &[(fails, false)], width);
+        add(&mut c, claim, &[(unsat, true)], width);
+    } else {
+        add(&mut c, claim, &[(kind, true), (fails, true)], width);
+    }
     add(&mut c, inspected, &[(kind, false)], width);
     add(&mut c, inspected, &[(claim, false)], width);
     add(
@@ -152,8 +162,9 @@ fn guarded_settlement_randomized_and_constrained_runs_preserve_models() {
         sound(&c, &p);
     }
     let mut replacements = 0;
+    let mut implied = 0;
     for n in 0..24 {
-        let (mut c, _) = fixture(0);
+        let (mut c, _) = fixture_guard(0, 1, n % 2 == 0);
         let all: Vec<_> = c.relations().map(|r| r.id).collect();
         let derived: Vec<_> = c
             .relations()
@@ -174,6 +185,11 @@ fn guarded_settlement_randomized_and_constrained_runs_preserve_models() {
             .unwrap()
             .admit(&Limits::default())
             .unwrap();
+        implied += p
+            .rewrite_proofs()
+            .filter_map(|p| p.guarded_settlement())
+            .filter(|p| p.implied_guard.is_some())
+            .count();
         replacements += p
             .rewrite_proofs()
             .filter(|p| p.guarded_settlement().is_some())
@@ -181,6 +197,7 @@ fn guarded_settlement_randomized_and_constrained_runs_preserve_models() {
         sound(&c, &p);
     }
     assert!(replacements > 0);
+    assert!(implied > 0);
     let (c, _) = fixture(0);
     let raw = GroundProgram::prepare(&c, &Domains::new(), &Limits::default()).unwrap();
     for tasks in [0, 1, 2, 4, 8, 16, 64] {
@@ -314,4 +331,49 @@ fn guarded_expression_is_respected_by_observation_certification() {
         CertificationOutcome::NotCertified
     ));
     sound(&c, &p);
+}
+
+#[test]
+fn implied_guard_cutoff_does_not_starve_a_later_small_component() {
+    let (mut c, _) = fixture_width(0, 1025);
+    let kind = rel(&mut c, "small_kind", true);
+    let ready = rel(&mut c, "small_ready", true);
+    let priority = rel(&mut c, "small_priority", true);
+    let booked = rel(&mut c, "small_booked", false);
+    let fails = rel(&mut c, "small_fails", false);
+    let claim = rel(&mut c, "small_claim", false);
+    let inspected = rel(&mut c, "small_inspected", false);
+    let held = rel(&mut c, "small_held", false);
+    let cleared = rel(&mut c, "small_cleared", false);
+    rule(&mut c, booked, &[(kind, false), (cleared, false)]);
+    rule(&mut c, fails, &[(ready, false), (booked, true)]);
+    rule(&mut c, claim, &[(kind, true), (fails, true)]);
+    rule(&mut c, inspected, &[(kind, false)]);
+    rule(&mut c, inspected, &[(claim, false)]);
+    rule(&mut c, held, &[(priority, false), (inspected, false)]);
+    rule(&mut c, cleared, &[(ready, false), (held, true)]);
+    let l = Limits::default();
+    let events = RefCell::new(Vec::new());
+    let p = GroundProgram::prepare_cartesian(&c, &Domains::new(), &l)
+        .unwrap()
+        .admit_observed(
+            &mut Budget::new(&l),
+            Some(&|e| events.borrow_mut().push(e.clone())),
+        )
+        .unwrap();
+    assert!(p.admission_limit().is_none(), "{:?}", p.admission_limit());
+    assert!(events.borrow().iter().any(|e| {
+        e.attempts
+            .get(&AdmissionAttemptKind::ImpliedGuard)
+            .is_some_and(|a| a.cutoffs > 0)
+    }));
+    assert!(
+        p.rewrite_proofs()
+            .filter_map(|p| p.guarded_settlement())
+            .any(|p| p.proof.candidate.rule.head.atom == atom(claim))
+    );
+    assert_eq!(
+        p.evaluate([], &l).unwrap().fact(&atom(claim)).unwrap(),
+        FactState::Settled(true)
+    );
 }

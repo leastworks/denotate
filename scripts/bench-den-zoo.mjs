@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','schema-layered'];
-export function source(family, n) {
+export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','guarded-hub','schema-layered'];
+export function source(family, n, {hubReader='split',hubRoutes=true}={}) {
   if (!families.includes(family) || !Number.isSafeInteger(n) || n < 1) throw Error('invalid family/positive size');
   let s = 'relation bad();\n';
   let assumptions = '';
@@ -75,6 +75,26 @@ export function source(family, n) {
     add('claim() :- !kind(), !fails();');
     add('inspected() :- kind(); inspected() :- claim();');
     add('held() :- inspected(); cleared() :- !held();');
+  } else if (family==='guarded-hub') {
+    if(!['split','merged'].includes(hubReader))throw Error('hub reader must be split or merged');
+    add('sort Class; const perishable, hazardous: Class; input declared(kind: Class);');
+    add('sort Lane;');
+    add(`const ${Array.from({length:n},(_,i)=>`l${i}`).join(', ')}: Lane; input route(lane: Lane);`);
+    add('assumption one_class: at_most_one(declared, group_by: ());');
+    if(hubRoutes)add('assumption one_route: at_most_one(route, group_by: ());');
+    assumptions=hubRoutes?'one_class, one_route':'one_class';
+    add('input docked(); input priority_call();');
+    for(const name of ['tagged','claim_fails','hazard_claim','inspected','held','cleared'])add(`relation ${name}();`);
+    for(let i=0;i<n;i++)add(`input fa${i}(); input fb${i}(); tagged() :- route(l${i}), fa${i}(), !fb${i}(), declared(perishable), cleared();`);
+    add('claim_fails() :- docked(), !tagged();');
+    if(hubReader==='split') {
+      add('relation hc_type_ok(); relation hc_read_ok(); relation hc_unsat();');
+      add('hc_type_ok() :- declared(hazardous); hc_read_ok() :- !claim_fails();');
+      add('hc_unsat() :- !hc_type_ok(); hc_unsat() :- !hc_read_ok(); hazard_claim() :- !hc_unsat();');
+    } else add('hazard_claim() :- declared(hazardous), !claim_fails();');
+    add('inspected() :- declared(perishable); inspected() :- hazard_claim();');
+    add('held() :- priority_call(), inspected(); cleared() :- docked(), !held();');
+    add('notice hazard_condition: varies(hazard_claim);');
   } else if (family==='removal-heavy') {
     add('input flag(); relation a(); relation b(); a() :- !b(); b() :- !a();');
     for(let i=0;i<n;i++) add(`relation output${i}(); output${i}() :- flag(); output${i}() :- flag(), a(); bad() :- output${i}();`);
@@ -82,7 +102,7 @@ export function source(family, n) {
     add('relation seed(); seed(); relation a(); relation b(); a() :- !b(); b() :- !a();');
     for(let i=0;i<n;i++) add(`relation support${i}(); support${i}() :- ${i?`support${i-1}`:'seed'}(); relation result${i}(); result${i}() :- support${i}(); result${i}() :- a();`);
   } else throw Error('schema-layered uses the schema generator');
-  return s+`obligation no_bad: empty(bad); verification checks { assumptions: [${assumptions}]; obligations: [no_bad]; }\n`;
+  return s+`obligation no_bad: empty(bad); verification checks { assumptions: [${assumptions}]; obligations: [no_bad]; ${family==='guarded-hub'?'notices: [hazard_condition];':''} }\n`;
 }
 export function fit(points, threshold = 1.3) {
   const usable = points.filter(([x, y]) => Number.isFinite(x) && x > 0 && Number.isFinite(y) && y > 0);
@@ -125,7 +145,9 @@ export function measurements(records, outcomes) {
     }
     if(r.type==='progress') {
       const d=r.detail;
-      if(d?.admission?.failure) failed.add('admission');
+      // A recoverable attempt skip can precede successful admission. Final
+      // unresolved reasons below still mark genuinely incomplete admission.
+      if(d?.admission?.failure && !d.admission.skipped) failed.add('admission');
       if(d?.checking?.failure) failed.add('checking');
     }
     if(r.type==='run-end' && r.error && current) failed.add(current);
@@ -237,7 +259,7 @@ function readRun(dir, size, rep) {
 export function summarize(out) {
   const config = JSON.parse(fs.readFileSync(path.join(out, 'sweep.json')));
   const { family, sizes, repeat, threshold, binary } = config;
-  const report = { threshold, repeat, sizes, inputOrder: config.inputOrder ?? 'key', families: {} };
+  const report = { threshold, repeat, sizes, inputOrder: config.inputOrder ?? 'key', hubReader: config.hubReader ?? 'split', hubRoutes: config.hubRoutes ?? true, families: {} };
   for (const name of family) {
     const runs = [];
     for (const size of sizes) for (let rep = 0; rep < repeat; rep++) {
@@ -253,19 +275,20 @@ export function summarize(out) {
   return report;
 }
 
-export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3,binary='target/profiling/examples/bench_schema',samply=false,limits=[],inputOrder='key'}) {
+export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3,binary='target/profiling/examples/bench_schema',samply=false,limits=[],inputOrder='key',hubReader='split',hubRoutes=true}) {
+  if (!['split','merged'].includes(hubReader)) throw Error('hub reader must be split or merged');
   if (!['key','reverse-key','structural'].includes(inputOrder)) throw Error('invalid input order');
   fs.mkdirSync(path.dirname(out),{recursive:true});
   fs.mkdirSync(out,{recursive:false});
-  fs.writeFileSync(path.join(out, 'sweep.json'), JSON.stringify({family, sizes, repeat, threshold, inputOrder, binary: path.resolve(binary)}, null, 2));
-  const report={threshold,repeat,sizes,inputOrder,families:{}};
+  fs.writeFileSync(path.join(out, 'sweep.json'), JSON.stringify({family, sizes, repeat, threshold, inputOrder, hubReader, hubRoutes, binary: path.resolve(binary)}, null, 2));
+  const report={threshold,repeat,sizes,inputOrder,hubReader,hubRoutes,families:{}};
   for(const name of family) {
     const runs=[];
     for(const size of sizes) for(let rep=0;rep<repeat;rep++) {
       const dir=path.resolve(out,`${name}-${size}-${rep}`);
       let args=['--out',dir,'--input-order',inputOrder];
       if(name==='schema-layered') args.push('--topology','layered','--fields',String(size+2),'--reads',String(size),'--depth','2','--encoding','assumed');
-      else {const input=path.resolve(out,`${name}-${size}.den`);fs.writeFileSync(input,source(name,size));args.push('--source',input);}
+      else {const input=path.resolve(out,`${name}-${size}.den`);fs.writeFileSync(input,source(name,size,{hubReader,hubRoutes}));args.push('--source',input);}
       if(samply) args.push('--samply');
       if(limits.length) args.push('--',...limits);
       const proc=spawnSync(binary,args,{stdio:'pipe',encoding:'utf8'});
@@ -289,11 +312,13 @@ if(!process.execArgv.some(a=>a==='-e'||a==='--eval') && process.argv[1] && path.
     const opts={out:`target/bench-den-zoo-${Date.now()}`}; const args=process.argv.slice(2);
     for(let i=0;i<args.length;i++) {
       const key=args[i];if(key==='--'){opts.limits=args.slice(i+1);break;}
+      if(key==='--hub-no-routes'){opts.hubRoutes=false;continue;}
       if(key==='--samply'){opts.samply=true;continue;}
-      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
+      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [--hub-reader split|merged] [--hub-no-routes] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
       const val=args[++i];
       if(key==='--family')opts.family=val.split(',');else if(key==='--sizes')opts.sizes=val.split(',').map(Number);
       else if(key==='--input-order')opts.inputOrder=val;
+      else if(key==='--hub-reader')opts.hubReader=val;
       else if(key==='--repeat')opts.repeat=Number(val);else if(key==='--threshold')opts.threshold=Number(val);else if(key==='--out')opts.out=val;
       else throw Error(`unknown option ${key}`);
     }

@@ -6,45 +6,7 @@ use crate::{
 };
 use denotate_ir::*;
 
-fn summaries(
-    p: &GroundProgram,
-    m: &SymbolicMeaning<'_>,
-    l: &Limits,
-) -> BTreeMap<GroundRuleId, ProducerSummary> {
-    let ctx = m.context();
-    p.rules()
-        .map(|rule| {
-            let mut condition = ctx.true_condition();
-            let mut settled = Vec::new();
-            let mut exact = true;
-            for literal in &rule.body {
-                match m.fact(&literal.term.atom).unwrap() {
-                    SymbolicFact::Settled(mut value) => {
-                        if literal.polarity == Polarity::Negative {
-                            value = ctx.not(&value, l).unwrap();
-                        }
-                        condition = ctx.and(&condition, &value, l).unwrap();
-                        settled.push(SettledPremise {
-                            literal: literal.clone(),
-                            condition: value,
-                        });
-                    }
-                    SymbolicFact::Blocked(_) => exact = false,
-                    _ => panic!(),
-                }
-            }
-            (
-                rule.id,
-                ProducerSummary {
-                    rule: rule.clone(),
-                    settled,
-                    condition,
-                    exact,
-                },
-            )
-        })
-        .collect()
-}
+use crate::test_support::rewrites::summaries;
 
 #[test]
 fn restricted_cone_bounds_equal_full_relaxed_bounds_masked_by_guard_and_worlds() {
@@ -517,6 +479,7 @@ fn broad_failure_never_suppresses_a_smaller_guard_cone_and_storage_is_released()
                     literal,
                     &m,
                     &bounds,
+                    None,
                     &mut retained,
                     &mut budget,
                     &progress
@@ -670,7 +633,13 @@ fn identical_outside_head_cones_reuse_bounds_without_leaking_retention() {
                 .get(&AdmissionAttemptKind::GuardedBounds)
                 .is_some_and(|a| a.completed == 2 && a.reused_result == 0)
         }) {
-            assert!(events.iter().all(|e| e.skipped.is_none()));
+            // Optional implied-guard discovery may fail and use G. The
+            // actual cone/bounds attempts must both finish without a skip.
+            assert!(events.iter().all(|e| {
+                e.skipped
+                    .as_ref()
+                    .is_none_or(|s| s.kind == AdmissionAttemptKind::ImpliedGuard)
+            }));
             exercised = true;
             break;
         }

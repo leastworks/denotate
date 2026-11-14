@@ -96,6 +96,68 @@ impl Rewrite<'_> {
                         guards.join(" and ")
                     }
                 ));
+                if let Some(implied) = &p.implied_guard {
+                    let mut remaining = if detail == RewriteDetail::Full {
+                        usize::MAX
+                    } else {
+                        32
+                    };
+                    let guard =
+                        expression_text(&implied.expression, corpus, names, &mut remaining)?;
+                    notes.insert(format!(
+                        "Implied guard retained with the replacement: {guard}."
+                    ));
+                    if detail == RewriteDetail::Direct && implied.expression.nodes() > 32 {
+                        notes.insert(format!("Omitted {} implied-guard expression nodes; request full rewrite evidence (CLI --verbose).",implied.expression.nodes()-32));
+                    }
+                    for premise in &implied.premises {
+                        let negative = premise.literal.polarity == Polarity::Negative;
+                        let name =
+                            crate::evidence::atom_name(corpus, names, &premise.literal.term.atom)?;
+                        let how = if negative {
+                            format!(
+                                "complement of the union of {} exact producer guards",
+                                premise.producers.len()
+                            )
+                        } else {
+                            format!(
+                                "union of all {} producer settled guards",
+                                premise.producers.len()
+                            )
+                        };
+                        notes.insert(format!("Implied guard from {}{name}: {how}; supporting definitions are related locations.",if negative {"!"}else{""}));
+                        if detail == RewriteDetail::Full {
+                            for producer in &premise.producers {
+                                let mut terms = Vec::new();
+                                for term in &producer.settled {
+                                    terms.push(format!(
+                                        "{}{}",
+                                        if term.literal.polarity == Polarity::Negative {
+                                            "!"
+                                        } else {
+                                            ""
+                                        },
+                                        crate::evidence::atom_name(
+                                            corpus,
+                                            names,
+                                            &term.literal.term.atom
+                                        )?
+                                    ));
+                                }
+                                for replacement in &producer.rule.replacements {
+                                    let mut remaining = usize::MAX;
+                                    terms.push(expression_text(
+                                        &replacement.expression,
+                                        corpus,
+                                        names,
+                                        &mut remaining,
+                                    )?);
+                                }
+                                notes.insert(format!("Implied-guard producer {name}: settled condition {}; unresolved premises contribute no condition.",if terms.is_empty(){"true".to_owned()}else{terms.join(" and ")}));
+                            }
+                        }
+                    }
+                }
                 if detail == RewriteDetail::Full {
                     for (rank, step) in p.steps.iter().enumerate() {
                         let mut remaining = usize::MAX;

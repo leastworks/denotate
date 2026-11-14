@@ -271,3 +271,44 @@ pub(super) fn expression(
         }
     }
 }
+
+#[cfg(test)]
+pub(crate) fn summaries(
+    p: &GroundProgram,
+    m: &SymbolicMeaning<'_>,
+    l: &Limits,
+) -> std::collections::BTreeMap<GroundRuleId, ProducerSummary> {
+    let ctx = m.context();
+    p.rules()
+        .map(|rule| {
+            let mut condition = ctx.true_condition();
+            let mut settled = Vec::new();
+            let mut exact = true;
+            for literal in &rule.body {
+                match m.fact(&literal.term.atom).unwrap() {
+                    SymbolicFact::Settled(mut value) => {
+                        if literal.polarity == Polarity::Negative {
+                            value = ctx.not(&value, l).unwrap();
+                        }
+                        condition = ctx.and(&condition, &value, l).unwrap();
+                        settled.push(SettledPremise {
+                            literal: literal.clone(),
+                            condition: value,
+                        });
+                    }
+                    SymbolicFact::Blocked(_) => exact = false,
+                    _ => panic!(),
+                }
+            }
+            (
+                rule.id,
+                ProducerSummary {
+                    rule: rule.clone(),
+                    settled,
+                    condition,
+                    exact,
+                },
+            )
+        })
+        .collect()
+}

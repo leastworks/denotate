@@ -1,0 +1,22 @@
+relation bad();
+sort Class; const perishable, hazardous: Class; input declared(kind: Class);
+sort Lane;
+const l0: Lane; input route(lane: Lane);
+assumption one_class: at_most_one(declared, group_by: ());
+assumption one_route: at_most_one(route, group_by: ());
+input docked(); input priority_call();
+relation tagged();
+relation claim_fails();
+relation hazard_claim();
+relation inspected();
+relation held();
+relation cleared();
+input fa0(); input fb0(); tagged() :- route(l0), fa0(), !fb0(), declared(perishable), cleared();
+claim_fails() :- docked(), !tagged();
+relation hc_type_ok(); relation hc_read_ok(); relation hc_unsat();
+hc_type_ok() :- declared(hazardous); hc_read_ok() :- !claim_fails();
+hc_unsat() :- !hc_type_ok(); hc_unsat() :- !hc_read_ok(); hazard_claim() :- !hc_unsat();
+inspected() :- declared(perishable); inspected() :- hazard_claim();
+held() :- priority_call(), inspected(); cleared() :- docked(), !held();
+notice hazard_condition: varies(hazard_claim);
+obligation no_bad: empty(bad); verification checks { assumptions: [one_class, one_route]; obligations: [no_bad]; notices: [hazard_condition]; }
