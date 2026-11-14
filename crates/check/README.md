@@ -328,6 +328,19 @@ use separate invocations of the existing limits; time and refinement limits are
 probe-specific. Cancellation propagates. See the [policy](../../docs/checker-policies.md#diagnostic-sat-probe)
 for the precise meaning, bounds and reporting contract.
 
+`PreparedCheck::admit_with_candidate_probe` optionally diagnoses guarded-settlement
+candidates on their actual admission snapshots. `CandidateProbeLimits` supplies
+one aggregate allowance per invocation; `AdmissionProgress` delivers
+`candidate_probe` and `candidate_probe_counts` only on diagnostic events. Reports
+are not cached; a reused admission emits its usual reuse event without queries.
+The two supported-model copies disagree on the target premise, with the reading
+producer's contribution free under its effective guard. Settled providers and W
+are encoded from their exact existing conditions. No stability refinement runs in
+the unresolved cone. A verified pair rules out this kind of certificate on this
+snapshot; UNSAT only means not ruled out. Neither answer affects admission.
+Probe time is excluded from the checker deadline, and cancellation still applies.
+See the [candidate policy](../../docs/checker-policies.md#guarded-candidate-filter).
+
 ## Coverage
 
 `Verification.coverage` and `ScopedResults.coverage` contain per-obligation summaries:

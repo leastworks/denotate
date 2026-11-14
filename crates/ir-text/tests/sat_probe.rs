@@ -121,3 +121,175 @@ assumption required:at_least_one(choice,group_by:(s));verification v{{assumption
         }
     }
 }
+
+#[test]
+fn candidate_probe_agrees_with_certificates_at_their_actual_snapshots() {
+    let boolean = include_str!("fixtures/guarded-settlement-boolean.den");
+    // The provider's real value is perishable, despite its positive self-loop.
+    let upstream=boolean.replace("input perishable();", "input seed(); input extra(); relation perishable(); perishable():-seed();perishable():-extra(),perishable();");
+    let early = format!(
+        "{boolean}\nrelation unused(); unused():-docked();unused():-docked(),priority_call();"
+    );
+    let mut certificates = 0;
+    let mut implied = 0;
+    let mut revised = false;
+    for text in [
+        boolean,
+        &upstream,
+        &early,
+        include_str!("fixtures/guarded-settlement.den"),
+        include_str!("fixtures/implied-guard.den"),
+        include_str!("fixtures/guarded-settlement-producers.den"),
+    ] {
+        let loaded = load_text(text);
+        let l = Limits::default();
+        let ops = (&l).into();
+        let request = loaded.verification_requests(&l).unwrap().remove(0).1;
+        let RequestPreparation::Complete(raw) =
+            request.prepare(&loaded.corpus, &loaded.keys, &ops).unwrap()
+        else {
+            panic!()
+        };
+        let events = std::cell::RefCell::new(Vec::new());
+        let observer = |e: &AdmissionProgress| events.borrow_mut().push(e.clone());
+        let admitted = raw
+            .admit_with_candidate_probe(
+                &ops,
+                Some(&observer),
+                Some(CandidateProbeLimits {
+                    max_candidates: 1000,
+                    timeout: std::time::Duration::from_secs(60),
+                    ..Default::default()
+                }),
+            )
+            .unwrap();
+        assert!(admitted.program().is_admitted());
+        let events = events.into_inner();
+        for event in events.iter().filter(|e| e.candidate_probe.is_some()) {
+            assert!(
+                event.guarded.as_ref().unwrap().position.is_some(),
+                "diagnose the final iteration guard, never a lookahead preview"
+            );
+        }
+        let reports = events
+            .iter()
+            .filter_map(|e| e.candidate_probe.as_ref())
+            .collect::<Vec<_>>();
+        for proof in admitted
+            .program()
+            .rewrite_proofs()
+            .filter_map(|p| p.guarded_settlement())
+        {
+            let report = reports
+                .iter()
+                .find(|r| {
+                    r.snapshot == proof.bounds.cone.snapshot
+                        && r.rule == proof.proof.candidate.rule.id
+                        && r.occurrence == proof.occurrence
+                })
+                .expect("same-snapshot report for certificate");
+            assert_eq!(report.answer, SatProbeAnswer::Unsat, "{report:?}");
+            certificates += 1;
+            implied += usize::from(proof.implied_guard.is_some());
+            revised |= report.snapshot > 0;
+        }
+        let counts = events
+            .iter()
+            .filter_map(|e| e.candidate_probe_counts.as_ref())
+            .last()
+            .unwrap();
+        assert_eq!(
+            counts.candidates,
+            counts.ruled_out + counts.not_ruled_out + counts.unknown + counts.unexamined
+        );
+        assert_eq!(counts.unknown, 0);
+    }
+    assert!(certificates >= 6);
+    assert!(implied > 0);
+    assert!(revised);
+}
+
+#[test]
+fn candidate_probe_caps_exhaustion_and_cancellation_leave_admission_alone() {
+    let text = "input x();relation h();relation p();h():-x(),!p();p():-x(),!h();verification v{assumptions:[];obligations:[];}";
+    let loaded = load_text(text);
+    let l = Limits::default();
+    let ops = (&l).into();
+    let request = loaded.verification_requests(&l).unwrap().remove(0).1;
+    let prepare = || {
+        let RequestPreparation::Complete(raw) =
+            request.prepare(&loaded.corpus, &loaded.keys, &ops).unwrap()
+        else {
+            panic!()
+        };
+        raw
+    };
+    let ordinary = prepare().admit(&ops).unwrap();
+    for config in [
+        CandidateProbeLimits::default(),
+        CandidateProbeLimits {
+            max_candidates: 0,
+            ..Default::default()
+        },
+        CandidateProbeLimits {
+            max_candidates: 1,
+            ..Default::default()
+        },
+        CandidateProbeLimits {
+            max_work: 1,
+            ..Default::default()
+        },
+        CandidateProbeLimits {
+            timeout: std::time::Duration::ZERO,
+            ..Default::default()
+        },
+    ] {
+        let events = std::cell::RefCell::new(Vec::new());
+        let observer = |e: &AdmissionProgress| events.borrow_mut().push(e.clone());
+        let admitted = prepare()
+            .admit_with_candidate_probe(&ops, Some(&observer), Some(config.clone()))
+            .unwrap();
+        assert_eq!(admitted.receipts(), ordinary.receipts());
+        assert_eq!(
+            admitted.program().is_admitted(),
+            ordinary.program().is_admitted()
+        );
+        assert_eq!(
+            admitted.program().admission_limit(),
+            ordinary.program().admission_limit()
+        );
+        assert_eq!(
+            admitted.program().rewrite_proofs().count(),
+            ordinary.program().rewrite_proofs().count()
+        );
+        let events = events.into_inner();
+        let counts = events
+            .iter()
+            .filter_map(|e| e.candidate_probe_counts.as_ref())
+            .last()
+            .unwrap();
+        assert!(counts.candidates > 0);
+        assert_eq!(
+            counts.candidates,
+            counts.ruled_out + counts.not_ruled_out + counts.unknown + counts.unexamined
+        );
+        if config.max_candidates == 0 || config.timeout.is_zero() {
+            assert_eq!(counts.unexamined, counts.candidates);
+        } else if config.max_work == 1 {
+            assert!(counts.unknown > 0);
+            assert!(counts.unexamined > 0);
+        } else {
+            assert!(counts.ruled_out > 0);
+        }
+    }
+    let cancellation = ops.cancellation.clone();
+    let observer = |e: &AdmissionProgress| {
+        if e.candidate_probe.is_some() {
+            cancellation.cancel();
+        }
+    };
+    assert!(matches!(
+        prepare().admit_with_candidate_probe(&ops, Some(&observer), Some(Default::default())),
+        Err(CheckError::Cancelled)
+    ));
+}

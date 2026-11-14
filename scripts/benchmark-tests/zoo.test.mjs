@@ -87,14 +87,18 @@ test('SAT probes preserve checker outcomes and survive report recovery',()=>{
   try {
     const config={binary:'target/debug/examples/bench_schema',family:['negative-unresolved','guarded-ring'],sizes:[2],repeat:1};
     const normal=run({...config,out:path.join(root,'normal')});
-    const probed=run({...config,out:path.join(root,'probed'),satProbe:true});
+    const probed=run({...config,out:path.join(root,'probed'),satProbe:true,satProbeCandidates:true});
     assert.equal(probed.satProbe,true);
+    assert.equal(probed.satProbeCandidates,true);
     for(const name of config.family) {
       const a=normal.families[name].runs[0], b=probed.families[name].runs[0];
       // Each runner owns a different temporary root; compare every status field
       // except that root URI. CLI parity on the same root is tested separately.
       const statuses=r=>r.outcomes.map(({program,...status})=>status);
       assert.equal(a.exit,b.exit);assert.deepEqual(statuses(a),statuses(b));
+      assert.equal(a.candidateProbes.length,0);assert.ok(b.candidateProbes.length>0);
+      const counts=b.candidateProbes.at(-1).probe.counts;
+      assert.equal(counts.candidates,counts.ruledOut+counts.notRuledOut+counts.unknown+counts.unexamined);
       assert.equal(a.satProbes.length,0);assert.ok(b.satProbes.length>0);
       for(const {probe:p} of b.satProbes) {
         assert.equal(p.state,name==='guarded-ring'?'unsat':'sat');

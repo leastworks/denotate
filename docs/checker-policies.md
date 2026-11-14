@@ -133,6 +133,47 @@ Use `just bench-den-schema --sat-probe` or `just bench-den-zoo --sat-probe` to r
 them alongside normal outcomes. The first increment answers uniqueness only;
 existence search and admitting programs based on SAT are separate future choices.
 
+### Guarded-candidate filter
+
+`--sat-probe-candidates` separately opts into a necessary-condition query at the
+actual guarded-settlement snapshot, after earlier rewrites and implied-guard
+strengthening. It runs when admission selects a candidate for bounds iteration, after the
+final implied-guard discovery and cone preparation. It neither reorders nor skips any admission attempt.
+
+Both copies share the exact input functions already computed for settled providers
+and W. These BDDs are translated to CNF without further BDD evaluation. Within the
+unresolved cone, all producers have Clark completion except the reading producer:
+its contribution is a free choice in each copy, allowed only under its effective
+guard G. Both copies satisfy G and W and must disagree on the candidate premise.
+Positive self-support inside this cone is deliberately **not** refined away.
+An unresolved provider outside this component currently gives `unknown`.
+
+A concretely checked supported pair is `ruled-out`: this candidate cannot obtain
+the current guarded-settlement certificate on this snapshot. UNSAT is
+`not-ruled-out`, not a certificate, existence result or admission decision. The
+answer applies only to that premise, reading rule, effective guard, verification
+and graph snapshot. No answers are reused across snapshots or invocations.
+
+One admission invocation has an aggregate allowance: 64 candidates
+(`--sat-probe-candidate-limit`), 10,000 ms of active diagnostic time
+(`--sat-probe-candidate-timeout-ms`), and 10,000,000 encoding/validation work units
+(`--sat-probe-candidate-work`). The flags also enable this probe. CNF variables,
+clauses and literals retain the existing per-query size ceilings; solver search
+is bounded cooperatively by the remaining aggregate time. Learned clauses are not
+an independently capped memory pool. Diagnostic work does not consume checker
+work or condition-node allowances. Its elapsed time, including report delivery,
+is excluded from the admission deadline without resetting prior checker time;
+cancellation remains live. Wall-clock profiling still includes the extra work.
+
+Counts cover candidates enumerated in reached guarded-settlement passes across
+snapshots: `ruledOut`, `notRuledOut`, `unknown`, `unexamined`. Unexamined includes
+allowance/cap exhaustion and candidates admission never attempts (including when
+another attempt resolves their component or ordinary checking stops). It does not
+count hypothetical candidates in rounds never reached. Lookahead previews are not queried: their guard may still strengthen before
+iteration. Candidates only ranked, but never selected, remain unexamined.
+Reused admission has no fresh candidate queries. Schema/zoo reports preserve
+`candidateProbes`, including cumulative counts streamed before an interrupted run.
+
 ## Guarded settlement
 
 After producer removal and discharge have no batch, the relevant phase can replace

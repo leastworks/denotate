@@ -435,7 +435,7 @@ impl GroundProgram {
         budget: &mut Budget<'_>,
         observer: Option<&AdmissionObserver<'_>>,
     ) -> Result<Self> {
-        self.admit_attempts(budget, observer, Attempts::default())
+        self.admit_attempts(budget, observer, Attempts::default(), None)
     }
     #[cfg(test)]
     pub(crate) fn admit_without_negative_reuse(
@@ -443,23 +443,36 @@ impl GroundProgram {
         budget: &mut Budget<'_>,
         observer: Option<&AdmissionObserver<'_>>,
     ) -> Result<Self> {
-        self.admit_attempts(budget, observer, Attempts::without_negative_reuse())
+        self.admit_attempts(budget, observer, Attempts::without_negative_reuse(), None)
+    }
+    pub(crate) fn admit_probed(
+        self,
+        budget: &mut Budget<'_>,
+        observer: Option<&AdmissionObserver<'_>>,
+        config: CandidateProbeLimits,
+    ) -> Result<Self> {
+        self.admit_attempts(budget, observer, Attempts::default(), Some(config))
     }
     fn admit_attempts(
         mut self,
         budget: &mut Budget<'_>,
         observer: Option<&AdmissionObserver<'_>>,
         mut attempts: Attempts,
+        probe: Option<CandidateProbeLimits>,
     ) -> Result<Self> {
         self.rewrites.skips.clear();
         self.rewrites.skipped_attempts = 0;
         let progress = crate::admission_progress::AdmissionReporter::new(observer);
+        if let Some(config) = probe {
+            progress.enable_candidate_probe(config, budget.limits);
+        }
         progress.snapshot(&self, 0, "starting");
         let limits = budget.limits;
         limits.cancellation.check()?;
         self.rewrites.inconclusive = None;
         self.rewrites.downstream_incomplete = None;
         if !self.assumptions_consistent() {
+            budget.excluding_time(|| progress.candidate_probe_summary(&self));
             progress.finish(&self, "inconsistent-assumptions");
             return Ok(self);
         }
@@ -473,6 +486,7 @@ impl GroundProgram {
                 progress.phase(phase);
                 self.rewrite_loop(budget, &progress, &mut attempts, phase, &mut round)
             });
+        budget.excluding_time(|| progress.candidate_probe_summary(&self));
         progress.round_end(&self);
         self.rewrites.skipped_attempts = attempts.count;
         self.rewrites.skips = attempts.records();

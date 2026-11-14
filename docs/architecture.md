@@ -270,6 +270,14 @@ No layer infers a DSL's lexical structure, assumes its conclusions, or treats a
 notice as a business obligation. Notice queries currently recompute in warm sessions,
 with independent bounded allowances and fresh presentation from current provenance.
 
+Opt-in SAT diagnostics belong to the checker but never to its admission decisions
+or reusable query state. The guarded-candidate probe borrows the live cone and
+exact settled conditions; it uses an independent aggregate budget. Its active time
+and report delivery are excluded from admission's operational deadline without
+resetting checker time already spent. Both clocks still honor cancellation.
+Progress transports the results to CLI/schema/zoo consumers; presentation findings
+and editor semantics remain unchanged. See the [probe policy](checker-policies.md#guarded-candidate-filter).
+
 ## Programs and checking in the editor
 
 A `.den` program is a `den.root` folder plus its referenced libraries; a file outside

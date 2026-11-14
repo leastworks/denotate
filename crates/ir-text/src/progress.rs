@@ -61,6 +61,7 @@ impl CheckProgress {
     /// Frontend boundaries that finish before per-query checking starts.
     pub fn exhaustion(&self, phase: Phase, context: &Value, message: String, continues: bool) {
         let mut detail = context.clone();
+
         detail["checking"] = json!({"stage":phase.name(),"state":"exhausted","target":null,"failure":message,"continues":continues});
         self.emit(phase, detail);
     }
@@ -135,6 +136,25 @@ impl<'a> AdmissionDetails<'a> {
             return;
         }
         let mut detail = context.clone();
+        if let Some(counts) = &event.candidate_probe_counts {
+            let names = self.names.get_or_init(|| {
+                Arc::new(crate::presentation::diagnostic_names(&self.program.corpus))
+            });
+            let atoms = |set: &std::collections::BTreeSet<denotate_check::GroundAtom>| {
+                set.iter()
+                    .map(|a| atom_text(a, &**names))
+                    .collect::<Vec<_>>()
+            };
+            detail["candidateProbe"] = json!({"round":event.round, "scope":"enumerated-candidates-across-admission-snapshots",
+            "counts":{"candidates":counts.candidates,"ruledOut":counts.ruled_out,"notRuledOut":counts.not_ruled_out,"unknown":counts.unknown,"unexamined":counts.unexamined,"elapsedMs":counts.elapsed.as_secs_f64()*1000.},
+            "candidate":event.candidate_probe.as_ref().map(|r| json!({
+                "snapshot":r.snapshot,"rule":format!("{:?}",r.rule),"occurrence":format!("{:?}",r.occurrence),"location":self.location(r.source),"premise":atom_text(&r.premise,&**names),
+                "state":r.state(),"reason":r.reason,"exhaustion":r.exhaustion.map(|e|json!({"phase":e.phase,"resource":e.resource})),"coneAtoms":r.cone_atoms,"coneRules":r.cone_rules,"variables":r.variables,"clauses":r.clauses,"literals":r.literals,"elapsedMs":r.elapsed.as_secs_f64()*1000.,
+                "verifiedSupportedPair":r.pair.is_some(),"world":r.pair.as_ref().map(|p|atoms(&p.world)),"differing":r.pair.as_ref().map(|p|atoms(&p.differing)),"models":r.pair.as_ref().map(|p|p.models.iter().map(atoms).collect::<Vec<_>>()),"readingFires":r.pair.as_ref().map(|p|p.reading_fires)
+            }))});
+            progress.emit(Phase::Admission, detail);
+            return;
+        }
         detail["admission"] = json!({
             "phase": event.phase.label(),
             "round": event.round,

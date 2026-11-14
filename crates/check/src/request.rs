@@ -1020,9 +1020,19 @@ impl PreparedCheck<'_> {
     }
     /// Observational, invocation-local progress; never retained with admission.
     pub fn admit_with_progress(
+        self,
+        operations: &OperationalLimits,
+        observer: Option<&AdmissionObserver<'_>>,
+    ) -> Result<Self> {
+        self.admit_with_candidate_probe(operations, observer, None)
+    }
+    /// Diagnostic-only candidate search at live admission snapshots. Reports are
+    /// delivered to the observer, never cached. Reused admission has no attempts.
+    pub fn admit_with_candidate_probe(
         mut self,
         operations: &OperationalLimits,
         observer: Option<&AdmissionObserver<'_>>,
+        probe: Option<CandidateProbeLimits>,
     ) -> Result<Self> {
         let limits = self.request.limits.with_operations(operations);
         let mut budget = Budget::tracked(&limits);
@@ -1041,7 +1051,11 @@ impl PreparedCheck<'_> {
             );
             return Ok(self);
         }
-        self.program = self.program.admit_observed(&mut budget, observer)?;
+        self.program = if let Some(config) = probe {
+            self.program.admit_probed(&mut budget, observer, config)?
+        } else {
+            self.program.admit_observed(&mut budget, observer)?
+        };
         self.receipts.invalidate(&QueryKey::Admission);
         budget.record(
             &mut self.receipts,

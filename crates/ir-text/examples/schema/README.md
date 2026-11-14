@@ -67,6 +67,13 @@ concretely verified pair; UNSAT establishes at most one meaning and says nothing
 about existence. Normal outcomes and exit codes are unchanged. Reports contain
 local names, worlds and source locations; see the [probe policy](../../../../docs/checker-policies.md#diagnostic-sat-probe).
 
+`--sat-probe-candidates` enables the admission-time guarded-candidate filter;
+`candidateProbes` keeps its cumulative counts and per-candidate supported pairs.
+The three `--sat-probe-candidate-{limit,timeout-ms,work}` overrides follow `--`.
+These allowances cover a whole admission invocation, independently of normal
+checker budgets. `not-ruled-out` is not a certificate. The report and recovery
+preserve this distinction and unexamined counts.
+
 ## Synthetic semantics
 
 A raw message assigns at most one value to each field. One selector field per tree

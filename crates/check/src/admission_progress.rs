@@ -96,6 +96,9 @@ pub struct AdmissionProgress {
     pub failure: Option<Inconclusive>,
     pub attempts: BTreeMap<AdmissionAttemptKind, AdmissionAttempts>,
     pub guarded: Option<GuardedAttempt>,
+    /// Present only on diagnostic events; never retained in ordinary progress.
+    pub candidate_probe: Option<CandidateProbeReport>,
+    pub candidate_probe_counts: Option<CandidateProbeCounts>,
     pub prerequisites: BTreeMap<&'static str, Duration>,
 }
 pub type AdmissionObserver<'a> = dyn Fn(&AdmissionProgress) + 'a;
@@ -110,11 +113,13 @@ struct State {
 pub(crate) struct AdmissionReporter<'a> {
     observer: Option<&'a AdmissionObserver<'a>>,
     state: RefCell<State>,
+    candidate_probe: RefCell<Option<crate::sat_probe::candidates::Diagnosis>>,
 }
 impl<'a> AdmissionReporter<'a> {
     pub fn new(observer: Option<&'a AdmissionObserver<'a>>) -> Self {
         Self {
             observer,
+            candidate_probe: RefCell::new(None),
             state: RefCell::new(State {
                 progress: AdmissionProgress {
                     phase: AdmissionPhase::Relevant,
@@ -134,6 +139,8 @@ impl<'a> AdmissionReporter<'a> {
                     attempts: BTreeMap::new(),
                     prerequisites: BTreeMap::new(),
                     guarded: None,
+                    candidate_probe: None,
+                    candidate_probe_counts: None,
                 },
                 current: None,
                 current_rule: None,
@@ -141,6 +148,57 @@ impl<'a> AdmissionReporter<'a> {
                 round_reported: false,
             }),
         }
+    }
+    pub fn enable_candidate_probe(&self, config: CandidateProbeLimits, limits: &Limits) {
+        *self.candidate_probe.borrow_mut() = Some(crate::sat_probe::candidates::Diagnosis::new(
+            config,
+            limits.clone(),
+        ));
+    }
+    pub fn candidate_probe_register(&self, count: usize) {
+        if let Some(d) = self.candidate_probe.borrow_mut().as_mut() {
+            d.register(count);
+        }
+    }
+    pub fn candidate_probe(
+        &self,
+        program: &GroundProgram,
+        cone: &crate::guarded_bounds::BorrowedCone<'_>,
+        ctx: &ConditionContext,
+        candidate: &ProducerSummary,
+        literal: &GroundLiteral,
+        budget: &mut crate::limits::Budget<'_>,
+    ) -> crate::limits::Result<()> {
+        if self.candidate_probe.borrow().is_none() {
+            return Ok(());
+        }
+        budget.excluding_time(|| {
+            let report = self
+                .candidate_probe
+                .borrow_mut()
+                .as_mut()
+                .unwrap()
+                .probe(cone, ctx, candidate, literal)?;
+            if let Some(report) = report {
+                self.state.borrow_mut().progress.candidate_probe = Some(report);
+                self.candidate_probe_summary(program);
+                self.state.borrow_mut().progress.candidate_probe = None;
+            }
+            Ok(())
+        })
+    }
+    pub fn candidate_probe_summary(&self, program: &GroundProgram) {
+        let Some(counts) = self
+            .candidate_probe
+            .borrow()
+            .as_ref()
+            .map(|d| d.counts.clone())
+        else {
+            return;
+        };
+        self.state.borrow_mut().progress.candidate_probe_counts = Some(counts);
+        self.emit(program, true);
+        self.state.borrow_mut().progress.candidate_probe_counts = None;
     }
     pub fn phase(&self, phase: AdmissionPhase) {
         self.state.borrow_mut().progress.phase = phase;

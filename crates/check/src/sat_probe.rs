@@ -693,3 +693,8 @@ fn least_unfounded(c: &Cone, model: &[bool], b: &mut Budget<'_>) -> Result<BTree
 
 #[cfg(test)]
 mod tests;
+
+pub(crate) mod candidates;
+pub use candidates::{
+    CandidateProbeCounts, CandidateProbeLimits, CandidateProbePair, CandidateProbeReport,
+};

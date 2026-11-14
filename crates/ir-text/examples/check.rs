@@ -210,6 +210,14 @@ fn run_streaming(
         let trace = &callback_trace;
         let active = &callback_active;
         let profile = &callback_profile;
+        if let Some(v) = event.get("candidateProbe") {
+            trace.message(format!(
+                "{}: candidate probe {}",
+                event["verification"].as_str().unwrap_or("verification"),
+                v
+            ));
+            return;
+        }
         if let Some(v) = event.get("satProbe") {
             trace.message(format!(
                 "{}: SAT probe {}",
@@ -312,6 +320,7 @@ fn check_program(
         input_order,
         sat_probe,
         sat_probe_limits,
+        candidate_probe,
         limits,
         progress: report_progress,
         ..
@@ -654,9 +663,11 @@ fn check_program(
         let observer =
             |event: &denotate_check::AdmissionProgress| admission.report(progress, &detail, event);
         let admitted = prepared
-            .admit_with_progress(
+            .admit_with_candidate_probe(
                 &operations,
-                (report_progress || limits.profile.enabled()).then_some(&observer),
+                (report_progress || limits.profile.enabled() || candidate_probe.is_some())
+                    .then_some(&observer),
+                candidate_probe.clone(),
             )
             .map_err(checker_failure)?
             .with_emptiness_examples(empty_examples.unwrap_or_default());
@@ -942,6 +953,29 @@ mod tests {
             ));
         }
     }
+    #[test]
+    fn candidate_probe_preserves_human_json_and_exit_codes_even_when_exhausted() {
+        for text in [
+            include_str!("../tests/fixtures/guarded-settlement-boolean.den"),
+            "relation h();relation p();h():-!p();p():-!h();verification v{assumptions:[];obligations:[];}",
+        ] {
+            let f = Fixture::new(text);
+            for json in [false, true] {
+                let flags = if json { vec!["--json"] } else { vec![] };
+                let (code, output, _) = f.traced(&flags);
+                for cap in ["0", "1", "64"] {
+                    let mut args = flags.clone();
+                    args.extend(["--sat-probe-candidates", "--sat-probe-candidate-limit", cap]);
+                    let (probed, result, trace) = f.traced(&args);
+                    assert_eq!(probed, code);
+                    assert_eq!(result, output);
+                    assert!(trace.contains("candidate probe"), "{trace}");
+                    assert!(trace.contains("unexamined"));
+                }
+            }
+        }
+    }
+
     const BODY: &str = "sort S; const x, y: S; input p(x:S); relation q(x:S); q(X) :- p(X); assumption a: at_most_one(p, group_by: ()); obligation o: at_most_one(q, group_by: ());";
     const RESTRICTED: &str = "verification v { assumptions: [a]; obligations: [o]; }";
 

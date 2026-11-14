@@ -154,6 +154,15 @@ and memory-profile records, including local input tuples and differing atoms wit
 source locations. Ordinary output and exit codes are unchanged. See the
 [probe policy](../../docs/checker-policies.md#diagnostic-sat-probe) for scope and limits.
 
+`just check-den <program> --sat-probe-candidates` diagnoses guarded candidates
+during admission, independently of the pre-admission uniqueness probe. Progress
+reports `ruled-out`, `not-ruled-out`, `unknown` and cumulative unexamined counts.
+Defaults are 64 queries, 10 seconds total active probe time and 10 million work
+units per admission; adjust `--sat-probe-candidate-limit`,
+`--sat-probe-candidate-timeout-ms` and `--sat-probe-candidate-work`. These do not
+consume ordinary admission's allowances or change its attempts. A not-ruled-out
+candidate is not a proof. See the [candidate policy](../../docs/checker-policies.md#guarded-candidate-filter).
+
 Admission additionally reports rounds, stages, remaining ground components with
 negation, blocked atoms and committed rewrites. Upper-bound analysis identifies
 its component before work starts, with a representative tuple, source location

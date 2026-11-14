@@ -458,6 +458,14 @@ fn positive_implied_certificate_owns_support_and_preserves_models_independent_of
         .filter(|s| s.rule.head.atom == atom(claim))
         .map(|s| s.rule.id)
         .collect();
+    let reports = RefCell::new(Vec::new());
+    let observer = |e: &AdmissionProgress| {
+        if let Some(r) = &e.candidate_probe {
+            reports.borrow_mut().push(r.clone());
+        }
+    };
+    let progress = crate::admission_progress::AdmissionReporter::new(Some(&observer));
+    progress.enable_candidate_probe(CandidateProbeLimits::default(), &l);
     let proofs = p
         .guarded_settlements(
             &m,
@@ -465,11 +473,22 @@ fn positive_implied_certificate_owns_support_and_preserves_models_independent_of
             &targets,
             &mut 0,
             &mut Budget::new(&l),
-            &crate::admission_progress::AdmissionReporter::new(None),
+            &progress,
             &mut crate::admission_skips::Attempts::default(),
         )
         .unwrap();
     let proof = &proofs[0];
+    let reports = reports.borrow();
+    let report = reports
+        .iter()
+        .find(|r| {
+            r.rule == proof.proof.candidate.rule.id
+                && r.occurrence == proof.occurrence
+                && r.snapshot == proof.bounds.cone.snapshot
+        })
+        .unwrap();
+    assert_eq!(report.answer, SatProbeAnswer::Unsat);
+
     assert!(
         proof
             .implied_guard

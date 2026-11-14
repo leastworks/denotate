@@ -16,6 +16,7 @@ pub struct Options {
     pub limits: Limits,
     pub input_order: InputOrder,
     pub sat_probe: bool,
+    pub candidate_probe: Option<denotate_check::CandidateProbeLimits>,
     pub sat_probe_limits: denotate_check::SatProbeLimits,
 }
 pub fn limit_values(l: &Limits) -> [(&'static str, u128); 9] {
@@ -37,6 +38,10 @@ pub fn help() -> String {
         --verification NAME       Run one verification (a partial run)\n\
         --validate-all-assumptions Validate unselected declarations too (authoring aid)\n\
         --input-order ORDER       Diagnostic BDD order: key (default), reverse-key, structural\n\
+        --sat-probe-candidates    Diagnostic guarded-candidate search during admission\n\
+        --sat-probe-candidate-limit N  Aggregate candidate cap (default 64)\n\
+        --sat-probe-candidate-timeout-ms N  Aggregate diagnostic time (default 10000)\n\
+        --sat-probe-candidate-work N  Aggregate encoding/validation work (default 10000000)\n\
         --sat-probe               Diagnostic stable-pair search before admission (progress only)\n\
         --sat-probe-timeout-ms N   Time per probe, independent of checker timeout (default 10000)\n\
         --sat-probe-refinements N  Maximum unfounded-set refinement rounds (default 64)\n\
@@ -78,6 +83,7 @@ impl Options {
             limits,
             input_order: InputOrder::Key,
             sat_probe: false,
+            candidate_probe: None,
             sat_probe_limits: Default::default(),
         };
         let mut seen = BTreeSet::new();
@@ -112,6 +118,29 @@ impl Options {
                             )
                         })?)
                     });
+                }
+                "--sat-probe-candidates" => {
+                    options.candidate_probe.get_or_insert_with(Default::default);
+                }
+                "--sat-probe-candidate-limit" | "--sat-probe-candidate-work" => {
+                    let n = value()?
+                        .parse()
+                        .map_err(|_| (2, format!("{option} requires a nonnegative integer")))?;
+                    let probe = options.candidate_probe.get_or_insert_with(Default::default);
+                    if option == "--sat-probe-candidate-limit" {
+                        probe.max_candidates = n;
+                    } else {
+                        probe.max_work = n;
+                    }
+                }
+                "--sat-probe-candidate-timeout-ms" => {
+                    let n = value()?
+                        .parse()
+                        .map_err(|_| (2, format!("{option} requires a nonnegative integer")))?;
+                    options
+                        .candidate_probe
+                        .get_or_insert_with(Default::default)
+                        .timeout = Duration::from_millis(n);
                 }
                 "--sat-probe" => options.sat_probe = true,
                 "--sat-probe-timeout-ms" => {

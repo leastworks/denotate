@@ -28,6 +28,12 @@ including during `--summarize` recovery. Probe limits can follow `--`, for examp
 `--sat-probe-timeout-ms 10000`. No ordinary verdict changes; UNSAT proves at most
 one stable meaning, not existence. See the [probe policy](../docs/checker-policies.md#diagnostic-sat-probe).
 
+`--sat-probe-candidates` independently enables the guarded-candidate diagnostic
+within admission. Runs and recovered reports retain `candidateProbes`, including
+answer counts and unexamined candidates. Pass aggregate allowance overrides via
+`-- --sat-probe-candidate-limit 128` (likewise `timeout-ms` and `work`).
+Ordinary candidate ordering, verdicts and exit codes stay unchanged.
+
 ## Preset contracts
 
 Each preset has one verification. `n` is the requested size; all other shape

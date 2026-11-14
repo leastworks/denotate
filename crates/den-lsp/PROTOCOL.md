@@ -127,6 +127,29 @@ Neither normal diagnostic data nor status/exit codes change. The schema/zoo runn
 retain the latest record per verification/component in `satProbes`, including an
 unfinished `starting` record when recovering an interrupted run.
 
+The CLI's separate `--sat-probe-candidates` emits `candidateProbe` records during
+phase `admission`. No editor setting or finding is added. Each record has `round`,
+`scope: "enumerated-candidates-across-admission-snapshots"` and cumulative `counts`:
+`candidates`, `ruledOut`, `notRuledOut`, `unknown`, `unexamined`, `elapsedMs`.
+The nullable `candidate` has run-local `snapshot`, `rule` and `occurrence`, source
+`location`, `premise`, `state` (`ruled-out`, `not-ruled-out`, `unknown`), nullable
+`reason` and `exhaustion` (`phase`, `resource`), `coneAtoms`, `coneRules`, emitted
+`variables`, `clauses`, `literals`, and `elapsedMs`. `verifiedSupportedPair` is
+explicitly different from the earlier probe's `verifiedStablePair`. A verified
+pair includes `world` (true inputs; all unlisted inputs false), `models`,
+`differing` atom names and the two `readingFires` values. The two copies share one
+input world. Positive self-support inside the candidate cone is allowed. UNSAT
+means not ruled out, not existence or admission. Names and locations stay local.
+
+Counts include candidates enumerated across reached snapshots, each queried at
+most once per snapshot, after its final guard is known for bounds iteration.
+Lookahead-only candidates remain unexamined. Unexamined also includes candidates ordinary admission
+did not reach; rounds never reached are not claimed covered. A final record has
+`candidate: null`; intermediate records preserve counts if the run is interrupted.
+Schema/zoo reports retain this stream as `candidateProbes`. Reused admission has
+no fresh queries. Probe work and active elapsed time are separate from checker
+allowances; cancellation still propagates. Profiling wall time includes diagnosis.
+
 Updates carry the job's ticket through the shared scheduler, and the owner drops
 updates for superseded tickets. A progress-only owner turn does not rebuild source
 snapshots. The client renders active progress without requesting program status;

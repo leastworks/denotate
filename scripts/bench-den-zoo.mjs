@@ -268,6 +268,7 @@ function readRun(dir, size, rep) {
     before: report.beforeAdmission, after: report.afterAdmission,
     guardedAttempts: report.guardedAttempts ?? [],
     satProbes: report.satProbes ?? [],
+    candidateProbes: report.candidateProbes ?? [],
     attemptSummaries: report.admissionAttemptSummaries ?? [],
     attemptSamples: report.admissionAttemptSamples ?? [],
     phases: measurements(records, report.outcomes),
@@ -278,7 +279,7 @@ function readRun(dir, size, rep) {
 export function summarize(out) {
   const config = JSON.parse(fs.readFileSync(path.join(out, 'sweep.json')));
   const { family, sizes, repeat, threshold, binary } = config;
-  const report = { threshold, repeat, sizes, inputOrder: config.inputOrder ?? 'key', hubReader: config.hubReader ?? 'split', hubRoutes: config.hubRoutes ?? true, hubDecoys: config.hubDecoys ?? 0, hubDecoyShape: config.hubDecoyShape ?? 'full', satProbe: config.satProbe ?? false, families: {} };
+  const report = { threshold, repeat, sizes, inputOrder: config.inputOrder ?? 'key', hubReader: config.hubReader ?? 'split', hubRoutes: config.hubRoutes ?? true, hubDecoys: config.hubDecoys ?? 0, hubDecoyShape: config.hubDecoyShape ?? 'full', satProbe: config.satProbe ?? false, satProbeCandidates: config.satProbeCandidates ?? false, families: {} };
   for (const name of family) {
     const runs = [];
     for (const size of sizes) for (let rep = 0; rep < repeat; rep++) {
@@ -294,13 +295,13 @@ export function summarize(out) {
   return report;
 }
 
-export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3,binary='target/profiling/examples/bench_schema',samply=false,limits=[],inputOrder='key',hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',satProbe=false}) {
+export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3,binary='target/profiling/examples/bench_schema',samply=false,limits=[],inputOrder='key',hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',satProbe=false,satProbeCandidates=false}) {
   if (!['split','merged'].includes(hubReader)) throw Error('hub reader must be split or merged');
   if (!['key','reverse-key','structural'].includes(inputOrder)) throw Error('invalid input order');
   fs.mkdirSync(path.dirname(out),{recursive:true});
   fs.mkdirSync(out,{recursive:false});
-  fs.writeFileSync(path.join(out, 'sweep.json'), JSON.stringify({family, sizes, repeat, threshold, inputOrder, hubReader, hubRoutes, hubDecoys, hubDecoyShape, satProbe, binary: path.resolve(binary)}, null, 2));
-  const report={threshold,repeat,sizes,inputOrder,hubReader,hubRoutes,hubDecoys,hubDecoyShape,satProbe,families:{}};
+  fs.writeFileSync(path.join(out, 'sweep.json'), JSON.stringify({family, sizes, repeat, threshold, inputOrder, hubReader, hubRoutes, hubDecoys, hubDecoyShape, satProbe, satProbeCandidates, binary: path.resolve(binary)}, null, 2));
+  const report={threshold,repeat,sizes,inputOrder,hubReader,hubRoutes,hubDecoys,hubDecoyShape,satProbe,satProbeCandidates,families:{}};
   for(const name of family) {
     const runs=[];
     for(const size of sizes) for(let rep=0;rep<repeat;rep++) {
@@ -310,6 +311,7 @@ export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3
       else {const input=path.resolve(out,`${name}-${size}.den`);fs.writeFileSync(input,source(name,size,{hubReader,hubRoutes,hubDecoys,hubDecoyShape}));args.push('--source',input);}
       if(samply) args.push('--samply');
       if(satProbe) args.push('--sat-probe');
+      if(satProbeCandidates) args.push('--sat-probe-candidates');
       if(limits.length) args.push('--',...limits);
       const proc=spawnSync(binary,args,{stdio:'pipe',encoding:'utf8'});
       if(proc.error || proc.status!==0) throw Error(proc.error?.message||proc.stderr);
@@ -334,8 +336,9 @@ if(!process.execArgv.some(a=>a==='-e'||a==='--eval') && process.argv[1] && path.
       const key=args[i];if(key==='--'){opts.limits=args.slice(i+1);break;}
       if(key==='--hub-no-routes'){opts.hubRoutes=false;continue;}
       if(key==='--samply'){opts.samply=true;continue;}
+      if(key==='--sat-probe-candidates'){opts.satProbeCandidates=true;continue;}
       if(key==='--sat-probe'){opts.satProbe=true;continue;}
-      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [--hub-reader split|merged] [--hub-no-routes] [--sat-probe] [--hub-decoys N] [--hub-decoy-shape full|near-full] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
+      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [--hub-reader split|merged] [--hub-no-routes] [--sat-probe] [--sat-probe-candidates] [--hub-decoys N] [--hub-decoy-shape full|near-full] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
       const val=args[++i];
       if(key==='--family')opts.family=val.split(',');else if(key==='--sizes')opts.sizes=val.split(',').map(Number);
       else if(key==='--input-order')opts.inputOrder=val;

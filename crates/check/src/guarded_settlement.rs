@@ -155,6 +155,7 @@ impl GroundProgram {
                 candidates.push((cost, candidate, literal, component));
             }
         }
+        progress.candidate_probe_register(candidates.len());
         budget.charge(
             candidates
                 .len()
@@ -430,6 +431,10 @@ impl GroundProgram {
                 Some(position),
                 component.atoms.len(),
             );
+            // Lookahead may have skipped implied-guard discovery while another
+            // candidate waited. Diagnose only the final guard used for bounds,
+            // never an earlier preview of this same rule/occurrence/snapshot.
+            progress.candidate_probe(self, &cone, ctx, &effective, literal, budget)?;
             let reused = match &cache {
                 Some((old, _)) => cone.same_computation(old, budget)?,
                 None => false,

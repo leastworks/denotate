@@ -54,6 +54,11 @@ pub struct Condition {
     bdd: Arc<Bdd>,
 }
 impl Condition {
+    /// Read-only diagnostic encoding of an already computed function.
+    pub(crate) fn diagnostic_bdd(&self) -> &Bdd {
+        &self.bdd
+    }
+
     // Exact representation equality is a safe cache hit, not a semantic query.
     // A different layout may miss the cache; it can never create a false hit.
     pub(crate) fn same_representation(&self, other: &Self) -> bool {
@@ -309,6 +314,9 @@ impl ConditionContext {
     }
     pub fn true_condition(&self) -> Condition {
         self.yes.clone()
+    }
+    pub(crate) fn diagnostic_inputs(&self) -> impl Iterator<Item = (&GroundAtom, BddVariable)> {
+        self.inputs.iter().map(|(a, v)| (a, *v))
     }
     pub fn inputs(&self) -> impl Iterator<Item = &GroundAtom> {
         self.inputs.keys()

@@ -309,6 +309,8 @@ fn partial_and_completed_reports_preserve_logs_and_distinguish_completion() {
             "\n",
             r#"{"type":"progress","detail":{"verification":"v","satProbe":{"component":2,"state":"starting"}}}"#,
             "\n",
+            r#"{"type":"progress","detail":{"verification":"v","candidateProbe":{"round":1,"counts":{"candidates":20,"ruledOut":1,"notRuledOut":0,"unknown":0,"unexamined":19},"candidate":{"snapshot":2,"state":"ruled-out"}}}}"#,
+            "\n",
             r#"{"type":"progress","detail":{"phase":"checking","admitted":false,"ground":{"ruleInstances":8},"fold":{"retainedEvidence":{"ruleInstances":3},"residual":{"ruleInstances":9}}}}"#,
             "\n",
             r#"{"type":"progress","detail":{"verification":"v","admission":{"phase":"relevant","round":1,"guarded":{"index":1,"state":"deferred","deferred":true,"position":null,"componentAtoms":622,"liveAtoms":621}}}}"#,
@@ -342,6 +344,14 @@ fn partial_and_completed_reports_preserve_logs_and_distinguish_completion() {
     assert_eq!(probes.len(), 2);
     assert_eq!(probes[0]["probe"]["state"], "unsat");
     assert_eq!(probes[1]["probe"]["state"], "starting");
+    assert_eq!(
+        report["candidateProbes"][0]["probe"]["counts"]["unexamined"],
+        19
+    );
+    assert_eq!(
+        report["candidateProbes"][0]["probe"]["candidate"]["snapshot"],
+        2
+    );
     let guarded = report["guardedAttempts"].as_array().unwrap();
     assert_eq!(guarded.len(), 2);
     assert_eq!(guarded[0]["attempt"]["deferred"], true);

@@ -13,7 +13,8 @@ use std::{
 const HELP: &str = "Usage: just bench-den-schema [OPTIONS] [-- CHECKER_LIMITS...]\n\n\
 --out DIR                 New persistent run directory (default target/bench-den-schema/<timestamp>)\n\
 --input-order ORDER       Diagnostic BDD order: key | reverse-key | structural\n\
---sat-probe               Enable diagnostic SAT probes (limits may follow --)\n\
+--sat-probe               Enable diagnostic stable-pair probes (limits may follow --)\n\
+--sat-probe-candidates    Diagnose guarded candidates during admission\n\
 --encoding NAME           ambiguous | coverage (default) | negated | assumed\n\
 --topology NAME           independent (default) | coupled | mixed | layered\n\
 --coupling-percent N      Layered conditions with cross reads (0..100; default 50)\n\
@@ -72,7 +73,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
                 generate_only = true;
                 continue;
             }
-            "--sat-probe" => {
+            "--sat-probe" | "--sat-probe-candidates" => {
                 forwarded.push(arg);
                 continue;
             }
@@ -110,12 +111,15 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
     let flags = check_options::limit_values(&denotate_check::Limits::default());
     let mut check_flags = forwarded.iter();
     while let Some(flag) = check_flags.next() {
-        if flag == "--sat-probe" {
+        if flag == "--sat-probe" || flag == "--sat-probe-candidates" {
             continue;
         }
         if flag != "--input-order"
             && flag != "--sat-probe-timeout-ms"
             && flag != "--sat-probe-refinements"
+            && flag != "--sat-probe-candidate-limit"
+            && flag != "--sat-probe-candidate-work"
+            && flag != "--sat-probe-candidate-timeout-ms"
             && !flags.iter().any(|(f, _)| *f == flag)
         {
             return Err(
@@ -191,7 +195,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         "crossReadCount":(0..shape.reads).filter(|i|cross_read(&shape,*i).is_some()).count(),
         "layoutDepth":if shape.topology==Topology::Layered {Some(shape.depth+2)} else {None},
         "shape":{"couplingPercent":shape.coupling_percent,"fields":shape.fields,"reads":shape.reads,"depth":shape.depth,"width":shape.width,"encoding":format!("{:?}",shape.encoding).to_lowercase(),"topology":format!("{:?}",shape.topology).to_lowercase(),"overlaps":shape.overlaps,"shadowed":shape.shadowed,"wideHeads":shape.wide_heads,"producers":shape.producers,"computed":shape.computed,"catalog":shape.catalog,"catalogLayers":shape.catalog_layers},
-        "inputOrder":parsed.input_order.label(),"satProbe":{"enabled":parsed.sat_probe,"timeoutMs":parsed.sat_probe_limits.timeout.as_millis(),"maxRefinements":parsed.sat_probe_limits.max_refinements},"limits":limits,"binary":binary,"binarySha256":binary_hash,"checkArgs":check_args});
+        "candidateProbe":parsed.candidate_probe.as_ref().map(|p| json!({"timeoutMs":p.timeout.as_millis(),"maxCandidates":p.max_candidates,"maxWork":p.max_work})),"inputOrder":parsed.input_order.label(),"satProbe":{"enabled":parsed.sat_probe,"timeoutMs":parsed.sat_probe_limits.timeout.as_millis(),"maxRefinements":parsed.sat_probe_limits.max_refinements},"limits":limits,"binary":binary,"binarySha256":binary_hash,"checkArgs":check_args});
     if source_path.is_some() {
         for key in ["shape", "layout", "layoutDepth", "crossReadCount"] {
             manifest.as_object_mut().unwrap().remove(key);
@@ -264,6 +268,7 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
     let mut attempts = super::attempts::Attempts::default();
     let mut guarded = BTreeMap::new();
     let mut sat_probes = BTreeMap::new();
+    let mut candidate_probes = Vec::new();
     let mut malformed = 0;
     if let Ok(file) = fs::File::open(dir.join("memory.jsonl")) {
         for line in BufReader::new(file).lines() {
@@ -286,6 +291,11 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
                 Some("progress") => {
                     let d = &v["detail"];
                     attempts.observe(d);
+                    if d.get("candidateProbe").is_some() {
+                        candidate_probes.push(
+                            json!({"verification":d["verification"],"probe":d["candidateProbe"]}),
+                        );
+                    }
                     if let Some(component) = d["satProbe"]["component"].as_u64() {
                         sat_probes.insert(
                             format!("{}:{component:020}", d["verification"]),
@@ -346,6 +356,7 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
     let (summaries, samples) = attempts.finish();
     report["admissionAttemptSummaries"] = json!(summaries);
     report["admissionAttemptSamples"] = json!(samples);
+    report["candidateProbes"] = json!(candidate_probes);
     report["satProbes"] = json!(sat_probes.into_values().collect::<Vec<_>>());
     report["guardedAttempts"] = json!(guarded.into_values().collect::<Vec<_>>());
     report["outcomes"] = json!(outcomes);

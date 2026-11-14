@@ -533,6 +533,37 @@ real program that the current choice serves badly.
   negative upstream components rather than assuming them settled. BDD remains the
   only backend; progress-only probe results do not alter findings or exit codes.
   See [the probe policy](checker-policies.md#diagnostic-sat-probe) for bounds and scope.
+- **The guarded-candidate SAT filter relaxes support, not just the body.**
+  A reading producer r may contribute independently in either supported-model
+  copy, only under its effective settled guard G. It is never forced to fire.
+  For `h :- !p; p :- !h`, forcing `h :- true` would make p unique and hide the
+  very freedom the certificate must tolerate. The query instead requires two
+  supported models in the same G-and-W world that disagree on p. Settled upstream
+  providers retain their exact BDD conditions, so positive upstream self-support
+  cannot invent a value. Only the unresolved cone retains supported-model freedom.
+
+  Why a verified pair rules out this certificate: the candidate-relaxed upper
+  bounds cover every supported interpretation with r's contribution bounded by G;
+  their lower guarantees hold in all of them. False upper bounds therefore seed
+  sound false marks. By induction on the certificate's ranks, an exact mark built
+  from globally settled conditions and earlier marks has the same value in every
+  such interpretation. The reading producer never supplies live settling support
+  or a guarantee; it can only help rule out a body when its upper bound is false.
+  Thus a completed mark for p contradicts a pair disagreeing on p in one world.
+  This includes positive self-support in the unresolved cone, so stable-model
+  refinement would weaken the diagnostic and is deliberately omitted. A settled
+  case split cannot separate this same-world pair. UNSAT only fails to rule the
+  candidate out; it establishes neither a certificate nor existence. The scope is
+  the actual effective guard, verification and snapshot, not all future rewrites.
+
+  Queries run after final guard discovery for bounds iteration. A lookahead
+  preview can have a weaker guard when inference was deferred; its answer must
+  not be reused for the strengthened guard on the same graph snapshot.
+  The filter remains diagnostic-only. It receives aggregate time/work and a
+  candidate cap, reports unexamined candidates, and never guides admission.
+  Its active time is excluded from admission's deadline while preserving elapsed
+  checker time and cancellation. Earlier uniqueness probes still run before
+  admission and retain their separate stable-model refinement semantics.
 - **Assumptions take effect only through an explicit verification.** Assumptions are
   the domain constraints a library author chooses. When every declared assumption was
   active, declaring or importing one silently changed every check, and one obligation

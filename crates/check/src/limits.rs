@@ -286,6 +286,17 @@ impl<'a> Budget<'a> {
     pub fn tick(&mut self, phase: &'static str) -> Result<()> {
         self.charge(1, phase)
     }
+    /// Diagnostic work has its own clock. Preserve all elapsed checker time,
+    /// including on errors; cancellation is checked by both budgets.
+    pub(crate) fn excluding_time<T>(&mut self, run: impl FnOnce() -> T) -> T {
+        let start = Instant::now();
+        let result = run();
+        self.exclude_elapsed(start.elapsed());
+        result
+    }
+    fn exclude_elapsed(&mut self, elapsed: Duration) {
+        self.start += elapsed;
+    }
     pub fn remaining(&self) -> usize {
         self.limits.max_work.saturating_sub(self.work)
     }
@@ -376,5 +387,31 @@ impl From<denotate_ir::ConstructionError> for CheckError {
 impl From<denotate_ir::KeyError> for CheckError {
     fn from(e: denotate_ir::KeyError) -> Self {
         Self::Keys(e)
+    }
+}
+
+#[cfg(test)]
+mod diagnostic_clock_tests {
+    use super::*;
+    #[test]
+    fn exclusion_preserves_spent_time_and_never_resets_a_deadline() {
+        let limits = Limits {
+            timeout: Duration::from_secs(30),
+            ..Limits::default()
+        };
+        let mut budget = Budget::new(&limits);
+        // Simulate 10 seconds of admission and 100 of diagnosis. Excluding the
+        // latter must permit more admission, without erasing the former.
+        let now = Instant::now();
+        budget.start = now - Duration::from_secs(110);
+        budget.exclude_elapsed(Duration::from_secs(100));
+        assert_eq!(budget.start, now - Duration::from_secs(10));
+        budget.check("admission").unwrap();
+        budget.start -= Duration::from_secs(21);
+        budget.excluding_time(|| ());
+        assert!(matches!(
+            budget.check("admission"),
+            Err(CheckError::Deadline { .. })
+        ));
     }
 }
