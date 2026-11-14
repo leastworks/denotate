@@ -7,7 +7,7 @@ it when real programs exist, and change it on evidence.
 | Path / policy | Decision | Why |
 | --- | --- | --- |
 | Checker backend | BDD only; cached coarse BDD in editors | Predictable, canonical conditions; good warm reuse |
-| BDD input order | Semantic-key order; opt-in reverse and structural orders for diagnosis | Measure representation costs before choosing a different default |
+| BDD input order | Semantic-key order; opt-in reverse and structural orders for diagnosis | Structural order helped only synthetic name-separated shapes; under 0.5% on a production-scale program |
 | Relation-SCC grounding | Kept opt-in | Warm-run wins; not yet worth the complexity by default |
 | Fixed-fact evaluation | Shared across verifications; one retained keyed fold per session, without a byte cap | Checker limits bound the fold; retain completed work for reuse across edits and report its accounted bytes |
 | Admission rewrite order | Commit exact-coverage producer removals before cycle bounds | Avoid analysing cycles that independent support already makes redundant; preserve removals if later bounds exhaust |
@@ -65,6 +65,14 @@ recomputes with preparation; choosing a default and an edit-stability policy are
 separate work. Witness choices and rewrite-warning inventories may differ, since
 guarded candidate priorities also use BDD sizes. Conclusive semantic answers must
 agree; compare independent tiny-world oracles as well as completed workload runs.
+
+Measured outcome: structural order cut BDD work sharply on shapes whose input names
+separate co-read inputs (the zoo's guarded fan-in and ring), and changed little
+elsewhere. On a production-scale lowered program (about 30K inputs) it completes
+only with raised cutoffs (the support expansion is quadratic there) and moves BDD
+node counts by at most 0.5% in every phase; its guarded-bound storage comes from
+the number of retained conditions, not the order. Key order stays the default and
+structural order remains a diagnostic; there is no plan to change the default.
 
 ## Backend retirement
 

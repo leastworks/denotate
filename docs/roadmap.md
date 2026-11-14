@@ -269,6 +269,13 @@ cold/warm agreement unchanged; no node counts, budgets or timings as goldens.
 
 ## Small items
 
+- **Structural BDD input order** exists as a diagnostic (`--input-order structural`).
+  It cut BDD work by orders of magnitude on synthetic shapes whose input names
+  separate co-read inputs, but barely moved a production-scale program. Revisit
+  when another DSL's lowered programs show order-sensitive costs (compare with
+  `reverse-key` first). Placement should then treat derived atoms as hypergraph
+  nodes, since today's support expansion is quadratic at scale, and a default needs
+  an edit-stability policy ([checker policies](checker-policies.md#diagnostic-input-ordering)).
 - General-assumption contexts use fresh whole-program evaluation. If a real program
   demonstrates unacceptable cost, re-score before adding constraint-aware local cones
   or proving which restrictions permit the existing absent-extension shortcut; see
