@@ -1,4 +1,5 @@
-//! Guard-relative, rank-ordered settlement. A candidate is relaxed before bounds
+//! Guard-relative settlement in upstream-first component turns, ranked within
+//! each component. A candidate is relaxed before bounds
 //! are computed and cannot supply a live settling producer for its own proof.
 use crate::{
     admission_skips::{Attempt, Attempts},
@@ -8,7 +9,7 @@ use crate::{
 };
 use biodivine_lib_bdd::op_function::{and, or};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     sync::Arc,
     time::Instant,
 };
@@ -20,6 +21,9 @@ pub(crate) const EXPRESSION_DEPTH: usize = 64;
 pub(crate) const CERTIFICATE_NODES: usize = 8192;
 // Provisional scheduling only; neither the cone nor its certificate changes.
 const LOOKAHEAD: usize = 32;
+// Scheduling turns, not an operation limit. A lone component can continue;
+// otherwise four bounds candidates give way to the next upstream-ordered queue.
+pub(crate) const BOUNDS_PER_TURN: usize = 4;
 const RANK_STORAGE: usize = 16;
 // Extra discovery/preparation work after an all-deferred window, per snapshot.
 // Finish the current queue operation before testing this scheduling allowance;
@@ -37,6 +41,73 @@ impl Lookahead {
     fn finish(&mut self, budget: &Budget<'_>) {
         self.work = self.used(budget);
         self.since = None;
+    }
+}
+
+type Cost = (bool, usize, usize);
+type Candidate<'a> = (&'a ProducerSummary, &'a GroundLiteral, &'a Component);
+struct ComponentQueue<'a> {
+    // Only borrowed candidates, charged ranking metadata and at most one inferred
+    // guard per component. Prepared descriptors remain in Attempts; temporary
+    // bounds still share just one cache entry across all components.
+    queue: BTreeMap<
+        (Cost, usize),
+        (
+            &'a ProducerSummary,
+            &'a GroundLiteral,
+            &'a Component,
+            bool,
+            Option<crate::implied_guard::Inferred>,
+        ),
+    >,
+    ranked: BTreeMap<(bool, usize, usize, Cost, usize), Candidate<'a>>,
+    remaining: usize,
+    ranking: bool,
+    pending_inference: bool,
+}
+impl ComponentQueue<'_> {
+    fn new() -> Self {
+        Self {
+            queue: BTreeMap::new(),
+            ranked: BTreeMap::new(),
+            remaining: LOOKAHEAD,
+            ranking: true,
+            pending_inference: false,
+        }
+    }
+    fn nodes(&self) -> usize {
+        self.ranked.len() * RANK_STORAGE
+            + self
+                .queue
+                .values()
+                .filter_map(|(_, _, _, _, inferred)| inferred.as_ref())
+                .map(crate::implied_guard::Inferred::nodes)
+                .sum::<usize>()
+    }
+    fn release_optional(&mut self) -> usize {
+        let mut nodes = self.ranked.len() * RANK_STORAGE;
+        for ((_, _, _, cost, index), (candidate, literal, component)) in
+            std::mem::take(&mut self.ranked)
+        {
+            self.queue
+                .insert((cost, index), (candidate, literal, component, true, None));
+        }
+        // A waiting inferred guard is optional too. Keep the candidate and
+        // rediscover its guard when resumed. At most one is queued per component;
+        // scan only when that flag is set, then clear it before another eviction.
+        if self.pending_inference {
+            for (_, _, _, discover, inferred) in self.queue.values_mut() {
+                if let Some(value) = inferred.take() {
+                    nodes += value.nodes();
+                    drop(value);
+                    *discover = true;
+                    break;
+                }
+            }
+        }
+        self.pending_inference = false;
+        self.ranking = false;
+        nodes
     }
 }
 
@@ -223,32 +294,25 @@ impl GroundProgram {
         // computation (or failure key), so optional reuse cannot accumulate BDDs.
         let mut cache: Option<(Arc<BorrowedCone<'_>>, Option<Arc<BorrowedBounds<'_>>>)> = None;
         let mut cache_reason = None; // diagnostic cause travels with a reused skipped result
-        let mut queue = candidates
+        let mut queues = BTreeMap::new();
+        for (index, (cost, candidate, literal, component)) in candidates.into_iter().enumerate() {
+            queues
+                .entry(component.id)
+                .or_insert_with(ComponentQueue::new)
+                .queue
+                .insert((cost, index), (candidate, literal, component, true, None));
+        }
+        let order = crate::admission_scope::component_order(
+            self,
+            &queues.keys().copied().collect(),
+            budget,
+        )?;
+        let mut turns: VecDeque<_> = order
             .into_iter()
-            .enumerate()
-            .map(|(index, (cost, candidate, literal, component))| {
-                (
-                    (cost, index),
-                    (
-                        candidate,
-                        literal,
-                        component,
-                        true,
-                        None::<crate::implied_guard::Inferred>,
-                    ),
-                )
-            })
-            .collect::<BTreeMap<_, _>>();
+            .map(|id| queues.remove(&id).unwrap())
+            .collect();
         let mut union_cache = None;
-        let mut pending_inference = false;
-        let mut release_inference = 0;
-        // The window holds ranking metadata. Admission-local prepared descriptors
-        // can rebind cones without owning whole-round summaries or bound values.
-        // Completed proofs still own their immutable evidence.
-        let mut ranked = BTreeMap::new();
-        let mut remaining = LOOKAHEAD;
         let mut position = 0;
-        let mut ranking = true;
         let mut lookahead = Lookahead {
             work: 0,
             limit: budget.limits.max_work / 10,
@@ -258,481 +322,531 @@ impl GroundProgram {
         if let Some(limit) = attempts.lookahead_work {
             lookahead.limit = limit;
         }
-        loop {
-            *retained -= release_inference;
-            release_inference = 0;
-            lookahead.finish(budget);
-            progress.guarded_lookahead(lookahead.work, lookahead.limit);
-            let useful = ranked
-                .first_key_value()
-                .is_some_and(|((deferred, _, _, _, _), _)| !deferred);
-            let extend = ranking
-                && remaining == 0
-                && !useful
-                && !queue.is_empty()
-                && lookahead.work < lookahead.limit;
-            lookahead.since = extend.then(|| budget.used());
-            let selected = ranking && ((!extend && remaining == 0) || queue.is_empty());
-            let entry = if selected {
-                if let Some(((deferred, _, _, cost, index), value)) = ranked.pop_first() {
-                    *retained -= RANK_STORAGE;
-                    let (candidate, literal, component) = value;
-                    Some((
-                        (cost, index),
-                        (candidate, literal, component, true, None),
-                        Some(deferred),
-                    ))
-                } else if queue.is_empty() {
+        while let Some(ComponentQueue {
+            mut queue,
+            mut ranked,
+            mut remaining,
+            mut ranking,
+            mut pending_inference,
+        }) = turns.pop_front()
+        {
+            let mut turn_attempts = 0;
+            let mut release_inference = 0;
+            loop {
+                *retained -= release_inference;
+                release_inference = 0;
+                lookahead.finish(budget);
+                progress.guarded_lookahead(lookahead.work, lookahead.limit);
+                if turn_attempts >= BOUNDS_PER_TURN && !turns.is_empty() {
                     break;
+                }
+                let useful = ranked
+                    .first_key_value()
+                    .is_some_and(|((deferred, _, _, _, _), _)| !deferred);
+                let extend = ranking
+                    && remaining == 0
+                    && !useful
+                    && !queue.is_empty()
+                    && lookahead.work < lookahead.limit;
+                lookahead.since = extend.then(|| budget.used());
+                let selected = ranking && ((!extend && remaining == 0) || queue.is_empty());
+                let entry = if selected {
+                    if let Some(((deferred, _, _, cost, index), value)) = ranked.pop_first() {
+                        *retained -= RANK_STORAGE;
+                        let (candidate, literal, component) = value;
+                        Some((
+                            (cost, index),
+                            (candidate, literal, component, true, None),
+                            Some(deferred),
+                        ))
+                    } else if queue.is_empty() {
+                        break;
+                    } else {
+                        // Every preparation in the previous window failed locally.
+                        remaining = LOOKAHEAD;
+                        continue;
+                    }
                 } else {
-                    // Every preparation in the previous window failed locally.
-                    remaining = LOOKAHEAD;
+                    queue.pop_first().map(|(key, value)| (key, value, None))
+                };
+                let Some((
+                    (cost, index),
+                    (candidate, literal, component, discover, mut inferred),
+                    deferred,
+                )) = entry
+                else {
+                    break;
+                };
+                release_inference = inferred
+                    .as_ref()
+                    .map_or(0, crate::implied_guard::Inferred::nodes);
+                if inferred.is_some() && !selected {
+                    pending_inference = false;
+                }
+                if selected {
+                    remaining = LOOKAHEAD.saturating_sub(ranked.len());
+                }
+                budget.tick("guarded candidate queue")?;
+                #[cfg(test)]
+                if !attempts.batch_guarded
+                    && proofs
+                        .iter()
+                        .any(|p: &GuardedSettlementProof| p.bounds.cone.component == component.id)
+                {
                     continue;
                 }
-            } else {
-                queue.pop_first().map(|(key, value)| (key, value, None))
-            };
-            let Some((
-                (cost, index),
-                (candidate, literal, component, discover, mut inferred),
-                deferred,
-            )) = entry
-            else {
-                break;
-            };
-            release_inference = inferred
-                .as_ref()
-                .map_or(0, crate::implied_guard::Inferred::nodes);
-            if inferred.is_some() && !selected {
-                pending_inference = false;
-            }
-            if selected {
-                remaining = LOOKAHEAD.saturating_sub(ranked.len());
-            }
-            // A later component must not spend global work while this one's
-            // successful batch is still uncommitted. Keep batching independent
-            // readers within the same component; rebuild the queue after commit.
-            if proofs
-                .first()
-                .is_some_and(|p: &GuardedSettlementProof| p.bounds.cone.component != component.id)
-            {
-                break;
-            }
-            budget.tick("guarded candidate queue")?;
-            #[cfg(test)]
-            if !attempts.batch_guarded
-                && proofs
-                    .iter()
-                    .any(|p: &GuardedSettlementProof| p.bounds.cone.component == component.id)
-            {
-                continue;
-            }
-            if batch.reads(candidate.rule.id)
-                || attempts.reuse_negative(
-                    &Attempt::GuardedSettlement(candidate.rule.id, literal.term.occurrence),
-                    budget,
-                    progress,
-                )?
-            {
-                continue;
-            }
-            if discover {
-                // At most one refined candidate waits in the queue. This prevents
-                // global inference before the first proof. Others retain their
-                // ordinary priority while that candidate awaits its turn.
-                if !pending_inference || selected {
-                    progress.rule(self, "implied-guard", candidate.rule.id, index + 1);
-                    if let Some(result) = attempts.run(
-                        Attempt::ImpliedGuard(candidate.rule.id),
+                if batch.reads(candidate.rule.id)
+                    || attempts.reuse_negative(
+                        &Attempt::GuardedSettlement(candidate.rule.id, literal.term.occurrence),
+                        budget,
+                        progress,
+                    )?
+                {
+                    continue;
+                }
+                if discover {
+                    // At most one refined candidate waits in the queue. This prevents
+                    // global inference before the first proof. Others retain their
+                    // ordinary priority while that candidate awaits its turn.
+                    if !pending_inference || selected {
+                        progress.rule(self, "implied-guard", candidate.rule.id, index + 1);
+                        if let Some(result) = attempts.run(
+                            Attempt::ImpliedGuard(candidate.rule.id),
+                            &candidate.rule.head.atom,
+                            self,
+                            retained,
+                            budget,
+                            progress,
+                            |retained, budget| {
+                                crate::implied_guard::discover(
+                                    candidate,
+                                    summaries,
+                                    &producers,
+                                    union_cache.as_ref(),
+                                    ctx,
+                                    retained,
+                                    budget,
+                                )
+                            },
+                        )? {
+                            if result.cutoff {
+                                progress.cutoff(AdmissionAttemptKind::ImpliedGuard);
+                            }
+                            if let Some(next) = result.union {
+                                if let Some(old) = union_cache.replace(next) {
+                                    *retained -= old.nodes();
+                                }
+                            }
+                            inferred = result.inferred;
+                        }
+                    }
+                    let guard = inferred
+                        .as_ref()
+                        .map_or(&candidate.condition, |i| &i.condition);
+                    let actual = (guard.is_true(), guard.node_count(), cost.2);
+                    if !selected {
+                        pending_inference |= inferred.is_some();
+                        queue.insert(
+                            (actual, index),
+                            (candidate, literal, component, false, inferred),
+                        );
+                        continue;
+                    }
+                    release_inference = inferred
+                        .as_ref()
+                        .map_or(0, crate::implied_guard::Inferred::nodes);
+                }
+                if !selected && ranking {
+                    remaining = remaining.saturating_sub(1);
+                }
+                let mut effective = candidate.clone();
+                if let Some(i) = &inferred {
+                    effective.condition = i.condition.clone();
+                }
+                progress.guarded_start(
+                    self,
+                    index + 1,
+                    &candidate.rule,
+                    &literal.term.atom,
+                    deferred.unwrap_or(false),
+                    (lookahead.used(budget), lookahead.limit),
+                );
+                let mut preprocessing = None;
+                let mut preparation = Preparation::default();
+                let before_preparation = *retained;
+                let mut released_cache = 0;
+                let cone_key = Attempt::GuardedCone(candidate.rule.id, literal.term.occurrence);
+                budget.tick("guarded descriptor lookup")?;
+                let mut saved = std::mem::take(&mut attempts.prepared);
+                let mut reused_preparation = false;
+                let reuse = if let Some(old) = saved.get(&cone_key) {
+                    let bound = old
+                        .bind(
+                            self,
+                            &effective.condition,
+                            &ctx.permitted_worlds(),
+                            summaries,
+                            retained,
+                            budget,
+                        )
+                        .and_then(|cone| {
+                            if cone.is_some() && ranking && !selected {
+                                *retained =
+                                    crate::symbolic::retain(*retained, 0, RANK_STORAGE, budget)?;
+                            }
+                            Ok(cone)
+                        });
+                    match bound {
+                        Ok(Some(cone)) => {
+                            preparation = old.stats.clone();
+                            preparation.existing_nodes = before_preparation;
+                            preparation.added_nodes = cone.temporary_nodes();
+                            reused_preparation = true;
+                            progress.reused_result(AdmissionAttemptKind::GuardedPreprocessing);
+                            Some(cone)
+                        }
+                        Ok(None) => None,
+                        Err(CheckError::LimitExceeded {
+                            phase: "symbolic storage",
+                            resource: "condition nodes",
+                            ..
+                        }) => {
+                            released_cache += saved.values().map(|c| c.nodes()).sum::<usize>();
+                            saved.clear();
+                            *retained = before_preparation - released_cache;
+                            None
+                        }
+                        Err(e) => return Err(e),
+                    }
+                } else {
+                    None
+                };
+                // A miss evicts the obsolete descriptor before preparing its replacement.
+                if !reused_preparation {
+                    if let Some(old) = saved.remove(&cone_key) {
+                        released_cache += old.nodes();
+                        *retained -= old.nodes();
+                    }
+                }
+                let attempt_baseline = *retained;
+                let previously_released = released_cache;
+                let prepared = if let Some(cone) = reuse {
+                    Ok(Some(cone))
+                } else {
+                    attempts.run(
+                        cone_key.clone(),
                         &candidate.rule.head.atom,
                         self,
                         retained,
                         budget,
                         progress,
                         |retained, budget| {
-                            crate::implied_guard::discover(
-                                candidate,
-                                summaries,
-                                &producers,
-                                union_cache.as_ref(),
-                                ctx,
-                                retained,
-                                budget,
-                            )
-                        },
-                    )? {
-                        if result.cutoff {
-                            progress.cutoff(AdmissionAttemptKind::ImpliedGuard);
-                        }
-                        if let Some(next) = result.union {
-                            if let Some(old) = union_cache.replace(next) {
-                                *retained -= old.nodes();
+                            let started = Instant::now();
+                            let mut prepare =
+                                |retained: &mut usize, budget: &mut Budget<'_>, rank: bool| {
+                                    crate::guarded_bounds::prepare(
+                                        self,
+                                        component,
+                                        &effective,
+                                        &literal.term.atom,
+                                        summaries,
+                                        &producers,
+                                        ctx,
+                                        retained,
+                                        budget,
+                                        &mut preparation,
+                                    )
+                                    .and_then(|cone| {
+                                        if rank {
+                                            *retained = crate::symbolic::retain(
+                                                *retained,
+                                                0,
+                                                RANK_STORAGE,
+                                                budget,
+                                            )?;
+                                        }
+                                        Ok(cone)
+                                    })
+                                };
+                            let mut result = prepare(retained, budget, ranking && !selected);
+                            if matches!(
+                                &result,
+                                Err(CheckError::LimitExceeded {
+                                    phase: "symbolic storage",
+                                    resource: "condition nodes",
+                                    ..
+                                })
+                            ) {
+                                released_cache +=
+                                    cache.take().map_or(0, |old| {
+                                        old.1.as_ref().map_or_else(
+                                            || old.0.temporary_nodes(),
+                                            |b| b.temporary_nodes(),
+                                        )
+                                    }) + union_cache.take().map_or(0, |old| old.nodes());
+                                released_cache += saved.values().map(|c| c.nodes()).sum::<usize>();
+                                saved.clear();
+                                // Waiting components' optional ranks and guards must
+                                // yield storage too, without losing their candidates.
+                                for waiting in &mut turns {
+                                    released_cache += waiting.release_optional();
+                                }
+                                let was_ranking = ranking;
+                                // Ranking is optional too. Return waiting candidates to
+                                // their original queue and retry without its metadata.
+                                released_cache += ranked.len() * RANK_STORAGE;
+                                for ((_, _, _, cost, index), (candidate, literal, component)) in
+                                    std::mem::take(&mut ranked)
+                                {
+                                    queue.insert(
+                                        (cost, index),
+                                        (candidate, literal, component, true, None),
+                                    );
+                                }
+                                ranking = false;
+                                if released_cache > 0 || was_ranking {
+                                    // The partial cone has dropped. Optional reuse must
+                                    // yield storage to the next attempt. Retry once; keep
+                                    // all work charges and enforce the same storage cap.
+                                    *retained = before_preparation - released_cache;
+                                    result = prepare(retained, budget, false);
+                                }
                             }
-                        }
-                        inferred = result.inferred;
-                    }
+                            preprocessing = Some(started.elapsed());
+                            result
+                        },
+                    )
+                };
+                attempts.prepared = saved;
+                if matches!(&prepared, Ok(None)) {
+                    // Attempts restored its entry baseline after a local failure;
+                    // the evicted cache is no longer part of that baseline.
+                    *retained = attempt_baseline - (released_cache - previously_released);
                 }
-                let guard = inferred
-                    .as_ref()
-                    .map_or(&candidate.condition, |i| &i.condition);
-                let actual = (guard.is_true(), guard.node_count(), cost.2);
-                if !selected {
-                    pending_inference |= inferred.is_some();
-                    queue.insert(
-                        (actual, index),
-                        (candidate, literal, component, false, inferred),
-                    );
+                progress.guarded_lookahead(lookahead.used(budget), lookahead.limit);
+                progress.guarded_prepared(
+                    self,
+                    (preprocessing.is_some() || reused_preparation).then_some(&preparation),
+                    preprocessing.unwrap_or_default(),
+                    match &prepared {
+                        Ok(Some(_)) if selected => "iterating",
+                        Ok(Some(_)) => "ranked",
+                        Ok(None) => "skipped",
+                        Err(_) => "failed",
+                    },
+                );
+                if !matches!(&prepared, Ok(Some(_))) {
+                    let reason = attempts.reason(&Attempt::GuardedCone(
+                        candidate.rule.id,
+                        literal.term.occurrence,
+                    ));
+                    budget.excluding_time(|| {
+                        self.dump(
+                            progress.dump,
+                            AdmissionDumpEvent::GuardedOutcome {
+                                rule: candidate.rule.id,
+                                occurrence: literal.term.occurrence,
+                                stage: "preparation",
+                                state: if prepared.is_err() {
+                                    "failed"
+                                } else {
+                                    "skipped"
+                                },
+                                reason,
+                            },
+                        )
+                    });
+                }
+                let Some(cone) = prepared? else {
+                    if preprocessing.is_none() {
+                        progress.guarded_end(self, Default::default(), true, "skipped");
+                    }
+                    continue;
+                };
+                let dependencies = dependencies(
+                    candidate,
+                    &cone,
+                    inferred.as_ref().map(|i| &i.proof),
+                    budget,
+                )?;
+                budget.charge(
+                    dependencies.len() + batch.rules.len(),
+                    "guarded batch independence",
+                )?;
+                if !batch.accepts(candidate.rule.id, &dependencies) {
+                    *retained -= cone.temporary_nodes()
+                        + if ranking && !selected {
+                            RANK_STORAGE
+                        } else {
+                            0
+                        };
                     continue;
                 }
-                release_inference = inferred
-                    .as_ref()
-                    .map_or(0, crate::implied_guard::Inferred::nodes);
-            }
-            if !selected && ranking {
-                remaining = remaining.saturating_sub(1);
-            }
-            let mut effective = candidate.clone();
-            if let Some(i) = &inferred {
-                effective.condition = i.condition.clone();
-            }
-            progress.guarded_start(
-                self,
-                index + 1,
-                &candidate.rule,
-                &literal.term.atom,
-                deferred.unwrap_or(false),
-                (lookahead.used(budget), lookahead.limit),
-            );
-            let mut preprocessing = None;
-            let mut preparation = Preparation::default();
-            let before_preparation = *retained;
-            let mut released_cache = 0;
-            let cone_key = Attempt::GuardedCone(candidate.rule.id, literal.term.occurrence);
-            budget.tick("guarded descriptor lookup")?;
-            let mut saved = std::mem::take(&mut attempts.prepared);
-            let mut reused_preparation = false;
-            let reuse = if let Some(old) = saved.get(&cone_key) {
-                let bound = old
-                    .bind(
-                        self,
-                        &effective.condition,
-                        &ctx.permitted_worlds(),
-                        summaries,
-                        retained,
-                        budget,
-                    )
-                    .and_then(|cone| {
-                        if cone.is_some() && ranking && !selected {
-                            *retained =
-                                crate::symbolic::retain(*retained, 0, RANK_STORAGE, budget)?;
-                        }
-                        Ok(cone)
-                    });
-                match bound {
-                    Ok(Some(cone)) => {
-                        preparation = old.stats.clone();
-                        preparation.existing_nodes = before_preparation;
-                        preparation.added_nodes = cone.temporary_nodes();
-                        reused_preparation = true;
-                        progress.reused_result(AdmissionAttemptKind::GuardedPreprocessing);
-                        Some(cone)
+                // A cached negative also depends on unsuccessful guard discovery.
+                // A producer ignored today (e.g. non-exact for a negative premise)
+                // can supply a stronger guard after a later rewrite. Keep all these
+                // one-hop inputs, not only the sources of a successful inference.
+                let mut retry_dependencies = dependencies.clone();
+                for premise in &candidate.rule.body {
+                    for id in producers.get(&premise.term.atom).into_iter().flatten() {
+                        budget.tick("guarded inference retry inputs")?;
+                        retry_dependencies.insert(*id);
                     }
-                    Ok(None) => None,
-                    Err(CheckError::LimitExceeded {
-                        phase: "symbolic storage",
-                        resource: "condition nodes",
-                        ..
-                    }) => {
-                        released_cache += saved.values().map(|c| c.nodes()).sum::<usize>();
-                        saved.clear();
-                        *retained = before_preparation - released_cache;
-                        None
-                    }
-                    Err(e) => return Err(e),
                 }
-            } else {
-                None
-            };
-            // A miss evicts the obsolete descriptor before preparing its replacement.
-            if !reused_preparation {
-                if let Some(old) = saved.remove(&cone_key) {
-                    released_cache += old.nodes();
-                    *retained -= old.nodes();
-                }
-            }
-            let attempt_baseline = *retained;
-            let previously_released = released_cache;
-            let prepared = if let Some(cone) = reuse {
-                Ok(Some(cone))
-            } else {
-                attempts.run(
-                    cone_key.clone(),
-                    &candidate.rule.head.atom,
-                    self,
-                    retained,
-                    budget,
-                    progress,
-                    |retained, budget| {
-                        let started = Instant::now();
-                        let mut prepare =
-                            |retained: &mut usize, budget: &mut Budget<'_>, rank: bool| {
-                                crate::guarded_bounds::prepare(
-                                    self,
-                                    component,
-                                    &effective,
-                                    &literal.term.atom,
-                                    summaries,
-                                    &producers,
-                                    ctx,
-                                    retained,
-                                    budget,
-                                    &mut preparation,
-                                )
-                                .and_then(|cone| {
-                                    if rank {
-                                        *retained = crate::symbolic::retain(
-                                            *retained,
-                                            0,
-                                            RANK_STORAGE,
-                                            budget,
-                                        )?;
-                                    }
-                                    Ok(cone)
-                                })
-                            };
-                        let mut result = prepare(retained, budget, ranking && !selected);
-                        if matches!(
-                            &result,
-                            Err(CheckError::LimitExceeded {
-                                phase: "symbolic storage",
-                                resource: "condition nodes",
-                                ..
-                            })
-                        ) {
-                            released_cache += cache.take().map_or(0, |old| {
-                                old.1.as_ref().map_or_else(
-                                    || old.0.temporary_nodes(),
-                                    |b| b.temporary_nodes(),
-                                )
-                            }) + union_cache.take().map_or(0, |old| old.nodes());
-                            released_cache += saved.values().map(|c| c.nodes()).sum::<usize>();
-                            saved.clear();
-                            let was_ranking = ranking;
-                            // Ranking is optional too. Return waiting candidates to
-                            // their original queue and retry without its metadata.
-                            released_cache += ranked.len() * RANK_STORAGE;
-                            for ((_, _, _, cost, index), (candidate, literal, component)) in
-                                std::mem::take(&mut ranked)
-                            {
-                                queue.insert(
-                                    (cost, index),
-                                    (candidate, literal, component, true, None),
-                                );
-                            }
-                            ranking = false;
-                            if released_cache > 0 || was_ranking {
-                                // The partial cone has dropped. Optional reuse must
-                                // yield storage to the next attempt. Retry once; keep
-                                // all work charges and enforce the same storage cap.
-                                *retained = before_preparation - released_cache;
-                                result = prepare(retained, budget, false);
-                            }
-                        }
-                        preprocessing = Some(started.elapsed());
-                        result
-                    },
-                )
-            };
-            attempts.prepared = saved;
-            if matches!(&prepared, Ok(None)) {
-                // Attempts restored its entry baseline after a local failure;
-                // the evicted cache is no longer part of that baseline.
-                *retained = attempt_baseline - (released_cache - previously_released);
-            }
-            progress.guarded_lookahead(lookahead.used(budget), lookahead.limit);
-            progress.guarded_prepared(
-                self,
-                (preprocessing.is_some() || reused_preparation).then_some(&preparation),
-                preprocessing.unwrap_or_default(),
-                match &prepared {
-                    Ok(Some(_)) if selected => "iterating",
-                    Ok(Some(_)) => "ranked",
-                    Ok(None) => "skipped",
-                    Err(_) => "failed",
-                },
-            );
-            if !matches!(&prepared, Ok(Some(_))) {
-                let reason = attempts.reason(&Attempt::GuardedCone(
+                attempts.remember_dependencies(
                     candidate.rule.id,
                     literal.term.occurrence,
-                ));
-                budget.excluding_time(|| {
-                    self.dump(
-                        progress.dump,
-                        AdmissionDumpEvent::GuardedOutcome {
-                            rule: candidate.rule.id,
-                            occurrence: literal.term.occurrence,
-                            stage: "preparation",
-                            state: if prepared.is_err() {
-                                "failed"
-                            } else {
-                                "skipped"
-                            },
-                            reason,
-                        },
-                    )
-                });
-            }
-            let Some(cone) = prepared? else {
-                if preprocessing.is_none() {
-                    progress.guarded_end(self, Default::default(), true, "skipped");
-                }
-                continue;
-            };
-            let dependencies = dependencies(
-                candidate,
-                &cone,
-                inferred.as_ref().map(|i| &i.proof),
-                budget,
-            )?;
-            budget.charge(
-                dependencies.len() + batch.rules.len(),
-                "guarded batch independence",
-            )?;
-            if !batch.accepts(candidate.rule.id, &dependencies) {
-                *retained -= cone.temporary_nodes()
-                    + if ranking && !selected {
-                        RANK_STORAGE
-                    } else {
-                        0
-                    };
-                continue;
-            }
-            // A cached negative also depends on unsuccessful guard discovery.
-            // A producer ignored today (e.g. non-exact for a negative premise)
-            // can supply a stronger guard after a later rewrite. Keep all these
-            // one-hop inputs, not only the sources of a successful inference.
-            let mut retry_dependencies = dependencies.clone();
-            for premise in &candidate.rule.body {
-                for id in producers.get(&premise.term.atom).into_iter().flatten() {
-                    budget.tick("guarded inference retry inputs")?;
-                    retry_dependencies.insert(*id);
-                }
-            }
-            attempts.remember_dependencies(
-                candidate.rule.id,
-                literal.term.occurrence,
-                retry_dependencies,
-                retained,
-                budget,
-            )?;
-            if !reused_preparation {
-                attempts.keep_prepared(
-                    cone_key,
-                    crate::guarded_preparation::PreparedCone::capture(
-                        &candidate.rule.head.atom,
-                        &cone,
-                        &effective.condition,
-                        ctx.permitted_worlds(),
-                        &preparation,
-                    ),
+                    retry_dependencies,
                     retained,
                     budget,
                 )?;
-            }
-            if !selected && ranking {
-                // Compare live atoms with all atoms in the candidate's current
-                // unresolved SCC, not just the visited cone. Near-full cones are
-                // deliberately deferred too (e.g. 621/622).
-                let deferred = preparation.live_atoms.saturating_mul(10)
-                    >= component.atoms.len().saturating_mul(9);
-                progress.guarded_lookahead(lookahead.used(budget), lookahead.limit);
-                progress.guarded_order(self, deferred, None, component.atoms.len());
-                ranked.insert(
-                    (
-                        deferred,
-                        preparation.live_atoms,
-                        preparation.live_producers,
-                        cost,
-                        index,
-                    ),
-                    (candidate, literal, component),
-                );
-                *retained -= cone.temporary_nodes();
-                continue;
-            }
-            // Storage pressure may have disabled ranking in this operation.
-            // Stop charging lookahead before its immediate bounds fallback too.
-            lookahead.finish(budget);
-            progress.guarded_lookahead(lookahead.work, lookahead.limit);
-            position += 1;
-            progress.guarded_order(
-                self,
-                deferred.unwrap_or(false),
-                Some(position),
-                component.atoms.len(),
-            );
-            // Lookahead may have skipped implied-guard discovery while another
-            // candidate waited. Diagnose only the final guard used for bounds,
-            // never an earlier preview of this same rule/occurrence/snapshot.
-            budget.excluding_time(|| {
-                self.dump(
-                    progress.dump,
-                    AdmissionDumpEvent::Guarded {
-                        candidate,
-                        literal,
-                        cone: &cone,
-                        implied: inferred.as_ref().map(|i| &i.proof),
-                        before_atoms: preparation.before_atoms,
-                        before_rules: preparation.before_producers,
-                        pruning: preparation.pruning,
-                    },
-                )
-            });
-            progress.dump_cutoff.set(false);
-            progress.candidate_probe(self, &cone, ctx, &effective, literal, budget)?;
-            let reused = match &cache {
-                Some((old, _)) => cone.same_computation(old, budget)?,
-                None => false,
-            };
-            let mut iteration = None;
-            progress.rule(self, "guarded-bounds", candidate.rule.id, 0);
-            if reused {
-                *retained -= cone.temporary_nodes(); // equivalent key is unnecessary
-                if cache.as_ref().unwrap().1.is_some() {
-                    progress.reused_result(AdmissionAttemptKind::GuardedBounds);
-                } else {
-                    progress.reused(AdmissionAttemptKind::GuardedBounds, true);
-                }
-            } else {
-                if let Some((old, bounds)) = cache.take() {
-                    *retained -= bounds
-                        .as_ref()
-                        .map_or_else(|| old.temporary_nodes(), |b| b.temporary_nodes());
-                }
-                let observe = |iteration| progress.iteration(self, iteration);
-                let result = attempts.run(
-                    Attempt::GuardedBounds(candidate.rule.id, literal.term.occurrence),
-                    &candidate.rule.head.atom,
-                    self,
-                    retained,
-                    budget,
-                    progress,
-                    |retained, budget| {
-                        let started = Instant::now();
-                        let result = crate::guarded_bounds::compute(
+                if !reused_preparation {
+                    attempts.keep_prepared(
+                        cone_key,
+                        crate::guarded_preparation::PreparedCone::capture(
+                            &candidate.rule.head.atom,
                             &cone,
-                            ctx,
-                            retained,
-                            budget,
-                            progress.enabled().then_some(&observe),
-                        );
-                        iteration = Some(started.elapsed());
-                        result
+                            &effective.condition,
+                            ctx.permitted_worlds(),
+                            &preparation,
+                        ),
+                        retained,
+                        budget,
+                    )?;
+                }
+                if !selected && ranking {
+                    // Compare live atoms with all atoms in the candidate's current
+                    // unresolved SCC, not just the visited cone. Near-full cones are
+                    // deliberately deferred too (e.g. 621/622).
+                    let deferred = preparation.live_atoms.saturating_mul(10)
+                        >= component.atoms.len().saturating_mul(9);
+                    progress.guarded_lookahead(lookahead.used(budget), lookahead.limit);
+                    progress.guarded_order(self, deferred, None, component.atoms.len());
+                    ranked.insert(
+                        (
+                            deferred,
+                            preparation.live_atoms,
+                            preparation.live_producers,
+                            cost,
+                            index,
+                        ),
+                        (candidate, literal, component),
+                    );
+                    *retained -= cone.temporary_nodes();
+                    continue;
+                }
+                // Storage pressure may have disabled ranking in this operation.
+                // Stop charging lookahead before its immediate bounds fallback too.
+                lookahead.finish(budget);
+                progress.guarded_lookahead(lookahead.work, lookahead.limit);
+                position += 1;
+                turn_attempts += 1;
+                progress.guarded_order(
+                    self,
+                    deferred.unwrap_or(false),
+                    Some(position),
+                    component.atoms.len(),
+                );
+                // Lookahead may have skipped implied-guard discovery while another
+                // candidate waited. Diagnose only the final guard used for bounds,
+                // never an earlier preview of this same rule/occurrence/snapshot.
+                budget.excluding_time(|| {
+                    self.dump(
+                        progress.dump,
+                        AdmissionDumpEvent::Guarded {
+                            candidate,
+                            literal,
+                            cone: &cone,
+                            implied: inferred.as_ref().map(|i| &i.proof),
+                            before_atoms: preparation.before_atoms,
+                            before_rules: preparation.before_producers,
+                            pruning: preparation.pruning,
+                        },
+                    )
+                });
+                progress.dump_cutoff.set(false);
+                progress.candidate_probe(self, &cone, ctx, &effective, literal, budget)?;
+                let reused = match &cache {
+                    Some((old, _)) => cone.same_computation(old, budget)?,
+                    None => false,
+                };
+                let mut iteration = None;
+                progress.rule(self, "guarded-bounds", candidate.rule.id, 0);
+                if reused {
+                    *retained -= cone.temporary_nodes(); // equivalent key is unnecessary
+                    if cache.as_ref().unwrap().1.is_some() {
+                        progress.reused_result(AdmissionAttemptKind::GuardedBounds);
+                    } else {
+                        progress.reused(AdmissionAttemptKind::GuardedBounds, true);
+                    }
+                } else {
+                    if let Some((old, bounds)) = cache.take() {
+                        *retained -= bounds
+                            .as_ref()
+                            .map_or_else(|| old.temporary_nodes(), |b| b.temporary_nodes());
+                    }
+                    let observe = |iteration| progress.iteration(self, iteration);
+                    let result = attempts.run(
+                        Attempt::GuardedBounds(candidate.rule.id, literal.term.occurrence),
+                        &candidate.rule.head.atom,
+                        self,
+                        retained,
+                        budget,
+                        progress,
+                        |retained, budget| {
+                            let started = Instant::now();
+                            let result = crate::guarded_bounds::compute(
+                                &cone,
+                                ctx,
+                                retained,
+                                budget,
+                                progress.enabled().then_some(&observe),
+                            );
+                            iteration = Some(started.elapsed());
+                            result
+                        },
+                    );
+                    if result.is_err() {
+                        progress.guarded_end(self, iteration.unwrap_or_default(), false, "failed");
+                        budget.excluding_time(|| {
+                            self.dump(
+                                progress.dump,
+                                AdmissionDumpEvent::GuardedOutcome {
+                                    rule: candidate.rule.id,
+                                    occurrence: literal.term.occurrence,
+                                    stage: "bounds",
+                                    state: "failed",
+                                    reason: None,
+                                },
+                            )
+                        });
+                    }
+                    if progress.dump.is_some() {
+                        cache_reason = attempts.reason(&Attempt::GuardedBounds(
+                            candidate.rule.id,
+                            literal.term.occurrence,
+                        ));
+                    }
+                    cache = Some((cone, result?));
+                }
+                let bounds = cache.as_ref().unwrap().1.as_ref();
+                progress.guarded_end(
+                    self,
+                    iteration.unwrap_or_default(),
+                    reused || iteration.is_none(),
+                    if bounds.is_some() {
+                        "completed"
+                    } else {
+                        "skipped"
                     },
                 );
-                if result.is_err() {
-                    progress.guarded_end(self, iteration.unwrap_or_default(), false, "failed");
+                let Some(bounds) = bounds else {
+                    let reason = attempts
+                        .reason(&Attempt::GuardedBounds(
+                            candidate.rule.id,
+                            literal.term.occurrence,
+                        ))
+                        .or(cache_reason);
                     budget.excluding_time(|| {
                         self.dump(
                             progress.dump,
@@ -740,104 +854,85 @@ impl GroundProgram {
                                 rule: candidate.rule.id,
                                 occurrence: literal.term.occurrence,
                                 stage: "bounds",
-                                state: "failed",
-                                reason: None,
+                                state: "skipped",
+                                reason,
                             },
                         )
                     });
-                }
-                if progress.dump.is_some() {
-                    cache_reason = attempts.reason(&Attempt::GuardedBounds(
-                        candidate.rule.id,
-                        literal.term.occurrence,
-                    ));
-                }
-                cache = Some((cone, result?));
-            }
-            let bounds = cache.as_ref().unwrap().1.as_ref();
-            progress.guarded_end(
-                self,
-                iteration.unwrap_or_default(),
-                reused || iteration.is_none(),
-                if bounds.is_some() {
-                    "completed"
-                } else {
-                    "skipped"
-                },
-            );
-            let Some(bounds) = bounds else {
-                let reason = attempts
-                    .reason(&Attempt::GuardedBounds(
-                        candidate.rule.id,
-                        literal.term.occurrence,
-                    ))
-                    .or(cache_reason);
+                    continue;
+                };
+                progress.rule(self, "guarded-settlement", candidate.rule.id, 0);
+                let proof = attempts.proof(
+                    Attempt::GuardedSettlement(candidate.rule.id, literal.term.occurrence),
+                    &candidate.rule.head.atom,
+                    self,
+                    retained,
+                    budget,
+                    progress,
+                    Option::is_none,
+                    |retained, budget| {
+                        self.settle_guarded(
+                            candidate,
+                            literal,
+                            meaning,
+                            bounds,
+                            inferred.as_ref(),
+                            retained,
+                            budget,
+                            progress,
+                        )
+                    },
+                );
+                let reason = attempts.reason(&Attempt::GuardedSettlement(
+                    candidate.rule.id,
+                    literal.term.occurrence,
+                ));
+                let state = match &proof {
+                    Err(_) => "failed",
+                    Ok(None) => "skipped",
+                    Ok(Some(Some(_))) => "settled",
+                    Ok(Some(None)) if progress.dump_cutoff.get() => "certificate-cutoff",
+                    Ok(Some(None)) => "negative",
+                };
                 budget.excluding_time(|| {
                     self.dump(
                         progress.dump,
                         AdmissionDumpEvent::GuardedOutcome {
                             rule: candidate.rule.id,
                             occurrence: literal.term.occurrence,
-                            stage: "bounds",
-                            state: "skipped",
+                            stage: "settlement",
+                            state,
                             reason,
                         },
                     )
                 });
-                continue;
+                let proof = proof?.flatten();
+                if let Some(proof) = proof {
+                    batch.insert(candidate.rule.id, dependencies);
+                    proofs.push(proof);
+                }
+            }
+            *retained -= release_inference;
+            let state = ComponentQueue {
+                queue,
+                ranked,
+                remaining,
+                ranking,
+                pending_inference,
             };
-            progress.rule(self, "guarded-settlement", candidate.rule.id, 0);
-            let proof = attempts.proof(
-                Attempt::GuardedSettlement(candidate.rule.id, literal.term.occurrence),
-                &candidate.rule.head.atom,
-                self,
-                retained,
-                budget,
-                progress,
-                Option::is_none,
-                |retained, budget| {
-                    self.settle_guarded(
-                        candidate,
-                        literal,
-                        meaning,
-                        bounds,
-                        inferred.as_ref(),
-                        retained,
-                        budget,
-                        progress,
-                    )
-                },
-            );
-            let reason = attempts.reason(&Attempt::GuardedSettlement(
-                candidate.rule.id,
-                literal.term.occurrence,
-            ));
-            let state = match &proof {
-                Err(_) => "failed",
-                Ok(None) => "skipped",
-                Ok(Some(Some(_))) => "settled",
-                Ok(Some(None)) if progress.dump_cutoff.get() => "certificate-cutoff",
-                Ok(Some(None)) => "negative",
-            };
-            budget.excluding_time(|| {
-                self.dump(
-                    progress.dump,
-                    AdmissionDumpEvent::GuardedOutcome {
-                        rule: candidate.rule.id,
-                        occurrence: literal.term.occurrence,
-                        stage: "settlement",
-                        state,
-                        reason,
-                    },
-                )
-            });
-            let proof = proof?.flatten();
-            if let Some(proof) = proof {
-                batch.insert(candidate.rule.id, dependencies);
-                proofs.push(proof);
+            if !proofs.is_empty() {
+                // Commit before another component's preparation or proof can exhaust.
+                // Drop all queued conditions/metadata before releasing their charges.
+                let nodes = state.nodes() + turns.iter().map(ComponentQueue::nodes).sum::<usize>();
+                drop(state);
+                turns.clear();
+                *retained -= nodes;
+                break;
+            }
+            if !state.queue.is_empty() || !state.ranked.is_empty() {
+                turns.push_back(state);
             }
         }
-        *retained -= release_inference + ranked.len() * RANK_STORAGE;
         if let Some(union) = union_cache {
             *retained -= union.nodes();
         }
@@ -1174,5 +1269,96 @@ mod batch_tests {
                 "one replacement per rule"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod queue_tests {
+    use super::*;
+    use crate::test_support::rewrites::{atom, rel, rule, summaries};
+    use denotate_ir::Corpus;
+
+    #[test]
+    fn evicted_waiting_guard_is_reconstructed_without_losing_its_candidate() {
+        let mut c = Corpus::new();
+        let x = rel(&mut c, "x", true);
+        let a = rel(&mut c, "a", false);
+        let b = rel(&mut c, "b", false);
+        let source = rule(&mut c, a, &[(b, true)]);
+        rule(&mut c, b, &[(x, false)]);
+        rule(&mut c, b, &[(a, true)]);
+        let l = Limits::default();
+        let p = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+        let m = p.symbolic(&l).unwrap();
+        let summaries = summaries(&p, &m, &l);
+        let candidate = summaries
+            .values()
+            .find(|s| s.rule.source == source)
+            .unwrap();
+        let mut producers = BTreeMap::<_, Vec<_>>::new();
+        for s in summaries.values() {
+            producers
+                .entry(&s.rule.head.atom)
+                .or_default()
+                .push(s.rule.id);
+        }
+        let mut retained = 0;
+        let mut budget = Budget::new(&l);
+        let mut discovered = crate::implied_guard::discover(
+            candidate,
+            &summaries,
+            &producers,
+            None,
+            m.context(),
+            &mut retained,
+            &mut budget,
+        )
+        .unwrap();
+        if let Some(union) = discovered.union.take() {
+            let nodes = union.nodes();
+            drop(union);
+            retained -= nodes;
+        }
+        let inferred = discovered.inferred.take().expect("a requires !x");
+        let worlds = [vec![], vec![atom(x)]];
+        let observations = |guard: &Condition| {
+            worlds
+                .iter()
+                .map(|w| m.context().evaluate(guard, w.iter().cloned(), &l).unwrap())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(observations(&inferred.condition), [true, false]);
+        let key = ((false, inferred.condition.node_count(), 2), 0);
+        let mut waiting = ComponentQueue::new();
+        waiting.queue.insert(
+            key,
+            (
+                candidate,
+                &candidate.rule.body[0],
+                p.component_for(&atom(a)).unwrap(),
+                false,
+                Some(inferred),
+            ),
+        );
+        waiting.pending_inference = true;
+        retained -= waiting.release_optional();
+        assert_eq!(retained, 0, "only the saved guard owned these charges");
+        assert_eq!(waiting.nodes(), 0);
+        let (candidate, _, _, discover, saved) = waiting.queue.get(&key).unwrap();
+        assert!(*discover && saved.is_none());
+        let restored = crate::implied_guard::discover(
+            candidate,
+            &summaries,
+            &producers,
+            None,
+            m.context(),
+            &mut retained,
+            &mut budget,
+        )
+        .unwrap();
+        assert_eq!(
+            observations(&restored.inferred.unwrap().condition),
+            [true, false]
+        );
     }
 }

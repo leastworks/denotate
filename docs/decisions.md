@@ -479,7 +479,23 @@ The file intentionally retains program names and is not an anonymized export.
   Interrupted graph commits remain atomic. More graph rebuilds and changes to
   warnings made unnecessary by earlier settlement are accepted trade-offs for
   preserving progress. Shared preparation and global exhaustion still stop;
-  enforced work sharing and guarded-candidate turns remain separate scheduling work.
+  enforced work sharing remains separate scheduling work.
+- **Guarded attempts take upstream-first component turns.** On a three-component
+  production chain, global cone ranking spent nearly the whole round on the large
+  downstream component while its two providers barely ran. Component dependency
+  order now takes priority over candidate cost, with size/order ties. Within a
+  component the existing ranking, deferral and lookahead stay intact. Four bounds
+  candidates per turn allow small batches but return control to other components
+  even when the upstream cannot settle. A lone component can continue directly.
+  Successful batches still commit before work crosses the component boundary.
+
+  Queues resume within their immutable snapshot; commits rebuild all scheduling.
+  Waiting ranks and inferred guards remain charged and can be evicted without
+  losing candidates; the bounds cache stays one entry. The
+  extended-lookahead allowance is shared across the snapshot. This is scheduling
+  by attempts, not a work share: a single long operation or preprocessing sequence
+  can still exhaust globally. No proof criterion, admission limit or within-attempt
+  cancellation behavior changes.
 - **Retry coverage and removal only when their summary inputs can change.**
   A rewrite preserves meaning under the selected assumptions W, but can change
   unrestricted conditions outside W (for example, dropping `!value(b)` from

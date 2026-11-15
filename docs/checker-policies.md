@@ -490,9 +490,24 @@ component IDs do not survive a commit. This can cost more graph rebuilds than a
 global batch, but preserves completed upstream work if a later component exhausts.
 Within each component, rule order and proof criteria are unchanged. Earlier
 settlement can make a later rewrite unnecessary, so warning sets can change.
-Guarded candidates retain their existing ranking, but a successful batch commits
-before starting work on a different component. Independent readers within the
-same component can still share a batch.
+Guarded candidates use the same provider-first ordering of their components,
+then the existing guard/cone ranking within each component. Each component gets
+up to **four bounds candidates per turn** before the next waiting component runs;
+after the last component, the first resumes its remaining queue. A lone component
+continues without a switch. Four is provisional: it permits small independent
+batches while limiting how many attempts delay another component. A successful
+batch commits before crossing a component boundary. Independent readers within
+the same component can still share a batch.
+
+Turn slots count actual bounds-candidate positions, including reused bounds and
+local failures. Cached-negative lookups and preprocessing do not consume slots.
+Each component keeps its ranking window and at most one waiting inferred guard,
+charged to existing storage. The extended-lookahead work allowance remains shared
+across the whole snapshot, not renewed per turn. Optional ranks and saved inferred
+guards in waiting queues can be evicted on storage pressure, returning candidates
+for ranking or guard discovery; this never discards a proof. The temporary bounds cache still has
+one entry shared across components. Progress positions remain global to the
+guarded pass and reveal the component order and resumption.
 
 If a component's pass runs out of condition storage outside the existing narrower
 attempt recovery, its temporary coverage/bounds and pending proofs are dropped
@@ -504,8 +519,9 @@ polarity, including old SCC members. Completed admission can reuse these explici
 skips, as with other local failures. A guarded certificate's retention failure is
 likewise local to its attempt, preserving earlier independent certificates.
 Shared preparation storage, global work, deadlines and cancellation still stop
-the phase. No allowance or within-attempt yield is added. Global guarded-candidate
-ranking remains unchanged; per-component turns are separate work.
+the phase. No allowance or within-attempt yield is added: a single operation or a
+long preprocessing sequence can still spend the global work allowance. Enforced
+work sharing remains separate work.
 
 After cheap removals have no batch to commit, a recursive component with a
 non-exact candidate and exact head coverage can use strengthened bounds. Its lower

@@ -242,6 +242,12 @@ and `state` (`preprocessing`, `ranked`, `deferred`, `iterating`, `completed`,
 used by ranking. `deferred` records whether ranking classified the cone as full or
 nearly full; it remains true if the candidate later runs. `position` is its
 one-based bounds-attempt order within that guarded pass, or null while waiting.
+Components take upstream-first turns of at most four such positions while other
+components wait; returning to a component continues its queue. Bounds reuse and
+local failure count toward a turn; preprocessing does not. A successful batch
+commits before the next component runs. These are scheduling turns, not yields
+inside a long operation. Existing component/round fields and global `position`
+show the order without a new progress event or status field.
 `index` remains the original candidate identity within the round; it is not the
 execution order. `lookaheadWork` counts charged discovery/preparation work beyond
 all-deferred windows in this snapshot, including failures and descriptor reuse;

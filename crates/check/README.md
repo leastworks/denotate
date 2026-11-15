@@ -54,7 +54,15 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    producer stays relaxed. Rebuilt cones retain transitive pruning sources as
    separate owned evidence. Optional size/BDD/storage failure uses the old cone;
    global work, deadlines and cancellation propagate. Preprocessing is lazy and charged;
-   guards with smaller estimates run first. A single snapshot-local entry reuses
+   components take upstream-first turns of at most four bounds candidates, with
+   size/order ties. Within each component the existing guard/cone ranking and
+   lookahead apply. Waiting queues keep their ranking metadata; storage pressure
+   can release it and saved inferred guards without losing candidates. Guards are
+   rediscovered when those candidates resume. A lone component
+   continues without a switch. Bounds reuse and local skips consume a turn slot,
+   while preparation and cached-negative lookups do not. A single attempt can
+   still spend the global allowance; there is no within-attempt yield.
+   A single snapshot-local entry reuses
    only identical computations, including failures, never a failure under a
    broader guard. Conditions and cache metadata are charged and released.
    Temporary cones borrow already-accounted round summaries and store explicit

@@ -364,3 +364,77 @@ fn guarded_proofs_commit_before_work_moves_to_another_component() {
         "a guarded batch cannot span components"
     );
 }
+
+#[test]
+fn guarded_turns_are_upstream_first_and_a_stuck_provider_does_not_starve_readers() {
+    use crate::guarded_settlement::BOUNDS_PER_TURN;
+    let mut c = Corpus::new();
+    let flag = rel(&mut c, "flag", true);
+    // Declare the smaller consumer first; its guard also gives it a cheaper
+    // old global rank. The dependency order must take priority over both.
+    let down = (0..6)
+        .map(|i| rel(&mut c, &format!("down{i}"), false))
+        .collect::<Vec<_>>();
+    let up = (0..8)
+        .map(|i| rel(&mut c, &format!("up{i}"), false))
+        .collect::<Vec<_>>();
+    for i in 0..up.len() {
+        rule(&mut c, up[i], &[(up[(i + 1) % up.len()], true)]);
+    }
+    for i in 0..down.len() {
+        let mut body = vec![(down[(i + 1) % down.len()], true)];
+        if i == 0 {
+            body.extend([(flag, false), (up[0], false)]);
+        }
+        rule(&mut c, down[i], &body);
+    }
+    let l = Limits::default();
+    let raw = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+    let meaning = raw.symbolic(&l).unwrap();
+    let summaries = summaries(&raw, &meaning, &l);
+    let events = RefCell::new(Vec::new());
+    let observe = |e: &AdmissionProgress| events.borrow_mut().push(e.clone());
+    let reporter = AdmissionReporter::new(Some(&observe));
+    let mut attempts = Attempts::default();
+    let mut retained = 0;
+    let proofs = raw
+        .guarded_settlements(
+            &meaning,
+            &summaries,
+            &summaries.keys().copied().collect(),
+            &mut retained,
+            &mut Budget::new(&l),
+            &reporter,
+            &mut attempts,
+        )
+        .unwrap();
+    assert!(proofs.is_empty(), "the fixture is genuinely unresolved");
+    assert_eq!(
+        retained,
+        attempts.nodes(),
+        "waiting ranks and temporary bounds are released"
+    );
+    let order = events
+        .borrow()
+        .iter()
+        .filter_map(|e| e.guarded.as_ref())
+        .filter_map(|g| g.position.map(|position| (position, g.head.clone())))
+        .collect::<BTreeMap<_, _>>()
+        .into_values()
+        .collect::<Vec<_>>();
+    assert_eq!(order.len(), up.len() + down.len());
+    let is_up = |a: &GroundAtom| up.contains(&a.relation);
+    assert!(order[..BOUNDS_PER_TURN].iter().all(is_up));
+    assert!(
+        order[BOUNDS_PER_TURN..2 * BOUNDS_PER_TURN]
+            .iter()
+            .all(|a| !is_up(a))
+    );
+    assert!(
+        order[2 * BOUNDS_PER_TURN..3 * BOUNDS_PER_TURN]
+            .iter()
+            .all(is_up),
+        "the provider resumes from its waiting candidates on the next turn"
+    );
+    assert!(order.iter().any(|a| a.relation == down[0]));
+}

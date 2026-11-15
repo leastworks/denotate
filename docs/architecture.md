@@ -94,6 +94,10 @@ schedule. Pending proof storage can be released only with its owning batch, neve
 with shared summaries or committed evidence. A failed batch drops its values before
 restoring storage accounting; computation is not refunded. Its retry identity uses
 a representative atom and the existing pre-commit reader closure, not an SCC ID.
+Guarded candidates take upstream-first component turns, preserving each component's
+ranking queue between turns. These queues and their component handles live only
+within one immutable snapshot; every successful commit rebuilds them. Prepared
+descriptors retain their existing explicit dependency validation across snapshots.
 Logical downstream exhaustion is separate from
 admission exhaustion: the completed cycle result and the optional downstream
 incomplete marker are reused together under identical logical limits. Presentation

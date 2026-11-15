@@ -215,16 +215,40 @@ verification second{assumptions:[];obligations:[clean];}";
         max_bdd_nodes: 128,
         ..Limits::default()
     };
+    let edited = base.replace("fails0():-ready0()", "fails0():-priority0()");
+    guarded_edits_agree(base, edited, limits);
+}
+
+#[test]
+fn guarded_component_chain_agrees_fresh_cold_warm_and_after_upstream_edits() {
+    let mut base = String::from("relation bad();\n");
+    for prefix in ["up", "mid"] {
+        base += &format!(
+            "input {prefix}_kind(); input {prefix}_ready(); input {prefix}_priority();
+relation {prefix}_booked(); relation {prefix}_fails(); relation {prefix}_claim();
+relation {prefix}_inspected(); relation {prefix}_held(); relation {prefix}_cleared();
+{prefix}_booked():-{prefix}_kind(),{prefix}_cleared();
+{prefix}_fails():-{prefix}_ready(),!{prefix}_booked();
+{prefix}_claim():-!{prefix}_kind(),!{prefix}_fails();
+{prefix}_inspected():-{prefix}_kind(); {prefix}_inspected():-{prefix}_claim();
+{prefix}_held():-{prefix}_priority(),{prefix}_inspected();
+{prefix}_cleared():-{prefix}_ready(),!{prefix}_held();\n"
+        );
+    }
+    base += "mid_booked():-mid_kind(),up_claim();
+obligation clean:empty(bad);
+verification first{assumptions:[];obligations:[clean];}
+verification second{assumptions:[];obligations:[clean];}";
+    let edited = base.replace("up_fails():-up_ready()", "up_fails():-up_priority()");
+    guarded_edits_agree(base, edited, Limits::default());
+}
+
+fn guarded_edits_agree(base: String, edited: String, limits: Limits) {
     let ops = (&limits).into();
     let mut warm = Session::default();
-    for (version, text) in [
-        base.clone(),
-        format!("// moved\n{base}"),
-        base.replace("fails0():-ready0()", "fails0():-priority0()"),
-        base,
-    ]
-    .into_iter()
-    .enumerate()
+    for (version, text) in [base.clone(), format!("// moved\n{base}"), edited, base]
+        .into_iter()
+        .enumerate()
     {
         let file = SourceFile::new(format!("file:///v{version}/ring.den"), version as u64, text);
         let p = load(

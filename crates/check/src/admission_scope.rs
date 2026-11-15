@@ -27,17 +27,11 @@ impl AdmissionScope {
                 .or_default()
                 .insert(*id);
         }
-        let mut levels = BTreeMap::new();
-        // Graph analysis numbers every provider before its consumers.
-        for id in &self.cone.components {
-            let c = p.component(*id).expect("scoped component");
-            budget.charge(1 + c.dependencies.len(), "component schedule")?;
-            let level = c.dependencies.iter().map(|d| levels[d]).max().unwrap_or(0);
-            levels.insert(*id, level + usize::from(groups.contains_key(id)));
-        }
-        let mut groups = groups.into_iter().collect::<Vec<_>>();
-        groups.sort_by_key(|(id, _)| (levels[id], p.components[id.index].atoms.len(), *id));
-        Ok(groups)
+        let order = component_order(p, &groups.keys().copied().collect(), budget)?;
+        Ok(order
+            .into_iter()
+            .map(|id| (id, groups.remove(&id).unwrap()))
+            .collect())
     }
 
     pub fn build(
@@ -115,4 +109,32 @@ impl AdmissionScope {
         }
         Ok(Self { targets, cone })
     }
+}
+
+/// Provider-first target levels through all intervening components. The same
+/// ordering serves ordinary passes and guarded turns, within one snapshot only.
+pub(crate) fn component_order(
+    p: &GroundProgram,
+    targets: &BTreeSet<ComponentId>,
+    budget: &mut Budget<'_>,
+) -> Result<Vec<ComponentId>> {
+    let mut ancestors = BTreeSet::new();
+    let mut pending = targets.iter().copied().collect::<Vec<_>>();
+    while let Some(id) = pending.pop() {
+        budget.tick("component schedule")?;
+        if ancestors.insert(id) {
+            pending.extend(&p.components[id.index].dependencies);
+        }
+    }
+    let mut levels = BTreeMap::new();
+    // Graph analysis numbers every provider before its consumers.
+    for id in ancestors {
+        let c = &p.components[id.index];
+        budget.charge(1 + c.dependencies.len(), "component schedule")?;
+        let level = c.dependencies.iter().map(|d| levels[d]).max().unwrap_or(0);
+        levels.insert(id, level + usize::from(targets.contains(&id)));
+    }
+    let mut order = targets.iter().copied().collect::<Vec<_>>();
+    order.sort_by_key(|id| (levels[id], p.components[id.index].atoms.len(), *id));
+    Ok(order)
 }

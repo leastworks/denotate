@@ -136,11 +136,13 @@ fn guarded_settlement_does_not_unfold_unresolved_self_support() {
 fn all_deferred_candidates_still_attempt_bounds_and_release_the_window() {
     // More candidates than a lookahead window, none with a useful guard.
     let mut c = Corpus::new();
-    for i in 0..40 {
-        let a = rel(&mut c, &format!("a{i}"), false);
-        let b = rel(&mut c, &format!("b{i}"), false);
-        rule(&mut c, a, &[(b, true)]);
-        rule(&mut c, b, &[(a, true)]);
+    // One component: windows are now local to each component, so independent
+    // two-atom cycles would all fit without extended lookahead.
+    let ring = (0..80)
+        .map(|i| rel(&mut c, &format!("a{i}"), false))
+        .collect::<Vec<_>>();
+    for i in 0..ring.len() {
+        rule(&mut c, ring[i], &[(ring[(i + 1) % ring.len()], true)]);
     }
     let l = Limits::default();
     let p = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
@@ -634,19 +636,23 @@ fn independent_readers_share_a_snapshot_and_match_sequential_and_uncached_models
 }
 
 #[test]
-fn extended_preparation_failure_evicts_optional_storage_and_keeps_other_candidates() {
+fn preparation_failure_evicts_waiting_component_ranks_and_keeps_candidates() {
     let mut c = Corpus::new();
     let mut sources = BTreeSet::new();
     let mut small = BTreeSet::new();
-    for i in 0..32 {
-        let a = rel(&mut c, &format!("a{i}"), false);
-        let b = rel(&mut c, &format!("b{i}"), false);
-        sources.insert(rule(&mut c, a, &[(b, true)]));
-        rule(&mut c, b, &[(a, true)]);
-        small.insert(atom(a));
+    let ring = (0..64)
+        .map(|i| rel(&mut c, &format!("a{i}"), false))
+        .collect::<Vec<_>>();
+    for i in 0..ring.len() {
+        let r = rule(&mut c, ring[i], &[(ring[(i + 1) % ring.len()], true)]);
+        if i % 2 == 0 {
+            sources.insert(r);
+            small.insert(atom(ring[i]));
+        }
     }
-    // This larger cone comes after the first all-deferred window. Even after
-    // evicting optional descriptors it cannot fit; the next small one can.
+    // The first component retains waiting ranked candidates after its turn.
+    // This larger component cannot fit even after evicting optional descriptors
+    // and every component's ranking metadata. The first must still resume.
     let chain = (0..4096)
         .map(|i| rel(&mut c, &format!("large{i}"), false))
         .collect::<Vec<_>>();
@@ -697,10 +703,22 @@ fn extended_preparation_failure_evicts_optional_storage_and_keeps_other_candidat
         .filter_map(|e| e.guarded.as_ref())
         .find(|g| g.head == atom(chain[0]) && g.state == "skipped")
         .unwrap();
-    assert!(
-        failed.lookahead_work > 0,
-        "failure occurs in the extended window"
-    );
+    let failure_position = events
+        .iter()
+        .position(|e| {
+            e.guarded
+                .as_ref()
+                .is_some_and(|g| g.head == atom(chain[0]) && g.state == "skipped")
+        })
+        .unwrap();
+    for part in [&events[..failure_position], &events[failure_position + 1..]] {
+        assert!(
+            part.iter()
+                .filter_map(|e| e.guarded.as_ref())
+                .any(|g| g.state == "completed" && small.contains(&g.head)),
+            "other candidates run before the failure and resume afterwards"
+        );
+    }
     assert!(
         failed.existing_condition_nodes.unwrap() > 0,
         "waiting descriptors occupy storage"
