@@ -32,6 +32,16 @@ operation may not expose an exact count; no count is fabricated. Counts can incl
 rejected demand, and an effective ceiling can be tightened by remaining work/storage
 or backend capacity. These diagnostics do not change accounting or semantic outcomes.
 
+## IR construction
+
+Constant duplicate validation uses an ordered name set per namespace/sort pair,
+rather than scanning all earlier constants for every declaration. This replaces
+quadratic construction work with logarithmic lookup in the relevant name set.
+The index stores one additional owned name per constant and does not determine
+declaration order, occurrence IDs or semantic keys. Error precedence and duplicate
+rules are unchanged. This is construction bookkeeping, with no change to checker
+budgets or deadline polling.
+
 ## Diagnostic input ordering
 
 `just check-den ROOT --input-order key|reverse-key|structural` selects a BDD

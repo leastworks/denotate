@@ -339,6 +339,8 @@ pub struct Corpus {
     next: usize,
     sorts: BTreeMap<SortId, Sort>,
     constants: BTreeMap<ConstantId, Constant>,
+    // Duplicate validation only; declaration order and IDs stay in `constants`.
+    constant_names: BTreeMap<(Namespace, SortId), BTreeSet<String>>,
     relations: BTreeMap<RelationId, Relation>,
     // Generated relation display names are not members of the frontend namespace.
     generated_relations: BTreeSet<RelationId>,
@@ -372,6 +374,7 @@ impl Default for Corpus {
             next: 0,
             sorts: BTreeMap::new(),
             constants: BTreeMap::new(),
+            constant_names: BTreeMap::new(),
             relations: BTreeMap::new(),
             generated_relations: BTreeSet::new(),
             rules: BTreeMap::new(),
@@ -559,9 +562,11 @@ impl Corpus {
         let name = name.into();
         self.require_sort(sort)?;
         named(&name, "constant")?;
-        if self
-            .constants()
-            .any(|c| c.sort == sort && c.name == name && self.namespace(c.id) == Some(&namespace))
+        if !self
+            .constant_names
+            .entry((namespace.clone(), sort))
+            .or_default()
+            .insert(name.clone())
         {
             return Err(ConstructionError::DuplicateName {
                 kind: "constant in sort",
@@ -1228,3 +1233,6 @@ impl Corpus {
         Ok(id)
     }
 }
+
+#[cfg(test)]
+mod tests;

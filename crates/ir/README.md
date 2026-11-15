@@ -15,6 +15,11 @@ sort mismatches, inconsistent variable sorts, unsafe head or negative variables,
 input definitions and invalid grouping columns. Variables are rule-local; duplicate
 authored facts keep separate occurrences.
 
+Constant names are unique within their owning namespace and sort identity. The
+same name is allowed in another namespace or another sort. A private ordered name
+index handles duplicate validation. IDs and enumeration still follow construction
+order; index order is not exposed. Rejected declarations consume no occurrence IDs.
+
 - **Namespaces.** `*_in` constructors take a `Namespace` path of decoded, non-empty
   segments (`Namespace::new(["billing", "invoices"])?`, which differs from the single
   segment `"billing::invoices"`); `Namespace::default()` is global. Rules and generated
