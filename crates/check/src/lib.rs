@@ -28,7 +28,10 @@ mod profile;
 pub use profile::*;
 mod guarded_bounds;
 mod guarded_settlement;
-pub use guarded_bounds::{GuardedBounds, GuardedCone, GuardedProducer};
+pub use guarded_bounds::{
+    DeadReason as GuardedDeadReason, GuardedBounds, GuardedCone, GuardedProducer,
+    Pruning as GuardedPruning,
+};
 mod local;
 mod request;
 mod rewrite;

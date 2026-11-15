@@ -11,12 +11,14 @@ use std::{
     ops::Deref,
     sync::Arc,
 };
+mod prune;
+pub use prune::{DeadReason, Pruning};
 
 #[derive(Debug, Clone)]
 pub struct GuardedProducer<S = Arc<ProducerSummary>> {
     /// Unmasked, immutable summary at the certificate's snapshot.
     pub summary: S,
-    /// Whether its settled guard intersects this cone's domain.
+    /// Whether this producer remains possible under the cone's domain.
     pub live: bool,
 }
 impl<S: Deref<Target = ProducerSummary>> Deref for GuardedProducer<S> {
@@ -35,21 +37,36 @@ pub struct GuardedCone<S = Arc<ProducerSummary>> {
     pub atoms: Vec<GroundAtom>,
     /// Dead producers remain evidence, but their premises do not extend the cone.
     pub producers: Vec<GuardedProducer<S>>,
+    /// Support for deadness propagated through premises, outside the rebuilt cone.
+    pub pruning: Pruning<S>,
 }
 impl<S: Deref<Target = ProducerSummary>> GuardedCone<S> {
+    pub(crate) fn summaries(&self) -> impl Iterator<Item = &ProducerSummary> {
+        self.producers
+            .iter()
+            .map(|p| &**p)
+            .chain(self.pruning.sources.iter().map(|p| &**p))
+    }
     pub(crate) fn temporary_nodes(&self) -> usize {
         // Charge cache/key metadata too, conservatively as condition-node slots.
         // Summaries are borrowed from the already-accounted round.
-        self.domain.node_count() + self.atoms.len() + 2 * self.producers.len() + 1
+        self.domain.node_count()
+            + self.atoms.len()
+            + 2 * self.producers.len()
+            + 1
+            + self.pruning.temporary_nodes()
     }
     pub(crate) fn nodes(&self) -> usize {
         // A committed certificate outlives the round. Keep conservative ownership
         // charges, including individually shared summaries, on that proof.
-        self.temporary_nodes() + self.producers.iter().map(|p| p.nodes()).sum::<usize>()
+        self.temporary_nodes() + self.summaries().map(ProducerSummary::nodes).sum::<usize>()
     }
     pub(crate) fn same_computation(&self, other: &Self, budget: &mut Budget<'_>) -> Result<bool> {
         budget.charge(
-            self.atoms.len() + self.producers.len() + self.domain.node_count(),
+            self.atoms.len()
+                + self.producers.len()
+                + self.domain.node_count()
+                + self.pruning.temporary_nodes(),
             "guarded cache lookup",
         )?;
         Ok(self.snapshot == other.snapshot
@@ -57,6 +74,7 @@ impl<S: Deref<Target = ProducerSummary>> GuardedCone<S> {
             && self.relaxed_rule == other.relaxed_rule
             && self.atoms == other.atoms
             && self.domain.same_representation(&other.domain)
+            && self.pruning.reasons == other.pruning.reasons
             && self
                 .producers
                 .iter()
@@ -115,6 +133,7 @@ impl BorrowedBounds<'_> {
                 relaxed_rule: self.cone.relaxed_rule,
                 atoms: self.cone.atoms.clone(),
                 producers,
+                pruning: self.cone.pruning.owned(budget)?,
             }),
             conditions: self.conditions.clone(),
             guarantees: self.guarantees.clone(),
@@ -132,6 +151,9 @@ pub(crate) struct Preparation {
     pub live_producers: usize,
     pub existing_nodes: usize,
     pub added_nodes: usize,
+    pub before_atoms: Option<usize>,
+    pub before_producers: Option<usize>,
+    pub pruning: Option<&'static str>,
 }
 
 pub(crate) fn prepare<'a>(
@@ -152,7 +174,8 @@ pub(crate) fn prepare<'a>(
     };
     let result = prepare_inner(
         program, component, candidate, root, summaries, producers, ctx, retained, budget, stats,
-    );
+    )
+    .and_then(|cone| prune::prepare(cone, root, ctx, retained, budget, stats));
     stats.added_nodes = retained.saturating_sub(stats.existing_nodes);
     result
 }
@@ -231,6 +254,7 @@ fn prepare_inner<'a>(
         relaxed_rule,
         atoms: atoms.into_iter().collect(),
         producers: selected.into_values().collect(),
+        pruning: Pruning::default(),
     }))
 }
 

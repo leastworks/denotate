@@ -33,7 +33,15 @@ fn guarded_settlement_variants_preserve_models_and_notice_results() {
         "claim_fails() :- docked(), !tagged();",
         "relation never(); claim_fails() :- docked(), !tagged(), !never();",
     );
-    for text in [MAIN, BOOLEAN, PRODUCERS, HUB, &sparse, &sparse_replacement] {
+    for text in [
+        MAIN,
+        BOOLEAN,
+        PRODUCERS,
+        HUB,
+        include_str!("fixtures/guarded-chain.den"),
+        &sparse,
+        &sparse_replacement,
+    ] {
         let p = loaded(text, 0);
         let limits = Limits::default();
         let ops = (&limits).into();
@@ -506,7 +514,7 @@ fn decoy_hub(n: usize, decoys: usize, shape: &str) -> String {
 }
 
 #[test]
-fn cone_order_defers_full_and_near_full_decoys_and_agrees_fresh_cold_warm() {
+fn cone_order_uses_pruned_decoys_and_agrees_fresh_cold_warm() {
     use std::cell::RefCell;
     for shape in ["full", "near-full"] {
         let p = loaded(&decoy_hub(53, 12, shape), 0);
@@ -541,19 +549,23 @@ fn cone_order_defers_full_and_near_full_decoys_and_agrees_fresh_cold_warm() {
             .filter_map(|e| e.guarded.as_ref())
             .find(|g| g.position.is_some())
             .unwrap();
-        assert_eq!(
-            first.head.relation, reader,
-            "useful reader gets bounds before the decoys"
+        // Deadness propagation now makes some former decoys useful: ranking
+        // must prefer the reduced cone, not a particular authored reader name.
+        assert!(!first.deferred);
+        assert!(first.live_atoms.unwrap() * 10 < first.component_atoms.unwrap() * 9);
+        assert!(
+            events
+                .iter()
+                .filter_map(|e| e.guarded.as_ref())
+                .any(|g| { g.pruning == Some("complete") && g.cone_atoms < g.before_atoms })
         );
-        assert!(events.iter().filter_map(|e| e.guarded.as_ref()).any(|g| {
-            g.state == "deferred"
-                && g.position.is_none()
-                && if shape == "full" {
-                    g.live_atoms == g.component_atoms
-                } else {
-                    g.live_atoms.unwrap() + 1 == g.component_atoms.unwrap()
-                }
-        }));
+        assert!(
+            events
+                .iter()
+                .filter_map(|e| e.guarded.as_ref())
+                .filter(|g| g.deferred)
+                .all(|g| { g.live_atoms.unwrap() * 10 >= g.component_atoms.unwrap() * 9 })
+        );
         let fresh = check(&p, None);
         let mut session = Session::default();
         assert_eq!(fresh, check(&p, Some(&mut session)));
@@ -585,5 +597,41 @@ fn decoy_hub_rewrites_preserve_stable_and_supported_models() {
                 supported_models(g, &after, &world)
             );
         }
+    }
+}
+
+#[test]
+fn chain_pruning_transitive_edit_agrees_fresh_cold_and_warm() {
+    let base = include_str!("fixtures/guarded-chain.den");
+    // Direct reader/producer unchanged. Edit the settled classification behind
+    // the exact producer that justifies negative pruning, then restore it.
+    let edited = base.replace(
+        "hc_type_ok() :- declared(hazardous);",
+        "hc_type_ok() :- declared(hazardous), priority_call();",
+    );
+    let mut warm = Session::default();
+    for (version, text) in [base, &edited, base].into_iter().enumerate() {
+        let p = loaded(text, version as u64);
+        let limits = Limits::default();
+        let request = p.verification_requests(&limits).unwrap().remove(0).1;
+        let RequestPreparation::Complete(raw) = request
+            .prepare(&p.corpus, &p.keys, &(&limits).into())
+            .unwrap()
+        else {
+            panic!()
+        };
+        let prepared = raw.admit(&(&limits).into()).unwrap();
+        assert!(prepared.program().is_admitted());
+        assert!(
+            prepared
+                .program()
+                .rewrite_proofs()
+                .filter_map(|p| p.guarded_settlement())
+                .any(|p| !p.bounds.cone.pruning.sources.is_empty())
+        );
+        let fresh = check(&p, None);
+        assert_eq!(fresh, check(&p, Some(&mut Session::default())));
+        assert_eq!(fresh, check(&p, Some(&mut warm)));
+        assert_eq!(fresh, check(&p, Some(&mut warm)));
     }
 }

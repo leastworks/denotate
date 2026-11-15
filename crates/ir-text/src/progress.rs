@@ -181,6 +181,7 @@ impl<'a> AdmissionDetails<'a> {
                 json!({"index":g.index, "position":g.position, "deferred":g.deferred, "componentAtoms":g.component_atoms, "head":atom_text(&g.head, &**names), "premise":atom_text(&g.premise, &**names),
                     "location":self.location(g.source), "restricted":true, "coneAtoms":g.cone_atoms,
                     "liveAtoms":g.live_atoms, "coneRules":g.cone_rules, "liveRules":g.live_rules,
+                    "beforePruningAtoms":g.before_atoms, "beforePruningRules":g.before_rules, "pruning":g.pruning,
                     "domainNodes":g.domain_nodes, "existingConditionNodes":g.existing_condition_nodes,
                     "addedConditionNodes":g.added_condition_nodes, "preprocessingMs":g.preprocessing.as_secs_f64()*1000.,
                     "iterationMs":g.iteration.as_secs_f64()*1000., "reused":g.reused, "state":g.state})
@@ -361,6 +362,18 @@ pub fn admission_text(a: &Value) -> String {
             g["preprocessingMs"].as_f64().unwrap_or(0.), g["iterationMs"].as_f64().unwrap_or(0.)));
     }
     if let Some(g) = a.get("guarded").filter(|g| g.is_object()) {
+        if let Some(pruning) = g["pruning"].as_str() {
+            text.push_str(&format!(
+                "; pruning {pruning} (before: {} atoms, {} rules){}",
+                g["beforePruningAtoms"],
+                g["beforePruningRules"],
+                if pruning == "complete" {
+                    ""
+                } else {
+                    "; using original cone"
+                }
+            ));
+        }
         if g["deferred"] == true {
             text.push_str("; ranked as full/nearly full");
         }

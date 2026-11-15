@@ -4,7 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','guarded-hub','schema-layered'];
-export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full'}={}) {
+export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1}={}) {
   if (!families.includes(family) || !Number.isSafeInteger(n) || n < 1) throw Error('invalid family/positive size');
   let s = 'relation bad();\n';
   let assumptions = '';
@@ -78,7 +78,9 @@ export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,
   } else if (family==='guarded-hub') {
     if(!['split','merged'].includes(hubReader))throw Error('hub reader must be split or merged');
     if(!Number.isSafeInteger(hubDecoys)||hubDecoys<0||!['full','near-full'].includes(hubDecoyShape))throw Error('invalid hub decoys');
-    add('sort Class; const perishable, hazardous: Class; input declared(kind: Class);');
+    if (![hubWriters,hubReaders,hubValues].every(Number.isSafeInteger) || hubWriters<0 || hubReaders<1 || hubValues<1) throw Error('invalid hub chain dimensions');
+    if (hubDecoys && (hubWriters || hubReaders!==1 || hubValues!==1)) throw Error('chain dimensions and decoys are separate workloads');
+    add(`sort Class; const perishable, hazardous${Array.from({length:hubReaders-1},(_,j)=>`, reader${j+1}`).join('')}: Class; input declared(kind: Class);`);
     add('sort Lane;');
     add(`const ${Array.from({length:n},(_,i)=>`l${i}`).join(', ')}: Lane; input route(lane: Lane);`);
     add('assumption one_class: at_most_one(declared, group_by: ());');
@@ -86,13 +88,28 @@ export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,
     assumptions=hubRoutes?'one_class, one_route':'one_class';
     add('input docked(); input priority_call();');
     for(const name of ['tagged','claim_fails','hazard_claim','inspected','held','cleared'])add(`relation ${name}();`);
-    for(let i=0;i<n;i++)add(`input fa${i}(); input fb${i}(); tagged() :- route(l${i}), fa${i}(), !fb${i}(), declared(perishable), cleared();`);
+    if (hubWriters) {
+      for(let w=0;w<hubWriters;w++) {
+        add(`relation triggered${w}(); relation applies${w}(); applies${w}() :- triggered${w}(); tagged() :- applies${w}();`);
+      }
+      for(let i=0;i<n;i++) {
+        add(`relation lane_when${i}(); relation lane_use${i}(); lane_when${i}() :- declared(perishable), cleared(); lane_use${i}() :- lane_when${i}();`);
+        for(let v=0;v<hubValues;v++)add(`input fa${i}_${v}(); input fb${i}_${v}(); triggered${i%hubWriters}() :- route(l${i}), fa${i}_${v}(), !fb${i}_${v}(), lane_use${i}();`);
+      }
+    } else {
+      if(hubValues!==1)throw Error('hub values requires writer chains');
+      for(let i=0;i<n;i++)add(`input fa${i}(); input fb${i}(); tagged() :- route(l${i}), fa${i}(), !fb${i}(), declared(perishable), cleared();`);
+    }
     add('claim_fails() :- docked(), !tagged();');
     if(hubReader==='split') {
       add('relation hc_type_ok(); relation hc_read_ok(); relation hc_unsat();');
       add('hc_type_ok() :- declared(hazardous); hc_read_ok() :- !claim_fails();');
       add('hc_unsat() :- !hc_type_ok(); hc_unsat() :- !hc_read_ok(); hazard_claim() :- !hc_unsat();');
     } else add('hazard_claim() :- declared(hazardous), !claim_fails();');
+    for(let j=1;j<hubReaders;j++) {
+      add(`relation hc_type_ok${j}(); relation hc_read_ok${j}(); relation hc_unsat${j}(); relation hazard_claim${j}();`);
+      add(`hc_type_ok${j}() :- declared(reader${j}); hc_read_ok${j}() :- !claim_fails(); hc_unsat${j}() :- !hc_type_ok${j}(); hc_unsat${j}() :- !hc_read_ok${j}(); hazard_claim${j}() :- !hc_unsat${j}(); inspected() :- hazard_claim${j}();`);
+    }
     add('inspected() :- declared(perishable); inspected() :- hazard_claim();');
     add('held() :- priority_call(), inspected(); cleared() :- docked(), !held();');
     if(hubDecoys) {
@@ -279,7 +296,7 @@ function readRun(dir, size, rep) {
 export function summarize(out) {
   const config = JSON.parse(fs.readFileSync(path.join(out, 'sweep.json')));
   const { family, sizes, repeat, threshold, binary } = config;
-  const report = { threshold, repeat, sizes, inputOrder: config.inputOrder ?? 'key', hubReader: config.hubReader ?? 'split', hubRoutes: config.hubRoutes ?? true, hubDecoys: config.hubDecoys ?? 0, hubDecoyShape: config.hubDecoyShape ?? 'full', satProbe: config.satProbe ?? false, satProbeCandidates: config.satProbeCandidates ?? false, families: {} };
+  const report = { threshold, repeat, sizes, inputOrder: config.inputOrder ?? 'key', hubReader: config.hubReader ?? 'split', hubRoutes: config.hubRoutes ?? true, hubDecoys: config.hubDecoys ?? 0, hubDecoyShape: config.hubDecoyShape ?? 'full', hubWriters: config.hubWriters ?? 0, hubReaders: config.hubReaders ?? 1, hubValues: config.hubValues ?? 1, satProbe: config.satProbe ?? false, satProbeCandidates: config.satProbeCandidates ?? false, families: {} };
   for (const name of family) {
     const runs = [];
     for (const size of sizes) for (let rep = 0; rep < repeat; rep++) {
@@ -295,20 +312,20 @@ export function summarize(out) {
   return report;
 }
 
-export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3,binary='target/profiling/examples/bench_schema',samply=false,limits=[],inputOrder='key',hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',satProbe=false,satProbeCandidates=false}) {
+export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3,binary='target/profiling/examples/bench_schema',samply=false,limits=[],inputOrder='key',hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1,satProbe=false,satProbeCandidates=false}) {
   if (!['split','merged'].includes(hubReader)) throw Error('hub reader must be split or merged');
   if (!['key','reverse-key','structural'].includes(inputOrder)) throw Error('invalid input order');
   fs.mkdirSync(path.dirname(out),{recursive:true});
   fs.mkdirSync(out,{recursive:false});
-  fs.writeFileSync(path.join(out, 'sweep.json'), JSON.stringify({family, sizes, repeat, threshold, inputOrder, hubReader, hubRoutes, hubDecoys, hubDecoyShape, satProbe, satProbeCandidates, binary: path.resolve(binary)}, null, 2));
-  const report={threshold,repeat,sizes,inputOrder,hubReader,hubRoutes,hubDecoys,hubDecoyShape,satProbe,satProbeCandidates,families:{}};
+  fs.writeFileSync(path.join(out, 'sweep.json'), JSON.stringify({family, sizes, repeat, threshold, inputOrder, hubReader, hubRoutes, hubDecoys, hubDecoyShape, hubWriters, hubReaders, hubValues, satProbe, satProbeCandidates, binary: path.resolve(binary)}, null, 2));
+  const report={threshold,repeat,sizes,inputOrder,hubReader,hubRoutes,hubDecoys,hubDecoyShape,hubWriters,hubReaders,hubValues,satProbe,satProbeCandidates,families:{}};
   for(const name of family) {
     const runs=[];
     for(const size of sizes) for(let rep=0;rep<repeat;rep++) {
       const dir=path.resolve(out,`${name}-${size}-${rep}`);
       let args=['--out',dir,'--input-order',inputOrder];
       if(name==='schema-layered') args.push('--topology','layered','--fields',String(size+2),'--reads',String(size),'--depth','2','--encoding','assumed');
-      else {const input=path.resolve(out,`${name}-${size}.den`);fs.writeFileSync(input,source(name,size,{hubReader,hubRoutes,hubDecoys,hubDecoyShape}));args.push('--source',input);}
+      else {const input=path.resolve(out,`${name}-${size}.den`);fs.writeFileSync(input,source(name,size,{hubReader,hubRoutes,hubDecoys,hubDecoyShape,hubWriters,hubReaders,hubValues}));args.push('--source',input);}
       if(samply) args.push('--samply');
       if(satProbe) args.push('--sat-probe');
       if(satProbeCandidates) args.push('--sat-probe-candidates');
@@ -338,11 +355,14 @@ if(!process.execArgv.some(a=>a==='-e'||a==='--eval') && process.argv[1] && path.
       if(key==='--samply'){opts.samply=true;continue;}
       if(key==='--sat-probe-candidates'){opts.satProbeCandidates=true;continue;}
       if(key==='--sat-probe'){opts.satProbe=true;continue;}
-      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [--hub-reader split|merged] [--hub-no-routes] [--sat-probe] [--sat-probe-candidates] [--hub-decoys N] [--hub-decoy-shape full|near-full] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
+      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [--hub-reader split|merged] [--hub-no-routes] [--sat-probe] [--sat-probe-candidates] [--hub-writers N] [--hub-readers N] [--hub-values N] [--hub-decoys N] [--hub-decoy-shape full|near-full] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
       const val=args[++i];
       if(key==='--family')opts.family=val.split(',');else if(key==='--sizes')opts.sizes=val.split(',').map(Number);
       else if(key==='--input-order')opts.inputOrder=val;
       else if(key==='--hub-reader')opts.hubReader=val;
+      else if(key==='--hub-writers')opts.hubWriters=Number(val);
+      else if(key==='--hub-readers')opts.hubReaders=Number(val);
+      else if(key==='--hub-values')opts.hubValues=Number(val);
       else if(key==='--hub-decoys')opts.hubDecoys=Number(val);
       else if(key==='--hub-decoy-shape')opts.hubDecoyShape=val;
       else if(key==='--repeat')opts.repeat=Number(val);else if(key==='--threshold')opts.threshold=Number(val);else if(key==='--out')opts.out=val;

@@ -130,10 +130,32 @@ test('decoy options and deferred candidate positions survive saved reports',()=>
       const r=report.families['guarded-hub'].runs[0];
       assert.equal(r.after.admitted,true);
       const attempts=r.guardedAttempts.filter(a=>a.phase==='relevant').map(a=>a.attempt);
-      assert.ok(attempts.some(a=>a.deferred&&a.position===null));
+      assert.ok(attempts.some(a=>a.pruning==='complete'&&a.coneAtoms<a.beforePruningAtoms));
       const first=attempts.filter(a=>a.position!==null).sort((a,b)=>a.position-b.position)[0];
-      assert.equal(first.head,'hazard_claim()');
+      assert.equal(first.deferred,false);
+      assert.ok(first.liveAtoms*10<first.componentAtoms*9);
       assert.deepEqual(summarize(out),report);
     }
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('writer chains prune, admit and preserve dimensions and progress on recovery',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-chain-pruning-'));
+  try {
+    for(const hubValues of [1,2]) {
+      const out=path.join(root,`values-${hubValues}`);
+      const report=run({out,binary:'target/debug/examples/bench_schema',family:['guarded-hub'],sizes:[2],repeat:1,hubRoutes:false,hubWriters:2,hubReaders:2,hubValues,satProbeCandidates:true});
+      assert.equal(report.hubWriters,2);assert.equal(report.hubReaders,2);assert.equal(report.hubValues,hubValues);
+      const r=report.families['guarded-hub'].runs[0];
+      assert.equal(r.after.admitted,true);
+      assert.equal(r.exit,0);
+      assert.ok(r.guardedAttempts.some(({attempt:a})=>a.pruning==='complete'&&a.coneAtoms<a.beforePruningAtoms&&a.coneRules<a.beforePruningRules));
+      assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));
+      assert.deepEqual(summarize(out),report);
+    }
+    assert.throws(()=>source('guarded-hub',2,{hubWriters:-1}));
+    assert.throws(()=>source('guarded-hub',2,{hubReaders:0}));
+    assert.throws(()=>source('guarded-hub',2,{hubValues:2}));
+    assert.throws(()=>source('guarded-hub',2,{hubWriters:2,hubDecoys:1}));
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });

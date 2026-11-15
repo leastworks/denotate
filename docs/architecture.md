@@ -121,7 +121,10 @@ commits conservatively clear invocation-local negative/failed attempts, while la
 ordinary commits also detect changes through expression leaves. Presentation owns
 wording and display limits, and the CLI treats the equivalence warning as advisory.
 Temporary guarded cones borrow immutable producer summaries from the current
-round; they own only their domain, live/dead flags and traversal metadata. Bound
+round; they own only their domain, live/dead flags, pruning reasons and traversal
+metadata. Deadness propagation can cut transitive producer chains; support outside
+the rebuilt cone remains separate evidence and participates in keyed local query
+closure. Optional pruning failure retains the original cone. Bound
 values are restricted while accumulating rather than retaining masked copies for
 every producer. A successful certificate promotes only the referenced summaries
 to individually shared ownership, preserving its executable snapshot after later

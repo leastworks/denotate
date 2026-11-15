@@ -88,15 +88,33 @@ real program that the current choice serves badly.
   `GuardedBounds` certificate carries that domain and cannot be passed to the
   unrestricted removal/discharge path.
 
-  Follow dependencies backward from the candidate premise, dropping a producer's
-  edges only when its settled condition is false under G ∧ W. The reading
-  producer is relaxed before traversal: keep its guard, omit its cyclic premises,
-  exclude it from exact guarantees and never use it as a live settling producer.
-  This pruning remains valid after replacement. The retained cone is closed under
-  the relaxed operator's dependencies, so its bounds equal the full component's
-  restricted bounds. Dead producers remain certificate evidence; unresolved
-  external producers remain unknown. The supported/stable-model argument above
-  therefore applies unchanged.
+  Follow dependencies backward from the candidate premise. The reading producer
+  is relaxed before traversal: keep its guard, omit its cyclic premises, exclude
+  it from exact guarantees and never use it as a live settling producer.
+
+  **Deadness propagates before guarded bounds.** Under D = G ∧ W, a producer
+  cannot fire if its settled condition is impossible, a positive premise is
+  already dead, or a negative premise's atom is guaranteed by the union of its
+  exact producers' settled conditions. An atom becomes dead only when every
+  producer is dead. These marks are monotone; a positive cycle with no such seed
+  remains possible. Never inspect the reading producer's loop premises to kill
+  it: it remains free to fire within G, before and after the replacement.
+
+  Induction over these reasons establishes falsity in every supported
+  interpretation of that relaxed program. Rebuilding reachability without dead
+  producers' edges therefore loses no supported interpretation and cannot
+  introduce one: their bodies were already false. Full bounds on retained atoms
+  still equal the full component's restricted fixed point. No new settled
+  meaning or unrestricted bound is inferred. The guarded replacement's existing
+  supported/stable-model argument applies unchanged.
+
+  Dead producers keep their reasons, including all producers of a dead positive
+  premise and the exact sources of a negative guarantee. Transitive sources
+  outside the rebuilt cone are owned proof evidence, included in local query
+  dependency closure and full evidence expansion, never executable cone edges.
+  Pruning is optional: resource cutoffs discard the entire partial pass and use
+  the original cone without a new inconclusive result. Global work, deadlines
+  and cancellation still propagate, and spent work is not refunded.
 
   **Temporary cones retain only their own storage.** Borrow immutable producer
   summaries already charged to the current round; keep domain-relative live/dead

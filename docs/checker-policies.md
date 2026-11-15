@@ -202,6 +202,26 @@ guarantees, avoiding large intermediate unions outside the domain. Successful
 certificates own the referenced snapshot summaries individually and retain their
 conservative proof charges after the round ends. No whole old round is retained.
 The reading producer is relaxed before traversal.
+Before bounds, an optional deadness worklist propagates impossible settled
+conditions through positive premises and kills negative premises whose atoms
+are guaranteed under G ∧ W by exact producers. The reading producer's loop
+premises are never inspected for this purpose. Rebuild the cone from the requested
+premise; ranking, bounds and the candidate probe use the rebuilt cone. Proof
+sources outside it remain separately owned and charged.
+
+This pass indexes at most 65,536 atoms, producers and body-literal entries in total.
+It reserves sixteen condition-node slots per indexed item for simultaneous
+indices, queues, reasons and rebuilt metadata, plus variable-size negative-reason
+vectors and BDD guarantees. These are conservative storage charges, not heap byte
+measurements. Each negative atom's exact-producer union is built once per candidate
+and released after its readers; no pruning result or guarantee cache crosses
+candidates or snapshots. Candidate results retain the domain, component, snapshot,
+relaxed rule, rebuilt cone and reasons. A size, BDD task/node or condition-storage
+cutoff discards the pass and reports the reason, retaining the original cone.
+It adds no inconclusive result; global work, cancellation and deadlines propagate.
+The size cap and slot estimate are provisional. This pass does not eliminate the
+unrestricted bounds that run earlier, or batch replacements across rounds.
+
 Preprocessing is lazy and charged, and has its own recoverable attempt. Candidates
 with an informative guard run before unrestricted ones, then by guard node count
 and immediate producer count; ties preserve the existing order. That order now
@@ -256,7 +276,7 @@ One snapshot-local cache entry retains the latest complete bounds or failure key
 If preparing the next cone hits storage pressure, discard the optional cache and
 retry preparation once under the same cap, retaining all work charges. A repeated
 failure is the ordinary local skip. Reuse requires the same domain representation, cone, component, snapshot and
-relaxed rule (omitted when its head is outside the cone). Metadata conservatively
+relaxed rule (omitted when its head is outside the cone), and pruning reasons. Metadata conservatively
 uses condition-node storage slots as well as work charges. Different guards never
 inherit another guard's failure. Replacing an entry releases it; successful proofs
 retain their own certificates. No result cache crosses snapshots. Repeated signed

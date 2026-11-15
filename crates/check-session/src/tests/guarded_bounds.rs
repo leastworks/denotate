@@ -4,6 +4,81 @@ use denotate_ir_text::{ProgramMembership, SourceFile, load, presentation};
 use serde_json::json;
 
 #[test]
+fn pruned_transitive_sources_remain_local_query_dependencies_after_edits() {
+    let base = include_str!("../../../ir-text/tests/fixtures/guarded-chain.den")
+        .replace("obligations: [no_bad]", "obligations: [no_bad, unique]")
+        + "\nsort Mark; const left,right: Mark; relation selected(mark: Mark);\nselected(left):-hazard_claim(); selected(right):-hazard_claim();\nobligation unique:at_most_one(selected,group_by:());";
+    let edited = base.replace(
+        "hc_type_ok() :- declared(hazardous);",
+        "hc_type_ok() :- declared(hazardous), priority_call();",
+    );
+    let limits = Limits::default();
+    let ops = (&limits).into();
+    let mut warm = Session::default();
+    let mut previous = None;
+    for (version, text) in [&base, &edited, &base].into_iter().enumerate() {
+        let file = SourceFile::new("file:///chain.den", version as u64, text.clone());
+        let p = load(
+            &ProgramMembership::single("root", [file.uri.clone()]),
+            &[file],
+        )
+        .unwrap();
+        let request = p.verification_requests(&limits).unwrap().remove(0).1;
+        let run = |mut session: Option<&mut Session>| {
+            let raw = match session.as_deref_mut() {
+                Some(s) => s.prepare(&request, &p.corpus, &p.keys, &ops).unwrap(),
+                None => request.prepare(&p.corpus, &p.keys, &ops).unwrap(),
+            };
+            let RequestPreparation::Complete(raw) = raw else {
+                panic!()
+            };
+            let prepared = raw.admit(&ops).unwrap();
+            assert!(prepared.program().is_admitted());
+            assert!(
+                prepared
+                    .program()
+                    .rewrite_proofs()
+                    .filter_map(|p| p.guarded_settlement())
+                    .any(|p| !p.bounds.cone.pruning.sources.is_empty())
+            );
+            let report = match session.as_deref_mut() {
+                Some(s) => s.verify(&prepared, &ops).unwrap(),
+                None => prepared.verify_local(&ops).unwrap(),
+            };
+            let LocalCheckOutcome::Complete(report) = report else {
+                panic!()
+            };
+            let inputs: Vec<_> = report.queries.values().map(|q| q.input.clone()).collect();
+            assert!(!inputs.is_empty());
+            assert!(inputs.iter().any(|q| {
+                q.rewrites
+                    .iter()
+                    .any(|r| matches!(r.kind, KeyedRewriteKind::GuardedSettlement(_)))
+            }));
+            let shown = presentation::present_with_rewrite_detail(
+                &p,
+                &report.checked,
+                presentation::RewriteDetail::Full,
+            )
+            .unwrap();
+            let details: Vec<_> = shown.diagnostics.iter().map(|d| json!({"message":d.message,"notes":d.notes,"data":d.data(&p.keys).unwrap()})).collect();
+            (report.checked.results.value, inputs, details)
+        };
+        let fresh = run(None);
+        if let Some(previous) = previous {
+            assert_ne!(
+                fresh.1, previous,
+                "transitive support edit changes query input"
+            );
+        }
+        assert_eq!(fresh, run(Some(&mut Session::default())));
+        assert_eq!(fresh, run(Some(&mut warm)));
+        assert_eq!(fresh, run(Some(&mut warm)));
+        previous = Some(fresh.1);
+    }
+}
+
+#[test]
 fn guarded_proof_owns_its_snapshot_after_later_commits_and_local_queries() {
     let base = "input kind(); input ready(); input priority();
 relation booked(); relation fails(); relation claim(); relation inspected(); relation held(); relation cleared();

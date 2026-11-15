@@ -46,7 +46,12 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    valid under the reading rule's retained guard. Rank-ordered marks use bounds
    computed with that reading producer relaxed to its guard; it cannot justify
    itself. Bounds are restricted to G ∧ W and the premise's live dependency cone,
-   in a separate `GuardedBounds` certificate. Preprocessing is lazy and charged;
+   in a separate `GuardedBounds` certificate. An optional deadness pass first
+   propagates impossible guards through positive chains and negative premises
+   guaranteed by exact producers. Unseeded cycles remain possible; the reading
+   producer stays relaxed. Rebuilt cones retain transitive pruning sources as
+   separate owned evidence. Optional size/BDD/storage failure uses the old cone;
+   global work, deadlines and cancellation propagate. Preprocessing is lazy and charged;
    guards with smaller estimates run first. A single snapshot-local entry reuses
    only identical computations, including failures, never a failure under a
    broader guard. Conditions and cache metadata are charged and released.

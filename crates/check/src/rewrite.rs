@@ -170,8 +170,7 @@ impl RewriteProof {
             RewriteJustification::GuardedSettlement(p) => p
                 .bounds
                 .cone
-                .producers
-                .iter()
+                .summaries()
                 .map(|p| &p.rule)
                 .chain(
                     p.implied_guard
@@ -223,9 +222,7 @@ impl RewriteProof {
             .chain(self.guarded_settlement().into_iter().flat_map(|p| {
                 p.bounds
                     .cone
-                    .producers
-                    .iter()
-                    .map(|p| p.summary.as_ref())
+                    .summaries()
                     .chain(p.implied_guard.iter().flat_map(|g| g.summaries()))
             }))
     }
@@ -259,9 +256,8 @@ impl RewriteProof {
                     .chain(
                         p.bounds
                             .cone
-                            .producers
-                            .iter()
-                            .flat_map(|p| p.summary.profile_conditions()),
+                            .summaries()
+                            .flat_map(ProducerSummary::profile_conditions),
                     )
             }))
     }

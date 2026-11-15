@@ -61,6 +61,31 @@ No semantic outcome, cost counter, timing, or solver witness is a performance go
 The tiny path checks assert verdicts, surviving SCCs, removal/discharge counts as
 path-presence checks, and produced findings, without historical cost thresholds.
 
+## Guarded writer chains
+
+`guarded-hub --hub-writers 4 --hub-readers 4 --hub-values 2` puts each lane's
+class condition behind `lane_when -> lane_use -> triggered -> applies -> tagged`.
+`--sizes` controls lanes; writers share their lanes round-robin. Values control
+independent input-pair alternatives per lane, not a sort's domain. Readers have
+exclusive classes and split class/read statements; `--hub-reader` still controls
+the first reader's split/merged form. `--hub-no-routes` removes route exclusivity
+without removing class exclusivity. Chains and decoys are separate workloads.
+Without these options the original presets stay unchanged.
+
+For example:
+
+```sh
+just bench-den-zoo --family guarded-hub --sizes 4,8,16 --repeat 1 \
+  --hub-writers 4 --hub-readers 4 --hub-values 1 --hub-no-routes
+```
+
+Compare `beforePruningAtoms`/`beforePruningRules` with `coneAtoms`/`coneRules` and
+`liveAtoms`/`liveRules` in guarded attempts. `pruning` records completion or a
+fallback reason. Optional fallback keeps the original cone. One successful
+replacement still starts another round; large chains may spend their budget on
+repeated unrestricted bounds or have expensive final meanings even after cones
+shrink. This workload measures that limitation as well as the pruning gain.
+
 ## Reading the report
 
 `zoo.json` keeps individual runs and per-phase summaries. Durations sum only

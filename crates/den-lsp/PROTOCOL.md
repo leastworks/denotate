@@ -212,7 +212,8 @@ reused failures still count in `reusedSkip`.
 
 During guarded work, `guarded` describes one candidate: `index` (one-based,
 round-local), `head`, `premise`, source `location`, `restricted: true`,
-`coneAtoms`, `liveAtoms`, `coneRules`, `liveRules`, `domainNodes`,
+`coneAtoms`, `liveAtoms`, `coneRules`, `liveRules`, `beforePruningAtoms`,
+`beforePruningRules`, `pruning`, `domainNodes`,
 `existingConditionNodes`, `addedConditionNodes`,
 `preprocessingMs`, `iterationMs`, `reused`, `componentAtoms`, `deferred`, `position`,
 and `state` (`preprocessing`, `ranked`, `deferred`, `iterating`, `completed`,
@@ -223,8 +224,13 @@ one-based bounds-attempt order within that guarded pass, or null while waiting.
 `index` remains the original candidate identity within the round; it is not the
 execution order. These fields distinguish deferred candidates in saved reports,
 including candidates made unnecessary by another reader's successful rewrite. Cone counts are visited atoms and
-producers so far, including dead ones; live atoms have at least one producer whose
-settled guard intersects the domain (this does not establish the atom's truth).
+producers so far, including dead ones; after successful deadness propagation they
+count the rebuilt cone. Live atoms have at least one producer not proved dead under
+the domain (this does not establish the atom's truth). `beforePruningAtoms` and
+`beforePruningRules` count the original cone. `pruning` is `complete`, or the
+optional fallback reason: `pruning items`, `BDD tasks`, `BDD nodes`, or
+`condition nodes`. Fallback uses the original cone, not a partial result, and
+adds no inconclusive finding. These fields are null until pruning starts.
 The domain is G ∧ W; its size counts BDD nodes. Existing condition nodes are the
 retained baseline on entry to preparation; added nodes are successfully retained
 domain/metadata nodes before cleanup, excluding shared round summaries. A rejected

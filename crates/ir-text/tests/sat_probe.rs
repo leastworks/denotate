@@ -76,6 +76,7 @@ fn guarded_fixtures_and_four_guard_cycle_have_at_most_one_stable_model() {
         include_str!("fixtures/guarded-settlement-boolean.den"),
         include_str!("fixtures/guarded-settlement-producers.den"),
         include_str!("fixtures/implied-guard.den"),
+        include_str!("fixtures/guarded-chain.den"),
         "input x();input y();relation g0();relation g1();relation g2();relation g3();g0():-x();g0():-y();g1():-!x();g1():-y();g2():-x();g2():-!y();g3():-!x();g3():-!y();relation a();relation b();relation c();relation d();a():-g0(),!b();b():-g1(),!c();c():-g2(),!d();d():-g3(),!a();verification v{assumptions:[];obligations:[];}",
     ] {
         let rs = reports(text);

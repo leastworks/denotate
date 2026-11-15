@@ -66,6 +66,10 @@ pub struct GuardedAttempt {
     pub live_atoms: Option<usize>,
     pub cone_rules: Option<usize>,
     pub live_rules: Option<usize>,
+    pub before_atoms: Option<usize>,
+    pub before_rules: Option<usize>,
+    /// Complete, or the optional resource cutoff that kept the old cone.
+    pub pruning: Option<&'static str>,
     pub domain_nodes: Option<usize>,
     pub existing_condition_nodes: Option<usize>,
     pub added_condition_nodes: Option<usize>,
@@ -252,6 +256,9 @@ impl<'a> AdmissionReporter<'a> {
             live_atoms: None,
             cone_rules: None,
             live_rules: None,
+            before_atoms: None,
+            before_rules: None,
+            pruning: None,
             domain_nodes: None,
             existing_condition_nodes: None,
             added_condition_nodes: None,
@@ -304,6 +311,9 @@ impl<'a> AdmissionReporter<'a> {
                 g.live_atoms = Some(p.live_atoms);
                 g.cone_rules = Some(p.visited_producers);
                 g.live_rules = Some(p.live_producers);
+                g.before_atoms = p.before_atoms;
+                g.before_rules = p.before_producers;
+                g.pruning = p.pruning;
                 g.domain_nodes = p.domain_nodes;
                 g.existing_condition_nodes = Some(p.existing_nodes);
                 g.added_condition_nodes = Some(p.added_nodes);
