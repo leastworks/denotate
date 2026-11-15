@@ -151,8 +151,11 @@ inconclusive. Finding identities and the earlier admission passes are unchanged.
 A bounded lookahead ranks prepared cones before attempting their bounds, deferring
 full and nearly full cones. Waiting candidates retain only size metadata; their
 cones are rebound from unchanged prepared descriptors when available, while
-guards are rediscovered when selected. All-deferred windows still
-attempt bounds, and optional ranking yields under preparation storage pressure.
+guards are rediscovered when selected. An all-deferred window can extend within a
+deterministic charged-work allowance per snapshot; it tries the first useful cone
+found, or the best deferred one when the allowance is spent. Optional descriptors
+and ranking yield under preparation storage pressure. This scheduling allowance
+never becomes a checker-limit finding or failed-proof cache entry.
 The [checker policies](../../docs/checker-policies.md#guarded-settlement) describe
 its provisional window, threshold and progress fields.
 

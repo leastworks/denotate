@@ -178,7 +178,8 @@ impl<'a> AdmissionDetails<'a> {
             "prerequisiteMs": event.prerequisites.iter().map(|(k, d)| ((*k).to_string(), json!(d.as_secs_f64()*1000.))).collect::<serde_json::Map<_, _>>(),
             "guarded": event.guarded.as_ref().map(|g| {
                 let names = self.names.get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)));
-                json!({"index":g.index, "position":g.position, "deferred":g.deferred, "componentAtoms":g.component_atoms, "head":atom_text(&g.head, &**names), "premise":atom_text(&g.premise, &**names),
+                json!({"index":g.index, "position":g.position, "deferred":g.deferred, "componentAtoms":g.component_atoms,
+                    "lookaheadWork":g.lookahead_work, "lookaheadLimit":g.lookahead_limit, "head":atom_text(&g.head, &**names), "premise":atom_text(&g.premise, &**names),
                     "location":self.location(g.source), "restricted":true, "coneAtoms":g.cone_atoms,
                     "liveAtoms":g.live_atoms, "coneRules":g.cone_rules, "liveRules":g.live_rules,
                     "beforePruningAtoms":g.before_atoms, "beforePruningRules":g.before_rules, "pruning":g.pruning,
@@ -195,6 +196,8 @@ impl<'a> AdmissionDetails<'a> {
                 .failure
                 .map(|r| denotate_presentation::exhaustion_text(r.phase, r.resource, r.details)),
         });
+        detail["admission"]["lookaheadWork"] = json!(event.lookahead_work);
+        detail["admission"]["lookaheadLimit"] = json!(event.lookahead_limit);
         progress.emit(Phase::Admission, detail);
     }
     /// Diagnostic-only, local report. Names and locations intentionally remain
@@ -372,6 +375,12 @@ pub fn admission_text(a: &Value) -> String {
                 } else {
                     "; using original cone"
                 }
+            ));
+        }
+        if g["lookaheadWork"].as_u64().is_some_and(|w| w > 0) {
+            text.push_str(&format!(
+                "; extra lookahead work {} / {}",
+                g["lookaheadWork"], g["lookaheadLimit"]
             ));
         }
         if g["deferred"] == true {

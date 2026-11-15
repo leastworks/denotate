@@ -61,6 +61,31 @@ No semantic outcome, cost counter, timing, or solver witness is a performance go
 The tiny path checks assert verdicts, surviving SCCs, removal/discharge counts as
 path-presence checks, and produced findings, without historical cost thresholds.
 
+## Tagged-value hub
+
+`guarded-hub --hub-variant tagged --hub-writers W --hub-tag-values V` uses a
+`Tag` domain of V values. `--sizes` controls the number of lanes n. Each writer
+has an exactly-one result input (selected coverage and uniqueness assumptions),
+and each value produces a `tagged(T)` writer candidate. The W × V writers can
+fill the initial candidate window before the small lane cones. The workload also
+has exclusive classes, routes, received values and a singleton check group.
+It uses the split reader and no decoys. This is separate from the default `pairs`
+variant: `--hub-values` still means independent input-pair alternatives per lane.
+
+```sh
+just bench-den-zoo --family guarded-hub --sizes 53 --repeat 1 \
+  --hub-variant tagged --hub-writers 4 --hub-tag-values 32 \
+  --out target/hub-tagged-32 -- --max-work 20000000000 \
+  --max-bdd-nodes 10000000 --max-bdd-tasks 100000000 \
+  --max-condition-nodes 100000000 --max-bdd-variables 1000000 --timeout-ms 300000
+```
+
+Repeat with `--hub-tag-values 128` and a new output directory. Saved reports retain
+both variant and dimensions. `guardedAttempts` includes extra `lookaheadWork` and
+`lookaheadLimit`; use actual attempt positions and component dumps to distinguish
+reaching lane certificates from full admission. These are separate acceptance
+claims, with no timing or chosen-candidate goldens.
+
 ## Guarded writer chains
 
 `guarded-hub --hub-writers 4 --hub-readers 4 --hub-values 2` puts each lane's

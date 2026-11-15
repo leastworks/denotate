@@ -637,3 +637,60 @@ fn chain_pruning_transitive_edit_agrees_fresh_cold_and_warm() {
         assert_eq!(fresh, check(&p, Some(&mut warm)));
     }
 }
+
+#[test]
+fn tagged_hub_looks_past_writers_and_agrees_fresh_cold_warm() {
+    use std::cell::RefCell;
+    let script =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/bench-den-zoo.mjs");
+    let output = std::process::Command::new("node")
+        .args(["--input-type=module", "-e", "import {pathToFileURL} from 'node:url'; const m=await import(pathToFileURL(process.argv[1])); process.stdout.write(m.source('guarded-hub',1,{hubVariant:'tagged',hubWriters:1,hubTagValues:34}));"])
+        .arg(script).output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8(output.stdout).unwrap();
+    let p = loaded(&text, 0);
+    let l = Limits::default();
+    let ops = (&l).into();
+    let req = p.verification_requests(&l).unwrap().remove(0).1;
+    let RequestPreparation::Complete(raw) = req.prepare(&p.corpus, &p.keys, &ops).unwrap() else {
+        panic!()
+    };
+    let events = RefCell::new(Vec::new());
+    let prepared = raw
+        .admit_with_progress(&ops, Some(&|e| events.borrow_mut().push(e.clone())))
+        .unwrap();
+    assert!(prepared.program().is_admitted());
+    let events = events.borrow();
+    let first = events
+        .iter()
+        .filter_map(|e| e.guarded.as_ref())
+        .find(|g| g.position.is_some())
+        .unwrap();
+    assert!(first.lookahead_work > 0, "exercise the extended window");
+    assert!(!first.deferred);
+    assert!(
+        prepared
+            .program()
+            .rewrite_proofs()
+            .any(|p| p.guarded_settlement().is_some())
+    );
+    let mut warm = Session::default();
+    for (revision, text) in [
+        text.clone(),
+        text.replace("fa0(), !fb0()", "fa0(), fb0()"),
+        text,
+    ]
+    .iter()
+    .enumerate()
+    {
+        let p = loaded(text, revision as u64);
+        let fresh = check(&p, None);
+        assert_eq!(fresh, check(&p, Some(&mut Session::default())));
+        assert_eq!(fresh, check(&p, Some(&mut warm)));
+        assert_eq!(fresh, check(&p, Some(&mut warm)));
+    }
+}

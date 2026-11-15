@@ -179,3 +179,27 @@ test('schema runner keeps local component dumps and recovery retains their path'
     assert.equal(fs.readFileSync(report.componentDump,'utf8'),data);
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+
+test('tagged hub is a separate value domain, with persistent configuration',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-tagged-hub-'));
+  try {
+    const options={hubVariant:'tagged',hubWriters:2,hubTagValues:3};
+    const text=source('guarded-hub',2,options);
+    assert.equal(text,source('guarded-hub',2,options));
+    assert.match(text,/tagged\(T\) :- applies0\(\), result0\(T\)/);
+    assert.match(text,/has_result0: at_least_one/);
+    assert.match(text,/t2: Tag/);
+    assert.doesNotMatch(text,/fa0_1/);
+    const out=path.join(root,'run');
+    const report=run({...options,out,binary:'target/debug/examples/bench_schema',family:['guarded-hub'],sizes:[2],repeat:1});
+    assert.equal(report.hubVariant,'tagged');assert.equal(report.hubTagValues,3);
+    const r=report.families['guarded-hub'].runs[0];
+    assert.equal(r.after.admitted,true);assert.equal(r.exit,0);
+    assert.equal(r.outcomes[0].notices[0].result.state,'varying');
+    assert.ok(r.guardedAttempts.every(({attempt:g})=>Number.isFinite(g.lookaheadWork)&&Number.isFinite(g.lookaheadLimit)));
+    assert.ok(r.attemptSummaries.every(a=>Number.isFinite(a.lookaheadWork)&&Number.isFinite(a.lookaheadLimit)));
+    assert.deepEqual(summarize(out),report);
+    for(const bad of [{hubVariant:'unknown'},{hubVariant:'tagged'},{...options,hubTagValues:0},{...options,hubValues:2},{...options,hubDecoys:1},{...options,hubReader:'merged'},{...options,hubRoutes:false},{hubTagValues:3}])assert.throws(()=>source('guarded-hub',2,bad));
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});

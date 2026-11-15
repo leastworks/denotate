@@ -21,6 +21,24 @@ pub(crate) const CERTIFICATE_NODES: usize = 8192;
 // Provisional scheduling only; neither the cone nor its certificate changes.
 const LOOKAHEAD: usize = 32;
 const RANK_STORAGE: usize = 16;
+// Extra discovery/preparation work after an all-deferred window, per snapshot.
+// Finish the current queue operation before testing this scheduling allowance;
+// never turn it into a failed proof or a checker exhaustion.
+
+struct Lookahead {
+    work: usize,
+    limit: usize,
+    since: Option<usize>,
+}
+impl Lookahead {
+    fn used(&self, budget: &Budget<'_>) -> usize {
+        self.work + self.since.map_or(0, |start| budget.used() - start)
+    }
+    fn finish(&mut self, budget: &Budget<'_>) {
+        self.work = self.used(budget);
+        self.since = None;
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct GuardedSettlementStep {
@@ -231,10 +249,30 @@ impl GroundProgram {
         let mut remaining = LOOKAHEAD;
         let mut position = 0;
         let mut ranking = true;
+        let mut lookahead = Lookahead {
+            work: 0,
+            limit: budget.limits.max_work / 10,
+            since: None,
+        };
+        #[cfg(test)]
+        if let Some(limit) = attempts.lookahead_work {
+            lookahead.limit = limit;
+        }
         loop {
             *retained -= release_inference;
             release_inference = 0;
-            let selected = ranking && (remaining == 0 || queue.is_empty());
+            lookahead.finish(budget);
+            progress.guarded_lookahead(lookahead.work, lookahead.limit);
+            let useful = ranked
+                .first_key_value()
+                .is_some_and(|((deferred, _, _, _, _), _)| !deferred);
+            let extend = ranking
+                && remaining == 0
+                && !useful
+                && !queue.is_empty()
+                && lookahead.work < lookahead.limit;
+            lookahead.since = extend.then(|| budget.used());
+            let selected = ranking && ((!extend && remaining == 0) || queue.is_empty());
             let entry = if selected {
                 if let Some(((deferred, _, _, cost, index), value)) = ranked.pop_first() {
                     *retained -= RANK_STORAGE;
@@ -269,7 +307,7 @@ impl GroundProgram {
                 pending_inference = false;
             }
             if selected {
-                remaining = LOOKAHEAD - ranked.len();
+                remaining = LOOKAHEAD.saturating_sub(ranked.len());
             }
             budget.tick("guarded candidate queue")?;
             #[cfg(test)]
@@ -342,7 +380,7 @@ impl GroundProgram {
                     .map_or(0, crate::implied_guard::Inferred::nodes);
             }
             if !selected && ranking {
-                remaining -= 1;
+                remaining = remaining.saturating_sub(1);
             }
             let mut effective = candidate.clone();
             if let Some(i) = &inferred {
@@ -354,12 +392,14 @@ impl GroundProgram {
                 &candidate.rule,
                 &literal.term.atom,
                 deferred.unwrap_or(false),
+                (lookahead.used(budget), lookahead.limit),
             );
             let mut preprocessing = None;
             let mut preparation = Preparation::default();
             let before_preparation = *retained;
             let mut released_cache = 0;
             let cone_key = Attempt::GuardedCone(candidate.rule.id, literal.term.occurrence);
+            budget.tick("guarded descriptor lookup")?;
             let mut saved = std::mem::take(&mut attempts.prepared);
             let mut reused_preparation = false;
             let reuse = if let Some(old) = saved.get(&cone_key) {
@@ -500,6 +540,7 @@ impl GroundProgram {
                 // the evicted cache is no longer part of that baseline.
                 *retained = attempt_baseline - (released_cache - previously_released);
             }
+            progress.guarded_lookahead(lookahead.used(budget), lookahead.limit);
             progress.guarded_prepared(
                 self,
                 (preprocessing.is_some() || reused_preparation).then_some(&preparation),
@@ -596,6 +637,7 @@ impl GroundProgram {
                 // deliberately deferred too (e.g. 621/622).
                 let deferred = preparation.live_atoms.saturating_mul(10)
                     >= component.atoms.len().saturating_mul(9);
+                progress.guarded_lookahead(lookahead.used(budget), lookahead.limit);
                 progress.guarded_order(self, deferred, None, component.atoms.len());
                 ranked.insert(
                     (
@@ -610,6 +652,10 @@ impl GroundProgram {
                 *retained -= cone.temporary_nodes();
                 continue;
             }
+            // Storage pressure may have disabled ranking in this operation.
+            // Stop charging lookahead before its immediate bounds fallback too.
+            lookahead.finish(budget);
+            progress.guarded_lookahead(lookahead.work, lookahead.limit);
             position += 1;
             progress.guarded_order(
                 self,

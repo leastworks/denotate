@@ -139,6 +139,8 @@ impl Attempt {
 }
 
 pub(crate) struct Attempts {
+    #[cfg(test)]
+    pub lookahead_work: Option<usize>,
     skipped: BTreeMap<Attempt, AdmissionSkip>,
     negative: BTreeMap<Attempt, GroundAtom>,
     // Bounded metadata, one last outcome/cause per live attempt, never BDDs.
@@ -165,6 +167,8 @@ impl Default for Attempts {
             reuse_prepared: true,
             #[cfg(test)]
             batch_guarded: true,
+            #[cfg(test)]
+            lookahead_work: None,
         }
     }
 }

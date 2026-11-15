@@ -59,6 +59,9 @@ pub struct GuardedAttempt {
     /// The candidate was ranked as full or nearly full, even if later attempted.
     pub deferred: bool,
     pub component_atoms: Option<usize>,
+    /// Charged extra lookahead work this snapshot; excludes bounds attempts.
+    pub lookahead_work: usize,
+    pub lookahead_limit: usize,
     pub head: GroundAtom,
     pub premise: GroundAtom,
     pub source: RuleId,
@@ -100,6 +103,9 @@ pub struct AdmissionProgress {
     pub failure: Option<Inconclusive>,
     pub attempts: BTreeMap<AdmissionAttemptKind, AdmissionAttempts>,
     pub guarded: Option<GuardedAttempt>,
+    /// Snapshot totals also survive clearing the current candidate at commit.
+    pub lookahead_work: usize,
+    pub lookahead_limit: usize,
     /// Present only on diagnostic events; never retained in ordinary progress.
     pub candidate_probe: Option<CandidateProbeReport>,
     pub candidate_probe_counts: Option<CandidateProbeCounts>,
@@ -147,6 +153,8 @@ impl<'a> AdmissionReporter<'a> {
                     attempts: BTreeMap::new(),
                     prerequisites: BTreeMap::new(),
                     guarded: None,
+                    lookahead_work: 0,
+                    lookahead_limit: 0,
                     candidate_probe: None,
                     candidate_probe_counts: None,
                 },
@@ -244,6 +252,7 @@ impl<'a> AdmissionReporter<'a> {
         rule: &GroundRule,
         premise: &GroundAtom,
         deferred: bool,
+        lookahead: (usize, usize),
     ) {
         if !self.enabled() {
             return;
@@ -253,6 +262,8 @@ impl<'a> AdmissionReporter<'a> {
             position: None,
             deferred,
             component_atoms: None,
+            lookahead_work: lookahead.0,
+            lookahead_limit: lookahead.1,
             head: rule.head.atom.clone(),
             premise: premise.clone(),
             source: rule.source,
@@ -272,6 +283,15 @@ impl<'a> AdmissionReporter<'a> {
             state: "preprocessing",
         });
         self.rule(program, "guarded-preprocessing", rule.id, 0);
+    }
+    pub fn guarded_lookahead(&self, work: usize, limit: usize) {
+        let mut s = self.state.borrow_mut();
+        s.progress.lookahead_work = work;
+        s.progress.lookahead_limit = limit;
+        if let Some(g) = &mut s.progress.guarded {
+            g.lookahead_work = work;
+            g.lookahead_limit = limit;
+        }
     }
     pub fn guarded_order(
         &self,
@@ -432,6 +452,8 @@ impl<'a> AdmissionReporter<'a> {
             let mut s = self.state.borrow_mut();
             s.progress.attempts.clear();
             s.progress.prerequisites.clear();
+            s.progress.lookahead_work = 0;
+            s.progress.lookahead_limit = 0;
             s.round_reported = false;
         }
         {

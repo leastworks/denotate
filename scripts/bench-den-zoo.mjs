@@ -4,7 +4,9 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','guarded-hub','schema-layered'];
-export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1}={}) {
+export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1,hubVariant='pairs',hubTagValues=2}={}) {
+  if (!['pairs','tagged'].includes(hubVariant)) throw Error('invalid hub variant');
+  if (hubVariant==='pairs' && hubTagValues!==2) throw Error('tag values requires tagged hub variant');
   if (!families.includes(family) || !Number.isSafeInteger(n) || n < 1) throw Error('invalid family/positive size');
   let s = 'relation bad();\n';
   let assumptions = '';
@@ -75,6 +77,36 @@ export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,
     add('claim() :- !kind(), !fails();');
     add('inspected() :- kind(); inspected() :- claim();');
     add('held() :- inspected(); cleared() :- !held();');
+  } else if (family==='guarded-hub' && hubVariant==='tagged') {
+    if (hubReader!=='split' || !hubRoutes || hubDecoys || hubReaders!==1 || hubValues!==1) throw Error('tagged hub requires split reader, routes and no pair/decoy dimensions');
+    if (![hubWriters,hubTagValues].every(Number.isSafeInteger) || hubWriters<1 || hubTagValues<1) throw Error('tagged hub requires positive writers and tag values');
+    add('sort Class; const perishable, hazardous, general: Class;');
+    add('relation classes(c: Class); classes(perishable); classes(hazardous); classes(general); input declared(c: Class) within classes;');
+    add('assumption one_class: at_most_one(declared, group_by: ()); input docked(); input priority_call();');
+    add(`sort Lane; const ${Array.from({length:n},(_,i)=>`l${i}`).join(', ')}: Lane; relation lanes(l: Lane);`);
+    for(let i=0;i<n;i++)add(`lanes(l${i});`);
+    add('input route(l: Lane) within lanes; assumption one_route: at_most_one(route, group_by: ());');
+    for(let i=0;i<n;i++)add(`input fa${i}(); input fb${i}();`);
+    add(`sort Tag; const ${Array.from({length:hubTagValues},(_,i)=>`t${i}`).join(', ')}: Tag; relation tags(t: Tag);`);
+    for(let v=0;v<hubTagValues;v++)add(`tags(t${v});`);
+    add('input received(t: Tag) within tags; assumption one_received: at_most_one(received, group_by: ()); input kept();');
+    add('sort Check; const c0: Check; relation checks(c: Check); checks(c0); input satisfies(c: Check) within checks; assumption disjoint_checks: at_most_one(satisfies, group_by: ());');
+    assumptions='one_class, one_route, one_received, disjoint_checks';
+    for(let w=0;w<hubWriters;w++) {
+      add(`input result${w}(t: Tag) within tags; assumption has_result${w}: at_least_one(result${w}, group_by: ()); assumption one_result${w}: at_most_one(result${w}, group_by: ());`);
+      assumptions+=`, has_result${w}, one_result${w}`;
+    }
+    add('relation tagged(t: Tag); tagged(T) :- received(T), kept();');
+    for(let w=0;w<hubWriters;w++)add(`relation applies${w}(); relation triggered${w}(); tagged(T) :- applies${w}(), result${w}(T); applies${w}() :- triggered${w}();`);
+    for(let i=0;i<n;i++)add(`relation use${i}(); relation when${i}(); triggered${i%hubWriters}() :- use${i}(); use${i}() :- when${i}(); when${i}() :- route(l${i}), fa${i}(), !fb${i}(), declared(perishable), cleared();`);
+    add('relation tag_present(); tag_present() :- tagged(_);');
+    for(const name of ['checked','claim_fails_ok','hc_type_ok','hc_unsat','claim_fails_unsat','hc_read_ok','claim_fails','hazard_claim','inspected_ok','inspected_unsat','inspected','held_ok','held_unsat','held','cleared_ok','cleared_unsat','cleared'])add(`relation ${name}();`);
+    add('checked() :- tag_present(), satisfies(c0); claim_fails_ok() :- docked(), !checked();');
+    add('hc_type_ok() :- declared(hazardous); hc_unsat() :- !hc_type_ok(); claim_fails_unsat() :- !claim_fails_ok(); hc_read_ok() :- !claim_fails(); hc_unsat() :- !hc_read_ok(); claim_fails() :- !claim_fails_unsat(); hazard_claim() :- !hc_unsat();');
+    add('inspected_ok() :- declared(perishable); inspected_ok() :- hazard_claim(); inspected_unsat() :- !inspected_ok(); inspected() :- !inspected_unsat();');
+    add('held_ok() :- priority_call(), inspected(); held_unsat() :- !held_ok(); held() :- !held_unsat();');
+    add('cleared_ok() :- docked(), !held(); cleared_unsat() :- !cleared_ok(); cleared() :- !cleared_unsat();');
+    add('notice hazard_condition: varies(cleared);');
   } else if (family==='guarded-hub') {
     if(!['split','merged'].includes(hubReader))throw Error('hub reader must be split or merged');
     if(!Number.isSafeInteger(hubDecoys)||hubDecoys<0||!['full','near-full'].includes(hubDecoyShape))throw Error('invalid hub decoys');
@@ -296,7 +328,7 @@ function readRun(dir, size, rep) {
 export function summarize(out) {
   const config = JSON.parse(fs.readFileSync(path.join(out, 'sweep.json')));
   const { family, sizes, repeat, threshold, binary } = config;
-  const report = { threshold, repeat, sizes, inputOrder: config.inputOrder ?? 'key', hubReader: config.hubReader ?? 'split', hubRoutes: config.hubRoutes ?? true, hubDecoys: config.hubDecoys ?? 0, hubDecoyShape: config.hubDecoyShape ?? 'full', hubWriters: config.hubWriters ?? 0, hubReaders: config.hubReaders ?? 1, hubValues: config.hubValues ?? 1, satProbe: config.satProbe ?? false, satProbeCandidates: config.satProbeCandidates ?? false, families: {} };
+  const report = { threshold, repeat, sizes, inputOrder: config.inputOrder ?? 'key', hubReader: config.hubReader ?? 'split', hubRoutes: config.hubRoutes ?? true, hubDecoys: config.hubDecoys ?? 0, hubDecoyShape: config.hubDecoyShape ?? 'full', hubWriters: config.hubWriters ?? 0, hubReaders: config.hubReaders ?? 1, hubValues: config.hubValues ?? 1, hubVariant: config.hubVariant ?? 'pairs', hubTagValues: config.hubTagValues ?? 2, satProbe: config.satProbe ?? false, satProbeCandidates: config.satProbeCandidates ?? false, families: {} };
   for (const name of family) {
     const runs = [];
     for (const size of sizes) for (let rep = 0; rep < repeat; rep++) {
@@ -312,20 +344,20 @@ export function summarize(out) {
   return report;
 }
 
-export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3,binary='target/profiling/examples/bench_schema',samply=false,limits=[],inputOrder='key',hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1,satProbe=false,satProbeCandidates=false}) {
+export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3,binary='target/profiling/examples/bench_schema',samply=false,limits=[],inputOrder='key',hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1,hubVariant='pairs',hubTagValues=2,satProbe=false,satProbeCandidates=false}) {
   if (!['split','merged'].includes(hubReader)) throw Error('hub reader must be split or merged');
   if (!['key','reverse-key','structural'].includes(inputOrder)) throw Error('invalid input order');
   fs.mkdirSync(path.dirname(out),{recursive:true});
   fs.mkdirSync(out,{recursive:false});
-  fs.writeFileSync(path.join(out, 'sweep.json'), JSON.stringify({family, sizes, repeat, threshold, inputOrder, hubReader, hubRoutes, hubDecoys, hubDecoyShape, hubWriters, hubReaders, hubValues, satProbe, satProbeCandidates, binary: path.resolve(binary)}, null, 2));
-  const report={threshold,repeat,sizes,inputOrder,hubReader,hubRoutes,hubDecoys,hubDecoyShape,hubWriters,hubReaders,hubValues,satProbe,satProbeCandidates,families:{}};
+  fs.writeFileSync(path.join(out, 'sweep.json'), JSON.stringify({family, sizes, repeat, threshold, inputOrder, hubReader, hubRoutes, hubDecoys, hubDecoyShape, hubWriters, hubReaders, hubValues, hubVariant, hubTagValues, satProbe, satProbeCandidates, binary: path.resolve(binary)}, null, 2));
+  const report={threshold,repeat,sizes,inputOrder,hubReader,hubRoutes,hubDecoys,hubDecoyShape,hubWriters,hubReaders,hubValues,hubVariant,hubTagValues,satProbe,satProbeCandidates,families:{}};
   for(const name of family) {
     const runs=[];
     for(const size of sizes) for(let rep=0;rep<repeat;rep++) {
       const dir=path.resolve(out,`${name}-${size}-${rep}`);
       let args=['--out',dir,'--input-order',inputOrder];
       if(name==='schema-layered') args.push('--topology','layered','--fields',String(size+2),'--reads',String(size),'--depth','2','--encoding','assumed');
-      else {const input=path.resolve(out,`${name}-${size}.den`);fs.writeFileSync(input,source(name,size,{hubReader,hubRoutes,hubDecoys,hubDecoyShape,hubWriters,hubReaders,hubValues}));args.push('--source',input);}
+      else {const input=path.resolve(out,`${name}-${size}.den`);fs.writeFileSync(input,source(name,size,{hubReader,hubRoutes,hubDecoys,hubDecoyShape,hubWriters,hubReaders,hubValues,hubVariant,hubTagValues}));args.push('--source',input);}
       if(samply) args.push('--samply');
       if(satProbe) args.push('--sat-probe');
       if(satProbeCandidates) args.push('--sat-probe-candidates');
@@ -355,11 +387,13 @@ if(!process.execArgv.some(a=>a==='-e'||a==='--eval') && process.argv[1] && path.
       if(key==='--samply'){opts.samply=true;continue;}
       if(key==='--sat-probe-candidates'){opts.satProbeCandidates=true;continue;}
       if(key==='--sat-probe'){opts.satProbe=true;continue;}
-      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [--hub-reader split|merged] [--hub-no-routes] [--sat-probe] [--sat-probe-candidates] [--hub-writers N] [--hub-readers N] [--hub-values N] [--hub-decoys N] [--hub-decoy-shape full|near-full] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
+      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [--hub-reader split|merged] [--hub-no-routes] [--sat-probe] [--sat-probe-candidates] [--hub-variant pairs|tagged] [--hub-tag-values V] [--hub-writers N] [--hub-readers N] [--hub-values N] [--hub-decoys N] [--hub-decoy-shape full|near-full] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
       const val=args[++i];
       if(key==='--family')opts.family=val.split(',');else if(key==='--sizes')opts.sizes=val.split(',').map(Number);
       else if(key==='--input-order')opts.inputOrder=val;
       else if(key==='--hub-reader')opts.hubReader=val;
+      else if(key==='--hub-variant')opts.hubVariant=val;
+      else if(key==='--hub-tag-values')opts.hubTagValues=Number(val);
       else if(key==='--hub-writers')opts.hubWriters=Number(val);
       else if(key==='--hub-readers')opts.hubReaders=Number(val);
       else if(key==='--hub-values')opts.hubValues=Number(val);

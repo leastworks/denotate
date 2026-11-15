@@ -228,8 +228,14 @@ The file intentionally retains program names and is not an anonymized export.
   bounds on each such candidate first can consume the budget before a useful
   reader is reached. Prepare a bounded window in the existing order, defer full
   and nearly full cones, and try the smallest prepared cone. If every candidate
-  is deferred, still attempt the smallest; do not require a successful shrink to
-  make progress. Window size and the near-full threshold are provisional policies.
+  is deferred, extend the search within a deterministic charged-work allowance per
+  snapshot. Many cheap full-cone writer candidates can otherwise fill every window
+  and hide useful readers. Try the first non-deferred cone found; fall back to the
+  best deferred one when the allowance is spent or the queue ends. Finishing an
+  in-flight preparation may overshoot the scheduling allowance; actual checker
+  limits still apply. This fallback neither records a failed proof nor makes a
+  result inconclusive. Elapsed time cannot influence scheduling. Window size,
+  allowance and the near-full threshold are provisional policies.
   The window retains charged size metadata; prepared descriptors can rebind the
   chosen cone when their complete inputs stay unchanged. Rediscover the guard
   and yield optional ranking and descriptor storage under pressure. Global work

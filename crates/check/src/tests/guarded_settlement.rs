@@ -151,6 +151,7 @@ fn all_deferred_candidates_still_attempt_bounds_and_release_the_window() {
     let progress = crate::admission_progress::AdmissionReporter::new(Some(&observer));
     let mut retained = 0;
     let mut attempts = crate::admission_skips::Attempts::default();
+    attempts.lookahead_work = Some(1); // exercise fallback, not a production budget golden
     let proofs = p
         .guarded_settlements(
             &m,
@@ -166,6 +167,29 @@ fn all_deferred_candidates_still_attempt_bounds_and_release_the_window() {
     assert_eq!(retained, attempts.nodes());
     retained -= attempts.clear_prepared();
     assert_eq!(retained, attempts.nodes());
+    let observed = events.borrow();
+    let first = observed
+        .iter()
+        .filter_map(|e| e.guarded.as_ref())
+        .find(|g| g.position.is_some())
+        .unwrap();
+    assert!(first.lookahead_work >= first.lookahead_limit);
+    let prepared_before = observed
+        .iter()
+        .filter_map(|e| e.guarded.as_ref())
+        .take_while(|g| g.position.is_none())
+        .filter(|g| g.state == "deferred")
+        .count();
+    assert!(
+        prepared_before < 80,
+        "fallback must not wait for all preparations"
+    );
+    assert!(
+        observed
+            .iter()
+            .all(|e| e.failure.is_none() && e.skipped.is_none())
+    );
+    drop(observed);
     let attempted = events
         .borrow()
         .iter()
@@ -182,6 +206,27 @@ fn all_deferred_candidates_still_attempt_bounds_and_release_the_window() {
         80,
         "every ambiguous reader still gets an attempt"
     );
+    // A real cancellation while exploring beyond the window propagates. It
+    // must not be mistaken for the scheduler's ordinary deferred fallback.
+    let cancel_limits = Limits::default();
+    let cancel = |e: &AdmissionProgress| {
+        if e.guarded.as_ref().is_some_and(|g| g.lookahead_work > 0) {
+            cancel_limits.cancellation.cancel();
+        }
+    };
+    let progress = crate::admission_progress::AdmissionReporter::new(Some(&cancel));
+    assert!(matches!(
+        p.guarded_settlements(
+            &m,
+            &summaries,
+            &summaries.keys().copied().collect(),
+            &mut 0,
+            &mut Budget::new(&cancel_limits),
+            &progress,
+            &mut crate::admission_skips::Attempts::default()
+        ),
+        Err(CheckError::Cancelled)
+    ));
 }
 
 #[test]
@@ -585,5 +630,108 @@ fn independent_readers_share_a_snapshot_and_match_sequential_and_uncached_models
                     .collect::<BTreeSet<_>>()
             );
         }
+    }
+}
+
+#[test]
+fn extended_preparation_failure_evicts_optional_storage_and_keeps_other_candidates() {
+    let mut c = Corpus::new();
+    let mut sources = BTreeSet::new();
+    let mut small = BTreeSet::new();
+    for i in 0..32 {
+        let a = rel(&mut c, &format!("a{i}"), false);
+        let b = rel(&mut c, &format!("b{i}"), false);
+        sources.insert(rule(&mut c, a, &[(b, true)]));
+        rule(&mut c, b, &[(a, true)]);
+        small.insert(atom(a));
+    }
+    // This larger cone comes after the first all-deferred window. Even after
+    // evicting optional descriptors it cannot fit; the next small one can.
+    let chain = (0..4096)
+        .map(|i| rel(&mut c, &format!("large{i}"), false))
+        .collect::<Vec<_>>();
+    sources.insert(rule(&mut c, chain[0], &[(chain[1], true)]));
+    for pair in chain[1..].windows(2) {
+        rule(&mut c, pair[0], &[(pair[1], false)]);
+    }
+    rule(&mut c, *chain.last().unwrap(), &[(chain[0], true)]);
+    let tail = rel(&mut c, "tail", false);
+    let other = rel(&mut c, "other", false);
+    sources.insert(rule(&mut c, tail, &[(other, true)]));
+    rule(&mut c, other, &[(tail, true)]);
+    small.insert(atom(tail));
+    let l = Limits::default();
+    let p = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+    let m = p.symbolic(&l).unwrap();
+    let summaries = test_support::rewrites::summaries(&p, &m, &l);
+    let targets = summaries
+        .values()
+        .filter(|s| sources.contains(&s.rule.source))
+        .map(|s| s.rule.id)
+        .collect();
+    let limits = Limits {
+        max_condition_nodes: 8000,
+        ..l
+    };
+    let events = RefCell::new(Vec::new());
+    let observer = |e: &AdmissionProgress| events.borrow_mut().push(e.clone());
+    let progress = crate::admission_progress::AdmissionReporter::new(Some(&observer));
+    let mut retained = 0;
+    let mut attempts = crate::admission_skips::Attempts::default();
+    let proofs = p
+        .guarded_settlements(
+            &m,
+            &summaries,
+            &targets,
+            &mut retained,
+            &mut Budget::new(&limits),
+            &progress,
+            &mut attempts,
+        )
+        .unwrap();
+    assert!(proofs.is_empty());
+    assert_eq!(retained, attempts.nodes());
+    let events = events.borrow();
+    let failed = events
+        .iter()
+        .filter_map(|e| e.guarded.as_ref())
+        .find(|g| g.head == atom(chain[0]) && g.state == "skipped")
+        .unwrap();
+    assert!(
+        failed.lookahead_work > 0,
+        "failure occurs in the extended window"
+    );
+    assert!(
+        failed.existing_condition_nodes.unwrap() > 0,
+        "waiting descriptors occupy storage"
+    );
+    let attempted = events
+        .iter()
+        .filter_map(|e| e.guarded.as_ref())
+        .filter(|g| g.state == "completed")
+        .map(|g| g.head.clone())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        attempted, small,
+        "eviction and failure preserve every waiting candidate"
+    );
+    for completed in events
+        .iter()
+        .filter_map(|e| e.guarded.as_ref())
+        .filter(|g| g.state == "completed")
+    {
+        let started = events
+            .iter()
+            .filter_map(|e| e.guarded.as_ref())
+            .find(|g| {
+                g.index == completed.index
+                    && g.position == completed.position
+                    && g.state == "iterating"
+            })
+            .unwrap();
+        assert_eq!(
+            started.lookahead_work, completed.lookahead_work,
+            "bounds never spend lookahead work, including after storage fallback"
+        );
     }
 }

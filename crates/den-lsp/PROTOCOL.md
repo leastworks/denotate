@@ -217,13 +217,21 @@ round-local), `head`, `premise`, source `location`, `restricted: true`,
 `beforePruningRules`, `pruning`, `domainNodes`,
 `existingConditionNodes`, `addedConditionNodes`,
 `preprocessingMs`, `iterationMs`, `reused`, `componentAtoms`, `deferred`, `position`,
+`lookaheadWork`, `lookaheadLimit`,
 and `state` (`preprocessing`, `ranked`, `deferred`, `iterating`, `completed`,
 `skipped`, `failed`). `componentAtoms` is the current component's total atom count
 used by ranking. `deferred` records whether ranking classified the cone as full or
 nearly full; it remains true if the candidate later runs. `position` is its
 one-based bounds-attempt order within that guarded pass, or null while waiting.
 `index` remains the original candidate identity within the round; it is not the
-execution order. These fields distinguish deferred candidates in saved reports,
+execution order. `lookaheadWork` counts charged discovery/preparation work beyond
+all-deferred windows in this snapshot, including failures and descriptor reuse;
+`lookaheadLimit` is its deterministic scheduling allowance. Bounds work is excluded.
+The allowance is checked between queue operations and may be exceeded by the last
+one. Reaching it selects a deferred candidate, without reporting a checker limit.
+The admission object also carries `lookaheadWork` and `lookaheadLimit`, so the
+final `attempt-summary` preserves the snapshot totals after the current candidate
+is cleared. They reset when the round changes. These fields distinguish deferred candidates in saved reports,
 including candidates made unnecessary by another reader's successful rewrite. Cone counts are visited atoms and
 producers so far, including dead ones; after successful deadness propagation they
 count the rebuilt cone. Live atoms have at least one producer not proved dead under

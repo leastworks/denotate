@@ -247,15 +247,29 @@ component at the current snapshot, not atoms visited during cone traversal; a
 The window holds size metadata (charged conservatively as 16 condition slots per
 entry). Optional prepared descriptors retain the domain, atom/rule IDs, live flags,
 pruning metadata and sizes; current producer summaries are rebound for the chosen
-attempt. Inferred guards are rediscovered. Vacant slots are refilled before choosing again. If every
-prepared candidate is deferred, attempt the smallest anyway. Unexamined candidates
-may have smaller cones: this is bounded lookahead, not a global sort. Each window
-admits at most 32 preparations, including locally failed preparations. Global
-work, deadlines and cancellation can still stop that work. On preparation storage
-pressure, release optional ranking metadata, return its candidates to their
-original queue, and retry without ranking for the remainder of the snapshot.
-The 32-entry window and 90% threshold are provisional; neither changes proofs,
-cones or the independence requirement for batching replacements.
+attempt. Inferred guards are rediscovered. Vacant slots are refilled before choosing
+again. If all 32 candidates are deferred, discovery and preparation continue beyond
+that window until the first non-deferred candidate is prepared, the queue ends, or
+an extra-work allowance is spent. The allowance is `max_work / 10`
+charged work units per snapshot, shared across extended windows. It counts queue
+work, implied-guard discovery, descriptor lookups/rebinding, failed preparations,
+and their dependency/storage accounting; bounds and settlement work do not spend
+it. Work before the initial window fills is charged normally, outside this extra
+allowance. It is fixed before the first bounds attempt and never uses elapsed time.
+
+The scheduler checks the allowance between queue operations, finishing an in-flight
+discovery or preparation (so it may overshoot by that operation's charged work).
+Spending it selects the best deferred candidate; it is not a checker exhaustion or
+an unsuccessful proof, and creates no skip/negative cache entry. Deferred candidates
+remain eligible in this snapshot and later ones. Global work, deadlines and
+cancellation still apply inside every operation. Unexamined candidates may have
+smaller cones: this is bounded lookahead, not a global sort. On preparation storage
+pressure, release optional descriptors and ranking metadata, return waiting
+candidates to their original queue, and retry without ranking for the remainder
+of the snapshot. The window, allowance and 90% threshold are provisional; neither
+changes proofs, cones or the independence requirement for batching replacements.
+Progress exposes cumulative extra `lookaheadWork` and its `lookaheadLimit` alongside
+the candidate; they reset per snapshot and are measurements, never cache identities.
 
 One-hop implied guards can strengthen G before the cone is prepared. A negative
 unresolved premise excludes the union of its exact producers' settled guards;
