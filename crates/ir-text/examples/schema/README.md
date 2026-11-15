@@ -74,6 +74,12 @@ These allowances cover a whole admission invocation, independently of normal
 checker budgets. `not-ruled-out` is not a certificate. The report and recovery
 preserve this distinction and unexamined counts.
 
+`--dump-component FILE` saves admission diagnostics under the run directory (FILE
+is a single file name). The manifest and recovered report retain the path without
+loading the potentially large file into the report. Use `--dump-component-limit N`
+after `--` to change its independent record cap. The [component-dump guide](../check/COMPONENT-DUMP.md)
+describes snapshots, partial files and truncation. It contains local program names.
+
 ## Synthetic semantics
 
 A raw message assigns at most one value to each field. One selector field per tree

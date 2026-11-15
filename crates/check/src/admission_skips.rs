@@ -163,6 +163,9 @@ pub(crate) struct RetryChanges {
 }
 
 impl Attempts {
+    pub fn reason(&self, attempt: &Attempt) -> Option<Inconclusive> {
+        self.skipped.get(attempt).map(|s| s.reason)
+    }
     #[cfg(test)]
     pub fn without_negative_reuse() -> Self {
         Self {

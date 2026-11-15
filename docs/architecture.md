@@ -281,6 +281,14 @@ resetting checker time already spent. Both clocks still honor cancellation.
 Progress transports the results to CLI/schema/zoo consumers; presentation findings
 and editor semantics remain unchanged. See the [probe policy](checker-policies.md#guarded-candidate-filter).
 
+Admission component dumps use a separate borrowed observer. The checker exposes
+actual attempt snapshots and the last committed graph before propagating a deadline
+or cancellation error; it does not serialize, perform IO, clone entire graphs or
+retain historical cones. The CLI resolves semantic identities, names and source
+locations, and streams bounded JSONL. Diagnostic allowance exhaustion and write
+failures stay outside checker results. Reuse emits the reused graph without fresh
+attempts. See the [dump guide](../crates/ir-text/examples/check/COMPONENT-DUMP.md).
+
 ## Programs and checking in the editor
 
 A `.den` program is a `den.root` folder plus its referenced libraries; a file outside

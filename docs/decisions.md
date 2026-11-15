@@ -6,6 +6,21 @@ Settled design choices and why they were made. Current behavior is specified in 
 alternatives that were rejected. Revisit a decision only with new evidence, such as a
 real program that the current choice serves badly.
 
+## Admission dumps capture the computation that actually ran
+
+Component diagnostics borrow each selected guarded attempt before its cone and
+implied guard are released, and the last committed graph before admission returns
+or propagates an error. Reconstructing attempts from the final graph would invent
+history after rewrites split components. Signed premises and Boolean expressions
+are preserved; dependency read sets cannot stand in for guards. A pruning fallback
+and an attempt's outcome are separate facts.
+
+The checker supplies structure without IO. The CLI streams bounded local JSONL,
+reserving allowance for the final graph, excluding recording time from admission's
+deadline and reporting diagnostic failures separately. Structural identities use
+semantic keys; reused admission records reuse rather than fabricated attempts.
+The file intentionally retains program names and is not an anonymized export.
+
 ## Measurement
 
 - **Show direct structural justification; expand chains on request.** A source

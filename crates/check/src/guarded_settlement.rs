@@ -167,6 +167,7 @@ impl GroundProgram {
         // One-entry snapshot-local cache: retain only the most recent complete
         // computation (or failure key), so optional reuse cannot accumulate BDDs.
         let mut cache: Option<(Arc<BorrowedCone<'_>>, Option<Arc<BorrowedBounds<'_>>>)> = None;
+        let mut cache_reason = None; // diagnostic cause travels with a reused skipped result
         let mut queue = candidates
             .into_iter()
             .enumerate()
@@ -398,6 +399,28 @@ impl GroundProgram {
                     Err(_) => "failed",
                 },
             );
+            if !matches!(&prepared, Ok(Some(_))) {
+                let reason = attempts.reason(&Attempt::GuardedCone(
+                    candidate.rule.id,
+                    literal.term.occurrence,
+                ));
+                budget.excluding_time(|| {
+                    self.dump(
+                        progress.dump,
+                        AdmissionDumpEvent::GuardedOutcome {
+                            rule: candidate.rule.id,
+                            occurrence: literal.term.occurrence,
+                            stage: "preparation",
+                            state: if prepared.is_err() {
+                                "failed"
+                            } else {
+                                "skipped"
+                            },
+                            reason,
+                        },
+                    )
+                });
+            }
             let Some(cone) = prepared? else {
                 if preprocessing.is_none() {
                     progress.guarded_end(self, Default::default(), true, "skipped");
@@ -434,6 +457,21 @@ impl GroundProgram {
             // Lookahead may have skipped implied-guard discovery while another
             // candidate waited. Diagnose only the final guard used for bounds,
             // never an earlier preview of this same rule/occurrence/snapshot.
+            budget.excluding_time(|| {
+                self.dump(
+                    progress.dump,
+                    AdmissionDumpEvent::Guarded {
+                        candidate,
+                        literal,
+                        cone: &cone,
+                        implied: inferred.as_ref().map(|i| &i.proof),
+                        before_atoms: preparation.before_atoms,
+                        before_rules: preparation.before_producers,
+                        pruning: preparation.pruning,
+                    },
+                )
+            });
+            progress.dump_cutoff.set(false);
             progress.candidate_probe(self, &cone, ctx, &effective, literal, budget)?;
             let reused = match &cache {
                 Some((old, _)) => cone.same_computation(old, budget)?,
@@ -477,6 +515,24 @@ impl GroundProgram {
                 );
                 if result.is_err() {
                     progress.guarded_end(self, iteration.unwrap_or_default(), false, "failed");
+                    budget.excluding_time(|| {
+                        self.dump(
+                            progress.dump,
+                            AdmissionDumpEvent::GuardedOutcome {
+                                rule: candidate.rule.id,
+                                occurrence: literal.term.occurrence,
+                                stage: "bounds",
+                                state: "failed",
+                                reason: None,
+                            },
+                        )
+                    });
+                }
+                if progress.dump.is_some() {
+                    cache_reason = attempts.reason(&Attempt::GuardedBounds(
+                        candidate.rule.id,
+                        literal.term.occurrence,
+                    ));
                 }
                 cache = Some((cone, result?));
             }
@@ -492,32 +548,72 @@ impl GroundProgram {
                 },
             );
             let Some(bounds) = bounds else {
+                let reason = attempts
+                    .reason(&Attempt::GuardedBounds(
+                        candidate.rule.id,
+                        literal.term.occurrence,
+                    ))
+                    .or(cache_reason);
+                budget.excluding_time(|| {
+                    self.dump(
+                        progress.dump,
+                        AdmissionDumpEvent::GuardedOutcome {
+                            rule: candidate.rule.id,
+                            occurrence: literal.term.occurrence,
+                            stage: "bounds",
+                            state: "skipped",
+                            reason,
+                        },
+                    )
+                });
                 continue;
             };
             progress.rule(self, "guarded-settlement", candidate.rule.id, 0);
-            let proof = attempts
-                .proof(
-                    Attempt::GuardedSettlement(candidate.rule.id, literal.term.occurrence),
-                    &candidate.rule.head.atom,
-                    self,
-                    retained,
-                    budget,
-                    progress,
-                    Option::is_none,
-                    |retained, budget| {
-                        self.settle_guarded(
-                            candidate,
-                            literal,
-                            meaning,
-                            bounds,
-                            inferred.as_ref(),
-                            retained,
-                            budget,
-                            progress,
-                        )
+            let proof = attempts.proof(
+                Attempt::GuardedSettlement(candidate.rule.id, literal.term.occurrence),
+                &candidate.rule.head.atom,
+                self,
+                retained,
+                budget,
+                progress,
+                Option::is_none,
+                |retained, budget| {
+                    self.settle_guarded(
+                        candidate,
+                        literal,
+                        meaning,
+                        bounds,
+                        inferred.as_ref(),
+                        retained,
+                        budget,
+                        progress,
+                    )
+                },
+            );
+            let reason = attempts.reason(&Attempt::GuardedSettlement(
+                candidate.rule.id,
+                literal.term.occurrence,
+            ));
+            let state = match &proof {
+                Err(_) => "failed",
+                Ok(None) => "skipped",
+                Ok(Some(Some(_))) => "settled",
+                Ok(Some(None)) if progress.dump_cutoff.get() => "certificate-cutoff",
+                Ok(Some(None)) => "negative",
+            };
+            budget.excluding_time(|| {
+                self.dump(
+                    progress.dump,
+                    AdmissionDumpEvent::GuardedOutcome {
+                        rule: candidate.rule.id,
+                        occurrence: literal.term.occurrence,
+                        stage: "settlement",
+                        state,
+                        reason,
                     },
-                )?
-                .flatten();
+                )
+            });
+            let proof = proof?.flatten();
             if let Some(proof) = proof {
                 done.insert(component.id);
                 proofs.push(proof);

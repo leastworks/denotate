@@ -472,3 +472,15 @@ operational allowance. Its receipts use `QueryKey::Notice`; a deadline is unknow
 without a semantic receipt, while cancellation aborts. Sessions currently recompute
 these queries. They do not affect obligation verdicts/completeness. No implicit
 notice selection is added to the legacy `all_obligations` constructor.
+
+## Admission diagnostic snapshots
+
+`PreparedCheck::admit_with_diagnostics` optionally delivers borrowed `AdmissionDump`
+records synchronously: actual guarded cones, signed guards, implied-guard sources,
+pruning evidence and outcomes, plus the last committed graph on completion, reuse
+or interruption. No earlier attempt is reconstructed from the final graph. The
+observer owns bounded formatting and delivery; the checker performs no IO and
+retains no diagnostic state in sessions. Its delivery time is excluded from the
+admission deadline. Reused admission emits its graph and no invented attempts.
+The CLI [component-dump guide](../ir-text/examples/check/COMPONENT-DUMP.md) describes
+the bounded writer and its independent failure reporting.

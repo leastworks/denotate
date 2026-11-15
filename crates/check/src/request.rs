@@ -1029,15 +1029,36 @@ impl PreparedCheck<'_> {
     /// Diagnostic-only candidate search at live admission snapshots. Reports are
     /// delivered to the observer, never cached. Reused admission has no attempts.
     pub fn admit_with_candidate_probe(
-        mut self,
+        self,
         operations: &OperationalLimits,
         observer: Option<&AdmissionObserver<'_>>,
         probe: Option<CandidateProbeLimits>,
     ) -> Result<Self> {
+        self.admit_with_diagnostics(operations, observer, probe, None)
+    }
+    /// Optional, bounded diagnostic recording at actual admission snapshots.
+    /// Dump failures are handled by the observer, independently of checking.
+    pub fn admit_with_diagnostics(
+        mut self,
+        operations: &OperationalLimits,
+        observer: Option<&AdmissionObserver<'_>>,
+        probe: Option<CandidateProbeLimits>,
+        dump: Option<&AdmissionDumpObserver<'_>>,
+    ) -> Result<Self> {
         let limits = self.request.limits.with_operations(operations);
         let mut budget = Budget::tracked(&limits);
-        operations.cancellation.check()?;
-        budget.check("admission")?;
+        if let Err(error) = budget.check("admission") {
+            budget.excluding_time(|| {
+                self.program.dump(
+                    dump,
+                    AdmissionDumpEvent::Graph {
+                        state: "interrupted",
+                        error: Some(&error),
+                    },
+                )
+            });
+            return Err(error);
+        }
         if let Some((program, receipt)) = self.shared_admission.as_ref().and_then(|c| c.get()) {
             self.program.core = program.clone();
             self.receipts.invalidate(&QueryKey::Admission);
@@ -1049,13 +1070,20 @@ impl PreparedCheck<'_> {
                 0,
                 "reused",
             );
+            budget.excluding_time(|| {
+                self.program.dump(
+                    dump,
+                    AdmissionDumpEvent::Graph {
+                        state: "reused",
+                        error: None,
+                    },
+                )
+            });
             return Ok(self);
         }
-        self.program = if let Some(config) = probe {
-            self.program.admit_probed(&mut budget, observer, config)?
-        } else {
-            self.program.admit_observed(&mut budget, observer)?
-        };
+        self.program = self
+            .program
+            .admit_diagnosed(&mut budget, observer, probe, dump)?;
         self.receipts.invalidate(&QueryKey::Admission);
         budget.record(
             &mut self.receipts,

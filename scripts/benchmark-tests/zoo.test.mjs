@@ -159,3 +159,23 @@ test('writer chains prune, admit and preserve dimensions and progress on recover
     assert.throws(()=>source('guarded-hub',2,{hubWriters:2,hubDecoys:1}));
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('schema runner keeps local component dumps and recovery retains their path', async()=>{
+  const {spawnSync}=await import('node:child_process');
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-component-dump-'));
+  try {
+    const input=path.join(root,'source.den');
+    fs.writeFileSync(input,source('negative-unresolved',1));
+    const out=path.join(root,'run');
+    const result=spawnSync('target/debug/examples/bench_schema',['--out',out,'--source',input,'--dump-component','component.jsonl'],{encoding:'utf8'});
+    assert.equal(result.status,0,result.stderr);
+    const report=JSON.parse(fs.readFileSync(path.join(out,'report.json')));
+    assert.equal(report.componentDump,fs.realpathSync(path.join(out,'component.jsonl')));
+    const data=fs.readFileSync(report.componentDump,'utf8');
+    assert.ok(data.trim().split('\n').map(JSON.parse).some(r=>r.record==='graph-end' && r.complete));
+    const recovery=spawnSync('target/debug/examples/bench_schema',['--summarize',out],{encoding:'utf8'});
+    assert.equal(recovery.status,0,recovery.stderr);
+    assert.equal(JSON.parse(fs.readFileSync(path.join(out,'report.json'))).componentDump,report.componentDump);
+    assert.equal(fs.readFileSync(report.componentDump,'utf8'),data);
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});

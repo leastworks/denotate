@@ -116,6 +116,8 @@ struct State {
 }
 pub(crate) struct AdmissionReporter<'a> {
     observer: Option<&'a AdmissionObserver<'a>>,
+    pub(crate) dump: Option<&'a AdmissionDumpObserver<'a>>,
+    pub(crate) dump_cutoff: std::cell::Cell<bool>,
     state: RefCell<State>,
     candidate_probe: RefCell<Option<crate::sat_probe::candidates::Diagnosis>>,
 }
@@ -123,6 +125,8 @@ impl<'a> AdmissionReporter<'a> {
     pub fn new(observer: Option<&'a AdmissionObserver<'a>>) -> Self {
         Self {
             observer,
+            dump: None,
+            dump_cutoff: std::cell::Cell::new(false),
             candidate_probe: RefCell::new(None),
             state: RefCell::new(State {
                 progress: AdmissionProgress {
@@ -341,6 +345,9 @@ impl<'a> AdmissionReporter<'a> {
         self.emit(program, true);
     }
     pub fn cutoff(&self, kind: AdmissionAttemptKind) {
+        if self.dump.is_some() && kind == AdmissionAttemptKind::GuardedSettlement {
+            self.dump_cutoff.set(true);
+        }
         if self.enabled() {
             self.state
                 .borrow_mut()

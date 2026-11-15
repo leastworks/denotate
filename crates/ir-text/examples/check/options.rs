@@ -13,6 +13,8 @@ pub struct Options {
     pub hide_library_rewrites: bool,
     pub progress: bool,
     pub profile_memory: Option<String>,
+    pub dump_component: Option<String>,
+    pub dump_component_limit: usize,
     pub limits: Limits,
     pub input_order: InputOrder,
     pub sat_probe: bool,
@@ -51,6 +53,8 @@ pub fn help() -> String {
         --hide-library-rewrites   Hide library rewrite diagnostics\n\
         --no-progress             Silence progress on stderr\n\
         --profile-memory FILE     Stream detailed memory/BDD JSON lines to a new file\n\
+        --dump-component FILE     Stream bounded admission component diagnostics (local JSONL)\n\
+        --dump-component-limit N  Aggregate data record cap (default 100000)\n\
         --help, -h                Show this help\n\n\
         Checker limits (nonnegative integers; zero allows no use of that resource):\n",
     );
@@ -80,6 +84,8 @@ impl Options {
             hide_library_rewrites: false,
             progress: true,
             profile_memory: None,
+            dump_component: None,
+            dump_component_limit: 100_000,
             limits,
             input_order: InputOrder::Key,
             sat_probe: false,
@@ -101,6 +107,12 @@ impl Options {
                 "--verbose" => options.verbose = true,
                 "--no-progress" => options.progress = false,
                 "--profile-memory" => options.profile_memory = Some(value()?),
+                "--dump-component" => options.dump_component = Some(value()?),
+                "--dump-component-limit" => {
+                    options.dump_component_limit = value()?
+                        .parse()
+                        .map_err(|_| (2, format!("{option} requires a nonnegative integer")))?
+                }
                 "--hide-library-rewrites" => options.hide_library_rewrites = true,
                 "--verification" => options.selection = Some(value()?),
                 "--input-order" => {

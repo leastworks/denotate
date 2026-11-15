@@ -133,6 +133,18 @@ Use `just bench-den-schema --sat-probe` or `just bench-den-zoo --sat-probe` to r
 them alongside normal outcomes. The first increment answers uniqueness only;
 existence search and admitting programs based on SAT are separate future choices.
 
+### Component dumps
+
+`--dump-component FILE` records actual guarded attempts and the final committed
+unresolved graph under an independent diagnostic allowance. Default file-wide
+limits are 100,000 data records, 2 million traversal work units, 32 MiB each of
+serialized data and copied name text, and 10 seconds of active recording time.
+Half is reserved for attempts, half for final graphs/contexts. Collection and
+expression-depth caps bound temporary formatting; these are not exact heap-byte
+limits. Small control records survive data truncation. Recording time is excluded
+from admission's deadline, and a diagnostic failure cannot change its result.
+Details and limitations are in the [dump guide](../crates/ir-text/examples/check/COMPONENT-DUMP.md).
+
 ### Guarded-candidate filter
 
 `--sat-probe-candidates` separately opts into a necessary-condition query at the

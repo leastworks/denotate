@@ -13,6 +13,7 @@ use std::{
 const HELP: &str = "Usage: just bench-den-schema [OPTIONS] [-- CHECKER_LIMITS...]\n\n\
 --out DIR                 New persistent run directory (default target/bench-den-schema/<timestamp>)\n\
 --input-order ORDER       Diagnostic BDD order: key | reverse-key | structural\n\
+--dump-component FILE     Save component JSONL under this run directory\n\
 --sat-probe               Enable diagnostic stable-pair probes (limits may follow --)\n\
 --sat-probe-candidates    Diagnose guarded candidates during admission\n\
 --encoding NAME           ambiguous | coverage (default) | negated | assumed\n\
@@ -47,6 +48,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
     let mut shape = Shape::default();
     let mut out = None;
     let mut source_path = None;
+    let mut component_dump = None;
     let mut sampled = false;
     let mut generate_only = false;
     let mut forwarded = Vec::new();
@@ -83,6 +85,18 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         match arg.as_str() {
             "--out" => out = Some(PathBuf::from(value)),
             "--source" => source_path = Some(PathBuf::from(value)),
+            "--dump-component" => {
+                let path = PathBuf::from(&value);
+                if path.components().count() != 1
+                    || path.file_name().is_none()
+                    || path.is_absolute()
+                {
+                    return Err(
+                        "--dump-component needs a file name inside the run directory".into(),
+                    );
+                }
+                component_dump = Some(value);
+            }
             "--encoding" => shape.encoding = Encoding::parse(&value)?,
             "--topology" => shape.topology = Topology::parse(&value)?,
             "--input-order" => forwarded.extend([arg, value]),
@@ -117,6 +131,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         if flag != "--input-order"
             && flag != "--sat-probe-timeout-ms"
             && flag != "--sat-probe-refinements"
+            && flag != "--dump-component-limit"
             && flag != "--sat-probe-candidate-limit"
             && flag != "--sat-probe-candidate-work"
             && flag != "--sat-probe-candidate-timeout-ms"
@@ -175,6 +190,13 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         "--profile-memory".into(),
         dir.join("memory.jsonl").to_string_lossy().into_owned(),
     ];
+    let component_path = component_dump.as_ref().map(|file| dir.join(file));
+    if let Some(path) = &component_path {
+        check_args.extend([
+            "--dump-component".into(),
+            path.to_string_lossy().into_owned(),
+        ]);
+    }
     check_args.extend(forwarded);
     let revision = Command::new("git")
         .args(["rev-parse", "HEAD"])
@@ -195,7 +217,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         "crossReadCount":(0..shape.reads).filter(|i|cross_read(&shape,*i).is_some()).count(),
         "layoutDepth":if shape.topology==Topology::Layered {Some(shape.depth+2)} else {None},
         "shape":{"couplingPercent":shape.coupling_percent,"fields":shape.fields,"reads":shape.reads,"depth":shape.depth,"width":shape.width,"encoding":format!("{:?}",shape.encoding).to_lowercase(),"topology":format!("{:?}",shape.topology).to_lowercase(),"overlaps":shape.overlaps,"shadowed":shape.shadowed,"wideHeads":shape.wide_heads,"producers":shape.producers,"computed":shape.computed,"catalog":shape.catalog,"catalogLayers":shape.catalog_layers},
-        "candidateProbe":parsed.candidate_probe.as_ref().map(|p| json!({"timeoutMs":p.timeout.as_millis(),"maxCandidates":p.max_candidates,"maxWork":p.max_work})),"inputOrder":parsed.input_order.label(),"satProbe":{"enabled":parsed.sat_probe,"timeoutMs":parsed.sat_probe_limits.timeout.as_millis(),"maxRefinements":parsed.sat_probe_limits.max_refinements},"limits":limits,"binary":binary,"binarySha256":binary_hash,"checkArgs":check_args});
+        "componentDump":component_path,"componentDumpRecordLimit":parsed.dump_component_limit,"candidateProbe":parsed.candidate_probe.as_ref().map(|p| json!({"timeoutMs":p.timeout.as_millis(),"maxCandidates":p.max_candidates,"maxWork":p.max_work})),"inputOrder":parsed.input_order.label(),"satProbe":{"enabled":parsed.sat_probe,"timeoutMs":parsed.sat_probe_limits.timeout.as_millis(),"maxRefinements":parsed.sat_probe_limits.max_refinements},"limits":limits,"binary":binary,"binarySha256":binary_hash,"checkArgs":check_args});
     if source_path.is_some() {
         for key in ["shape", "layout", "layoutDepth", "crossReadCount"] {
             manifest.as_object_mut().unwrap().remove(key);

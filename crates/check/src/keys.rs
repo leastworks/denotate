@@ -35,7 +35,8 @@ pub struct InstanceKey {
     pub substitution: Vec<(VariableKey, ConstantKey)>,
 }
 impl InstanceKey {
-    pub(crate) fn from_rule(
+    /// Identity of an original, unrewritten instance, projected on demand.
+    pub fn from_rule(
         corpus: &Corpus,
         keys: &SemanticKeys,
         r: &GroundRule,

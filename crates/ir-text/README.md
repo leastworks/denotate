@@ -154,6 +154,11 @@ and memory-profile records, including local input tuples and differing atoms wit
 source locations. Ordinary output and exit codes are unchanged. See the
 [probe policy](../../docs/checker-policies.md#diagnostic-sat-probe) for scope and limits.
 
+`just check-den <program> --dump-component FILE` streams bounded, local JSONL
+with actual guarded-attempt snapshots and the last committed unresolved graph,
+including on admission interruption. Names and locations are resolved by the CLI;
+recording cannot change a checker result. See the [dump format and allowances](examples/check/COMPONENT-DUMP.md).
+
 `just check-den <program> --sat-probe-candidates` diagnoses guarded candidates
 during admission, independently of the pre-admission uniqueness probe. Progress
 reports `ruled-out`, `not-ruled-out`, `unknown` and cumulative unexamined counts.

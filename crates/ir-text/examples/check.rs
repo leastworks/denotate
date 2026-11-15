@@ -12,6 +12,8 @@ use serde_json::json;
 use std::{collections::BTreeSet, fmt::Write};
 
 type Failure = (u8, String);
+#[path = "check/component_dump.rs"]
+mod component_dump;
 #[path = "check/options.rs"]
 mod options;
 #[cfg(test)]
@@ -321,10 +323,17 @@ fn check_program(
         sat_probe,
         sat_probe_limits,
         candidate_probe,
+        dump_component,
+        dump_component_limit,
         limits,
         progress: report_progress,
         ..
     } = options;
+    let dump = std::cell::RefCell::new(
+        dump_component
+            .as_deref()
+            .and_then(|path| component_dump::Dump::open(path, dump_component_limit, trace)),
+    );
     let backend = BackendIdentity::bdd_with_order(input_order);
     progress.emit(Phase::Discovery, json!({}));
     let (membership, sources) = filesystem::discover_classified(std::path::Path::new(&root))
@@ -662,12 +671,19 @@ fn check_program(
         progress.emit(Phase::Admission, detail.clone());
         let observer =
             |event: &denotate_check::AdmissionProgress| admission.report(progress, &detail, event);
+        let dump_observer = |event: denotate_check::AdmissionDump<'_>| {
+            if let Some(dump) = &mut *dump.borrow_mut() {
+                dump.capture(&p, declaration, event);
+            }
+        };
+        let dump_enabled = dump.borrow().is_some();
         let admitted = prepared
-            .admit_with_candidate_probe(
+            .admit_with_diagnostics(
                 &operations,
                 (report_progress || limits.profile.enabled() || candidate_probe.is_some())
                     .then_some(&observer),
                 candidate_probe.clone(),
+                dump_enabled.then_some(&dump_observer),
             )
             .map_err(checker_failure)?
             .with_emptiness_examples(empty_examples.unwrap_or_default());
@@ -869,9 +885,9 @@ mod tests {
             Ok(())
         }
     }
-    struct Fixture(PathBuf);
+    pub(super) struct Fixture(pub(super) PathBuf);
     impl Fixture {
-        fn new(text: &str) -> Self {
+        pub(super) fn new(text: &str) -> Self {
             static NEXT: AtomicU64 = AtomicU64::new(0);
             let folder = std::env::temp_dir().join(format!(
                 "denotate-check-cli-{}-{}",
@@ -883,7 +899,7 @@ mod tests {
             fs::write(folder.join("program.den"), text).unwrap();
             Self(folder)
         }
-        fn run(&self, options: &[&str]) -> (u8, String) {
+        pub(super) fn run(&self, options: &[&str]) -> (u8, String) {
             let mut output = String::new();
             let args = std::iter::once(self.0.to_str().unwrap().to_owned())
                 .chain(options.iter().map(|s| s.to_string()));
@@ -1105,7 +1121,7 @@ mod tests {
         }
     }
     impl Fixture {
-        fn traced(&self, flags: &[&str]) -> (Result<u8, Failure>, String, String) {
+        pub(super) fn traced(&self, flags: &[&str]) -> (Result<u8, Failure>, String, String) {
             let mut output = String::new();
             let progress = SharedOutput::default();
             let result = run_with_progress(
@@ -2443,3 +2459,7 @@ kept():-middle(); kept():-term(); term():-!kept(); verification checks{assumptio
 #[cfg(test)]
 #[path = "check/shipping_news.rs"]
 mod shipping_news;
+
+#[cfg(test)]
+#[path = "check/component_dump_tests.rs"]
+mod component_dump_tests;

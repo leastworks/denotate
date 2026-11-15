@@ -431,7 +431,7 @@ impl GroundProgram {
         budget: &mut Budget<'_>,
         observer: Option<&AdmissionObserver<'_>>,
     ) -> Result<Self> {
-        self.admit_attempts(budget, observer, Attempts::default(), None)
+        self.admit_attempts(budget, observer, Attempts::default(), None, None)
     }
     #[cfg(test)]
     pub(crate) fn admit_without_negative_reuse(
@@ -439,15 +439,22 @@ impl GroundProgram {
         budget: &mut Budget<'_>,
         observer: Option<&AdmissionObserver<'_>>,
     ) -> Result<Self> {
-        self.admit_attempts(budget, observer, Attempts::without_negative_reuse(), None)
+        self.admit_attempts(
+            budget,
+            observer,
+            Attempts::without_negative_reuse(),
+            None,
+            None,
+        )
     }
-    pub(crate) fn admit_probed(
+    pub(crate) fn admit_diagnosed(
         self,
         budget: &mut Budget<'_>,
         observer: Option<&AdmissionObserver<'_>>,
-        config: CandidateProbeLimits,
+        config: Option<CandidateProbeLimits>,
+        dump: Option<&AdmissionDumpObserver<'_>>,
     ) -> Result<Self> {
-        self.admit_attempts(budget, observer, Attempts::default(), Some(config))
+        self.admit_attempts(budget, observer, Attempts::default(), config, dump)
     }
     fn admit_attempts(
         mut self,
@@ -455,21 +462,43 @@ impl GroundProgram {
         observer: Option<&AdmissionObserver<'_>>,
         mut attempts: Attempts,
         probe: Option<CandidateProbeLimits>,
+        dump: Option<&AdmissionDumpObserver<'_>>,
     ) -> Result<Self> {
         self.rewrites.skips.clear();
         self.rewrites.skipped_attempts = 0;
-        let progress = crate::admission_progress::AdmissionReporter::new(observer);
+        let mut progress = crate::admission_progress::AdmissionReporter::new(observer);
+        progress.dump = dump;
         if let Some(config) = probe {
             progress.enable_candidate_probe(config, budget.limits);
         }
         progress.snapshot(&self, 0, "starting");
         let limits = budget.limits;
-        limits.cancellation.check()?;
+        if let Err(error) = limits.cancellation.check() {
+            budget.excluding_time(|| {
+                self.dump(
+                    dump,
+                    AdmissionDumpEvent::Graph {
+                        state: "interrupted",
+                        error: Some(&error),
+                    },
+                )
+            });
+            return Err(error);
+        }
         self.rewrites.inconclusive = None;
         self.rewrites.downstream_incomplete = None;
         if !self.assumptions_consistent() {
             budget.excluding_time(|| progress.candidate_probe_summary(&self));
             progress.finish(&self, "inconsistent-assumptions");
+            budget.excluding_time(|| {
+                self.dump(
+                    dump,
+                    AdmissionDumpEvent::Graph {
+                        state: "inconsistent-assumptions",
+                        error: None,
+                    },
+                )
+            });
             return Ok(self);
         }
         let mut round = 0;
@@ -486,6 +515,19 @@ impl GroundProgram {
         progress.round_end(&self);
         self.rewrites.skipped_attempts = attempts.count;
         self.rewrites.skips = attempts.records();
+        budget.excluding_time(|| {
+            self.dump(
+                dump,
+                AdmissionDumpEvent::Graph {
+                    state: if result.is_ok() {
+                        "complete"
+                    } else {
+                        "interrupted"
+                    },
+                    error: result.as_ref().err(),
+                },
+            )
+        });
         if let Err(error) = result {
             progress.failed(&self, &error);
             budget.failure(&error);
