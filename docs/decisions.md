@@ -103,6 +103,21 @@ The file intentionally retains program names and is not an anonymized export.
 
 ## Meaning and checking
 
+- **A program means its stable models; every permitted world must have exactly
+  one, and the checker says so up front when it does not.** Where a negation cycle
+  has no consistent value in some world (an odd loop) or two (an even one), an
+  implementation that evaluates by propagation still behaves somehow: it breaks the
+  tie by its evaluation order, and may do so consistently. That choice is not part
+  of the program's meaning and is not verified; a change of order can flip it
+  silently. The intended behavior must be stated in the rules instead. A real
+  lowered program had an odd loop that its compiler resolved consistently; the
+  checker could only report the component as unresolved. Today admission refuses
+  such components and the opt-in SAT probe answers uniqueness (at most one stable
+  meaning per world, with a witness pair when not). Reporting non-unique and
+  non-existent meanings as findings, with the world and the loop, is planned
+  ([roadmap](roadmap.md)); positive self-support stays legitimate (least-model
+  meaning) and is reported only on request.
+
 - **Replace cyclic premises only with a guard-relative, non-circular certificate.**
   A premise need not be always false to cut its cycle edge. Under a rule's settled
   guard G, it may equal an input-dependent expression over globally settled atoms.

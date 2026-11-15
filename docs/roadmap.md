@@ -16,6 +16,12 @@ Cycle-relevant proofs and supporting evaluation precede downstream work; downstr
 exhaustion is reported separately without relabeling the cycles' results. A
 production-scale lowered program showed what remains:
 
+- **Upfront meaning checks.** Report, as findings, any permitted world where a
+  component has no stable meaning or more than one, with the world and the loop.
+  Uniqueness exists as the opt-in SAT probe; existence (a world with no stable
+  model, found by a two-solver loop with derivation-support generalization) is
+  next. Then decide when these run by default and how their findings relate to
+  admission's unresolved-component reports.
 - **Never-active cycles.** More generally, a component whose active dependency graph
   is acyclic in every permitted world (edges labelled with their guards, checked by a
   symbolic topological peeling) has one meaning per world without any rewrite. It
