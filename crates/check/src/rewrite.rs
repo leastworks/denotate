@@ -431,7 +431,7 @@ impl GroundProgram {
         budget: &mut Budget<'_>,
         observer: Option<&AdmissionObserver<'_>>,
     ) -> Result<Self> {
-        self.admit_attempts(budget, observer, Attempts::default(), None, None)
+        self.admit_attempts(budget, observer, Attempts::default(), None, None, None)
     }
     #[cfg(test)]
     pub(crate) fn admit_without_negative_reuse(
@@ -445,6 +445,7 @@ impl GroundProgram {
             Attempts::without_negative_reuse(),
             None,
             None,
+            None,
         )
     }
     pub(crate) fn admit_diagnosed(
@@ -452,9 +453,17 @@ impl GroundProgram {
         budget: &mut Budget<'_>,
         observer: Option<&AdmissionObserver<'_>>,
         config: Option<CandidateProbeLimits>,
+        components: Option<(SatProbeLimits, &SatProbeObserver<'_>)>,
         dump: Option<&AdmissionDumpObserver<'_>>,
     ) -> Result<Self> {
-        self.admit_attempts(budget, observer, Attempts::default(), config, dump)
+        self.admit_attempts(
+            budget,
+            observer,
+            Attempts::default(),
+            config,
+            components,
+            dump,
+        )
     }
     #[cfg(test)]
     pub(crate) fn admit_guarded_for_test(
@@ -467,7 +476,7 @@ impl GroundProgram {
         let mut attempts = Attempts::default();
         attempts.batch_guarded = batch;
         attempts.reuse_prepared = reuse;
-        self.admit_attempts(budget, observer, attempts, None, None)
+        self.admit_attempts(budget, observer, attempts, None, None, None)
     }
 
     fn admit_attempts(
@@ -476,12 +485,16 @@ impl GroundProgram {
         observer: Option<&AdmissionObserver<'_>>,
         mut attempts: Attempts,
         probe: Option<CandidateProbeLimits>,
+        components: Option<(SatProbeLimits, &SatProbeObserver<'_>)>,
         dump: Option<&AdmissionDumpObserver<'_>>,
     ) -> Result<Self> {
         self.rewrites.skips.clear();
         self.rewrites.skipped_attempts = 0;
         let mut progress = crate::admission_progress::AdmissionReporter::new(observer);
         progress.dump = dump;
+        progress.component_probe = components.map(|(config, observer)| {
+            crate::sat_probe::admission::Diagnosis::new(config, budget.limits.clone(), observer)
+        });
         if let Some(config) = probe {
             progress.enable_candidate_probe(config, budget.limits);
         }
@@ -707,6 +720,13 @@ impl GroundProgram {
             let components = scope.ordered_targets(self, budget)?;
             let mut batch = Vec::new();
             for pass in ["producer-removals", "bound-removals", "candidates"] {
+                if pass == "bound-removals" && phase == AdmissionPhase::Relevant {
+                    if let Some(diagnosis) = &progress.component_probe {
+                        budget.excluding_time(|| {
+                            diagnosis.run(self, *round, &components, &summaries, ctx)
+                        })?;
+                    }
+                }
                 for (component, targets) in &components {
                     progress.work(self, pass, Some(*component), 0, true);
                     let head = self

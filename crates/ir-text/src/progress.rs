@@ -273,7 +273,7 @@ impl<'a> AdmissionDetails<'a> {
             "atoms":component.map(|c|c.atoms.len()),"representative":representative.map(describe),
             "verifiedStablePair":report.pair.is_some(),"supportedPairSeen":report.supported_pair_seen,
             "refinements":report.refinements,"solves":report.solves,"variables":report.variables,
-            "clauses":report.clauses,"literals":report.literals,"coneAtoms":report.cone_atoms,"coneRules":report.cone_rules,
+            "clauses":report.clauses,"literals":report.literals,"coneAtoms":report.cone_atoms,"coneRules":report.cone_rules,"conditionNodes":report.condition_nodes,
             "solveMs":report.solve_time.as_secs_f64()*1000.,"elapsedMs":report.elapsed.as_secs_f64()*1000.,"reason":report.reason,
             "world":report.pair.as_ref().map(|p|p.world.iter().map(describe).collect::<Vec<_>>()),
             "differing":report.pair.as_ref().map(|p|p.differing.iter().map(describe).collect::<Vec<_>>()),
@@ -283,7 +283,7 @@ impl<'a> AdmissionDetails<'a> {
             "world":e.world.as_ref().map(|w|w.iter().map(describe).collect::<Vec<_>>()),
             "worlds":e.worlds, "covers":e.covers, "refinements":e.refinements, "solves":e.solves,
             "variables":e.variables, "clauses":e.clauses, "literals":e.literals,
-            "coneAtoms":e.cone_atoms, "coneRules":e.cone_rules,
+            "coneAtoms":e.cone_atoms, "coneRules":e.cone_rules,"conditionNodes":e.condition_nodes,
             "solveMs":e.solve_time.as_secs_f64()*1000., "elapsedMs":e.elapsed.as_secs_f64()*1000.,
         })).unwrap_or(Value::Null);
         result

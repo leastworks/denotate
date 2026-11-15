@@ -23,7 +23,9 @@ runs; `zoo.json` is updated after each child. Recovery includes interrupted
 children and keeps missing repetitions visible in the requested counts.
 
 Use `--sat-probe` to retain independent SAT meaning results alongside each run's
-BDD outcomes. `satProbes` contains the latest record per verification/component,
+BDD outcomes. Queries run after cheap admission reductions with exact settled
+boundary conditions. `satProbes` contains the latest record per
+verification/snapshot/component,
 including during `--summarize` recovery. Probe limits can follow `--`, for example
 `--sat-probe-timeout-ms 10000`. No ordinary verdict changes; uniqueness UNSAT
 triggers a separate existence search. Its nested `existence` record distinguishes

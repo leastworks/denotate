@@ -346,20 +346,31 @@ condition allowance. `LocalMetrics.keys` includes the first query's index build.
 
 ## Diagnostic SAT probe
 
-`PreparedCheck::sat_probe(component, probe_limits, operations)` examines an immutable
-pre-admission component. It uses only that component's upstream cone and the selected
-assumptions, returning `SatProbeReport`: SAT with a reduct-verified pair, UNSAT
-(at most one stable meaning), or unknown with a reason. After UNSAT, a separate
-`SatExistenceReport` checks whether each permitted world has a stable model. It
-reports `every-world`, `no-meaning` with an input world, `inconsistent-assumptions`,
-or `unknown`. Both questions apply only to the target/upstream/assumption cone.
-It does not change normal results, admission, caches or backend identity. The CLI
-opts in with `--sat-probe`; no probe runs by default.
+`PreparedCheck::admit_with_probes` can run component uniqueness/existence probes
+on actual admission snapshots, after structural reductions and producer removals,
+in provider-first order. A borrowed `SatProbeObserver` receives a starting event
+and a `SatProbeReport` with the current graph, revision and round. Settled providers,
+replacement expressions and W are read from existing exact conditions; read-only
+BDD encoding avoids reconstructing their upstream rules. An unresolved external
+provider gives `unknown`; later snapshots can use it once it settles.
+
+SAT returns a reduct-verified pair; UNSAT establishes at most one stable meaning.
+After UNSAT, a separate `SatExistenceReport` reports `every-world`, `no-meaning`
+with an input world, `inconsistent-assumptions`, or `unknown`. Both questions apply
+only to the target under its exact settled boundary and W. Diagnostics never
+change admission, normal results or caches. The CLI opts in with `--sat-probe`;
+no probe runs by default. Reused admission emits no queries. Each reached snapshot
+has independent diagnostic allowances; all diagnostic time, including delivery,
+is excluded from the admission deadline. Cancellation stays live.
+
+`PreparedCheck::sat_probe(component, probe_limits, operations)` remains available
+for explicit pre-admission whole-cone comparisons. It does not accept rewritten
+graphs. The CLI uses the compact admission path above.
 
 The probe encodes Clark completion using batsat, refines unfounded candidates with
 external-support clauses and independently evaluates each reduct by a positive
-worklist. Fixed values are constants; upstream positive loops are checked too.
-Unresolved negative upstream components produce unknown. CNF and cone size/work
+worklist. Exact conditions include the ordinary evaluator's least meaning of settled
+positive recursion; unresolved upstream components produce unknown. CNF and cone size/work
 use separate invocations of the existing limits; time and refinement limits are
 probe-specific, independently for uniqueness and existence. Cancellation propagates.
 Existence alternates a W-only world query with a pinned-input stable-model query.

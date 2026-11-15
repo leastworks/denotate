@@ -19,8 +19,9 @@ production-scale lowered program showed what remains:
 - **Upfront meaning checks.** Report, as findings, any permitted world where a
   component has no stable meaning or more than one, with the world and the loop.
   The opt-in SAT probe checks uniqueness and, after proving at most one, existence using
-  alternating world and stable-model queries with generalized input cubes.
-  It can report a world with no meaning; exposing self-supporting loops and
+  alternating world and stable-model queries with generalized input cubes. It now
+  runs during admission in provider-first order, using exact settled boundary
+  conditions instead of upstream rule cones. It can report a world with no meaning; exposing self-supporting loops and
   handling unresolved negative upstream components remain. Decide when these
   checks run by default and how their findings relate to
   admission's unresolved-component reports.

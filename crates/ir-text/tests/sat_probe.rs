@@ -5,6 +5,229 @@ fn load_text(text: &str) -> LoadedProgram {
     let f = SourceFile::new("file:///probe.den", 0, text);
     load(&ProgramMembership::single("root", [f.uri.clone()]), &[f]).unwrap()
 }
+
+#[test]
+fn component_probes_follow_three_successively_settled_providers() {
+    let mut text = String::new();
+    for i in 0..3 {
+        if i == 0 {
+            text.push_str("input perishable_0();");
+        } else {
+            text.push_str(&format!(
+                "relation perishable_{i}();perishable_{i}():-cleared_{}();",
+                i - 1
+            ));
+        }
+        text.push_str(&format!(
+            "
+input docked_{i}();input priority_{i}();
+relation booked_{i}();booked_{i}():-perishable_{i}(),cleared_{i}();
+relation fails_{i}();fails_{i}():-docked_{i}(),!booked_{i}();
+relation claim_{i}();claim_{i}():-!perishable_{i}(),!fails_{i}();
+relation inspected_{i}();inspected_{i}():-perishable_{i}();inspected_{i}():-claim_{i}();
+relation held_{i}();held_{i}():-priority_{i}(),inspected_{i}();
+relation cleared_{i}();cleared_{i}():-docked_{i}(),!held_{i}();"
+        ));
+    }
+    text.push_str("verification v{assumptions:[];obligations:[];}");
+    let p = load_text(&text);
+    let l = Limits::default();
+    let ops = (&l).into();
+    let request = p.verification_requests(&l).unwrap().remove(0).1;
+    let prepare = || {
+        let RequestPreparation::Complete(raw) = request.prepare(&p.corpus, &p.keys, &ops).unwrap()
+        else {
+            panic!()
+        };
+        raw
+    };
+    let ordinary = prepare().admit(&ops).unwrap();
+    assert!(ordinary.program().is_admitted());
+    let events = std::cell::RefCell::new(Vec::new());
+    let observer = |e: SatProbeEvent<'_>| {
+        if let Some(r) = e.report {
+            let representative = &e.program.component(e.component).unwrap().atoms[0];
+            let name = p
+                .corpus
+                .relation(representative.relation)
+                .unwrap()
+                .name
+                .clone();
+            events.borrow_mut().push((name, e.snapshot, r.clone()));
+        }
+    };
+    let admitted = prepare()
+        .admit_with_probes(
+            &ops,
+            None,
+            None,
+            Some((Default::default(), &observer)),
+            None,
+        )
+        .unwrap();
+    assert_eq!(admitted.receipts(), ordinary.receipts());
+    assert!(admitted.program().is_admitted());
+    let events = events.into_inner();
+    let mut answered = Vec::new();
+    for (name, snapshot, r) in &events {
+        if r.answer == SatProbeAnswer::Unknown {
+            assert!(r.reason.as_deref().unwrap().contains("upstream unresolved"));
+        } else {
+            assert_eq!(r.answer, SatProbeAnswer::Unsat);
+            assert_eq!(
+                r.existence.as_ref().unwrap().answer,
+                SatExistenceAnswer::EveryWorld
+            );
+            let stage = name.chars().last().unwrap().to_digit(10).unwrap();
+            if !answered.iter().any(|(s, _)| *s == stage) {
+                answered.push((stage, *snapshot));
+            }
+        }
+    }
+    assert_eq!(
+        answered.iter().map(|(s, _)| *s).collect::<Vec<_>>(),
+        [0, 1, 2],
+        "{events:?}"
+    );
+    assert!(answered.windows(2).all(|w| w[0].1 < w[1].1));
+    assert!(
+        events
+            .iter()
+            .any(|(_, _, r)| r.answer == SatProbeAnswer::Unknown)
+    );
+}
+
+#[test]
+fn unresolved_upstream_is_unknown_and_probe_results_are_not_cached() {
+    let p = load_text(
+        "input x();relation a();relation b();a():-x(),!b();b():-x(),!a();relation c();relation d();c():-a(),!d();d():-!c();verification v{assumptions:[];obligations:[];}",
+    );
+    let l = Limits::default();
+    let ops = (&l).into();
+    let request = p.verification_requests(&l).unwrap().remove(0).1;
+    let mut session = denotate_check_session::Session::default();
+    let events = std::cell::RefCell::new(Vec::new());
+    let observer = |e: SatProbeEvent<'_>| {
+        if let Some(r) = e.report {
+            events.borrow_mut().push(r.clone());
+        }
+    };
+    let mut outcomes = None;
+    for _ in 0..2 {
+        // cold/warm preparation; shared admission within each run
+        let fixed = session
+            .prepare_fixed(&p.corpus, &p.keys, &p.domains, &l)
+            .unwrap();
+        let mut receipts = None;
+        for reused in [false, true] {
+            events.borrow_mut().clear();
+            let RequestPreparation::Complete(raw) = session
+                .prepare_with_fixed(&request, &p.corpus, &p.keys, &ops, &fixed)
+                .unwrap()
+            else {
+                panic!()
+            };
+            let admitted = raw
+                .admit_with_probes(
+                    &ops,
+                    None,
+                    None,
+                    Some((Default::default(), &observer)),
+                    None,
+                )
+                .unwrap();
+            assert!(!admitted.program().is_admitted());
+            if reused {
+                assert!(
+                    events.borrow().is_empty(),
+                    "admission reuse must not re-run diagnostics"
+                );
+                assert_eq!(admitted.receipts(), receipts.as_ref().unwrap());
+            } else {
+                assert!(
+                    events
+                        .borrow()
+                        .iter()
+                        .any(|r| r.answer == SatProbeAnswer::Sat)
+                );
+                assert!(
+                    events
+                        .borrow()
+                        .iter()
+                        .any(|r| r.answer == SatProbeAnswer::Unknown
+                            && r.reason.as_deref().unwrap().contains("upstream unresolved"))
+                );
+                receipts = Some(admitted.receipts().clone());
+            }
+            let LocalCheckOutcome::Complete(report) = session.verify(&admitted, &ops).unwrap()
+            else {
+                panic!()
+            };
+            if let Some(expected) = &outcomes {
+                assert_eq!(&report.checked.results.value, expected);
+            } else {
+                outcomes = Some(report.checked.results.value);
+            }
+        }
+    }
+}
+
+#[test]
+fn component_probe_exhaustion_and_cancellation_do_not_become_checker_answers() {
+    let p = load_text(include_str!("fixtures/guarded-settlement.den"));
+    let l = Limits::default();
+    let ops: OperationalLimits = (&l).into();
+    let request = p.verification_requests(&l).unwrap().remove(0).1;
+    let prepare = || {
+        let RequestPreparation::Complete(raw) = request.prepare(&p.corpus, &p.keys, &ops).unwrap()
+        else {
+            panic!()
+        };
+        raw
+    };
+    let ordinary = prepare().admit(&ops).unwrap();
+    let events = std::cell::RefCell::new(Vec::new());
+    let observer = |e: SatProbeEvent<'_>| {
+        if let Some(r) = e.report {
+            events.borrow_mut().push(r.clone());
+        }
+    };
+    let admitted = prepare()
+        .admit_with_probes(
+            &ops,
+            None,
+            None,
+            Some((
+                SatProbeLimits {
+                    timeout: std::time::Duration::ZERO,
+                    ..Default::default()
+                },
+                &observer,
+            )),
+            None,
+        )
+        .unwrap();
+    assert!(admitted.program().is_admitted());
+    assert_eq!(admitted.receipts(), ordinary.receipts());
+    assert!(!events.borrow().is_empty());
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .all(|r| r.answer == SatProbeAnswer::Unknown && r.reason.is_some())
+    );
+    let observer = |_: SatProbeEvent<'_>| ops.cancellation.cancel();
+    assert!(matches!(
+        prepare().admit_with_probes(
+            &ops,
+            None,
+            None,
+            Some((Default::default(), &observer)),
+            None
+        ),
+        Err(CheckError::Cancelled)
+    ));
+}
 fn reports(text: &str) -> Vec<(String, Vec<SatProbeReport>)> {
     let p = load_text(text);
     let l = Limits::default();

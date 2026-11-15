@@ -1039,10 +1039,22 @@ impl PreparedCheck<'_> {
     /// Optional, bounded diagnostic recording at actual admission snapshots.
     /// Dump failures are handled by the observer, independently of checking.
     pub fn admit_with_diagnostics(
+        self,
+        operations: &OperationalLimits,
+        observer: Option<&AdmissionObserver<'_>>,
+        probe: Option<CandidateProbeLimits>,
+        dump: Option<&AdmissionDumpObserver<'_>>,
+    ) -> Result<Self> {
+        self.admit_with_probes(operations, observer, probe, None, dump)
+    }
+    /// Component probes run after cheap reductions, borrowing exact settled
+    /// conditions. Results are observational and never retained in admission.
+    pub fn admit_with_probes(
         mut self,
         operations: &OperationalLimits,
         observer: Option<&AdmissionObserver<'_>>,
         probe: Option<CandidateProbeLimits>,
+        components: Option<(SatProbeLimits, &SatProbeObserver<'_>)>,
         dump: Option<&AdmissionDumpObserver<'_>>,
     ) -> Result<Self> {
         let limits = self.request.limits.with_operations(operations);
@@ -1081,9 +1093,9 @@ impl PreparedCheck<'_> {
             });
             return Ok(self);
         }
-        self.program = self
-            .program
-            .admit_diagnosed(&mut budget, observer, probe, dump)?;
+        self.program =
+            self.program
+                .admit_diagnosed(&mut budget, observer, probe, components, dump)?;
         self.receipts.invalidate(&QueryKey::Admission);
         budget.record(
             &mut self.receipts,

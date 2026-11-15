@@ -659,14 +659,35 @@ The file intentionally retains program names and is not an anonymized export.
 - **SAT returns only as an opt-in diagnostic probe.** A real program exhausted
   BDD admission after several optimizations, leaving ambiguity versus proof cost
   unresolved. A two-completion SAT query separates those questions without changing
-  checking behavior. It runs on the prepared graph before admission, avoiding both
-  admission exhaustion and retention of an extra graph snapshot. Candidates must
+  checking behavior. The initial pre-admission whole-cone query remains available
+  for explicit comparisons; the CLI now probes actual admission snapshots as
+  described below. Candidates must
   pass independent reduct evaluation; external-support refinements remove unfounded
   candidates without losing stable models. UNSAT establishes at most one stable
   meaning, never existence or admissibility. The first increment declines unresolved
   negative upstream components rather than assuming them settled. BDD remains the
   only backend; progress-only probe results do not alter findings or exit codes.
   See [the probe policy](checker-policies.md#diagnostic-sat-probe) for bounds and scope.
+- **Probe components under exact settled boundaries during admission.** A real
+  pre-admission query pulled in 56K upstream atoms and did not finish. Symbolic
+  evaluation already knows most of those providers as exact Boolean functions.
+  After cheap structural/producer reductions, encode those functions and W by
+  read-only Tseitin definitions rather than reconstructing upstream rules. Include
+  installed replacement expressions. Shared acyclic definitions have one stable
+  extension for every input world; composing them with target rules therefore
+  preserves target stable models under W. Reduct checks and existence covers also
+  include these definitions, preserving false guards of alternative producers.
+  This introduces no new BDD evaluation or change to admission's proofs.
+
+  Probe in provider-first order and report an unresolved external provider as
+  unknown. Ordinary admission may settle it, enabling a later snapshot's query.
+  Queries are fresh per component/snapshot, independently bounded for uniqueness
+  and existence; time including report delivery is excluded from admission's
+  deadline. Limits before the hook can prevent a query. Cheaply admitted components,
+  reused admission and inconsistent contexts need no probe. SAT answers never
+  influence scheduling or admission. Snapshot-qualified report indices prevent
+  later components from overwriting earlier probe records after graph revisions.
+
 - **Existence is a separate diagnostic query after uniqueness.** At most one stable
   model allows zero. The existing BDD completion check is sufficient to find some
   contradictions, but a supported, unfounded solution can hide the absence of a
@@ -722,8 +743,8 @@ The file intentionally retains program names and is not an anonymized export.
   The filter remains diagnostic-only. It receives aggregate time/work and a
   candidate cap, reports unexamined candidates, and never guides admission.
   Its active time is excluded from admission's deadline while preserving elapsed
-  checker time and cancellation. Earlier uniqueness probes still run before
-  admission and retain their separate stable-model refinement semantics.
+  checker time and cancellation. Component uniqueness probes retain their separate
+  stable-model refinement semantics.
 - **Assumptions take effect only through an explicit verification.** Assumptions are
   the domain constraints a library author chooses. When every declared assumption was
   active, declaring or importing one silently changed every check, and one obligation

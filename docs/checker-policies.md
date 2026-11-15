@@ -91,23 +91,34 @@ standing feature-parity requirement.
 
 ## Diagnostic SAT probe
 
-`just check-den ROOT --sat-probe` asks whether each prepared component with a
-negative cycle has two stable meanings in one permitted world, then checks for
-worlds with no meaning when uniqueness is established. It is off by
-default and runs **before admission**, so an admission limit cannot prevent the
-answer. This examines the larger original component, not a residual component
-after rewrites. Results go to stderr progress and `--profile-memory` records;
-ordinary BDD verdicts, findings, stdout and exit codes are unchanged. Neither an
-editor setting nor a second checking backend is introduced.
+`just check-den ROOT --sat-probe` asks whether an unresolved negative component
+has two stable meanings in one permitted world, then checks for worlds with no
+meaning when uniqueness is established. It is off by default. Queries run inside
+admission, after structural reductions and producer removals reach a snapshot with
+no further cheap removal batch, before bound removals and discharge attempts.
+Components follow admission's provider-first order. Results go to stderr progress
+and `--profile-memory` records; ordinary BDD verdicts, findings, stdout and exit
+codes are unchanged. Neither an editor setting nor a second checking backend is
+introduced.
 
-The encoding is two Clark completions with a difference in the target component,
-shared inputs and upstream definitions, and only the verification's selected
-assumptions. All four cardinality restrictions use the resolved domains; inputs
-excluded by `within` remain absent. It walks the target and assumption dependency
-cones, treats folded facts as constants and does not convert BDD conditions to CNF.
-Positive upstream recursion is included. An unresolved negative component outside
-the target gives `unknown`; it cannot be treated as settled. Definitions downstream
-of the target, if reached by an assumption, follow each copy.
+The encoding contains the target component and the exact settled conditions it
+reads, including existing replacement expressions, plus W (the selected
+assumptions' already-computed permitted-world condition). Read-only Tseitin
+encoding replaces upstream definitions. Anonymous acyclic Boolean definitions
+participate in reduct replay and existence covers, so disabled guards cannot
+silently become enabled inside a covering cube. Shared inputs and settled
+conditions feed both completions; disagreement is required on the target only.
+No additional BDD operations are performed. Domain overrides, `within` and all
+assumption kinds are already reflected in these exact conditions.
+
+An unsettled provider outside the target gives `unknown` with `upstream unresolved`.
+After admission commits a rewrite, queries on the next snapshot can use newly
+settled providers. Each reached snapshot is queried afresh: no SAT answer skips,
+reorders or admits anything. Components removed by cheap passes need no query.
+A limit before this diagnostic point can prevent a query; a reused admission or
+inconsistent context has no admission attempts and emits no component probes.
+The low-level `PreparedCheck::sat_probe` retains the earlier pre-admission
+whole-cone query for explicit comparisons; the CLI uses the compact path.
 
 Every candidate pair is independently evaluated as the least model of its reduct
 over the whole encoded cone. Unfounded candidates add external-support clauses
@@ -118,14 +129,16 @@ refinement also excludes two supported models. Unrelated regions outside the con
 are not certified, so a verified pair is a component result, not a claim that the
 entire program has two stable models.
 
-Each component receives a fresh independent allowance. `--sat-probe-timeout-ms`
+Each component at each reached snapshot receives a fresh independent allowance. `--sat-probe-timeout-ms`
 defaults to 10,000 ms per question (uniqueness, then existence after UNSAT),
 including encoding, solving and replay; deadlines are cooperative. Existence has
 its own fresh allowance and does not consume or reset the uniqueness allowance.
 `--sat-probe-refinements` defaults to 64. Existing `max_atoms`, `max_rules`,
 `max_dependencies` and `max_work` bound the cone and encoding: CNF variables,
 emitted clauses and literal occurrences respectively share those size ceilings.
-They do not consume the ordinary checker's allowance. The solver's learned clauses
+They do not consume the ordinary checker's allowance. Encoding, solving and
+report delivery time are excluded from admission's deadline, preserving time
+already spent on ordinary checking. The solver's learned clauses
 are internal solver storage, not counted as emitted CNF; solving is time-bounded,
 not a process-memory cap. Exhaustion gives `unknown` with a reason. Cancellation
 propagates. No solver state or arena indices are retained between invocations.
@@ -142,9 +155,9 @@ space, so incomplete search never means existence was established. There is no
 additional world-count tuning limit. Reports distinguish proposed worlds and
 emitted covering cubes; a cube can cover many concrete worlds.
 
-The world query contains only the selected assumptions and their definitions,
-with stable-model refinement; target equations are disabled. The model query pins
-all cone inputs and enables the target/upstream equations. Both modes share one
+The world query contains only W and its acyclic Boolean definitions; target
+equations are disabled. The model query pins all cone inputs and enables the
+target and exact settled-boundary equations. Both modes share one
 SAT engine, so their combined emitted CNF size is bounded by a single allowance.
 Loop refinements follow the appropriate mode; covering clauses apply only to world
 proposals. A stable model supplies a sufficient cube preserving all true rule
@@ -156,7 +169,7 @@ leaves. An input-independent model can cover the entire input space.
 
 Only `unsat` plus `every-world` establishes exactly one stable meaning in the
 probed cone; it still does not admit the program or establish anything about
-unrelated regions. Negative upstream components remain unknown in this increment.
+unrelated regions. Unresolved upstream components remain unknown in this increment.
 Admitting programs based on SAT stays a separate future choice.
 
 ### Component dumps

@@ -284,7 +284,12 @@ notice as a business obligation. Notice queries currently recompute in warm sess
 with independent bounded allowances and fresh presentation from current provenance.
 
 Opt-in SAT diagnostics belong to the checker but never to its admission decisions
-or reusable query state. The guarded-candidate probe borrows the live cone and
+or reusable query state. Component probes borrow an admission snapshot after cheap
+reductions and use exact settled BDD boundary conditions, including replacements
+and W, in place of upstream definitions. They run in provider-first order with
+separate per-question allowances. An unresolved provider gives unknown; subsequent
+snapshots can retry after ordinary admission settles it. The guarded-candidate
+probe borrows the live cone and
 exact settled conditions; it uses an independent aggregate budget. Its active time
 and report delivery are excluded from admission's operational deadline without
 resetting checker time already spent. Both clocks still honor cancellation.

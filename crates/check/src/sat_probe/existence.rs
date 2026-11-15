@@ -35,6 +35,7 @@ pub struct SatExistenceReport {
     pub literals: usize,
     pub cone_atoms: usize,
     pub cone_rules: usize,
+    pub condition_nodes: usize,
     pub solve_time: Duration,
     pub elapsed: Duration,
 }
@@ -42,12 +43,12 @@ pub struct SatExistenceReport {
 /// W alone, plus free inputs from the full cone. No target equations may filter
 /// which worlds are proposed. Assumption definitions retain their stable meaning.
 fn world_cone(c: &Cone, negative_target: bool, b: &mut Budget<'_>) -> Result<Cone> {
-    let mut producers = vec![Vec::new(); c.atoms.len()];
+    let mut producers = vec![Vec::new(); c.fixed.len()];
     for (j, r) in c.rules.iter().enumerate() {
         b.tick("SAT existence world cone")?;
         producers[r.head].push(j);
     }
-    let mut needed = vec![false; c.atoms.len()];
+    let mut needed = vec![false; c.fixed.len()];
     let mut pending = c
         .groups
         .iter()
@@ -69,8 +70,9 @@ fn world_cone(c: &Cone, negative_target: bool, b: &mut Budget<'_>) -> Result<Con
             pending.extend(c.rules[*j].body.iter().map(|(a, _)| *a));
         }
     }
-    b.charge(c.atoms.len() + c.rules.len(), "SAT existence world cone")?;
+    b.charge(c.fixed.len() + c.rules.len(), "SAT existence world cone")?;
     Ok(Cone {
+        source_rules: c.source_rules,
         atoms: c.atoms.clone(),
         rules: c.rules.iter().filter(|r| needed[r.head]).cloned().collect(),
         fixed: c
@@ -86,8 +88,8 @@ fn world_cone(c: &Cone, negative_target: bool, b: &mut Budget<'_>) -> Result<Con
             })
             .collect(),
         input: c.input.clone(),
-        target: vec![false; c.atoms.len()],
-        duplicated: vec![false; c.atoms.len()],
+        target: vec![false; c.fixed.len()],
+        duplicated: vec![false; c.fixed.len()],
         groups: c.groups.clone(),
     })
 }
@@ -104,7 +106,7 @@ fn encode(
     b: &mut Budget<'_>,
 ) -> Result<Encoding> {
     let mut vars = Vec::new();
-    for i in 0..c.atoms.len() {
+    for i in 0..c.fixed.len() {
         b.tick("SAT existence encoding")?;
         vars.push(match c.fixed[i] {
             Some(true) => truth,
@@ -113,7 +115,7 @@ fn encode(
             None => cnf.var(b)?,
         });
     }
-    let mut producers = vec![Vec::new(); c.atoms.len()];
+    let mut producers = vec![Vec::new(); c.fixed.len()];
     let mut bodies = Vec::new();
     for r in &c.rules {
         b.charge(1 + r.body.len(), "SAT existence encoding")?;
@@ -126,7 +128,7 @@ fn encode(
         producers[r.head].push(body);
         bodies.push(body);
     }
-    for i in 0..c.atoms.len() {
+    for i in 0..c.fixed.len() {
         if c.input[i] || c.fixed[i].is_some() {
             continue;
         }
@@ -245,12 +247,27 @@ fn cover(c: &Cone, model: &[bool], b: &mut Budget<'_>) -> Result<BTreeSet<usize>
     Ok(inputs)
 }
 
-pub(super) fn search(
+#[cfg(test)]
+fn search(
     p: &GroundProgram,
     component: ComponentId,
     restrictions: &[Restriction],
     probe: &SatProbeLimits,
     limits: &Limits,
+) -> Result<SatExistenceReport> {
+    search_built(
+        p.component(component).unwrap().cycle.is_some(),
+        probe,
+        limits,
+        &|b| cone(p, component, restrictions, b),
+    )
+}
+
+pub(super) fn search_built(
+    negative_target: bool,
+    probe: &SatProbeLimits,
+    limits: &Limits,
+    build: &dyn Fn(&mut Budget<'_>) -> Result<Cone>,
 ) -> Result<SatExistenceReport> {
     let start = Instant::now();
     let mut b = Budget::new(limits);
@@ -267,6 +284,7 @@ pub(super) fn search(
         literals: 0,
         cone_atoms: 0,
         cone_rules: 0,
+        condition_nodes: 0,
         solve_time: Duration::ZERO,
         elapsed: Duration::ZERO,
     };
@@ -286,10 +304,11 @@ pub(super) fn search(
         gate: None,
     };
     let result = (|| {
-        let c = cone(p, component, restrictions, &mut b)?;
+        let c = build(&mut b)?;
         report.cone_atoms = c.atoms.len();
-        report.cone_rules = c.rules.len();
-        let w = world_cone(&c, p.component(component).unwrap().cycle.is_some(), &mut b)?;
+        report.cone_rules = c.source_rules;
+        report.condition_nodes = c.fixed.len() - c.atoms.len();
+        let w = world_cone(&c, negative_target, &mut b)?;
         let truth = cnf.var(&mut b)?;
         cnf.clause(vec![truth], &mut b)?;
         let active = cnf.var(&mut b)?;
@@ -316,9 +335,9 @@ pub(super) fn search(
                 return Ok(());
             };
             report.worlds += 1;
-            b.charge(c.atoms.len(), "SAT existence observation")?;
+            b.charge(c.fixed.len(), "SAT existence observation")?;
             let mut pins = vec![active];
-            pins.extend((0..c.atoms.len()).filter(|i| c.input[*i]).map(|i| {
+            pins.extend((0..c.fixed.len()).filter(|i| c.input[*i]).map(|i| {
                 if world[i] {
                     worlds.vars[i]
                 } else {

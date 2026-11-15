@@ -110,13 +110,17 @@ shared with `check-den` through `denotate_ir_text::progress`. The CLI additional
 reports its filesystem discovery phase; the editor retains its snapshot-driven
 discovery and publication policy.
 
-The CLI's opt-in `--sat-probe` additionally emits phase `sat-probe` before admission.
+The CLI's opt-in `--sat-probe` additionally emits phase `sat-probe` during admission,
+after cheap reductions, in provider-first order.
 It is not an LSP setting, backend or finding. `satProbe` records carry a run-local
-`component` index and `state`: `starting`, `sat`, `unsat` or `unknown`. Completed
-records include `meaning`, `scope` (`prepared-component-and-upstream`), `atoms`,
+`component` index qualified by `snapshot` (graph revision) and `round`, and `state`: `starting`, `sat`, `unsat` or `unknown`. Completed
+records include `meaning`, `scope` (`admission-component-and-settled-conditions`), `atoms`,
 `representative`, `verifiedStablePair`, `supportedPairSeen`, `refinements`, `solves`,
-`variables`, `clauses`, `literals`, `coneAtoms`, `coneRules`, `solveMs`, `elapsedMs`
-and nullable `reason`. CNF counts are emitted encoding size, not solver heap or
+`variables`, `clauses`, `literals`, `coneAtoms`, `coneRules`, `conditionNodes`, `solveMs`, `elapsedMs`
+and nullable `reason`. `coneAtoms` counts named target/input atoms, `coneRules`
+counts target rule instances, and `conditionNodes` separately counts anonymous
+acyclic Boolean nodes (including terminals). Unresolved upstream providers give
+`unknown`; a later snapshot may answer after those providers settle. CNF counts are emitted encoding size, not solver heap or
 learned clauses. `world` lists true cone inputs (others false), `differing` lists
 target atoms on which the pair differs, and `models` lists each target assignment's
 true atoms; these three fields are null without a verified pair. Tuple descriptions
@@ -129,14 +133,14 @@ report; it is null when uniqueness is SAT or unknown. Its `state` is `every-worl
 `world` (true cone inputs, others false, with the same locations), `worlds` (proposed
 permitted worlds), `covers` (emitted covering cubes, not their number of concrete
 worlds), `refinements`, `solves`, `variables`, `clauses`, `literals`, `coneAtoms`,
-`coneRules`, `solveMs`, and `elapsedMs`. Only `no-meaning` has a non-null `world`;
+`coneRules`, `conditionNodes`, `solveMs`, and `elapsedMs`. Only `no-meaning` has a non-null `world`;
 an empty list is a valid input-free witness. Each question has its own timeout,
 work/encoding allowances and refinement limit. The outer counts/times remain
 uniqueness-only. The combined `meaning` explains both answers: UNSAT plus
 `every-world` establishes exactly one meaning in this cone, not in unrelated
 regions or ordinary checker admission. Empty W is explicitly distinguished.
 Neither normal diagnostic data nor status/exit codes change. The schema/zoo runners
-retain the latest record per verification/component in `satProbes`, including an
+retain the latest record per verification/snapshot/component in `satProbes`, including an
 unfinished `starting` record when recovering an interrupted run.
 
 The CLI's separate `--sat-probe-candidates` emits `candidateProbe` records during

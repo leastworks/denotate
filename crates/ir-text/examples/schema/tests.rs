@@ -309,6 +309,8 @@ fn partial_and_completed_reports_preserve_logs_and_distinguish_completion() {
             "\n",
             r#"{"type":"progress","detail":{"verification":"v","satProbe":{"component":2,"state":"starting"}}}"#,
             "\n",
+            r#"{"type":"progress","detail":{"verification":"v","satProbe":{"snapshot":7,"round":3,"component":1,"state":"starting"}}}"#,
+            "\n",
             r#"{"type":"progress","detail":{"verification":"v","candidateProbe":{"round":1,"counts":{"candidates":20,"ruledOut":1,"notRuledOut":0,"unknown":0,"unexamined":19},"candidate":{"snapshot":2,"state":"ruled-out"}}}}"#,
             "\n",
             r#"{"type":"progress","detail":{"phase":"checking","admitted":false,"ground":{"ruleInstances":8},"fold":{"retainedEvidence":{"ruleInstances":3},"residual":{"ruleInstances":9}}}}"#,
@@ -341,9 +343,18 @@ fn partial_and_completed_reports_preserve_logs_and_distinguish_completion() {
     assert_eq!(read()["outcomes"][0]["state"], "inconclusive");
     let report = read();
     let probes = report["satProbes"].as_array().unwrap();
-    assert_eq!(probes.len(), 2);
-    assert_eq!(probes[0]["probe"]["state"], "unsat");
-    assert_eq!(probes[1]["probe"]["state"], "starting");
+    assert_eq!(probes.len(), 3);
+    assert!(probes.iter().any(|r| r["probe"]["state"] == "unsat"));
+    assert!(
+        probes
+            .iter()
+            .any(|r| r["probe"]["snapshot"] == 7 && r["probe"]["state"] == "starting")
+    );
+    assert!(
+        probes
+            .iter()
+            .any(|r| r["probe"]["component"] == 2 && r["probe"]["state"] == "starting")
+    );
     assert_eq!(
         report["candidateProbes"][0]["probe"]["counts"]["unexamined"],
         19

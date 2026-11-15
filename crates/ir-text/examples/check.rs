@@ -647,27 +647,19 @@ fn check_program(
             prepared.program(),
             session.fixed_stats().retained_bytes,
         );
-        if sat_probe {
-            // Independent budgets and immutable prepared graph. Ordinary admission
-            // and checking begin afterwards with exactly their usual inputs.
-            progress.emit(Phase::SatProbe, detail.clone());
-            for (i, component) in prepared
-                .program()
-                .components()
-                .filter(|c| c.cycle.is_some())
-                .enumerate()
-            {
-                let mut probing = detail.clone();
-                probing["satProbe"] =
-                    json!({"component":i+1,"state":"starting","atoms":component.atoms.len()});
-                progress.emit(Phase::SatProbe, probing.clone());
-                let report = prepared
-                    .sat_probe(component.id, &sat_probe_limits, &operations)
-                    .map_err(checker_failure)?;
-                probing["satProbe"] = admission.sat_probe(prepared.program(), &report, i + 1);
-                progress.emit(Phase::SatProbe, probing);
-            }
-        }
+        let component_observer = |event: denotate_check::SatProbeEvent<'_>| {
+            let mut probing = detail.clone();
+            let index = event.index;
+            probing["satProbe"] = match event.report {
+                Some(report) => admission.sat_probe(event.program, report, index),
+                None => json!({"component":index,"state":"starting",
+                    "atoms":event.program.component(event.component).unwrap().atoms.len()}),
+            };
+            probing["satProbe"]["scope"] = json!("admission-component-and-settled-conditions");
+            probing["satProbe"]["snapshot"] = json!(event.snapshot);
+            probing["satProbe"]["round"] = json!(event.round);
+            progress.emit(Phase::SatProbe, probing);
+        };
         progress.emit(Phase::Admission, detail.clone());
         let observer =
             |event: &denotate_check::AdmissionProgress| admission.report(progress, &detail, event);
@@ -678,11 +670,12 @@ fn check_program(
         };
         let dump_enabled = dump.borrow().is_some();
         let admitted = prepared
-            .admit_with_diagnostics(
+            .admit_with_probes(
                 &operations,
                 (report_progress || limits.profile.enabled() || candidate_probe.is_some())
                     .then_some(&observer),
                 candidate_probe.clone(),
+                sat_probe.then_some((sat_probe_limits.clone(), &component_observer)),
                 dump_enabled.then_some(&dump_observer),
             )
             .map_err(checker_failure)?
@@ -1076,10 +1069,10 @@ mod tests {
     }
     #[test]
     fn existence_exhaustion_keeps_uniqueness_without_claiming_totality() {
-        // z keeps b potentially producible during grounding; the selected
-        // assumption then removes that external support in every permitted world.
+        // b's self-support stays inside the target component. Settled upstream
+        // positive recursion now uses its exact BDD and needs no SAT refinement.
         let f = Fixture::new(
-            "input x();input z();relation a();relation b();a():-!a(),!b();b():-x(),b();b():-z();assumption on: at_least_one(x,group_by:());assumption off: empty(z);verification v{assumptions:[on,off];obligations:[];}",
+            "input x();relation a();relation b();a():-!a(),!b();b():-x(),b();b():-a();assumption on:at_least_one(x,group_by:());verification v{assumptions:[on];obligations:[];}",
         );
         let (normal_code, normal_output, _) = f.traced(&["--json"]);
         let path = f.0.join("existence-limit.jsonl");

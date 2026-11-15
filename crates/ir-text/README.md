@@ -144,7 +144,7 @@ sizes, result counts and session reuse. Every phase starts with a flushed line;
 transitions report elapsed time. `--no-progress` disables this checker trace.
 `--verbose` controls diagnostic detail, independent of progress and checking.
 
-`just check-den <program> --sat-probe` adds a diagnostic search before admission:
+`just check-den <program> --sat-probe` adds a diagnostic search inside admission, after cheap reductions:
 does each component with a negative cycle have two stable meanings in a permitted
 world? SAT reports a concretely verified pair. After uniqueness UNSAT, a separate
 existence search reports `every-world`, `no-meaning` with an input world,
@@ -162,7 +162,7 @@ including on admission interruption. Names and locations are resolved by the CLI
 recording cannot change a checker result. See the [dump format and allowances](examples/check/COMPONENT-DUMP.md).
 
 `just check-den <program> --sat-probe-candidates` diagnoses guarded candidates
-during admission, independently of the pre-admission meaning probe. Progress
+during admission, independently of the component meaning probe. Progress
 reports `ruled-out`, `not-ruled-out`, `unknown` and cumulative unexamined counts.
 Defaults are 64 queries, 10 seconds total active probe time and 10 million work
 units per admission; adjust `--sat-probe-candidate-limit`,

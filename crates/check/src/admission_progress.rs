@@ -126,6 +126,7 @@ pub(crate) struct AdmissionReporter<'a> {
     pub(crate) dump_cutoff: std::cell::Cell<bool>,
     state: RefCell<State>,
     candidate_probe: RefCell<Option<crate::sat_probe::candidates::Diagnosis>>,
+    pub component_probe: Option<crate::sat_probe::admission::Diagnosis<'a>>,
 }
 impl<'a> AdmissionReporter<'a> {
     pub fn new(observer: Option<&'a AdmissionObserver<'a>>) -> Self {
@@ -134,6 +135,7 @@ impl<'a> AdmissionReporter<'a> {
             dump: None,
             dump_cutoff: std::cell::Cell::new(false),
             candidate_probe: RefCell::new(None),
+            component_probe: None,
             state: RefCell::new(State {
                 progress: AdmissionProgress {
                     phase: AdmissionPhase::Relevant,

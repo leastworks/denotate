@@ -319,8 +319,10 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
                         );
                     }
                     if let Some(component) = d["satProbe"]["component"].as_u64() {
+                        // Old streams had no revision; keep recovery compatible.
+                        let snapshot = d["satProbe"]["snapshot"].as_u64().unwrap_or(0);
                         sat_probes.insert(
-                            format!("{}:{component:020}", d["verification"]),
+                            format!("{}:{snapshot:020}:{component:020}", d["verification"]),
                             json!({"verification":d["verification"],"probe":d["satProbe"]}),
                         );
                     }

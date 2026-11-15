@@ -46,8 +46,8 @@ pub use settled_expression::{SettledExpression, SettledReplacement};
 mod sat_probe;
 pub use sat_probe::{
     CandidateProbeCounts, CandidateProbeLimits, CandidateProbePair, CandidateProbeReport,
-    SatExistenceAnswer, SatExistenceReport, SatProbeAnswer, SatProbeLimits, SatProbePair,
-    SatProbeReport,
+    SatExistenceAnswer, SatExistenceReport, SatProbeAnswer, SatProbeEvent, SatProbeLimits,
+    SatProbeObserver, SatProbePair, SatProbeReport,
 };
 mod symbolic;
 pub use structural::{

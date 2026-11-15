@@ -300,6 +300,12 @@ pub(crate) fn summaries(
                     _ => panic!(),
                 }
             }
+            for replacement in &rule.replacements {
+                let value = m
+                    .settled_expression(&replacement.expression, &mut crate::limits::Budget::new(l))
+                    .unwrap();
+                condition = ctx.and(&condition, &value, l).unwrap();
+            }
             (
                 rule.id,
                 ProducerSummary {

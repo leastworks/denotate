@@ -62,6 +62,8 @@ pub struct SatProbeReport {
     pub literals: usize,
     pub cone_atoms: usize,
     pub cone_rules: usize,
+    /// Anonymous acyclic nodes encoding exact settled conditions (including W).
+    pub condition_nodes: usize,
     pub solve_time: Duration,
     pub elapsed: Duration,
     /// A separate existence search after uniqueness is established.
@@ -167,6 +169,7 @@ struct Rule {
     head: usize,
     body: Vec<(usize, bool)>,
 }
+// Named atoms precede anonymous acyclic BDD nodes; all indexed arrays include both.
 struct Cone {
     atoms: Vec<GroundAtom>,
     rules: Vec<Rule>,
@@ -175,6 +178,7 @@ struct Cone {
     fixed: Vec<Option<bool>>,
     input: Vec<bool>,
     groups: Vec<(Cardinality, Vec<usize>)>,
+    source_rules: usize,
 }
 
 impl PreparedCheck<'_> {
@@ -412,6 +416,7 @@ fn cone(
         .map(|(k, g)| (k, g.iter().map(|a| index[a]).collect()))
         .collect();
     Ok(Cone {
+        source_rules: rules.len(),
         atoms,
         rules,
         fixed,
@@ -429,6 +434,22 @@ fn probe_component(
     probe: &SatProbeLimits,
     limits: &Limits,
 ) -> Result<SatProbeReport> {
+    probe_built(
+        component,
+        probe,
+        limits,
+        p.component(component).is_some_and(|c| c.cycle.is_some()),
+        &|b| cone(p, component, restrictions, b),
+    )
+}
+
+fn probe_built(
+    component: ComponentId,
+    probe: &SatProbeLimits,
+    limits: &Limits,
+    negative_target: bool,
+    build: &dyn Fn(&mut Budget<'_>) -> Result<Cone>,
+) -> Result<SatProbeReport> {
     let start = Instant::now();
     let mut report = SatProbeReport {
         component,
@@ -443,6 +464,7 @@ fn probe_component(
         literals: 0,
         cone_atoms: 0,
         cone_rules: 0,
+        condition_nodes: 0,
         solve_time: Duration::ZERO,
         elapsed: Duration::ZERO,
         existence: None,
@@ -464,13 +486,14 @@ fn probe_component(
     };
     let mut budget = Budget::new(limits);
     let result = (|| {
-        let c = cone(p, component, restrictions, &mut budget)?;
+        let c = build(&mut budget)?;
         report.cone_atoms = c.atoms.len();
-        report.cone_rules = c.rules.len();
+        report.cone_rules = c.source_rules;
+        report.condition_nodes = c.fixed.len() - c.atoms.len();
         let truth = cnf.var(&mut budget)?;
         cnf.clause(vec![truth], &mut budget)?;
         let mut vars = Vec::new();
-        for i in 0..c.atoms.len() {
+        for i in 0..c.fixed.len() {
             let v = match c.fixed[i] {
                 Some(true) => truth,
                 Some(false) => !truth,
@@ -485,7 +508,7 @@ fn probe_component(
                 },
             ]);
         }
-        let mut producers = vec![Vec::new(); c.atoms.len()];
+        let mut producers = vec![Vec::new(); c.fixed.len()];
         let mut bodies = Vec::new();
         for (j, r) in c.rules.iter().enumerate() {
             producers[r.head].push(j);
@@ -510,7 +533,7 @@ fn probe_component(
             }
             bodies.push(pair);
         }
-        for i in 0..c.atoms.len() {
+        for i in 0..c.fixed.len() {
             if c.input[i] || c.fixed[i].is_some() {
                 continue;
             }
@@ -543,7 +566,7 @@ fn probe_component(
             }
         }
         let mut differing = Vec::new();
-        for i in 0..c.atoms.len() {
+        for i in 0..c.fixed.len() {
             if !c.target[i] {
                 continue;
             }
@@ -647,12 +670,11 @@ fn probe_component(
     }
     drop(cnf);
     if report.answer == SatProbeAnswer::Unsat {
-        report.existence = Some(existence::search(
-            p,
-            component,
-            restrictions,
+        report.existence = Some(existence::search_built(
+            negative_target,
             probe,
             limits,
+            build,
         )?);
     }
     Ok(report)
@@ -661,7 +683,7 @@ fn probe_component(
 /// Linear worklist evaluation of the candidate's reduct, independent of the
 /// production evaluator/admission and of SAT. Positive cycles need real support.
 fn least_unfounded(c: &Cone, model: &[bool], b: &mut Budget<'_>) -> Result<BTreeSet<usize>> {
-    let mut truth = vec![false; c.atoms.len()];
+    let mut truth = vec![false; c.fixed.len()];
     let mut queue = Vec::new();
     for i in 0..truth.len() {
         b.tick("SAT probe reduct")?;
@@ -721,3 +743,6 @@ pub(crate) mod candidates;
 pub use candidates::{
     CandidateProbeCounts, CandidateProbeLimits, CandidateProbePair, CandidateProbeReport,
 };
+
+pub(crate) mod admission;
+pub use admission::{SatProbeEvent, SatProbeObserver};
