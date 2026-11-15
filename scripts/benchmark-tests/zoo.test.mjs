@@ -46,6 +46,12 @@ test('each family reaches its semantic and structural path; two-size smoke has n
       if(name.startsWith('guarded-')) {assert.ok(r.guardedAttempts.some(g=>g.attempt.state==='completed'&&g.attempt.restricted&&g.attempt.coneAtoms>0));assert.ok(r.guardedAttempts.every(g=>Number.isFinite(g.attempt.preprocessingMs)&&Number.isFinite(g.attempt.iterationMs)));}
       if(name==='guarded-hub') {assert.equal(r.after.admitted,true);assert.equal(r.exit,0);assert.equal(r.outcomes[0].findings.filter(f=>f.kind==='guarded-settlement').length,1);assert.equal(r.outcomes[0].notices[0].result.state,'varying');}
       if(name==='schema-layered')assert.equal(r.after.admitted,true);
+      if(name==='component-chain') {
+        assert.equal(r.after.admitted,true);
+        const starts=fs.readFileSync(path.join(root,'tiny','component-chain-2-0','memory.jsonl'),'utf8').trim().split('\n').map(JSON.parse).filter(r=>r.detail?.admission?.stage==='starting');
+        assert.equal(starts[0].detail.admission.unresolvedComponents,3);
+        assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));
+      }
     }
     assert.ok(r.families['guarded-ring'].attempts.some(a=>a.kind==='guarded-bounds'));
     const smoke=run({out:path.join(root,'smoke'),binary:'target/debug/examples/bench_schema',family:['fan-in-input','negative-unresolved'],sizes:[1,2],repeat:1,threshold:1.3,inputOrder:'structural'});

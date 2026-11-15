@@ -11,6 +11,7 @@ pub use admission_progress::{
 };
 mod admission_scope;
 mod admission_skips;
+mod component_passes;
 pub use admission_skips::{AdmissionAttemptKind, AdmissionSkip};
 mod assumption_validation;
 mod assumptions;

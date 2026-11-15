@@ -443,7 +443,7 @@ fn layered_all_encodings_report_faithfully() {
 }
 
 #[test]
-fn zoo_tiny_sources_preserve_independent_stable_and_supported_models() {
+fn zoo_tiny_sources_match_independent_oracles() {
     use denotate_check::test_support::rewrites::{compare_permitted, subsets, supported_models};
     let script =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/bench-den-zoo.mjs");
@@ -500,9 +500,66 @@ fn zoo_tiny_sources_preserve_independent_stable_and_supported_models() {
                     .filter(|a| a.relation == option)
                     .all(|a| groups.insert(a.arguments[0]))
             };
-            compare_permitted(&p.corpus, &p.domains, g, permitted);
+            // The three-component chain exceeds the tiny model oracle's
+            // exponential atom cap even at n=1. Check its closed-form meaning
+            // in every input world instead; the other presets keep exhaustive
+            // stable and supported model preservation below.
+            if name != "component-chain" {
+                compare_permitted(&p.corpus, &p.domains, g, permitted);
+            }
             for world in subsets(&g.input_atoms().cloned().collect::<Vec<_>>()) {
                 if !permitted(&world) {
+                    continue;
+                }
+                if name == "component-chain" {
+                    let atom = |name: &str| {
+                        GroundAtom::new(
+                            p.corpus.relations().find(|r| r.name == name).unwrap().id,
+                            [],
+                        )
+                    };
+                    let replay = g.evaluate(world.iter().cloned(), &l).unwrap();
+                    let mut upstream_claim = false;
+                    for prefix in ["up", "mid"] {
+                        let kind = world.contains(&atom(&format!("{prefix}_kind")));
+                        let ready = world.contains(&atom(&format!("{prefix}_ready")));
+                        let priority = world.contains(&atom(&format!("{prefix}_priority")));
+                        // If kind holds, inspected holds independently of the
+                        // cycle. Otherwise booked is false, so claim = !ready.
+                        let claim = !kind && !ready;
+                        let inspected = kind || claim;
+                        let held = priority && inspected;
+                        let cleared = ready && !held;
+                        let booked = kind && (cleared || upstream_claim);
+                        for (name, value) in [
+                            ("claim", claim),
+                            ("inspected", inspected),
+                            ("held", held),
+                            ("cleared", cleared),
+                            ("booked", booked),
+                            ("fails", ready && !booked),
+                        ] {
+                            assert_eq!(
+                                replay.fact(&atom(&format!("{prefix}_{name}"))).unwrap(),
+                                FactState::Settled(value)
+                            );
+                        }
+                        upstream_claim = claim;
+                    }
+                    let q = world.contains(&atom("q"));
+                    let guard = world.contains(&atom("p")) || q;
+                    // Every cyclic producer requires guard, already enough
+                    // for wide through its independent input producers.
+                    let wide = guard || upstream_claim;
+                    for (name, value) in [
+                        ("guard", guard),
+                        ("wide", wide),
+                        ("leaf0", !wide || q),
+                        ("leaf1", !wide || q),
+                        ("bad", false),
+                    ] {
+                        assert_eq!(replay.fact(&atom(name)).unwrap(), FactState::Settled(value));
+                    }
                     continue;
                 }
                 if name == "guarded-ring" {

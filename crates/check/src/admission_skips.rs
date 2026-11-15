@@ -10,6 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AdmissionAttemptKind {
+    ComponentStorage,
     Coverage,
     Removal,
     UpperBounds,
@@ -24,6 +25,7 @@ pub enum AdmissionAttemptKind {
 impl AdmissionAttemptKind {
     pub fn label(self) -> &'static str {
         match self {
+            Self::ComponentStorage => "component-storage",
             Self::Coverage => "producer-coverage",
             Self::Removal => "producer-removal",
             Self::UpperBounds => "upper-bounds",
@@ -49,6 +51,7 @@ pub struct AdmissionSkip {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Attempt {
+    ComponentStorage(GroundAtom),
     Coverage(GroundAtom),
     Removal(GroundRuleId),
     UpperBounds(GroundAtom),
@@ -63,6 +66,7 @@ pub(crate) enum Attempt {
 impl Attempt {
     pub fn kind(&self) -> AdmissionAttemptKind {
         match self {
+            Self::ComponentStorage(_) => AdmissionAttemptKind::ComponentStorage,
             Self::Coverage(_) => AdmissionAttemptKind::Coverage,
             Self::Removal(_) => AdmissionAttemptKind::Removal,
             Self::UpperBounds(_) => AdmissionAttemptKind::UpperBounds,
@@ -89,6 +93,7 @@ impl Attempt {
                 | Self::GuaranteedBounds(_)
                 | Self::GuardedBounds(..)
                 | Self::GuardedCone(..)
+                | Self::GuardedSettlement(..)
                 | Self::ImpliedGuard(..)
         ) && matches!(
             error,
@@ -101,6 +106,7 @@ impl Attempt {
     }
     fn record(&self, head: &GroundAtom, reason: Inconclusive) -> AdmissionSkip {
         let (kind, rule, occurrence) = match self {
+            Self::ComponentStorage(_) => (AdmissionAttemptKind::ComponentStorage, None, None),
             Self::Coverage(_) => (AdmissionAttemptKind::Coverage, None, None),
             Self::Removal(rule) => (AdmissionAttemptKind::Removal, Some(*rule), None),
             Self::UpperBounds(_) => (AdmissionAttemptKind::UpperBounds, None, None),
@@ -178,6 +184,80 @@ pub(crate) struct RetryChanges {
 }
 
 impl Attempts {
+    pub fn component_skipped(&self, head: &GroundAtom) -> bool {
+        self.skipped
+            .contains_key(&Attempt::ComponentStorage(head.clone()))
+    }
+
+    /// The closure owns all temporary coverage/bounds and pending proofs for one
+    /// component. On failure those values drop before accounting is restored.
+    /// It may record attempt metadata, but cannot retain new prepared conditions.
+    pub fn component_pass<T>(
+        &mut self,
+        head: &GroundAtom,
+        program: &GroundProgram,
+        retained: &mut usize,
+        budget: &mut Budget<'_>,
+        progress: &AdmissionReporter<'_>,
+        run: impl FnOnce(&mut Self, &mut usize, &mut Budget<'_>) -> Result<T>,
+    ) -> Result<Option<T>> {
+        budget.tick("component attempt lookup")?;
+        let key = Attempt::ComponentStorage(head.clone());
+        if self.component_skipped(head) {
+            progress.reused(key.kind(), true);
+            return Ok(None);
+        }
+        let baseline = *retained;
+        #[cfg(debug_assertions)]
+        let owned = self.nodes();
+        let start = progress.attempt_start(key.kind(), self.history.get(&key).copied());
+        let result = run(self, retained, budget);
+        #[cfg(debug_assertions)]
+        debug_assert_eq!(
+            self.nodes(),
+            owned,
+            "component pass must not retain prepared conditions"
+        );
+        let local = matches!(
+            &result,
+            Err(CheckError::LimitExceeded {
+                phase: "symbolic storage",
+                resource: "condition nodes",
+                ..
+            })
+        );
+        progress.attempt_end(
+            key.kind(),
+            start,
+            if local {
+                "skipped"
+            } else if result.is_err() {
+                "failed"
+            } else {
+                "completed"
+            },
+        );
+        match result {
+            Ok(value) => {
+                self.history.remove(&key);
+                Ok(Some(value))
+            }
+            Err(error) if local => {
+                *retained = baseline;
+                let record = key.record(head, Inconclusive::from_error(error.clone())?);
+                self.count += 1;
+                progress.skipped(program, &record, self.count);
+                budget.record_failure(&error);
+                if progress.enabled() {
+                    self.history.insert(key.clone(), (true, None));
+                }
+                self.skipped.insert(key, record);
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     pub fn nodes(&self) -> usize {
         self.prepared.values().map(|p| p.nodes()).sum::<usize>()
             + self
@@ -405,7 +485,8 @@ impl Attempts {
         let conservative = self.tracked().any(|(a, _)| {
             matches!(
                 a,
-                Attempt::UpperBounds(_)
+                Attempt::ComponentStorage(_)
+                    | Attempt::UpperBounds(_)
                     | Attempt::GuaranteedBounds(_)
                     | Attempt::BoundRemoval(_)
                     | Attempt::ImpliedGuard(..)
@@ -558,7 +639,8 @@ impl Attempts {
                                 None => true,
                             }
                     }
-                    Attempt::UpperBounds(_)
+                    Attempt::ComponentStorage(_)
+                    | Attempt::UpperBounds(_)
                     | Attempt::GuaranteedBounds(_)
                     | Attempt::BoundRemoval(_)
                     | Attempt::ImpliedGuard(..)
@@ -1070,15 +1152,26 @@ mod tests {
             let id = before.rules().find(|r| r.source == candidate).unwrap().id;
             let bound = Attempt::GuaranteedBounds(atom(a));
             let removal = Attempt::BoundRemoval(id);
+            let component = Attempt::ComponentStorage(atom(a));
             let cheap = Attempt::Removal(id);
             let reason =
                 Inconclusive::from_error(CheckError::limit("BDD operation", "BDD tasks", 1, None))
                     .unwrap();
             let mut attempts = Attempts::default();
-            for attempt in [bound.clone(), removal.clone(), cheap.clone()] {
+            for attempt in [
+                bound.clone(),
+                removal.clone(),
+                component.clone(),
+                cheap.clone(),
+            ] {
                 // Inject completed negatives or local failures without a resource golden.
                 // Retry uses production graph traversal and invalidation below.
-                if negative && !matches!(attempt, Attempt::GuaranteedBounds(_)) {
+                if negative
+                    && !matches!(
+                        attempt,
+                        Attempt::GuaranteedBounds(_) | Attempt::ComponentStorage(_)
+                    )
+                {
                     attempts.negative.insert(attempt.clone(), atom(a));
                 } else {
                     attempts
@@ -1158,7 +1251,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 invalid.keys().cloned().collect::<BTreeSet<_>>(),
-                BTreeSet::from([bound, removal])
+                BTreeSet::from([bound, removal, component])
             );
             attempts.invalidate(&invalid);
             assert_eq!(

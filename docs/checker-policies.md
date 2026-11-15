@@ -10,7 +10,7 @@ it when real programs exist, and change it on evidence.
 | BDD input order | Semantic-key order; opt-in reverse and structural orders for diagnosis | Structural order helped only synthetic name-separated shapes; under 0.5% on a production-scale program |
 | Relation-SCC grounding | Kept opt-in | Warm-run wins; not yet worth the complexity by default |
 | Fixed-fact evaluation | Shared across verifications; one retained keyed fold per session, without a byte cap | Checker limits bound the fold; retain completed work for reuse across edits and report its accounted bytes |
-| Admission rewrite order | Commit exact-coverage producer removals before cycle bounds | Avoid analysing cycles that independent support already makes redundant; preserve removals if later bounds exhaust |
+| Admission rewrite order | Exact removals before bounds; component passes upstream first, each successful batch committed immediately | Preserve completed work before later components exhaust; rebuild ordering after every commit |
 | Assumption validation | Ground-validate the union selected by executed verifications | Unselected cones need no grounding; selected cones still share whole-residual preparation |
 | Plan cache | Small-rule bypass with bounded retention | Avoids caching cost for trivial rules |
 | Coverage results | Recomputed each check; preparation is reused | No measured need for a coverage verdict cache yet |
@@ -482,6 +482,31 @@ residual program. No new allowance is introduced; `admission-candidates` profili
 covers the proof passes. Progress distinguishes `producer-removals`,
 `guaranteed-bounds`, `bound-removals` and discharge `candidates`/`upper-bounds`.
 
+After shared evaluation and summaries, removal, bound-removal and discharge passes
+visit target components by upstream level (non-target providers transmit levels),
+then by atom count and deterministic graph order. A successful component batch
+commits before another component or tier runs. The next round rebuilds the schedule;
+component IDs do not survive a commit. This can cost more graph rebuilds than a
+global batch, but preserves completed upstream work if a later component exhausts.
+Within each component, rule order and proof criteria are unchanged. Earlier
+settlement can make a later rewrite unnecessary, so warning sets can change.
+Guarded candidates retain their existing ranking, but a successful batch commits
+before starting work on a different component. Independent readers within the
+same component can still share a batch.
+
+If a component's pass runs out of condition storage outside the existing narrower
+attempt recovery, its temporary coverage/bounds and pending proofs are dropped
+before restoring the saved storage count. Shared summaries, prepared entries and
+committed proofs are not released; work is never refunded. A `component-storage`
+skip suppresses that component's later passes and guarded candidates until its
+dependency inputs change. Retry follows the pre-commit reader cone through either
+polarity, including old SCC members. Completed admission can reuse these explicit
+skips, as with other local failures. A guarded certificate's retention failure is
+likewise local to its attempt, preserving earlier independent certificates.
+Shared preparation storage, global work, deadlines and cancellation still stop
+the phase. No allowance or within-attempt yield is added. Global guarded-candidate
+ranking remains unchanged; per-component turns are separate work.
+
 After cheap removals have no batch to commit, a recursive component with a
 non-exact candidate and exact head coverage can use strengthened bounds. Its lower
 guarantees are unions of existing exact producers only. Upper bounds descend from
@@ -540,10 +565,11 @@ allowance plus one stopping step, with no construction charge. The bound is stil
 or ties it, failure reports `BDD preflight: work` and stops admission. Successful
 operation charges are unchanged. Completion-equation preflights are unchanged.
 
-Temporary upper/guaranteed/guarded bounds and guarded-cone preprocessing also
-recover from condition-node storage exhaustion, releasing all partial storage.
-This exception does not apply to proof installation or shared evaluation; it does
-not raise or bypass the storage cap. Earlier global work remains charged, so a
+Temporary upper/guaranteed/guarded bounds, guarded-cone preprocessing and guarded
+certificate retention also recover from condition-node storage exhaustion,
+releasing their partial values. Escaping component-pass failures use the owned
+batch boundary described above. Neither recovery applies to shared evaluation or
+transactional graph installation, nor raises the storage cap. Earlier global work remains charged, so a
 later unrestricted bound can still exhaust work before another guarded attempt.
 
 Failures in shared symbolic evaluation or summaries, total work limits and other

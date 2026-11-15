@@ -272,7 +272,7 @@ fn admission_skips_failed_component_bounds_without_losing_independent_discharge(
 }
 
 #[test]
-fn admission_retries_discharge_when_another_heads_external_premise_settles() {
+fn admission_discharges_upstream_before_the_consumers_external_premise_is_needed() {
     let mut c = Corpus::new();
     let inputs: Vec<_> = ["p", "q", "r", "s", "t"]
         .iter()
@@ -291,7 +291,7 @@ fn admission_retries_discharge_when_another_heads_external_premise_settles() {
     rule(&mut c, x, &[(*p, false), (y, true)]);
     rule(&mut c, y, &[(*p, true), (x, true)]);
     let raw = GroundProgram::prepare(&c, &Domains::new(), &Limits::default()).unwrap();
-    let mut retried = false;
+    let mut ordered = false;
     for bound in 0..32 {
         let (result, events) = admit(
             &raw,
@@ -306,17 +306,20 @@ fn admission_retries_discharge_when_another_heads_external_premise_settles() {
                 && s.rule
                     .is_some_and(|id| raw.original_rule(id).unwrap().source == ar)
         });
-        if skipped
+        if !skipped
             && result.rewrite_proofs().any(|p| {
                 p.candidate().source == ar && matches!(p.kind, RewriteKind::Discharge { .. })
             })
         {
-            retried = true;
+            ordered = true;
             assert!(result.admission_limit().is_none());
             assert!(result.is_admitted());
         }
     }
-    assert!(retried);
+    assert!(
+        ordered,
+        "the upstream discharge now commits before the consumer is tried"
+    );
 }
 
 // Rewrites above `wide` alter blocked graphs for several rounds without changing

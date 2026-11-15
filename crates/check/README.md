@@ -34,8 +34,10 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    Structural changes commit before symbolic evaluation, using the same atomic
    graph rebuild. They require no BDD operations. Each settled snapshot then proves
    redundant producer removals from independent
-   exact coverage. A nonempty removal batch is committed and the components rebuilt
-   before another snapshot. When cheap removals have no batch, lower guarantees
+   exact coverage. Removals, bound removals and discharge visit components in
+   provider-first target levels, then by size. Each successful component batch
+   commits immediately; the schedule is rebuilt with the graph. All cheap removals
+   must have no batch before bounds begin. When cheap removals have no batch, lower guarantees
    from exact producers strengthen descending cycle upper bounds. A non-exact
    producer is removed if its body's upper bound implies the independent exact
    head cover under W. Exact producers are retained; recursive lower coverage is
@@ -62,7 +64,8 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    ownership charges after the round/cache is dropped. Failed preparation reports
    partial cone counts and existing/added storage before releasing its values.
    Replacements whose complete dependencies are mutually untouched share an atomic
-   batch, with one replacement per rule. Dependencies include dead producers,
+   batch, with one replacement per rule. A nonempty guarded batch commits before
+   work starts on another component. Dependencies include dead producers,
    transitive pruning sources and implied guards. Prepared descriptors and ranking
    sizes can survive a round when these inputs and G ∧ W stay unchanged; current
    summaries and component IDs are rebound. Descriptors and retry footprints are
@@ -77,7 +80,13 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    therefore retain quadratic evidence metadata.
    Per-operation BDD limits in individual proof attempts are recoverable skips.
    Temporary bounds/cone storage exhaustion is also a skip after releasing partial
-   values; proof/shared storage failures still stop. Limits are unchanged;
+   values. Escaping storage failures in a component's removal/bound-removal/discharge
+   pass discard that component's pending proofs and temporary conditions, then
+   restore their accounting. Shared summaries and earlier committed proofs stay
+   charged. The component is skipped until a rewrite changes its dependency cone;
+   the skip is visible as `component-storage`. Guarded certificate retention also
+   recovers per attempt, preserving earlier certificates in its independent batch.
+   Shared storage failures still stop. Limits are unchanged;
    shared phases and global exhaustion stop that phase. Phase B records
    `GroundProgram::downstream_incomplete()` and `ScopedResults::downstream_incomplete`
    separately from `admission_limit()`. This advisory result preserves phase A's

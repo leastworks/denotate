@@ -449,8 +449,9 @@ The file intentionally retains program names and is not an anonymized export.
   also skip on retained-condition storage exhaustion: their partial values are
   dropped and their storage accounting restored before continuing. This lets a
   small guarded certificate run after an unrestricted bound exceeded storage.
+  Guarded certificate retention also recovers at its existing attempt boundary.
   Limits are unchanged; successful certificates, shared values and cache entries
-  still count against them. Other retained-storage failures, global work,
+  still count against them. Shared retained-storage failures, global work,
   deadlines, cancellation and failures in shared evaluation/summaries stop the current phase and discard the pending batch;
   downstream exhaustion is recorded separately as above.
   Failed preflights consume their task allowance plus one stopping step; a preflight
@@ -459,6 +460,26 @@ The file intentionally retains program names and is not an anonymized export.
   from changed producer heads through the pre-commit graph, including old SCC members.
   Current skips accompany reused admission and explain only their own unresolved
   components; a downstream skip cannot label an upstream cycle as exhausted.
+- **Pending component proofs own their storage failure.** A real three-component
+  chain exhausted condition storage in producer removals before reaching guarded
+  settlement. Treating that failure as global discarded useful work elsewhere.
+  Removal, bound-removal and discharge passes now run in provider-first target
+  levels, ties by size and deterministic graph order. A successful component batch
+  commits immediately, before another component can consume global work. Every
+  commit rebuilds the schedule against the new graph, including splits.
+  Guarded batches also commit before crossing a component boundary; independent
+  readers within one component retain their existing batching rule and ranking.
+
+  A storage failure escaping a component's narrower attempt boundaries drops only
+  its pending proofs and temporary conditions, then restores storage accounting.
+  It cannot release shared summaries, prepared caches or committed evidence, and
+  never refunds computation. It leaves a visible `component-storage` skip; later
+  passes do not revisit it until a rewrite changes its inputs. A representative
+  atom and the pre-commit reader closure provide retry identity across SCC changes.
+  Interrupted graph commits remain atomic. More graph rebuilds and changes to
+  warnings made unnecessary by earlier settlement are accepted trade-offs for
+  preserving progress. Shared preparation and global exhaustion still stop;
+  enforced work sharing and guarded-candidate turns remain separate scheduling work.
 - **Retry coverage and removal only when their summary inputs can change.**
   A rewrite preserves meaning under the selected assumptions W, but can change
   unrestricted conditions outside W (for example, dropping `!value(b)` from

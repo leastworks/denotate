@@ -3,13 +3,43 @@ use crate::{
     limits::{Budget, Result},
     *,
 };
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) struct AdmissionScope {
     pub targets: BTreeSet<GroundRuleId>,
     pub cone: DependencyCone,
 }
 impl AdmissionScope {
+    /// Provider-first levels of target components, with size/order ties. Settled
+    /// providers transmit the level but do not add a turn. IDs live only until
+    /// this snapshot commits; retries are keyed by a component's representative.
+    pub fn ordered_targets(
+        &self,
+        p: &GroundProgram,
+        budget: &mut Budget<'_>,
+    ) -> Result<Vec<(ComponentId, BTreeSet<GroundRuleId>)>> {
+        let mut groups = BTreeMap::<_, BTreeSet<_>>::new();
+        for id in &self.targets {
+            budget.tick("component schedule")?;
+            let rule = p.rule(*id).expect("live target");
+            groups
+                .entry(p.component_for(&rule.head.atom)?.id)
+                .or_default()
+                .insert(*id);
+        }
+        let mut levels = BTreeMap::new();
+        // Graph analysis numbers every provider before its consumers.
+        for id in &self.cone.components {
+            let c = p.component(*id).expect("scoped component");
+            budget.charge(1 + c.dependencies.len(), "component schedule")?;
+            let level = c.dependencies.iter().map(|d| levels[d]).max().unwrap_or(0);
+            levels.insert(*id, level + usize::from(groups.contains_key(id)));
+        }
+        let mut groups = groups.into_iter().collect::<Vec<_>>();
+        groups.sort_by_key(|(id, _)| (levels[id], p.components[id.index].atoms.len(), *id));
+        Ok(groups)
+    }
+
     pub fn build(
         p: &GroundProgram,
         phase: AdmissionPhase,

@@ -105,13 +105,23 @@ verification second{assumptions:[];obligations:[no_absent];}
 
 fn run(
     p: &LoadedProgram,
-    mut session: Option<&mut Session>,
+    session: Option<&mut Session>,
 ) -> (Vec<ScopedResults>, Vec<Value>, Vec<WorkReceipts>) {
-    let limits = Limits {
-        max_bdd_tasks: 2,
-        ..Limits::default()
-    };
-    let ops = (&limits).into();
+    run_limited(
+        p,
+        session,
+        &Limits {
+            max_bdd_tasks: 2,
+            ..Limits::default()
+        },
+    )
+}
+fn run_limited(
+    p: &LoadedProgram,
+    mut session: Option<&mut Session>,
+    limits: &Limits,
+) -> (Vec<ScopedResults>, Vec<Value>, Vec<WorkReceipts>) {
+    let ops = limits.into();
     let fixed = session.as_deref_mut().map(|s| {
         s.prepare_fixed(&p.corpus, &p.keys, &p.domains, &limits)
             .unwrap()
@@ -185,11 +195,17 @@ fn run(
                 .iter()
                 .any(|d| d.notes.iter().any(|n| n.contains("Admission skipped")))
         );
-        assert!(presented.diagnostics.iter().any(|d| {
-            d.related
-                .iter()
-                .any(|r| r.label.contains("skipped admission proof attempt"))
-        }));
+        if prepared
+            .program()
+            .admission_skips()
+            .any(|s| s.rule.is_some())
+        {
+            assert!(presented.diagnostics.iter().any(|d| {
+                d.related
+                    .iter()
+                    .any(|r| r.label.contains("skipped admission proof attempt"))
+            }));
+        }
         let diagnostics:Vec<_>=presented.diagnostics.iter().map(|d| {
             let source=p.sources.snapshot(d.primary.snapshot()).unwrap();
             assert!(source.text.get(d.primary.byte_range()).is_some());
@@ -200,6 +216,80 @@ fn run(
         results.push(report.checked.results.value);
     }
     (results, displays, receipts)
+}
+
+#[test]
+fn component_storage_skips_survive_reuse_and_source_edits() {
+    let mut source = String::from(
+        "input p(); input q(); relation guard(); guard():-p(); guard():-q();
+relation wide(); wide():-p(); wide():-q();
+relation u(); relation v(); u():-!v(); v():-!u();
+relation absent(); obligation no_absent:empty(absent);
+verification first{assumptions:[];obligations:[no_absent];}
+verification second{assumptions:[];obligations:[no_absent];}\n",
+    );
+    for i in 0..5 {
+        source.push_str(&format!(
+            "relation leaf{i}(); leaf{i}():-!wide(); leaf{i}():-q(); wide():-guard(),leaf{i}();\n"
+        ));
+    }
+    let parse = |revision, text: String| {
+        let file = SourceFile::new("file:///storage.den", revision, text);
+        load(
+            &ProgramMembership::single("root", [file.uri.clone()]),
+            &[file],
+        )
+        .unwrap()
+    };
+    let p = parse(0, source.clone());
+    // Exercise a real storage failure without making its exact numeric threshold
+    // a golden. Preparation must finish before the local pass can recover.
+    let limits = (100..2000)
+        .step_by(10)
+        .find_map(|cap| {
+            let l = Limits {
+                max_condition_nodes: cap,
+                ..Limits::default()
+            };
+            let request = p.verification_requests(&l).unwrap().remove(0).1;
+            let RequestPreparation::Complete(prepared) =
+                request.prepare(&p.corpus, &p.keys, &(&l).into()).unwrap()
+            else {
+                return None;
+            };
+            let prepared = prepared.admit(&(&l).into()).unwrap();
+            (prepared.program().admission_limit().is_none()
+                && prepared
+                    .program()
+                    .admission_skips()
+                    .any(|s| s.kind == AdmissionAttemptKind::ComponentStorage)
+                && prepared
+                    .program()
+                    .admission_skips()
+                    .all(|s| s.kind == AdmissionAttemptKind::ComponentStorage))
+            .then_some(l)
+        })
+        .expect("local component storage skip");
+    let mut warm = Session::default();
+    for (revision, text) in [source.clone(), format!("// moved\n\n{source}"), source]
+        .into_iter()
+        .enumerate()
+    {
+        let p = parse(revision as u64, text);
+        let fresh = run_limited(&p, None, &limits);
+        let cold = run_limited(&p, Some(&mut Session::default()), &limits);
+        let current = run_limited(&p, Some(&mut warm), &limits);
+        assert_eq!((&fresh.0, &fresh.1), (&cold.0, &cold.1));
+        assert_eq!(cold, current);
+        assert_eq!(current, run_limited(&p, Some(&mut warm), &limits));
+        assert!(current.1.iter().all(|shown| {
+            shown["status"]["admissionSkips"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|s| s["attempt"] == "component-storage")
+        }));
+    }
 }
 
 #[test]

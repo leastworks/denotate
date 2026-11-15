@@ -43,6 +43,14 @@ Each preset has one verification. `n` is the requested size; all other shape
 parameters stay fixed. Counts below describe the possible authored ground graph
 before admission (fixed evidence included); the report records actual inventory.
 
+`component-chain` connects two six-atom guarded cycles to a wide downstream cycle
+with `n` overlapping candidate producers. Its three cycles admit at defaults.
+With a tighter `--max-condition-nodes` allowance, pending downstream removal
+proofs can exhaust storage while the two small upstream components still reach
+guarded settlement. Progress distinguishes local `component-storage` skips from
+global preparation failures. This tests recovery and component order, not an
+enforced work share; an individual expensive attempt can still consume global work.
+
 | Preset | Variable shape | Atoms / rules | Expected path |
 | --- | --- | --- | --- |
 | fan-in-fixed | n fixed sources of one head | n+2 / 2n+1 | fixed folding, present-tuple failure |
@@ -52,6 +60,7 @@ before admission (fixed evidence included); the report records actual inventory.
 | certification | n even cycles feeding one emptiness target | 2n+1 / 2n+1 | blocked target, observation certification |
 | removal-heavy | n independently covered output heads beside an ambiguous cycle | n+4 / 3n+2 | at least n removals, no discharges; replay visits residual output rules |
 | presentation | n supported heads with a transitive support chain and cyclic alternatives | 2n+3 / 3n+3 | structural source findings and bounded direct evidence |
+| component-chain | two small guarded cycles feeding one n-producer cycle | n+22 / 3n+20 | guarded settlement survives downstream proof-storage pressure |
 | guarded-ring | n linked guard-relative settlement units; grouped priority/readiness inputs | 8n+1 / 8n | one 6n-atom SCC; guard-live cones settle claims even with tight per-operation bounds |
 | guarded-fan-in | one guarded unit with n input-pair booked producers | 2n+8 / n+6 | one large bound hits a node limit before aggregate storage fills |
 | guarded-worlds | 2n independent exclusive input groups, n guarded producers | 6n+8 / 2n+6 | large W exercises temporary cone storage and retained proof ownership |

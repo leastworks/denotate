@@ -88,7 +88,13 @@ another request's context.
 Admission runs cycle-relevant proof targets before downstream work. Each phase
 selects a dependency-closed support graph, including settled providers, without
 changing the full input-variable universe or selected assumptions. Transactional
-graph rebuilds remain global. Logical downstream exhaustion is separate from
+graph rebuilds remain global. Component-owned removal/discharge batches run
+upstream first and commit before later components; every commit rebuilds the
+schedule. Pending proof storage can be released only with its owning batch, never
+with shared summaries or committed evidence. A failed batch drops its values before
+restoring storage accounting; computation is not refunded. Its retry identity uses
+a representative atom and the existing pre-commit reader closure, not an SCC ID.
+Logical downstream exhaustion is separate from
 admission exhaustion: the completed cycle result and the optional downstream
 incomplete marker are reused together under identical logical limits. Presentation
 reports the marker as advisory; it never relabels an unsupported region.

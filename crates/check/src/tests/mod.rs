@@ -4,6 +4,7 @@ mod cancellation;
 mod certification;
 mod certification_search;
 mod completion;
+mod component_fairness;
 mod core;
 mod cycle_first;
 mod findings;

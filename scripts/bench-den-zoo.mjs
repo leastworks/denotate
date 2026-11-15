@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','guarded-hub','schema-layered'];
+export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','guarded-hub','component-chain','schema-layered'];
 export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1,hubVariant='pairs',hubTagValues=2}={}) {
   if (!['pairs','tagged'].includes(hubVariant)) throw Error('invalid hub variant');
   if (hubVariant==='pairs' && hubTagValues!==2) throw Error('tag values requires tagged hub variant');
@@ -27,6 +27,25 @@ export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,
       } else add(`a${i}() :- !b${i}(); b${i}() :- !a${i}();`);
     }
     if (family==='certification') add(`bad() :- ${Array.from({length:n},(_,i)=>`a${i}()`).join(', ')};`);
+  } else if (family === 'component-chain') {
+    // Two small guarded components feed a wide removal component. The last
+    // component's pending proofs can fill storage before guarded work starts.
+    for (const [prefix, upstream] of [['up',null], ['mid','up']]) {
+      add(`input ${prefix}_kind(); input ${prefix}_ready(); input ${prefix}_priority();`);
+      for (const name of ['booked','fails','claim','inspected','held','cleared']) add(`relation ${prefix}_${name}();`);
+      add(`${prefix}_booked() :- ${prefix}_kind(), ${prefix}_cleared();`);
+      if(upstream) add(`${prefix}_booked() :- ${prefix}_kind(), ${upstream}_claim();`);
+      add(`${prefix}_fails() :- ${prefix}_ready(), !${prefix}_booked();`);
+      add(`${prefix}_claim() :- !${prefix}_kind(), !${prefix}_fails();`);
+      add(`${prefix}_inspected() :- ${prefix}_kind(); ${prefix}_inspected() :- ${prefix}_claim();`);
+      add(`${prefix}_held() :- ${prefix}_priority(), ${prefix}_inspected();`);
+      add(`${prefix}_cleared() :- ${prefix}_ready(), !${prefix}_held();`);
+    }
+    add('input p(); input q(); relation guard(); guard():-p(); guard():-q();');
+    add('relation wide(); wide():-p(); wide():-q(); wide():-mid_claim();');
+    for(let i=0;i<n;i++) {
+      add(`relation leaf${i}(); leaf${i}():-!wide(); leaf${i}():-q(); wide():-guard(),leaf${i}();`);
+    }
   } else if (family === 'guarded-ring') {
     // Grouped input names deliberately order priorities before readiness bits.
     // The positive ring is cut by ready_i; under !kind every booked_i is false.

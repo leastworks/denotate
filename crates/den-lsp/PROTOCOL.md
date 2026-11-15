@@ -199,15 +199,22 @@ completion fraction.
 `iteration` is an optional current upper-bound iteration, not an estimated total.
 Rewrite counts are cumulative committed counts, not proposed changes.
 
-`skippedAttempts` is the cumulative number of failed per-operation proof attempts,
+`skippedAttempts` is the cumulative number of failed local proof attempts or component passes,
 including later retries. A recoverable failure immediately emits `skipped` as
 `producer-coverage`, `producer-removal`, `upper-bounds`, `guaranteed-bounds`,
-`bound-removal`, `negation-discharge`, `implied-guard`, `guarded-preprocessing`, `guarded-bounds` or `guarded-settlement`,
+`bound-removal`, `negation-discharge`, `implied-guard`, `guarded-preprocessing`, `guarded-bounds`, `guarded-settlement` or `component-storage`,
 `skipTarget: {head: "p(a)"}`, and the ordinary formatted `failure`. Admission
 continues. Subsequent updates clear `skipped`, `skipTarget` and that local failure;
 `reused` includes the retained attempt count. A failure with `skipped: null` stops
 admission. A preflight constrained by remaining work reports resource `work`,
 not the per-operation `BDD tasks` limit; ties are treated as global work stops.
+`component-storage` identifies an abandoned component-owned pending batch by its
+representative head. Its failure retains the actual phase/resource. Temporary
+values have been dropped; shared summaries and committed proofs remain. The skip
+survives completed-admission reuse and clears when changed dependencies require a
+retry. It is not an ordinary negative proof result. Existing attempt summaries
+include this kind as an enclosing component pass; its time includes nested proofs
+and must not be added to their times.
 
 Stages are `starting`, `structural`, `structural-committed`, `symbolic`, `summaries`, `producer-removals`, `candidates`,
 `upper-bounds`, `guaranteed-bounds`, `bound-removals`, `implied-guard`, `guarded-preprocessing`, `guarded-bounds`, `guarded-settlement`, `commit`, `committed`, `attempt-summary`, `complete`, `reused`, and

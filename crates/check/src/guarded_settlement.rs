@@ -309,6 +309,15 @@ impl GroundProgram {
             if selected {
                 remaining = LOOKAHEAD.saturating_sub(ranked.len());
             }
+            // A later component must not spend global work while this one's
+            // successful batch is still uncommitted. Keep batching independent
+            // readers within the same component; rebuild the queue after commit.
+            if proofs
+                .first()
+                .is_some_and(|p: &GuardedSettlementProof| p.bounds.cone.component != component.id)
+            {
+                break;
+            }
             budget.tick("guarded candidate queue")?;
             #[cfg(test)]
             if !attempts.batch_guarded
