@@ -145,6 +145,12 @@ pub(crate) struct Attempts {
     history: BTreeMap<Attempt, (bool, Option<&'static str>)>,
     reuse_negatives: bool,
     pub count: usize,
+    pub prepared: BTreeMap<Attempt, crate::guarded_preparation::PreparedCone>,
+    // Complete producer dependencies, including deadness and inferred guards.
+    dependencies: BTreeMap<Attempt, std::sync::Arc<BTreeSet<GroundRuleId>>>,
+    pub reuse_prepared: bool,
+    #[cfg(test)]
+    pub batch_guarded: bool,
 }
 impl Default for Attempts {
     fn default() -> Self {
@@ -154,6 +160,11 @@ impl Default for Attempts {
             history: BTreeMap::new(),
             reuse_negatives: true,
             count: 0,
+            prepared: BTreeMap::new(),
+            dependencies: BTreeMap::new(),
+            reuse_prepared: true,
+            #[cfg(test)]
+            batch_guarded: true,
         }
     }
 }
@@ -163,6 +174,84 @@ pub(crate) struct RetryChanges {
 }
 
 impl Attempts {
+    pub fn nodes(&self) -> usize {
+        self.prepared.values().map(|p| p.nodes()).sum::<usize>()
+            + self
+                .dependencies
+                .values()
+                .map(|d| d.len() + 1)
+                .sum::<usize>()
+    }
+    pub fn prune_dependencies(&mut self) -> usize {
+        let before = self.nodes();
+        self.dependencies.retain(|a, _| {
+            self.prepared.contains_key(a)
+                || self.skipped.contains_key(a)
+                || self.negative.contains_key(a)
+        });
+        before - self.nodes()
+    }
+    pub fn clear_prepared(&mut self) -> usize {
+        let before = self.nodes();
+        self.prepared.clear();
+        self.dependencies
+            .retain(|a, _| self.skipped.contains_key(a) || self.negative.contains_key(a));
+        before - self.nodes()
+    }
+    pub fn remember_dependencies(
+        &mut self,
+        rule: GroundRuleId,
+        occurrence: OccurrenceId,
+        dependencies: BTreeSet<GroundRuleId>,
+        retained: &mut usize,
+        budget: &mut Budget<'_>,
+    ) -> Result<()> {
+        let keys = [
+            Attempt::GuardedCone(rule, occurrence),
+            Attempt::GuardedBounds(rule, occurrence),
+            Attempt::GuardedSettlement(rule, occurrence),
+        ];
+        budget.charge(dependencies.len(), "guarded retry footprint")?;
+        let old: usize = keys
+            .iter()
+            .filter_map(|k| self.dependencies.remove(k))
+            .map(|d| d.len() + 1)
+            .sum();
+        *retained -= old;
+        let nodes = keys.len() * (dependencies.len() + 1);
+        if retained.saturating_add(nodes) <= budget.limits.max_condition_nodes {
+            *retained = crate::symbolic::retain(*retained, 0, nodes, budget)?;
+            let dependencies = std::sync::Arc::new(dependencies);
+            for key in keys {
+                self.dependencies.insert(key, dependencies.clone());
+            }
+        } else if let Some(old) = self.prepared.remove(&keys[0]) {
+            *retained -= old.nodes();
+        }
+        Ok(())
+    }
+    pub fn keep_prepared(
+        &mut self,
+        key: Attempt,
+        cone: crate::guarded_preparation::PreparedCone,
+        retained: &mut usize,
+        budget: &mut Budget<'_>,
+    ) -> Result<()> {
+        // Without a complete footprint, retry conservatively and do not retain a cone.
+        if !self.reuse_prepared || !self.dependencies.contains_key(&key) {
+            return Ok(());
+        }
+        if let Some(old) = self.prepared.remove(&key) {
+            *retained -= old.nodes();
+        }
+        let nodes = cone.nodes();
+        budget.charge(nodes, "guarded preparation retention")?;
+        if retained.saturating_add(nodes) <= budget.limits.max_condition_nodes {
+            *retained = crate::symbolic::retain(*retained, 0, nodes, budget)?;
+            self.prepared.insert(key, cone);
+        }
+        Ok(())
+    }
     pub fn reason(&self, attempt: &Attempt) -> Option<Inconclusive> {
         self.skipped.get(attempt).map(|s| s.reason)
     }
@@ -178,9 +267,10 @@ impl Attempts {
             .iter()
             .map(|(a, s)| (a, &s.head))
             .chain(self.negative.iter())
+            .chain(self.prepared.iter().map(|(a, p)| (a, &p.head)))
     }
     fn len(&self) -> usize {
-        self.skipped.len() + self.negative.len()
+        self.skipped.len() + self.negative.len() + self.prepared.len()
     }
 
     /// Consult before constructing a cover/bounds used only by this consumer.
@@ -323,7 +413,8 @@ impl Attempts {
         });
         let precise = self
             .tracked()
-            .any(|(a, _)| matches!(a, Attempt::Coverage(_) | Attempt::Removal(_)));
+            .any(|(a, _)| matches!(a, Attempt::Coverage(_) | Attempt::Removal(_)))
+            || !self.dependencies.is_empty();
         for proof in batch {
             budget.tick("admission retry dependencies")?;
             let head = &proof.candidate().head.atom;
@@ -370,21 +461,6 @@ impl Attempts {
         budget: &mut Budget<'_>,
     ) -> Result<BTreeMap<Attempt, &'static str>> {
         let mut invalid = BTreeMap::new();
-        // Replacements add settled dependencies as well as cutting a cycle edge.
-        // Start conservatively: clear every live entry transactionally. Ordinary
-        // removal/discharge commits keep their existing precise invalidation.
-        if after
-            .rules
-            .iter()
-            .zip(&before.rules)
-            .any(|(a, b)| a.replacements != b.replacements)
-        {
-            budget.charge(self.len() + after.rules.len(), "guarded retry invalidation")?;
-            return Ok(self
-                .tracked()
-                .map(|(a, _)| (a.clone(), "guarded-replacement"))
-                .collect());
-        }
         if self.len() == 0 {
             return Ok(invalid);
         }
@@ -445,7 +521,10 @@ impl Attempts {
                 // Discharge and guarded settlement both remove a literal. Use
                 // the existing index, not a body scan for every cached literal
                 // (which would be quadratic for a rule with many negations).
-                Attempt::Discharge(id, occurrence) | Attempt::GuardedSettlement(id, occurrence) => {
+                Attempt::Discharge(id, occurrence)
+                | Attempt::GuardedSettlement(id, occurrence)
+                | Attempt::GuardedCone(id, occurrence)
+                | Attempt::GuardedBounds(id, occurrence) => {
                     after.rule(*id).is_none()
                         || after.discharge(*id, *occurrence).is_some()
                         || after.replacement_proof(*id, *occurrence).is_some()
@@ -456,30 +535,34 @@ impl Attempts {
                 invalid.insert(attempt.clone(), "obsolete");
                 continue;
             }
-            let retry = match attempt {
-                Attempt::Coverage(_) => coverage[head],
-                Attempt::Removal(id) => {
-                    coverage[head]
-                        || match before.rule(*id) {
-                            Some(rule) => summary_changed(
-                                before,
-                                after,
-                                rule,
-                                after.rule(*id),
-                                &changed.settled,
-                                budget,
-                            )?,
-                            None => true,
-                        }
+            let retry = if let Some(dependencies) = self.dependencies.get(attempt) {
+                dependency_changes(before, after, head, dependencies, &changed.settled, budget)?
+            } else {
+                match attempt {
+                    Attempt::Coverage(_) => coverage[head],
+                    Attempt::Removal(id) => {
+                        coverage[head]
+                            || match before.rule(*id) {
+                                Some(rule) => summary_changed(
+                                    before,
+                                    after,
+                                    rule,
+                                    after.rule(*id),
+                                    &changed.settled,
+                                    budget,
+                                )?,
+                                None => true,
+                            }
+                    }
+                    Attempt::UpperBounds(_)
+                    | Attempt::GuaranteedBounds(_)
+                    | Attempt::BoundRemoval(_)
+                    | Attempt::ImpliedGuard(..)
+                    | Attempt::GuardedCone(..)
+                    | Attempt::GuardedBounds(..)
+                    | Attempt::GuardedSettlement(..)
+                    | Attempt::Discharge(..) => changed.all.contains(head),
                 }
-                Attempt::UpperBounds(_)
-                | Attempt::GuaranteedBounds(_)
-                | Attempt::BoundRemoval(_)
-                | Attempt::ImpliedGuard(..)
-                | Attempt::GuardedCone(..)
-                | Attempt::GuardedBounds(..)
-                | Attempt::GuardedSettlement(..)
-                | Attempt::Discharge(..) => changed.all.contains(head),
             };
             if retry {
                 let cause = match attempt {
@@ -497,6 +580,8 @@ impl Attempts {
         for (attempt, cause) in invalid {
             self.skipped.remove(attempt);
             self.negative.remove(attempt);
+            self.prepared.remove(attempt);
+            self.dependencies.remove(attempt);
             if *cause == "obsolete" {
                 self.history.remove(attempt);
             } else if let Some(previous) = self.history.get_mut(attempt) {
@@ -516,6 +601,43 @@ impl Attempts {
         }
         records
     }
+}
+
+/// Compare complete inputs on both sides of an atomic commit. SCC IDs themselves
+/// change on every rebuild; only membership relative to the reading head matters.
+fn dependency_changes(
+    before: &GroundProgram,
+    after: &GroundProgram,
+    head: &GroundAtom,
+    dependencies: &BTreeSet<GroundRuleId>,
+    changed_settled: &BTreeSet<GroundAtom>,
+    budget: &mut Budget<'_>,
+) -> Result<bool> {
+    let old_component = before.component_for(head)?.id;
+    let new_component = after.component_for(head)?.id;
+    for id in dependencies {
+        budget.tick("guarded retry inputs")?;
+        let (Some(old), Some(new)) = (before.rule(*id), after.rule(*id)) else {
+            return Ok(true);
+        };
+        if old != new || summary_changed(before, after, old, Some(new), changed_settled, budget)? {
+            return Ok(true);
+        }
+        for atom in std::iter::once(old.head.atom.clone())
+            .chain(old.dependency_literals().map(|l| l.term.atom))
+        {
+            budget.tick("guarded retry membership")?;
+            let inside = |p: &GroundProgram, component| {
+                p.atom_index
+                    .get(&atom)
+                    .is_some_and(|i| p.atom_components[*i] == component)
+            };
+            if inside(before, old_component) != inside(after, new_component) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 // Symbolic admission is all-or-nothing: a represented, unblocked atom is
@@ -590,6 +712,218 @@ impl GroundProgram {
 mod tests {
     use super::*;
     use crate::test_support::rewrites::{atom, rel, rule};
+
+    #[test]
+    fn prepared_cones_rebind_across_unrelated_rewrites_and_invalidate_every_source() {
+        let (mut c, claim) = crate::tests::guarded_settlement::fixture(0);
+        let x = rel(&mut c, "x", true);
+        let y = rel(&mut c, "y", false);
+        let unrelated = rule(&mut c, y, &[(x, true)]);
+        let l = Limits::default();
+        let raw = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+        let m = raw.symbolic(&l).unwrap();
+        let summaries = crate::test_support::rewrites::summaries(&raw, &m, &l);
+        let candidate = summaries
+            .values()
+            .find(|s| s.rule.head.atom == atom(claim))
+            .unwrap();
+        let mut attempts = Attempts::default();
+        let mut retained = 0;
+        raw.guarded_settlements(
+            &m,
+            &summaries,
+            &BTreeSet::from([candidate.rule.id]),
+            &mut retained,
+            &mut Budget::new(&l),
+            &AdmissionReporter::new(None),
+            &mut attempts,
+        )
+        .unwrap();
+        // Select the unresolved occurrence, not the settled guard literal.
+        let key = attempts
+            .prepared
+            .keys()
+            .find(|a| matches!(a, Attempt::GuardedCone(id, _) if *id == candidate.rule.id))
+            .unwrap()
+            .clone();
+        let old = &attempts.prepared[&key];
+        let dependencies = attempts.dependencies[&key].clone();
+        let unrelated_id = raw.rules().find(|r| r.source == unrelated).unwrap().id;
+        let mut after = raw.clone();
+        after.rules[unrelated_id.index].body.clear();
+        crate::graph::analyze(&mut after, &mut Budget::new(&l)).unwrap();
+        let changed = RetryChanges {
+            all: BTreeSet::from([atom(y)]),
+            settled: BTreeSet::from([atom(y)]),
+        };
+        assert!(
+            !attempts
+                .invalidated(&raw, &after, &changed, &mut Budget::new(&l))
+                .unwrap()
+                .contains_key(&key)
+        );
+        let next_meaning = after.symbolic(&l).unwrap();
+        let next_summaries = crate::test_support::rewrites::summaries(&after, &next_meaning, &l);
+        let rebound = old
+            .bind(
+                &after,
+                &next_summaries[&candidate.rule.id].condition,
+                &next_meaning.context().permitted_worlds(),
+                &next_summaries,
+                &mut 0,
+                &mut Budget::new(&l),
+            )
+            .unwrap()
+            .unwrap();
+        assert_eq!(rebound.snapshot, after.graph_revision);
+        assert_eq!(
+            rebound.component,
+            after.component_for(&atom(claim)).unwrap().id
+        );
+        assert_ne!(
+            rebound.component,
+            raw.component_for(&atom(claim)).unwrap().id
+        );
+        // Rebuilding the same cone from scratch agrees, including pruning reasons.
+        let index = next_summaries
+            .values()
+            .fold(BTreeMap::<_, Vec<_>>::new(), |mut index, s| {
+                index.entry(&s.rule.head.atom).or_default().push(s.rule.id);
+                index
+            });
+        let Attempt::GuardedCone(id, occurrence) = key else {
+            panic!()
+        };
+        let literal = candidate
+            .rule
+            .body
+            .iter()
+            .find(|l| l.term.occurrence == occurrence)
+            .unwrap();
+        let fresh = crate::guarded_bounds::prepare(
+            &after,
+            after.component_for(&atom(claim)).unwrap(),
+            &next_summaries[&id],
+            &literal.term.atom,
+            &next_summaries,
+            &index,
+            next_meaning.context(),
+            &mut 0,
+            &mut Budget::new(&l),
+            &mut crate::guarded_bounds::Preparation::default(),
+        )
+        .unwrap();
+        assert!(
+            rebound
+                .same_computation(&fresh, &mut Budget::new(&l))
+                .unwrap()
+        );
+        assert!(
+            old.bind(
+                &after,
+                &next_meaning.context().false_condition(),
+                &next_meaning.context().permitted_worlds(),
+                &next_summaries,
+                &mut 0,
+                &mut Budget::new(&l)
+            )
+            .unwrap()
+            .is_none()
+        );
+        for source in dependencies.iter() {
+            let mut edited = raw.clone();
+            edited.rules[source.index].body.clear();
+            crate::graph::analyze(&mut edited, &mut Budget::new(&l)).unwrap();
+            assert!(
+                attempts
+                    .invalidated(
+                        &raw,
+                        &edited,
+                        &RetryChanges {
+                            all: BTreeSet::new(),
+                            settled: BTreeSet::new()
+                        },
+                        &mut Budget::new(&l)
+                    )
+                    .unwrap()
+                    .contains_key(&Attempt::GuardedCone(id, occurrence)),
+                "source {source:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn replacement_retries_its_component_bounds_but_keeps_unrelated_failures() {
+        let (mut c, claim) = crate::tests::guarded_settlement::fixture(0);
+        let x = rel(&mut c, "x", false);
+        let y = rel(&mut c, "y", false);
+        rule(&mut c, x, &[(y, true)]);
+        rule(&mut c, y, &[(x, true)]);
+        let l = Limits::default();
+        let raw = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+        let admitted = raw.clone().admit(&l).unwrap();
+        let proof = admitted
+            .rewrite_proofs()
+            .find(|p| p.guarded_settlement().is_some())
+            .unwrap();
+        let mut attempts = Attempts::default();
+        let own = Attempt::GuaranteedBounds(atom(claim));
+        let other = Attempt::GuaranteedBounds(atom(x));
+        let reason =
+            Inconclusive::from_error(CheckError::limit("BDD operation", "BDD nodes", 1, None))
+                .unwrap();
+        for (key, head) in [(&own, atom(claim)), (&other, atom(x))] {
+            attempts
+                .skipped
+                .insert(key.clone(), key.record(&head, reason));
+        }
+        let changes = attempts
+            .changed_readers(&raw, std::slice::from_ref(proof), &mut Budget::new(&l))
+            .unwrap();
+        let mut after = raw.clone();
+        let p = proof.guarded_settlement().unwrap();
+        let rule = &mut after.rules[proof.candidate().id.index];
+        rule.body.retain(|l| l.term.occurrence != p.occurrence);
+        rule.replacements.push(SettledReplacement {
+            occurrence: p.occurrence,
+            expression: p.replacement.clone(),
+        });
+        crate::graph::analyze(&mut after, &mut Budget::new(&l)).unwrap();
+        let invalid = attempts
+            .invalidated(&raw, &after, &changes, &mut Budget::new(&l))
+            .unwrap();
+        assert!(invalid.contains_key(&own));
+        assert!(!invalid.contains_key(&other));
+        attempts.invalidate(&invalid);
+        assert!(
+            attempts
+                .run(
+                    other,
+                    &atom(x),
+                    &after,
+                    &mut 0,
+                    &mut Budget::new(&l),
+                    &AdmissionReporter::new(None),
+                    |_, _| -> Result<()> { panic!("unchanged bound must not rerun") }
+                )
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            attempts
+                .run(
+                    own,
+                    &atom(claim),
+                    &after,
+                    &mut 0,
+                    &mut Budget::new(&l),
+                    &AdmissionReporter::new(None),
+                    |_, _| Ok(())
+                )
+                .unwrap()
+                .is_some()
+        );
+    }
 
     #[test]
     fn obsolete_negative_discharge_is_removed_without_becoming_a_skip() {

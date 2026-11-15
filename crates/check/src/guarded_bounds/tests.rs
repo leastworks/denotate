@@ -570,6 +570,7 @@ fn identical_outside_head_cones_reuse_bounds_without_leaking_retention() {
     let observer = |e: &AdmissionProgress| events.borrow_mut().push(e.clone());
     let progress = AdmissionReporter::new(Some(&observer));
     let mut retained = 0;
+    let mut attempts = Attempts::default();
     let proofs = p
         .guarded_settlements(
             &m,
@@ -578,13 +579,14 @@ fn identical_outside_head_cones_reuse_bounds_without_leaking_retention() {
             &mut retained,
             &mut Budget::new(&l),
             &progress,
-            &mut Attempts::default(),
+            &mut attempts,
         )
         .unwrap();
     assert!(proofs.is_empty()); // constant premises stay for removal/discharge
     assert_eq!(
-        retained, 0,
-        "the invocation cache must release every retained node"
+        retained,
+        attempts.nodes(),
+        "only charged admission-local descriptors and negative footprints survive"
     );
     assert!(events.borrow().iter().any(|e| {
         e.guarded

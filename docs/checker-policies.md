@@ -244,9 +244,10 @@ behind cones below that threshold. The denominator is all ground atoms in that
 component at the current snapshot, not atoms visited during cone traversal; a
 621/622 cone is therefore deferred. Live producer count breaks size ties only.
 
-Only size metadata waits in the window (charged conservatively as 16 condition
-slots per entry); cones and inferred guards are released and reconstructed for
-the chosen attempt. Vacant slots are refilled before choosing again. If every
+The window holds size metadata (charged conservatively as 16 condition slots per
+entry). Optional prepared descriptors retain the domain, atom/rule IDs, live flags,
+pruning metadata and sizes; current producer summaries are rebound for the chosen
+attempt. Inferred guards are rediscovered. Vacant slots are refilled before choosing again. If every
 prepared candidate is deferred, attempt the smallest anyway. Unexamined candidates
 may have smaller cones: this is bounded lookahead, not a global sort. Each window
 admits at most 32 preparations, including locally failed preparations. Global
@@ -254,7 +255,7 @@ work, deadlines and cancellation can still stop that work. On preparation storag
 pressure, release optional ranking metadata, return its candidates to their
 original queue, and retry without ranking for the remainder of the snapshot.
 The 32-entry window and 90% threshold are provisional; neither changes proofs,
-cones or the one-replacement-per-component rule.
+cones or the independence requirement for batching replacements.
 
 One-hop implied guards can strengthen G before the cone is prepared. A negative
 unresolved premise excludes the union of its exact producers' settled guards;
@@ -291,14 +292,35 @@ failure is the ordinary local skip. Reuse requires the same domain representatio
 relaxed rule (omitted when its head is outside the cone), and pruning reasons. Metadata conservatively
 uses condition-node storage slots as well as work charges. Different guards never
 inherit another guard's failure. Replacing an entry releases it; successful proofs
-retain their own certificates. No result cache crosses snapshots. Repeated signed
+retain their own certificates. Bound values and failed-bound keys do not cross
+snapshots. Prepared cone descriptors may: complete dependencies include the reading
+rule, live/dead producers, transitive pruning sources and implied-guard sources.
+Every commit compares their executable shape, settled inputs and membership in the
+reader's component; changed inputs invalidate the descriptor. A hit also requires
+the same guard and W representations, implying the same domain without a new BDD
+operation. Retry footprints additionally cover unsuccessful guard-discovery inputs,
+which can become informative after a producer changes. Current snapshot/component IDs and summaries are
+rebound, never copied blindly. Ranking reuses the saved live counts, with deferral
+recomputed against the current component size. Original before-pruning counts
+belong to the preparation that produced the descriptor.
+
+Descriptors and complete retry footprints charge condition-node slots, and their
+construction, lookup and comparison charge work. Retention is optional when it
+does not fit; missing footprints use conservative reader-cone invalidation. Cone
+preparation evicts descriptors along with other optional caches before retrying
+on storage pressure. Descriptors are also released before downstream work, which
+does not attempt guarded replacements; all metadata is released when admission ends. Repeated signed
 atoms in one body need only one attempt. Progress distinguishes
 `guarded-preprocessing`, `guarded-bounds` and `guarded-settlement`, with per-candidate
 cone size, preprocessing/iteration elapsed time, reuse and outcome. Progress also
 records whether ranking deferred the candidate, its component atom count, and its
 actual bounds-attempt position (absent while it is waiting). Saved reports retain
 the deferral flag even if the candidate later runs. Expression
-`cutoffs` remain separate. A replacement still invalidates failed/negative attempts.
+`cutoffs` remain separate. `guarded-preprocessing`'s `reusedResult` also counts
+descriptor hits within and across snapshots. Guarded replacements batch in candidate
+order only when no changed reading rule occurs in another certificate's complete
+proof dependencies; one replacement per rule. Dead producers count too. Batch
+commit and invalidation remain atomic.
 Preparation also reports domain BDD size and existing versus added condition-node
 storage, including partial visited/live counts on failure. Added storage is the
 amount successfully retained before cleanup, not the failed requested increment
@@ -506,15 +528,18 @@ visited premises + skipped attempts), apart from ordered-map/set lookup costs. I
 is charged and can stop admission globally before the commit. Unchanged skips keep
 their original reason and consumed work; neither graph nor retry invalidation is
 partially published if the rebuild or comparison exhausts. No retry cache crosses
-preparations, and no BDD values are retained for retry detection.
+preparations. Retry footprints retain rule IDs; the separate prepared-cone cache
+also retains its domain condition.
 
 Completed negative producer-removal, bound-removal and discharge attempts are
 also remembered for this admission invocation. They follow the same invalidation
 rules as skips; conservative cone changes can retry bounds/discharge even if the
 computed conditions would be equal. Cache lookup costs one work step. Cache
 invalidation is charged as above, now including remembered negatives. Entries hold
-only an attempt identity and head, with bounded observational history when progress
-is enabled: no producer lists, BDD conditions or cross-round successful results.
+an attempt identity and head, with bounded observational history when progress
+is enabled. Guarded attempts with a complete cone additionally retain its complete
+producer footprint; other attempts use the conservative reader closure. Whole-component
+computations still retry after any change in their component.
 Obsolete attempts are removed and all metadata is released when admission ends.
 Negatives never become skip records, exhaustion counts or inconclusive findings.
 

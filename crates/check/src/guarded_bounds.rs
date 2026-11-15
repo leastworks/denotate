@@ -142,7 +142,7 @@ impl BorrowedBounds<'_> {
 }
 
 /// Measurements survive a failed preparation after its partial cone is dropped.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub(crate) struct Preparation {
     pub domain_nodes: Option<usize>,
     pub visited_atoms: usize,

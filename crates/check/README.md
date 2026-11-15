@@ -61,8 +61,15 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    just their referenced snapshot summaries and bound values, with conservative
    ownership charges after the round/cache is dropped. Failed preparation reports
    partial cone counts and existing/added storage before releasing its values.
-   One replacement per component commits atomically. Later exhaustion
-   preserves earlier committed batches.
+   Replacements whose complete dependencies are mutually untouched share an atomic
+   batch, with one replacement per rule. Dependencies include dead producers,
+   transitive pruning sources and implied guards. Prepared descriptors and ranking
+   sizes can survive a round when these inputs and G ∧ W stay unchanged; current
+   summaries and component IDs are rebound. Descriptors and retry footprints are
+   charged to existing storage/work allowances and released at admission end;
+   bounds remain snapshot-local. Changed inputs invalidate guarded attempts,
+   while unrelated attempts survive. Whole-component bounds retry when their
+   component changes. Later exhaustion preserves earlier committed batches.
    Within a snapshot, exact-producer coverage is computed lazily per head, reused
    by its non-exact candidates, and removed from the cache after the last candidate.
    Retained unions count against the existing condition-node limit. Proofs still
@@ -143,7 +150,8 @@ guard and is reported as an `implied-guard` attempt, without making that fallbac
 inconclusive. Finding identities and the earlier admission passes are unchanged.
 A bounded lookahead ranks prepared cones before attempting their bounds, deferring
 full and nearly full cones. Waiting candidates retain only size metadata; their
-cones and guards are reconstructed when selected. All-deferred windows still
+cones are rebound from unchanged prepared descriptors when available, while
+guards are rediscovered when selected. All-deferred windows still
 attempt bounds, and optional ranking yields under preparation storage pressure.
 The [checker policies](../../docs/checker-policies.md#guarded-settlement) describe
 its provisional window, threshold and progress fields.

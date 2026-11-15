@@ -456,6 +456,20 @@ impl GroundProgram {
     ) -> Result<Self> {
         self.admit_attempts(budget, observer, Attempts::default(), config, dump)
     }
+    #[cfg(test)]
+    pub(crate) fn admit_guarded_for_test(
+        self,
+        budget: &mut Budget<'_>,
+        observer: Option<&AdmissionObserver<'_>>,
+        batch: bool,
+        reuse: bool,
+    ) -> Result<Self> {
+        let mut attempts = Attempts::default();
+        attempts.batch_guarded = batch;
+        attempts.reuse_prepared = reuse;
+        self.admit_attempts(budget, observer, attempts, None, None)
+    }
+
     fn admit_attempts(
         mut self,
         budget: &mut Budget<'_>,
@@ -507,6 +521,9 @@ impl GroundProgram {
             .rewrite_loop(budget, &progress, &mut attempts, phase, &mut round)
             .and_then(|()| {
                 progress.round_end(&self);
+                // Downstream never attempts guarded replacements. Release the
+                // optional preparation pool before its evaluation and proofs.
+                attempts.clear_prepared();
                 phase = AdmissionPhase::Downstream;
                 progress.phase(phase);
                 self.rewrite_loop(budget, &progress, &mut attempts, phase, &mut round)
@@ -613,7 +630,8 @@ impl GroundProgram {
             let mut summaries = BTreeMap::new();
             let mut producers = BTreeMap::<_, Vec<_>>::new();
             let mut last_candidates = BTreeMap::new();
-            let mut retained = self.rewrites.nodes + meaning.metrics().retained_condition_nodes;
+            let mut retained =
+                self.rewrites.nodes + meaning.metrics().retained_condition_nodes + attempts.nodes();
             for (position, rule) in self
                 .rules
                 .iter()
@@ -1357,5 +1375,83 @@ impl GroundProgram {
         };
         batch.push(proof);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod batch_commit_tests {
+    use super::*;
+    use crate::test_support::rewrites::{atom, summaries};
+
+    #[test]
+    fn interrupted_multi_replacement_commit_leaves_graph_and_proofs_untouched() {
+        let (c, first, second) = crate::tests::guarded_settlement::independent_readers_fixture();
+        let l = Limits::default();
+        let raw = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+        let m = raw.symbolic(&l).unwrap();
+        let summaries = summaries(&raw, &m, &l);
+        let targets = summaries
+            .values()
+            .filter(|s| [atom(first), atom(second)].contains(&s.rule.head.atom))
+            .map(|s| s.rule.id)
+            .collect();
+        let proofs = raw
+            .guarded_settlements(
+                &m,
+                &summaries,
+                &targets,
+                &mut 0,
+                &mut Budget::new(&l),
+                &crate::admission_progress::AdmissionReporter::new(None),
+                &mut Attempts::default(),
+            )
+            .unwrap();
+        assert_eq!(proofs.len(), 2);
+        let batch: Vec<_> = proofs
+            .into_iter()
+            .enumerate()
+            .map(|(index, proof)| RewriteProof {
+                id: RewriteProofId {
+                    snapshot: raw.graph_revision,
+                    index,
+                },
+                snapshot: raw.graph_revision,
+                kind: RewriteKind::GuardedSettlement {
+                    literal_occurrence: proof.occurrence,
+                },
+                justification: RewriteJustification::GuardedSettlement(proof),
+            })
+            .collect();
+        let mut rebuilt_failure = false;
+        let mut completed = false;
+        for allowance in (1..10000).step_by(31) {
+            let limited = Limits {
+                max_work: allowance,
+                ..l.clone()
+            };
+            let mut p = raw.clone();
+            match p.commit_rewrites(
+                batch.clone(),
+                &mut Attempts::default(),
+                &mut Budget::new(&limited),
+            ) {
+                Ok(()) => {
+                    assert_eq!(p.rewrite_proofs().count(), 2);
+                    completed = true;
+                    break;
+                }
+                Err(CheckError::LimitExceeded { phase, .. }) => {
+                    rebuilt_failure |= phase != "rewrite commit";
+                    assert_eq!(
+                        p.rules().collect::<Vec<_>>(),
+                        raw.rules().collect::<Vec<_>>()
+                    );
+                    assert_eq!(p.graph_revision, raw.graph_revision);
+                    assert_eq!(p.rewrite_proofs().count(), 0);
+                }
+                Err(e) => panic!("{e:?}"),
+            }
+        }
+        assert!(rebuilt_failure && completed);
     }
 }

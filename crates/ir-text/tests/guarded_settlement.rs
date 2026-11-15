@@ -563,8 +563,10 @@ fn cone_order_uses_pruned_decoys_and_agrees_fresh_cold_warm() {
             events
                 .iter()
                 .filter_map(|e| e.guarded.as_ref())
+                // A deferred candidate's start event precedes its cone counts.
                 .filter(|g| g.deferred)
-                .all(|g| { g.live_atoms.unwrap() * 10 >= g.component_atoms.unwrap() * 9 })
+                .filter_map(|g| g.live_atoms.zip(g.component_atoms))
+                .all(|(live, total)| live * 10 >= total * 9)
         );
         let fresh = check(&p, None);
         let mut session = Session::default();

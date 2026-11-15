@@ -207,7 +207,8 @@ Each entry has `kind` (the same labels as `skipped`), `new`, `rerunNegative`,
 `failed`, `cutoffs`, `elapsedMs` and `retryCauses`. The first three counters count executed
 attempts by prior outcome; the three reuse counters count cache hits, without
 executing the operation. `completed` counts successful computations/proofs;
-`reusedResult` counts identical completed bounds reused within a snapshot;
+`reusedResult` counts identical completed bounds reused within a snapshot and
+prepared-cone descriptor hits (`guarded-preprocessing`), including across snapshots;
 reused failures still count in `reusedSkip`.
 
 During guarded work, `guarded` describes one candidate: `index` (one-based,
@@ -227,7 +228,8 @@ including candidates made unnecessary by another reader's successful rewrite. Co
 producers so far, including dead ones; after successful deadness propagation they
 count the rebuilt cone. Live atoms have at least one producer not proved dead under
 the domain (this does not establish the atom's truth). `beforePruningAtoms` and
-`beforePruningRules` count the original cone. `pruning` is `complete`, or the
+`beforePruningRules` count the original cone, from its last actual preparation
+when a descriptor is reused. Ranking uses the current component size. `pruning` is `complete`, or the
 optional fallback reason: `pruning items`, `BDD tasks`, `BDD nodes`, or
 `condition nodes`. Fallback uses the original cone, not a partial result, and
 adds no inconclusive finding. These fields are null until pruning starts.

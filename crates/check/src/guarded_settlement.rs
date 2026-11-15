@@ -41,6 +41,43 @@ pub struct GuardedSettlementProof {
     pub implied_guard: Option<ImpliedGuardProof>,
 }
 
+/// The symmetric check lets certificates be applied sequentially in any order.
+/// Dead producers and transitive pruning/implied sources are dependencies too.
+#[derive(Default)]
+struct IndependentBatch {
+    rules: BTreeSet<GroundRuleId>,
+    dependencies: BTreeSet<GroundRuleId>,
+}
+impl IndependentBatch {
+    fn reads(&self, rule: GroundRuleId) -> bool {
+        self.rules.contains(&rule) || self.dependencies.contains(&rule)
+    }
+    fn accepts(&self, rule: GroundRuleId, dependencies: &BTreeSet<GroundRuleId>) -> bool {
+        !self.reads(rule) && self.rules.is_disjoint(dependencies)
+    }
+    fn insert(&mut self, rule: GroundRuleId, dependencies: BTreeSet<GroundRuleId>) {
+        self.rules.insert(rule);
+        self.dependencies.extend(dependencies);
+    }
+}
+
+pub(crate) fn dependencies<S: std::ops::Deref<Target = ProducerSummary>>(
+    candidate: &ProducerSummary,
+    cone: &GuardedCone<S>,
+    implied: Option<&ImpliedGuardProof>,
+    budget: &mut Budget<'_>,
+) -> Result<BTreeSet<GroundRuleId>> {
+    let mut dependencies = BTreeSet::from([candidate.rule.id]);
+    for source in cone
+        .summaries()
+        .chain(implied.into_iter().flat_map(ImpliedGuardProof::summaries))
+    {
+        budget.tick("guarded proof dependencies")?;
+        dependencies.insert(source.rule.id);
+    }
+    Ok(dependencies)
+}
+
 pub(crate) type Expr = Arc<SettledExpression<GroundAtom>>;
 pub(crate) fn constant(v: bool) -> Expr {
     Arc::new(SettledExpression::Constant(v))
@@ -107,7 +144,7 @@ impl GroundProgram {
         attempts: &mut Attempts,
     ) -> Result<Vec<GuardedSettlementProof>> {
         let ctx = meaning.context();
-        let mut done = BTreeSet::new();
+        let mut batch = IndependentBatch::default();
         let mut proofs = Vec::new();
         // Cheap structural indexing/ordering only. No candidate BDD or full cone
         // is computed before the first attempt.
@@ -187,9 +224,9 @@ impl GroundProgram {
         let mut union_cache = None;
         let mut pending_inference = false;
         let mut release_inference = 0;
-        // Only metadata waits in this bounded window, never cones or inferred
-        // source snapshots. Reconstruct the selected candidate at the same graph
-        // snapshot under the same budgets. Completed proofs still own their data.
+        // The window holds ranking metadata. Admission-local prepared descriptors
+        // can rebind cones without owning whole-round summaries or bound values.
+        // Completed proofs still own their immutable evidence.
         let mut ranked = BTreeMap::new();
         let mut remaining = LOOKAHEAD;
         let mut position = 0;
@@ -235,7 +272,15 @@ impl GroundProgram {
                 remaining = LOOKAHEAD - ranked.len();
             }
             budget.tick("guarded candidate queue")?;
-            if done.contains(&component.id)
+            #[cfg(test)]
+            if !attempts.batch_guarded
+                && proofs
+                    .iter()
+                    .any(|p: &GuardedSettlementProof| p.bounds.cone.component == component.id)
+            {
+                continue;
+            }
+            if batch.reads(candidate.rule.id)
                 || attempts.reuse_negative(
                     &Attempt::GuardedSettlement(candidate.rule.id, literal.term.occurrence),
                     budget,
@@ -314,83 +359,150 @@ impl GroundProgram {
             let mut preparation = Preparation::default();
             let before_preparation = *retained;
             let mut released_cache = 0;
-            let prepared = attempts.run(
-                Attempt::GuardedCone(candidate.rule.id, literal.term.occurrence),
-                &candidate.rule.head.atom,
-                self,
-                retained,
-                budget,
-                progress,
-                |retained, budget| {
-                    let started = Instant::now();
-                    let mut prepare = |retained: &mut usize,
-                                       budget: &mut Budget<'_>,
-                                       rank: bool| {
-                        crate::guarded_bounds::prepare(
-                            self,
-                            component,
-                            &effective,
-                            &literal.term.atom,
-                            summaries,
-                            &producers,
-                            ctx,
-                            retained,
-                            budget,
-                            &mut preparation,
-                        )
-                        .and_then(|cone| {
-                            if rank {
-                                *retained =
-                                    crate::symbolic::retain(*retained, 0, RANK_STORAGE, budget)?;
-                            }
-                            Ok(cone)
-                        })
-                    };
-                    let mut result = prepare(retained, budget, ranking && !selected);
-                    if matches!(
-                        &result,
-                        Err(CheckError::LimitExceeded {
-                            phase: "symbolic storage",
-                            resource: "condition nodes",
-                            ..
-                        })
-                    ) {
-                        released_cache = cache.take().map_or(0, |old| {
-                            old.1
-                                .as_ref()
-                                .map_or_else(|| old.0.temporary_nodes(), |b| b.temporary_nodes())
-                        }) + union_cache.take().map_or(0, |old| old.nodes());
-                        let was_ranking = ranking;
-                        // Ranking is optional too. Return waiting candidates to
-                        // their original queue and retry without its metadata.
-                        released_cache += ranked.len() * RANK_STORAGE;
-                        for ((_, _, _, cost, index), (candidate, literal, component)) in
-                            std::mem::take(&mut ranked)
-                        {
-                            queue
-                                .insert((cost, index), (candidate, literal, component, true, None));
+            let cone_key = Attempt::GuardedCone(candidate.rule.id, literal.term.occurrence);
+            let mut saved = std::mem::take(&mut attempts.prepared);
+            let mut reused_preparation = false;
+            let reuse = if let Some(old) = saved.get(&cone_key) {
+                let bound = old
+                    .bind(
+                        self,
+                        &effective.condition,
+                        &ctx.permitted_worlds(),
+                        summaries,
+                        retained,
+                        budget,
+                    )
+                    .and_then(|cone| {
+                        if cone.is_some() && ranking && !selected {
+                            *retained =
+                                crate::symbolic::retain(*retained, 0, RANK_STORAGE, budget)?;
                         }
-                        ranking = false;
-                        if released_cache > 0 || was_ranking {
-                            // The partial cone has dropped. Optional reuse must
-                            // yield storage to the next attempt. Retry once; keep
-                            // all work charges and enforce the same storage cap.
-                            *retained = before_preparation - released_cache;
-                            result = prepare(retained, budget, false);
-                        }
+                        Ok(cone)
+                    });
+                match bound {
+                    Ok(Some(cone)) => {
+                        preparation = old.stats.clone();
+                        preparation.existing_nodes = before_preparation;
+                        preparation.added_nodes = cone.temporary_nodes();
+                        reused_preparation = true;
+                        progress.reused_result(AdmissionAttemptKind::GuardedPreprocessing);
+                        Some(cone)
                     }
-                    preprocessing = Some(started.elapsed());
-                    result
-                },
-            );
+                    Ok(None) => None,
+                    Err(CheckError::LimitExceeded {
+                        phase: "symbolic storage",
+                        resource: "condition nodes",
+                        ..
+                    }) => {
+                        released_cache += saved.values().map(|c| c.nodes()).sum::<usize>();
+                        saved.clear();
+                        *retained = before_preparation - released_cache;
+                        None
+                    }
+                    Err(e) => return Err(e),
+                }
+            } else {
+                None
+            };
+            // A miss evicts the obsolete descriptor before preparing its replacement.
+            if !reused_preparation {
+                if let Some(old) = saved.remove(&cone_key) {
+                    released_cache += old.nodes();
+                    *retained -= old.nodes();
+                }
+            }
+            let attempt_baseline = *retained;
+            let previously_released = released_cache;
+            let prepared = if let Some(cone) = reuse {
+                Ok(Some(cone))
+            } else {
+                attempts.run(
+                    cone_key.clone(),
+                    &candidate.rule.head.atom,
+                    self,
+                    retained,
+                    budget,
+                    progress,
+                    |retained, budget| {
+                        let started = Instant::now();
+                        let mut prepare =
+                            |retained: &mut usize, budget: &mut Budget<'_>, rank: bool| {
+                                crate::guarded_bounds::prepare(
+                                    self,
+                                    component,
+                                    &effective,
+                                    &literal.term.atom,
+                                    summaries,
+                                    &producers,
+                                    ctx,
+                                    retained,
+                                    budget,
+                                    &mut preparation,
+                                )
+                                .and_then(|cone| {
+                                    if rank {
+                                        *retained = crate::symbolic::retain(
+                                            *retained,
+                                            0,
+                                            RANK_STORAGE,
+                                            budget,
+                                        )?;
+                                    }
+                                    Ok(cone)
+                                })
+                            };
+                        let mut result = prepare(retained, budget, ranking && !selected);
+                        if matches!(
+                            &result,
+                            Err(CheckError::LimitExceeded {
+                                phase: "symbolic storage",
+                                resource: "condition nodes",
+                                ..
+                            })
+                        ) {
+                            released_cache += cache.take().map_or(0, |old| {
+                                old.1.as_ref().map_or_else(
+                                    || old.0.temporary_nodes(),
+                                    |b| b.temporary_nodes(),
+                                )
+                            }) + union_cache.take().map_or(0, |old| old.nodes());
+                            released_cache += saved.values().map(|c| c.nodes()).sum::<usize>();
+                            saved.clear();
+                            let was_ranking = ranking;
+                            // Ranking is optional too. Return waiting candidates to
+                            // their original queue and retry without its metadata.
+                            released_cache += ranked.len() * RANK_STORAGE;
+                            for ((_, _, _, cost, index), (candidate, literal, component)) in
+                                std::mem::take(&mut ranked)
+                            {
+                                queue.insert(
+                                    (cost, index),
+                                    (candidate, literal, component, true, None),
+                                );
+                            }
+                            ranking = false;
+                            if released_cache > 0 || was_ranking {
+                                // The partial cone has dropped. Optional reuse must
+                                // yield storage to the next attempt. Retry once; keep
+                                // all work charges and enforce the same storage cap.
+                                *retained = before_preparation - released_cache;
+                                result = prepare(retained, budget, false);
+                            }
+                        }
+                        preprocessing = Some(started.elapsed());
+                        result
+                    },
+                )
+            };
+            attempts.prepared = saved;
             if matches!(&prepared, Ok(None)) {
                 // Attempts restored its entry baseline after a local failure;
                 // the evicted cache is no longer part of that baseline.
-                *retained -= released_cache;
+                *retained = attempt_baseline - (released_cache - previously_released);
             }
             progress.guarded_prepared(
                 self,
-                preprocessing.map(|_| &preparation),
+                (preprocessing.is_some() || reused_preparation).then_some(&preparation),
                 preprocessing.unwrap_or_default(),
                 match &prepared {
                     Ok(Some(_)) if selected => "iterating",
@@ -427,6 +539,57 @@ impl GroundProgram {
                 }
                 continue;
             };
+            let dependencies = dependencies(
+                candidate,
+                &cone,
+                inferred.as_ref().map(|i| &i.proof),
+                budget,
+            )?;
+            budget.charge(
+                dependencies.len() + batch.rules.len(),
+                "guarded batch independence",
+            )?;
+            if !batch.accepts(candidate.rule.id, &dependencies) {
+                *retained -= cone.temporary_nodes()
+                    + if ranking && !selected {
+                        RANK_STORAGE
+                    } else {
+                        0
+                    };
+                continue;
+            }
+            // A cached negative also depends on unsuccessful guard discovery.
+            // A producer ignored today (e.g. non-exact for a negative premise)
+            // can supply a stronger guard after a later rewrite. Keep all these
+            // one-hop inputs, not only the sources of a successful inference.
+            let mut retry_dependencies = dependencies.clone();
+            for premise in &candidate.rule.body {
+                for id in producers.get(&premise.term.atom).into_iter().flatten() {
+                    budget.tick("guarded inference retry inputs")?;
+                    retry_dependencies.insert(*id);
+                }
+            }
+            attempts.remember_dependencies(
+                candidate.rule.id,
+                literal.term.occurrence,
+                retry_dependencies,
+                retained,
+                budget,
+            )?;
+            if !reused_preparation {
+                attempts.keep_prepared(
+                    cone_key,
+                    crate::guarded_preparation::PreparedCone::capture(
+                        &candidate.rule.head.atom,
+                        &cone,
+                        &effective.condition,
+                        ctx.permitted_worlds(),
+                        &preparation,
+                    ),
+                    retained,
+                    budget,
+                )?;
+            }
             if !selected && ranking {
                 // Compare live atoms with all atoms in the candidate's current
                 // unresolved SCC, not just the visited cone. Near-full cones are
@@ -615,7 +778,7 @@ impl GroundProgram {
             });
             let proof = proof?.flatten();
             if let Some(proof) = proof {
-                done.insert(component.id);
+                batch.insert(candidate.rule.id, dependencies);
                 proofs.push(proof);
             }
         }
@@ -628,6 +791,7 @@ impl GroundProgram {
                 .as_ref()
                 .map_or_else(|| cone.temporary_nodes(), |b| b.temporary_nodes());
         }
+        *retained -= attempts.prune_dependencies();
         Ok(proofs)
     }
 
@@ -891,5 +1055,69 @@ impl GroundProgram {
             budget,
         )?;
         Ok(Some(proof))
+    }
+}
+
+#[cfg(test)]
+mod batch_tests {
+    use super::*;
+    use crate::test_support::rewrites::{rel, rule, summaries};
+
+    #[test]
+    fn complete_dependencies_reject_both_batch_orders_including_pruned_and_implied_sources() {
+        let mut c = denotate_ir::Corpus::new();
+        let a = rel(&mut c, "a", false);
+        let b = rel(&mut c, "b", false);
+        rule(&mut c, a, &[(b, true)]);
+        rule(&mut c, b, &[(a, true)]);
+        let l = Limits::default();
+        let p = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+        let m = p.symbolic(&l).unwrap();
+        let all = summaries(&p, &m, &l);
+        let mut values = all.values();
+        let candidate = values.next().unwrap();
+        let source = values.next().unwrap();
+        for role in ["live", "dead", "pruned", "implied"] {
+            let mut cone = GuardedCone {
+                component: p.component_for(&candidate.rule.head.atom).unwrap().id,
+                snapshot: p.graph_revision,
+                domain: m.context().true_condition(),
+                relaxed_rule: None,
+                atoms: vec![source.rule.head.atom.clone()],
+                producers: vec![],
+                pruning: crate::guarded_bounds::Pruning::default(),
+            };
+            let mut implied = None;
+            match role {
+                "live" | "dead" => cone.producers.push(crate::guarded_bounds::GuardedProducer {
+                    summary: source,
+                    live: role == "live",
+                }),
+                "pruned" => cone.pruning.sources.push(source),
+                "implied" => {
+                    implied = Some(ImpliedGuardProof {
+                        expression: constant(true),
+                        premises: vec![ImpliedGuardPremise {
+                            literal: candidate.rule.body[0].clone(),
+                            producers: vec![Arc::new(source.clone())],
+                        }],
+                    })
+                }
+                _ => unreachable!(),
+            }
+            let deps =
+                dependencies(candidate, &cone, implied.as_ref(), &mut Budget::new(&l)).unwrap();
+            assert!(deps.contains(&source.rule.id), "{role}");
+            let mut batch = IndependentBatch::default();
+            batch.insert(source.rule.id, BTreeSet::new());
+            assert!(!batch.accepts(candidate.rule.id, &deps), "{role}");
+            let mut batch = IndependentBatch::default();
+            batch.insert(candidate.rule.id, deps);
+            assert!(!batch.accepts(source.rule.id, &BTreeSet::new()), "{role}");
+            assert!(
+                !batch.accepts(candidate.rule.id, &BTreeSet::new()),
+                "one replacement per rule"
+            );
+        }
     }
 }

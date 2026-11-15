@@ -18,4 +18,4 @@ mod permitted;
 
 mod structural;
 
-mod guarded_settlement;
+pub(crate) mod guarded_settlement;

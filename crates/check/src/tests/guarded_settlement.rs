@@ -6,7 +6,7 @@ use crate::{
 use denotate_ir::*;
 use std::{cell::RefCell, collections::BTreeSet};
 
-fn fixture(depth: usize) -> (Corpus, RelationId) {
+pub(crate) fn fixture(depth: usize) -> (Corpus, RelationId) {
     fixture_width(depth, 1)
 }
 fn fixture_width(depth: usize, width: usize) -> (Corpus, RelationId) {
@@ -150,6 +150,7 @@ fn all_deferred_candidates_still_attempt_bounds_and_release_the_window() {
     let observer = |e: &AdmissionProgress| events.borrow_mut().push(e.clone());
     let progress = crate::admission_progress::AdmissionReporter::new(Some(&observer));
     let mut retained = 0;
+    let mut attempts = crate::admission_skips::Attempts::default();
     let proofs = p
         .guarded_settlements(
             &m,
@@ -158,11 +159,13 @@ fn all_deferred_candidates_still_attempt_bounds_and_release_the_window() {
             &mut retained,
             &mut Budget::new(&l),
             &progress,
-            &mut crate::admission_skips::Attempts::default(),
+            &mut attempts,
         )
         .unwrap();
     assert!(proofs.is_empty());
-    assert_eq!(retained, 0);
+    assert_eq!(retained, attempts.nodes());
+    retained -= attempts.clear_prepared();
+    assert_eq!(retained, attempts.nodes());
     let attempted = events
         .borrow()
         .iter()
@@ -272,7 +275,7 @@ fn guarded_settlement_randomized_and_constrained_runs_preserve_models() {
 }
 
 #[test]
-fn guarded_settlement_invalidates_failed_cover_when_a_producer_becomes_exact() {
+fn guarded_settlement_keeps_exact_cover_after_a_producer_becomes_exact() {
     let (mut c, claim) = fixture(0);
     let named = |name: &str| c.relations().find(|r| r.name == name).unwrap().id;
     let kind = named("kind");
@@ -302,11 +305,6 @@ fn guarded_settlement_invalidates_failed_cover_when_a_producer_becomes_exact() {
         p.rewrite_proofs()
             .any(|p| p.candidate().source == redundant)
     );
-    assert!(events.borrow().iter().any(|e| {
-        e.attempts
-            .values()
-            .any(|a| a.retry_causes.contains_key("guarded-replacement"))
-    }));
     sound(&c, &p);
 }
 
@@ -524,5 +522,68 @@ fn positive_implied_certificate_owns_support_and_preserves_models_independent_of
             supported_models(&p, &before, &world),
             supported_models(&p, &after, &world)
         );
+    }
+}
+
+pub(crate) fn independent_readers_fixture() -> (Corpus, RelationId, RelationId) {
+    let (mut c, claim) = fixture(0);
+    let named = |name: &str| c.relations().find(|r| r.name == name).unwrap().id;
+    let kind = named("kind");
+    let booked = named("booked");
+    let inspected = named("inspected");
+    let second = rel(&mut c, "second_claim", false);
+    let ready2 = rel(&mut c, "ready2", true);
+    let fails2 = rel(&mut c, "fails2", false);
+    rule(&mut c, fails2, &[(ready2, false), (booked, true)]);
+    rule(&mut c, second, &[(kind, true), (fails2, true)]);
+    rule(&mut c, inspected, &[(second, false)]);
+    (c, claim, second)
+}
+
+#[test]
+fn independent_readers_share_a_snapshot_and_match_sequential_and_uncached_models() {
+    let (c, claim, second) = independent_readers_fixture();
+    let l = Limits::default();
+    let raw = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+    let batched = raw.clone().admit(&l).unwrap();
+    let readers: Vec<_> = batched
+        .rewrite_proofs()
+        .filter(|p| {
+            p.guarded_settlement().is_some()
+                && [atom(claim), atom(second)].contains(&p.candidate().head.atom)
+        })
+        .collect();
+    assert_eq!(
+        readers.len(),
+        2,
+        "{:?}",
+        batched
+            .rewrite_proofs()
+            .map(|p| (p.candidate().head.atom.clone(), p.kind.clone(), p.snapshot))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(readers[0].snapshot, readers[1].snapshot);
+    assert!(batched.is_admitted());
+    sound(&c, &batched);
+    for (batch, reuse) in [(false, false), (true, false)] {
+        let p = raw
+            .clone()
+            .admit_guarded_for_test(&mut Budget::new(&l), None, batch, reuse)
+            .unwrap();
+        assert!(p.is_admitted());
+        sound(&c, &p);
+        for world in subsets(&raw.input_atoms().cloned().collect::<Vec<_>>()) {
+            assert_eq!(
+                batched
+                    .evaluate(world.clone(), &l)
+                    .unwrap()
+                    .established_facts()
+                    .collect::<BTreeSet<_>>(),
+                p.evaluate(world, &l)
+                    .unwrap()
+                    .established_facts()
+                    .collect::<BTreeSet<_>>()
+            );
+        }
     }
 }

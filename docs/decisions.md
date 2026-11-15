@@ -6,6 +6,48 @@ Settled design choices and why they were made. Current behavior is specified in 
 alternatives that were rejected. Revisit a decision only with new evidence, such as a
 real program that the current choice serves badly.
 
+## Guarded replacements batch only across untouched proof dependencies
+
+One admission snapshot may supply several guarded replacements, including readers
+in the same component. There is at most one replacement per reading rule. The
+complete dependency set includes live producers, dead producers and their reasons,
+transitive pruning sources outside the executable cone, and implied-guard sources.
+A batch is accepted only if no reading rule is a dependency of another certificate.
+Candidate order and selection remain deterministic; the graph and proofs commit
+atomically after rebuilding and validating retry inputs.
+
+Apply such a batch sequentially. Earlier replacements leave every rule used by
+certificate i unchanged, including the evidence for excluding producers. Its
+relaxed computation, pruning and rank argument therefore remain valid. Existing
+settled summaries cannot depend on those previously blocked reading rules. Each
+step preserves the supported and stable meanings under W in both directions, as
+the individual replacement does; composition preserves them too. This avoids
+requiring a new joint-replacement proof.
+
+Dead producers cannot be ignored: `h :- guard, q` may be dead because q is
+impossible, but replacing q removes that reason. Adding a settled conjunct does
+not establish preservation of the old pruning argument. More permissive batching
+needs a separate justification.
+
+A replacement no longer clears all admission attempts. Complete guarded footprints
+are compared across the staged commit, including changed settled dependencies and
+component membership relative to the reader. Retry footprints also include the
+one-hop inputs of guard discovery, including producers that did not strengthen the
+guard: a rewrite can make them useful on a later attempt. Without a complete footprint, the
+old transitive reader-cone invalidation applies. Whole-component bounds still
+retry after a change anywhere in their component. Exact-cover and obsolete-literal
+cleanup retain their existing rules.
+
+Prepared cone descriptors and ranking sizes can survive rounds within one
+admission. They keep the domain, atom/rule IDs and pruning metadata, not bound
+values or whole-round producer snapshots. Reuse requires untouched complete inputs
+and identical G and W representations (so the saved G ∧ W can be reused without
+another BDD operation); current summaries and component IDs are rebound.
+Changed membership invalidates the descriptor, rather than trusting an old SCC
+number. These IDs never cross preparations or session boundaries. Storage and
+lookup work use existing allowances; optional descriptors yield on preparation
+storage pressure. Reusing bounds across changed snapshots remains separate work.
+
 ## Admission dumps capture the computation that actually ran
 
 Component diagnostics borrow each selected guarded attempt before its cone and
@@ -77,8 +119,8 @@ The file intentionally retains program names and is not an anonymized export.
   unknown. The reading producer is never a live producer of its own certificate.
   Bounds used here relax that producer to G and exclude it from exact guarantees.
   This is essential: bounds must survive the replacement, rather than rely on
-  the very cyclic premise being removed. One replacement per component is committed
-  per snapshot; independent components can share the atomic batch.
+  the very cyclic premise being removed. Replacements with mutually untouched
+  complete proof dependencies can share the atomic batch, as described above.
 
   For supported models in either graph, the relaxed operator bounds the component
   because the reading producer can imply no more than G. By induction on the
@@ -171,9 +213,9 @@ The file intentionally retains program names and is not an anonymized export.
   Existing producer removal and negation discharge get the first opportunity;
   guarded settlement runs only when they have no batch. This deliberately preserves
   established discharge warnings and their failure-local attempts. Bounds and
-  settlement have separate attempt identities. A replacement conservatively
-  invalidates all invocation-local failed/negative attempts; subsequent ordinary
-  commits track expression leaves as settled dependencies. Replay, completion,
+  settlement have separate attempt identities. Replacements invalidate attempts
+  whose complete inputs changed; commits track expression leaves as settled
+  dependencies. Replay, completion,
   certification and keyed local queries execute the same attached expression.
   The certificate stays separate from the executable condition and points back
   to original source. New `guarded-settlement` warnings describe an equivalence,
@@ -188,11 +230,12 @@ The file intentionally retains program names and is not an anonymized export.
   and nearly full cones, and try the smallest prepared cone. If every candidate
   is deferred, still attempt the smallest; do not require a successful shrink to
   make progress. Window size and the near-full threshold are provisional policies.
-  Retain only charged size metadata for waiting candidates, reconstruct the chosen
-  cone and guard, and yield optional ranking storage under pressure. Global work
+  The window retains charged size metadata; prepared descriptors can rebind the
+  chosen cone when their complete inputs stay unchanged. Rediscover the guard
+  and yield optional ranking and descriptor storage under pressure. Global work
   and cancellation still apply to preparation. This changes scheduling, not
-  certificates or admission semantics. It does not truncate cones or batch more
-  replacements. Stable/supported-model oracles and fresh/cold/warm agreement guard
+  certificates or admission semantics. Ranking does not truncate cones or relax
+  the separate dependency check for batching replacements. Stable/supported-model oracles and fresh/cold/warm agreement guard
   correctness; workload measurements assess the scheduling benefit.
 
 - **Use one-hop implied guards when the reader's guard is in another rule.**
