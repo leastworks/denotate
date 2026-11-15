@@ -2,7 +2,7 @@ use super::*;
 use crate::test_support::rewrites::{atom, rel, rule, stable_models, subsets, supported_models};
 use denotate_ir::Corpus;
 
-fn run(c: &Corpus, target: RelationId, constraints: &[Restriction]) -> SatProbeReport {
+pub(super) fn run(c: &Corpus, target: RelationId, constraints: &[Restriction]) -> SatProbeReport {
     let l = Limits::default();
     let p = GroundProgram::prepare_cartesian(c, &Domains::new(), &l).unwrap();
     probe_component(
@@ -41,7 +41,7 @@ fn ambiguous_pair_is_verified_in_one_shared_world() {
     );
 }
 #[test]
-fn positive_self_support_is_refined_without_claiming_existence() {
+fn positive_self_support_and_existence_are_checked_separately() {
     let mut c = Corpus::new();
     let a = rel(&mut c, "a", false);
     rule(&mut c, a, &[(a, false)]);
@@ -185,6 +185,7 @@ fn random_tiny_probes_agree_with_exhaustive_stable_models() {
                 continue;
             }
             let mut ambiguous = false;
+            let mut no_meaning = false;
             for w in subsets(&inputs.iter().cloned().collect::<Vec<_>>()) {
                 let stable = stable_models(
                     &atoms.iter().cloned().collect::<Vec<_>>(),
@@ -192,6 +193,14 @@ fn random_tiny_probes_agree_with_exhaustive_stable_models() {
                     &rules,
                     &w,
                 );
+                no_meaning |= stable.is_empty();
+                if r.existence
+                    .as_ref()
+                    .and_then(|r| r.world.as_ref())
+                    .is_some_and(|bad| *bad == w)
+                {
+                    assert!(stable.is_empty(), "reported world has a stable model");
+                }
                 let projected = stable
                     .iter()
                     .map(|m| {
@@ -227,6 +236,17 @@ fn random_tiny_probes_agree_with_exhaustive_stable_models() {
                 }
             }
             assert_eq!(r.answer == SatProbeAnswer::Sat, ambiguous);
+            if let Some(e) = r.existence {
+                assert_eq!(
+                    e.answer,
+                    if no_meaning {
+                        SatExistenceAnswer::NoMeaning
+                    } else {
+                        SatExistenceAnswer::EveryWorld
+                    },
+                    "{e:?}"
+                );
+            }
         }
     }
 }
@@ -255,6 +275,7 @@ fn solver_polls_cancellation_during_a_real_search() {
         ),
         clauses: 0,
         literals: 0,
+        gate: None,
     };
     let mut birds = Vec::new();
     for _ in 0..9 {

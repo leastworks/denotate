@@ -64,6 +64,8 @@ pub struct SatProbeReport {
     pub cone_rules: usize,
     pub solve_time: Duration,
     pub elapsed: Duration,
+    /// A separate existence search after uniqueness is established.
+    pub existence: Option<SatExistenceReport>,
 }
 
 struct Stop {
@@ -95,6 +97,8 @@ struct Cnf {
     solver: Solver<Stop>,
     clauses: usize,
     literals: usize,
+    /// Clauses emitted in this mode apply only when this literal is true.
+    gate: Option<Lit>,
 }
 impl Cnf {
     fn var(&mut self, b: &mut Budget<'_>) -> Result<Lit> {
@@ -107,6 +111,9 @@ impl Cnf {
         Ok(Lit::new(self.solver.new_var_default(), true))
     }
     fn clause(&mut self, mut lits: Vec<Lit>, b: &mut Budget<'_>) -> Result<()> {
+        if let Some(gate) = self.gate {
+            lits.push(!gate);
+        }
         b.room(self.clauses, b.limits.max_rules, "SAT probe CNF", "clauses")?;
         let next = self.literals.saturating_add(lits.len());
         if next > b.limits.max_dependencies {
@@ -155,6 +162,7 @@ impl Cnf {
         Ok(())
     }
 }
+#[derive(Clone)]
 struct Rule {
     head: usize,
     body: Vec<(usize, bool)>,
@@ -437,6 +445,7 @@ fn probe_component(
         cone_rules: 0,
         solve_time: Duration::ZERO,
         elapsed: Duration::ZERO,
+        existence: None,
     };
     let mut cnf = Cnf {
         solver: Solver::new(
@@ -451,6 +460,7 @@ fn probe_component(
         ),
         clauses: 0,
         literals: 0,
+        gate: None,
     };
     let mut budget = Budget::new(limits);
     let result = (|| {
@@ -635,6 +645,16 @@ fn probe_component(
         Err(CheckError::Cancelled) => return Err(CheckError::Cancelled),
         Err(e) => report.reason = Some(e.to_string()),
     }
+    drop(cnf);
+    if report.answer == SatProbeAnswer::Unsat {
+        report.existence = Some(existence::search(
+            p,
+            component,
+            restrictions,
+            probe,
+            limits,
+        )?);
+    }
     Ok(report)
 }
 
@@ -693,6 +713,9 @@ fn least_unfounded(c: &Cone, model: &[bool], b: &mut Budget<'_>) -> Result<BTree
 
 #[cfg(test)]
 mod tests;
+
+mod existence;
+pub use existence::{SatExistenceAnswer, SatExistenceReport};
 
 pub(crate) mod candidates;
 pub use candidates::{

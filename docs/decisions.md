@@ -630,6 +630,32 @@ The file intentionally retains program names and is not an anonymized export.
   negative upstream components rather than assuming them settled. BDD remains the
   only backend; progress-only probe results do not alter findings or exit codes.
   See [the probe policy](checker-policies.md#diagnostic-sat-probe) for bounds and scope.
+- **Existence is a separate diagnostic query after uniqueness.** At most one stable
+  model allows zero. The existing BDD completion check is sufficient to find some
+  contradictions, but a supported, unfounded solution can hide the absence of a
+  stable model. The SAT probe therefore alternates permitted-world proposals with
+  stable-model search at pinned inputs, refining positive self-support as in the
+  uniqueness probe. Target equations are disabled while choosing a world; encoding
+  them there would silently omit no-meaning worlds. A selector keeps these two
+  logical queries separate in one SAT engine, with aggregate CNF accounting.
+  A model query with no solution supplies a no-meaning input world; exhausting
+  uncovered worlds establishes existence. Empty W is reported separately, never
+  as meaningful totality. Limits yield unknown; cancellation propagates.
+
+  Generalization preserves the verified model's derived atoms while allowing
+  unneeded inputs to vary. Keep all input literals of each true body. For each
+  false body, a false derived/fixed premise already keeps it false; otherwise
+  keep one false input literal. Every true body remains true and every false body
+  remains false, so the same derived interpretation is a completion model. Its
+  original reduct derivations survive, giving the least reduct model all its true
+  derived atoms. Conversely it models the new reduct, so the least model cannot
+  gain any derived atom outside it. The interpretation is therefore stable
+  throughout the cube. This covers absence and alternative producers too; retaining
+  only successful derivation leaves would be unsound. Cover clauses exclude worlds
+  only in the proposal query; model refinements are gated to the model query.
+  Only both successful questions establish exactly one meaning in the probed cone.
+  No normal verdict, finding, admission result or exit code changes.
+
 - **The guarded-candidate SAT filter relaxes support, not just the body.**
   A reading producer r may contribute independently in either supported-model
   copy, only under its effective settled guard G. It is never forced to fire.

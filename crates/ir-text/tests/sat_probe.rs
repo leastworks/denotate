@@ -294,3 +294,50 @@ fn candidate_probe_caps_exhaustion_and_cancellation_leave_admission_alone() {
         Err(CheckError::Cancelled)
     ));
 }
+
+#[test]
+fn existence_uses_selected_assumptions_and_reports_empty_world_sets_separately() {
+    for (restriction, extra) in [
+        ("empty(enabled)", "relation enabled(); enabled():-x();"),
+        (
+            "at_least_one(off,group_by:())",
+            "relation off(); off():-!x();",
+        ),
+    ] {
+        let text=format!("input x(); relation a(); a():-x(),!a(); {extra} assumption safe:{restriction};
+verification free{{assumptions:[];obligations:[];}} verification restricted{{assumptions:[safe];obligations:[];}}");
+        let rs = reports(&text);
+        for (key, reports) in rs {
+            for r in reports {
+                let e = r.existence.unwrap();
+                assert_eq!(
+                    e.answer,
+                    if key.contains("free") {
+                        SatExistenceAnswer::NoMeaning
+                    } else {
+                        SatExistenceAnswer::EveryWorld
+                    }
+                );
+                if let Some(world) = e.world {
+                    assert_eq!(world.len(), 1);
+                }
+            }
+        }
+    }
+    // Eligibility leaves no input tuple for right, but the resolved grouping
+    // domain still requires it. No permitted world is distinct from totality.
+    let base="sort S; const left,right:S; relation eligible(s:S); eligible(left); input choice(s:S) within eligible;
+relation a();a():-!a(); assumption required:at_least_one(choice,group_by:(s)); verification v{assumptions:[required];obligations:[];}";
+    for (prefix, expected) in [
+        ("", SatExistenceAnswer::InconsistentAssumptions),
+        ("domain S=[left];", SatExistenceAnswer::NoMeaning),
+    ] {
+        let text = format!("{prefix}{base}");
+        assert!(
+            reports(&text)[0]
+                .1
+                .iter()
+                .all(|r| r.existence.as_ref().unwrap().answer == expected)
+        );
+    }
+}

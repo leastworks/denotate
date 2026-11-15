@@ -332,7 +332,10 @@ condition allowance. `LocalMetrics.keys` includes the first query's index build.
 `PreparedCheck::sat_probe(component, probe_limits, operations)` examines an immutable
 pre-admission component. It uses only that component's upstream cone and the selected
 assumptions, returning `SatProbeReport`: SAT with a reduct-verified pair, UNSAT
-(at most one stable meaning, without checking existence), or unknown with a reason.
+(at most one stable meaning), or unknown with a reason. After UNSAT, a separate
+`SatExistenceReport` checks whether each permitted world has a stable model. It
+reports `every-world`, `no-meaning` with an input world, `inconsistent-assumptions`,
+or `unknown`. Both questions apply only to the target/upstream/assumption cone.
 It does not change normal results, admission, caches or backend identity. The CLI
 opts in with `--sat-probe`; no probe runs by default.
 
@@ -341,7 +344,13 @@ external-support clauses and independently evaluates each reduct by a positive
 worklist. Fixed values are constants; upstream positive loops are checked too.
 Unresolved negative upstream components produce unknown. CNF and cone size/work
 use separate invocations of the existing limits; time and refinement limits are
-probe-specific. Cancellation propagates. See the [policy](../../docs/checker-policies.md#diagnostic-sat-probe)
+probe-specific, independently for uniqueness and existence. Cancellation propagates.
+Existence alternates a W-only world query with a pinned-input stable-model query.
+Their encodings share one SAT engine with a selector: target equations cannot
+exclude worlds from the first query. Stable models cover generalized input cubes;
+these preserve true rule bodies and a false premise for every false body, including
+negative and alternative producers. See the [soundness argument](../../docs/decisions.md#meaning-and-checking)
+and [policy](../../docs/checker-policies.md#diagnostic-sat-probe)
 for the precise meaning, bounds and reporting contract.
 
 `PreparedCheck::admit_with_candidate_probe` optionally diagnoses guarded-settlement

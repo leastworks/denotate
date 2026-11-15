@@ -248,12 +248,28 @@ impl<'a> AdmissionDetails<'a> {
                 });
             json!({"atom":atom_text(a, &**names),"location":location})
         };
-        json!({"component":index,"state":report.answer.label(),"scope":"prepared-component-and-upstream",
-            "meaning": match report.answer {
-                denotate_check::SatProbeAnswer::Sat => "two verified stable meanings in one permitted world",
-                denotate_check::SatProbeAnswer::Unsat => "at most one stable meaning per permitted world; existence not checked",
-                denotate_check::SatProbeAnswer::Unknown => "uniqueness not determined",
-            },
+        use denotate_check::{SatExistenceAnswer as E, SatProbeAnswer as U};
+        let meaning = match (report.answer, report.existence.as_ref().map(|e| e.answer)) {
+            (U::Sat, _) => "two verified stable meanings in one permitted world",
+            (U::Unsat, Some(E::EveryWorld)) => {
+                "exactly one stable meaning per permitted world in the probed cone"
+            }
+            (U::Unsat, Some(E::NoMeaning)) => {
+                "at most one stable meaning per permitted world; a permitted world has no stable meaning"
+            }
+            (U::Unsat, Some(E::InconsistentAssumptions)) => {
+                "no permitted worlds: selected assumptions are inconsistent"
+            }
+            (U::Unsat, Some(E::Unknown)) => {
+                "at most one stable meaning per permitted world; existence not determined"
+            }
+            (U::Unsat, None) => {
+                "at most one stable meaning per permitted world; existence not checked"
+            }
+            (U::Unknown, _) => "uniqueness not determined",
+        };
+        let mut result = json!({"component":index,"state":report.answer.label(),"scope":"prepared-component-and-upstream",
+            "meaning": meaning,
             "atoms":component.map(|c|c.atoms.len()),"representative":representative.map(describe),
             "verifiedStablePair":report.pair.is_some(),"supportedPairSeen":report.supported_pair_seen,
             "refinements":report.refinements,"solves":report.solves,"variables":report.variables,
@@ -261,7 +277,16 @@ impl<'a> AdmissionDetails<'a> {
             "solveMs":report.solve_time.as_secs_f64()*1000.,"elapsedMs":report.elapsed.as_secs_f64()*1000.,"reason":report.reason,
             "world":report.pair.as_ref().map(|p|p.world.iter().map(describe).collect::<Vec<_>>()),
             "differing":report.pair.as_ref().map(|p|p.differing.iter().map(describe).collect::<Vec<_>>()),
-            "models":report.pair.as_ref().map(|p|p.models.iter().map(|m|m.iter().map(|a|atom_text(a,&**names)).collect::<Vec<_>>()).collect::<Vec<_>>())})
+            "models":report.pair.as_ref().map(|p|p.models.iter().map(|m|m.iter().map(|a|atom_text(a,&**names)).collect::<Vec<_>>()).collect::<Vec<_>>())});
+        result["existence"] = report.existence.as_ref().map(|e| json!({
+            "state":e.answer.label(), "reason":e.reason,
+            "world":e.world.as_ref().map(|w|w.iter().map(describe).collect::<Vec<_>>()),
+            "worlds":e.worlds, "covers":e.covers, "refinements":e.refinements, "solves":e.solves,
+            "variables":e.variables, "clauses":e.clauses, "literals":e.literals,
+            "coneAtoms":e.cone_atoms, "coneRules":e.cone_rules,
+            "solveMs":e.solve_time.as_secs_f64()*1000., "elapsedMs":e.elapsed.as_secs_f64()*1000.,
+        })).unwrap_or(Value::Null);
+        result
     }
     fn component(&self, c: &AdmissionComponent) -> Value {
         let names = self

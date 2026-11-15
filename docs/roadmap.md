@@ -18,9 +18,11 @@ production-scale lowered program showed what remains:
 
 - **Upfront meaning checks.** Report, as findings, any permitted world where a
   component has no stable meaning or more than one, with the world and the loop.
-  Uniqueness exists as the opt-in SAT probe; existence (a world with no stable
-  model, found by a two-solver loop with derivation-support generalization) is
-  next. Then decide when these run by default and how their findings relate to
+  The opt-in SAT probe checks uniqueness and, after proving at most one, existence using
+  alternating world and stable-model queries with generalized input cubes.
+  It can report a world with no meaning; exposing self-supporting loops and
+  handling unresolved negative upstream components remain. Decide when these
+  checks run by default and how their findings relate to
   admission's unresolved-component reports.
 - **Never-active cycles.** More generally, a component whose active dependency graph
   is acyclic in every permitted world (edges labelled with their guards, checked by a

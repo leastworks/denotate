@@ -146,10 +146,12 @@ transitions report elapsed time. `--no-progress` disables this checker trace.
 
 `just check-den <program> --sat-probe` adds a diagnostic search before admission:
 does each component with a negative cycle have two stable meanings in a permitted
-world? SAT reports a concretely verified pair; UNSAT means at most one, **not** that
-one exists. `--sat-probe-timeout-ms N` (default 10000) and
-`--sat-probe-refinements N` (default 64) bound each probe independently of ordinary
-checking. Unknown includes the stopping reason. Reports appear only in progress
+world? SAT reports a concretely verified pair. After uniqueness UNSAT, a separate
+existence search reports `every-world`, `no-meaning` with an input world,
+`inconsistent-assumptions`, or `unknown`. Only UNSAT plus `every-world` establishes
+exactly one meaning in the probed cone. `--sat-probe-timeout-ms N` (default 10000)
+and `--sat-probe-refinements N` (default 64) bound each question independently of
+ordinary checking. Unknown includes the stopping reason. Reports appear only in progress
 and memory-profile records, including local input tuples and differing atoms with
 source locations. Ordinary output and exit codes are unchanged. See the
 [probe policy](../../docs/checker-policies.md#diagnostic-sat-probe) for scope and limits.
@@ -160,7 +162,7 @@ including on admission interruption. Names and locations are resolved by the CLI
 recording cannot change a checker result. See the [dump format and allowances](examples/check/COMPONENT-DUMP.md).
 
 `just check-den <program> --sat-probe-candidates` diagnoses guarded candidates
-during admission, independently of the pre-admission uniqueness probe. Progress
+during admission, independently of the pre-admission meaning probe. Progress
 reports `ruled-out`, `not-ruled-out`, `unknown` and cumulative unexamined counts.
 Defaults are 64 queries, 10 seconds total active probe time and 10 million work
 units per admission; adjust `--sat-probe-candidate-limit`,

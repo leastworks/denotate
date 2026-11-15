@@ -92,7 +92,8 @@ standing feature-parity requirement.
 ## Diagnostic SAT probe
 
 `just check-den ROOT --sat-probe` asks whether each prepared component with a
-negative cycle has two stable meanings in one permitted world. It is off by
+negative cycle has two stable meanings in one permitted world, then checks for
+worlds with no meaning when uniqueness is established. It is off by
 default and runs **before admission**, so an admission limit cannot prevent the
 answer. This examines the larger original component, not a residual component
 after rewrites. Results go to stderr progress and `--profile-memory` records;
@@ -118,7 +119,9 @@ are not certified, so a verified pair is a component result, not a claim that th
 entire program has two stable models.
 
 Each component receives a fresh independent allowance. `--sat-probe-timeout-ms`
-defaults to 10,000 ms for encoding, solving and replay; the deadline is cooperative.
+defaults to 10,000 ms per question (uniqueness, then existence after UNSAT),
+including encoding, solving and replay; deadlines are cooperative. Existence has
+its own fresh allowance and does not consume or reset the uniqueness allowance.
 `--sat-probe-refinements` defaults to 64. Existing `max_atoms`, `max_rules`,
 `max_dependencies` and `max_work` bound the cone and encoding: CNF variables,
 emitted clauses and literal occurrences respectively share those size ceilings.
@@ -130,8 +133,31 @@ propagates. No solver state or arena indices are retained between invocations.
 Reports contain emitted CNF counts, solve time, refinement/solve counts and the
 verified pair, with local source locations. These are observations, never goldens.
 Use `just bench-den-schema --sat-probe` or `just bench-den-zoo --sat-probe` to retain
-them alongside normal outcomes. The first increment answers uniqueness only;
-existence search and admitting programs based on SAT are separate future choices.
+them alongside normal outcomes. After uniqueness is established, a separate
+existence search reports `every-world`, `no-meaning` (with a permitted world),
+`inconsistent-assumptions` (W is empty), or `unknown` with its reason. It uses the
+same configured limits, freshly, and one aggregate refinement counter for both
+world and model queries. World exploration also consumes work and emitted CNF
+space, so incomplete search never means existence was established. There is no
+additional world-count tuning limit. Reports distinguish proposed worlds and
+emitted covering cubes; a cube can cover many concrete worlds.
+
+The world query contains only the selected assumptions and their definitions,
+with stable-model refinement; target equations are disabled. The model query pins
+all cone inputs and enables the target/upstream equations. Both modes share one
+SAT engine, so their combined emitted CNF size is bounded by a single allowance.
+Loop refinements follow the appropriate mode; covering clauses apply only to world
+proposals. A stable model supplies a sufficient cube preserving all true rule
+bodies and one false premise of every false body. Derived premises keep the same
+interpretation; only necessary input values are fixed. Thus support survives and
+no previously false producer can become true. This is conservative, not a minimal
+cube, and is not the unsound shortcut of retaining only successful derivation
+leaves. An input-independent model can cover the entire input space.
+
+Only `unsat` plus `every-world` establishes exactly one stable meaning in the
+probed cone; it still does not admit the program or establish anything about
+unrelated regions. Negative upstream components remain unknown in this increment.
+Admitting programs based on SAT stays a separate future choice.
 
 ### Component dumps
 

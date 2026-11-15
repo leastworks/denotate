@@ -14,7 +14,7 @@ const HELP: &str = "Usage: just bench-den-schema [OPTIONS] [-- CHECKER_LIMITS...
 --out DIR                 New persistent run directory (default target/bench-den-schema/<timestamp>)\n\
 --input-order ORDER       Diagnostic BDD order: key | reverse-key | structural\n\
 --dump-component FILE     Save component JSONL under this run directory\n\
---sat-probe               Enable diagnostic stable-pair probes (limits may follow --)\n\
+--sat-probe               Enable diagnostic uniqueness/existence probes (limits may follow --)\n\
 --sat-probe-candidates    Diagnose guarded candidates during admission\n\
 --encoding NAME           ambiguous | coverage (default) | negated | assumed\n\
 --topology NAME           independent (default) | coupled | mixed | layered\n\

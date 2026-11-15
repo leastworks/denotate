@@ -206,6 +206,7 @@ fn probe(
         ),
         clauses: 0,
         literals: 0,
+        gate: None,
     };
     let result = (|| {
         b.charge(cone.atoms.len(), "candidate probe atoms")?;

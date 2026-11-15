@@ -22,11 +22,14 @@ with `just bench-den-zoo --summarize DIR`. The saved `sweep.json` records reques
 runs; `zoo.json` is updated after each child. Recovery includes interrupted
 children and keeps missing repetitions visible in the requested counts.
 
-Use `--sat-probe` to retain independent SAT uniqueness results alongside each run's
+Use `--sat-probe` to retain independent SAT meaning results alongside each run's
 BDD outcomes. `satProbes` contains the latest record per verification/component,
 including during `--summarize` recovery. Probe limits can follow `--`, for example
-`--sat-probe-timeout-ms 10000`. No ordinary verdict changes; UNSAT proves at most
-one stable meaning, not existence. See the [probe policy](../docs/checker-policies.md#diagnostic-sat-probe).
+`--sat-probe-timeout-ms 10000`. No ordinary verdict changes; uniqueness UNSAT
+triggers a separate existence search. Its nested `existence` record distinguishes
+`every-world`, `no-meaning` (with an input world), `inconsistent-assumptions` and
+`unknown`. Each question gets its own configured allowance. See the
+[probe policy](../docs/checker-policies.md#diagnostic-sat-probe).
 
 `--sat-probe-candidates` independently enables the guarded-candidate diagnostic
 within admission. Runs and recovered reports retain `candidateProbes`, including

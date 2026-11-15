@@ -103,6 +103,8 @@ test('SAT probes preserve checker outcomes and survive report recovery',()=>{
       for(const {probe:p} of b.satProbes) {
         assert.equal(p.state,name==='guarded-ring'?'unsat':'sat');
         assert.equal(p.verifiedStablePair,name!=='guarded-ring');
+        if(name==='guarded-ring') assert.equal(p.existence.state,'every-world');
+        else assert.equal(p.existence,null);
         assert.ok(p.variables>0);assert.ok(p.clauses>0);assert.ok(Number.isFinite(p.solveMs));
       }
     }

@@ -44,8 +44,8 @@ pub fn help() -> String {
         --sat-probe-candidate-limit N  Aggregate candidate cap (default 64)\n\
         --sat-probe-candidate-timeout-ms N  Aggregate diagnostic time (default 10000)\n\
         --sat-probe-candidate-work N  Aggregate encoding/validation work (default 10000000)\n\
-        --sat-probe               Diagnostic stable-pair search before admission (progress only)\n\
-        --sat-probe-timeout-ms N   Time per probe, independent of checker timeout (default 10000)\n\
+        --sat-probe               Diagnostic uniqueness and existence search before admission (progress only)\n\
+        --sat-probe-timeout-ms N   Time per probe question, independent of checker timeout (default 10000)\n\
         --sat-probe-refinements N  Maximum unfounded-set refinement rounds (default 64)\n\
         --json                    Print existing status summaries on stdout\n\
         --verbose                 Expand all related locations and structural proof chains\n\

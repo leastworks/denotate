@@ -997,18 +997,21 @@ mod tests {
 
     #[test]
     fn sat_probe_preserves_output_and_exit_codes_and_reports_only_to_progress() {
-        for (text, answer) in [
+        for (text, answer, existence) in [
             (
                 "input x();relation a();relation b();a():-x(),!b();b():-x(),!a();verification v{assumptions:[];obligations:[];}",
                 "sat",
+                None,
             ),
             (
                 include_str!("../tests/fixtures/guarded-settlement.den"),
                 "unsat",
+                Some("every-world"),
             ),
             (
                 "input x();relation a();a():-x(),!a();verification v{assumptions:[];obligations:[];}",
                 "unsat",
+                Some("no-meaning"),
             ),
         ] {
             let f = Fixture::new(text);
@@ -1052,18 +1055,68 @@ mod tests {
                                 assert!(a["location"]["line"].as_u64().unwrap() > 0);
                             }
                         }
-                        if !limited && answer == "unsat" {
-                            assert!(
-                                p["meaning"]
-                                    .as_str()
-                                    .unwrap()
-                                    .contains("existence not checked")
-                            );
+                        if let Some(expected) = existence.filter(|_| !limited) {
+                            assert_eq!(p["existence"]["state"], expected);
+                            if expected == "no-meaning" {
+                                let world = p["existence"]["world"].as_array().unwrap();
+                                assert!(!world.is_empty());
+                                assert!(
+                                    world
+                                        .iter()
+                                        .all(|a| a["location"]["line"].as_u64().unwrap() > 0)
+                                );
+                            }
+                        } else {
+                            assert!(p["existence"].is_null());
                         }
                     }
                 }
             }
         }
+    }
+    #[test]
+    fn existence_exhaustion_keeps_uniqueness_without_claiming_totality() {
+        // z keeps b potentially producible during grounding; the selected
+        // assumption then removes that external support in every permitted world.
+        let f = Fixture::new(
+            "input x();input z();relation a();relation b();a():-!a(),!b();b():-x(),b();b():-z();assumption on: at_least_one(x,group_by:());assumption off: empty(z);verification v{assumptions:[on,off];obligations:[];}",
+        );
+        let (normal_code, normal_output, _) = f.traced(&["--json"]);
+        let path = f.0.join("existence-limit.jsonl");
+        let (code, output, trace) = f.traced(&[
+            "--json",
+            "--sat-probe",
+            "--sat-probe-refinements",
+            "0",
+            "--profile-memory",
+            path.to_str().unwrap(),
+        ]);
+        assert_eq!(code, normal_code);
+        assert_eq!(output, normal_output);
+        let records = fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+            .collect::<Vec<_>>();
+        let report = records
+            .iter()
+            .filter_map(|r| r["detail"].get("satProbe"))
+            .find(|p| p["state"] == "unsat")
+            .expect(&trace);
+        assert_eq!(report["existence"]["state"], "unknown");
+        assert!(
+            report["existence"]["reason"]
+                .as_str()
+                .unwrap()
+                .contains("refinements")
+        );
+        assert!(
+            report["meaning"]
+                .as_str()
+                .unwrap()
+                .contains("existence not determined")
+        );
+        assert!(report["existence"]["world"].is_null());
     }
     #[test]
     fn diagnostic_input_orders_preserve_answers_and_report_configuration() {

@@ -122,7 +122,19 @@ target atoms on which the pair differs, and `models` lists each target assignmen
 true atoms; these three fields are null without a verified pair. Tuple descriptions
 in `world`, `differing` and `representative` include `atom` and nullable `location`
 with `uri` and one-based scalar `line`/`column`. These local reports contain source
-information. UNSAT means at most one stable meaning, not existence or admissibility.
+information. The top-level `state` continues to answer uniqueness: UNSAT alone
+means at most one stable meaning. After UNSAT, `existence` contains a separate
+report; it is null when uniqueness is SAT or unknown. Its `state` is `every-world`,
+`no-meaning`, `inconsistent-assumptions`, or `unknown`. It includes `reason`,
+`world` (true cone inputs, others false, with the same locations), `worlds` (proposed
+permitted worlds), `covers` (emitted covering cubes, not their number of concrete
+worlds), `refinements`, `solves`, `variables`, `clauses`, `literals`, `coneAtoms`,
+`coneRules`, `solveMs`, and `elapsedMs`. Only `no-meaning` has a non-null `world`;
+an empty list is a valid input-free witness. Each question has its own timeout,
+work/encoding allowances and refinement limit. The outer counts/times remain
+uniqueness-only. The combined `meaning` explains both answers: UNSAT plus
+`every-world` establishes exactly one meaning in this cone, not in unrelated
+regions or ordinary checker admission. Empty W is explicitly distinguished.
 Neither normal diagnostic data nor status/exit codes change. The schema/zoo runners
 retain the latest record per verification/component in `satProbes`, including an
 unfinished `starting` record when recovering an interrupted run.
