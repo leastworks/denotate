@@ -186,6 +186,7 @@ impl<'a> AdmissionDetails<'a> {
                 "branchConeAtoms":s.branch_cone_atoms,"branchLiveAtoms":s.branch_live_atoms,
                 "expressionNodes":s.expression_nodes,"evaluatedLeaves":s.evaluated_leaves,"cutoffStage":s.cutoff_stage,
                 "depth":s.depth,"maxDepth":s.max_depth,"leaves":s.leaves,"state":s.state,
+                "replacementSizes":s.replacement_sizes.as_ref().map(replacement_sizes),
                 "fallback":event.split_fallback.map(|r|json!({"phase":r.phase,"resource":r.resource,
                     "message":denotate_presentation::exhaustion_text(r.phase,r.resource,r.details)}))})
         });
@@ -357,6 +358,21 @@ impl<'a> AdmissionDetails<'a> {
     }
 }
 
+fn replacement_sizes(s: &denotate_check::SplitReplacementSizes) -> Value {
+    let bdd = |v: denotate_check::BddStorage| {
+        json!({
+            "references":v.references,"distinctArrays":v.distinct_arrays,"nodes":v.nodes,"nodeBytes":v.node_bytes
+        })
+    };
+    json!({"state":s.state,"replacements":s.replacements,"distinctExpressions":s.distinct_expressions,
+        "expressionNodes":s.expression_nodes,"measuredExpressions":s.measured_expressions,
+        "unrestrictedBdd":s.unrestricted_bdd.map(bdd),"domainRestrictedBdd":s.domain_restricted_bdd.map(bdd),
+        "maxUnrestrictedBddNodes":s.max_unrestricted_bdd_nodes,"maxDomainRestrictedBddNodes":s.max_domain_restricted_bdd_nodes,
+        "elapsedMs":s.elapsed.as_secs_f64()*1000.,
+        "failure":s.failure.map(|r|json!({"phase":r.phase,"resource":r.resource,
+            "message":denotate_presentation::exhaustion_text(r.phase,r.resource,r.details)}))})
+}
+
 pub fn admission_text(a: &Value) -> String {
     let mut text = format!(
         "Admission ({}) round {} · {}: {} unresolved negation components; {} blocked atoms; {} rules removed, {} negations discharged",
@@ -433,6 +449,17 @@ pub fn admission_text(a: &Value) -> String {
         }
         if let Some(stage) = s["cutoffStage"].as_str() {
             text.push_str(&format!("; cutoff during {stage}"));
+        }
+        if let Some(sizes) = s.get("replacementSizes").filter(|s| s.is_object()) {
+            text.push_str(&format!(
+                "; replacement sizes ({}): {} expressions / {} DAG nodes; BDD nodes unrestricted {}, within W {}; measured {}/{}",
+                sizes["state"].as_str().unwrap_or(""), sizes["distinctExpressions"], sizes["expressionNodes"],
+                sizes["unrestrictedBdd"]["nodes"], sizes["domainRestrictedBdd"]["nodes"],
+                sizes["measuredExpressions"], sizes["distinctExpressions"]
+            ));
+            if let Some(reason) = sizes["failure"]["message"].as_str() {
+                text.push_str(&format!("; size measurement incomplete: {reason}"));
+            }
         }
         if let Some(reason) = s["fallback"]["message"].as_str() {
             text.push_str(&format!(

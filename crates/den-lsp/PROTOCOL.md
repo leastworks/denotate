@@ -305,6 +305,21 @@ immediately includes `{phase, resource, message}` in its `fallback` field and
 continues ordinary admission; it is not a semantic inconclusive result. Attempt
 counts use kind `structural-split`. The field is null outside this stage. These
 fields are shared by CLI and editor progress; no finding identity changes.
+When checker profiling is enabled, a `certified` event may also carry
+`replacementSizes`; otherwise it is null. It reports `state` (`complete`,
+`incomplete`, or `unavailable`), `replacements` (occurrences), nullable
+`distinctExpressions` (distinct signed roots), `expressionNodes` (reachable shared
+DAG nodes), and `measuredExpressions` (roots whose unrestricted value was computed).
+`unrestrictedBdd` and `domainRestrictedBdd` each contain `references`,
+`distinctArrays`, `nodes`, and `nodeBytes`; `maxUnrestrictedBddNodes` and
+`maxDomainRestrictedBddNodes` give per-root maxima. BDD totals and maxima are null
+unless inspection completes; they are not peaks or lower-bound estimates.
+`elapsedMs` records the independently budgeted inspection; `failure` is nullable
+`{phase, resource, message}` for a diagnostic allowance cutoff. These measurements
+neither change admission nor create an inconclusive finding. The restricted total
+uses W explicitly, including for negative replacements. See checker policies for
+the diagnostic allowances. CLI profiles retain the same object and human progress
+prints its summary.
 Intermediate ranking/branch updates are delivered at most once per 250 ms.
 Attempt boundaries, chosen splits, cutoffs, failures and terminal summaries remain
 immediate; throttling never drops counts from the final summaries.

@@ -50,10 +50,29 @@ impl AdmissionPhase {
     }
 }
 
+/// Independently bounded inspection of a joint batch, enabled only by profiling.
+#[derive(Debug, Clone, Default)]
+pub struct SplitReplacementSizes {
+    pub state: &'static str,
+    pub replacements: usize,
+    pub distinct_expressions: Option<usize>,
+    /// Reachable DAG nodes, shared across all installed replacement roots.
+    pub expression_nodes: Option<usize>,
+    pub measured_expressions: usize,
+    pub unrestricted_bdd: Option<BddStorage>,
+    pub domain_restricted_bdd: Option<BddStorage>,
+    pub max_unrestricted_bdd_nodes: Option<usize>,
+    pub max_domain_restricted_bdd_nodes: Option<usize>,
+    pub failure: Option<Inconclusive>,
+    pub elapsed: Duration,
+}
+
 /// Bounded case-search observations, never proof evidence or cache inputs.
 #[derive(Debug, Clone, Default)]
 pub struct GuardedSplitProgress {
     pub expression_nodes: Option<usize>,
+    /// Profiling-only, independently budgeted inspection of a completed batch.
+    pub replacement_sizes: Option<SplitReplacementSizes>,
     pub evaluated_leaves: usize,
     pub cutoff_stage: Option<&'static str>,
     pub search_work: Option<usize>,

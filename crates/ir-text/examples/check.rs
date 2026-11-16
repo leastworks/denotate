@@ -1283,6 +1283,15 @@ mod tests {
                 .iter()
                 .any(|s| s["state"] == "certified" && s["maxDepth"].as_u64().unwrap() >= 2)
         );
+        let sizes = splits
+            .iter()
+            .find_map(|s| (s["state"] == "certified").then_some(&s["replacementSizes"]))
+            .unwrap();
+        assert_eq!(sizes["state"], "complete");
+        assert!(sizes["expressionNodes"].as_u64().unwrap() > 0);
+        assert!(sizes["unrestrictedBdd"]["nodes"].as_u64().unwrap() > 0);
+        assert!(sizes["domainRestrictedBdd"]["nodes"].as_u64().unwrap() > 0);
+        assert!(trace.contains("replacement sizes (complete)"));
         assert_eq!(f.run(&["--json"]), f.run(&["--json", "--verbose"]));
     }
 

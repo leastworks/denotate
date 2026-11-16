@@ -445,6 +445,12 @@ score stops early; exhausting scoring keeps the best useful split already found.
 Fixed conditions consume no split or scoring allowance. The older candidate-relative
 case search keeps its separate policy above.
 Joint expressions are interned across all leaf values and edge replacements. The
+structural-split interner folds direct complementary children in conjunctions and
+disjunctions, and combination reuses an identical interned branch rather than
+building a conditional around it. These are structural identities over every
+world, with charged traversal and temporary lookup storage. No comparison of
+domain-masked leaf truths or reference back into the unresolved component is used.
+The shared expression machinery for other proof paths is unchanged. The
 single-premise **1,024-node/depth-64/8,192-certificate-node** caps do not apply to
 this path. Work and condition storage charge construction, child references,
 interning metadata, traversal, original sources, pruning evidence and staging.
@@ -475,6 +481,23 @@ added, and skipping is scheduling only, never a semantic result.
 Current component, scores, branch sizes, evaluation, staging, certification and immediate optional fallback reasons
 appear under `structuralSplit` in progress. Default warnings name the shared proof
 and replacement; full evidence expands branch evaluation and deadness reasons.
+
+With profiling enabled, a certified joint batch also reports `replacementSizes`:
+reachable expression DAG nodes across distinct signed replacement roots, and
+unrestricted replacement BDD sizes separately from certificate truth restricted
+to W. Totals count distinct retained BDD arrays, not semantic equivalence or solver
+peak memory; maxima describe one replacement. Temporary measurement evaluates each
+shared expression node once and releases non-root BDDs after their last reader.
+Inspection has an independent allowance per batch:
+5,000,000 work, 100,000 nodes per BDD, 1,000,000 BDD tasks per operation,
+1,000,000 retained condition-node slots and a cooperative 250 ms deadline.
+The defaults are diagnostic policy, not admission limits. Exhaustion reports an
+incomplete measurement with unavailable totals; unexpected unavailable inputs do
+not change the certificate. Cancellation still propagates. Measurement work and
+BDD creation are excluded from checker receipts/counters and its elapsed time is
+excluded from admission's deadline. The `structural-split-sizes` profile span and
+the report's elapsed time expose the overhead. Ordinary progress does not perform
+this inspection, and no measurement enters cached results or rewrite evidence.
 Warning inventories can change because this pass runs before earlier proof methods.
 
 ### Case splits

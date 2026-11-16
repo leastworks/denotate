@@ -130,7 +130,11 @@ or part of a session's retained admission result.
 The early structural split pass uses the same executable expressions and rewrite
 identities, with a joint certificate shared across a component's replacements.
 Its expressions form an interned DAG shared across leaf values and replacements;
-local-query projection/rebinding preserve that sharing across rules. Pointer keys
+structural combination reuses equal branches and folds direct complementary terms
+without comparing domain-restricted truths. Profiling may inspect the completed
+batch's expression and BDD sizes under a separate bounded allowance; that work and
+its results never participate in admission decisions, receipts or cached evidence.
+Local-query projection/rebinding preserve that sharing across rules. Pointer keys
 exist only during traversal of an immutable graph; cached identity and equality
 remain structural and semantic. Cutoff scheduling is invocation-local and uses
 the same conservative pre-commit reader invalidation as bound attempts.

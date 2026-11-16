@@ -7,7 +7,7 @@ pub use admission_dump::*;
 mod admission_progress;
 pub use admission_progress::{
     AdmissionAttempts, AdmissionComponent, AdmissionObserver, AdmissionPhase, AdmissionProgress,
-    GuardedAttempt, GuardedSplitProgress,
+    GuardedAttempt, GuardedSplitProgress, SplitReplacementSizes,
 };
 mod admission_scope;
 mod admission_skips;

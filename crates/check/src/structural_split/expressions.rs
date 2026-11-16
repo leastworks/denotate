@@ -23,6 +23,32 @@ impl Expressions {
     pub fn len(&self) -> usize {
         self.nodes.len()
     }
+    /// Both branches are interned in this attempt. Equality here is structural,
+    /// never agreement of domain-masked leaf truths.
+    pub fn choose(
+        &mut self,
+        choice: Expr,
+        yes: Expr,
+        no: Expr,
+        retained: &mut usize,
+        budget: &mut Budget<'_>,
+    ) -> Result<Expr> {
+        budget.tick("structural split expression choice")?;
+        if Arc::ptr_eq(&yes, &no) {
+            return Ok(yes);
+        }
+        self.intern(
+            join(
+                vec![
+                    join(vec![choice.clone(), yes], true),
+                    join(vec![signed(choice, true), no], true),
+                ],
+                false,
+            ),
+            retained,
+            budget,
+        )
+    }
     pub fn intern(
         &mut self,
         expression: Expr,
@@ -46,7 +72,32 @@ impl Expressions {
                     .iter()
                     .map(|c| self.intern(c.clone(), retained, budget))
                     .collect::<Result<_>>()?;
-                join(cs, all)
+                let expression = join(cs, all);
+                if let SettledExpression::All(cs) | SettledExpression::Any(cs) = expression.as_ref()
+                {
+                    // Direct complementary children suffice; no expansion or
+                    // Boolean query. Charge temporary lookup metadata as well.
+                    budget.charge(
+                        cs.len()
+                            .saturating_mul(cs.len().max(1).ilog2() as usize + 1),
+                        "structural split complements",
+                    )?;
+                    crate::symbolic::retain(*retained, 0, cs.len().saturating_mul(3), budget)?;
+                    let mut signs = BTreeSet::new();
+                    for child in cs {
+                        let (base, negative) = match child.as_ref() {
+                            SettledExpression::Not(base) => (base, true),
+                            _ => (child, false),
+                        };
+                        let pointer = Arc::as_ptr(base) as usize;
+                        if signs.contains(&(pointer, !negative)) {
+                            drop(signs);
+                            return self.intern(constant(!all), retained, budget);
+                        }
+                        signs.insert((pointer, negative));
+                    }
+                }
+                expression
             }
             _ => expression,
         };
@@ -109,3 +160,6 @@ impl Expressions {
         Ok(expression)
     }
 }
+
+#[cfg(test)]
+mod tests;

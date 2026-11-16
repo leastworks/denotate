@@ -15,6 +15,7 @@ use std::{
 };
 
 mod expressions;
+mod sizes;
 use expressions::Expressions;
 
 // Scoring is cooperative at complete candidate boundaries. One candidate can
@@ -158,6 +159,11 @@ impl GroundProgram {
                 } else {
                     "certified"
                 };
+                if !proofs.is_empty() && budget.limits.profile.enabled() && progress.enabled() {
+                    let limits = budget.limits;
+                    search.stats.replacement_sizes =
+                        Some(budget.excluding_time(|| sizes::measure(&proofs, meaning, limits))?);
+                }
                 progress.structural_split(self, &search.stats, None);
                 Ok(proofs)
             }
@@ -397,17 +403,13 @@ impl Search<'_, '_> {
         for (target, a) in left.values {
             budget.tick("structural split combination")?;
             let b = &right.values[&target];
-            let expression = join(
-                vec![
-                    join(vec![choice.clone(), a.expression], true),
-                    join(
-                        vec![signed(choice.clone(), true), b.expression.clone()],
-                        true,
-                    ),
-                ],
-                false,
-            );
-            let expression = self.expressions.intern(expression, retained, budget)?;
+            let expression = self.expressions.choose(
+                choice.clone(),
+                a.expression,
+                b.expression.clone(),
+                retained,
+                budget,
+            )?;
             let truth = ctx.apply(
                 &ctx.apply(&yes, &a.truth, and, budget)?,
                 &ctx.apply(&no, &b.truth, and, budget)?,

@@ -335,6 +335,13 @@ The file intentionally retains program names and is not an anonymized export.
   caps. Sharing survives semantic projection and runtime reconstruction; simply
   relaxing accounting while copying each edge's expanded tree would move the
   memory problem downstream. Expression hashing/equality ignore sharing layout.
+  Combination reuses identical interned branches and folds direct complementary
+  children. These identities hold in all worlds, so no new proof query is needed.
+  Leaf truths are masked by their domains and cannot justify cross-branch
+  simplification; that would require evaluating an expression on the other domain.
+  Installed expressions continue to mention only settled external atoms. Optional
+  profiling measures unrestricted replacement BDDs separately from certificate
+  truths under W, with its own budget and no effect on the certificate or verdict.
   A cutoff is retried only after a relevant dependency changes within admission;
   it is not a semantic result or a session cache entry.
   Shared evidence is charged once per joint batch. Positive forwarding sources

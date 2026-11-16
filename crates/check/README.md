@@ -47,7 +47,11 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    attempt, including BDD preflight work. A local cutoff or partial/oversized
    certificate falls back; global work/deadlines/cancellation still stop admission.
    Joint expression DAGs retain sharing through semantic projection/rebinding;
-   construction uses charged work/storage and separate safety caps rather than
+   equal branches and direct complementary terms simplify structurally during
+   interning. No domain-relative equivalence query is added. Profiling optionally
+   reports per-batch replacement DAG size and unrestricted versus W-restricted
+   BDD sizes, with independent bounded inspection and explicit incomplete results.
+   Construction uses charged work/storage and separate safety caps rather than
    the single-premise expression caps. Unchanged cutoffs are skipped within the
    admission; supporting-provider changes invalidate them.
    Negations proved always true under their settled guard keep redundant-negation
