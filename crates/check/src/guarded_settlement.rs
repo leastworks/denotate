@@ -260,6 +260,11 @@ impl GroundProgram {
     ) -> Result<Vec<GuardedSettlementProof>> {
         let ctx = meaning.context();
         let mut batch = IndependentBatch::default();
+        let mut pruning_cache = crate::guarded_bounds::PruningCache::default();
+        #[cfg(test)]
+        if !attempts.reuse_pruning {
+            pruning_cache.release();
+        }
         let mut proofs = Vec::new();
         // Cheap structural indexing/ordering only. No candidate BDD or full cone
         // is computed before the first attempt.
@@ -501,6 +506,7 @@ impl GroundProgram {
                 );
                 let mut preprocessing = None;
                 let mut preparation = Preparation::default();
+                pruning_cache.reserve(retained, budget)?;
                 let before_preparation = *retained;
                 let mut released_cache = 0;
                 let cone_key = Attempt::GuardedCone(candidate.rule.id, literal.term.occurrence);
@@ -570,9 +576,13 @@ impl GroundProgram {
                         progress,
                         |retained, budget| {
                             let started = Instant::now();
-                            let mut prepare =
-                                |retained: &mut usize, budget: &mut Budget<'_>, rank: bool| {
-                                    crate::guarded_bounds::prepare(
+                            let prepare =
+                                |retained: &mut usize,
+                                 budget: &mut Budget<'_>,
+                                 rank: bool,
+                                 pruning_cache: &mut crate::guarded_bounds::PruningCache,
+                                 preparation: &mut Preparation| {
+                                    crate::guarded_bounds::prepare_cached(
                                         self,
                                         component,
                                         &effective,
@@ -582,7 +592,8 @@ impl GroundProgram {
                                         ctx,
                                         retained,
                                         budget,
-                                        &mut preparation,
+                                        preparation,
+                                        pruning_cache,
                                     )
                                     .and_then(|cone| {
                                         if rank {
@@ -596,7 +607,13 @@ impl GroundProgram {
                                         Ok(cone)
                                     })
                                 };
-                            let mut result = prepare(retained, budget, ranking && !selected);
+                            let mut result = prepare(
+                                retained,
+                                budget,
+                                ranking && !selected,
+                                &mut pruning_cache,
+                                &mut preparation,
+                            );
                             if matches!(
                                 &result,
                                 Err(CheckError::LimitExceeded {
@@ -604,7 +621,11 @@ impl GroundProgram {
                                     resource: "condition nodes",
                                     ..
                                 })
-                            ) {
+                            ) || (result.is_ok()
+                                && preparation.pruning == Some("condition nodes")
+                                && pruning_cache.reserved() != 0)
+                            {
+                                released_cache += pruning_cache.release();
                                 released_cache +=
                                     cache.take().map_or(0, |old| {
                                         old.1.as_ref().map_or_else(
@@ -636,8 +657,15 @@ impl GroundProgram {
                                     // The partial cone has dropped. Optional reuse must
                                     // yield storage to the next attempt. Retry once; keep
                                     // all work charges and enforce the same storage cap.
+                                    drop(result);
                                     *retained = before_preparation - released_cache;
-                                    result = prepare(retained, budget, false);
+                                    result = prepare(
+                                        retained,
+                                        budget,
+                                        false,
+                                        &mut pruning_cache,
+                                        &mut preparation,
+                                    );
                                 }
                             }
                             preprocessing = Some(started.elapsed());
@@ -1049,6 +1077,7 @@ impl GroundProgram {
                 .map_or_else(|| cone.temporary_nodes(), |b| b.temporary_nodes());
         }
         *retained -= attempts.prune_dependencies();
+        *retained -= pruning_cache.release();
         Ok(proofs)
     }
 

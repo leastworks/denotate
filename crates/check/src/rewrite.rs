@@ -484,6 +484,18 @@ impl GroundProgram {
     }
     /// Exercise the ordinary fallback pipeline in tests of its own proofs/caches.
     #[cfg(test)]
+    pub(crate) fn admit_fallback_without_pruning_reuse(
+        self,
+        budget: &mut Budget<'_>,
+    ) -> Result<Self> {
+        let mut attempts = Attempts::default();
+        attempts.structural_split = false;
+        attempts.reuse_pruning = false;
+        self.admit_attempts(budget, None, attempts, None, None, None)
+    }
+
+    /// Exercise the ordinary fallback pipeline in tests of its own proofs/caches.
+    #[cfg(test)]
     pub(crate) fn admit_fallback_for_test(
         self,
         budget: &mut Budget<'_>,

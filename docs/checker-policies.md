@@ -274,9 +274,22 @@ This pass indexes at most 65,536 atoms, producers and body-literal entries in to
 It reserves sixteen condition-node slots per indexed item for simultaneous
 indices, queues, reasons and rebuilt metadata, plus variable-size negative-reason
 vectors and BDD guarantees. These are conservative storage charges, not heap byte
-measurements. Each negative atom's exact-producer union is built once per candidate
-and released after its readers; no pruning result or guarantee cache crosses
-candidates or snapshots. Candidate results retain the domain, component, snapshot,
+measurements. Candidate preparation shares liveness tests and exact-guarantee
+tests for the most recent domain D within one immutable admission snapshot. The
+key includes D's exact representation; a guarantee also checks the complete
+ordered exact-producer set, excluding a relaxed producer. Only the resulting
+Boolean test and source IDs are retained, not the union BDD. A domain change
+clears the entries. Reachability, relaxation and propagated deadness are always
+computed for the candidate. No such cache crosses snapshots or program preparations.
+
+This optional cache reserves at most `min(max_condition_nodes / 64, 65536)`
+condition-node slots, including domain and map/vector metadata. Reservation is
+lazy; entries that do not fit are simply not saved. Completed entries may survive
+a failed candidate, but failed computations are never cached. On preparation or
+pruning storage pressure, release the reservation and retry without this cache;
+all spent work remains charged. The reservation makes partial-cone rollback
+independent of which complete entries it added. These limits are provisional,
+not a new user-facing allowance. Candidate results retain the domain, component, snapshot,
 relaxed rule, rebuilt cone and reasons. A size, BDD task/node or condition-storage
 cutoff discards the pass and reports the reason, retaining the original cone.
 It adds no inconclusive result; global work, cancellation and deadlines propagate.
@@ -508,6 +521,17 @@ steps. Public finding identities stay `(verification, source rule, occurrence)`.
 Multi-way splits, branch memoization and conditional schedules remain deferred.
 
 ## Re-scoring
+
+Deadline polling reads the monotonic clock on the first charge and every 256
+charges thereafter. Explicit operation/phase checks and zero-work charges always
+read it immediately; cancellation is still checked on every charge and boundary.
+Boolean operand/result validation, preflight completion and failed result
+construction are explicit boundaries, so repeated recoverable BDD failures do not
+wait for the charge counter to poll the deadline.
+At most 255 charge opportunities skip a clock read. This is not a wall-clock
+latency bound: one BDD operation or other work item can take arbitrarily long
+between opportunities. Work accounting, deterministic limits and cached receipts
+are unchanged. Diagnostic-time exclusion keeps its existing separate clock policy.
 
 Admission progress in CLI stderr and the `.den` editor reports round/stage,
 unresolved ground components, affected atoms, current component and committed

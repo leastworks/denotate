@@ -181,8 +181,22 @@ pub(crate) struct Budget<'a> {
     work: usize,
     charges: Option<WorkCharges>,
     structural_split_start: Option<usize>,
+    charges_until_clock: usize,
+    #[cfg(test)]
+    clock: Option<TestClock>,
     #[cfg(any(test, feature = "test-support"))]
     pub profile: Option<PreparationProfile>,
+}
+
+// Bounds skipped polling opportunities, not time: one operation can be long.
+const DEADLINE_POLL_CHARGES: usize = 256;
+
+#[cfg(test)]
+#[derive(Default)]
+struct TestClock {
+    elapsed: Duration,
+    reads: std::cell::Cell<usize>,
+    readings: Vec<Duration>,
 }
 
 /// Diagnostic-only counters. Timed public-path samples leave this disabled.
@@ -202,6 +216,9 @@ impl<'a> Budget<'a> {
             work: 0,
             charges: None,
             structural_split_start: None,
+            charges_until_clock: 0,
+            #[cfg(test)]
+            clock: None,
             #[cfg(any(test, feature = "test-support"))]
             profile: None,
         }
@@ -349,15 +366,30 @@ impl<'a> Budget<'a> {
     }
     pub fn check(&self, phase: &'static str) -> Result<()> {
         self.limits.cancellation.check()?;
-        if self.start.elapsed() >= self.limits.timeout {
+        if self.elapsed() >= self.limits.timeout {
             let error = CheckError::deadline(phase, self.limits.timeout);
             self.limits.progress.failure(&error);
             return Err(error);
         }
         Ok(())
     }
+    fn elapsed(&self) -> Duration {
+        #[cfg(test)]
+        if let Some(clock) = &self.clock {
+            let read = clock.reads.get();
+            clock.reads.set(read + 1);
+            return clock.readings.get(read).copied().unwrap_or(clock.elapsed);
+        }
+        self.start.elapsed()
+    }
     pub fn charge(&mut self, amount: usize, phase: &'static str) -> Result<()> {
-        self.check(phase)?;
+        if amount == 0 || self.charges_until_clock == 0 {
+            self.check(phase)?;
+            self.charges_until_clock = DEADLINE_POLL_CHARGES - 1;
+        } else {
+            self.limits.cancellation.check()?;
+            self.charges_until_clock -= 1;
+        }
         if amount > self.limits.max_work.saturating_sub(self.work) {
             if let Some(charges) = &mut self.charges {
                 let rejected = charges.rejected_work.entry(phase.into()).or_default();
@@ -450,6 +482,105 @@ impl From<denotate_ir::KeyError> for CheckError {
 #[cfg(test)]
 mod diagnostic_clock_tests {
     use super::*;
+    #[test]
+    fn boolean_boundaries_read_deadlines_even_after_failed_operations() {
+        use crate::test_support::rewrites::{atom, rel};
+        let mut c = denotate_ir::Corpus::new();
+        let i = rel(&mut c, "i", true);
+        let j = rel(&mut c, "j", true);
+        let defaults = Limits::default();
+        let p = crate::GroundProgram::prepare(&c, &crate::Domains::new(), &defaults).unwrap();
+        let ctx = p.condition_context(&defaults).unwrap();
+        let a = ctx.input(&atom(i), &defaults).unwrap();
+        let b = ctx.input(&atom(j), &defaults).unwrap();
+        for (tasks, nodes, reads_before_expiry, phase) in [
+            (0, 100, 0, "BDD operation"),   // start
+            (0, 100, 2, "BDD preflight"),   // failed preflight
+            (100, 100, 2, "BDD operation"), // successful preflight
+            (100, 3, 3, "BDD operation"),   // failed result construction
+            (100, 100, 3, "BDD operation"), // successful result construction
+        ] {
+            let limits = Limits {
+                max_bdd_tasks: tasks,
+                max_bdd_nodes: nodes,
+                ..defaults.clone()
+            };
+            let mut budget = Budget::new(&limits);
+            budget.charges_until_clock = DEADLINE_POLL_CHARGES - 1;
+            budget.clock = Some(TestClock {
+                elapsed: limits.timeout,
+                readings: vec![Duration::ZERO; reads_before_expiry],
+                ..TestClock::default()
+            });
+            assert!(
+                matches!(ctx.apply(&a, &b, biodivine_lib_bdd::op_function::and, &mut budget),
+                Err(CheckError::Deadline { phase: actual, .. }) if actual == phase)
+            );
+        }
+    }
+    #[test]
+    fn deadline_is_read_on_schedule_and_at_explicit_boundaries() {
+        let limits = Limits::default();
+        let mut budget = Budget::tracked(&limits);
+        budget.clock = Some(TestClock::default());
+        budget.tick("first").unwrap();
+        assert_eq!(budget.clock.as_ref().unwrap().reads.get(), 1);
+        budget.clock.as_mut().unwrap().elapsed = limits.timeout;
+        for _ in 1..DEADLINE_POLL_CHARGES {
+            budget.tick("between polls").unwrap();
+        }
+        assert_eq!(budget.clock.as_ref().unwrap().reads.get(), 1);
+        assert!(matches!(
+            budget.tick("scheduled"),
+            Err(CheckError::Deadline {
+                phase: "scheduled",
+                ..
+            })
+        ));
+        assert_eq!(budget.clock.as_ref().unwrap().reads.get(), 2);
+        assert_eq!(budget.used(), DEADLINE_POLL_CHARGES);
+        assert_eq!(budget.snapshot().work, DEADLINE_POLL_CHARGES);
+
+        // Explicit checks and zero-work charges never wait for that schedule.
+        budget.clock.as_mut().unwrap().elapsed = Duration::ZERO;
+        budget.tick("restart").unwrap();
+        budget.clock.as_mut().unwrap().elapsed = limits.timeout;
+        assert!(matches!(
+            budget.check("boundary"),
+            Err(CheckError::Deadline {
+                phase: "boundary",
+                ..
+            })
+        ));
+        assert!(matches!(
+            budget.charge(0, "zero"),
+            Err(CheckError::Deadline { phase: "zero", .. })
+        ));
+    }
+
+    #[test]
+    fn cancellation_and_work_limits_do_not_wait_for_a_clock_poll() {
+        let limits = Limits {
+            max_work: 1,
+            ..Limits::default()
+        };
+        let mut budget = Budget::tracked(&limits);
+        budget.clock = Some(TestClock::default());
+        budget.tick("first").unwrap();
+        assert!(matches!(
+            budget.tick("work"),
+            Err(CheckError::LimitExceeded {
+                resource: "work",
+                ..
+            })
+        ));
+        assert_eq!(budget.clock.as_ref().unwrap().reads.get(), 1);
+        assert_eq!(budget.snapshot().rejected_work["work"], 1);
+        limits.cancellation.cancel();
+        assert!(matches!(budget.tick("cancel"), Err(CheckError::Cancelled)));
+        assert_eq!(budget.clock.as_ref().unwrap().reads.get(), 1);
+    }
+
     #[test]
     fn exclusion_preserves_spent_time_and_never_resets_a_deadline() {
         let limits = Limits {

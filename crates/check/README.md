@@ -81,6 +81,10 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    A single snapshot-local entry reuses
    only identical computations, including failures, never a failure under a
    broader guard. Conditions and cache metadata are charged and released.
+   Candidate preparation shares liveness and exact-guarantee tests for the most
+   recent domain in the snapshot, with exact-producer membership checked before
+   reuse. Its bounded, charged cache yields on storage pressure. Relaxation,
+   reachability and propagated deadness remain candidate-specific.
    Temporary cones borrow already-accounted round summaries and store explicit
    live/dead flags. They retain no masked producer conditions: bounds and settlement
    restrict contributions transiently before accumulation. Successful proofs own
@@ -516,7 +520,11 @@ carry the allowance in milliseconds, never elapsed timing. Input-domain preparat
 preserves provider discovery/grounding/analysis/evaluation versus input enumeration.
 Details do not charge work or alter verdicts; forwarded and cached reasons retain
 them. Backend capacity or available work/storage can tighten the effective ceiling.
-`Cancellation` is cooperative and checked at phase boundaries.
+Cancellation is checked at every charge and explicit boundary. Deadline clock
+reads occur on the first charge, then every 256 charges; explicit `Budget::check`
+and zero-work charges always read it immediately. At most 255 charge opportunities
+skip the clock. This bounds polling work, not elapsed response time: an operation
+between checks can still run for a long time. Deterministic work charges are unchanged.
 
 ## Tests
 

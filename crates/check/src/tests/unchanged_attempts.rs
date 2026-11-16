@@ -116,6 +116,24 @@ fn sound(c: &Corpus, p: &GroundProgram) {
     }
 }
 
+#[test]
+fn pruning_reuse_preserves_admission_proofs_and_independent_model_oracles() {
+    for depth in [0, 2] {
+        let (c, _) = super::guarded_settlement::fixture(depth);
+        let l = Limits::default();
+        let raw = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+        let cached = raw
+            .clone()
+            .admit_fallback_for_test(&mut Budget::new(&l), None)
+            .unwrap();
+        let fresh = raw
+            .admit_fallback_without_pruning_reuse(&mut Budget::new(&l))
+            .unwrap();
+        equal(&cached, &fresh);
+        sound(&c, &cached);
+    }
+}
+
 fn multiround(count: usize) -> Corpus {
     let mut c = Corpus::new();
     let i = rel(&mut c, "i", true);

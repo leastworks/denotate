@@ -163,6 +163,13 @@ to individually shared ownership, preserving its executable snapshot after later
 rewrites. Its storage remains conservatively charged after the round ends; no
 borrow or ownership of the entire previous round escapes into the certificate.
 
+Candidate preparation shares completed liveness and exact-guarantee tests under
+the most recent domain within that immutable snapshot. Exact representation and
+producer-set checks prevent sharing across changed domains or relaxed exact
+producers. The bounded cache stores Boolean answers and source IDs, never whole
+cones, propagated deadness or reachability. It yields its accounted storage on
+pressure and is released with the snapshot; it is not a session artifact.
+
 Semantic indexing shares source schemas and declaration bindings across those
 contexts. `GroundKeyView` projects atom, instance, component and rewrite keys from
 the current graph when needed. It reads original and committed bodies from the

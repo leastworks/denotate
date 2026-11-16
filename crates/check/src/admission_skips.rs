@@ -166,6 +166,8 @@ pub(crate) struct Attempts {
     pub reuse_prepared: bool,
     #[cfg(test)]
     pub batch_guarded: bool,
+    #[cfg(test)]
+    pub reuse_pruning: bool,
 }
 impl Default for Attempts {
     fn default() -> Self {
@@ -182,6 +184,8 @@ impl Default for Attempts {
             reuse_prepared: true,
             #[cfg(test)]
             batch_guarded: true,
+            #[cfg(test)]
+            reuse_pruning: true,
             #[cfg(test)]
             lookahead_work: None,
         }
@@ -854,6 +858,93 @@ impl GroundProgram {
 mod tests {
     use super::*;
     use crate::test_support::rewrites::{atom, rel, rule};
+
+    #[test]
+    fn removal_negatives_survive_unrelated_commits_but_retry_changed_exact_coverage() {
+        let mut c = denotate_ir::Corpus::new();
+        let i = rel(&mut c, "i", true);
+        let j = rel(&mut c, "j", true);
+        let head = rel(&mut c, "head", false);
+        let blocked = rel(&mut c, "blocked", false);
+        let unrelated = rel(&mut c, "unrelated", false);
+        let cover = rule(&mut c, head, &[(i, false)]);
+        let candidate = rule(&mut c, head, &[(j, false), (blocked, true)]);
+        rule(&mut c, blocked, &[(head, true)]);
+        let other = rule(&mut c, unrelated, &[(i, false), (j, false)]);
+        let l = Limits::default();
+        let mut before = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+        let id = before.rules().find(|r| r.source == candidate).unwrap().id;
+        let cover = before.rules().find(|r| r.source == cover).unwrap().id;
+        let other = before.rules().find(|r| r.source == other).unwrap().id;
+        let mut attempts = Attempts::default();
+        let reporter = AdmissionReporter::new(None);
+        let mut budget = Budget::new(&l);
+        let meaning = before.symbolic(&l).unwrap();
+        let summaries = crate::test_support::rewrites::summaries(&before, &meaning, &l);
+        let producers = summaries
+            .values()
+            .fold(BTreeMap::<_, Vec<_>>::new(), |mut map, s| {
+                map.entry(&s.rule.head.atom).or_default().push(s.rule.id);
+                map
+            });
+        assert!(
+            before
+                .producer_removals(
+                    &summaries,
+                    &BTreeSet::from([id]),
+                    &producers,
+                    meaning.context(),
+                    &mut 0,
+                    &mut budget,
+                    &reporter,
+                    &mut attempts
+                )
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            attempts
+                .reuse_negative(&Attempt::Removal(id), &mut budget, &reporter)
+                .unwrap()
+        );
+        drop(meaning);
+        for _ in 0..2 {
+            let mut after = before.clone();
+            after.rules[other.index].body.pop();
+            crate::graph::analyze(&mut after, &mut budget).unwrap();
+            let changed = RetryChanges {
+                all: BTreeSet::from([atom(unrelated)]),
+                settled: BTreeSet::from([atom(unrelated)]),
+            };
+            let invalid = attempts
+                .invalidated(&before, &after, &changed, &mut budget)
+                .unwrap();
+            attempts.invalidate(&invalid);
+            assert!(
+                attempts
+                    .reuse_negative(&Attempt::Removal(id), &mut budget, &reporter)
+                    .unwrap()
+            );
+            before = after;
+        }
+        let mut after = before.clone();
+        after.rules[cover.index].body.clear();
+        crate::graph::analyze(&mut after, &mut budget).unwrap();
+        let changed = RetryChanges {
+            all: BTreeSet::from([atom(head)]),
+            settled: BTreeSet::new(),
+        };
+        let invalid = attempts
+            .invalidated(&before, &after, &changed, &mut budget)
+            .unwrap();
+        assert_eq!(invalid[&Attempt::Removal(id)], "exact-cover");
+        attempts.invalidate(&invalid);
+        assert!(
+            !attempts
+                .reuse_negative(&Attempt::Removal(id), &mut budget, &reporter)
+                .unwrap()
+        );
+    }
 
     #[test]
     fn split_cutoff_retries_only_when_its_reader_dependencies_change() {

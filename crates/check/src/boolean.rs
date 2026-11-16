@@ -516,6 +516,8 @@ impl ConditionContext {
         }
     }
     fn check(&self, condition: &Condition, budget: &mut Budget<'_>) -> Result<()> {
+        // These are explicit Boolean-operation boundaries, not inner work ticks.
+        budget.check("BDD operation")?;
         budget.tick("BDD operation")?;
         if condition.universe != self.universe
             || condition.bdd.num_vars() != self.variables.num_vars()
@@ -553,6 +555,7 @@ impl ConditionContext {
         // cache for a small result. Preflight the task graph before building it.
         let allowed = budget.limits.max_bdd_tasks.min(budget.remaining() / 2);
         let Some((_, tasks)) = Bdd::check_binary_op(allowed, &a.bdd, &b.bdd, op) else {
+            budget.check("BDD preflight")?;
             budget.observe("BDD preflight", "BDD tasks", allowed.saturating_add(1));
             // The failed traversal consumed work too. Charge its task allowance
             // plus the stopping step (no construction ran). Keep global work
@@ -565,10 +568,12 @@ impl ConditionContext {
             }
             return Err(limit("BDD preflight", "BDD tasks", allowed, None));
         };
+        budget.check("BDD operation")?;
         budget.observe("BDD operation", "BDD tasks", tasks);
         budget.charge(2 * tasks + 1, "BDD operation")?;
         let Some(bdd) = Bdd::binary_op_with_limit(budget.limits.max_bdd_nodes, &a.bdd, &b.bdd, op)
         else {
+            budget.check("BDD operation")?;
             budget.observe(
                 "BDD operation",
                 "BDD nodes",

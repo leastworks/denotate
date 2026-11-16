@@ -6,7 +6,26 @@ Settled design choices and why they were made. Current behavior is specified in 
 alternatives that were rejected. Revisit a decision only with new evidence, such as a
 real program that the current choice serves badly.
 
+## Amortize deadline clock reads, preserve cancellation and boundary checks
+
+Per-charge monotonic clock reads were measurable overhead during grounding and
+admission. Poll every 256 charges, while checking cancellation at every opportunity
+and reading the clock immediately at explicit boundaries and zero-work checks.
+The bound is skipped polling opportunities, not elapsed time; this remains a
+cooperative deadline. Charging work and detecting deterministic exhaustion remain
+unchanged. A controlled-clock test covers the schedule without timing thresholds.
+Boolean operations make their formerly implicit boundary reads explicit, including
+failed preflights and failed construction; scripted-clock tests cover those paths.
+
 ## Guarded replacements batch only across untouched proof dependencies
+
+Pruning shares candidate-independent Boolean tests within one snapshot and exact
+domain representation: producer liveness and whether an atom's exact producers
+guarantee it under D. A relaxed exact producer changes that producer set and misses
+the cache. Keeping only the most recent domain bounds ownership without retaining
+large numbers of guard BDDs. A small conservative storage reservation covers the
+entries; optional retention yields on pressure. Whole-cone reuse would be unsound:
+relaxation and reachability differ between candidates even if no producer is dead.
 
 One admission snapshot may supply several guarded replacements, including readers
 in the same component. There is at most one replacement per reading rule. The

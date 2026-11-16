@@ -36,6 +36,7 @@ fn cones(
         &mut budget,
         &mut stats,
         true,
+        &mut PruningCache::default(),
     )
     .unwrap();
     let new = prepare(
@@ -50,6 +51,46 @@ fn cones(
     assert_eq!(stats.pruning, Some("complete"));
     assert_eq!(retained, new.temporary_nodes());
     test(&old, &new, model.context());
+
+    // Across candidates/preparations only the independent Boolean tests may be
+    // shared. The complete cone and every reason/source must still agree.
+    let mut shared = PruningCache::default();
+    let mut held = 0;
+    shared.reserve(&mut held, &mut budget).unwrap();
+    for _ in 0..2 {
+        let cached = super::super::prepare_cached(
+            &p,
+            p.component_for(&root).unwrap(),
+            candidate,
+            &root,
+            &summaries,
+            &index,
+            model.context(),
+            &mut held,
+            &mut budget,
+            &mut stats,
+            &mut shared,
+        )
+        .unwrap();
+        assert!(new.same_computation(&cached, &mut budget).unwrap());
+        assert_eq!(
+            new.pruning
+                .sources
+                .iter()
+                .map(|s| s.rule.id)
+                .collect::<Vec<_>>(),
+            cached
+                .pruning
+                .sources
+                .iter()
+                .map(|s| s.rule.id)
+                .collect::<Vec<_>>()
+        );
+        held -= cached.temporary_nodes();
+        assert_eq!(held, shared.reserved());
+    }
+    held -= shared.release();
+    assert_eq!(held, 0);
 
     // Optional storage failure retains the SAME old cone, with no error and no
     // partial marks or retained storage. Normal bounds still compute afterwards.

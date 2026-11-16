@@ -86,6 +86,7 @@ fn reserve(total: usize, old: usize, new: usize, budget: &mut Budget<'_>) -> Res
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
 pub(super) fn prepare<'a>(
     cone: Arc<BorrowedCone<'a>>,
     root: &GroundAtom,
@@ -94,13 +95,34 @@ pub(super) fn prepare<'a>(
     budget: &mut Budget<'_>,
     stats: &mut Preparation,
 ) -> Result<Arc<BorrowedCone<'a>>> {
-    prepare_roots(
+    prepare_cached(
+        cone,
+        root,
+        ctx,
+        retained,
+        budget,
+        stats,
+        &mut PruningCache::default(),
+    )
+}
+
+pub(super) fn prepare_cached<'a>(
+    cone: Arc<BorrowedCone<'a>>,
+    root: &GroundAtom,
+    ctx: &ConditionContext,
+    retained: &mut usize,
+    budget: &mut Budget<'_>,
+    stats: &mut Preparation,
+    cache: &mut PruningCache,
+) -> Result<Arc<BorrowedCone<'a>>> {
+    prepare_roots_cached(
         cone,
         std::slice::from_ref(root),
         ctx,
         retained,
         budget,
         stats,
+        cache,
     )
 }
 
@@ -112,10 +134,30 @@ pub(super) fn prepare_roots<'a>(
     budget: &mut Budget<'_>,
     stats: &mut Preparation,
 ) -> Result<Arc<BorrowedCone<'a>>> {
+    prepare_roots_cached(
+        cone,
+        roots,
+        ctx,
+        retained,
+        budget,
+        stats,
+        &mut PruningCache::default(),
+    )
+}
+
+fn prepare_roots_cached<'a>(
+    cone: Arc<BorrowedCone<'a>>,
+    roots: &[GroundAtom],
+    ctx: &ConditionContext,
+    retained: &mut usize,
+    budget: &mut Budget<'_>,
+    stats: &mut Preparation,
+    cache: &mut PruningCache,
+) -> Result<Arc<BorrowedCone<'a>>> {
     stats.before_atoms = Some(cone.atoms.len());
     stats.before_producers = Some(cone.producers.len());
     let mut scratch = *retained;
-    match run_roots(&cone, roots, ctx, &mut scratch, budget, MAX_ITEMS) {
+    match run_roots(&cone, roots, ctx, &mut scratch, budget, MAX_ITEMS, cache) {
         Ok(pruned) => {
             budget.charge(pruned.producers.len(), "guarded pruning counts")?;
             // Stage all evidence before replacing the old cone. Failed staging
@@ -178,6 +220,7 @@ fn run<'a>(
         scratch,
         budget,
         max_items,
+        &mut PruningCache::default(),
     )
 }
 
@@ -188,6 +231,7 @@ fn run_roots<'a>(
     scratch: &mut usize,
     budget: &mut Budget<'_>,
     max_items: usize,
+    cache: &mut PruningCache,
 ) -> Result<BorrowedCone<'a>> {
     let mut items = cone.atoms.len() + cone.producers.len();
     for p in &cone.producers {
@@ -235,41 +279,45 @@ fn run_roots<'a>(
             }
         }
     }
-    // Each exact guarantee is built once per atom for this D and released after
-    // its negative readers. No candidate-specific result escapes this pass.
+    // Share only the guarantee test under D, with its exact producer membership.
+    // Relaxation, propagated deadness and reachability remain candidate-specific.
     for (atom, users) in negative {
         budget.charge(users.len(), "guarded pruning negative readers")?;
         if users.iter().all(|i| reasons.contains_key(i)) {
             continue;
         }
-        let mut lower = ctx.false_condition();
         let mut exact = Vec::new();
         for i in by_head.get(atom).into_iter().flatten() {
             let p = &cone.producers[*i];
             budget.tick("guarded pruning guarantee")?;
-            if !p.live || !p.exact || Some(p.rule.id) == cone.relaxed_rule {
-                continue;
+            if p.live && p.exact && Some(p.rule.id) != cone.relaxed_rule {
+                exact.push(p.rule.id);
             }
-            let scoped = ctx.apply(&cone.domain, &p.condition, and, budget)?;
-            let next = ctx.apply(&lower, &scoped, or, budget)?;
-            *scratch = reserve(
-                *scratch,
-                if exact.is_empty() {
-                    0
-                } else {
-                    lower.node_count()
-                },
-                next.node_count(),
-                budget,
-            )?;
-            lower = next;
-            exact.push(p.rule.id);
         }
-        let guaranteed =
-            !exact.is_empty() && ctx.apply(&cone.domain, &lower, and_not, budget)?.is_false();
-        if !exact.is_empty() {
-            *scratch -= lower.node_count();
-        }
+        let guaranteed = cache.guaranteed(
+            atom,
+            &exact,
+            |budget| {
+                let mut lower = ctx.false_condition();
+                let mut held = 0;
+                for i in by_head.get(atom).into_iter().flatten() {
+                    let p = &cone.producers[*i];
+                    if !p.live || !p.exact || Some(p.rule.id) == cone.relaxed_rule {
+                        continue;
+                    }
+                    let scoped = ctx.apply(&cone.domain, &p.condition, and, budget)?;
+                    let next = ctx.apply(&lower, &scoped, or, budget)?;
+                    *scratch = reserve(*scratch, held, next.node_count(), budget)?;
+                    held = next.node_count();
+                    lower = next;
+                }
+                let guaranteed = !exact.is_empty()
+                    && ctx.apply(&cone.domain, &lower, and_not, budget)?.is_false();
+                *scratch -= held;
+                Ok(guaranteed)
+            },
+            budget,
+        )?;
         if guaranteed {
             for i in users {
                 budget.charge(1 + exact.len(), "guarded pruning negative")?;

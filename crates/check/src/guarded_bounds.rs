@@ -11,7 +11,9 @@ use std::{
     ops::Deref,
     sync::Arc,
 };
+mod cache;
 mod prune;
+pub(crate) use cache::PruningCache;
 pub use prune::{DeadReason, Pruning};
 
 #[derive(Debug, Clone)]
@@ -219,9 +221,37 @@ pub(crate) fn prepare<'a>(
     budget: &mut Budget<'_>,
     stats: &mut Preparation,
 ) -> Result<Arc<BorrowedCone<'a>>> {
+    prepare_cached(
+        program,
+        component,
+        candidate,
+        root,
+        summaries,
+        producers,
+        ctx,
+        retained,
+        budget,
+        stats,
+        &mut PruningCache::default(),
+    )
+}
+
+pub(crate) fn prepare_cached<'a>(
+    program: &GroundProgram,
+    component: &Component,
+    candidate: &ProducerSummary,
+    root: &GroundAtom,
+    summaries: &'a BTreeMap<GroundRuleId, ProducerSummary>,
+    producers: &BTreeMap<&GroundAtom, Vec<GroundRuleId>>,
+    ctx: &ConditionContext,
+    retained: &mut usize,
+    budget: &mut Budget<'_>,
+    stats: &mut Preparation,
+    cache: &mut PruningCache,
+) -> Result<Arc<BorrowedCone<'a>>> {
     prepare_mode(
         program, component, candidate, root, summaries, producers, ctx, retained, budget, stats,
-        true,
+        true, cache,
     )
 }
 
@@ -240,8 +270,18 @@ pub(crate) fn executable<'a>(
     stats: &mut Preparation,
 ) -> Result<Arc<BorrowedCone<'a>>> {
     prepare_mode(
-        program, component, candidate, root, summaries, producers, ctx, retained, budget, stats,
+        program,
+        component,
+        candidate,
+        root,
+        summaries,
+        producers,
+        ctx,
+        retained,
+        budget,
+        stats,
         false,
+        &mut PruningCache::default(),
     )
 }
 
@@ -257,6 +297,7 @@ fn prepare_mode<'a>(
     budget: &mut Budget<'_>,
     stats: &mut Preparation,
     relax: bool,
+    cache: &mut PruningCache,
 ) -> Result<Arc<BorrowedCone<'a>>> {
     *stats = Preparation {
         existing_nodes: *retained,
@@ -264,9 +305,9 @@ fn prepare_mode<'a>(
     };
     let result = prepare_inner(
         program, component, candidate, root, summaries, producers, ctx, retained, budget, stats,
-        relax,
+        relax, cache,
     )
-    .and_then(|cone| prune::prepare(cone, root, ctx, retained, budget, stats));
+    .and_then(|cone| prune::prepare_cached(cone, root, ctx, retained, budget, stats, cache));
     stats.added_nodes = retained.saturating_sub(stats.existing_nodes);
     result
 }
@@ -283,8 +324,10 @@ fn prepare_inner<'a>(
     budget: &mut Budget<'_>,
     stats: &mut Preparation,
     relax: bool,
+    cache: &mut PruningCache,
 ) -> Result<Arc<BorrowedCone<'a>>> {
     let domain = ctx.restrict(&candidate.condition, budget)?;
+    cache.select(program.graph_revision, &domain, budget)?;
     stats.domain_nodes = Some(domain.node_count());
     *retained = crate::symbolic::retain(*retained, 0, domain.node_count() + 1, budget)?;
     let mut pending = BTreeSet::from([root.clone()]);
@@ -307,9 +350,15 @@ fn prepare_inner<'a>(
             )?;
             // Restrict transiently for deadness; do not retain one copy of the
             // (potentially large) domain per producer.
-            let live = !ctx
-                .apply(&domain, &summary.condition, and, budget)?
-                .is_false();
+            let live = cache.live(
+                *id,
+                |budget| {
+                    Ok(!ctx
+                        .apply(&domain, &summary.condition, and, budget)?
+                        .is_false())
+                },
+                budget,
+            )?;
             if live {
                 stats.live_producers += 1;
                 if !live_atom {
