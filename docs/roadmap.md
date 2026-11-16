@@ -285,6 +285,15 @@ equivalence.
 **Acceptance for both:** default-limit outcomes, witnesses-as-behaviour and
 cold/warm agreement unchanged; no node counts, budgets or timings as goldens.
 
+**Symbolic evaluation scope.** Admission evaluates every atom of its cone exactly,
+and each round re-evaluates the cone from scratch; an atom that exhausts a
+per-operation limit becomes unknown. Open directions: reuse unchanged components'
+conditions across rounds; keep only the conditions later stages read; and
+demand-driven evaluation, computing an atom's condition only under its readers'
+guards. On a production-scale program, a large cone unblocked by a structural split
+overflowed condition storage; a shared manager would also store common
+sub-functions once.
+
 ## Small items
 
 - **Structural BDD input order** exists as a diagnostic (`--input-order structural`).
