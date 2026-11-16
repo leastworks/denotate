@@ -162,6 +162,7 @@ impl<'a> AdmissionDetails<'a> {
                         "chosen":s.chosen.as_ref().map(|a| atom_text(a, &**names)),
                         "cyclicAtoms":s.cyclic_atoms,"branchCyclicAtoms":s.branch_cyclic_atoms,
                         "branchConeAtoms":s.branch_cone_atoms,"branchLiveAtoms":s.branch_live_atoms,
+                "expressionNodes":s.expression_nodes,"evaluatedLeaves":s.evaluated_leaves,"cutoffStage":s.cutoff_stage,
                         "depth":s.depth,"maxDepth":s.max_depth,"leaves":s.leaves,"state":s.state}));
                 json!({"index":g.index, "position":g.position, "deferred":g.deferred, "componentAtoms":g.component_atoms,
                     "lookaheadWork":g.lookahead_work, "lookaheadLimit":g.lookahead_limit, "head":atom_text(&g.head, &**names), "premise":atom_text(&g.premise, &**names),
@@ -183,6 +184,7 @@ impl<'a> AdmissionDetails<'a> {
                 "cutoffs":s.cutoffs,"chosen":s.chosen.as_ref().map(|a|atom_text(a,&**names)),
                 "cyclicAtoms":s.cyclic_atoms,"branchCyclicAtoms":s.branch_cyclic_atoms,
                 "branchConeAtoms":s.branch_cone_atoms,"branchLiveAtoms":s.branch_live_atoms,
+                "expressionNodes":s.expression_nodes,"evaluatedLeaves":s.evaluated_leaves,"cutoffStage":s.cutoff_stage,
                 "depth":s.depth,"maxDepth":s.max_depth,"leaves":s.leaves,"state":s.state,
                 "fallback":event.split_fallback.map(|r|json!({"phase":r.phase,"resource":r.resource,
                     "message":denotate_presentation::exhaustion_text(r.phase,r.resource,r.details)}))})
@@ -423,6 +425,15 @@ pub fn admission_text(a: &Value) -> String {
             "; search work {}/{}; caps depth {}, leaves {}",
             s["searchWork"], s["searchLimit"], s["depthLimit"], s["leafLimit"]
         ));
+        if let Some(nodes) = s["expressionNodes"].as_u64() {
+            text.push_str(&format!(
+                "; {nodes} shared expression nodes, {} leaves evaluated",
+                s["evaluatedLeaves"]
+            ));
+        }
+        if let Some(stage) = s["cutoffStage"].as_str() {
+            text.push_str(&format!("; cutoff during {stage}"));
+        }
         if let Some(reason) = s["fallback"]["message"].as_str() {
             text.push_str(&format!(
                 "; optional structural split skipped: {reason}; continuing ordinary admission"

@@ -365,7 +365,11 @@ impl GroundKeyView<'_> {
                 .collect::<Result<_>>()?,
         })
     }
-    fn body(&self, rule: &GroundRule) -> Result<GroundInstance> {
+    fn body(
+        &self,
+        rule: &GroundRule,
+        expressions: &mut crate::settled_expression::ExpressionMap<GroundAtom, AtomKey>,
+    ) -> Result<GroundInstance> {
         Ok(GroundInstance {
             replacements: rule
                 .replacements
@@ -378,7 +382,7 @@ impl GroundKeyView<'_> {
                             .key(r.occurrence)
                             .map_err(CheckError::Keys)?
                             .clone(),
-                        expression: r.expression.map(&mut |a| self.atom(a))?,
+                        expression: expressions.map(&r.expression, &mut |a| self.atom(a))?,
                     })
                 })
                 .collect::<Result<_>>()?,
@@ -402,13 +406,22 @@ impl GroundKeyView<'_> {
             self.program
                 .original_rule(id)
                 .ok_or(CheckError::Internal("missing original ground rule"))?,
+            &mut Default::default(),
         )
     }
     pub fn committed(&self, id: GroundRuleId) -> Result<GroundInstance> {
+        self.committed_shared(id, &mut Default::default())
+    }
+    pub(crate) fn committed_shared(
+        &self,
+        id: GroundRuleId,
+        expressions: &mut crate::settled_expression::ExpressionMap<GroundAtom, AtomKey>,
+    ) -> Result<GroundInstance> {
         self.body(
             self.program
                 .rule(id)
                 .ok_or(CheckError::Internal("missing committed ground rule"))?,
+            expressions,
         )
     }
     pub fn component(&self, id: ComponentId) -> Result<ComponentKey> {

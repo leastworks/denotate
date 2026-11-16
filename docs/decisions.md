@@ -310,6 +310,14 @@ The file intentionally retains program names and is not an anonymized export.
   constant replacements and several occurrences in one rule. Independent batches
   retain their symmetric dependency checks. Complete expressions, evidence and
   storage accounting are staged before mutation; a failed stage installs nothing.
+  Joint certificates share executable expression nodes as well as evidence. The
+  small single-premise certificate cap rejected tree combination on the layered
+  workload, so this path uses charged construction/storage with separate safety
+  caps. Sharing survives semantic projection and runtime reconstruction; simply
+  relaxing accounting while copying each edge's expanded tree would move the
+  memory problem downstream. Expression hashing/equality ignore sharing layout.
+  A cutoff is retried only after a relevant dependency changes within admission;
+  it is not a semantic result or a session cache entry.
   Shared evidence is charged once per joint batch. Positive forwarding sources
   remain in finding replay scopes even when their executable premise was replaced.
   Collection confirms those authored facts and gives the expanded evidence DAG

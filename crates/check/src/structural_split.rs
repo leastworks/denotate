@@ -4,7 +4,7 @@ use crate::{
     admission_progress::AdmissionReporter,
     guarded_bounds::{BorrowedCone, component_cone},
     guarded_settlement::cases::{cyclic_size, recoverable},
-    guarded_settlement::{CERTIFICATE_NODES, Expr, bounded, constant, join, signed},
+    guarded_settlement::{Expr, constant, join, signed},
     limits::{Budget, Result},
     *,
 };
@@ -13,6 +13,9 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     sync::Arc,
 };
+
+mod expressions;
+use expressions::Expressions;
 
 // Scoring is cooperative at complete candidate boundaries. One candidate can
 // cross this allowance; its operations still obey the global work/BDD limits.
@@ -26,7 +29,7 @@ impl From<&Limits> for SplitLimits {
     fn from(limits: &Limits) -> Self {
         Self {
             scoring_work: 1_000_000,
-            depth: limits.max_structural_split_depth,
+            depth: limits.max_structural_split_depth.min(256),
             leaves: limits.max_structural_split_leaves,
         }
     }
@@ -44,7 +47,7 @@ fn optional_failure(error: &CheckError) -> bool {
             error,
             CheckError::LimitExceeded {
                 phase: "structural split",
-                resource: "structural split work",
+                resource: "structural split work" | "expression nodes" | "expression depth",
                 ..
             }
         )
@@ -61,11 +64,11 @@ struct Tree {
 }
 impl Tree {
     fn nodes(&self) -> usize {
-        self.certificate.nodes()
+        self.certificate.structural_nodes()
             + self
                 .values
                 .values()
-                .map(|v| 1 + v.truth.node_count() + v.expression.nodes())
+                .map(|v| 1 + v.truth.node_count())
                 .sum::<usize>()
     }
 }
@@ -77,6 +80,7 @@ struct Search<'a, 'm> {
     limits: SplitLimits,
     work_start: usize,
     stats: GuardedSplitProgress,
+    expressions: Expressions,
 }
 
 impl GroundProgram {
@@ -88,7 +92,9 @@ impl GroundProgram {
         retained: &mut usize,
         budget: &mut Budget<'_>,
         progress: &AdmissionReporter<'_>,
+        cutoff: &mut bool,
     ) -> Result<Vec<GuardedSettlementProof>> {
+        *cutoff = false;
         let baseline = *retained;
         progress.work(self, "structural-split", Some(component.id), 0, true);
         let started = progress.attempt_start(AdmissionAttemptKind::StructuralSplit, None);
@@ -99,10 +105,11 @@ impl GroundProgram {
             meaning,
             limits: SplitLimits::from(budget.limits),
             work_start: budget.used(),
+            expressions: Expressions::default(),
             stats: GuardedSplitProgress {
                 leaves: 1,
                 search_limit: Some(budget.limits.max_structural_split_work),
-                depth_limit: Some(budget.limits.max_structural_split_depth),
+                depth_limit: Some(budget.limits.max_structural_split_depth.min(256)),
                 leaf_limit: Some(budget.limits.max_structural_split_leaves),
                 ..Default::default()
             },
@@ -125,6 +132,7 @@ impl GroundProgram {
             search.stage(tree, retained, budget, progress)
         });
         search.stats.search_work = Some(budget.used() - work_start);
+        search.stats.expression_nodes = Some(search.expressions.len());
         let outcome = match &result {
             Ok(p) if p.is_empty() => "negative",
             Ok(_) => "completed",
@@ -144,6 +152,7 @@ impl GroundProgram {
                     .unwrap_or(0);
                 let nodes = shared + proofs.iter().map(|p| p.nodes() - shared).sum::<usize>();
                 *retained = crate::symbolic::retain(baseline, 0, nodes, budget)?;
+                *cutoff = proofs.is_empty() && search.stats.state.contains("cutoff");
                 search.stats.state = if proofs.is_empty() {
                     "negative"
                 } else {
@@ -153,7 +162,9 @@ impl GroundProgram {
                 Ok(proofs)
             }
             Err(e) if optional_failure(&e) => {
+                *cutoff = true;
                 budget.record_failure(&e);
+                search.stats.cutoff_stage = Some(search.stats.state);
                 search.stats.state = "fallback";
                 progress.structural_split(self, &search.stats, Some(Inconclusive::from_error(e)?));
                 // An optional failed optimization is not an unsupported-region
@@ -168,6 +179,7 @@ impl GroundProgram {
 impl Search<'_, '_> {
     fn report(&mut self, budget: &Budget<'_>, progress: &AdmissionReporter<'_>) {
         self.stats.search_work = Some(budget.used() - self.work_start);
+        self.stats.expression_nodes = Some(self.expressions.len());
         progress.structural_split(self.program, &self.stats, None);
     }
     fn cutoff(
@@ -190,10 +202,11 @@ impl Search<'_, '_> {
         progress: &AdmissionReporter<'_>,
     ) -> Result<Option<Tree>> {
         let baseline = *retained;
+        let expressions = self.expressions.storage;
         let result = self.node_inner(domain, depth, retained, budget, progress);
-        *retained = baseline;
+        *retained = baseline + self.expressions.storage - expressions;
         if let Ok(Some(tree)) = &result {
-            *retained = crate::symbolic::retain(baseline, 0, tree.nodes(), budget)?;
+            *retained = crate::symbolic::retain(*retained, 0, tree.nodes(), budget)?;
         }
         result
     }
@@ -373,7 +386,13 @@ impl Search<'_, '_> {
         let Some(right) = self.node(&no, depth + 1, retained, budget, progress)? else {
             return Ok(None);
         };
-        let choice = Arc::new(SettledExpression::Atom(atom.clone()));
+        self.stats.state = "combining";
+        self.report(budget, progress);
+        let choice = self.expressions.intern(
+            Arc::new(SettledExpression::Atom(atom.clone())),
+            retained,
+            budget,
+        )?;
         let mut values = BTreeMap::new();
         for (target, a) in left.values {
             budget.tick("structural split combination")?;
@@ -388,22 +407,14 @@ impl Search<'_, '_> {
                 ],
                 false,
             );
-            if !bounded(&expression, budget)? {
-                self.cutoff("expression-cutoff", budget, progress);
-                return Ok(None);
-            }
+            let expression = self.expressions.intern(expression, retained, budget)?;
             let truth = ctx.apply(
                 &ctx.apply(&yes, &a.truth, and, budget)?,
                 &ctx.apply(&no, &b.truth, and, budget)?,
                 or,
                 budget,
             )?;
-            *retained = crate::symbolic::retain(
-                *retained,
-                0,
-                1 + truth.node_count() + expression.nodes(),
-                budget,
-            )?;
+            *retained = crate::symbolic::retain(*retained, 0, 1 + truth.node_count(), budget)?;
             values.insert(target, Value { expression, truth });
         }
         let certificate = GuardedCertificate::Split {
@@ -411,10 +422,6 @@ impl Search<'_, '_> {
             when_true: Box::new(left.certificate),
             when_false: Box::new(right.certificate),
         };
-        if certificate.expression_nodes() > CERTIFICATE_NODES {
-            self.cutoff("certificate-cutoff", budget, progress);
-            return Ok(None);
-        }
         Ok(Some(Tree {
             certificate,
             values,
@@ -460,7 +467,7 @@ impl Search<'_, '_> {
             .collect();
         let mut values = BTreeMap::<GroundAtom, Value>::new();
         let mut steps = Vec::new();
-        let mut expression_nodes = 0;
+
         while let Some(atom) = ready.pop_first() {
             budget.tick("structural split evaluation")?;
             let mut alternatives = Vec::new();
@@ -507,10 +514,7 @@ impl Search<'_, '_> {
                     terms.push(replacement.expression.clone());
                 }
                 let expression = join(terms, true);
-                if !bounded(&expression, budget)? {
-                    self.cutoff("expression-cutoff", budget, progress);
-                    return Ok(None);
-                }
+                let expression = self.expressions.intern(expression, retained, budget)?;
                 *retained = crate::symbolic::retain(*retained, 0, 2, budget)?;
                 alternatives.push(expression);
                 truth = ctx.apply(&truth, &body, or, budget)?;
@@ -523,23 +527,12 @@ impl Search<'_, '_> {
             } else {
                 join(alternatives, false)
             };
-            if !bounded(&expression, budget)? {
-                self.cutoff("expression-cutoff", budget, progress);
-                return Ok(None);
-            }
-            expression_nodes += expression.nodes();
-            if expression_nodes > CERTIFICATE_NODES {
-                self.cutoff("certificate-cutoff", budget, progress);
-                return Ok(None);
-            }
-            budget.charge(
-                expression.nodes() + sources.len(),
-                "structural split value storage",
-            )?;
+            let expression = self.expressions.intern(expression, retained, budget)?;
+            budget.charge(sources.len(), "structural split value storage")?;
             *retained = crate::symbolic::retain(
                 *retained,
                 0,
-                2 + 2 * (truth.node_count() + expression.nodes()) + sources.len(),
+                2 + 2 * truth.node_count() + sources.len(),
                 budget,
             )?;
             steps.push(GuardedSettlementStep {
@@ -566,6 +559,7 @@ impl Search<'_, '_> {
             cone.pruning.reasons.len(),
             "structural split pruning evidence",
         )?;
+        self.stats.evaluated_leaves += 1;
         let certificate = GuardedCertificate::Acyclic {
             domain: cone.domain.clone(),
             steps,
@@ -599,8 +593,15 @@ impl Search<'_, '_> {
             *retained = crate::symbolic::retain(*retained, 0, source.nodes(), budget)?;
             producers.push(Arc::new(source.clone()));
         }
-        let retained_nodes =
-            2 + tree.certificate.nodes() + producers.iter().map(|p| p.nodes()).sum::<usize>();
+        // Both signs are shared before freezing the joint storage count.
+        for value in tree.values.values() {
+            self.expressions
+                .intern(signed(value.expression.clone(), true), retained, budget)?;
+        }
+        let retained_nodes = 2
+            + tree.certificate.structural_nodes()
+            + self.expressions.storage
+            + producers.iter().map(|p| p.nodes()).sum::<usize>();
         let joint = Arc::new(JointCertificate {
             retained_nodes,
             snapshot: self.program.graph_revision,
@@ -625,11 +626,11 @@ impl Search<'_, '_> {
                     continue;
                 };
                 let negative = literal.polarity == Polarity::Negative;
-                let replacement = signed(value.expression.clone(), negative);
-                if !bounded(&replacement, budget)? {
-                    self.cutoff("expression-cutoff", budget, progress);
-                    return Ok(Vec::new());
-                }
+                let replacement = self.expressions.intern(
+                    signed(value.expression.clone(), negative),
+                    retained,
+                    budget,
+                )?;
                 let coverage = if negative {
                     self.meaning.context().complement(&value.truth, budget)?
                 } else {
@@ -678,6 +679,7 @@ impl Search<'_, '_> {
                 proofs.push(proof);
             }
         }
+        self.report(budget, progress);
         Ok(proofs)
     }
 }

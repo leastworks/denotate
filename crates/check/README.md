@@ -46,6 +46,10 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    `max_structural_split_leaves` and `max_structural_split_work` bound this optional
    attempt, including BDD preflight work. A local cutoff or partial/oversized
    certificate falls back; global work/deadlines/cancellation still stop admission.
+   Joint expression DAGs retain sharing through semantic projection/rebinding;
+   construction uses charged work/storage and separate safety caps rather than
+   the single-premise expression caps. Unchanged cutoffs are skipped within the
+   admission; supporting-provider changes invalidate them.
    Negations proved always true under their settled guard keep redundant-negation
    warnings and safe frontend edits, independently of which proof path established
    them. Genuine expression replacements remain equivalence warnings. If that

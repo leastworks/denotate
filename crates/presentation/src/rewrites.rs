@@ -53,7 +53,7 @@ impl Rewrite<'_> {
                     notes.insert("This negated condition is always true under the rule's settled guard; removing it preserves the rule's meaning.".to_owned());
                 }
                 let mut remaining = if detail == RewriteDetail::Full {
-                    usize::MAX
+                    8192
                 } else {
                     32
                 };
@@ -153,7 +153,7 @@ impl Rewrite<'_> {
                                     ));
                                 }
                                 for replacement in &producer.rule.replacements {
-                                    let mut remaining = usize::MAX;
+                                    let mut remaining = 8192;
                                     terms.push(expression_text(
                                         &replacement.expression,
                                         corpus,
@@ -250,7 +250,7 @@ impl Rewrite<'_> {
                                     }
                                 }
                                 for (rank, step) in steps.iter().enumerate() {
-                                    let mut remaining = usize::MAX;
+                                    let mut remaining = 8192;
                                     let value = expression_text(
                                         &step.expression,
                                         corpus,

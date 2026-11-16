@@ -16,6 +16,9 @@ type Failure = (u8, String);
 mod component_dump;
 #[path = "check/options.rs"]
 mod options;
+#[path = "check/profile_writer.rs"]
+mod profile_writer;
+use profile_writer::record as profile_record;
 #[cfg(test)]
 #[allow(dead_code)]
 #[path = "schema/generate.rs"]
@@ -173,15 +176,16 @@ fn run_streaming(
         return Ok(0);
     }
     let mut options = options::Options::parse(args, limits)?;
-    let profile_file = if let Some(path) = &options.profile_memory {
+    let (profile_file, _profile_flush) = if let Some(path) = &options.profile_memory {
         let file = std::fs::OpenOptions::new()
             .write(true)
             .create_new(true)
             .open(path)
             .map_err(|e| (3, format!("Cannot create memory profile {path}: {e}")))?;
-        Some(std::sync::Arc::new(std::sync::Mutex::new(file)))
+        let (file, guard) = profile_writer::FlushGuard::new(file);
+        (Some(file), Some(guard))
     } else {
-        None
+        (None, None)
     };
     let _memory_profile = profile_file.as_ref().map(|file| {
         let file = Some(file.clone());
@@ -291,18 +295,6 @@ fn run_streaming(
         "error":result.as_ref().err().map(|(_, message)| message)}),
     );
     result
-}
-// Observations are best-effort, just like memory events; they never affect verdicts.
-fn profile_record(
-    file: &Option<std::sync::Arc<std::sync::Mutex<std::fs::File>>>,
-    event: serde_json::Value,
-) {
-    if let Some(file) = file {
-        use std::io::Write;
-        let mut file = file.lock().unwrap();
-        let _ = writeln!(file, "{event}");
-        let _ = file.flush();
-    }
 }
 fn check_program(
     options: options::Options,
@@ -833,6 +825,10 @@ fn check_program(
     })
 }
 fn main() {
+    #[cfg(unix)]
+    if std::env::args().any(|a| a == "--profile-memory") {
+        profile_writer::signals::install();
+    }
     use std::io::Write;
     let mut output = String::new();
     let mut stdout = std::io::stdout().lock();

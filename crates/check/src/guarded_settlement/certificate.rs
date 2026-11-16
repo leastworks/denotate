@@ -120,6 +120,37 @@ impl GuardedCertificate {
             })
             .sum()
     }
+    /// Structural split expressions are counted once by the attempt's pool.
+    pub(crate) fn structural_nodes(&self) -> usize {
+        self.walk()
+            .map(|node| match node {
+                Self::Acyclic {
+                    domain,
+                    steps,
+                    values,
+                    pruning,
+                } => {
+                    domain.node_count()
+                        + values.values().map(Condition::node_count).sum::<usize>()
+                        + steps.iter().map(|s| 2 + s.producers.len()).sum::<usize>()
+                        + pruning
+                            .values()
+                            .map(|r| {
+                                3 + match r {
+                                    DeadReason::Negative {
+                                        exact_producers, ..
+                                    } => exact_producers.len(),
+                                    _ => 0,
+                                }
+                            })
+                            .sum::<usize>()
+                }
+                Self::Split { .. } => 3,
+                Self::Empty { domain } => 1 + domain.node_count(),
+                _ => unreachable!("structural certificate"),
+            })
+            .sum()
+    }
     pub(crate) fn expression_nodes(&self) -> usize {
         self.walk()
             .map(|node| match node {

@@ -227,6 +227,7 @@ dependencies = [
  "denotate-check-session",
  "denotate-ir",
  "denotate-presentation",
+ "libc",
  "salsa",
  "serde_json",
  "sha2",

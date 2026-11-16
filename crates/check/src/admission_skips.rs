@@ -53,6 +53,7 @@ pub struct AdmissionSkip {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Attempt {
+    StructuralSplit(GroundAtom),
     ComponentStorage(GroundAtom),
     Coverage(GroundAtom),
     Removal(GroundRuleId),
@@ -68,6 +69,7 @@ pub(crate) enum Attempt {
 impl Attempt {
     pub fn kind(&self) -> AdmissionAttemptKind {
         match self {
+            Self::StructuralSplit(_) => AdmissionAttemptKind::StructuralSplit,
             Self::ComponentStorage(_) => AdmissionAttemptKind::ComponentStorage,
             Self::Coverage(_) => AdmissionAttemptKind::Coverage,
             Self::Removal(_) => AdmissionAttemptKind::Removal,
@@ -108,6 +110,7 @@ impl Attempt {
     }
     fn record(&self, head: &GroundAtom, reason: Inconclusive) -> AdmissionSkip {
         let (kind, rule, occurrence) = match self {
+            Self::StructuralSplit(_) => (AdmissionAttemptKind::StructuralSplit, None, None),
             Self::ComponentStorage(_) => (AdmissionAttemptKind::ComponentStorage, None, None),
             Self::Coverage(_) => (AdmissionAttemptKind::Coverage, None, None),
             Self::Removal(rule) => (AdmissionAttemptKind::Removal, Some(*rule), None),
@@ -201,6 +204,35 @@ impl Attempts {
         }
     }
 
+    pub fn split_cutoff(
+        &self,
+        head: &GroundAtom,
+        budget: &mut Budget<'_>,
+        progress: &AdmissionReporter<'_>,
+    ) -> Result<bool> {
+        budget.tick("structural split retry lookup")?;
+        let reused = self
+            .negative
+            .contains_key(&Attempt::StructuralSplit(head.clone()));
+        if reused {
+            progress.reused(AdmissionAttemptKind::StructuralSplit, true);
+        }
+        Ok(reused)
+    }
+    pub fn remember_split_cutoff(
+        &mut self,
+        head: &GroundAtom,
+        retained: &mut usize,
+        budget: &mut Budget<'_>,
+    ) -> Result<()> {
+        budget.tick("structural split retry metadata")?;
+        if retained.saturating_add(2) <= budget.limits.max_condition_nodes {
+            *retained = crate::symbolic::retain(*retained, 0, 2, budget)?;
+            self.negative
+                .insert(Attempt::StructuralSplit(head.clone()), head.clone());
+        }
+        Ok(())
+    }
     pub fn component_skipped(&self, head: &GroundAtom) -> bool {
         self.skipped
             .contains_key(&Attempt::ComponentStorage(head.clone()))
@@ -276,7 +308,12 @@ impl Attempts {
     }
 
     pub fn nodes(&self) -> usize {
-        self.prepared.values().map(|p| p.nodes()).sum::<usize>()
+        2 * self
+            .negative
+            .keys()
+            .filter(|a| matches!(a, Attempt::StructuralSplit(_)))
+            .count()
+            + self.prepared.values().map(|p| p.nodes()).sum::<usize>()
             + self
                 .dependencies
                 .values()
@@ -502,7 +539,8 @@ impl Attempts {
         let conservative = self.tracked().any(|(a, _)| {
             matches!(
                 a,
-                Attempt::ComponentStorage(_)
+                Attempt::StructuralSplit(_)
+                    | Attempt::ComponentStorage(_)
                     | Attempt::UpperBounds(_)
                     | Attempt::GuaranteedBounds(_)
                     | Attempt::BoundRemoval(_)
@@ -656,7 +694,8 @@ impl Attempts {
                                 None => true,
                             }
                     }
-                    Attempt::ComponentStorage(_)
+                    Attempt::StructuralSplit(_)
+                    | Attempt::ComponentStorage(_)
                     | Attempt::UpperBounds(_)
                     | Attempt::GuaranteedBounds(_)
                     | Attempt::BoundRemoval(_)
@@ -815,6 +854,63 @@ impl GroundProgram {
 mod tests {
     use super::*;
     use crate::test_support::rewrites::{atom, rel, rule};
+
+    #[test]
+    fn split_cutoff_retries_only_when_its_reader_dependencies_change() {
+        let mut c = denotate_ir::Corpus::new();
+        let input = rel(&mut c, "input", true);
+        let provider = rel(&mut c, "provider", false);
+        let a = rel(&mut c, "a", false);
+        let b = rel(&mut c, "b", false);
+        let unrelated = rel(&mut c, "unrelated", false);
+        rule(&mut c, provider, &[(input, false)]);
+        rule(&mut c, a, &[(provider, false), (b, true)]);
+        rule(&mut c, b, &[(a, true)]);
+        rule(&mut c, unrelated, &[(input, false)]);
+        let limits = Limits::default();
+        let raw = GroundProgram::prepare(&c, &Domains::new(), &limits).unwrap();
+        let mut attempts = Attempts::default();
+        let mut budget = Budget::new(&limits);
+        let report = AdmissionReporter::new(None);
+        attempts
+            .remember_split_cutoff(&atom(a), &mut 0, &mut budget)
+            .unwrap();
+        assert!(
+            attempts
+                .split_cutoff(&atom(a), &mut budget, &report)
+                .unwrap()
+        );
+        // Invalidations use the existing pre-commit reader closure, which reaches
+        // a from provider, even though a's own rules did not change.
+        for changed in [
+            BTreeSet::from([atom(unrelated)]),
+            BTreeSet::from([atom(provider), atom(a), atom(b)]),
+        ] {
+            let expected = changed.contains(&atom(a));
+            let invalid = attempts
+                .invalidated(
+                    &raw,
+                    &raw,
+                    &RetryChanges {
+                        all: changed,
+                        settled: BTreeSet::new(),
+                    },
+                    &mut budget,
+                )
+                .unwrap();
+            assert_eq!(
+                invalid.contains_key(&Attempt::StructuralSplit(atom(a))),
+                expected
+            );
+            attempts.invalidate(&invalid);
+            assert_eq!(
+                attempts
+                    .split_cutoff(&atom(a), &mut budget, &report)
+                    .unwrap(),
+                !expected
+            );
+        }
+    }
 
     #[test]
     fn prepared_cones_rebind_across_unrelated_rewrites_and_invalidate_every_source() {

@@ -141,10 +141,6 @@ pub struct GuardedSettlementProof {
 impl GuardedSettlementProof {
     pub(crate) fn nodes(&self) -> usize {
         self.certificate.nodes()
-            // Joint trees store leaf values, not the combined per-edge expression.
-            + if matches!(self.certificate, GuardedCertificate::Joint(_)) {
-                self.replacement.nodes()
-            } else { 0 }
             + self
                 .implied_guard
                 .as_ref()

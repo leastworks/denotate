@@ -117,6 +117,7 @@ fn proofs(p: &GroundProgram, head: &GroundAtom, l: &Limits) -> Vec<GuardedSettle
         &mut 0,
         &mut Budget::new(l),
         &AdmissionReporter::new(None),
+        &mut false,
     )
     .unwrap()
 }
@@ -290,6 +291,7 @@ fn staging_exhaustion_and_interrupted_commit_install_nothing() {
                 &mut 0,
                 &mut Budget::new(&limited),
                 &report,
+                &mut false,
             )
             .unwrap();
         let events = events.borrow();
@@ -368,6 +370,7 @@ fn optional_caps_fall_back_and_global_work_failure_propagates() {
         },
     ] {
         let mut search = Search {
+            expressions: Expressions::default(),
             program: &p,
             component,
             summaries: &summaries,
@@ -406,6 +409,7 @@ fn optional_caps_fall_back_and_global_work_failure_propagates() {
         &mut 0,
         &mut Budget::new(&exhausted),
         &progress,
+        &mut false,
     );
     assert!(matches!(
         result,
@@ -560,6 +564,7 @@ fn scoring_cutoff_keeps_a_useful_partial_split() {
         let m = p.symbolic(&l).unwrap();
         let summaries = crate::test_support::rewrites::summaries(&p, &m, &l);
         let mut search = Search {
+            expressions: Expressions::default(),
             program: &p,
             component: p.component_for(&atom(cycle[0])).unwrap(),
             summaries: &summaries,

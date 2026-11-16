@@ -31,6 +31,7 @@ impl Runtime {
                     .cloned(),
             );
         }
+        let mut expressions = crate::settled_expression::ExpressionMap::default();
         let mut corpus = Corpus::new();
         let mut keys = SemanticKeys::default();
         let mut sorts = BTreeMap::new();
@@ -232,7 +233,8 @@ impl Runtime {
                 .map(|r| {
                     Ok(SettledReplacement {
                         occurrence: occurrences[&r.occurrence],
-                        expression: r.expression.map(&mut |a| Ok(atoms[a].clone()))?,
+                        expression: expressions
+                            .map(&r.expression, &mut |a| Ok(atoms[a].clone()))?,
                     })
                 })
                 .collect::<Result<_>>()?;

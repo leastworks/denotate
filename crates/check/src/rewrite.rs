@@ -785,6 +785,11 @@ impl GroundProgram {
                         if component.cycle.is_none() {
                             continue;
                         }
+                        let head = &component.atoms[0];
+                        if attempts.split_cutoff(head, budget, progress)? {
+                            continue;
+                        }
+                        let mut cutoff = false;
                         let proofs = self.structural_splits(
                             component,
                             &summaries,
@@ -792,7 +797,11 @@ impl GroundProgram {
                             &mut retained,
                             budget,
                             progress,
+                            &mut cutoff,
                         )?;
+                        if cutoff {
+                            attempts.remember_split_cutoff(head, &mut retained, budget)?;
+                        }
                         for proof in proofs {
                             batch.push(RewriteProof {
                                 id: RewriteProofId {

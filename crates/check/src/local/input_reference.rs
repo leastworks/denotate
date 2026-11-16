@@ -150,6 +150,7 @@ impl PreparedCheck<'_> {
             None
         };
         let input_order = self.local_variable_order(cone, context, completion_context.is_some())?;
+        let mut expressions = crate::settled_expression::ExpressionMap::default();
         Ok(LocalInput {
             input_order,
             completion_context,
@@ -174,7 +175,7 @@ impl PreparedCheck<'_> {
                 .map(|id| {
                     Ok((
                         self.key_view().instance(*id)?,
-                        self.key_view().committed(*id)?,
+                        self.key_view().committed_shared(*id, &mut expressions)?,
                     ))
                 })
                 .collect::<Result<_>>()?,

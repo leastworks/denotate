@@ -129,6 +129,11 @@ or part of a session's retained admission result.
 
 The early structural split pass uses the same executable expressions and rewrite
 identities, with a joint certificate shared across a component's replacements.
+Its expressions form an interned DAG shared across leaf values and replacements;
+local-query projection/rebinding preserve that sharing across rules. Pointer keys
+exist only during traversal of an immutable graph; cached identity and equality
+remain structural and semantic. Cutoff scheduling is invocation-local and uses
+the same conservative pre-commit reader invalidation as bound attempts.
 Each leaf evaluates the original component in topological order; dead producers
 and pruning reasons stay in evidence. All replacements stage and commit together.
 It reuses the checker’s pruning and SCC analysis, without a second evaluator in
@@ -216,7 +221,9 @@ limits, semantic keys, receipts and cached results. The checker emits scoped eve
 and BDD storage observations without OS access or additional semantic work.
 Driver-owned memory sampling lives in `check-session::profiling`; CLI/editor phase
 callbacks choose when to read it. The detailed profiler streams samples and events
-without retaining a growing event history. Process-wide readings are observations,
+without retaining a growing event history. The CLI owns bounded JSONL buffering,
+periodic/boundary flushes and signal-time flushing; the checker owns throttled
+intermediate progress and preserves terminal counts. Process-wide readings are observations,
 never cache inputs or resource-policy decisions.
 
 Checking progress also travels through operational limits. Synchronous, owned

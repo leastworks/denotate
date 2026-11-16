@@ -300,3 +300,26 @@ fn guarded_edits_agree(base: String, edited: String, limits: Limits) {
         assert_eq!(fresh, run(Some(&mut warm)));
     }
 }
+
+#[test]
+fn deep_joint_certificate_agrees_fresh_cold_warm_and_after_support_edits() {
+    let mut text = String::from("sort Choice;\n");
+    for i in 0..40 {
+        text += &format!("const c{i}:Choice; relation a{i}();\n");
+    }
+    text += "input selected(choice:Choice); input ready(); relation gate(); gate():-ready();\n";
+    for i in 0..40 {
+        text += &format!("a{i}():-selected(c{i}),gate(),!a{}();\n", (i + 1) % 40);
+    }
+    text += "relation bad(); bad():-a0(); assumption exclusive:at_most_one(selected,group_by:()); obligation clean:empty(bad); verification checks{assumptions:[exclusive];obligations:[clean];}";
+    let edited = text.replace("gate():-ready();", "gate():-!ready();");
+    guarded_edits_agree(
+        text,
+        edited,
+        Limits {
+            max_structural_split_depth: 128,
+            max_structural_split_leaves: 128,
+            ..Limits::default()
+        },
+    );
+}

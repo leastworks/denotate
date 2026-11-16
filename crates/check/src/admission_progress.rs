@@ -53,6 +53,9 @@ impl AdmissionPhase {
 /// Bounded case-search observations, never proof evidence or cache inputs.
 #[derive(Debug, Clone, Default)]
 pub struct GuardedSplitProgress {
+    pub expression_nodes: Option<usize>,
+    pub evaluated_leaves: usize,
+    pub cutoff_stage: Option<&'static str>,
     pub search_work: Option<usize>,
     pub search_limit: Option<usize>,
     pub depth_limit: Option<usize>,
@@ -351,7 +354,7 @@ impl<'a> AdmissionReporter<'a> {
                 "ranked"
             };
         }
-        self.emit(program, true);
+        self.emit(program, position.is_some());
     }
     pub fn guarded_prepared(
         &self,
@@ -380,7 +383,7 @@ impl<'a> AdmissionReporter<'a> {
             }
         }
         if state != "iterating" {
-            self.emit(program, true);
+            self.emit(program, matches!(state, "skipped" | "failed"));
         }
     }
     pub fn guarded_split(&self, program: &GroundProgram, stats: &GuardedSplitProgress) {
@@ -390,7 +393,11 @@ impl<'a> AdmissionReporter<'a> {
         if let Some(g) = &mut self.state.borrow_mut().progress.guarded {
             g.splits = Some(stats.clone());
         }
-        self.emit(program, true);
+        self.emit(
+            program,
+            matches!(stats.state, "split" | "certified" | "negative" | "fallback")
+                || stats.state.contains("cutoff"),
+        );
     }
     pub fn structural_split(
         &self,
@@ -406,7 +413,21 @@ impl<'a> AdmissionReporter<'a> {
             s.progress.structural_split = Some(stats.clone());
             s.progress.split_fallback = fallback;
         }
-        self.emit(program, true);
+        self.emit(
+            program,
+            fallback.is_some()
+                || stats.state.contains("cutoff")
+                || matches!(
+                    stats.state,
+                    "split"
+                        | "certified"
+                        | "negative"
+                        | "fallback"
+                        | "unresolved-external"
+                        | "disabled"
+                        | "staging"
+                ),
+        );
     }
     pub fn guarded_end(
         &self,
@@ -601,7 +622,10 @@ impl<'a> AdmissionReporter<'a> {
         s.current = None;
         s.current_rule = Some(rule);
         drop(s);
-        self.emit(program, changed);
+        self.emit(
+            program,
+            stage == "guarded-preprocessing" || (changed && !stage.starts_with("guarded-")),
+        );
     }
     pub fn iteration(&self, program: &GroundProgram, iteration: usize) {
         if !self.enabled() {
@@ -782,6 +806,34 @@ mod tests {
         );
         events.into_inner()
     }
+    #[test]
+    fn split_updates_are_throttled_but_outcomes_and_totals_are_immediate() {
+        let p = program();
+        let events = RefCell::new(Vec::new());
+        let observer = |e: &AdmissionProgress| events.borrow_mut().push(e.clone());
+        let report = AdmissionReporter::new(Some(&observer));
+        report.work(&p, "structural-split", Some(p.components[0].id), 0, true);
+        let mut stats = GuardedSplitProgress::default();
+        for state in ["scoring", "evaluating", "scoring", "combining"] {
+            // Fix the throttle clock directly, with no timing assertion.
+            report.state.borrow_mut().last = Some(Instant::now());
+            stats.state = state;
+            stats.candidates_scored += 1;
+            report.structural_split(&p, &stats, None);
+        }
+        assert_eq!(events.borrow().len(), 1);
+        stats.state = "certificate-cutoff";
+        stats.cutoffs = 1;
+        report.structural_split(&p, &stats, None);
+        assert_eq!(events.borrow().len(), 2);
+        stats.state = "negative";
+        report.structural_split(&p, &stats, None);
+        let last = events.borrow();
+        let last = last.last().unwrap().structural_split.as_ref().unwrap();
+        assert_eq!(last.candidates_scored, 4);
+        assert_eq!(last.cutoffs, 1);
+    }
+
     #[test]
     fn admission_progress_describes_committed_rounds_without_changing_work() {
         let events = compare(&program(), &Limits::default());

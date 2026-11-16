@@ -431,9 +431,18 @@ order. Score by `(max branch cyclic atoms, sum)` with strict improvement. A perf
 score stops early; exhausting scoring keeps the best useful split already found.
 Fixed conditions consume no split or scoring allowance. The older candidate-relative
 case search keeps its separate policy above.
-Per-value and per-edge expressions use the **1,024-node/depth-64** caps; leaf/tree
-expressions share the **8,192-node** certificate cap. Conditions, traversal, graph
-storage, original sources, pruning evidence and replacement staging are charged.
+Joint expressions are interned across all leaf values and edge replacements. The
+single-premise **1,024-node/depth-64/8,192-certificate-node** caps do not apply to
+this path. Work and condition storage charge construction, child references,
+interning metadata, traversal, original sources, pruning evidence and staging.
+Additional safety caps are **262,144 distinct expression nodes**, **expression
+depth 256** and **search depth 256** (the effective depth is the smaller of this
+and the configured depth). These are optional cutoffs, not semantic limits.
+Projection and owned-query reconstruction preserve sharing across rules; equality,
+hashing and dependency enumeration visit shared structure without expanding it.
+Expression evaluation remains bounded by its certified depth and charged work.
+Default expression display stays at 32 visits; requested full expression display
+has an 8,192-visit safety bound and marks omitted text with an ellipsis.
 Partial search/staging results are released. Original component evidence is shared
 and charged once per atomic batch; per-occurrence expressions and direct evidence
 remain charged separately. Direct producers are indexed once; shared certificate
@@ -445,8 +454,12 @@ A completed partition installs all its internal premise replacements together.
 A local cap, BDD/storage failure or live unresolved external premise leaves the
 ordinary pipeline available and adds no semantic inconclusive finding. Work is
 not refunded; global work, deadline and cancellation failures propagate normally.
-No failed-component or branch cache is added. Current component, scores, branch
-sizes, evaluation, staging, certification and immediate optional fallback reasons
+Cutoff attempts are remembered within this admission only, by a stable component
+atom. The existing pre-commit reader closure invalidates them after changes to the
+component or supporting providers/settled conditions, including upstream rewrites.
+Unrelated commits keep the cutoff. No branch cache or retained session cutoff is
+added, and skipping is scheduling only, never a semantic result.
+Current component, scores, branch sizes, evaluation, staging, certification and immediate optional fallback reasons
 appear under `structuralSplit` in progress. Default warnings name the shared proof
 and replacement; full evidence expands branch evaluation and deadness reasons.
 Warning inventories can change because this pass runs before earlier proof methods.
@@ -812,6 +825,17 @@ periodic samples, lower bounds on true phase peaks. The `peak*` fields remain OS
 lifetime high waters. Nested spans overlap: their durations and peak sizes must not
 be summed. An `end` event means the scope exited, including on failure; the CLI
 outcome determines success. Write failures in the profile stream are best-effort.
+
+The CLI buffers JSONL in 64 KiB, flushing every 256 records or every 250 ms
+(including idle periods), at phase/span boundaries, and on return or unwinding.
+On Unix, SIGINT/SIGTERM request a flush from the writer thread, then restore and
+re-raise the signal; the signal handler performs no IO or locking. SIGKILL cannot
+flush: up to 256 pending/in-flight records may be lost, and recovery ignores a
+partial final line. Flush intervals depend on OS scheduling and successful IO;
+this is bounded buffering, not durable storage. Admission ranking and intermediate
+split updates use the existing 250 ms delivery throttle. Attempt starts/ends,
+chosen splits, cutoffs, failures and final summaries remain immediate; counts are
+updated even when an intermediate event is suppressed.
 
 `peakAccountedConditionNodes` is the maximum accepted condition-storage accounting
 observed within a span, excluding rejected demands. It is a peak of the checker's

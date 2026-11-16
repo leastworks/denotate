@@ -291,16 +291,23 @@ with the same meanings as case-search fields below. Nullable `candidatesAvailabl
 `nodeCandidatesScored`, `scoringWork` and `scoringLimit` describe the current node;
 `candidatesScored` remains cumulative over the component search. `searchLimit`,
 `depthLimit` and `leafLimit` report effective whole-component allowances;
-`searchWork` reports charged work so far. The selected
+`searchWork` reports charged work so far. `expressionNodes` is the number of
+interned expression nodes constructed during this attempt; `evaluatedLeaves`
+counts completed acyclic leaf evaluations (unlike `leaves`, which counts created
+branches). Nullable `cutoffStage` identifies evaluation, combination or staging
+when an optional resource failure occurs. The selected
 branch sizes give its score `(max, sum)`. A scoring cutoff can be followed by
 `split`: the best improving candidate remains useful. Here the branch graph is the
 original whole component, with no relaxed reader. States include `scoring`,
-`evaluating`, `split`, `staging`, `certified`, `unresolved-external`, `negative`,
+`evaluating`, `combining`, `split`, `staging`, `certified`, `unresolved-external`, `negative`,
 `fallback`, `disabled` and the scoring/depth/leaf/expression/certificate cutoffs. `fallback`
 immediately includes `{phase, resource, message}` in its `fallback` field and
 continues ordinary admission; it is not a semantic inconclusive result. Attempt
 counts use kind `structural-split`. The field is null outside this stage. These
 fields are shared by CLI and editor progress; no finding identity changes.
+Intermediate ranking/branch updates are delivered at most once per 250 ms.
+Attempt boundaries, chosen splits, cutoffs, failures and terminal summaries remain
+immediate; throttling never drops counts from the final summaries.
 
 During bounded case search, `guarded.splits` is an object with cumulative
 `candidatesScored`, `fixedCandidates`, `cutoffs`, current `depth`, `maxDepth` reached,
