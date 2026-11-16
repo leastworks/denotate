@@ -541,6 +541,18 @@ The file intentionally retains program names and is not an anonymized export.
   graph, marker and logical receipt are reusable together at the same limits;
   cancellation/deadlines remain operational aborts and are not reused.
 
+- **An unevaluable symbolic atom remains unknown.** A per-operation BDD node/task
+  or condition-storage failure while evaluating one head no longer ends admission.
+  The head and readers that need it are inconclusive; independent conditions keep
+  evaluating. False conjunctions and true alternatives can decide readers without
+  the unknown. In positive recursive components evaluation restarts from bottom
+  with failed heads opaque, so earlier least-fixed-point approximations cannot
+  escape as exact answers. Consumed work is never refunded. Shared context setup,
+  global work, deadlines and cancellation keep their existing boundaries. Unknown
+  results retain the originating atom and resource; session artifacts use semantic
+  keys and invalidate with their producer inputs and logical limits. Reader-specific
+  guarded evaluation and partial symbolic bounds are deferred.
+
 - **An expensive admission proof does not stop independent proofs.** A per-operation
   BDD task or result-node failure inside coverage, a removal check, component bounds
   or a discharge check skips that attempt. Partial batches remain sound: each proof
@@ -553,7 +565,7 @@ The file intentionally retains program names and is not an anonymized export.
   Guarded certificate retention also recovers at its existing attempt boundary.
   Limits are unchanged; successful certificates, shared values and cache entries
   still count against them. Shared retained-storage failures, global work,
-  deadlines, cancellation and failures in shared evaluation/summaries stop the current phase and discard the pending batch;
+  deadlines, cancellation and failures in shared context setup/summaries stop the current phase and discard the pending batch;
   downstream exhaustion is recorded separately as above.
   Failed preflights consume their task allowance plus one stopping step; a preflight
   constrained by remaining work (including a tie with the task cap) reports global

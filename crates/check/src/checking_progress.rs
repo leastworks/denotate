@@ -9,6 +9,7 @@ use std::{
 
 #[derive(Debug, Clone)]
 pub enum CheckingTarget {
+    Atom(GroundAtom),
     Obligation(ObligationId),
     Notice(NoticeId),
     Component(AdmissionComponent),

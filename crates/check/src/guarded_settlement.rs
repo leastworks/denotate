@@ -1236,8 +1236,9 @@ impl GroundProgram {
                                 },
                                 v,
                             )),
-                            SymbolicFact::Inconclusive(c) => return Err(c.into()),
-                            SymbolicFact::Blocked(_) => marks.get(&premise.term.atom).cloned(),
+                            SymbolicFact::Blocked(_) | SymbolicFact::Inconclusive(_) => {
+                                marks.get(&premise.term.atom).cloned()
+                            }
                         };
                         if let Some((e, mut v)) = pair {
                             if negative {

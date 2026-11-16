@@ -12,6 +12,7 @@ mod producer_removals;
 mod rewrites;
 mod sparse;
 mod symbolic;
+mod symbolic_exhaustion;
 mod unchanged_attempts;
 
 mod incremental_inventory;

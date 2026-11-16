@@ -116,6 +116,7 @@ impl PreparedCheck<'_> {
             context,
             conditions: BTreeMap::new(),
             inconclusive: BTreeMap::new(),
+            unknown: BTreeMap::new(),
             metrics: SymbolicMetrics {
                 elapsed: Duration::ZERO,
                 work: 0,
@@ -216,6 +217,17 @@ impl PreparedCheck<'_> {
                 .record(QueryKey::Property(key.clone()), memo.answer_receipt.clone())
                 .map_err(CheckError::Receipts)?;
             let value = memo.evaluation.as_ref();
+            if let Some(value) = value {
+                for (a, u) in &value.unknown {
+                    presentation.unknown.insert(
+                        self.key_view().bind_atom(a)?,
+                        EvaluationUnknown {
+                            atom: self.key_view().bind_atom(&u.atom)?,
+                            reason: u.reason,
+                        },
+                    );
+                }
+            }
             let answer = memo.answer.as_ref();
             let condition = match answer {
                 Some(LocalAnswer::Group(LocalVerdict::Overlap(c))) => Some(c),
@@ -367,6 +379,17 @@ impl PreparedCheck<'_> {
                     })
                 }
             };
+            if let Some(value) = &memo.evaluation {
+                for (a, u) in &value.unknown {
+                    presentation.unknown.insert(
+                        self.key_view().bind_atom(a)?,
+                        EvaluationUnknown {
+                            atom: self.key_view().bind_atom(&u.atom)?,
+                            reason: u.reason,
+                        },
+                    );
+                }
+            }
             receipts
                 .record(
                     QueryKey::RegionEvaluation(key.clone()),
@@ -441,6 +464,7 @@ impl PreparedCheck<'_> {
             )?;
             match meaning {
                 Ok(meaning) => {
+                    verification.unknown_atoms.extend(meaning.unknown.clone());
                     let mut queries = QueryRun {
                         keys: self.semantic_keys,
                         ground: &self.program,

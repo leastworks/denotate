@@ -719,6 +719,7 @@ fn check_program(
                 let result = &report.checked.results.value;
                 incomplete |= result.unfinished.is_some()
                     || !result.incomplete.is_empty()
+                    || !result.unknown_atoms.is_empty()
                     || result.coverage.values().any(|c| !c.complete())
                     || result.emptiness.values().any(|e| !e.complete())
                     || result.groups.values().any(|r| {

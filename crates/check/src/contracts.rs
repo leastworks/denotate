@@ -224,6 +224,8 @@ impl SymbolicMeaning<'_> {
                     .find_map(|id| self.inconclusive.get(id))
                 {
                     GroupOutcome::Inconclusive(*cause)
+                } else if let Some(unknown) = tuples.iter().find_map(|a| self.unknown.get(*a)) {
+                    GroupOutcome::Inconclusive(unknown.reason)
                 } else if !cone.blocked_by.is_empty() {
                     self.program
                         .admission_limit()

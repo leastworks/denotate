@@ -9,6 +9,7 @@ mod producer_removals;
 mod query_inputs;
 mod rewrites;
 mod symbolic;
+mod symbolic_exhaustion;
 mod test_dsl;
 mod verifications;
 mod sparse {

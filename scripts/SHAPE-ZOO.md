@@ -57,6 +57,7 @@ enforced work share; an individual expensive attempt can still consume global wo
 | --- | --- | --- | --- |
 | fan-in-fixed | n fixed sources of one head | n+2 / 2n+1 | fixed folding, present-tuple failure |
 | fan-in-input | n independent inputs to one head | n+2 / n+1 | symbolic disjunction, replayed failure |
+| symbolic-exhaustion | n input producers, a dependent negative cycle and an independent guarded cycle | n+7 / n+5 | atom-local exhaustion; independent admission and checking continue |
 | negative-guarded | n independent mutually exclusive even cycles | 3n / 2n | discharge admits cycles |
 | negative-unresolved | n input-free ambiguous even cycles | 2n / 2n | cycles survive folding and admission |
 | certification | n even cycles feeding one emptiness target | 2n+1 / 2n+1 | blocked target, observation certification |

@@ -128,6 +128,7 @@ pub struct AdmissionProgress {
     /// Present only on the immediate, recoverable failure event.
     pub skipped: Option<AdmissionSkip>,
     pub failure: Option<Inconclusive>,
+    pub symbolic_unknown: Option<EvaluationUnknown<GroundAtom>>,
     pub attempts: BTreeMap<AdmissionAttemptKind, AdmissionAttempts>,
     pub guarded: Option<GuardedAttempt>,
     pub structural_split: Option<GuardedSplitProgress>,
@@ -168,6 +169,7 @@ impl<'a> AdmissionReporter<'a> {
             state: RefCell::new(State {
                 progress: AdmissionProgress {
                     phase: AdmissionPhase::Relevant,
+                    symbolic_unknown: None,
                     round: 0,
                     stage: "starting",
                     unresolved_components: 0,
@@ -653,6 +655,18 @@ impl<'a> AdmissionReporter<'a> {
         let mut s = self.state.borrow_mut();
         s.progress.skipped = None;
         s.progress.failure = None;
+    }
+    pub fn symbolic_unknown(
+        &self,
+        program: &GroundProgram,
+        unknown: &EvaluationUnknown<GroundAtom>,
+    ) {
+        if !self.enabled() {
+            return;
+        }
+        self.state.borrow_mut().progress.symbolic_unknown = Some(unknown.clone());
+        self.emit(program, true);
+        self.state.borrow_mut().progress.symbolic_unknown = None;
     }
     fn emit(&self, program: &GroundProgram, force: bool) {
         let Some(observer) = self.observer else {

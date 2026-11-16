@@ -479,6 +479,14 @@ During checking, `detail.checking` describes the current operation:
 not proved. `failure` is null or the shared phase/resource/limit/demand explanation.
 `target` is null for setup, an `obligation` or `notice` with name/location, or a
 `component` with `index`, `atoms`, `ruleInstances`, `atom` and optional `location`.
+An atom-local symbolic exhaustion uses `{"kind":"atom","atom":"qualified_tuple(...)","name":"qualified_tuple(...)"}`
+and `continues: true`: that atom remains unknown while independent work continues.
+During admission the same immediate notification is `admission.unknownAtom`, with
+`atom` (display spelling) and `reason` (the shared exhaustion explanation), cleared
+after that event. It also uses the existing recoverable-skip layout:
+`skipped: "symbolic-evaluation"`, `skipTarget.head` and `failure`. This keeps the
+atom and reason visible in existing editor clients; it does not stop admission or
+increment the count of skipped proof attempts.
 Targets inside a private cache runtime retain the caller's source-bound identity.
 Stages include `dependency-index`, `input-context`, `query-input`,
 `local-symbolic-evaluation`, `symbolic-evaluation`, `uniqueness`, `emptiness`,
@@ -497,6 +505,15 @@ at enclosing boundaries. These events neither publish tentative findings nor
 change diagnostic identity, verdicts, limits or receipts. They provide no heartbeat
 inside one BDD call. All events retain the verification metadata and stale-ticket
 filtering described above.
+
+When symbolic conditions are unknown, the status summary adds `unknownAtoms`:
+entries contain `atom`, `causeAtom` (both the existing structured atom identity)
+and `reason` (phase/resource and available limit/demand fields). The list includes
+readers as well as the originally exhausted head; it is absent when empty.
+Dependent obligation findings retain their existing identities and inconclusive
+classification, with notes naming the originating atom and resource. Notes show
+at most eight distinct causes and an omitted count. No partial condition is used
+as a proof or counterexample.
 
 The VS Code status item shows a spinner and counts while work is pending, including
 when a different language's editor is active. Its tooltip identifies the active

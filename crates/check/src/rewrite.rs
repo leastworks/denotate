@@ -666,7 +666,13 @@ impl GroundProgram {
             let meaning = {
                 let _timer = progress.time("symbolic");
                 let mut stage = profile.span("admission-symbolic", Some(*round));
-                let observe = |id| progress.work(self, "symbolic", Some(id), 0, false);
+                let observe = |id, unknown: Option<&EvaluationUnknown<GroundAtom>>| {
+                    if let Some(unknown) = unknown {
+                        progress.symbolic_unknown(self, unknown);
+                    } else {
+                        progress.work(self, "symbolic", Some(id), 0, false);
+                    }
+                };
                 let meaning = self.symbolic_for_admission(
                     budget,
                     progress.enabled().then_some(&observe),
@@ -706,10 +712,7 @@ impl GroundProgram {
                 for literal in &rule.body {
                     budget.tick("rewrite summaries")?;
                     match meaning.fact(&literal.term.atom)? {
-                        SymbolicFact::Blocked(_) => exact = false,
-                        SymbolicFact::Inconclusive(cause) => {
-                            return Err(CheckError::from(cause));
-                        }
+                        SymbolicFact::Blocked(_) | SymbolicFact::Inconclusive(_) => exact = false,
                         SymbolicFact::Settled(mut value) => {
                             if literal.polarity == Polarity::Negative {
                                 value = ctx.complement(&value, budget)?;
@@ -725,8 +728,12 @@ impl GroundProgram {
                     }
                 }
                 for replacement in &rule.replacements {
-                    let value = meaning.settled_expression(&replacement.expression, budget)?;
-                    condition = ctx.apply(&condition, &value, and, budget)?;
+                    match meaning.partial_expression(&replacement.expression, budget)? {
+                        crate::symbolic::PartialCondition::Known(value) => {
+                            condition = ctx.apply(&condition, &value, and, budget)?
+                        }
+                        crate::symbolic::PartialCondition::Unknown(_) => exact = false,
+                    }
                 }
                 retained = crate::symbolic::retain(retained, 0, condition.node_count(), budget)?;
                 if !exact && scope.targets.contains(&rule.id) {

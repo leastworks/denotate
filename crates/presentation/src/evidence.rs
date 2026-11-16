@@ -328,6 +328,12 @@ pub fn interpret<'a>(
                     cycle_rules.extend(region.rules.iter().map(|r| r.source));
                 }
                 notes.push("No proof or counterexample is available for this group.".into());
+                notes.extend(unknown_notes(
+                    corpus,
+                    names,
+                    report,
+                    group.group.tuples.iter(),
+                )?);
                 match &group.outcome {
                     VerifiedOutcome::Inconclusive(c) => (
                         Kind::Inconclusive,
@@ -394,7 +400,19 @@ pub fn interpret<'a>(
             occurrence: (*id).into(),
             role: Role::Obligation,
         }];
-        let notes = Vec::new();
+        let notes = if emptiness.inconclusive.is_some() {
+            unknown_notes(
+                corpus,
+                names,
+                report,
+                report
+                    .unknown_atoms
+                    .keys()
+                    .filter(|a| a.relation == obligation.requirement.relation()),
+            )?
+        } else {
+            vec![]
+        };
         let mut placement_groups = Vec::new();
         for example in &emptiness.examples {
             let mut group = PlacementGroup {
@@ -515,7 +533,19 @@ pub fn interpret<'a>(
             identity: Identity::Coverage(*id),
             kind,
             message,
-            notes: vec![],
+            notes: if coverage.inconclusive.is_some() {
+                unknown_notes(
+                    corpus,
+                    names,
+                    report,
+                    report
+                        .unknown_atoms
+                        .keys()
+                        .filter(|a| a.relation == obligation.requirement.relation()),
+                )?
+            } else {
+                vec![]
+            },
             contributions,
             placement_groups,
             cycle_rules: vec![],
@@ -638,6 +668,27 @@ pub fn generic_details(
         ));
     }
     Ok(details)
+}
+
+fn unknown_notes<'a>(
+    corpus: &Corpus,
+    names: &dyn Fn(OccurrenceId) -> String,
+    report: &Verification<'_>,
+    roots: impl IntoIterator<Item = &'a GroundAtom>,
+) -> Result<Vec<String>> {
+    let mut notes = BTreeSet::new();
+    for root in roots {
+        if let Some(u) = report.unknown_atoms.get(root) {
+            notes.insert(format!("Exact condition for {} could not be evaluated: {}. Dependent facts remain unknown.",
+                atom_name(corpus, names, &u.atom)?, exhaustion_text(u.reason.phase, u.reason.resource, u.reason.details)));
+        }
+    }
+    let omitted = notes.len().saturating_sub(8);
+    let mut notes: Vec<_> = notes.into_iter().take(8).collect();
+    if omitted > 0 {
+        notes.push(format!("{omitted} more unevaluated atom conditions."));
+    }
+    Ok(notes)
 }
 
 pub(crate) fn atom_name(

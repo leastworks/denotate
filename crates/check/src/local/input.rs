@@ -55,6 +55,7 @@ pub struct LocalEvaluation {
     pub permitted: OwnedCondition,
     pub conditions: BTreeMap<AtomKey, OwnedCondition>,
     pub incomplete: BTreeMap<ComponentKey, Inconclusive>,
+    pub unknown: BTreeMap<AtomKey, EvaluationUnknown<AtomKey>>,
 }
 /// Overlap is a candidate condition, not a certified Counterexample. Replay stays fresh.
 #[derive(Debug, Clone, PartialEq, Eq)]

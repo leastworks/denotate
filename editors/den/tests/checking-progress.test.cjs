@@ -163,3 +163,15 @@ test('admission proof skips continue and survive a reused completion count', () 
   assert.match(view.details(p), /reused.*3 proof attempts skipped/);
   assert.doesNotMatch(view.details(p), /continuing admission|stopped:/);
 });
+
+test('atom-local symbolic exhaustion uses existing recovery and named-target layouts', () => {
+  const admission = { round: 1, stage: 'symbolic', unresolvedComponents: 1, blockedAtoms: 1,
+    removedRules: 0, dischargedNegations: 0, skippedAttempts: 0,
+    skipped: 'symbolic-evaluation', skipTarget: { head: 'wide()' }, failure: 'BDD operation: BDD nodes limit 5' };
+  const p = progress({ checking: 1 }, { active: [{ label: 'app', detail: { phase: 'admission', admission } }] });
+  assert.match(view.details(p), /skipped symbolic-evaluation for wide\(\).*BDD nodes.*continuing admission/);
+  assert.doesNotMatch(view.details(p), /stopped:|proof attempts skipped/);
+  p.active[0].detail = { phase: 'checking', checking: { stage: 'symbolic-evaluation', state: 'exhausted',
+    target: { kind: 'atom', name: 'wide()', atom: 'wide()' }, failure: 'BDD operation: BDD nodes limit 5', continues: true } };
+  assert.match(view.details(p), /atom wide\(\).*BDD nodes.*continuing other checking work/);
+});

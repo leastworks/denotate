@@ -197,6 +197,7 @@ pub fn summary(results: &ScopedResults) -> Value {
     let complete = !results.inconsistent_assumptions
         && results.unfinished.is_none()
         && results.incomplete.is_empty()
+        && results.unknown_atoms.is_empty()
         && results.emptiness.values().all(EmptinessResult::proved)
         && results.coverage.values().all(CoverageResult::proved)
         && results.regions.is_empty()
@@ -214,6 +215,12 @@ pub fn summary(results: &ScopedResults) -> Value {
         "unfinished":results.unfinished.as_ref().map(|r|crate::exhaustion_data(&r.phase, &r.resource, r.details)),
         "incomplete":results.incomplete.iter().map(|(k,r)|crate::with_limit_details(json!({"region":k.0.iter().map(atom_data).collect::<Vec<_>>(),"phase":r.phase,"resource":r.resource}), r.details)).collect::<Vec<_>>()
     });
+    if !results.unknown_atoms.is_empty() {
+        summary["unknownAtoms"] = json!(results.unknown_atoms.iter().map(|(a,u)| json!({
+            "atom":atom_data(a), "causeAtom":atom_data(&u.atom),
+            "reason":crate::exhaustion_data(u.reason.phase, u.reason.resource, u.reason.details)
+        })).collect::<Vec<_>>());
+    }
     if !results.context.notices.is_empty() {
         summary["notices"] = json!(results.context.notices.iter().map(|key| {
             let result = results.notices.get(key).map(notice_result_data).unwrap_or_else(|| json!({"kind":"condition-variability","state":"unknown","reason":{"kind":if results.inconsistent_assumptions {"inconsistent-assumptions"} else {"not-checked"}}}));

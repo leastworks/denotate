@@ -91,6 +91,24 @@ test('BDD work sums while accepted condition storage takes a peak',()=>{
   assert.equal(measurements(records,[]).admission.peakAccountedConditionNodes,null);
 });
 
+test('symbolic exhaustion preserves independent admission and names the unknown atom',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-zoo-unknown-'));
+  try {
+    const out=path.join(root,'run');
+    const result=run({out,binary:'target/debug/examples/bench_schema',family:['symbolic-exhaustion'],sizes:[8],repeat:1,limits:['--max-bdd-nodes','5']});
+    const r=result.families['symbolic-exhaustion'].runs[0];
+    assert.equal(r.checkerFinished,true);
+    const outcome=r.outcomes[0];
+    const obligation=e=>e.identity.obligation.at(-1);
+    assert.equal(outcome.emptiness.find(e=>obligation(e)==='no_independent').outcome,'proved');
+    assert.equal(outcome.emptiness.find(e=>obligation(e)==='no_bad').outcome,'inconclusive');
+    assert.ok(outcome.unknownAtoms.some(u=>u.causeAtom.relation.named.at(-1)==='wide' && u.reason.resource==='BDD nodes'));
+    const events=fs.readFileSync(path.join(out,'symbolic-exhaustion-8-0','memory.jsonl'),'utf8').trim().split('\n').map(JSON.parse);
+    assert.ok(events.some(e=>e.detail?.admission?.unknownAtom?.atom?.endsWith('wide()')));
+    assert.ok(events.some(e=>e.detail?.admission?.stage==='committed'||e.detail?.admission?.stage==='structural-committed'));
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
 test('SAT probes preserve checker outcomes and survive report recovery',()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-sat-probe-'));
   try {

@@ -659,6 +659,7 @@ impl CheckRequest {
             group_domains: BTreeMap::new(),
             regions: BTreeMap::new(),
             incomplete: BTreeMap::new(),
+            unknown_atoms: BTreeMap::new(),
             unfinished: Some(ResourceReason::from(reason)),
             admission_skips: vec![],
         }
@@ -850,6 +851,7 @@ pub struct ScopedResults {
     pub group_domains: BTreeMap<ObligationKey, KeyedGroups>,
     pub regions: BTreeMap<ComponentKey, RegionResult>,
     pub incomplete: BTreeMap<ComponentKey, ResourceReason>,
+    pub unknown_atoms: BTreeMap<AtomKey, EvaluationUnknown<AtomKey>>,
     /// Exhaustion before enumeration. Does not erase earlier completed scopes.
     pub unfinished: Option<ResourceReason>,
 }
@@ -1363,6 +1365,19 @@ impl PreparedCheck<'_> {
             ))
         });
         let mut out = ScopedResults {
+            unknown_atoms: report
+                .unknown_atoms
+                .iter()
+                .map(|(a, u)| {
+                    Ok((
+                        atom(a)?,
+                        EvaluationUnknown {
+                            atom: atom(&u.atom)?,
+                            reason: u.reason,
+                        },
+                    ))
+                })
+                .collect::<Result<_>>()?,
             downstream_incomplete: self.program.downstream_incomplete().map(Into::into),
             admission_skips,
             inconsistent_assumptions: !self.program.assumptions_consistent(),

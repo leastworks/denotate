@@ -243,12 +243,15 @@ fn hard_region(c: &mut Corpus) -> RelationId {
 fn cycle_first_unrelated_hard_bdd_does_not_precede_cycle_proofs_at_default_limits() {
     let mut c = Corpus::new();
     cycle(&mut c);
-    hard_region(&mut c);
+    let hard = hard_region(&mut c);
     let limits = Limits::default();
     let raw = GroundProgram::prepare(&c, &Domains::new(), &limits).unwrap();
     assert!(matches!(
-        raw.symbolic(&limits),
-        Err(CheckError::LimitExceeded { .. })
+        raw.symbolic(&limits)
+            .unwrap()
+            .fact(&GroundAtom::new(hard, []))
+            .unwrap(),
+        SymbolicFact::Inconclusive(_)
     ));
     let (p, _) = admit(&raw, &limits);
     assert!(p.is_admitted());

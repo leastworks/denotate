@@ -92,6 +92,7 @@ pub struct Verification<'p> {
     pub property_metrics: SymbolicMetrics,
     pub finding_metrics: FindingMetrics,
     pub incomplete_evaluation: BTreeMap<ComponentId, Inconclusive>,
+    pub unknown_atoms: BTreeMap<GroundAtom, EvaluationUnknown<GroundAtom>>,
 }
 impl<'p> Verification<'p> {
     pub(crate) fn inconsistent(program: &'p GroundProgram) -> Self {
@@ -108,6 +109,7 @@ impl<'p> Verification<'p> {
             },
             finding_metrics: FindingMetrics::default(),
             incomplete_evaluation: BTreeMap::new(),
+            unknown_atoms: BTreeMap::new(),
         }
     }
     pub fn program(&self) -> &GroundProgram {
@@ -122,6 +124,7 @@ impl<'p> Verification<'p> {
         self.program.assumptions_consistent()
             && self.whole_program_admitted()
             && self.incomplete_evaluation.is_empty()
+            && self.unknown_atoms.is_empty()
             && self.emptiness.values().all(EmptinessReport::proved)
             && self.coverage.values().all(CoverageReport::proved)
             && self
@@ -515,6 +518,7 @@ impl<'p> SymbolicMeaning<'p> {
             property_metrics: report.metrics,
             finding_metrics: metrics,
             incomplete_evaluation: self.inconclusive.clone(),
+            unknown_atoms: self.unknown.clone(),
         })
     }
 }

@@ -210,13 +210,18 @@ impl<'a> AdmissionDetails<'a> {
             "prerequisiteMs": event.prerequisites.iter().map(|(k, d)| ((*k).to_string(), json!(d.as_secs_f64()*1000.))).collect::<serde_json::Map<_, _>>(),
             "guarded": guarded,
             "structuralSplit": structural_split,
-            "skipped": event.skipped.as_ref().map(|s| s.kind.label()),
-            "skipTarget": event.skipped.as_ref().map(|s| {
+            "skipped": event.skipped.as_ref().map(|s| s.kind.label()).or_else(|| event.symbolic_unknown.as_ref().map(|_| "symbolic-evaluation")),
+            "unknownAtom": event.symbolic_unknown.as_ref().map(|u| {
                 let names = self.names.get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)));
-                json!({"head":atom_text(&s.head, &**names)})
+                json!({"atom":atom_text(&u.atom, &**names),"reason":denotate_presentation::exhaustion_text(u.reason.phase, u.reason.resource, u.reason.details)})
+            }),
+            "skipTarget": event.skipped.as_ref().map(|s| &s.head).or_else(|| event.symbolic_unknown.as_ref().map(|u| &u.atom)).map(|head| {
+                let names = self.names.get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)));
+                json!({"head":atom_text(head, &**names)})
             }),
             "failure": event
                 .failure
+                .or_else(|| event.symbolic_unknown.as_ref().map(|u| u.reason))
                 .map(|r| denotate_presentation::exhaustion_text(r.phase, r.resource, r.details)),
         });
         detail["admission"]["lookaheadWork"] = json!(event.lookahead_work);
@@ -464,7 +469,15 @@ pub fn admission_text(a: &Value) -> String {
             text.push_str(&format!("; bounds position {position}"));
         }
     }
-    if let Some(failure) = a["failure"].as_str() {
+    if let Some(atom) = a["unknownAtom"]["atom"].as_str() {
+        text.push_str(&format!(
+            "; exact condition for {atom} remains unknown: {}; continuing admission",
+            a["unknownAtom"]["reason"]
+                .as_str()
+                .unwrap_or("evaluation exhausted")
+        ));
+    }
+    if let Some(failure) = a["failure"].as_str().filter(|_| a["unknownAtom"].is_null()) {
         if let Some(kind) = a["skipped"].as_str() {
             text.push_str(&format!(
                 "; skipped {kind} for {}: {failure}; continuing admission",
@@ -557,6 +570,10 @@ impl AdmissionDetails<'_> {
         let context = context.clone();
         denotate_check::CheckingProgress::new(move |e| {
             let target = match e.target {
+                Some(denotate_check::CheckingTarget::Atom(a)) => {
+                    let name = atom_text(&a, &*names);
+                    Some(json!({"kind":"atom","atom":name,"name":name}))
+                }
                 Some(denotate_check::CheckingTarget::Obligation(id)) => {
                     declarations.get(&id.into()).map(
                         |v| json!({"kind":"obligation","name":v["name"],"location":v["location"]}),
@@ -619,6 +636,8 @@ pub fn checking_text(v: &Value) -> String {
             t["ruleInstances"],
             t["atom"].as_str().unwrap_or("?")
         ));
+    } else if let Some(atom) = t["atom"].as_str() {
+        text.push_str(&format!(": {atom}"));
     } else if let Some(name) = t["name"].as_str() {
         text.push_str(&format!(
             ": {} {name}",

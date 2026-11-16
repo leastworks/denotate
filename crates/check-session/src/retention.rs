@@ -339,8 +339,14 @@ fields!(LocalCompletionContext {
 fields!(LocalEvaluation {
     permitted,
     conditions,
-    incomplete
+    incomplete,
+    unknown
 });
+impl<A: Retained> Retained for EvaluationUnknown<A> {
+    fn heap(&self, p: &mut Payload) {
+        self.atom.heap(p);
+    }
+}
 impl Retained for OwnedCondition {
     fn heap(&self, p: &mut Payload) {
         slice(self.inputs(), p);

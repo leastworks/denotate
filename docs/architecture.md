@@ -64,6 +64,13 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
   while coverage and emptiness verdicts are recomputed. New cached stages must
   preserve cold/warm behavior and current-snapshot provenance.
 
+Symbolic evaluation records atom-local BDD/storage exhaustion separately from
+component-wide failures. Unknown conditions and their originating atom/resource
+travel with evaluated state; owned local queries project both atom identities to
+semantic keys. Presentation names these supplied causes rather than tracing
+dependencies again. Restarting an affected positive component prevents partial
+fixed-point conditions from being published as exact results.
+
 Restricted input domains follow the same boundaries: `Corpus` validates provider
 signatures and their static, stratified dependency cones; the checker evaluates them
 before seeding input atoms. Complete eligible tuple sets are explicit semantic-keyed

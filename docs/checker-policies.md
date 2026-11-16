@@ -703,11 +703,22 @@ operation charges are unchanged. Completion-equation preflights are unchanged.
 Temporary upper/guaranteed/guarded bounds, guarded-cone preprocessing and guarded
 certificate retention also recover from condition-node storage exhaustion,
 releasing their partial values. Escaping component-pass failures use the owned
-batch boundary described above. Neither recovery applies to shared evaluation or
+batch boundary described above. Neither recovery applies to shared context setup or
 transactional graph installation, nor raises the storage cap. Earlier global work remains charged, so a
 later unrestricted bound can still exhaust work before another guarded attempt.
 
-Failures in shared symbolic evaluation or summaries, total work limits and other
+Individual atom evaluation also recovers from per-operation BDD node/task and
+condition-storage exhaustion. The exhausted head becomes unknown for this
+snapshot. Its positive component restarts from bottom, releasing all partial
+conditions in that component and retaining the failed heads as opaque. Work is
+not refunded, including restart scans. A false conjunct or true alternative may
+still decide a reader; otherwise it becomes unknown too. This deliberately does
+not retain partial lower bounds or evaluate under individual readers' guards.
+Admission summaries omit unknown premises just as they omit blocked ones: they
+cannot become guarantees. New snapshots retry evaluation; owned local query
+results retain unknown atoms and their originating causes by semantic key.
+
+Failures in shared context setup or summaries, total work limits and other
 retained-storage limits stop the current phase, with the separate downstream marker described above.
 Deadlines and cancellation still abort the whole invocation. No pending batch
 is salvaged on these failures. Local skips allow independent proofs to commit.

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','guarded-hub','component-chain','schema-layered'];
+export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','guarded-hub','component-chain','symbolic-exhaustion','schema-layered'];
 export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1,hubVariant='pairs',hubTagValues=2}={}) {
   if (!['pairs','tagged'].includes(hubVariant)) throw Error('invalid hub variant');
   if (hubVariant==='pairs' && hubTagValues!==2) throw Error('tag values requires tagged hub variant');
@@ -19,6 +19,14 @@ export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,
       add(`result() :- source${i}();`);
     }
     add('bad() :- result();');
+  } else if (family==='symbolic-exhaustion') {
+    add('relation wide();');
+    for(let i=0;i<n;i++) add(`input source${i}(); wide() :- source${i}();`);
+    // Keep the wide provider in admission's cone; a separate guarded cycle
+    // must still settle when computing that provider's exact condition fails.
+    add('relation loop(); loop() :- wide(), !loop(); bad() :- !wide();');
+    add('input flag(); relation a(); relation b(); a() :- flag(), !b(); b() :- !flag(), !a();');
+    add('relation independent(); independent() :- a(), b(); obligation no_independent: empty(independent);');
   } else if (family.startsWith('negative') || family==='certification') {
     for (let i=0;i<n;i++) {
       add(`relation a${i}(); relation b${i}();`);
@@ -188,7 +196,7 @@ export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,
     add('relation seed(); seed(); relation a(); relation b(); a() :- !b(); b() :- !a();');
     for(let i=0;i<n;i++) add(`relation support${i}(); support${i}() :- ${i?`support${i-1}`:'seed'}(); relation result${i}(); result${i}() :- support${i}(); result${i}() :- a();`);
   } else throw Error('schema-layered uses the schema generator');
-  return s+`obligation no_bad: empty(bad); verification checks { assumptions: [${assumptions}]; obligations: [no_bad]; ${family==='guarded-hub'?'notices: [hazard_condition];':''} }\n`;
+  return s+`obligation no_bad: empty(bad); verification checks { assumptions: [${assumptions}]; obligations: [no_bad${family==='symbolic-exhaustion'?', no_independent':''}]; ${family==='guarded-hub'?'notices: [hazard_condition];':''} }\n`;
 }
 export function fit(points, threshold = 1.3) {
   const usable = points.filter(([x, y]) => Number.isFinite(x) && x > 0 && Number.isFinite(y) && y > 0);

@@ -388,6 +388,20 @@ impl Runtime {
         Ok(LocalEvaluation {
             permitted,
             conditions,
+            unknown: meaning
+                .unknown
+                .iter()
+                .map(|(a, u)| {
+                    Ok((
+                        AtomKey::from_atom(&self.keys, a).map_err(CheckError::Keys)?,
+                        EvaluationUnknown {
+                            atom: AtomKey::from_atom(&self.keys, &u.atom)
+                                .map_err(CheckError::Keys)?,
+                            reason: u.reason,
+                        },
+                    ))
+                })
+                .collect::<Result<_>>()?,
             incomplete: meaning
                 .inconclusive
                 .iter()
@@ -507,6 +521,19 @@ pub fn answer_owned_local(
             context,
             conditions,
             inconclusive: BTreeMap::new(),
+            unknown: value
+                .unknown
+                .iter()
+                .map(|(a, u)| {
+                    (
+                        rt.atoms[a].clone(),
+                        EvaluationUnknown {
+                            atom: rt.atoms[&u.atom].clone(),
+                            reason: u.reason,
+                        },
+                    )
+                })
+                .collect(),
             metrics: SymbolicMetrics {
                 elapsed: Duration::ZERO,
                 work: 0,
@@ -523,6 +550,9 @@ pub fn answer_owned_local(
                 budget.tick("property checks")?;
                 if let Some(c) = meaning.inconclusive.values().next() {
                     return Err(CheckError::from(*c));
+                }
+                if let Some(u) = input.roots.iter().find_map(|a| value.unknown.get(a)) {
+                    return Err(u.reason.into());
                 }
                 if !rt.cone.blocked_by.is_empty() {
                     return Ok(LocalAnswer::Group(match input.admission_limit {

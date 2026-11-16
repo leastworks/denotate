@@ -141,6 +141,15 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
 5. **Symbolic meaning.** `symbolic` computes a condition per fact over the input
    variables; `check_at_most_one` gives scoped group results: `Proved`,
    `Overlap(condition)`, `Unsupported` or `Inconclusive { phase, resource }`.
+   An individual atom's BDD task/node or retained-condition limit makes its exact
+   condition unknown, rather than ending admission or independent checking.
+   Unknown propagates through readers unless a false conjunct or true alternative
+   decides the expression. A positive recursive component restarts from bottom
+   after a head exhausts, treating that head as opaque; partial approximations
+   never become exact facts. `unknown_atoms()` and verification results retain
+   the originating atom and resource cause. Local session values use semantic keys
+   and retry after changed producers or limits. Shared context setup, total work,
+   deadlines and cancellation retain their existing failure boundaries.
 6. **Verification.** `verify_at_most_one` turns overlaps into `Counterexample`s only
    after concrete replay confirms at least two distinct tuples. Findings carry the
    complete observation, the grounded proof DAG and the replay scope (`WholeProgram`,
