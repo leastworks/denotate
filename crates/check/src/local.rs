@@ -115,6 +115,7 @@ impl PreparedCheck<'_> {
             program: &self.program,
             context,
             conditions: BTreeMap::new(),
+            released: BTreeSet::new(),
             inconclusive: BTreeMap::new(),
             unknown: BTreeMap::new(),
             metrics: SymbolicMetrics {

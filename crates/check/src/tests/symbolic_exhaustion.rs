@@ -30,7 +30,7 @@ fn admission_symbolic_exhaustion_is_local_to_the_atom_and_its_readers() {
         ..limits
     };
     let m = p
-        .symbolic_for_admission(&mut Budget::new(&low), None, &cone)
+        .symbolic_for_admission(&mut Budget::new(&low), None, &cone, &cone.facts, 0)
         .unwrap();
     for r in [wide, reader] {
         assert!(matches!(

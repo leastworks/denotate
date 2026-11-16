@@ -26,8 +26,15 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    (`relevant`), retaining their complete support. Then `downstream` handles
    still-blocked downstream removals and assumption-dependent input-negation
    warnings on settled heads, including programs with no cycles. Structural
-   worklists, symbolic evaluation and summaries are scoped to the current targets'
-   providers; input variables/W and transactional graph maintenance remain shared.
+   worklists and symbolic evaluation cover the current targets' providers; input
+   variables/W and transactional graph maintenance remain shared. Summaries retain
+   complete producer sets for target components and one-hop support used by cyclic
+   implied guards. Symbolic intermediates outside those readers are released after
+   their last consuming component completes; replacement-expression leaves count as
+   readers. Released conditions cannot silently read as false. Summary construction
+   is transactional per producer head: local BDD/storage failure discards the whole
+   group, skips every dependent component, and preserves independent attempts and
+   committed proofs. `summary-storage` records the cause and survives session reuse.
    Each round first performs structural truth/false propagation, dead-rule removal
    and bounded signed-body subsumption through single-producer positive chains.
    Removals target blocked regions; already settled rules supply truth/evidence.

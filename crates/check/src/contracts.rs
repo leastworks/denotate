@@ -236,8 +236,8 @@ impl SymbolicMeaning<'_> {
                         for right in &tuples[i + 1..] {
                             budget.tick("property checks")?;
                             let pair = self.context.apply(
-                                &self.known(left),
-                                &self.known(right),
+                                &self.known(left)?,
+                                &self.known(right)?,
                                 op_function::and,
                                 &mut budget,
                             )?;

@@ -206,7 +206,7 @@ Rewrite counts are cumulative committed counts, not proposed changes.
 `skippedAttempts` is the cumulative number of failed local proof attempts or component passes,
 including later retries. A recoverable failure immediately emits `skipped` as
 `producer-coverage`, `producer-removal`, `upper-bounds`, `guaranteed-bounds`,
-`bound-removal`, `negation-discharge`, `implied-guard`, `guarded-preprocessing`, `guarded-bounds`, `guarded-settlement` or `component-storage`,
+`bound-removal`, `negation-discharge`, `implied-guard`, `guarded-preprocessing`, `guarded-bounds`, `guarded-settlement`, `component-storage` or `summary-storage`,
 `skipTarget: {head: "p(a)"}`, and the ordinary formatted `failure`. Admission
 continues. Subsequent updates clear `skipped`, `skipTarget` and that local failure;
 `reused` includes the retained attempt count. A failure with `skipped: null` stops
@@ -219,8 +219,24 @@ survives completed-admission reuse and clears when changed dependencies require 
 retry. It is not an ordinary negative proof result. Existing attempt summaries
 include this kind as an enclosing component pass; its time includes nested proofs
 and must not be added to their times.
+`summary-storage` identifies a component whose complete producer-summary set could
+not be built. Each dependent component gets a skip; no partial producer group is
+used as coverage. Its actual BDD/storage phase and resource are retained, independent
+components continue, and completed-admission reuse carries the skip. Global work,
+deadlines and cancellation retain their existing boundaries.
 
-Stages are `starting`, `structural`, `structural-committed`, `symbolic`, `summaries`, `producer-removals`, `candidates`,
+With profiling enabled, symbolic/summary/candidate/commit boundary events may include
+`storage`. It contains `symbolic`, `summaries`, `committedProofs`
+and `optionalCaches`, each with `accountedNodes` and `retainedBdd` (`references`,
+`distinctArrays`, `nodes`, `nodeBytes`). `frontierMetadataNodes` counts summary
+membership bookkeeping; `keptConditions`, `releasedConditions` and `unknownAtoms`
+describe symbolic retention. Unknown atoms have no exact BDD. Actual arrays can be
+shared across pools, so pool sizes cannot be added. These are boundary snapshots;
+the profile's round-level `peakAccountedConditionNodes` remains the accepted
+accounting peak, not a physical peak. Ordinary progress leaves `storage` null.
+These observations are not cached or included in findings and do not change identity.
+
+Stages are `starting`, `structural`, `structural-committed`, `summary-frontier`, `symbolic`, `summaries`, `producer-removals`, `candidates`,
 `upper-bounds`, `guaranteed-bounds`, `bound-removals`, `implied-guard`, `guarded-preprocessing`, `guarded-bounds`, `guarded-settlement`, `guarded-cases`, `commit`, `committed`, `attempt-summary`, `complete`, `reused`, and
 `inconsistent-assumptions`.
 

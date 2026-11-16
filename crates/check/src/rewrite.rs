@@ -86,7 +86,7 @@ pub struct ProducerSummary {
     pub exact: bool,
 }
 impl ProducerSummary {
-    fn profile_conditions(&self) -> impl Iterator<Item = &Condition> {
+    pub(crate) fn profile_conditions(&self) -> impl Iterator<Item = &Condition> {
         std::iter::once(&self.condition).chain(self.settled.iter().map(|p| &p.condition))
     }
     pub(crate) fn nodes(&self) -> usize {
@@ -231,7 +231,13 @@ impl RewriteProof {
                     .chain(p.implied_guard.iter().flat_map(|g| g.summaries()))
             }))
     }
-    fn profile_conditions(&self) -> impl Iterator<Item = &Condition> {
+    pub(crate) fn profile_conditions(&self) -> impl Iterator<Item = &Condition> {
+        self.profile_conditions_with_certificate(true)
+    }
+    fn profile_conditions_with_certificate(
+        &self,
+        include: bool,
+    ) -> impl Iterator<Item = &Condition> {
         self.conditional()
             .into_iter()
             .flat_map(|p| {
@@ -251,24 +257,23 @@ impl RewriteProof {
                     }))
             })
             .chain(self.bound_removal().map(|p| &p.body_upper))
-            .chain(self.guarded_settlement().into_iter().flat_map(|p| {
+            .chain(self.guarded_settlement().into_iter().flat_map(move |p| {
                 p.implied_guard
                     .iter()
                     .flat_map(|g| g.summaries().flat_map(|s| s.profile_conditions()))
-                    .chain(p.certificate.domains())
-                    .chain(p.certificate.values())
-                    .chain(
-                        p.certificate
-                            .bounds()
-                            .flat_map(|b| b.conditions.values().chain(b.guarantees.values())),
-                    )
-                    .chain(
-                        p.certificate
-                            .summaries()
-                            .flat_map(ProducerSummary::profile_conditions),
-                    )
+                    .chain(include.then_some(&p.certificate).into_iter().flat_map(|c| {
+                        c.domains()
+                            .chain(c.values())
+                            .chain(
+                                c.bounds().flat_map(|b| {
+                                    b.conditions.values().chain(b.guarantees.values())
+                                }),
+                            )
+                            .chain(c.summaries().flat_map(ProducerSummary::profile_conditions))
+                    }))
             }))
     }
+
     fn nodes(&self) -> usize {
         if let Some(proof) = self.guarded_settlement() {
             return proof.nodes();
@@ -319,6 +324,9 @@ impl Rewrites {
 }
 
 impl GroundProgram {
+    pub(crate) fn rewrite_storage_nodes(&self) -> usize {
+        self.rewrites.nodes
+    }
     /// Private reconstructed query runtime: explicit owned discharge certificates.
     pub(crate) fn install_local_discharge(
         &mut self,
@@ -673,6 +681,11 @@ impl GroundProgram {
             if scope.targets.is_empty() {
                 return Ok(());
             }
+            progress.snapshot(self, *round, "summary-frontier");
+            let summary_plan = {
+                let _stage = profile.span("admission-frontier", Some(*round));
+                crate::admission_storage::SummaryPlan::build(self, &scope, attempts, budget)?
+            };
             progress.snapshot(self, *round, "symbolic");
             budget.tick("rewrite snapshot")?;
             let meaning = {
@@ -689,6 +702,8 @@ impl GroundProgram {
                     budget,
                     progress.enabled().then_some(&observe),
                     &scope.cone,
+                    &summary_plan.keep,
+                    self.rewrites.nodes + attempts.nodes() + summary_plan.nodes,
                 )?;
                 if profile.enabled() {
                     stage.retained(crate::boolean::condition_storage(
@@ -700,69 +715,46 @@ impl GroundProgram {
                 }
                 meaning
             };
+            if profile.enabled() {
+                progress.storage(
+                    self,
+                    crate::admission_storage::report(
+                        self,
+                        Some(&meaning),
+                        &BTreeMap::new(),
+                        attempts,
+                        summary_plan.nodes,
+                    ),
+                );
+            }
             let ctx = meaning.context();
             let summaries_timer = progress.time("summaries");
             let mut summaries_profile = profile.span("admission-summaries", Some(*round));
             progress.work(self, "summaries", None, 0, true);
-            let mut summaries = BTreeMap::new();
+            let mut retained = self.rewrites.nodes
+                + meaning.metrics().retained_condition_nodes
+                + attempts.nodes()
+                + summary_plan.nodes;
+            let summaries = summary_plan.build_summaries(
+                self,
+                &meaning,
+                &mut retained,
+                attempts,
+                budget,
+                progress,
+            )?;
             let mut producers = BTreeMap::<_, Vec<_>>::new();
             let mut has_candidates = false;
             let mut exact_heads = BTreeSet::new();
-            let mut retained =
-                self.rewrites.nodes + meaning.metrics().retained_condition_nodes + attempts.nodes();
-            for (position, rule) in self
-                .rules
-                .iter()
-                .filter(|r| scope.cone.rules.contains(&r.id))
-                .enumerate()
-            {
-                progress.rule(self, "summaries", rule.id, position + 1);
-                budget.tick("rewrite summaries")?;
-                let mut condition = ctx.true_condition();
-                let mut settled = Vec::new();
-                let mut exact = true;
-                for literal in &rule.body {
-                    budget.tick("rewrite summaries")?;
-                    match meaning.fact(&literal.term.atom)? {
-                        SymbolicFact::Blocked(_) | SymbolicFact::Inconclusive(_) => exact = false,
-                        SymbolicFact::Settled(mut value) => {
-                            if literal.polarity == Polarity::Negative {
-                                value = ctx.complement(&value, budget)?;
-                            }
-                            condition = ctx.apply(&condition, &value, and, budget)?;
-                            retained =
-                                crate::symbolic::retain(retained, 0, value.node_count(), budget)?;
-                            settled.push(SettledPremise {
-                                literal: literal.clone(),
-                                condition: value,
-                            });
-                        }
-                    }
-                }
-                for replacement in &rule.replacements {
-                    match meaning.partial_expression(&replacement.expression, budget)? {
-                        crate::symbolic::PartialCondition::Known(value) => {
-                            condition = ctx.apply(&condition, &value, and, budget)?
-                        }
-                        crate::symbolic::PartialCondition::Unknown(_) => exact = false,
-                    }
-                }
-                retained = crate::symbolic::retain(retained, 0, condition.node_count(), budget)?;
-                if !exact && scope.targets.contains(&rule.id) {
+            for summary in summaries.values() {
+                budget.tick("complete summary index")?;
+                let rule = &summary.rule;
+                if !summary.exact && scope.targets.contains(&rule.id) {
                     has_candidates = true;
                 }
-                if exact {
+                if summary.exact {
                     exact_heads.insert(&rule.head.atom);
                 }
-                summaries.insert(
-                    rule.id,
-                    ProducerSummary {
-                        rule: rule.clone(),
-                        settled,
-                        condition,
-                        exact,
-                    },
-                );
                 producers.entry(&rule.head.atom).or_default().push(rule.id);
             }
             if profile.enabled() {
@@ -777,12 +769,28 @@ impl GroundProgram {
                         })),
                 ));
             }
+            if profile.enabled() {
+                progress.storage(
+                    self,
+                    crate::admission_storage::report(
+                        self,
+                        Some(&meaning),
+                        &summaries,
+                        attempts,
+                        summary_plan.nodes,
+                    ),
+                );
+            }
             drop(summaries_profile);
             drop(summaries_timer);
             let mut candidates_profile = profile.span("admission-candidates", Some(*round));
             // A successful component batch commits before any later pass can
             // exhaust. Rebuild the schedule from the next immutable snapshot.
-            let components = scope.ordered_targets(self, budget)?;
+            let components = scope
+                .ordered_targets(self, budget)?
+                .into_iter()
+                .filter(|(id, _)| !attempts.summary_skipped(&self.components[id.index].atoms[0]))
+                .collect::<Vec<_>>();
             let mut batch = Vec::new();
             for pass in ["producer-removals", "bound-removals", "candidates"] {
                 if !batch.is_empty() {
@@ -945,14 +953,37 @@ impl GroundProgram {
                         ),
                 ));
             }
+            if profile.enabled() {
+                progress.storage(
+                    self,
+                    crate::admission_storage::report(
+                        self,
+                        Some(&meaning),
+                        &summaries,
+                        attempts,
+                        summary_plan.nodes,
+                    ),
+                );
+            }
             drop(candidates_profile);
             if batch.is_empty() {
                 return Ok(());
             }
+            drop(producers);
+            drop(exact_heads);
+            drop(summaries);
+            drop(meaning);
+            drop(summary_plan);
             let _commit_profile = profile.span("admission-commit", Some(*round));
             progress.work(self, "commit", None, 0, true);
             self.commit_rewrites(batch, attempts, budget)?;
             progress.snapshot(self, *round, "committed");
+            if profile.enabled() {
+                progress.storage(
+                    self,
+                    crate::admission_storage::report(self, None, &BTreeMap::new(), attempts, 0),
+                );
+            }
         }
     }
 
@@ -1354,4 +1385,18 @@ mod batch_commit_tests {
         }
         assert!(rebuilt_failure && completed);
     }
+}
+
+/// Traverse shared joint evidence once, for diagnostic storage snapshots only.
+pub(crate) fn profile_proof_conditions<'a>(
+    proofs: impl Iterator<Item = &'a RewriteProof>,
+) -> impl Iterator<Item = &'a Condition> {
+    let mut seen = BTreeSet::new();
+    proofs.flat_map(move |proof| {
+        let include = match proof.guarded_settlement().map(|p| &p.certificate) {
+            Some(GuardedCertificate::Joint(j)) => seen.insert((j.snapshot, j.component)),
+            _ => true,
+        };
+        proof.profile_conditions_with_certificate(include)
+    })
 }

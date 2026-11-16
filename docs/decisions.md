@@ -599,7 +599,7 @@ The file intentionally retains program names and is not an anonymized export.
   Guarded certificate retention also recovers at its existing attempt boundary.
   Limits are unchanged; successful certificates, shared values and cache entries
   still count against them. Shared retained-storage failures, global work,
-  deadlines, cancellation and failures in shared context setup/summaries stop the current phase and discard the pending batch;
+  deadlines, cancellation and failures in shared context setup stop the current phase and discard the pending batch;
   downstream exhaustion is recorded separately as above.
   Failed preflights consume their task allowance plus one stopping step; a preflight
   constrained by remaining work (including a tie with the task cap) reports global
@@ -627,6 +627,23 @@ The file intentionally retains program names and is not an anonymized export.
   warnings made unnecessary by earlier settlement are accepted trade-offs for
   preserving progress. Shared preparation and global exhaustion still stop;
   enforced work sharing remains separate scheduling work.
+- **Admission retains proof readers, not every evaluated intermediate.** A real
+  provider cone filled storage during symbolic evaluation, then its shared summary
+  construction stopped admission. Proofs need complete producer sets for target
+  components and one-hop support for implied guards, not summaries for every
+  upstream rule. Those summaries' premises and replacement leaves define the final
+  readers. Other conditions are released after their last consuming component,
+  with explicit released-value sentinels and charged bookkeeping. Recursive
+  components retain their providers through restarts. Needed conditions are not
+  evicted; limits and Boolean meanings, including outside W, are unchanged.
+
+  A partial summary group cannot serve as complete coverage. Summary construction
+  therefore commits whole producer-head groups, or drops the group and marks all
+  dependent attempts `summary-storage` on local BDD/storage exhaustion. Independent
+  work survives; shared context setup, total work and transactional graph commits
+  retain their global boundaries. Dependency-based retries and session reuse carry
+  the explicit skips. Profiling separates accounted pools from actual shared BDD
+  arrays. Checking retention and cross-round symbolic reuse are separate work.
 - **Guarded attempts take upstream-first component turns.** On a three-component
   production chain, global cone ranking spent nearly the whole round on the large
   downstream component while its two providers barely ran. Component dependency

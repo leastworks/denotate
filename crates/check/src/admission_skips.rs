@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AdmissionAttemptKind {
     ComponentStorage,
+    SummaryStorage,
     StructuralSplit,
     Coverage,
     Removal,
@@ -27,6 +28,7 @@ impl AdmissionAttemptKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::ComponentStorage => "component-storage",
+            Self::SummaryStorage => "summary-storage",
             Self::StructuralSplit => "structural-split",
             Self::Coverage => "producer-coverage",
             Self::Removal => "producer-removal",
@@ -55,6 +57,7 @@ pub struct AdmissionSkip {
 pub(crate) enum Attempt {
     StructuralSplit(GroundAtom),
     ComponentStorage(GroundAtom),
+    SummaryStorage(GroundAtom),
     Coverage(GroundAtom),
     Removal(GroundRuleId),
     UpperBounds(GroundAtom),
@@ -71,6 +74,7 @@ impl Attempt {
         match self {
             Self::StructuralSplit(_) => AdmissionAttemptKind::StructuralSplit,
             Self::ComponentStorage(_) => AdmissionAttemptKind::ComponentStorage,
+            Self::SummaryStorage(_) => AdmissionAttemptKind::SummaryStorage,
             Self::Coverage(_) => AdmissionAttemptKind::Coverage,
             Self::Removal(_) => AdmissionAttemptKind::Removal,
             Self::UpperBounds(_) => AdmissionAttemptKind::UpperBounds,
@@ -112,6 +116,7 @@ impl Attempt {
         let (kind, rule, occurrence) = match self {
             Self::StructuralSplit(_) => (AdmissionAttemptKind::StructuralSplit, None, None),
             Self::ComponentStorage(_) => (AdmissionAttemptKind::ComponentStorage, None, None),
+            Self::SummaryStorage(_) => (AdmissionAttemptKind::SummaryStorage, None, None),
             Self::Coverage(_) => (AdmissionAttemptKind::Coverage, None, None),
             Self::Removal(rule) => (AdmissionAttemptKind::Removal, Some(*rule), None),
             Self::UpperBounds(_) => (AdmissionAttemptKind::UpperBounds, None, None),
@@ -237,9 +242,27 @@ impl Attempts {
         }
         Ok(())
     }
+    pub fn summary_skipped(&self, head: &GroundAtom) -> bool {
+        self.skipped
+            .contains_key(&Attempt::SummaryStorage(head.clone()))
+    }
+    pub fn summary_failed(
+        &mut self,
+        head: &GroundAtom,
+        program: &GroundProgram,
+        reason: Inconclusive,
+        progress: &AdmissionReporter<'_>,
+    ) {
+        let key = Attempt::SummaryStorage(head.clone());
+        let record = key.record(head, reason);
+        self.count += 1;
+        progress.skipped(program, &record, self.count);
+        self.skipped.insert(key, record);
+    }
     pub fn component_skipped(&self, head: &GroundAtom) -> bool {
         self.skipped
             .contains_key(&Attempt::ComponentStorage(head.clone()))
+            || self.summary_skipped(head)
     }
 
     /// The closure owns all temporary coverage/bounds and pending proofs for one
@@ -545,6 +568,7 @@ impl Attempts {
                 a,
                 Attempt::StructuralSplit(_)
                     | Attempt::ComponentStorage(_)
+                    | Attempt::SummaryStorage(_)
                     | Attempt::UpperBounds(_)
                     | Attempt::GuaranteedBounds(_)
                     | Attempt::BoundRemoval(_)
@@ -700,6 +724,7 @@ impl Attempts {
                     }
                     Attempt::StructuralSplit(_)
                     | Attempt::ComponentStorage(_)
+                    | Attempt::SummaryStorage(_)
                     | Attempt::UpperBounds(_)
                     | Attempt::GuaranteedBounds(_)
                     | Attempt::BoundRemoval(_)

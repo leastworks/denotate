@@ -194,6 +194,17 @@ impl<'a> AdmissionDetails<'a> {
             "phase": event.phase.label(),
             "round": event.round,
             "stage": event.stage,
+            "storage": event.storage.as_ref().map(|s| {
+                let pool = |p: &denotate_check::AdmissionConditionPool| json!({
+                    "accountedNodes":p.accounted_nodes,
+                    "retainedBdd":{"references":p.retained_bdd.references,"distinctArrays":p.retained_bdd.distinct_arrays,
+                        "nodes":p.retained_bdd.nodes,"nodeBytes":p.retained_bdd.node_bytes}
+                });
+                json!({"symbolic":pool(&s.symbolic),"summaries":pool(&s.summaries),
+                    "committedProofs":pool(&s.committed_proofs),"optionalCaches":pool(&s.optional_caches),
+                    "frontierMetadataNodes":s.frontier_metadata_nodes,
+                    "keptConditions":s.kept_conditions,"releasedConditions":s.released_conditions,"unknownAtoms":s.unknown_atoms})
+            }),
             "unresolvedComponents": event.unresolved_components,
             "blockedAtoms": event.blocked_atoms,
             "current": event.current.as_ref().map(|c| self.component(c)),
@@ -389,6 +400,18 @@ pub fn admission_text(a: &Value) -> String {
             "; {} proof attempts skipped",
             a["skippedAttempts"]
         ));
+    }
+    if let Some(storage) = a.get("storage").filter(|s| s.is_object()) {
+        text.push_str(&format!(
+            "; symbolic conditions kept {}, released {}, unknown {}",
+            storage["keptConditions"], storage["releasedConditions"], storage["unknownAtoms"]
+        ));
+        for pool in ["symbolic", "summaries", "committedProofs", "optionalCaches"] {
+            text.push_str(&format!(
+                "; {pool}: {} accounted nodes, {} retained BDD nodes",
+                storage[pool]["accountedNodes"], storage[pool]["retainedBdd"]["nodes"]
+            ));
+        }
     }
     if a["stage"] == "attempt-summary" {
         if let Some(times) = a["prerequisiteMs"].as_object() {

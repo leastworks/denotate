@@ -20,6 +20,9 @@ pub(crate) struct PreparedCone {
     pub stats: Preparation,
 }
 impl PreparedCone {
+    pub(crate) fn profile_conditions(&self) -> impl Iterator<Item = &Condition> {
+        [&self.domain, &self.guard, &self.permitted].into_iter()
+    }
     pub fn capture(
         head: &GroundAtom,
         cone: &BorrowedCone<'_>,

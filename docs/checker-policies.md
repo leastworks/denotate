@@ -656,8 +656,9 @@ A nonempty removal batch rebuilds the graph and starts a fresh snapshot; cycle
 bounds run only after removals reach a fixed point. The coverage proof and
 transactional commit rules are unchanged. This can reduce BDD work and preserve
 useful progress before later exhaustion, but changes work charges and may require
-extra snapshots. Symbolic evaluation and summary construction still cover the
-residual program. No new allowance is introduced; `admission-candidates` profiling
+extra snapshots. Symbolic evaluation covers the selected provider cone; summary
+construction keeps only the complete producer groups later proof stages read.
+No new allowance is introduced; `admission-candidates` profiling
 covers the proof passes. Progress distinguishes `producer-removals`,
 `guaranteed-bounds`, `bound-removals` and discharge `candidates`/`upper-bounds`.
 
@@ -778,7 +779,28 @@ Admission summaries omit unknown premises just as they omit blocked ones: they
 cannot become guarantees. New snapshots retry evaluation; owned local query
 results retain unknown atoms and their originating causes by semantic key.
 
-Failures in shared context setup or summaries, total work limits and other
+Admission's symbolic retention frontier includes the premises and replacement
+leaves of every required producer summary. Required groups contain all producers
+in target components, plus complete one-hop producer sets for cyclic implied-guard
+discovery. Earlier provider layers are evaluated but their conditions are released
+after the last consuming component finishes. A positive recursive component keeps
+its providers through every restart. Missing sparse facts still mean false;
+explicitly released values instead cause an internal error if read. The deterministic
+last-reader schedule, sentinels and summary membership use charged work and storage.
+Committed proofs, prepared caches and frontier metadata reserve space while symbolic
+evaluation runs; no needed value is evicted. Checking keeps its existing retention.
+
+Summary BDD task/node or condition-storage exhaustion is local to a complete
+producer group. The partial group is dropped, storage accounting restored, and
+every target component that needs it receives a `summary-storage` skip. All its
+passes, including structural splits, wait for dependency invalidation. Complete
+groups needed only by skipped consumers are released; partial sets never supply
+coverage or implied guards. Work is not refunded. Independent components and prior
+commits remain available. Skips accompany same-context admission reuse and are
+invalidated through the pre-commit reader graph; component IDs are never cached.
+Unused upstream summaries no longer cause downstream-incomplete notices.
+
+Failures in shared context setup or frontier bookkeeping, total work limits and other
 retained-storage limits stop the current phase, with the separate downstream marker described above.
 Deadlines and cancellation still abort the whole invocation. No pending batch
 is salvaged on these failures. Local skips allow independent proofs to commit.
@@ -900,6 +922,17 @@ They are cumulative result payload, **not** allocator traffic or simultaneous li
 storage, and exclude the BDD library's internal temporary allocations. Retained BDD
 snapshots at symbolic, summary and candidate boundaries deduplicate `Arc` sharing and report
 occupied node payload; vector capacity, maps and allocator overhead are excluded.
+Profile-only admission `storage` events split these snapshots into symbolic values,
+summaries, committed proofs and optional prepared caches, alongside
+each pool's accounted nodes. They include kept/released condition and unknown-atom
+counts plus frontier metadata. Arrays can be shared between pools, so their actual
+node counts must not be added. These are boundary snapshots, not peak live BDD
+memory; use the round's `peakAccountedConditionNodes` and sampled process memory
+alongside them. Ordinary progress does not scan BDD storage for these reports.
+The committed-proof pool traverses each shared joint certificate once and uses
+the checker's installed-evidence accounting. Round-only symbolic values and
+summaries are dropped before graph commit; a post-commit snapshot reports the
+remaining proof and cache pools.
 `Condition` clones share storage; independently computed BDD arrays do not share
 their nodes. Memory samples are needed alongside these counters.
 

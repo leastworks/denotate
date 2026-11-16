@@ -522,6 +522,7 @@ pub fn answer_owned_local(
             program: &rt.program,
             context,
             conditions,
+            released: BTreeSet::new(),
             inconclusive: BTreeMap::new(),
             unknown: value
                 .unknown
@@ -577,8 +578,8 @@ pub fn answer_owned_local(
                     for right in &tuples[i + 1..] {
                         budget.tick("property checks")?;
                         let pair = ctx.apply(
-                            &meaning.known(&rt.atoms[*left]),
-                            &meaning.known(&rt.atoms[*right]),
+                            &meaning.known(&rt.atoms[*left])?,
+                            &meaning.known(&rt.atoms[*right])?,
                             biodivine_lib_bdd::op_function::and,
                             &mut budget,
                         )?;

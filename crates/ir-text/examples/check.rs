@@ -1266,6 +1266,28 @@ mod tests {
             .lines()
             .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
             .collect::<Vec<_>>();
+        let storage: Vec<_> = records
+            .iter()
+            .map(|r| &r["detail"]["admission"]["storage"])
+            .filter(|s| s.is_object())
+            .collect();
+        assert!(!storage.is_empty());
+        assert!(
+            storage
+                .iter()
+                .any(|s| s["symbolic"]["retainedBdd"]["nodes"].as_u64().unwrap() > 0)
+        );
+        assert!(
+            storage
+                .iter()
+                .any(|s| s["summaries"]["accountedNodes"].as_u64().unwrap() > 0)
+        );
+        assert!(
+            storage
+                .iter()
+                .any(|s| s["committedProofs"]["accountedNodes"].as_u64().unwrap() > 0)
+        );
+        assert!(trace.contains("symbolic conditions kept"));
         let splits = records
             .iter()
             .map(|r| &r["detail"]["admission"]["structuralSplit"])

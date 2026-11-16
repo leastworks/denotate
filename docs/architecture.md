@@ -101,6 +101,18 @@ schedule. Pending proof storage can be released only with its owning batch, neve
 with shared summaries or committed evidence. A failed batch drops its values before
 restoring storage accounting; computation is not refunded. Its retry identity uses
 a representative atom and the existing pre-commit reader closure, not an SCC ID.
+Admission separates the provider graph used for evaluation from the smaller set
+of producer summaries used by proofs. Complete target-component producer sets and
+one-hop providers for implied guards determine the final symbolic readers.
+Intermediate conditions are released only after their last consuming component
+finishes (including all recursive restarts); replacement leaves participate in
+that schedule. Released values have explicit sentinels, so an accidental later
+read is an internal error. Checking retains its existing query-owned values.
+Summary groups are built atomically per producer head. A failed group suppresses
+all dependent component attempts, including structural splits; incomplete producer
+coverage never enters a proof. Unneeded groups are released after failures, while
+shared successful groups and committed evidence remain. Summary skips use the same
+representative-atom and pre-commit dependency invalidation as component skips.
 Guarded candidates take upstream-first component turns, preserving each component's
 ranking queue between turns. These queues and their component handles live only
 within one immutable snapshot; every successful commit rebuilds them. Prepared

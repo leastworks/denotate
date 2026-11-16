@@ -1,3 +1,4 @@
+mod retention;
 use crate::{
     boolean::limit,
     limits::{Budget, Result},
@@ -93,15 +94,16 @@ pub struct SymbolicMeaning<'p> {
     pub(crate) program: &'p GroundProgram,
     pub(crate) context: ConditionContext,
     pub(crate) conditions: BTreeMap<GroundAtom, Condition>,
+    pub(crate) released: BTreeSet<GroundAtom>,
     pub(crate) inconclusive: BTreeMap<ComponentId, Inconclusive>,
     pub(crate) unknown: BTreeMap<GroundAtom, EvaluationUnknown<GroundAtom>>,
     pub(crate) metrics: SymbolicMetrics,
 }
 impl SymbolicMeaning<'_> {
-    fn partial_condition(&self, atom: &GroundAtom) -> PartialCondition {
+    fn partial_condition(&self, atom: &GroundAtom) -> Result<PartialCondition> {
         self.unknown.get(atom).cloned().map_or_else(
-            || PartialCondition::Known(self.known(atom)),
-            PartialCondition::Unknown,
+            || self.known(atom).map(PartialCondition::Known),
+            |u| Ok(PartialCondition::Unknown(u)),
         )
     }
     pub(crate) fn partial_expression(
@@ -166,7 +168,7 @@ impl SymbolicMeaning<'_> {
     }
     pub fn fact(&self, atom: &GroundAtom) -> Result<SymbolicFact> {
         if self.program.fixed_value(atom).is_some() {
-            return Ok(SymbolicFact::Settled(self.known(atom)));
+            return Ok(SymbolicFact::Settled(self.known(atom)?));
         }
         if let Some(unknown) = self.unknown.get(atom) {
             return Ok(SymbolicFact::Inconclusive(unknown.reason));
@@ -183,20 +185,24 @@ impl SymbolicMeaning<'_> {
                 return Ok(SymbolicFact::Blocked(component.blocked_by.clone()));
             }
         }
-        Ok(SymbolicFact::Settled(self.known(atom)))
+        Ok(SymbolicFact::Settled(self.known(atom)?))
     }
-    pub(crate) fn known(&self, atom: &GroundAtom) -> Condition {
+    pub(crate) fn known(&self, atom: &GroundAtom) -> Result<Condition> {
+        if self.released.contains(atom) {
+            return Err(CheckError::Internal("read of released symbolic condition"));
+        }
         if let Some(value) = self.program.fixed_value(atom) {
-            return if value {
+            return Ok(if value {
                 self.context.true_condition()
             } else {
                 self.context.false_condition()
-            };
+            });
         }
-        self.conditions
+        Ok(self
+            .conditions
             .get(atom)
             .cloned()
-            .unwrap_or_else(|| self.context.false_condition())
+            .unwrap_or_else(|| self.context.false_condition()))
     }
 }
 
@@ -218,12 +224,14 @@ impl GroundProgram {
         budget: &mut Budget<'_>,
         observe: Option<&dyn Fn(ComponentId, Option<&EvaluationUnknown<GroundAtom>>)>,
         cone: &DependencyCone,
+        keep: &BTreeSet<GroundAtom>,
+        reserved: usize,
     ) -> Result<SymbolicMeaning<'_>> {
         self.symbolic_selected_impl(
             budget,
             false,
             Some(cone),
-            true,
+            Some((keep, reserved)),
             observe,
             #[cfg(any(test, feature = "test-support"))]
             None,
@@ -257,7 +265,7 @@ impl GroundProgram {
             budget,
             partial,
             cone,
-            false,
+            None,
             None,
             #[cfg(any(test, feature = "test-support"))]
             None,
@@ -271,19 +279,26 @@ impl GroundProgram {
         cone: Option<&DependencyCone>,
         measured: &mut dyn FnMut(ComponentId, Duration),
     ) -> Result<SymbolicMeaning<'_>> {
-        self.symbolic_selected_impl(budget, partial, cone, false, None, Some(measured))
+        self.symbolic_selected_impl(budget, partial, cone, None, None, Some(measured))
     }
     fn symbolic_selected_impl(
         &self,
         budget: &mut Budget<'_>,
         partial: bool,
         cone: Option<&DependencyCone>,
-        admission: bool,
+        keep: Option<(&BTreeSet<GroundAtom>, usize)>,
         observe: Option<&dyn Fn(ComponentId, Option<&EvaluationUnknown<GroundAtom>>)>,
         #[cfg(any(test, feature = "test-support"))] mut measured: Option<
             &mut dyn FnMut(ComponentId, Duration),
         >,
     ) -> Result<SymbolicMeaning<'_>> {
+        let admission = keep.is_some();
+        let reserved = keep.map_or(0, |(_, reserved)| reserved);
+        let mut retention = keep
+            .map(|(keep, _)| {
+                retention::Retention::build(self, cone.expect("admission cone"), keep, budget)
+            })
+            .transpose()?;
         let _stage = budget.limits.progress.nested("symbolic-evaluation");
         let start = Instant::now();
         let context = ConditionContext::build_selected(
@@ -299,6 +314,7 @@ impl GroundProgram {
             program: self,
             context,
             conditions: BTreeMap::new(),
+            released: BTreeSet::new(),
             inconclusive: BTreeMap::new(),
             unknown: BTreeMap::new(),
             metrics: SymbolicMetrics {
@@ -307,7 +323,12 @@ impl GroundProgram {
                 retained_condition_nodes: 0,
             },
         };
-        let mut retained = meaning.context.permitted_worlds().node_count();
+        let mut retained = retain(
+            reserved + meaning.context.permitted_worlds().node_count(),
+            0,
+            retention.as_ref().map_or(0, |r| r.nodes),
+            budget,
+        )?;
         for input in meaning.context.inputs().cloned().collect::<Vec<_>>() {
             if admission && cone.is_some_and(|c| !c.facts.contains(&input)) {
                 continue;
@@ -318,6 +339,9 @@ impl GroundProgram {
             meaning.conditions.insert(input.clone(), condition);
         }
         for (index, component) in self.components.iter().enumerate() {
+            if let Some(retention) = &mut retention {
+                retention.before(index, &mut meaning, &mut retained, budget)?;
+            }
             if cone.is_some_and(|c| !c.components.contains(&component.id)) {
                 continue;
             }
@@ -380,7 +404,7 @@ impl GroundProgram {
                             if failed.contains_key(head) {
                                 continue;
                             }
-                            let old = meaning.partial_condition(head);
+                            let old = meaning.partial_condition(head)?;
                             if old.is_true() {
                                 continue;
                             }
@@ -467,13 +491,16 @@ impl GroundProgram {
                 meaning.inconclusive.insert(component.id, cause);
             }
         }
+        if let Some(retention) = &mut retention {
+            retention.before(usize::MAX, &mut meaning, &mut retained, budget)?;
+        }
         if !partial {
             budget.charge(0, "symbolic evaluation")?;
         }
         meaning.metrics = SymbolicMetrics {
             elapsed: start.elapsed(),
             work: budget.used(),
-            retained_condition_nodes: retained,
+            retained_condition_nodes: retained - reserved,
         };
         Ok(meaning)
     }
@@ -528,7 +555,7 @@ impl SymbolicMeaning<'_> {
         let mut body = PartialCondition::Known(self.context.true_condition());
         for literal in &rule.body {
             budget.tick("symbolic evaluation")?;
-            let mut premise = self.partial_condition(&literal.term.atom);
+            let mut premise = self.partial_condition(&literal.term.atom)?;
             if literal.polarity == Polarity::Negative {
                 if let Some(atom_index) = self.program.atom_index.get(&literal.term.atom) {
                     let provider = self.program.atom_components[*atom_index];

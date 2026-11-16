@@ -309,7 +309,7 @@ impl SymbolicMeaning<'_> {
                         for fact in &group.tuples {
                             budget.tick("certification violation replay")?;
                             if self.context().evaluate_with_budget(
-                                &self.known(fact),
+                                &self.known(fact)?,
                                 observation.present.iter().cloned(),
                                 budget,
                             )? != certified.facts.contains(fact)

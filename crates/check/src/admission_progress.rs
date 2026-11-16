@@ -132,6 +132,22 @@ pub struct GuardedAttempt {
 }
 
 #[derive(Debug, Clone)]
+pub struct AdmissionConditionPool {
+    pub accounted_nodes: usize,
+    pub retained_bdd: BddStorage,
+}
+#[derive(Debug, Clone)]
+pub struct AdmissionStorage {
+    pub symbolic: AdmissionConditionPool,
+    pub summaries: AdmissionConditionPool,
+    pub committed_proofs: AdmissionConditionPool,
+    pub optional_caches: AdmissionConditionPool,
+    pub frontier_metadata_nodes: usize,
+    pub kept_conditions: usize,
+    pub released_conditions: usize,
+    pub unknown_atoms: usize,
+}
+#[derive(Debug, Clone)]
 pub struct AdmissionProgress {
     pub phase: AdmissionPhase,
     pub round: usize,
@@ -151,6 +167,8 @@ pub struct AdmissionProgress {
     pub skipped: Option<AdmissionSkip>,
     pub failure: Option<Inconclusive>,
     pub symbolic_unknown: Option<EvaluationUnknown<GroundAtom>>,
+    /// Profile-only boundary snapshots; actual BDD pools may share arrays.
+    pub storage: Option<AdmissionStorage>,
     pub attempts: BTreeMap<AdmissionAttemptKind, AdmissionAttempts>,
     pub guarded: Option<GuardedAttempt>,
     pub structural_split: Option<GuardedSplitProgress>,
@@ -192,6 +210,7 @@ impl<'a> AdmissionReporter<'a> {
                 progress: AdmissionProgress {
                     phase: AdmissionPhase::Relevant,
                     symbolic_unknown: None,
+                    storage: None,
                     round: 0,
                     stage: "starting",
                     unresolved_components: 0,
@@ -710,6 +729,11 @@ impl<'a> AdmissionReporter<'a> {
         self.state.borrow_mut().progress.symbolic_unknown = Some(unknown.clone());
         self.emit(program, true);
         self.state.borrow_mut().progress.symbolic_unknown = None;
+    }
+    pub fn storage(&self, program: &GroundProgram, storage: AdmissionStorage) {
+        self.state.borrow_mut().progress.storage = Some(storage);
+        self.emit(program, true);
+        self.state.borrow_mut().progress.storage = None;
     }
     fn emit(&self, program: &GroundProgram, force: bool) {
         let Some(observer) = self.observer else {

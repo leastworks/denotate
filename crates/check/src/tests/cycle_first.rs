@@ -258,13 +258,16 @@ fn cycle_first_unrelated_hard_bdd_does_not_precede_cycle_proofs_at_default_limit
     assert!(p.admission_limit().is_none() && p.downstream_incomplete().is_none());
 }
 #[test]
-fn cycle_first_default_limits_report_downstream_exhaustion_without_relabeling_cycles() {
+fn cycle_first_does_not_build_unused_upstream_summaries_at_default_limits() {
     for unsupported in [false, true] {
         let (raw, _) = guarded(unsupported, 1, true, true);
         let (p, events) = admit(&raw, &Limits::default());
         assert_eq!(p.is_admitted(), !unsupported);
         assert!(p.admission_limit().is_none());
-        assert!(p.downstream_incomplete().is_some());
+        // The hard provider's exact value is unknown, but its own producer
+        // summary is not a reader of this downstream input-guard check. Building
+        // that unused summary used to abort the whole downstream phase.
+        assert!(p.downstream_incomplete().is_none());
         assert_eq!(events.last().unwrap().phase, AdmissionPhase::Downstream);
         assert!(
             p.components()

@@ -6,11 +6,13 @@ mod admission_dump;
 pub use admission_dump::*;
 mod admission_progress;
 pub use admission_progress::{
-    AdmissionAttempts, AdmissionComponent, AdmissionObserver, AdmissionPhase, AdmissionProgress,
-    GuardedAttempt, GuardedSplitProgress, SplitReplacementSizes,
+    AdmissionAttempts, AdmissionComponent, AdmissionConditionPool, AdmissionObserver,
+    AdmissionPhase, AdmissionProgress, AdmissionStorage, GuardedAttempt, GuardedSplitProgress,
+    SplitReplacementSizes,
 };
 mod admission_scope;
 mod admission_skips;
+mod admission_storage;
 mod component_passes;
 pub use admission_skips::{AdmissionAttemptKind, AdmissionSkip};
 mod assumption_validation;

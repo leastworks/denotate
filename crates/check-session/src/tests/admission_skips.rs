@@ -293,6 +293,71 @@ verification second{assumptions:[];obligations:[no_absent];}\n",
 }
 
 #[test]
+fn summary_storage_skips_agree_fresh_cold_warm_and_after_source_edits() {
+    let source = format!(
+        "input p(); input q(); relation a(); relation b();
+a():-{}!b(); b():-!a();
+relation x(); relation y(); x():-p(),!y(); y():-!p(),!x();
+relation u(); relation v(); u():-!v(); v():-!u();
+relation absent(); obligation no_absent:empty(absent);
+verification first{{assumptions:[];obligations:[no_absent];}}
+verification second{{assumptions:[];obligations:[no_absent];}}",
+        "p(),q(),".repeat(150)
+    );
+    let parse = |revision, text: String| {
+        let file = SourceFile::new("file:///summary-storage.den", revision, text);
+        load(
+            &ProgramMembership::single("root", [file.uri.clone()]),
+            &[file],
+        )
+        .unwrap()
+    };
+    let p = parse(0, source.clone());
+    let limits = (200..3000)
+        .step_by(50)
+        .find_map(|cap| {
+            let l = Limits {
+                max_condition_nodes: cap,
+                ..Limits::default()
+            };
+            let request = p.verification_requests(&l).unwrap().remove(0).1;
+            let RequestPreparation::Complete(prepared) =
+                request.prepare(&p.corpus, &p.keys, &(&l).into()).unwrap()
+            else {
+                return None;
+            };
+            let prepared = prepared.admit(&(&l).into()).unwrap();
+            (prepared.program().admission_limit().is_none()
+                && prepared
+                    .program()
+                    .admission_skips()
+                    .any(|s| s.kind == AdmissionAttemptKind::SummaryStorage))
+            .then_some(l)
+        })
+        .expect("exercise summary storage skip");
+    let mut warm = Session::default();
+    for (revision, text) in [source.clone(), format!("// moved\n{source}"), source]
+        .into_iter()
+        .enumerate()
+    {
+        let p = parse(revision as u64, text);
+        let fresh = run_limited(&p, None, &limits);
+        let cold = run_limited(&p, Some(&mut Session::default()), &limits);
+        let current = run_limited(&p, Some(&mut warm), &limits);
+        assert_eq!((&fresh.0, &fresh.1), (&cold.0, &cold.1));
+        assert_eq!(cold, current);
+        assert_eq!(current, run_limited(&p, Some(&mut warm), &limits));
+        assert!(current.1.iter().all(|shown| {
+            shown["status"]["admissionSkips"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|s| s["attempt"] == "summary-storage")
+        }));
+    }
+}
+
+#[test]
 fn admission_skips_survive_reuse_and_warm_edits_with_current_diagnostics() {
     let mut warm = Session::default();
     for (revision, text) in [
