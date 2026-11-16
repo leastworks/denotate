@@ -68,19 +68,20 @@ fn structural_order_is_deterministic_and_uses_dependencies_not_allocation() {
 }
 
 #[test]
-fn disjoint_groups_are_contiguous_and_overlapping_groups_keep_every_constraint() {
+fn disjoint_and_overlapping_preferences_preserve_every_input_constraint() {
     let l = Limits::default();
     for overlap in [false, true] {
         let (mut p, k) = fixture(false);
         let original = p.inputs.iter().cloned().collect::<Vec<_>>();
         p.input_groups = vec![
-            vec![original[0].clone(), original[3].clone()],
-            vec![original[1].clone(), original[4].clone()],
+            // Co-read pairs are (a,x), (b,y), (c,z); each group crosses them.
+            vec![original[0].clone(), original[1].clone()],
+            vec![original[3].clone(), original[4].clone()],
         ];
         if overlap {
             p.input_groups.extend([
-                vec![original[0].clone(), original[1].clone()],
-                vec![original[3].clone(), original[4].clone()],
+                vec![original[0].clone(), original[4].clone()],
+                vec![original[1].clone(), original[3].clone()],
             ]);
         }
         let key = p
@@ -90,26 +91,27 @@ fn disjoint_groups_are_contiguous_and_overlapping_groups_keep_every_constraint()
         let ordered = p
             .choose_input_order(&k, &[], InputOrder::Structural, &mut Budget::new(&l))
             .unwrap();
-        if !overlap {
-            for g in &ordered.input_groups {
-                let positions: Vec<_> = g
-                    .iter()
-                    .map(|a| {
-                        ordered
-                            .ordered_inputs()
-                            .iter()
-                            .position(|b| *b == a)
-                            .unwrap()
-                    })
-                    .collect();
-                assert_eq!(positions[0].abs_diff(positions[1]), 1);
-            }
-        }
         for world in subsets(&original) {
-            assert_eq!(
-                key.evaluate(world.iter().cloned(), &l).is_ok(),
-                ordered.evaluate(world.iter().cloned(), &l).is_ok()
-            );
+            let permitted = key
+                .input_groups
+                .iter()
+                .all(|g| g.iter().filter(|a| world.contains(*a)).count() <= 1);
+            for program in [&key, &ordered] {
+                assert_eq!(
+                    program.evaluate(world.iter().cloned(), &l).is_ok(),
+                    permitted
+                );
+            }
+            if permitted {
+                let facts = |p: &GroundProgram| {
+                    p.evaluate(world.iter().cloned(), &l)
+                        .unwrap()
+                        .established_facts()
+                        .cloned()
+                        .collect::<BTreeSet<_>>()
+                };
+                assert_eq!(facts(&key), facts(&ordered));
+            }
         }
     }
 }
@@ -192,4 +194,91 @@ fn reordered_clones_reject_conditions_from_the_old_map() {
         ),
         Err(CheckError::ForeignCondition)
     ));
+}
+
+#[test]
+fn exclusive_writer_ring_agrees_with_stable_and_supported_models_in_every_order() {
+    use crate::test_support::rewrites::{atom, stable_models, supported_models};
+    // Tiny version of the zoo's writer ring: each lane writes one distinct kind.
+    // Enumerate unrestricted worlds too, to verify that W is still enforced.
+    for writers in [2, 3] {
+        let mut c = Corpus::new();
+        let mut routes = Vec::new();
+        let mut contexts = Vec::new();
+        let mut relays = Vec::new();
+        for i in 0..writers {
+            let route = rel(&mut c, &format!("route{i}"), true);
+            let fa = rel(&mut c, &format!("fa{i}"), true);
+            let fb = rel(&mut c, &format!("fb{i}"), true);
+            let context = rel(&mut c, &format!("context{i}"), false);
+            rule(&mut c, context, &[(route, false), (fa, false), (fb, true)]);
+            routes.push(atom(route));
+            contexts.push(context);
+            relays.push(rel(&mut c, &format!("relay{i}"), false));
+        }
+        for i in 0..writers {
+            rule(
+                &mut c,
+                relays[i],
+                &[(contexts[i], false), (relays[(i + 1) % writers], true)],
+            );
+        }
+        let mut keys = SemanticKeys::default();
+        for r in c.relations() {
+            keys.bind_relation(
+                &c,
+                r.id,
+                RelationKey::Named(QualifiedKey::new("ring", r.name.as_str())),
+            )
+            .unwrap();
+        }
+        let l = Limits::default();
+        let mut raw = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+        raw.input_groups = vec![routes.clone()];
+        let atoms: Vec<_> = raw.atoms().cloned().collect();
+        let inputs: BTreeSet<_> = raw.input_atoms().cloned().collect();
+        let rules: Vec<_> = raw.rules().cloned().collect();
+        let worlds: Vec<_> = subsets(&inputs.iter().cloned().collect::<Vec<_>>())
+            .into_iter()
+            .map(|world| {
+                let permitted = routes.iter().filter(|a| world.contains(*a)).count() <= 1;
+                let models = if permitted {
+                    let stable = stable_models(&atoms, &inputs, &rules, &world);
+                    assert_eq!(stable.len(), 1);
+                    assert_eq!(stable, supported_models(&raw, &rules, &world));
+                    Some(stable)
+                } else {
+                    None
+                };
+                (world, models)
+            })
+            .collect();
+        for order in [
+            InputOrder::Key,
+            InputOrder::ReverseKey,
+            InputOrder::Structural,
+        ] {
+            let p = raw
+                .clone()
+                .choose_input_order(&keys, &[], order, &mut Budget::new(&l))
+                .unwrap()
+                .admit(&l)
+                .unwrap();
+            assert_eq!(p.input_order_report().effective, order);
+            assert!(p.is_admitted());
+            let rewritten: Vec<_> = p.rules().cloned().collect();
+            for (world, models) in &worlds {
+                let replay = p.evaluate(world.iter().cloned(), &l);
+                assert_eq!(replay.is_ok(), models.is_some());
+                if let Some(expected) = models {
+                    assert_eq!(*expected, stable_models(&atoms, &inputs, &rewritten, world));
+                    assert_eq!(*expected, supported_models(&p, &rewritten, world));
+                    assert_eq!(
+                        *expected.first().unwrap(),
+                        replay.unwrap().established_facts().cloned().collect()
+                    );
+                }
+            }
+        }
+    }
 }

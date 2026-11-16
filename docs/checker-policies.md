@@ -53,10 +53,11 @@ Ordering happens after fixed/`within` preparation and grounding, before W or any
 input-dependent BDD. Structural ordering traverses the dependency graph, with no
 symbolic evaluation: settled rule premises contribute input-support hyperedges,
 as do selected assumptions. Input-only uniqueness groups receive extra weight.
-Groups disjoint from all other groups are contiguous blocks; overlapping groups
-are preferences, and every constraint remains enforced. Eight FORCE placement
-passes use integer centers and semantic-key ties, retaining the best weighted
-span cost seen. No platform-dependent floating-point ordering is used.
+Every group is a weighted preference, including groups disjoint from all others.
+No group forces contiguous placement: its members may be read with inputs outside
+the group, and forcing them together can separate those co-read inputs. Assumption
+enforcement is unchanged. Eight FORCE placement passes use integer centers and
+semantic-key ties, retaining the best weighted span cost seen. No platform-dependent floating-point ordering is used.
 
 The heuristic charges preparation work and stops at one million cumulative
 structural entries or four million traversal/placement visits. These optimization
@@ -66,7 +67,8 @@ exhaustion and cancellation still propagate. CLI progress/profile records expose
 `inputOrder` (requested/effective order, fallback, inputs, structural entries,
 hyperedges and completed passes); non-default runs also print it on stdout.
 
-The backend configuration includes the requested order. Shared contexts partition
+The backend configuration includes the requested order (`structural-order-v2`
+identifies placement without hard group blocks). Shared contexts partition
 by selection and configuration; the assumption-specialized graph receives the
 request's exact map before W is built. Local query inputs retain the actual ordered
 input keys, including any completion context, so structural edits and switching
@@ -79,10 +81,17 @@ agree; compare independent tiny-world oracles as well as completed workload runs
 Measured outcome: structural order cut BDD work sharply on shapes whose input names
 separate co-read inputs (the zoo's guarded fan-in and ring), and changed little
 elsewhere. On a production-scale lowered program (about 30K inputs) it completes
-only with raised cutoffs (the support expansion is quadratic there) and moves BDD
-node counts by at most 0.5% in every phase; its guarded-bound storage comes from
-the number of retained conditions, not the order. Key order stays the default and
-structural order remains a diagnostic; there is no plan to change the default.
+only with raised cutoffs (the support expansion is quadratic there) and moved BDD
+node counts by at most 0.5% in every phase with the former hard-group placement.
+That run preceded removal of the hard uniqueness blocks. A separate writer-ring
+reproduction demonstrated that those blocks can dominate the cost by separating
+each lane's route and flag inputs. Re-score the updated placement on the production
+program before drawing a conclusion about its benefit there. Key order stays the
+default and structural order remains a diagnostic. A default change would need
+corpus-scale cutoff and support-expansion evidence, plus an edit-stability policy.
+The weighted-span objective is not a BDD-size guarantee: the writer-ring improved,
+while the split-reader hub retained larger split-certificate BDDs with the same
+proof path and outcomes. Both shapes must remain in placement comparisons.
 
 ## Backend retirement
 

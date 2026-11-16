@@ -276,9 +276,10 @@ compute W independently during preparation, then use whole-program checking.
 `BackendIdentity::bdd_with_order(InputOrder::{Key, ReverseKey, Structural})` selects
 an experimental variable layout; `bdd()` still means key order. Preparation chooses
 one map after grounding and copies it to the assumption-specialized view before W.
-Structural placement uses only dependencies and selected constraints, with charged
-cutoffs that fall back to key order. `GroundProgram::input_order_report()` describes
-the requested/effective order and any fallback; `ordered_input_atoms()` exposes the
+Structural placement uses only dependencies and selected constraints. Uniqueness
+groups are weighted preferences, without forced contiguity; assumption enforcement
+is independent of placement. Charged cutoffs fall back to key order.
+`GroundProgram::input_order_report()` describes the requested/effective order and any fallback; `ordered_input_atoms()` exposes the
 map. Order participates in shared-context and local-query reuse; local inputs also
 carry the actual projected sequence. See the [policy](../../docs/checker-policies.md#diagnostic-input-ordering)
 for the deterministic heuristic and its bounds.

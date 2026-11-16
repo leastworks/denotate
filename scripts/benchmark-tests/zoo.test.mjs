@@ -36,7 +36,7 @@ test('each family reaches its semantic and structural path; two-size smoke has n
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-zoo-'));
   try {
     for(const f of families.filter(f=>f!=='schema-layered'))assert.equal(source(f,2),source(f,2));
-    const r=run({out:path.join(root,'tiny'),binary:'target/debug/examples/bench_schema',family:families,sizes:[2],repeat:1,threshold:1.3});
+    const r=run({out:path.join(root,'tiny'),binary:'target/debug/examples/bench_schema',family:families,sizes:[2],repeat:1,threshold:1.3,ringLanes:1,ringRelays:2});
     for(const [name,{runs}] of Object.entries(r.families)) {
       const r=runs[0];assert.ok(r.checkerFinished,name);assert.ok(r.sizes.atoms>0,name);
       if(name==='negative-guarded') {assert.equal(r.after.admitted,true);assert.ok(r.sizes.dischargeProofs>0||joint(r));}
@@ -48,6 +48,7 @@ test('each family reaches its semantic and structural path; two-size smoke has n
       if(name==='guarded-ring'||name==='guarded-fan-in'||name==='guarded-worlds') {assert.equal(r.before.ground.largestComponentAtoms,name==='guarded-ring'?12:6);assert.equal(r.after.admitted,true);assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));assert.ok(joint(r)||r.attemptSummaries.some(a=>a.complete&&a.attempts.some(c=>c.kind==='guarded-bounds')));}
       if(name.startsWith('guarded-')) {assert.ok(joint(r)||r.guardedAttempts.some(g=>g.attempt.state==='completed'&&g.attempt.restricted&&g.attempt.coneAtoms>0));assert.ok(r.guardedAttempts.every(g=>Number.isFinite(g.attempt.preprocessingMs)&&Number.isFinite(g.attempt.iterationMs)));}
       if(name==='guarded-hub') {assert.equal(r.after.admitted,true);assert.equal(r.exit,0);assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));assert.equal(r.outcomes[0].notices[0].result.state,'varying');}
+      if(name==='writer-ring') {assert.equal(r.after.admitted,true);assert.equal(r.outcomes[0].emptiness[0].outcome,'proved');assert.equal(r.outcomes[0].notices[0].result.state,'varying');}
       if(name==='schema-layered')assert.equal(r.after.admitted,true);
       if(name==='component-chain') {
         assert.equal(r.after.admitted,true);
@@ -232,5 +233,37 @@ test('tagged hub is a separate value domain, with persistent configuration',()=>
     assert.ok(r.attemptSummaries.every(a=>Number.isFinite(a.lookaheadWork)&&Number.isFinite(a.lookaheadLimit)));
     assert.deepEqual(summarize(out),report);
     for(const bad of [{hubVariant:'unknown'},{hubVariant:'tagged'},{...options,hubTagValues:0},{...options,hubValues:2},{...options,hubDecoys:1},{...options,hubReader:'merged'},{...options,hubRoutes:false},{hubTagValues:3}])assert.throws(()=>source('guarded-hub',2,bad));
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+
+test('writer ring dimensions and all input orders survive report recovery',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-writer-ring-'));
+  try {
+    const options={ringLanes:1,ringRelays:2,ringReaders:2};
+    for(const inputOrder of ['key','reverse-key','structural']) {
+      const out=path.join(root,inputOrder);
+      const report=run({...options,out,inputOrder,binary:'target/debug/examples/bench_schema',family:['writer-ring'],sizes:[2],repeat:1});
+      for(const [key,value] of Object.entries(options))assert.equal(report[key],value);
+      const r=report.families['writer-ring'].runs[0];
+      assert.equal(r.inputOrder.requested,inputOrder);assert.equal(r.inputOrder.effective,inputOrder);assert.equal(r.inputOrder.fallback,null);
+      assert.equal(r.after.admitted,true);assert.equal(r.outcomes[0].emptiness[0].outcome,'proved');
+      assert.equal(r.outcomes[0].notices[0].result.state,'varying');
+      assert.deepEqual(summarize(out),report);
+    }
+    for(const bad of [{ringLanes:0},{ringRelays:1},{ringReaders:-1},{ringLanes:1.5}])assert.throws(()=>source('writer-ring',2,bad));
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('writer ring completes the verification with co-read inputs outside uniqueness groups',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-writer-ring-storage-'));
+  try {
+    const report=run({out:path.join(root,'run'),binary:'target/debug/examples/bench_schema',family:['writer-ring'],sizes:[4],repeat:1,inputOrder:'structural',
+      limits:['--timeout-ms','30000','--max-work','2000000000','--max-bdd-nodes','1000000','--max-bdd-tasks','10000000','--max-condition-nodes','100000000']});
+    const r=report.families['writer-ring'].runs[0];
+    assert.equal(r.inputOrder.effective,'structural');assert.equal(r.inputOrder.fallback,null);
+    assert.equal(r.after.admitted,true);assert.equal(r.outcomes[0].state,'proved');
+    assert.equal(r.outcomes[0].emptiness[0].outcome,'proved');
+    assert.equal(r.outcomes[0].notices[0].result.state,'varying');
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });

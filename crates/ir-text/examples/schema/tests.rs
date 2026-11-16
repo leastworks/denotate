@@ -458,7 +458,7 @@ fn zoo_tiny_sources_match_independent_oracles() {
     use denotate_check::test_support::rewrites::{compare_permitted, subsets, supported_models};
     let script =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/bench-den-zoo.mjs");
-    let output = std::process::Command::new("node").args(["--input-type=module", "-e", "import {pathToFileURL} from 'node:url'; const m=await import(pathToFileURL(process.argv[1])); console.log(JSON.stringify(m.families.filter(f=>f!=='schema-layered').map(f=>[f,m.source(f,f==='guarded-hub'?1:2)])));" ]).arg(script).output().unwrap();
+    let output = std::process::Command::new("node").args(["--input-type=module", "-e", "import {pathToFileURL} from 'node:url'; const m=await import(pathToFileURL(process.argv[1])); console.log(JSON.stringify(m.families.filter(f=>f!=='schema-layered').map(f=>[f,m.source(f,['guarded-hub','writer-ring'].includes(f)?1:2,{ringLanes:1,ringRelays:2,ringReaders:1})])));" ]).arg(script).output().unwrap();
     assert!(
         output.status.success(),
         "{}",
@@ -490,6 +490,13 @@ fn zoo_tiny_sources_match_independent_oracles() {
             // Independent interpretation of the worlds family's authored input-only
             // assumption: at most one choice for each group. Do not ask BDD W.
             let permitted = |world: &std::collections::BTreeSet<GroundAtom>| {
+                if name == "writer-ring" {
+                    let count = |name: &str| {
+                        let r = p.corpus.relations().find(|r| r.name == name).unwrap().id;
+                        world.iter().filter(|a| a.relation == r).count()
+                    };
+                    return count("route") <= 1 && count("received") <= 1 && count("result0") == 1;
+                }
                 if name == "guarded-hub" {
                     return ["declared", "route"].into_iter().all(|name| {
                         let r = p.corpus.relations().find(|r| r.name == name).unwrap().id;

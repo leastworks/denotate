@@ -317,10 +317,12 @@ common sub-functions once.
 ## Small items
 
 - **Structural BDD input order** exists as a diagnostic (`--input-order structural`).
-  It cut BDD work by orders of magnitude on synthetic shapes whose input names
-  separate co-read inputs, but barely moved a production-scale program. Revisit
-  when another DSL's lowered programs show order-sensitive costs (compare with
-  `reverse-key` first). Placement should then treat derived atoms as hypergraph
+  It cut BDD work sharply on synthetic shapes whose input names separate co-read
+  inputs. The first production run barely changed with the former hard uniqueness
+  blocks; those blocks have since been replaced by weighted preferences after a
+  writer-ring reproduction exposed their cost. Re-score that change on real lowered
+  programs before selecting a default (compare with `reverse-key` too). To scale
+  further, placement should treat derived atoms as hypergraph
   nodes, since today's support expansion is quadratic at scale, and a default needs
   an edit-stability policy ([checker policies](checker-policies.md#diagnostic-input-ordering)).
 - General-assumption contexts use fresh whole-program evaluation. If a real program

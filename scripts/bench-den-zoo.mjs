@@ -3,8 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','guarded-hub','component-chain','symbolic-exhaustion','schema-layered'];
-export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1,hubVariant='pairs',hubTagValues=2}={}) {
+export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','writer-ring','guarded-hub','component-chain','symbolic-exhaustion','schema-layered'];
+export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1,hubVariant='pairs',hubTagValues=2,ringLanes=8,ringRelays=6,ringReaders=1}={}) {
   if (!['pairs','tagged'].includes(hubVariant)) throw Error('invalid hub variant');
   if (hubVariant==='pairs' && hubTagValues!==2) throw Error('tag values requires tagged hub variant');
   if (!families.includes(family) || !Number.isSafeInteger(n) || n < 1) throw Error('invalid family/positive size');
@@ -54,6 +54,32 @@ export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,
     for(let i=0;i<n;i++) {
       add(`relation leaf${i}(); leaf${i}():-!wide(); leaf${i}():-q(); wide():-guard(),leaf${i}();`);
     }
+  } else if (family === 'writer-ring') {
+    if (![ringLanes,ringRelays,ringReaders].every(v=>Number.isSafeInteger(v)&&v>0)) throw Error('ring dimensions must be positive integers');
+    if (ringRelays<2) throw Error('writer ring requires at least two relays');
+    add(`sort Kind; const ${Array.from({length:ringRelays},(_,i)=>`t${i}`).join(', ')}: Kind; relation kinds(t: Kind);`);
+    for(let i=0;i<ringRelays;i++)add(`kinds(t${i});`);
+    add(`sort Lane; const ${Array.from({length:n},(_,w)=>Array.from({length:ringLanes},(_,j)=>`l${w}_${j}`)).flat().join(', ')}: Lane; relation lanes(l: Lane);`);
+    for(let w=0;w<n;w++)for(let j=0;j<ringLanes;j++)add(`lanes(l${w}_${j});`);
+    add('input route(l: Lane) within lanes; assumption one_route: at_most_one(route, group_by: ());');
+    add('input received(t: Kind) within kinds; assumption one_received: at_most_one(received, group_by: ());');
+    add('relation kind(t: Kind); relation written();');
+    assumptions='one_route, one_received';
+    for(let w=0;w<n;w++) {
+      add(`relation applies${w}(); input result${w}(t: Kind) within kinds;`);
+      add(`assumption has_result${w}: at_least_one(result${w}, group_by: ()); assumption one_result${w}: at_most_one(result${w}, group_by: ());`);
+      assumptions+=`, has_result${w}, one_result${w}`;
+      add(`kind(T) :- applies${w}(), result${w}(T); written() :- applies${w}();`);
+      for(let j=0;j<ringLanes;j++)add(`input fa${w}_${j}(); input fb${w}_${j}(); applies${w}() :- route(l${w}_${j}), fa${w}_${j}(), !fb${w}_${j}();`);
+    }
+    add('kind(T) :- received(T), !written();');
+    for(let i=0;i<ringRelays;i++) {
+      add(`relation context${i}(); relation relay${i}(); context${i}() :- kind(t${i}); relay${i}() :- context${i}(), !relay${(i+1)%ringRelays}();`);
+      add(`bad() :- context${i}(), !relay${i}();`);
+    }
+    add('relation downstream();');
+    for(let i=0;i<ringReaders;i++)add(`input w${i}(); relation down${i}(); down${i}() :- relay${i%ringRelays}(), w${i}(); downstream() :- down${i}();`);
+    add('notice downstream_varies: varies(downstream);');
   } else if (family === 'guarded-ring') {
     // Grouped input names deliberately order priorities before readiness bits.
     // The positive ring is cut by ready_i; under !kind every booked_i is false.
@@ -196,7 +222,7 @@ export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,
     add('relation seed(); seed(); relation a(); relation b(); a() :- !b(); b() :- !a();');
     for(let i=0;i<n;i++) add(`relation support${i}(); support${i}() :- ${i?`support${i-1}`:'seed'}(); relation result${i}(); result${i}() :- support${i}(); result${i}() :- a();`);
   } else throw Error('schema-layered uses the schema generator');
-  return s+`obligation no_bad: empty(bad); verification checks { assumptions: [${assumptions}]; obligations: [no_bad${family==='symbolic-exhaustion'?', no_independent':''}]; ${family==='guarded-hub'?'notices: [hazard_condition];':''} }\n`;
+  return s+`obligation no_bad: empty(bad); verification checks { assumptions: [${assumptions}]; obligations: [no_bad${family==='symbolic-exhaustion'?', no_independent':''}]; ${family==='guarded-hub'?'notices: [hazard_condition];':family==='writer-ring'?'notices: [downstream_varies];':''} }\n`;
 }
 export function fit(points, threshold = 1.3) {
   const usable = points.filter(([x, y]) => Number.isFinite(x) && x > 0 && Number.isFinite(y) && y > 0);
@@ -355,7 +381,7 @@ function readRun(dir, size, rep) {
 export function summarize(out) {
   const config = JSON.parse(fs.readFileSync(path.join(out, 'sweep.json')));
   const { family, sizes, repeat, threshold, binary } = config;
-  const report = { threshold, repeat, sizes, inputOrder: config.inputOrder ?? 'key', hubReader: config.hubReader ?? 'split', hubRoutes: config.hubRoutes ?? true, hubDecoys: config.hubDecoys ?? 0, hubDecoyShape: config.hubDecoyShape ?? 'full', hubWriters: config.hubWriters ?? 0, hubReaders: config.hubReaders ?? 1, hubValues: config.hubValues ?? 1, hubVariant: config.hubVariant ?? 'pairs', hubTagValues: config.hubTagValues ?? 2, satProbe: config.satProbe ?? false, satProbeCandidates: config.satProbeCandidates ?? false, families: {} };
+  const report = { threshold, repeat, sizes, inputOrder: config.inputOrder ?? 'key', hubReader: config.hubReader ?? 'split', hubRoutes: config.hubRoutes ?? true, hubDecoys: config.hubDecoys ?? 0, hubDecoyShape: config.hubDecoyShape ?? 'full', hubWriters: config.hubWriters ?? 0, hubReaders: config.hubReaders ?? 1, hubValues: config.hubValues ?? 1, hubVariant: config.hubVariant ?? 'pairs', hubTagValues: config.hubTagValues ?? 2, ringLanes: config.ringLanes ?? 8, ringRelays: config.ringRelays ?? 6, ringReaders: config.ringReaders ?? 1, satProbe: config.satProbe ?? false, satProbeCandidates: config.satProbeCandidates ?? false, families: {} };
   for (const name of family) {
     const runs = [];
     for (const size of sizes) for (let rep = 0; rep < repeat; rep++) {
@@ -371,20 +397,20 @@ export function summarize(out) {
   return report;
 }
 
-export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3,binary='target/profiling/examples/bench_schema',samply=false,limits=[],inputOrder='key',hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1,hubVariant='pairs',hubTagValues=2,satProbe=false,satProbeCandidates=false}) {
+export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3,binary='target/profiling/examples/bench_schema',samply=false,limits=[],inputOrder='key',hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1,hubVariant='pairs',hubTagValues=2,ringLanes=8,ringRelays=6,ringReaders=1,satProbe=false,satProbeCandidates=false}) {
   if (!['split','merged'].includes(hubReader)) throw Error('hub reader must be split or merged');
   if (!['key','reverse-key','structural'].includes(inputOrder)) throw Error('invalid input order');
   fs.mkdirSync(path.dirname(out),{recursive:true});
   fs.mkdirSync(out,{recursive:false});
-  fs.writeFileSync(path.join(out, 'sweep.json'), JSON.stringify({family, sizes, repeat, threshold, inputOrder, hubReader, hubRoutes, hubDecoys, hubDecoyShape, hubWriters, hubReaders, hubValues, hubVariant, hubTagValues, satProbe, satProbeCandidates, binary: path.resolve(binary)}, null, 2));
-  const report={threshold,repeat,sizes,inputOrder,hubReader,hubRoutes,hubDecoys,hubDecoyShape,hubWriters,hubReaders,hubValues,hubVariant,hubTagValues,satProbe,satProbeCandidates,families:{}};
+  fs.writeFileSync(path.join(out, 'sweep.json'), JSON.stringify({family, sizes, repeat, threshold, inputOrder, hubReader, hubRoutes, hubDecoys, hubDecoyShape, hubWriters, hubReaders, hubValues, hubVariant, hubTagValues, ringLanes, ringRelays, ringReaders, satProbe, satProbeCandidates, binary: path.resolve(binary)}, null, 2));
+  const report={threshold,repeat,sizes,inputOrder,hubReader,hubRoutes,hubDecoys,hubDecoyShape,hubWriters,hubReaders,hubValues,hubVariant,hubTagValues,ringLanes,ringRelays,ringReaders,satProbe,satProbeCandidates,families:{}};
   for(const name of family) {
     const runs=[];
     for(const size of sizes) for(let rep=0;rep<repeat;rep++) {
       const dir=path.resolve(out,`${name}-${size}-${rep}`);
       let args=['--out',dir,'--input-order',inputOrder];
       if(name==='schema-layered') args.push('--topology','layered','--fields',String(size+2),'--reads',String(size),'--depth','2','--encoding','assumed');
-      else {const input=path.resolve(out,`${name}-${size}.den`);fs.writeFileSync(input,source(name,size,{hubReader,hubRoutes,hubDecoys,hubDecoyShape,hubWriters,hubReaders,hubValues,hubVariant,hubTagValues}));args.push('--source',input);}
+      else {const input=path.resolve(out,`${name}-${size}.den`);fs.writeFileSync(input,source(name,size,{hubReader,hubRoutes,hubDecoys,hubDecoyShape,hubWriters,hubReaders,hubValues,hubVariant,hubTagValues,ringLanes,ringRelays,ringReaders}));args.push('--source',input);}
       if(samply) args.push('--samply');
       if(satProbe) args.push('--sat-probe');
       if(satProbeCandidates) args.push('--sat-probe-candidates');
@@ -414,10 +440,13 @@ if(!process.execArgv.some(a=>a==='-e'||a==='--eval') && process.argv[1] && path.
       if(key==='--samply'){opts.samply=true;continue;}
       if(key==='--sat-probe-candidates'){opts.satProbeCandidates=true;continue;}
       if(key==='--sat-probe'){opts.satProbe=true;continue;}
-      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [--hub-reader split|merged] [--hub-no-routes] [--sat-probe] [--sat-probe-candidates] [--hub-variant pairs|tagged] [--hub-tag-values V] [--hub-writers N] [--hub-readers N] [--hub-values N] [--hub-decoys N] [--hub-decoy-shape full|near-full] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
+      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [--hub-reader split|merged] [--hub-no-routes] [--sat-probe] [--sat-probe-candidates] [--hub-variant pairs|tagged] [--hub-tag-values V] [--hub-writers N] [--hub-readers N] [--hub-values N] [--hub-decoys N] [--hub-decoy-shape full|near-full] [--ring-lanes N] [--ring-relays N] [--ring-readers N] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
       const val=args[++i];
       if(key==='--family')opts.family=val.split(',');else if(key==='--sizes')opts.sizes=val.split(',').map(Number);
       else if(key==='--input-order')opts.inputOrder=val;
+      else if(key==='--ring-lanes')opts.ringLanes=Number(val);
+      else if(key==='--ring-relays')opts.ringRelays=Number(val);
+      else if(key==='--ring-readers')opts.ringReaders=Number(val);
       else if(key==='--hub-reader')opts.hubReader=val;
       else if(key==='--hub-variant')opts.hubVariant=val;
       else if(key==='--hub-tag-values')opts.hubTagValues=Number(val);

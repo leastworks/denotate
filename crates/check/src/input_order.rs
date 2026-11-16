@@ -219,8 +219,9 @@ impl GroundProgram {
             meter.store(group.len())?;
             groups.insert(group);
         }
-        // Selected general assumptions supply structural preferences too. Only
-        // input-only uniqueness groups are eligible for hard contiguous blocks.
+        // Selected general assumptions supply structural preferences too.
+        // Exclusivity influences placement without forcing its inputs together:
+        // each member may be co-read with inputs outside the group.
         for constraint in constraints {
             let mut edge = BTreeSet::new();
             let mut exclusive = BTreeMap::<Vec<_>, Vec<usize>>::new();
@@ -257,50 +258,12 @@ impl GroundProgram {
                 groups.insert(group);
             }
         }
-        let mut counts = vec![0usize; ordered.len()];
         for group in &groups {
             meter.visit(group.len())?;
-            for i in group {
-                counts[*i] += 1;
-            }
             add_edge(&mut edges, group.clone(), 4, meter)?;
         }
-        let mut blocks = Vec::new();
-        let mut assigned = vec![false; ordered.len()];
-        for group in &groups {
-            meter.visit(group.len())?;
-            if group.iter().all(|i| counts[*i] == 1) {
-                for i in group {
-                    assigned[*i] = true;
-                }
-                blocks.push(group.clone());
-            }
-        }
-        blocks.extend(
-            (0..ordered.len())
-                .filter(|i| !assigned[*i])
-                .map(|i| vec![i]),
-        );
-        blocks.sort_by_key(|b| b[0]);
-        let mut owner = vec![0; ordered.len()];
-        for (b, members) in blocks.iter().enumerate() {
-            for i in members {
-                owner[*i] = b;
-            }
-        }
-        let mut block_edges = BTreeMap::new();
-        for (edge, weight) in edges {
-            meter.visit(edge.len())?;
-            let edge = edge
-                .into_iter()
-                .map(|i| owner[i])
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect();
-            add_edge(&mut block_edges, edge, weight, meter)?;
-        }
-        report.hyperedges = block_edges.len();
-        let mut order: Vec<_> = (0..blocks.len()).collect();
+        report.hyperedges = edges.len();
+        let mut order: Vec<_> = (0..ordered.len()).collect();
         let mut best = order.clone();
         let mut best_cost = u128::MAX;
         for pass in 0..=PASSES {
@@ -311,7 +274,7 @@ impl GroundProgram {
             }
             let mut cost = 0;
             let mut centers = vec![(0u128, 0u128); order.len()];
-            for (edge, weight) in &block_edges {
+            for (edge, weight) in &edges {
                 meter.visit(edge.len())?;
                 let min = edge.iter().map(|b| positions[*b]).min().unwrap();
                 let max = edge.iter().map(|b| positions[*b]).max().unwrap();
@@ -345,14 +308,11 @@ impl GroundProgram {
                     } else {
                         sum / weight
                     },
-                    blocks[*b][0],
+                    *b,
                 )
             });
         }
-        Ok(best
-            .into_iter()
-            .flat_map(|b| blocks[b].iter().copied())
-            .collect())
+        Ok(best)
     }
 
     fn support(

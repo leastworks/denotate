@@ -68,6 +68,7 @@ enforced work share; an individual expensive attempt can still consume global wo
 | guarded-fan-in | one guarded unit with n input-pair booked producers | 2n+8 / n+6 | one large bound hits a node limit before aggregate storage fills |
 | guarded-worlds | 2n independent exclusive input groups, n guarded producers | 6n+8 / 2n+6 | large W exercises temporary cone storage and retained proof ownership |
 | guarded-hub | n lane producers, one reader whose class guard sits in a sibling rule | 3n+13 / n+10 (split reader) | implied guard cuts the shared cycle at its reader |
+| writer-ring | n writers, configurable lanes, relays and readers; exclusive routes and writer results | inventory recorded by the runner | mutually exclusive contexts cut a negative relay ring; co-read lane flags compete with uniqueness-group placement |
 | schema-layered | n payload reads, n+2 fields; depth 2, width 2, assumed acceptance | linear at fixed tree shape; inherited tables have four leaves | shared layout-valid schema preset |
 
 Categorical changes are distinct families. Fixed facts and removed rules remain
@@ -75,6 +76,33 @@ in evidence inventories; executable post-admission sizes are recorded separately
 No semantic outcome, cost counter, timing, or solver witness is a performance golden.
 The tiny path checks assert verdicts, surviving SCCs, removal/discharge counts as
 path-presence checks, and produced findings, without historical cost thresholds.
+
+## Writer ring
+
+`writer-ring` makes `--sizes` the number of writers. `--ring-lanes` (default 8)
+controls lanes per writer, `--ring-relays` (default 6, minimum 2) the number of
+kinds and relay predicates, and `--ring-readers` (default 1) downstream readers.
+All dimensions are positive integers and survive saved-report recovery.
+
+A lane applies when `route(l)`, `fa()` and `!fb()` hold. Routes are mutually
+exclusive across writers. Each writer has an exactly-one kind result (separate
+coverage and uniqueness assumptions); otherwise an optional received kind supplies
+the value. Each kind enables one relay in a negative ring. At most one context is
+true in any permitted world, so the ring has one meaning, the emptiness obligation
+is proved, and the downstream notice varies. Exhaustion is reported explicitly;
+large key-order runs need not complete. This tests both admission and checking.
+
+```sh
+just bench-den-zoo --family writer-ring --sizes 2,4,8,16 --repeat 1 \
+  --ring-lanes 8 --ring-relays 6 --ring-readers 1 --input-order structural \
+  --out target/writer-ring-structural -- --timeout-ms 120000
+```
+
+Compare with `--input-order key` in a new directory, retaining the same checker
+limits. Each run records requested/effective order and any fallback. Route groups
+stay weighted preferences rather than hard blocks, allowing lane inputs to be
+placed together. Neither placement nor node counts are golden expectations. Larger
+writer counts may still be expensive; their cause needs separate measurement.
 
 ## Tagged-value hub
 

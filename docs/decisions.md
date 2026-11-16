@@ -627,6 +627,17 @@ The file intentionally retains program names and is not an anonymized export.
   warnings made unnecessary by earlier settlement are accepted trade-offs for
   preserving progress. Shared preparation and global exhaustion still stop;
   enforced work sharing remains separate scheduling work.
+- **Input uniqueness groups guide BDD placement without forcing contiguity.**
+  A writer-ring reproduction reads each route input together with two lane flags.
+  Forcing the route uniqueness group into one contiguous block separated those
+  co-read inputs and made structural ordering expensive. Every uniqueness group
+  now remains a weighted hyperedge, with the same weight, while individual inputs
+  can move independently. All assumptions remain enforced; only the diagnostic
+  structural order changes. Key order stays the default. Semantic-key tie breaks,
+  bounded placement with explicit key-order fallback, and order-sensitive reuse
+  remain. The structural configuration is version 2 to distinguish measurements
+  and request identities from the former heuristic. Corpus-scale support expansion,
+  edit stability and any default change remain separate work.
 - **Admission retains proof readers, not every evaluated intermediate.** A real
   provider cone filled storage during symbolic evaluation, then its shared summary
   construction stopped admission. Proofs need complete producer sets for target

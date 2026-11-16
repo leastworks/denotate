@@ -24,11 +24,16 @@ verification unrestricted{assumptions:[];obligations:[no_bad];}";
     let overlapping = "sort S; const a,b:S; input cell(row:S,col:S);
 assumption rows:at_most_one(cell,group_by:(row));
 assumption cols:at_most_one(cell,group_by:(col));
-relation selected(row:S,col:S); selected(R,C):-cell(R,C);
+input enabled(); input blocked();
+relation selected(row:S,col:S); selected(R,C):-cell(R,C),enabled(),!blocked();
 obligation unique:at_most_one(selected,group_by:());
 verification checks{assumptions:[rows,cols];obligations:[unique];}
 verification again{assumptions:[rows,cols];obligations:[unique];}";
-    for (fixture, text) in [ordinary, specialized, overlapping].into_iter().enumerate() {
+    let disjoint = overlapping.replace("assumptions:[rows,cols]", "assumptions:[rows]");
+    for (fixture, text) in [ordinary, specialized, overlapping, disjoint.as_str()]
+        .into_iter()
+        .enumerate()
+    {
         let source = SourceFile::new("file:///orders.den", 0, text);
         let p = load(
             &ProgramMembership::single("root", [source.uri.clone()]),
@@ -110,7 +115,7 @@ verification again{assumptions:[rows,cols];obligations:[unique];}";
                             assert_eq!(accepted, expected, "fixture {fixture}, order {order:?}");
                         }
                     }
-                    if fixture == 2 {
+                    if fixture >= 2 {
                         let inputs = prepared
                             .program()
                             .input_atoms()
@@ -121,12 +126,14 @@ verification again{assumptions:[rows,cols];obligations:[unique];}";
                             let mut rows = std::collections::BTreeSet::new();
                             let mut cols = std::collections::BTreeSet::new();
                             let expected = world.iter().all(|a| {
-                                rows.insert(a.arguments[0]) && cols.insert(a.arguments[1])
+                                a.arguments.is_empty()
+                                    || (rows.insert(a.arguments[0])
+                                        && (fixture == 3 || cols.insert(a.arguments[1])))
                             });
                             assert_eq!(prepared.program().evaluate(world, &l).is_ok(), expected);
                             permitted += usize::from(expected);
                         }
-                        assert_eq!(permitted, 7);
+                        assert_eq!(permitted, if fixture == 2 { 28 } else { 36 });
                     }
                     let prepared = prepared.admit(&ops).unwrap();
                     let result = match session {
