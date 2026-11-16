@@ -300,12 +300,19 @@ cold/warm agreement unchanged; no node counts, budgets or timings as goldens.
 
 **Symbolic evaluation scope.** Admission evaluates every atom of its cone exactly,
 and each round re-evaluates the cone from scratch; an atom that exhausts a
-per-operation limit becomes unknown. Open directions: reuse unchanged components'
-conditions across rounds; keep only the conditions later stages read; and
-demand-driven evaluation, computing an atom's condition only under its readers'
-guards. On a production-scale program, a large cone unblocked by a structural split
-overflowed condition storage; a shared manager would also store common
-sub-functions once.
+per-operation limit becomes unknown. Admission keeps only the conditions its proofs
+read and releases the rest after their last reader; checking still retains its
+query-owned conditions, whose readers (obligations, evidence) are broader, and could
+get the same treatment if a real program shows checking storage dominating. Open
+directions: reuse unchanged components' conditions across rounds; evicting needed
+conditions, only with a deterministic policy, a diagnostic reason and evidence that
+frontier retention is not enough; demand-driven evaluation, computing an atom's
+condition only under its readers' guards; and assumption-relative evaluation, which
+might collapse exclusive alternatives that can co-occur only outside W. Rewrites
+already preserve meaning only within W, but evaluating every condition relative to
+W needs its own measurement and soundness argument. On a production-scale program, a large cone unblocked by
+a structural split overflowed condition storage; a shared manager would also store
+common sub-functions once.
 
 ## Small items
 
