@@ -99,6 +99,19 @@ The four-guard cycle, sibling contexts and never-active hubs exercise this path.
 This is still bounded proof search, without totality without rewrites, arbitrary
 multi-way splits or an exported conditional schedule.
 
+Installed split replacements simplify only by identities that hold in every world:
+equal branches and direct complementary terms. Two follow-ups wait for evidence
+from a production-scale program, where readers of a split's replacement evaluated
+about 250x slower than after guarded settlement of the same component. First,
+cross-branch agreement: leaf truths are masked to their own domains and cannot be
+compared directly (`ITE(c, true, false)` is `c`, not `true`), so a sound check
+evaluates the candidate expression on the opposite domain, charged and optional.
+Second, a visible replacement-size limit, which first needs a metric (unrestricted
+replacement BDD or expression size) and a baseline. Profiling reports both sizes
+alongside the W-restricted certificate truth. Never reintroduce a reference to an
+atom of the component being eliminated: its value may agree, but the reference can
+restore the cycle.
+
 ## Contract vocabulary: follow-ups
 
 `at_most_one`, `at_least_one`, `exactly_one` and `empty` are implemented for obligations
