@@ -1245,6 +1245,46 @@ mod tests {
     }
 
     #[test]
+    fn case_splits_reach_cli_evidence_and_shared_structured_progress() {
+        let f = Fixture::new(include_str!("../tests/fixtures/case-split.den"));
+        let (code, direct) = f.run(&["--no-progress"]);
+        assert_eq!(code, 0, "{direct}");
+        assert!(direct.contains("Case split on settled facts"));
+        assert!(!direct.contains("Case ["));
+        let (code, full) = f.run(&["--no-progress", "--verbose"]);
+        assert_eq!(code, 0, "{full}");
+        assert!(full.contains("Case [") && full.contains("Settlement step"));
+        let path = f.0.join("case-splits.jsonl");
+        let (code, observed, trace) = f.traced(&["--profile-memory", path.to_str().unwrap()]);
+        assert_eq!(code, Ok(0));
+        assert_eq!(observed, direct);
+        assert!(trace.contains("case splits:") && trace.contains("branch cone"));
+        let records = fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+            .collect::<Vec<_>>();
+        let splits = records
+            .iter()
+            .map(|r| &r["detail"]["admission"]["guarded"]["splits"])
+            .filter(|s| s.is_object())
+            .collect::<Vec<_>>();
+        assert!(splits.iter().any(|s| {
+            s["state"] == "split"
+                && s["chosen"].is_string()
+                && s["branchCyclicAtoms"]
+                    .as_array()
+                    .is_some_and(|v| v.len() == 2)
+        }));
+        assert!(
+            splits
+                .iter()
+                .any(|s| s["state"] == "certified" && s["maxDepth"].as_u64().unwrap() >= 2)
+        );
+        assert_eq!(f.run(&["--json"]), f.run(&["--json", "--verbose"]));
+    }
+
+    #[test]
     fn guarded_candidate_cones_and_timings_reach_cli_and_structured_progress() {
         let f = Fixture::new("input kind(); input ready(); input priority();
 relation booked(); relation fails(); relation claim(); relation inspected(); relation held(); relation cleared();
@@ -2417,7 +2457,11 @@ kept():-middle(); kept():-term(); term():-!kept(); verification checks{assumptio
         }
         let source = include_str!("../tests/fixtures/guarded-settlement.den")
             .replace("assumptions: [one_class]", "assumptions: []");
-        assert_eq!(Fixture::new(&source).run(&["--no-progress"]).0, 2);
+        // Independent context splits now justify this fixture without one_class;
+        // the frontend tests compare every world's stable and supported models.
+        let (code, output) = Fixture::new(&source).run(&["--no-progress"]);
+        assert_eq!(code, 0, "{output}");
+        assert!(output.contains("Case split on settled facts"));
     }
 
     #[test]

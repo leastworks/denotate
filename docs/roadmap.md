@@ -90,6 +90,13 @@ accept cycles that are never active or are broken by an early decision proven
 equivalent under the permitted worlds, reject the rest with a cycle and a witness
 world, and export the guarded schedule for comparison with a DSL's own scheduler.
 
+Bounded case splits already cover some never-active cycles: admission partitions
+the permitted worlds on independently settled atoms, proves each branch, and
+combines the results into an ordinary guarded replacement. This includes the
+four-guard cycle needing a second split even when the first split's largest branch
+does not shrink. It does not yet provide a separate evaluation order per branch,
+multi-way splits or an exported conditional schedule; those remain future work.
+
 ## Contract vocabulary: follow-ups
 
 `at_most_one`, `at_least_one`, `exactly_one` and `empty` are implemented for obligations

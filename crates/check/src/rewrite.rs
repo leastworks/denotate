@@ -168,8 +168,7 @@ impl RewriteProof {
             RewriteJustification::Symbolic(p) => p.producers.iter().map(|p| &p.rule).collect(),
             RewriteJustification::Structural(p) => p.supporting_rules(),
             RewriteJustification::GuardedSettlement(p) => p
-                .bounds
-                .cone
+                .certificate
                 .summaries()
                 .map(|p| &p.rule)
                 .chain(
@@ -220,8 +219,7 @@ impl RewriteProof {
                     .chain(p.upper_bounds.iter().flat_map(|b| b.producers.iter()))
             })
             .chain(self.guarded_settlement().into_iter().flat_map(|p| {
-                p.bounds
-                    .cone
+                p.certificate
                     .summaries()
                     .chain(p.implied_guard.iter().flat_map(|g| g.summaries()))
             }))
@@ -250,12 +248,14 @@ impl RewriteProof {
                 p.implied_guard
                     .iter()
                     .flat_map(|g| g.summaries().flat_map(|s| s.profile_conditions()))
-                    .chain(std::iter::once(&p.bounds.cone.domain))
-                    .chain(p.bounds.conditions.values())
-                    .chain(p.bounds.guarantees.values())
+                    .chain(p.certificate.domains())
                     .chain(
-                        p.bounds
-                            .cone
+                        p.certificate
+                            .bounds()
+                            .flat_map(|b| b.conditions.values().chain(b.guarantees.values())),
+                    )
+                    .chain(
+                        p.certificate
                             .summaries()
                             .flat_map(ProducerSummary::profile_conditions),
                     )
@@ -273,7 +273,7 @@ impl RewriteProof {
             .bound_removal()
             .map_or(0, |p| p.body_upper.node_count())
             + self.guarded_settlement().map_or(0, |p| {
-                p.bounds.nodes() + p.implied_guard.as_ref().map_or(0, ImpliedGuardProof::nodes)
+                p.certificate.nodes() + p.implied_guard.as_ref().map_or(0, ImpliedGuardProof::nodes)
             })
     }
 }

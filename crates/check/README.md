@@ -176,6 +176,19 @@ never becomes a checker-limit finding or failed-proof cache entry.
 The [checker policies](../../docs/checker-policies.md#guarded-settlement) describe
 its provisional window, threshold and progress fields.
 
+If ordinary guarded bounds fail locally or settlement is negative, a bounded case
+search can split the effective domain on globally settled input or derived atoms.
+An executable-cone SCC score chooses useful splits; it is never proof evidence.
+Each live branch obtains fresh candidate-relaxed bounds and a non-circular
+certificate, including constant leaves justified by false upper bounds or
+independently exact producers. Only a complete tree becomes a replacement, with
+the effective guard retained. `GuardedCertificate` records leaves, splits and
+empty domains; execution still consumes the combined `SettledExpression`.
+Branch caches are deliberately absent. Complete branch dependencies participate
+in batching, original evidence closure and local-query invalidation. Progress and
+full warning evidence expose the split and its branches. See the
+[case-split policies](../../docs/checker-policies.md#case-splits).
+
 Structural rewrite proofs expose direct settling/unfolding support through
 `direct_rules` and accurate absence explanations through `settlement`. Internal
 rewrite keys use that direct view. `supporting_rules` explicitly expands the full

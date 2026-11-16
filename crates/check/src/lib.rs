@@ -7,7 +7,7 @@ pub use admission_dump::*;
 mod admission_progress;
 pub use admission_progress::{
     AdmissionAttempts, AdmissionComponent, AdmissionObserver, AdmissionPhase, AdmissionProgress,
-    GuardedAttempt,
+    GuardedAttempt, GuardedSplitProgress,
 };
 mod admission_scope;
 mod admission_skips;
@@ -39,7 +39,7 @@ pub use guarded_bounds::{
 mod local;
 mod request;
 mod rewrite;
-pub use guarded_settlement::{GuardedSettlementProof, GuardedSettlementStep};
+pub use guarded_settlement::{GuardedCertificate, GuardedSettlementProof, GuardedSettlementStep};
 mod settled_expression;
 mod structural;
 pub use settled_expression::{SettledExpression, SettledReplacement};

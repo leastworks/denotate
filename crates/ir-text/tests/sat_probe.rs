@@ -407,7 +407,7 @@ fn candidate_probe_agrees_with_certificates_at_their_actual_snapshots() {
             let report = reports
                 .iter()
                 .find(|r| {
-                    r.snapshot == proof.bounds.cone.snapshot
+                    r.snapshot == proof.certificate.bounds().next().unwrap().cone.snapshot
                         && r.rule == proof.proof.candidate.rule.id
                         && r.occurrence == proof.occurrence
                 })

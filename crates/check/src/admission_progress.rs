@@ -50,6 +50,23 @@ impl AdmissionPhase {
     }
 }
 
+/// Bounded case-search observations, never proof evidence or cache inputs.
+#[derive(Debug, Clone, Default)]
+pub struct GuardedSplitProgress {
+    pub candidates_scored: usize,
+    pub fixed_candidates: usize,
+    pub cutoffs: usize,
+    pub chosen: Option<GroundAtom>,
+    pub cyclic_atoms: Option<usize>,
+    pub branch_cyclic_atoms: Option<[usize; 2]>,
+    pub branch_cone_atoms: Option<usize>,
+    pub branch_live_atoms: Option<usize>,
+    pub depth: usize,
+    pub max_depth: usize,
+    pub leaves: usize,
+    pub state: &'static str,
+}
+
 /// One candidate's restricted bounds work. Timings are observations only.
 #[derive(Debug, Clone)]
 pub struct GuardedAttempt {
@@ -80,6 +97,7 @@ pub struct GuardedAttempt {
     pub iteration: Duration,
     pub reused: bool,
     pub state: &'static str,
+    pub splits: Option<GuardedSplitProgress>,
 }
 
 #[derive(Debug, Clone)]
@@ -283,6 +301,7 @@ impl<'a> AdmissionReporter<'a> {
             iteration: Duration::ZERO,
             reused: false,
             state: "preprocessing",
+            splits: None,
         });
         self.rule(program, "guarded-preprocessing", rule.id, 0);
     }
@@ -348,6 +367,15 @@ impl<'a> AdmissionReporter<'a> {
         if state != "iterating" {
             self.emit(program, true);
         }
+    }
+    pub fn guarded_split(&self, program: &GroundProgram, stats: &GuardedSplitProgress) {
+        if !self.enabled() {
+            return;
+        }
+        if let Some(g) = &mut self.state.borrow_mut().progress.guarded {
+            g.splits = Some(stats.clone());
+        }
+        self.emit(program, true);
     }
     pub fn guarded_end(
         &self,

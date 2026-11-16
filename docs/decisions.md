@@ -238,6 +238,46 @@ The file intentionally retains program names and is not an anonymized export.
   and finding identities are unchanged. Display is bounded, with full steps on
   request; no source edit is authorized.
 
+- **Split guarded certificates on independently settled atoms.** When ordinary
+  guarded settlement has a completed negative answer or a recoverable bounds
+  failure, it may partition the effective domain I ∧ W on a settled atom c.
+  Globally settled derived atoms are eligible too; atoms in the unresolved
+  component are never guesses. Each live branch obtains its own candidate-relaxed
+  bounds and rank-ordered certificate. Its reading producer remains relaxed and
+  cannot justify itself. Empty branches need only evidence of an empty domain.
+
+  Branch leaves may be constant. False upper bounds justify false seeds; a union
+  of independently exact producers covering the branch justifies a true seed,
+  even if another producer remains unresolved. This uses the existing exact
+  guarantees, which exclude the reading producer; it does not turn a cyclic lower
+  bound into truth. Constant leaves are combined before applying the existing
+  whole-replacement policy, which leaves constant outcomes to removal/discharge.
+
+  For every permitted world in I, exactly one of c or !c holds. Combining branch
+  expressions as `(c and e1) or (!c and e2)` therefore preserves that world's
+  premise value. Each branch has the original non-circular certificate, so both
+  supported models and least reduct models are preserved in both directions.
+  Outside I the reading body remains disabled: the original guard remains in the
+  body and the implied guard remains in the replacement. No partial tree is
+  installed. Execution, replay and local queries still use `SettledExpression`;
+  the case tree is evidence, not a separate evaluator.
+
+  Structural scores are heuristics only. Score the executable cone, including the
+  reading producer's edges, by each branch's number of cyclic atoms. Omitting that
+  producer for scoring can already break the cycle and hide every useful split.
+  Compare `(max(left, right), left + right)` with `(N, 2N)`: one improving branch
+  is enough to justify trying a second split. A condition fixed by I, W or an
+  earlier split is not a split and consumes no depth or leaves. Branch proof cones
+  are separately pruned and relaxed; scores never enter a certificate.
+
+  There is no branch memoization. Branches bypass rule/occurrence attempt caches
+  that lack a domain key. Evidence and batching use all branches' live, dead and
+  transitive pruning sources, plus implied-guard sources. Negative-search retry
+  footprints conservatively include the whole current component, because scoring
+  also depends on producers omitted by successful proof cones. Cutoffs retain the
+  original rule; global work, deadlines and cancellation still propagate. Limits
+  and ranking are provisional [checker policies](checker-policies.md#case-splits).
+
 - **Rank a bounded window of guarded candidates by their prepared cones.** An
   informative guard can leave almost the entire component live. Running expensive
   bounds on each such candidate first can consume the budget before a useful

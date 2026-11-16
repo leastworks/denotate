@@ -14,6 +14,11 @@ use std::{
     time::Instant,
 };
 
+mod certificate;
+pub use certificate::GuardedCertificate;
+use certificate::Settlement;
+mod cases;
+
 // Optimization cutoffs: no rewrite is installed when a complete certificate does
 // not fit. Global work/BDD/dependency limits remain independent.
 pub(crate) const EXPRESSION_NODES: usize = 1024;
@@ -117,17 +122,34 @@ pub struct GuardedSettlementStep {
     pub expression: Arc<SettledExpression<GroundAtom>>,
     pub producers: Vec<GroundRuleId>,
     pub false_by_bound: bool,
+    pub true_by_guarantee: bool,
 }
 
 #[derive(Debug, Clone)]
 pub struct GuardedSettlementProof {
     pub proof: SymbolicRewriteProof,
-    pub bounds: Arc<GuardedBounds>,
+    pub certificate: GuardedCertificate,
     pub occurrence: denotate_ir::OccurrenceId,
     pub replacement: Arc<SettledExpression<GroundAtom>>,
-    /// Earlier entries justify later ones. Upper-bound seeds need no marks.
-    pub steps: Vec<GuardedSettlementStep>,
     pub implied_guard: Option<ImpliedGuardProof>,
+}
+
+impl GuardedSettlementProof {
+    pub(crate) fn nodes(&self) -> usize {
+        self.certificate.nodes()
+            + self
+                .implied_guard
+                .as_ref()
+                .map_or(0, ImpliedGuardProof::nodes)
+            + self.proof.candidate.nodes()
+            + self.proof.coverage.node_count()
+            + self
+                .proof
+                .producers
+                .iter()
+                .map(ProducerSummary::nodes)
+                .sum::<usize>()
+    }
 }
 
 /// The symmetric check lets certificates be applied sequentially in any order.
@@ -389,9 +411,11 @@ impl GroundProgram {
                 budget.tick("guarded candidate queue")?;
                 #[cfg(test)]
                 if !attempts.batch_guarded
-                    && proofs
-                        .iter()
-                        .any(|p: &GuardedSettlementProof| p.bounds.cone.component == component.id)
+                    && proofs.iter().any(|p: &GuardedSettlementProof| {
+                        p.certificate
+                            .bounds()
+                            .any(|b| b.cone.component == component.id)
+                    })
                 {
                     continue;
                 }
@@ -696,7 +720,7 @@ impl GroundProgram {
                 attempts.remember_dependencies(
                     candidate.rule.id,
                     literal.term.occurrence,
-                    retry_dependencies,
+                    retry_dependencies.clone(),
                     retained,
                     budget,
                 )?;
@@ -840,7 +864,7 @@ impl GroundProgram {
                         "skipped"
                     },
                 );
-                let Some(bounds) = bounds else {
+                if bounds.is_none() {
                     let reason = attempts
                         .reason(&Attempt::GuardedBounds(
                             candidate.rule.id,
@@ -859,9 +883,9 @@ impl GroundProgram {
                             },
                         )
                     });
-                    continue;
-                };
+                }
                 progress.rule(self, "guarded-settlement", candidate.rule.id, 0);
+                let mut released_cache = 0;
                 let proof = attempts.proof(
                     Attempt::GuardedSettlement(candidate.rule.id, literal.term.occurrence),
                     &candidate.rule.head.atom,
@@ -871,18 +895,77 @@ impl GroundProgram {
                     progress,
                     Option::is_none,
                     |retained, budget| {
-                        self.settle_guarded(
+                        if let Some(bounds) = cache.as_ref().and_then(|(_, b)| b.as_ref()) {
+                            if let Some(proof) = self.settle_guarded(
+                                candidate,
+                                literal,
+                                meaning,
+                                bounds,
+                                inferred.as_ref(),
+                                retained,
+                                budget,
+                                progress,
+                            )? {
+                                return Ok(Some(proof));
+                            }
+                        }
+                        // If every settled producer condition is fixed by this
+                        // domain, no split can change the graph. Keep the optional
+                        // bounds reusable instead of allocating a scoring graph.
+                        let mut varying = false;
+                        let domain = &cache.as_ref().unwrap().0.domain;
+                        for index in &self.component_rules[component.id.index] {
+                            budget.tick("case split eligibility")?;
+                            if let Some(s) = summaries.get(&self.rules[*index].id) {
+                                if !s.condition.is_true()
+                                    && !s.condition.is_false()
+                                    && !ctx.apply(domain, &s.condition, and, budget)?.is_false()
+                                    && !ctx
+                                        .apply(
+                                            domain,
+                                            &s.condition,
+                                            biodivine_lib_bdd::op_function::and_not,
+                                            budget,
+                                        )?
+                                        .is_false()
+                                {
+                                    varying = true;
+                                    break;
+                                }
+                            }
+                        }
+                        if !varying {
+                            return Ok(None);
+                        }
+                        // Release the broad domain's optional bounds before narrower
+                        // branches: it must not consume the space they could fit in.
+                        if let Some((cone, bounds)) = cache.take() {
+                            released_cache = bounds
+                                .as_ref()
+                                .map_or_else(|| cone.temporary_nodes(), |b| b.temporary_nodes());
+                            *retained -= released_cache;
+                        }
+                        self.case_settlement(
                             candidate,
                             literal,
+                            component,
                             meaning,
-                            bounds,
+                            summaries,
+                            &producers,
                             inferred.as_ref(),
+                            &mut retry_dependencies,
+                            cases::CaseLimits::default(),
                             retained,
                             budget,
                             progress,
                         )
                     },
                 );
+                if matches!(proof, Ok(None)) {
+                    // Local failure restored the attempt's initial accounting,
+                    // but the optional broad-domain cache was actually released.
+                    *retained -= released_cache;
+                }
                 let reason = attempts.reason(&Attempt::GuardedSettlement(
                     candidate.rule.id,
                     literal.term.occurrence,
@@ -907,9 +990,29 @@ impl GroundProgram {
                     )
                 });
                 let proof = proof?.flatten();
+                attempts.remember_dependencies(
+                    candidate.rule.id,
+                    literal.term.occurrence,
+                    retry_dependencies,
+                    retained,
+                    budget,
+                )?;
                 if let Some(proof) = proof {
-                    batch.insert(candidate.rule.id, dependencies);
-                    proofs.push(proof);
+                    let mut complete = dependencies;
+                    for source in proof.certificate.summaries() {
+                        budget.tick("case certificate dependencies")?;
+                        complete.insert(source.rule.id);
+                    }
+                    budget.charge(
+                        complete.len() + batch.rules.len(),
+                        "guarded batch independence",
+                    )?;
+                    if batch.accepts(candidate.rule.id, &complete) {
+                        batch.insert(candidate.rule.id, complete);
+                        proofs.push(proof);
+                    } else {
+                        *retained -= proof.nodes();
+                    }
                 }
             }
             *retained -= release_inference;
@@ -956,9 +1059,32 @@ impl GroundProgram {
         budget: &mut Budget<'_>,
         progress: &crate::admission_progress::AdmissionReporter<'_>,
     ) -> Result<Option<GuardedSettlementProof>> {
+        let guard = implied.map_or(&candidate.condition, |i| &i.condition);
+        let Some(settled) = self.settle_guarded_leaf(
+            candidate, literal, meaning, bounds, guard, false, retained, budget, progress,
+        )?
+        else {
+            return Ok(None);
+        };
+        self.finish_guarded(
+            candidate, literal, meaning, implied, settled, retained, budget, progress,
+        )
+    }
+
+    fn settle_guarded_leaf(
+        &self,
+        candidate: &ProducerSummary,
+        literal: &GroundLiteral,
+        meaning: &SymbolicMeaning<'_>,
+        bounds: &Arc<BorrowedBounds<'_>>,
+        guard: &Condition,
+        allow_constant: bool,
+        retained: &mut usize,
+        budget: &mut Budget<'_>,
+        progress: &crate::admission_progress::AdmissionReporter<'_>,
+    ) -> Result<Option<Settlement>> {
         let baseline = *retained;
         let ctx = meaning.context();
-        let guard = implied.map_or(&candidate.condition, |i| &i.condition);
         if ctx.restrict(guard, budget)?.is_false() {
             return Ok(None);
         }
@@ -989,6 +1115,7 @@ impl GroundProgram {
                     expression: constant(false),
                     producers: vec![],
                     false_by_bound: true,
+                    true_by_guarantee: false,
                 });
                 *retained = crate::symbolic::retain(
                     *retained,
@@ -996,6 +1123,52 @@ impl GroundProgram {
                     ctx.false_condition().node_count(),
                     budget,
                 )?;
+            }
+        }
+        if allow_constant {
+            for (atom, guarantee) in &bounds.guarantees {
+                budget.tick("case branch exact guarantee")?;
+                if marks.contains_key(atom)
+                    || !ctx
+                        .apply(
+                            &bounds.cone.domain,
+                            guarantee,
+                            biodivine_lib_bdd::op_function::and_not,
+                            budget,
+                        )?
+                        .is_false()
+                {
+                    continue;
+                }
+                expression_nodes += 1;
+                if expression_nodes > CERTIFICATE_NODES {
+                    cutoff(progress);
+                    *retained = baseline;
+                    return Ok(None);
+                }
+                let mut producers = Vec::new();
+                for p in &bounds.cone.producers {
+                    budget.tick("case branch guarantee source")?;
+                    if p.rule.head.atom == *atom
+                        && p.live
+                        && p.exact
+                        && p.rule.id != candidate.rule.id
+                    {
+                        producers.push(p.rule.id);
+                    }
+                }
+                // These lower bounds contain exact producers only. The relaxed
+                // reader is excluded, so this true seed cannot justify itself.
+                marks.insert(atom.clone(), (constant(true), bounds.cone.domain.clone()));
+                steps.push(GuardedSettlementStep {
+                    atom: atom.clone(),
+                    expression: constant(true),
+                    producers,
+                    false_by_bound: false,
+                    true_by_guarantee: true,
+                });
+                *retained =
+                    crate::symbolic::retain(*retained, 0, bounds.cone.domain.node_count(), budget)?;
             }
         }
         let mut producers = BTreeMap::<_, Vec<_>>::new();
@@ -1118,6 +1291,7 @@ impl GroundProgram {
                         expression: Arc::clone(&e),
                         producers: live,
                         false_by_bound: false,
+                        true_by_guarantee: false,
                     });
                     marks.insert(atom.clone(), (e, value));
                     changed = true;
@@ -1138,72 +1312,103 @@ impl GroundProgram {
             &ctx.apply(guard, &ctx.complement(truth, budget)?, and, budget)?,
             budget,
         )?;
-        if yes.is_false() || no.is_false() {
+        if !allow_constant && (yes.is_false() || no.is_false()) {
             *retained = baseline;
             return Ok(None);
         }
-        let expression = signed(
-            Arc::clone(expression),
-            literal.polarity == Polarity::Negative,
-        );
+        let expression = if yes.is_false() {
+            constant(false)
+        } else if no.is_false() {
+            constant(true)
+        } else {
+            Arc::clone(expression)
+        };
+        let truth = truth.clone();
+        budget.charge(
+            expression_nodes + bounds.cone.producers.len(),
+            "guarded proof storage",
+        )?;
+        let certificate = GuardedCertificate::Leaf {
+            bounds: bounds.owned(budget)?,
+            steps,
+        };
+        let result = Settlement {
+            expression,
+            truth,
+            certificate,
+        };
+        *retained = crate::symbolic::retain(baseline, 0, result.nodes(), budget)?;
+        Ok(Some(result))
+    }
+
+    fn finish_guarded(
+        &self,
+        candidate: &ProducerSummary,
+        literal: &GroundLiteral,
+        meaning: &SymbolicMeaning<'_>,
+        implied: Option<&crate::implied_guard::Inferred>,
+        settled: Settlement,
+        retained: &mut usize,
+        budget: &mut Budget<'_>,
+        progress: &crate::admission_progress::AdmissionReporter<'_>,
+    ) -> Result<Option<GuardedSettlementProof>> {
+        let baseline = *retained - settled.nodes();
+        let ctx = meaning.context();
+        let guard = implied.map_or(&candidate.condition, |i| &i.condition);
+        // Ordinary leaves already applied this policy before retaining evidence.
+        if !matches!(settled.certificate, GuardedCertificate::Leaf { .. }) {
+            let yes = ctx.restrict(&ctx.apply(guard, &settled.truth, and, budget)?, budget)?;
+            let no = ctx.restrict(
+                &ctx.apply(guard, &ctx.complement(&settled.truth, budget)?, and, budget)?,
+                budget,
+            )?;
+            // Constant leaves are useful; a constant complete result keeps the
+            // existing removal/discharge install policy.
+            if yes.is_false() || no.is_false() {
+                *retained = baseline;
+                return Ok(None);
+            }
+        }
+        let expression = signed(settled.expression, literal.polarity == Polarity::Negative);
         let expression = match implied {
             Some(i) => join(vec![Arc::clone(&i.proof.expression), expression], true),
             None => expression,
         };
-        if !bounded(&expression, budget)? {
-            cutoff(progress);
+        if !bounded(&expression, budget)?
+            || settled.certificate.expression_nodes() > CERTIFICATE_NODES
+        {
+            progress.cutoff(AdmissionAttemptKind::GuardedSettlement);
             *retained = baseline;
             return Ok(None);
         }
         let coverage = if literal.polarity == Polarity::Negative {
-            ctx.complement(truth, budget)?
+            ctx.complement(&settled.truth, budget)?
         } else {
-            truth.clone()
+            settled.truth
         };
-        let covering = producers
-            .get(&literal.term.atom)
-            .into_iter()
-            .flatten()
-            .map(|p| p.summary.clone())
-            .collect();
-        budget.charge(
-            candidate.rule.body.len() + expression_nodes + bounds.cone.producers.len(),
-            "guarded proof storage",
-        )?;
-        *retained = baseline;
-        let owned_bounds = bounds.owned(budget)?;
+        let mut covering = BTreeMap::new();
+        for source in settled.certificate.summaries() {
+            budget.tick("guarded direct evidence")?;
+            if source.rule.head.atom == literal.term.atom {
+                covering
+                    .entry(source.rule.id)
+                    .or_insert_with(|| source.clone());
+            }
+        }
+        budget.charge(candidate.rule.body.len(), "guarded proof storage")?;
         let proof = GuardedSettlementProof {
             proof: SymbolicRewriteProof {
                 candidate: candidate.clone(),
-                producers: covering,
+                producers: covering.into_values().collect(),
                 coverage,
                 upper_bounds: None,
             },
-            bounds: owned_bounds,
+            certificate: settled.certificate,
             occurrence: literal.term.occurrence,
             replacement: expression,
-            steps,
             implied_guard: implied.map(|i| i.proof.clone()),
         };
-        // Retained certificate accounting is conservative, as for other rewrites.
-        *retained = crate::symbolic::retain(
-            *retained,
-            0,
-            proof
-                .implied_guard
-                .as_ref()
-                .map_or(0, ImpliedGuardProof::nodes)
-                + proof.bounds.nodes()
-                + candidate.nodes()
-                + proof.proof.coverage.node_count()
-                + proof
-                    .proof
-                    .producers
-                    .iter()
-                    .map(ProducerSummary::nodes)
-                    .sum::<usize>(),
-            budget,
-        )?;
+        *retained = crate::symbolic::retain(baseline, 0, proof.nodes(), budget)?;
         Ok(Some(proof))
     }
 }

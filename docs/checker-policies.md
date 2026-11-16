@@ -398,6 +398,49 @@ rules and each implied guard's producer conditions. Inferred sources outside
 the replaced premise's cone remain owned proof dependencies. Stable/supported-model oracles and fresh/cold/warm tests are correctness
 gates; CLI benchmark timings and sampled memory remain measurements only.
 
+### Case splits
+
+After an ordinary guarded attempt is negative, or its bounds fail on a recoverable
+BDD/storage limit, try binary splits over settled atoms in the executable cone's
+producer premises and replacement leaves. Derived settled atoms are eligible;
+unresolved component atoms are not. If no producer has a settled condition varying
+inside the current domain, skip this search and preserve the cached bounds without
+constructing a scoring graph. Ordinary unsplit successes
+retain priority. Release the optional broad-domain bounds before branch work.
+
+Provisional cutoffs are **16 scored candidates per tree node, depth 3 and 8
+leaves**. Candidate order is deterministic ground-atom order. Conditions fixed by
+the current domain are discarded before scoring, without consuming depth or
+leaves. Rank by `(maximum branch cyclic atoms, sum of branch cyclic atoms)`,
+strictly improving on `(N, 2N)` for the parent. SCCs include positive cycles and
+self-loops; polarity is not a proof. A score of `(0, 0)` is optimal and stops the
+scan, retaining the first candidate on ties. Otherwise exhausting the scoring cap
+abandons that node, as do depth/leaf or complete-expression/certificate cutoffs.
+No incomplete tree installs a replacement or becomes a checker-limit finding.
+
+Every live branch prepares and prunes its own relaxed cone and computes its own
+bounds. Exact guarantees may seed true constant branch answers; false bounds seed
+false ones. The complete expression and all leaf steps share the existing
+1,024-node/depth-64 expression and 8,192-node certificate caps. No branch uses
+negative-result or bounds caches keyed only by rule/occurrence. Successful trees
+own and charge every leaf certificate; partial trees and scoring graphs are
+released. A failed local bounds operation can trigger a narrower split; exhausted
+global work, deadlines and cancellation stop normally. Spent work stays charged.
+
+Scoring charges traversal, BDD tests and SCC work. Temporary graph storage reserves
+eight condition-node slots per atom and two per dependency, in addition to the
+ordinary cone, candidate and domain storage. These are conservative bookkeeping
+slots, not bytes. Retry metadata includes the component's producers; committed
+proof dependencies use the union of the actual branch certificates and implied
+guards. A conflict in any branch prevents batching.
+
+Progress reports candidates scored, fixed candidates bypassed, cutoffs, chosen
+atom, parent/branch cyclic sizes, current and maximum depth, leaves, and each
+branch's prepared/live atom counts. Default warning notes name the split atoms
+and combined replacement; full evidence labels each branch and its settlement
+steps. Public finding identities stay `(verification, source rule, occurrence)`.
+Multi-way splits, branch memoization and conditional schedules remain deferred.
+
 ## Re-scoring
 
 Admission progress in CLI stderr and the `.den` editor reports round/stage,

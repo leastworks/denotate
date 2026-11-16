@@ -256,10 +256,10 @@ fn guarded_settlement_local_uniqueness_and_coverage_reconstruct_executable_condi
 }
 
 #[test]
-fn guarded_settlement_leaves_live_and_external_unresolved_cycles_unsupported() {
-    for text in [
-        MAIN.replace("assumptions: [one_class]", "assumptions: []"),
-        BOOLEAN.replace("input docked();", "relation external_a(); relation external_b(); external_a() :- !external_b(); external_b() :- !external_a(); relation docked(); docked() :- external_a();"),
+fn guarded_settlement_distinguishes_guard_cycles_from_external_ambiguity() {
+    for (text, expected) in [
+        (MAIN.replace("assumptions: [one_class]", "assumptions: []"), true),
+        (BOOLEAN.replace("input docked();", "relation external_a(); relation external_b(); external_a() :- !external_b(); external_b() :- !external_a(); relation docked(); docked() :- external_a();"), false),
     ] {
         let p = loaded(&text, 0);
         let limits = Limits::default();
@@ -267,8 +267,13 @@ fn guarded_settlement_leaves_live_and_external_unresolved_cycles_unsupported() {
         let request = p.verification_requests(&limits).unwrap().remove(0).1;
         let RequestPreparation::Complete(raw) = request.prepare(&p.corpus, &p.keys, &ops).unwrap() else { panic!() };
         let admitted = raw.admit(&ops).unwrap();
-        assert!(!admitted.program().is_admitted());
-        test_support::rewrites::compare(&p.corpus, &p.domains, admitted.program());
+        assert_eq!(admitted.program().is_admitted(), expected);
+        let g = admitted.program();
+        test_support::rewrites::compare(&p.corpus, &p.domains, g);
+        for world in test_support::rewrites::subsets(&g.input_atoms().cloned().collect::<Vec<_>>()) {
+            assert_eq!(test_support::rewrites::supported_models(g, &g.original_rules().cloned().collect::<Vec<_>>(), &world),
+                test_support::rewrites::supported_models(g, &g.rules().cloned().collect::<Vec<_>>(), &world));
+        }
     }
 }
 
@@ -357,17 +362,47 @@ obligation unique_classless: at_most_one(classless_claim, group_by: ());
             .values()
             .filter(|r| matches!(r, ScopedResult::Counterexample(..)))
             .count();
-        assert_eq!(failures, [1, 0, 1, 0, 1][revision]);
+        assert_eq!(failures, [1, 0, 1, 2, 1][revision]);
         if revision == 3 {
-            // Removing the class guarantee lets the cyclic producer coexist
-            // with its reader again. Fresh and warm must both retract admission.
-            assert!(
-                fresh
-                    .0
-                    .groups
-                    .values()
-                    .all(|r| matches!(r, ScopedResult::Unsupported(_)))
-            );
+            // Case splits now settle the weakened guard. The classless claim is
+            // genuinely possible, so both selected uniqueness checks can fail.
+            let l = Limits::default();
+            let ops = (&l).into();
+            let req = p.verification_requests(&l).unwrap().remove(0).1;
+            let RequestPreparation::Complete(raw) = req.prepare(&p.corpus, &p.keys, &ops).unwrap()
+            else {
+                panic!()
+            };
+            let admitted = raw.admit(&ops).unwrap();
+            let g = admitted.program();
+            assert!(g.is_admitted());
+            let class = p
+                .corpus
+                .relations()
+                .find(|r| r.name == "declared")
+                .unwrap()
+                .id;
+            let permitted =
+                |w: &BTreeSet<GroundAtom>| w.iter().filter(|a| a.relation == class).count() <= 1;
+            test_support::rewrites::compare_permitted(&p.corpus, &p.domains, g, permitted);
+            for world in
+                test_support::rewrites::subsets(&g.input_atoms().cloned().collect::<Vec<_>>())
+                    .into_iter()
+                    .filter(permitted)
+            {
+                assert_eq!(
+                    test_support::rewrites::supported_models(
+                        g,
+                        &g.original_rules().cloned().collect::<Vec<_>>(),
+                        &world
+                    ),
+                    test_support::rewrites::supported_models(
+                        g,
+                        &g.rules().cloned().collect::<Vec<_>>(),
+                        &world
+                    )
+                );
+            }
         }
         let diagnostics = fresh.1["diagnostics"].as_array().unwrap();
         if revision < 3 {
@@ -468,7 +503,10 @@ fn implied_guard_owns_producers_outside_the_replaced_premise_cone() {
         .unwrap();
     assert!(
         !proof
-            .bounds
+            .certificate
+            .bounds()
+            .next()
+            .unwrap()
             .cone
             .producers
             .iter()
@@ -629,7 +667,10 @@ fn chain_pruning_transitive_edit_agrees_fresh_cold_and_warm() {
                 .program()
                 .rewrite_proofs()
                 .filter_map(|p| p.guarded_settlement())
-                .any(|p| !p.bounds.cone.pruning.sources.is_empty())
+                .any(|p| p
+                    .certificate
+                    .bounds()
+                    .any(|b| !b.cone.pruning.sources.is_empty()))
         );
         let fresh = check(&p, None);
         assert_eq!(fresh, check(&p, Some(&mut Session::default())));
@@ -693,4 +734,117 @@ fn tagged_hub_looks_past_writers_and_agrees_fresh_cold_warm() {
         assert_eq!(fresh, check(&p, Some(&mut warm)));
         assert_eq!(fresh, check(&p, Some(&mut warm)));
     }
+}
+
+#[test]
+fn case_splits_present_branches_and_preserve_finding_identity() {
+    let p = loaded(include_str!("fixtures/case-split.den"), 0);
+    let l = Limits::default();
+    let ops = (&l).into();
+    let request = p.verification_requests(&l).unwrap().remove(0).1;
+    let RequestPreparation::Complete(raw) = request.prepare(&p.corpus, &p.keys, &ops).unwrap()
+    else {
+        panic!()
+    };
+    let events = std::cell::RefCell::new(Vec::new());
+    let prepared = raw
+        .admit_with_progress(&ops, Some(&|e| events.borrow_mut().push(e.clone())))
+        .unwrap();
+    assert!(prepared.program().is_admitted());
+    let CheckOutcome::Complete(report) = prepared.verify(&ops).unwrap() else {
+        panic!()
+    };
+    let direct = presentation::present(&p, &report).unwrap();
+    let full = presentation::present_with_rewrite_detail(
+        &p,
+        &report,
+        denotate_presentation::RewriteDetail::Full,
+    )
+    .unwrap();
+    assert_eq!(direct.status["state"], "proved");
+    assert_eq!(direct.status["notices"][0]["result"]["state"], "varying");
+    let d = direct
+        .diagnostics
+        .iter()
+        .find(|d| d.notes.iter().any(|n| n.starts_with("Case split on")))
+        .unwrap();
+    let f = full
+        .diagnostics
+        .iter()
+        .find(|f| f.data(&p.keys).unwrap()["finding"] == d.data(&p.keys).unwrap()["finding"])
+        .unwrap();
+    assert!(!d.notes.iter().any(|n| n.starts_with("Case [")));
+    assert!(
+        f.notes
+            .iter()
+            .any(|n| n.starts_with("Case [") && n.contains("Settlement step"))
+    );
+    assert!(events.borrow().iter().any(|e| {
+        e.guarded
+            .as_ref()
+            .and_then(|g| g.splits.as_ref())
+            .is_some_and(|s| s.max_depth >= 2)
+    }));
+}
+
+#[test]
+fn case_splits_branch_support_edits_agree_fresh_cold_warm() {
+    let base = include_str!("fixtures/case-split.den").replace("empty(invalid)", "empty(a)");
+    // The direct producer and reader are unchanged; only a settled guard used
+    // by one branch changes. This intentionally admits an ambiguous input world.
+    let edit = base.replace("g3() :- !x();", "g3() :- x();");
+    let mut warm = Session::default();
+    let mut before = None;
+    for (revision, text) in [&base, &edit, &base].into_iter().enumerate() {
+        let p = loaded(text, revision as u64);
+        let fresh = check(&p, None);
+        assert_eq!(fresh, check(&p, Some(&mut Session::default())));
+        assert_eq!(fresh, check(&p, Some(&mut warm)));
+        assert_eq!(fresh, check(&p, Some(&mut warm)));
+        if revision == 0 {
+            before = Some(fresh.0.clone());
+        }
+        if revision == 1 {
+            assert_ne!(before.as_ref().unwrap(), &fresh.0);
+        }
+        if revision == 2 {
+            assert_eq!(before.as_ref().unwrap(), &fresh.0);
+        }
+    }
+}
+
+#[test]
+fn sibling_contexts_split_empty_reading_guards_and_preserve_every_permitted_model() {
+    use test_support::rewrites::{compare_permitted, subsets, supported_models};
+    let p = loaded(include_str!("fixtures/case-split-contexts.den"), 0);
+    let l = Limits::default();
+    let ops = (&l).into();
+    let req = p.verification_requests(&l).unwrap().remove(0).1;
+    let RequestPreparation::Complete(raw) = req.prepare(&p.corpus, &p.keys, &ops).unwrap() else {
+        panic!()
+    };
+    let prepared = raw.admit(&ops).unwrap();
+    let g = prepared.program();
+    assert!(g.is_admitted());
+    assert!(
+        g.rewrite_proofs()
+            .filter_map(|p| p.guarded_settlement())
+            .any(|p| p.proof.candidate.condition.is_true()
+                && matches!(p.certificate, GuardedCertificate::Split { .. }))
+    );
+    compare_permitted(&p.corpus, &p.domains, g, |w| w.len() == 1);
+    for world in subsets(&g.input_atoms().cloned().collect::<Vec<_>>())
+        .into_iter()
+        .filter(|w| w.len() == 1)
+    {
+        assert_eq!(
+            supported_models(g, &g.original_rules().cloned().collect::<Vec<_>>(), &world),
+            supported_models(g, &g.rules().cloned().collect::<Vec<_>>(), &world)
+        );
+    }
+    let fresh = check(&p, None);
+    assert_eq!(fresh.1["status"]["state"], "proved");
+    let mut warm = Session::default();
+    assert_eq!(fresh, check(&p, Some(&mut warm)));
+    assert_eq!(fresh, check(&p, Some(&mut warm)));
 }

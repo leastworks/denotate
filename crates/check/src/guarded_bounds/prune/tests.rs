@@ -35,6 +35,7 @@ fn cones(
         &mut retained,
         &mut budget,
         &mut stats,
+        true,
     )
     .unwrap();
     let new = prepare(

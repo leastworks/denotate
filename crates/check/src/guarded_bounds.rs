@@ -168,12 +168,52 @@ pub(crate) fn prepare<'a>(
     budget: &mut Budget<'_>,
     stats: &mut Preparation,
 ) -> Result<Arc<BorrowedCone<'a>>> {
+    prepare_mode(
+        program, component, candidate, root, summaries, producers, ctx, retained, budget, stats,
+        true,
+    )
+}
+
+/// Heuristic only: retain the reading producer's executable dependencies. This
+/// graph is never fed to bounds or installed as a proof certificate.
+pub(crate) fn executable<'a>(
+    program: &GroundProgram,
+    component: &Component,
+    candidate: &ProducerSummary,
+    root: &GroundAtom,
+    summaries: &'a BTreeMap<GroundRuleId, ProducerSummary>,
+    producers: &BTreeMap<&GroundAtom, Vec<GroundRuleId>>,
+    ctx: &ConditionContext,
+    retained: &mut usize,
+    budget: &mut Budget<'_>,
+    stats: &mut Preparation,
+) -> Result<Arc<BorrowedCone<'a>>> {
+    prepare_mode(
+        program, component, candidate, root, summaries, producers, ctx, retained, budget, stats,
+        false,
+    )
+}
+
+fn prepare_mode<'a>(
+    program: &GroundProgram,
+    component: &Component,
+    candidate: &ProducerSummary,
+    root: &GroundAtom,
+    summaries: &'a BTreeMap<GroundRuleId, ProducerSummary>,
+    producers: &BTreeMap<&GroundAtom, Vec<GroundRuleId>>,
+    ctx: &ConditionContext,
+    retained: &mut usize,
+    budget: &mut Budget<'_>,
+    stats: &mut Preparation,
+    relax: bool,
+) -> Result<Arc<BorrowedCone<'a>>> {
     *stats = Preparation {
         existing_nodes: *retained,
         ..Preparation::default()
     };
     let result = prepare_inner(
         program, component, candidate, root, summaries, producers, ctx, retained, budget, stats,
+        relax,
     )
     .and_then(|cone| prune::prepare(cone, root, ctx, retained, budget, stats));
     stats.added_nodes = retained.saturating_sub(stats.existing_nodes);
@@ -191,6 +231,7 @@ fn prepare_inner<'a>(
     retained: &mut usize,
     budget: &mut Budget<'_>,
     stats: &mut Preparation,
+    relax: bool,
 ) -> Result<Arc<BorrowedCone<'a>>> {
     let domain = ctx.restrict(&candidate.condition, budget)?;
     stats.domain_nodes = Some(domain.node_count());
@@ -227,7 +268,7 @@ fn prepare_inner<'a>(
             }
             // Relax the reading producer BEFORE traversing its premises. Its
             // retained settled guard stays unchanged by the proposed replacement.
-            if live && *id != candidate.rule.id {
+            if live && (!relax || *id != candidate.rule.id) {
                 for premise in &summary.rule.body {
                     budget.tick("guarded cone premise")?;
                     if program
@@ -244,9 +285,8 @@ fn prepare_inner<'a>(
             selected.insert(*id, GuardedProducer { summary, live });
         }
     }
-    let relaxed_rule = atoms
-        .contains(&candidate.rule.head.atom)
-        .then_some(candidate.rule.id);
+    let relaxed_rule =
+        (relax && atoms.contains(&candidate.rule.head.atom)).then_some(candidate.rule.id);
     Ok(Arc::new(GuardedCone {
         component: component.id,
         snapshot: program.graph_revision,

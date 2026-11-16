@@ -155,6 +155,24 @@ impl<'a> AdmissionDetails<'a> {
             progress.emit(Phase::Admission, detail);
             return;
         }
+        let guarded = event.guarded.as_ref().map(|g| {
+                let names = self.names.get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)));
+                let splits = g.splits.as_ref().map(|s| json!({"candidatesScored":s.candidates_scored,
+                        "fixedCandidates":s.fixed_candidates,"cutoffs":s.cutoffs,
+                        "chosen":s.chosen.as_ref().map(|a| atom_text(a, &**names)),
+                        "cyclicAtoms":s.cyclic_atoms,"branchCyclicAtoms":s.branch_cyclic_atoms,
+                        "branchConeAtoms":s.branch_cone_atoms,"branchLiveAtoms":s.branch_live_atoms,
+                        "depth":s.depth,"maxDepth":s.max_depth,"leaves":s.leaves,"state":s.state}));
+                json!({"index":g.index, "position":g.position, "deferred":g.deferred, "componentAtoms":g.component_atoms,
+                    "lookaheadWork":g.lookahead_work, "lookaheadLimit":g.lookahead_limit, "head":atom_text(&g.head, &**names), "premise":atom_text(&g.premise, &**names),
+                    "location":self.location(g.source), "restricted":true, "coneAtoms":g.cone_atoms,
+                    "liveAtoms":g.live_atoms, "coneRules":g.cone_rules, "liveRules":g.live_rules,
+                    "beforePruningAtoms":g.before_atoms, "beforePruningRules":g.before_rules, "pruning":g.pruning,
+                    "domainNodes":g.domain_nodes, "existingConditionNodes":g.existing_condition_nodes,
+                    "addedConditionNodes":g.added_condition_nodes, "preprocessingMs":g.preprocessing.as_secs_f64()*1000.,
+                    "iterationMs":g.iteration.as_secs_f64()*1000., "reused":g.reused, "state":g.state,
+                    "splits": splits})
+            });
         detail["admission"] = json!({
             "phase": event.phase.label(),
             "round": event.round,
@@ -176,17 +194,7 @@ impl<'a> AdmissionDetails<'a> {
                 "retryCauses":a.retry_causes,
             })).collect::<Vec<_>>(),
             "prerequisiteMs": event.prerequisites.iter().map(|(k, d)| ((*k).to_string(), json!(d.as_secs_f64()*1000.))).collect::<serde_json::Map<_, _>>(),
-            "guarded": event.guarded.as_ref().map(|g| {
-                let names = self.names.get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)));
-                json!({"index":g.index, "position":g.position, "deferred":g.deferred, "componentAtoms":g.component_atoms,
-                    "lookaheadWork":g.lookahead_work, "lookaheadLimit":g.lookahead_limit, "head":atom_text(&g.head, &**names), "premise":atom_text(&g.premise, &**names),
-                    "location":self.location(g.source), "restricted":true, "coneAtoms":g.cone_atoms,
-                    "liveAtoms":g.live_atoms, "coneRules":g.cone_rules, "liveRules":g.live_rules,
-                    "beforePruningAtoms":g.before_atoms, "beforePruningRules":g.before_rules, "pruning":g.pruning,
-                    "domainNodes":g.domain_nodes, "existingConditionNodes":g.existing_condition_nodes,
-                    "addedConditionNodes":g.added_condition_nodes, "preprocessingMs":g.preprocessing.as_secs_f64()*1000.,
-                    "iterationMs":g.iteration.as_secs_f64()*1000., "reused":g.reused, "state":g.state})
-            }),
+            "guarded": guarded,
             "skipped": event.skipped.as_ref().map(|s| s.kind.label()),
             "skipTarget": event.skipped.as_ref().map(|s| {
                 let names = self.names.get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)));
@@ -401,6 +409,12 @@ pub fn admission_text(a: &Value) -> String {
                     "; using original cone"
                 }
             ));
+        }
+        if let Some(s) = g.get("splits").filter(|s| s.is_object()) {
+            text.push_str(&format!("; case splits: {} scored, {} fixed, {} cutoffs; chosen {}; cyclic {} → {}; depth {} (max {}), {} leaves; branch cone {} atoms ({} live); {}",
+                s["candidatesScored"], s["fixedCandidates"], s["cutoffs"], s["chosen"].as_str().unwrap_or("none"),
+                s["cyclicAtoms"], s["branchCyclicAtoms"], s["depth"], s["maxDepth"], s["leaves"],
+                s["branchConeAtoms"], s["branchLiveAtoms"], s["state"].as_str().unwrap_or("")));
         }
         if g["lookaheadWork"].as_u64().is_some_and(|w| w > 0) {
             text.push_str(&format!(

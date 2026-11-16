@@ -39,7 +39,10 @@ fn pruned_transitive_sources_remain_local_query_dependencies_after_edits() {
                     .program()
                     .rewrite_proofs()
                     .filter_map(|p| p.guarded_settlement())
-                    .any(|p| !p.bounds.cone.pruning.sources.is_empty())
+                    .any(|p| p
+                        .certificate
+                        .bounds()
+                        .any(|b| !b.cone.pruning.sources.is_empty()))
             );
             let report = match session.as_deref_mut() {
                 Some(s) => s.verify(&prepared, &ops).unwrap(),
@@ -142,7 +145,10 @@ verification checks{assumptions:[];obligations:[unique];}";
             let proof = first.guarded_settlement().unwrap();
             assert!(
                 proof
-                    .bounds
+                    .certificate
+                    .bounds()
+                    .next()
+                    .unwrap()
                     .cone
                     .producers
                     .iter()

@@ -158,26 +158,79 @@ impl Rewrite<'_> {
                         }
                     }
                 }
+                if let GuardedCertificate::Split { .. } = &p.certificate {
+                    let atoms: BTreeSet<_> = p
+                        .certificate
+                        .walk()
+                        .filter_map(|c| match c {
+                            GuardedCertificate::Split { atom, .. } => Some(atom),
+                            _ => None,
+                        })
+                        .collect();
+                    let names = atoms
+                        .into_iter()
+                        .map(|a| crate::evidence::atom_name(corpus, names, a))
+                        .collect::<Result<Vec<_>>>()?;
+                    notes.insert(format!("Case split on settled facts: {}. Every permitted branch independently justifies the combined replacement.", names.join(", ")));
+                }
                 if detail == RewriteDetail::Full {
-                    for (rank, step) in p.steps.iter().enumerate() {
-                        let mut remaining = usize::MAX;
-                        let value =
-                            expression_text(&step.expression, corpus, names, &mut remaining)?;
-                        let reason = if step.false_by_bound {
-                            "the upper bound is false under the guard, with the reading producer relaxed to its guard".to_owned()
-                        } else if step.producers.is_empty() {
-                            "no live producer remains under the guard".to_owned()
-                        } else {
-                            format!(
-                                "all {} live producers use only earlier marks and settled facts",
-                                step.producers.len()
-                            )
-                        };
-                        notes.insert(format!(
-                            "Settlement step {:04}: {} = {value}; {reason}.",
-                            rank + 1,
-                            crate::evidence::atom_name(corpus, names, &step.atom)?
-                        ));
+                    let mut pending = vec![(&p.certificate, String::new())];
+                    while let Some((certificate, branch)) = pending.pop() {
+                        match certificate {
+                            GuardedCertificate::Split {
+                                atom,
+                                when_true,
+                                when_false,
+                            } => {
+                                let name = crate::evidence::atom_name(corpus, names, atom)?;
+                                let prefix = if branch.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!("{branch} and ")
+                                };
+                                pending.push((when_false, format!("{prefix}!{name}")));
+                                pending.push((when_true, format!("{prefix}{name}")));
+                            }
+                            GuardedCertificate::Empty { .. } => {
+                                notes.insert(format!("Case [{branch}]: no permitted world; no premise certificate required."));
+                            }
+                            GuardedCertificate::Leaf { steps, .. } => {
+                                for (rank, step) in steps.iter().enumerate() {
+                                    let mut remaining = usize::MAX;
+                                    let value = expression_text(
+                                        &step.expression,
+                                        corpus,
+                                        names,
+                                        &mut remaining,
+                                    )?;
+                                    let reason = if step.false_by_bound {
+                                        "the upper bound is false under the guard, with the reading producer relaxed to its guard".to_owned()
+                                    } else if step.true_by_guarantee {
+                                        format!(
+                                            "the union of {} independently exact producer conditions covers this branch",
+                                            step.producers.len()
+                                        )
+                                    } else if step.producers.is_empty() {
+                                        "no live producer remains under the guard".to_owned()
+                                    } else {
+                                        format!(
+                                            "all {} live producers use only earlier marks and settled facts",
+                                            step.producers.len()
+                                        )
+                                    };
+                                    let prefix = if branch.is_empty() {
+                                        String::new()
+                                    } else {
+                                        format!("Case [{branch}]: ")
+                                    };
+                                    notes.insert(format!(
+                                        "{prefix}Settlement step {:04}: {} = {value}; {reason}.",
+                                        rank + 1,
+                                        crate::evidence::atom_name(corpus, names, &step.atom)?
+                                    ));
+                                }
+                            }
+                        }
                     }
                 }
                 continue;

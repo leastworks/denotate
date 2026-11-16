@@ -221,7 +221,7 @@ include this kind as an enclosing component pass; its time includes nested proof
 and must not be added to their times.
 
 Stages are `starting`, `structural`, `structural-committed`, `symbolic`, `summaries`, `producer-removals`, `candidates`,
-`upper-bounds`, `guaranteed-bounds`, `bound-removals`, `implied-guard`, `guarded-preprocessing`, `guarded-bounds`, `guarded-settlement`, `commit`, `committed`, `attempt-summary`, `complete`, `reused`, and
+`upper-bounds`, `guaranteed-bounds`, `bound-removals`, `implied-guard`, `guarded-preprocessing`, `guarded-bounds`, `guarded-settlement`, `guarded-cases`, `commit`, `committed`, `attempt-summary`, `complete`, `reused`, and
 `inconsistent-assumptions`.
 
 `attempts` is an optional array of per-round aggregates, ordered by attempt kind.
@@ -283,9 +283,28 @@ without throttling. These are progress observations, never finding identities or
 semantic inputs. The CLI uses the same fields. Temporary bounds/cone storage
 exhaustion is a local skip; other storage and global work exhaustion still stop.
 
+During bounded case search, `guarded.splits` is an object with cumulative
+`candidatesScored`, `fixedCandidates`, `cutoffs`, current `depth`, `maxDepth` reached,
+`leaves`, and `state`. Optional `chosen` names the most recently selected settled
+atom; `cyclicAtoms` is the parent executable cone's cyclic atom count, and
+`branchCyclicAtoms` is `[trueBranch, falseBranch]` for the chosen split.
+`branchConeAtoms` and `branchLiveAtoms` describe the most recently prepared proof
+branch, whose cone relaxes the reading producer. Executable graph scores select
+partitions only; they are not proof evidence. Optional graph counts and the chosen
+atom are null until available. States include `branch-bounds`, `split`, `certified`, `negative`,
+`scoring-cutoff`, `depth-cutoff`, `leaf-cutoff`, and `certificate-cutoff`. `certified`
+means that all branches supplied certificates; the existing installation policy
+can still reject a constant complete replacement. Cutoff updates are emitted
+immediately and counted even when the final state is negative. Fixed candidates
+consume neither split depth nor leaves. No partial tree installs a replacement.
+These fields are null outside case-search work and are shared by CLI progress.
+
 `negative` counts completed proof attempts that supplied no proof. `skipped`
 counts recoverable per-operation failures and `failed` counts stopping failures.
-`cutoffs` counts bounded-expression expansion skips (also counted as negative attempts), not resource exhaustion. Time covers executed operations only. Successful prerequisites are rebuilt each
+`cutoffs` counts bounded-expression expansion and case-search policy skips, not
+resource exhaustion. A complete attempt without a proof is counted as negative;
+a narrower partition can still recover from an earlier leaf expansion cutoff.
+Time covers executed operations only. Successful prerequisites are rebuilt each
 round and count as `new`, since their results are not remembered across rounds.
 `retryCauses` aggregates a bounded vocabulary: `exact-cover`, `settled-summary`,
 `reader-cone`, `guarded-replacement` and defensively `input-order` (`unchanged` in a test with reuse
@@ -334,6 +353,12 @@ related source rules are labeled `direct rewrite justification`. The same
 source-warning note/location caps apply, and formula text is bounded to 32 nodes,
 with an explicit omitted-node count. Full evidence shows rank-ordered marks and
 candidate-relaxed bounds. No synthetic source declaration or edit is produced.
+For a case-tree certificate, default notes name the settled split atoms and the
+combined replacement. Full evidence labels each branch's rank-ordered steps,
+including false upper-bound and independently exact true-guarantee seeds, or an
+empty permitted domain. Supporting locations include the union of every branch's
+sources. Finding identities, evidence kind, note/location caps and executable
+replacement semantics are unchanged.
 When a guard is inferred from producer summaries, notes name the retained implied
 guard and the source premise/producer set. Full detail expands the settled producer
 conditions. Supporting sources outside the replaced premise's cone are related

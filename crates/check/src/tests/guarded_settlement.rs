@@ -529,7 +529,7 @@ fn positive_implied_certificate_owns_support_and_preserves_models_independent_of
         .find(|r| {
             r.rule == proof.proof.candidate.rule.id
                 && r.occurrence == proof.occurrence
-                && r.snapshot == proof.bounds.cone.snapshot
+                && r.snapshot == proof.certificate.bounds().next().unwrap().cone.snapshot
         })
         .unwrap();
     assert_eq!(report.answer, SatProbeAnswer::Unsat);

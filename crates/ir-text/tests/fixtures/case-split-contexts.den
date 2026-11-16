@@ -1,0 +1,22 @@
+// Contexts are sibling producers, not premises of the cyclic reading rules.
+// One of three mutually exclusive contexts supplies an independently true atom.
+sort Choice;
+const alpha, beta, gamma: Choice;
+input selected(choice: Choice);
+assumption one_context: exactly_one(selected, group_by: ());
+relation alpha_context(); alpha_context() :- selected(alpha);
+relation beta_context(); beta_context() :- selected(beta);
+relation gamma_context(); gamma_context() :- selected(gamma);
+relation a(); relation b(); relation c();
+a() :- !b();
+a() :- alpha_context();
+b() :- !c();
+b() :- beta_context();
+c() :- !a();
+c() :- gamma_context();
+relation invalid();
+invalid() :- selected(alpha), !a();
+invalid() :- selected(beta), !b();
+invalid() :- selected(gamma), !c();
+obligation selected_context_holds: empty(invalid);
+verification checks { assumptions: [one_context]; obligations: [selected_context_holds]; }

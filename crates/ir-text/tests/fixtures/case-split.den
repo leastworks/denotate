@@ -1,0 +1,29 @@
+// Every input world disables one edge. No single reading guard proves the cycle
+// inactive; case splits over settled guards supply the missing partition.
+input x();
+input y();
+relation g0();
+relation g1();
+relation g2();
+relation g3();
+g0() :- x();
+g0() :- y();
+g1() :- !x();
+g1() :- y();
+g2() :- x();
+g2() :- !y();
+g3() :- !x();
+g3() :- !y();
+relation a();
+relation b();
+relation c();
+relation d();
+a() :- g0(), !b();
+b() :- g1(), !c();
+c() :- g2(), !d();
+d() :- g3(), !a();
+relation invalid();
+invalid() :- a(), !x();
+obligation valid_result: empty(invalid);
+notice a_varies: varies(a);
+verification checks { assumptions: []; obligations: [valid_result]; notices: [a_varies]; }
