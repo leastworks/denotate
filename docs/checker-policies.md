@@ -398,6 +398,59 @@ rules and each implied guard's producer conditions. Inferred sources outside
 the replaced premise's cone remain owned proof dependencies. Stable/supported-model oracles and fresh/cold/warm tests are correctness
 gates; CLI benchmark timings and sampled memory remain measurements only.
 
+### Structural splits
+
+After structural reduction, shared summaries and cheap exact-cover removals, try
+one whole-component search before bound removal, bound-backed discharge or
+candidate-relative guarded settlement. Components keep provider-first ordering.
+The domain is W; only globally settled atoms are split candidates. Reuse the
+existing deadness and executable SCC scoring routines with every component atom
+as a root. A leaf must be acyclic, and every live external premise must be settled.
+Topological leaf evaluation uses BDDs for settled conditions, but computes no bounds.
+
+The provisional search allowance is **100,000,000 charged work per component
+attempt**, including ranking, fixed-candidate checks, pruning, scoring, leaf
+computation, expression combination and certificate staging. It supplements the
+existing query budget; global work, deadlines and cancellation still propagate.
+Exhausting the local allowance abandons the entire attempt and continues ordinary
+admission, with no partial commit. **Depth 32 and 64 leaves** are safety caps,
+configurable along with the work allowance through `Limits`, the CLI's
+`--max-structural-split-depth`, `--max-structural-split-leaves`,
+`--max-structural-split-work`, and the matching `denotate.limits` settings.
+These values participate in request/cache validity. A zero depth or leaf cap disables
+the attempt; zero work leaves no search allowance. The limits apply to this
+whole-component path, not the older candidate-relative case search.
+
+Candidate scoring additionally has **1,000,000 charged work per node**. Check the scoring allowance between complete candidate scores; one
+in-flight score can cross it, and the global work/BDD limits always apply. Ranking
+and fixed-candidate checks count against total search work, outside this per-node scoring allowance.
+There is no fixed candidate-count cap on this path. Pre-rank by the number of live
+component producers mentioning the settled atom, then by the smallest selected
+input-exclusivity group containing it (ungrouped last), then deterministic atom
+order. Score by `(max branch cyclic atoms, sum)` with strict improvement. A perfect
+score stops early; exhausting scoring keeps the best useful split already found.
+Fixed conditions consume no split or scoring allowance. The older candidate-relative
+case search keeps its separate policy above.
+Per-value and per-edge expressions use the **1,024-node/depth-64** caps; leaf/tree
+expressions share the **8,192-node** certificate cap. Conditions, traversal, graph
+storage, original sources, pruning evidence and replacement staging are charged.
+Partial search/staging results are released. Original component evidence is shared
+and charged once per atomic batch; per-occurrence expressions and direct evidence
+remain charged separately. Direct producers are indexed once; shared certificate
+size is counted once rather than traversed per occurrence. Finding replay keeps
+certified positive forwarding sources and charges expansion/order of that authored
+evidence DAG. Constants and multiple occurrences in one rule are valid.
+
+A completed partition installs all its internal premise replacements together.
+A local cap, BDD/storage failure or live unresolved external premise leaves the
+ordinary pipeline available and adds no semantic inconclusive finding. Work is
+not refunded; global work, deadline and cancellation failures propagate normally.
+No failed-component or branch cache is added. Current component, scores, branch
+sizes, evaluation, staging, certification and immediate optional fallback reasons
+appear under `structuralSplit` in progress. Default warnings name the shared proof
+and replacement; full evidence expands branch evaluation and deadness reasons.
+Warning inventories can change because this pass runs before earlier proof methods.
+
 ### Case splits
 
 After an ordinary guarded attempt is negative, or its bounds fail on a recoverable

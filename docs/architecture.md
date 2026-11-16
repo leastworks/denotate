@@ -120,6 +120,16 @@ invalidation. Their metadata avoids repeated proofs and otherwise-unused bounds
 or coverage; it is discarded after admission and never becomes a diagnostic skip
 or part of a session's retained admission result.
 
+The early structural split pass uses the same executable expressions and rewrite
+identities, with a joint certificate shared across a component's replacements.
+Each leaf evaluates the original component in topological order; dead producers
+and pruning reasons stay in evidence. All replacements stage and commit together.
+It reuses the checker’s pruning and SCC analysis, without a second evaluator in
+presentation or session code. Keyed local queries retain the union of supporting
+sources, including sources dead in a branch. Finding scopes also retain certified
+positive forwarding sources. Evidence collection confirms those authored facts and
+orders the expanded DAG separately from rewritten execution, preserving attribution.
+
 Guarded settlement adds executable Boolean expressions to ground rules, preserving
 the authored rule and premise occurrence. They mention only globally settled atoms;
 the original guard stays in the body. Certificates retain rank-ordered reasoning and

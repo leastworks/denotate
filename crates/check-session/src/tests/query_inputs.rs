@@ -26,12 +26,10 @@ fn run(
     };
     let prepared = prepared.admit(&operations).unwrap();
     assert!(prepared.program().admission_limit().is_none());
-    assert!(
-        prepared
-            .program()
-            .rewrite_proofs()
-            .any(|p| p.symbolic().is_some_and(|p| p.upper_bounds.is_some()))
-    );
+    assert!(prepared.program().rewrite_proofs().any(|p| {
+        p.guarded_settlement()
+            .is_some_and(|p| matches!(p.certificate, GuardedCertificate::Joint(_)))
+    }));
     assert!(
         prepared
             .program()
@@ -99,6 +97,9 @@ relation u(); relation v(); u():-!v(); v():-!u();
 relation out(s:S); out(left):-a(),fixed0(); out(right):-b(),fixed0();
 out(left):-on(),u(); out(right):-!on(),u();
 relation odd(); odd():-a(),!odd();
+// A live external ambiguity keeps this pair on the discharge fallback path.
+relation c(); relation d(); c():-on(),!d(),u(); d():-!on(),!c();
+relation odd2(); odd2():-c(),!odd2();
 assumption exclusive:at_most_one(choice,group_by:());
 obligation unique_out:at_most_one(out,group_by:());
 verification checks{assumptions:[exclusive];obligations:[unique_out];}",

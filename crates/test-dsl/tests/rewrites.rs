@@ -28,7 +28,7 @@ fn group(f: &Fixture, inner: Expr) -> Expr {
 }
 
 #[test]
-fn direct_dsl_condition_warns_at_exact_negation_and_offers_whole_condition_edit() {
+fn joint_settlement_restores_redundant_negation_and_safe_removal() {
     let text = "input input_a, input_x;\nslot a;\na <- input_a when present(input_x) and not present(input_x) and not available(a);\n";
     let mut f = Fixture::new(text, &["input_a", "input_x"], &["a"]);
     let span = f.span(text.lines().nth(2).unwrap());
@@ -48,36 +48,31 @@ fn direct_dsl_condition_warns_at_exact_negation_and_offers_whole_condition_edit(
         .unwrap();
     assert!(ground.is_admitted());
     let warnings = present_rewrites(&p, &ground, &f.sources, SourceView::TestDsl.as_str()).unwrap();
-    assert_eq!(warnings.len(), 1);
-    let mut edited = f.text.clone();
-    let mut edits: Vec<_> = warnings
+    let authored: Vec<_> = warnings
         .iter()
-        .map(|w| {
-            assert_eq!(w.owner, Contribution::Program);
-            assert_eq!(
-                f.sources.text(w.primary.unwrap()).unwrap(),
-                "not available(a)"
-            );
-            let edit = w.edit.as_ref().unwrap();
-            assert!(
-                f.sources
-                    .text(edit.span)
-                    .unwrap()
-                    .starts_with(" and not available(")
-            );
-            edit
-        })
+        .filter(|w| w.owner == Contribution::Program)
         .collect();
-    edits.sort_by_key(|e| std::cmp::Reverse(e.span.byte_range().start));
-    for edit in edits {
-        edited.replace_range(edit.span.byte_range(), &edit.replacement);
-    }
+    assert_eq!(authored.len(), 1);
     assert_eq!(
-        edited,
-        "input input_a, input_x;\nslot a;\na <- input_a when present(input_x) and not present(input_x);\n"
+        f.sources.text(authored[0].primary.unwrap()).unwrap(),
+        "not available(a)"
     );
+    assert_eq!(authored[0].kind, denotate_presentation::Kind::Rewrite);
+    assert!(
+        authored[0]
+            .message
+            .starts_with("This negated condition is redundant:")
+    );
+    let edit = authored[0]
+        .edit
+        .as_ref()
+        .expect("negative premise is always true under its guard");
+    let mut applied = text.to_owned();
+    applied.replace_range(edit.span.byte_range(), &edit.replacement);
+    let edited = "input input_a, input_x;\nslot a;\na <- input_a when present(input_x) and not present(input_x);\n";
+    assert_eq!(applied, edited);
     // Independently authored post-edit AST, not mutation of the lowered rules.
-    let mut after = Fixture::new(&edited, &["input_a", "input_x"], &["a"]);
+    let mut after = Fixture::new(edited, &["input_a", "input_x"], &["a"]);
     let span = after.span(edited.lines().nth(2).unwrap());
     let t = after.atom(span, "present", "input_x");
     let not_t = after.not(after.atom(
@@ -257,14 +252,14 @@ fn library_warnings_do_not_borrow_user_locations_or_change_owner_with_view() {
     assert_eq!(
         warnings
             .iter()
-            .filter(|w| w.owner == Contribution::Library)
+            .filter(|w| rules.iter().any(|(r, _)| *r == w.rule))
             .count(),
         2
     );
     assert!(
         warnings
             .iter()
-            .filter(|w| w.owner == Contribution::Library)
+            .filter(|w| rules.iter().any(|(r, _)| *r == w.rule))
             .all(|w| w.primary.is_none() && w.edit.is_none())
     );
     let snapshot = sources
@@ -485,7 +480,7 @@ fn a_partial_ground_discharge_never_offers_an_authored_edit() {
 }
 
 #[test]
-fn exclusivity_through_library_forwarding_discharges_and_warns_at_both_nots() {
+fn exclusivity_through_library_forwarding_settles_and_warns_at_both_nots() {
     let f = Fixture::exclusive();
     let p = f.lower();
     let limits = Limits::default();
@@ -495,27 +490,34 @@ fn exclusivity_through_library_forwarding_discharges_and_warns_at_both_nots() {
         .unwrap();
     assert!(ground.is_admitted());
     assert!(ground.admission_limit().is_none());
-    assert_eq!(ground.rewrite_proofs().count(), 2);
     let warnings = present_rewrites(&p, &ground, &f.sources, SourceView::TestDsl.as_str()).unwrap();
-    assert_eq!(warnings.len(), 2);
-    let mut edited = f.text.clone();
-    let mut edits = Vec::new();
-    for (warning, negation) in warnings
+    let authored: Vec<_> = warnings
+        .iter()
+        .filter(|w| w.owner == Contribution::Program)
+        .collect();
+    assert_eq!(authored.len(), 2);
+    for (warning, negation) in authored
         .iter()
         .zip(["not available(b)", "not available(a)"])
     {
-        assert_eq!(warning.owner, Contribution::Program);
-        let expected = f.span(negation);
-        assert_eq!(warning.primary, Some(expected));
-        edits.push(warning.edit.as_ref().unwrap());
+        assert_eq!(warning.primary, Some(f.span(negation)));
+        assert_eq!(warning.kind, denotate_presentation::Kind::Rewrite);
+        assert!(
+            warning
+                .message
+                .starts_with("This negated condition is redundant:")
+        );
+        let edit = warning
+            .edit
+            .as_ref()
+            .expect("exclusive guards justify removal");
+        assert!(f.sources.text(edit.span).unwrap().contains(negation));
     }
-    edits.sort_by_key(|e| std::cmp::Reverse(e.span.byte_range().start));
-    for edit in edits {
-        edited.replace_range(edit.span.byte_range(), &edit.replacement);
-    }
-    assert_eq!(
-        edited,
-        "input input_a, input_b, input_x;\nslot a, b;\na <- input_a when present(input_x);\nb <- input_b when not present(input_x);\n"
+    assert!(
+        warnings
+            .iter()
+            .filter(|w| w.owner == Contribution::Library)
+            .all(|w| w.primary.is_none())
     );
     for bits in 0..8 {
         let world = ["input_a", "input_b", "input_x"]
@@ -540,7 +542,7 @@ fn exclusivity_through_library_forwarding_discharges_and_warns_at_both_nots() {
                 assert!(
                     premises
                         .iter()
-                        .any(|p| matches!(p, PremiseEvidence::Discharged { .. }))
+                        .any(|p| matches!(p, PremiseEvidence::Replaced { .. }))
                 );
             }
         }

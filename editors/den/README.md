@@ -163,7 +163,10 @@ programs. For example:
 
 These are example overrides, not recommended defaults. `limits` accepts `maxAtoms`,
 `maxRules`, `maxDependencies`, `maxWork`, `maxBddVariables`, `maxBddNodes`,
-`maxBddTasks` and `maxConditionNodes`, matching the CLI controls. Omitted fields use
+`maxBddTasks`, `maxConditionNodes`, `maxStructuralSplitDepth`,
+`maxStructuralSplitLeaves` and `maxStructuralSplitWork`, matching the CLI controls.
+The structural split allowances apply per component attempt; exhausting one
+continues ordinary admission. Omitted fields use
 checker defaults; zero allows no use. Limits apply per operation/query, and timeout
 is cooperative. Loading and presentation are outside that allowance. A limit change
 cancels obsolete checking and automatically rechecks all affected programs.

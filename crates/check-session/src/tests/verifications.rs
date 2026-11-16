@@ -233,7 +233,7 @@ fn assert_behavior(capture: &Capture, restricted: bool, obligations: bool) {
             capture
                 .rewrites
                 .iter()
-                .any(|r| matches!(r.kind, KeyedRewriteKind::Discharge(_)))
+                .any(|r| matches!(r.kind, KeyedRewriteKind::GuardedSettlement(_)))
         );
         assert!(capture.results.regions.is_empty());
     } else {

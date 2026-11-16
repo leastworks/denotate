@@ -94,10 +94,28 @@ pub(super) fn prepare<'a>(
     budget: &mut Budget<'_>,
     stats: &mut Preparation,
 ) -> Result<Arc<BorrowedCone<'a>>> {
+    prepare_roots(
+        cone,
+        std::slice::from_ref(root),
+        ctx,
+        retained,
+        budget,
+        stats,
+    )
+}
+
+pub(super) fn prepare_roots<'a>(
+    cone: Arc<BorrowedCone<'a>>,
+    roots: &[GroundAtom],
+    ctx: &ConditionContext,
+    retained: &mut usize,
+    budget: &mut Budget<'_>,
+    stats: &mut Preparation,
+) -> Result<Arc<BorrowedCone<'a>>> {
     stats.before_atoms = Some(cone.atoms.len());
     stats.before_producers = Some(cone.producers.len());
     let mut scratch = *retained;
-    match run(&cone, root, ctx, &mut scratch, budget, MAX_ITEMS) {
+    match run_roots(&cone, roots, ctx, &mut scratch, budget, MAX_ITEMS) {
         Ok(pruned) => {
             budget.charge(pruned.producers.len(), "guarded pruning counts")?;
             // Stage all evidence before replacing the old cone. Failed staging
@@ -144,9 +162,28 @@ fn fallback<'a>(
     }
 }
 
+#[cfg(test)]
 fn run<'a>(
     cone: &BorrowedCone<'a>,
     root: &GroundAtom,
+    ctx: &ConditionContext,
+    scratch: &mut usize,
+    budget: &mut Budget<'_>,
+    max_items: usize,
+) -> Result<BorrowedCone<'a>> {
+    run_roots(
+        cone,
+        std::slice::from_ref(root),
+        ctx,
+        scratch,
+        budget,
+        max_items,
+    )
+}
+
+fn run_roots<'a>(
+    cone: &BorrowedCone<'a>,
+    roots: &[GroundAtom],
     ctx: &ConditionContext,
     scratch: &mut usize,
     budget: &mut Budget<'_>,
@@ -280,7 +317,7 @@ fn run<'a>(
     // source chains are proof evidence, not edges for the bounds computation.
     let mut atoms = BTreeSet::new();
     let mut selected = BTreeSet::new();
-    let mut pending = BTreeSet::from([root]);
+    let mut pending: BTreeSet<_> = roots.iter().collect();
     while let Some(atom) = pending.pop_first() {
         budget.tick("guarded pruning cone")?;
         if !atoms.insert(atom.clone()) {

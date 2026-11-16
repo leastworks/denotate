@@ -789,7 +789,7 @@ fn presentation_gate(
             let text_set = output
                 .diagnostics
                 .iter()
-                .filter(|d| d.kind != Kind::Rewrite)
+                .filter(|d| !matches!(d.identity, denotate_presentation::Identity::Rewrite { .. }))
                 .map(|d| (d.kind, finding_identity(right, &q.keys, &d.identity)))
                 .collect::<BTreeSet<_>>();
             assert_eq!(direct_set, text_set, "{id}: presenter parity");

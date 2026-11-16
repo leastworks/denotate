@@ -126,6 +126,13 @@ pub struct RewriteProof {
     pub justification: RewriteJustification,
 }
 impl RewriteProof {
+    /// Removal of a negated condition, independently of the proving algorithm.
+    pub fn is_redundant_negation(&self) -> bool {
+        matches!(self.kind, RewriteKind::Discharge { .. })
+            || self
+                .guarded_settlement()
+                .is_some_and(|p| p.redundant_negation)
+    }
     pub fn candidate(&self) -> &GroundRule {
         match &self.justification {
             RewriteJustification::Symbolic(p) => &p.candidate.rule,
@@ -249,6 +256,7 @@ impl RewriteProof {
                     .iter()
                     .flat_map(|g| g.summaries().flat_map(|s| s.profile_conditions()))
                     .chain(p.certificate.domains())
+                    .chain(p.certificate.values())
                     .chain(
                         p.certificate
                             .bounds()
@@ -262,6 +270,9 @@ impl RewriteProof {
             }))
     }
     fn nodes(&self) -> usize {
+        if let Some(proof) = self.guarded_settlement() {
+            return proof.nodes();
+        }
         self.conditional().map_or(0, |p| {
             std::iter::once(&p.candidate)
                 .chain(&p.producers)
@@ -272,9 +283,6 @@ impl RewriteProof {
         }) + self
             .bound_removal()
             .map_or(0, |p| p.body_upper.node_count())
-            + self.guarded_settlement().map_or(0, |p| {
-                p.certificate.nodes() + p.implied_guard.as_ref().map_or(0, ImpliedGuardProof::nodes)
-            })
     }
 }
 
@@ -353,6 +361,28 @@ impl GroundProgram {
         limits: &Limits,
     ) -> Result<AnalysisOutcome<Self>> {
         AnalysisOutcome::from_result(Self::prepare(corpus, domains, limits))
+    }
+
+    /// Authored support removed by the atomic joint replacement. Its truth is
+    /// certified, but the source derivation still matters when showing a finding.
+    pub(crate) fn joint_premise(
+        &self,
+        rule: GroundRuleId,
+        occurrence: OccurrenceId,
+    ) -> Option<&GroundLiteral> {
+        let proof = self
+            .replacement_proof(rule, occurrence)?
+            .guarded_settlement()?;
+        if !matches!(proof.certificate, GuardedCertificate::Joint(_)) {
+            return None;
+        }
+        proof
+            .proof
+            .candidate
+            .rule
+            .body
+            .iter()
+            .find(|l| l.term.occurrence == occurrence)
     }
 
     pub(crate) fn replacement_proof(
@@ -439,14 +469,29 @@ impl GroundProgram {
         budget: &mut Budget<'_>,
         observer: Option<&AdmissionObserver<'_>>,
     ) -> Result<Self> {
-        self.admit_attempts(
-            budget,
-            observer,
-            Attempts::without_negative_reuse(),
-            None,
-            None,
-            None,
-        )
+        let attempts = Attempts::without_negative_reuse();
+        self.admit_attempts(budget, observer, attempts, None, None, None)
+    }
+    #[cfg(test)]
+    pub(crate) fn admit_fallback_without_negative_reuse(
+        self,
+        budget: &mut Budget<'_>,
+        observer: Option<&AdmissionObserver<'_>>,
+    ) -> Result<Self> {
+        let mut attempts = Attempts::without_negative_reuse();
+        attempts.structural_split = false;
+        self.admit_attempts(budget, observer, attempts, None, None, None)
+    }
+    /// Exercise the ordinary fallback pipeline in tests of its own proofs/caches.
+    #[cfg(test)]
+    pub(crate) fn admit_fallback_for_test(
+        self,
+        budget: &mut Budget<'_>,
+        observer: Option<&AdmissionObserver<'_>>,
+    ) -> Result<Self> {
+        let mut attempts = Attempts::default();
+        attempts.structural_split = false;
+        self.admit_attempts(budget, observer, attempts, None, None, None)
     }
     pub(crate) fn admit_diagnosed(
         self,
@@ -474,6 +519,7 @@ impl GroundProgram {
         reuse: bool,
     ) -> Result<Self> {
         let mut attempts = Attempts::default();
+        attempts.structural_split = false;
         attempts.batch_guarded = batch;
         attempts.reuse_prepared = reuse;
         self.admit_attempts(budget, observer, attempts, None, None, None)
@@ -720,6 +766,47 @@ impl GroundProgram {
             let components = scope.ordered_targets(self, budget)?;
             let mut batch = Vec::new();
             for pass in ["producer-removals", "bound-removals", "candidates"] {
+                if !batch.is_empty() {
+                    break;
+                }
+                if pass == "bound-removals"
+                    && phase == AdmissionPhase::Relevant
+                    && attempts.structural_split_enabled()
+                {
+                    for (component, _) in &components {
+                        let component = self.component(*component).expect("scheduled component");
+                        if component.cycle.is_none() {
+                            continue;
+                        }
+                        let proofs = self.structural_splits(
+                            component,
+                            &summaries,
+                            &meaning,
+                            &mut retained,
+                            budget,
+                            progress,
+                        )?;
+                        for proof in proofs {
+                            batch.push(RewriteProof {
+                                id: RewriteProofId {
+                                    snapshot: self.graph_revision,
+                                    index: self.rewrites.proofs.len() + batch.len(),
+                                },
+                                snapshot: self.graph_revision,
+                                kind: RewriteKind::GuardedSettlement {
+                                    literal_occurrence: proof.occurrence,
+                                },
+                                justification: RewriteJustification::GuardedSettlement(proof),
+                            });
+                        }
+                        if !batch.is_empty() {
+                            break;
+                        }
+                    }
+                }
+                if !batch.is_empty() {
+                    break;
+                }
                 if pass == "bound-removals" && phase == AdmissionPhase::Relevant {
                     if let Some(diagnosis) = &progress.component_probe {
                         budget.excluding_time(|| {
@@ -1035,6 +1122,29 @@ impl GroundProgram {
         Ok(batch)
     }
 
+    #[cfg(test)]
+    pub(crate) fn commit_joint_for_test(
+        &mut self,
+        proofs: Vec<GuardedSettlementProof>,
+        budget: &mut Budget<'_>,
+    ) -> Result<()> {
+        let batch = proofs
+            .into_iter()
+            .enumerate()
+            .map(|(i, proof)| RewriteProof {
+                id: RewriteProofId {
+                    snapshot: self.graph_revision,
+                    index: self.rewrites.proofs.len() + i,
+                },
+                snapshot: self.graph_revision,
+                kind: RewriteKind::GuardedSettlement {
+                    literal_occurrence: proof.occurrence,
+                },
+                justification: RewriteJustification::GuardedSettlement(proof),
+            })
+            .collect();
+        self.commit_rewrites(batch, &mut Attempts::default(), budget)
+    }
     fn commit_rewrites(
         &mut self,
         batch: Vec<RewriteProof>,
@@ -1054,6 +1164,9 @@ impl GroundProgram {
         )?;
         let mut next = self.clone();
         let changed = attempts.changed_readers(self, &batch, budget)?;
+        // Joint evidence is shared by every occurrence in this one atomic
+        // component batch. Charge its owned storage once, including after clones.
+        let mut shared = BTreeSet::new();
         for proof in batch {
             let id = proof.candidate().id;
             next.rewrites
@@ -1078,7 +1191,15 @@ impl GroundProgram {
                     .body
                     .retain(|l| l.term.occurrence != literal_occurrence),
             }
-            next.rewrites.nodes += proof.nodes();
+            let mut nodes = proof.nodes();
+            if let Some(p) = proof.guarded_settlement() {
+                if let GuardedCertificate::Joint(j) = &p.certificate {
+                    if !shared.insert((j.snapshot, j.component)) {
+                        nodes -= j.nodes();
+                    }
+                }
+            }
+            next.rewrites.nodes += nodes;
             next.rewrites.push_proof(proof);
         }
         crate::graph::analyze(&mut next, budget)?;

@@ -48,6 +48,12 @@ fn reconstructed_runtime_indexes_discharge_proofs_for_replay() {
     else {
         panic!("preparation exhausted");
     };
+    let mut prepared = prepared;
+    prepared.program = prepared
+        .program
+        .clone()
+        .admit_fallback_for_test(&mut Budget::new(&limits), None)
+        .unwrap();
     let prepared = prepared.admit(&operations).unwrap();
     let LocalCheckOutcome::Complete(report) = prepared.verify_local(&operations).unwrap() else {
         panic!("checking exhausted");

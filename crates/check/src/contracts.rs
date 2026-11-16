@@ -72,6 +72,19 @@ impl<'p> ConeIndex<'p> {
                         budget.tick("dependency cones")?;
                         pending.push(literal.term.atom.clone());
                     }
+                    // Joint replacement removes executable forwarding edges.
+                    // Keep their already-certified positive sources in replay
+                    // scopes so findings can still show authored derivations.
+                    for replacement in &rule.replacements {
+                        budget.tick("joint evidence dependencies")?;
+                        if let Some(literal) =
+                            self.program.joint_premise(rule.id, replacement.occurrence)
+                        {
+                            if literal.polarity == Polarity::Positive {
+                                pending.push(literal.term.atom.clone());
+                            }
+                        }
+                    }
                 }
             }
         }

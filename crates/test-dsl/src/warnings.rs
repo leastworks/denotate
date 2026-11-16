@@ -30,6 +30,7 @@ pub struct RewriteMetadata {
 }
 #[derive(Debug)]
 pub struct RewriteWarning {
+    pub kind: denotate_presentation::Kind,
     pub owner: Contribution,
     pub rule: RuleId,
     pub literal: Option<OccurrenceId>,
@@ -131,7 +132,9 @@ pub fn present_rewrites(
             .map(|span| {
                 RelatedLocation::new(
                     span,
-                    if literal.is_some() {
+                    if warning.kind() == denotate_presentation::Kind::GuardedSettlement {
+                        "equivalent condition"
+                    } else if literal.is_some() {
                         "redundant condition"
                     } else {
                         "redundant definition"
@@ -142,10 +145,15 @@ pub fn present_rewrites(
         let all_justified = warning.covers_all_instances;
         let edit = literal.and_then(|literal| {
             let edit = lowered.attribution.rewrites.removals.get(&literal)?;
-            (all_justified && sources.snapshot(edit.span.snapshot()).ok()?.view == view.as_str())
-                .then(|| edit.clone())
+            // Equivalence alone is insufficient: the negated premise must be
+            // true under its guard, in every original instance.
+            (all_justified
+                && warning.is_redundant_negation()
+                && sources.snapshot(edit.span.snapshot()).ok()?.view == view.as_str())
+            .then(|| edit.clone())
         });
         result.push(RewriteWarning {
+            kind: warning.kind(),
             owner,
             rule,
             literal,

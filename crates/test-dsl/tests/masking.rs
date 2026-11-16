@@ -242,7 +242,11 @@ fn masking_can_make_self_negation_harmless_without_a_dead_mapping_warning() {
             .is_empty()
     );
     assert!(warnings::covered_masks(&p, &sources).unwrap().is_empty());
-    let rewrites = warnings::present_rewrites(&p, &ground, &sources, "test-dsl").unwrap();
+    let rewrites: Vec<_> = warnings::present_rewrites(&p, &ground, &sources, "test-dsl")
+        .unwrap()
+        .into_iter()
+        .filter(|w| w.owner == warnings::Contribution::Program)
+        .collect();
     assert_eq!(rewrites.len(), 1);
     assert_eq!(rewrites[0].owner, warnings::Contribution::Program);
     assert_eq!(

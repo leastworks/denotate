@@ -11,6 +11,7 @@ use std::collections::{BTreeMap, BTreeSet};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum AdmissionAttemptKind {
     ComponentStorage,
+    StructuralSplit,
     Coverage,
     Removal,
     UpperBounds,
@@ -26,6 +27,7 @@ impl AdmissionAttemptKind {
     pub fn label(self) -> &'static str {
         match self {
             Self::ComponentStorage => "component-storage",
+            Self::StructuralSplit => "structural-split",
             Self::Coverage => "producer-coverage",
             Self::Removal => "producer-removal",
             Self::UpperBounds => "upper-bounds",
@@ -146,6 +148,8 @@ impl Attempt {
 
 pub(crate) struct Attempts {
     #[cfg(test)]
+    pub structural_split: bool,
+    #[cfg(test)]
     pub lookahead_work: Option<usize>,
     skipped: BTreeMap<Attempt, AdmissionSkip>,
     negative: BTreeMap<Attempt, GroundAtom>,
@@ -163,6 +167,8 @@ pub(crate) struct Attempts {
 impl Default for Attempts {
     fn default() -> Self {
         Self {
+            #[cfg(test)]
+            structural_split: true,
             skipped: BTreeMap::new(),
             negative: BTreeMap::new(),
             history: BTreeMap::new(),
@@ -184,6 +190,17 @@ pub(crate) struct RetryChanges {
 }
 
 impl Attempts {
+    pub fn structural_split_enabled(&self) -> bool {
+        #[cfg(test)]
+        {
+            self.structural_split
+        }
+        #[cfg(not(test))]
+        {
+            true
+        }
+    }
+
     pub fn component_skipped(&self, head: &GroundAtom) -> bool {
         self.skipped
             .contains_key(&Attempt::ComponentStorage(head.clone()))
@@ -1021,7 +1038,10 @@ mod tests {
         rule(&mut c, b, &[(i, true), (a, true)]);
         let limits = Limits::default();
         let before = GroundProgram::prepare(&c, &Domains::new(), &limits).unwrap();
-        let after = before.clone().admit(&limits).unwrap();
+        let after = before
+            .clone()
+            .admit_fallback_for_test(&mut Budget::new(&limits), None)
+            .unwrap();
         let proof = after.rewrite_proofs().next().unwrap();
         let RewriteKind::Discharge { literal_occurrence } = proof.kind else {
             panic!("discharge")
@@ -1139,7 +1159,10 @@ mod tests {
             // a's exact cover and its candidate's settled summary are unchanged.
             let limits = Limits::default();
             let before = GroundProgram::prepare(&c, &Domains::new(), &limits).unwrap();
-            let completed = before.clone().admit(&limits).unwrap();
+            let completed = before
+                .clone()
+                .admit_fallback_for_test(&mut Budget::new(&limits), None)
+                .unwrap();
             let batch: Vec<_> = completed
                 .rewrite_proofs()
                 .filter(|p| {

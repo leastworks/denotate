@@ -525,6 +525,7 @@ pub(crate) fn collect_evidence(
     budget: &mut Budget<'_>,
 ) -> Result<BTreeMap<GroundAtom, EvidenceStep>> {
     let mut result = BTreeMap::new();
+    let mut expanded_joint = false;
     let mut pending: Vec<_> = roots.iter().cloned().collect();
     while let Some(fact) = pending.pop() {
         budget.tick("evidence")?;
@@ -537,6 +538,7 @@ pub(crate) fn collect_evidence(
         let evidence = match &derivation.evidence {
             Evidence::Input => GroundEvidence::Input,
             Evidence::Derived { rule, premises } => {
+                let mut authored_support = Vec::new();
                 let rule = replay
                     .program()
                     .original_rule(*rule)
@@ -554,6 +556,24 @@ pub(crate) fn collect_evidence(
                                 *proof,
                                 budget,
                             )?;
+                            if let Some(literal) =
+                                replay.program().joint_premise(rule.id, *literal_occurrence)
+                            {
+                                if literal.polarity == Polarity::Positive {
+                                    if replay.fact(&literal.term.atom)? != FactState::Settled(true)
+                                    {
+                                        return Err(CheckError::Internal(
+                                            "joint authored support did not replay",
+                                        ));
+                                    }
+                                    pending.push(literal.term.atom.clone());
+                                    authored_support.push(PremiseEvidence::Positive {
+                                        fact: literal.term.atom.clone(),
+                                        occurrence: *literal_occurrence,
+                                    });
+                                    expanded_joint = true;
+                                }
+                            }
                         }
                         PremiseEvidence::Discharged {
                             literal_occurrence,
@@ -582,9 +602,10 @@ pub(crate) fn collect_evidence(
                         }
                     }
                 }
+                authored_support.extend(premises.iter().cloned());
                 GroundEvidence::Derived {
                     rule: rule.clone(),
-                    premises: premises.clone(),
+                    premises: authored_support,
                 }
             }
         };
@@ -596,5 +617,59 @@ pub(crate) fn collect_evidence(
             },
         );
     }
+    if expanded_joint {
+        // Execution may now precede an authored forwarding source. The joint
+        // certificate guarantees an acyclic authored graph in this world. Give
+        // the evidence DAG its own order, retaining the earlier-step contract.
+        order_evidence(&mut result, budget)?;
+    }
     Ok(result)
+}
+
+fn order_evidence(
+    evidence: &mut BTreeMap<GroundAtom, EvidenceStep>,
+    budget: &mut Budget<'_>,
+) -> Result<()> {
+    let mut counts = BTreeMap::new();
+    let mut readers = BTreeMap::<_, Vec<_>>::new();
+    for (atom, step) in evidence.iter() {
+        budget.tick("joint evidence order")?;
+        let mut count = 0;
+        if let GroundEvidence::Derived { premises, .. } = &step.evidence {
+            for premise in premises {
+                budget.tick("joint evidence edge")?;
+                if let PremiseEvidence::Positive { fact, .. } = premise {
+                    if !evidence.contains_key(fact) {
+                        return Err(CheckError::Internal("missing joint evidence support"));
+                    }
+                    readers.entry(fact.clone()).or_default().push(atom.clone());
+                    count += 1;
+                }
+            }
+        }
+        counts.insert(atom.clone(), count);
+    }
+    let mut ready: BTreeSet<_> = counts
+        .iter()
+        .filter(|(_, n)| **n == 0)
+        .map(|(a, _)| a.clone())
+        .collect();
+    let mut order = 0;
+    while let Some(atom) = ready.pop_first() {
+        budget.tick("joint evidence order")?;
+        evidence.get_mut(&atom).unwrap().order = order;
+        order += 1;
+        for reader in readers.get(&atom).into_iter().flatten() {
+            budget.tick("joint evidence edge")?;
+            let count = counts.get_mut(reader).unwrap();
+            *count -= 1;
+            if *count == 0 {
+                ready.insert(reader.clone());
+            }
+        }
+    }
+    if order != evidence.len() {
+        return Err(CheckError::Internal("cyclic joint evidence"));
+    }
+    Ok(())
 }

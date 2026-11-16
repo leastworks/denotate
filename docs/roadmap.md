@@ -9,8 +9,8 @@ Admission decides whether every permitted world has exactly one meaning. Impleme
 structural reduction (true/false propagation, dead rules, same-head subsumption after
 bounded unfolding), producer removal by exact coverage, bound-based removal (a cyclic
 producer whose bounded body is covered by exact producers), negation discharge and
-cycle upper bounds, guarded settlement into bounded expressions over settled atoms,
-failure-local skips with precise retry, reuse of completed
+cycle upper bounds, joint structural splits with acyclic leaves before bounds,
+guarded settlement into bounded expressions over settled atoms, failure-local skips with precise retry, reuse of completed
 negative attempts across rounds, and cycle-first ordering (see [decisions](decisions.md) and [checker policies](checker-policies.md)).
 Cycle-relevant proofs and supporting evaluation precede downstream work; downstream
 exhaustion is reported separately without relabeling the cycles' results. A
@@ -90,12 +90,14 @@ accept cycles that are never active or are broken by an early decision proven
 equivalent under the permitted worlds, reject the rest with a cycle and a witness
 world, and export the guarded schedule for comparison with a DSL's own scheduler.
 
-Bounded case splits already cover some never-active cycles: admission partitions
-the permitted worlds on independently settled atoms, proves each branch, and
-combines the results into an ordinary guarded replacement. This includes the
-four-guard cycle needing a second split even when the first split's largest branch
-does not shrink. It does not yet provide a separate evaluation order per branch,
-multi-way splits or an exported conditional schedule; those remain future work.
+Bounded structural splits now cover some never-active cycles before bounds work:
+admission partitions W on settled atoms and proves each leaf of the original
+component acyclic. A shared certificate replaces all internal premises at once;
+a live unresolved external dependency or an incomplete partition falls back.
+Candidate-relative case splits remain available later, with branch-local bounds.
+The four-guard cycle, sibling contexts and never-active hubs exercise this path.
+This is still bounded proof search, without totality without rewrites, arbitrary
+multi-way splits or an exported conditional schedule.
 
 ## Contract vocabulary: follow-ups
 

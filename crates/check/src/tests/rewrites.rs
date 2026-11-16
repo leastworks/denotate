@@ -44,7 +44,10 @@ fn discharge_lookup_handles_removal_only_and_mixed_snapshots() {
         }
         let limits = Limits::default();
         let raw = GroundProgram::prepare(&c, &Domains::new(), &limits).unwrap();
-        let admitted = raw.clone().admit(&limits).unwrap();
+        let admitted = raw
+            .clone()
+            .admit_fallback_for_test(&mut Budget::new(&limits), None)
+            .unwrap();
         assert_eq!(
             admitted
                 .rewrite_proofs()
@@ -181,7 +184,9 @@ fn mutual_negation_discharge_preserves_original_models_and_evidence() {
         }
         let raw = GroundProgram::prepare(&c, &Domains::new(), &Limits::default()).unwrap();
         let old_component = raw.component_for(&atom(first)).unwrap().id;
-        let p = raw.admit(&Limits::default()).unwrap();
+        let p = raw
+            .admit_fallback_for_test(&mut Budget::new(&Limits::default()), None)
+            .unwrap();
         assert!(p.is_admitted());
         assert!(
             p.component(old_component).is_none(),
@@ -349,7 +354,7 @@ fn counterexample_evidence_uses_authored_rules_without_reintroducing_removed_edg
     let limits = Limits::default();
     let p = GroundProgram::prepare(&c, &domains, &limits)
         .unwrap()
-        .admit(&limits)
+        .admit_fallback_for_test(&mut Budget::new(&limits), None)
         .unwrap();
     assert_eq!(compare(&c, &domains, &p), 2);
     let m = p.symbolic(&limits).unwrap();
@@ -391,7 +396,7 @@ fn counterexample_evidence_uses_authored_rules_without_reintroducing_removed_edg
     ));
     let foreign = GroundProgram::prepare(&c, &domains, &limits)
         .unwrap()
-        .admit(&limits)
+        .admit_fallback_for_test(&mut Budget::new(&limits), None)
         .unwrap();
     assert!(foreign.rewrite_proof(proof).is_none());
 }

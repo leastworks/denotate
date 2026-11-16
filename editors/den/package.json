@@ -29,6 +29,24 @@
           "additionalProperties": false,
           "description": "Resource ceilings per checker operation/query, shared by every program in this window. Omitted values use checker defaults; zero allows no use. Changes recheck programs.",
           "properties": {
+            "maxStructuralSplitDepth": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Optional structural split depth allowance per component; exhausting it falls back to ordinary admission.",
+              "maximum": 9007199254740991
+            },
+            "maxStructuralSplitLeaves": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Optional structural split leaves allowance per component; exhausting it falls back to ordinary admission.",
+              "maximum": 9007199254740991
+            },
+            "maxStructuralSplitWork": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Optional structural split work allowance per component; exhausting it falls back to ordinary admission.",
+              "maximum": 9007199254740991
+            },
             "maxAtoms": {
               "type": "integer",
               "minimum": 0,

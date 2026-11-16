@@ -22,8 +22,13 @@ pub struct Rewrite<'a> {
     pub message: &'static str,
 }
 impl Rewrite<'_> {
+    pub fn is_redundant_negation(&self) -> bool {
+        self.literal.is_some() && self.proofs.iter().all(|p| p.is_redundant_negation())
+    }
     pub fn kind(&self) -> Kind {
-        if self.proofs.iter().all(|p| p.guarded_settlement().is_some()) {
+        if !self.is_redundant_negation()
+            && self.proofs.iter().any(|p| p.guarded_settlement().is_some())
+        {
             Kind::GuardedSettlement
         } else {
             Kind::Rewrite
@@ -44,6 +49,9 @@ impl Rewrite<'_> {
         let mut notes = BTreeSet::new();
         for proof in &self.proofs {
             if let Some(p) = proof.guarded_settlement() {
+                if p.redundant_negation {
+                    notes.insert("This negated condition is always true under the rule's settled guard; removing it preserves the rule's meaning.".to_owned());
+                }
                 let mut remaining = if detail == RewriteDetail::Full {
                     usize::MAX
                 } else {
@@ -158,7 +166,10 @@ impl Rewrite<'_> {
                         }
                     }
                 }
-                if let GuardedCertificate::Split { .. } = &p.certificate {
+                if matches!(
+                    &p.certificate,
+                    GuardedCertificate::Split { .. } | GuardedCertificate::Joint(_)
+                ) {
                     let atoms: BTreeSet<_> = p
                         .certificate
                         .walk()
@@ -171,12 +182,18 @@ impl Rewrite<'_> {
                         .into_iter()
                         .map(|a| crate::evidence::atom_name(corpus, names, a))
                         .collect::<Result<Vec<_>>>()?;
-                    notes.insert(format!("Case split on settled facts: {}. Every permitted branch independently justifies the combined replacement.", names.join(", ")));
+                    if matches!(&p.certificate, GuardedCertificate::Joint(_)) {
+                        notes.insert(format!("Joint component certificate: {}. Every permitted leaf evaluates the original component in an acyclic order; all cycle-premise replacements are installed together.",
+                            if names.is_empty() { "no split needed".to_owned() } else { format!("case split on settled facts {}", names.join(", ")) }));
+                    } else {
+                        notes.insert(format!("Case split on settled facts: {}. Every permitted branch independently justifies the combined replacement.", names.join(", ")));
+                    }
                 }
                 if detail == RewriteDetail::Full {
                     let mut pending = vec![(&p.certificate, String::new())];
                     while let Some((certificate, branch)) = pending.pop() {
                         match certificate {
+                            GuardedCertificate::Joint(j) => pending.push((&j.tree, branch)),
                             GuardedCertificate::Split {
                                 atom,
                                 when_true,
@@ -194,7 +211,44 @@ impl Rewrite<'_> {
                             GuardedCertificate::Empty { .. } => {
                                 notes.insert(format!("Case [{branch}]: no permitted world; no premise certificate required."));
                             }
-                            GuardedCertificate::Leaf { steps, .. } => {
+                            GuardedCertificate::Leaf { steps, .. }
+                            | GuardedCertificate::Acyclic { steps, .. } => {
+                                if let GuardedCertificate::Acyclic { pruning, .. } = certificate {
+                                    for (rule, reason) in pruning {
+                                        let head = p
+                                            .certificate
+                                            .walk()
+                                            .find_map(|c| match c {
+                                                GuardedCertificate::Joint(j) => j
+                                                    .producers
+                                                    .iter()
+                                                    .find(|p| p.rule.id == *rule)
+                                                    .map(|p| &p.rule.head.atom),
+                                                _ => None,
+                                            })
+                                            .expect("joint pruning producer");
+                                        let head = crate::evidence::atom_name(corpus, names, head)?;
+                                        let reason = match reason {
+                                            GuardedDeadReason::SettledCondition => {
+                                                "its settled condition is impossible in this branch"
+                                                    .to_owned()
+                                            }
+                                            GuardedDeadReason::Positive(atom) => format!(
+                                                "{} has no live producer in this branch",
+                                                crate::evidence::atom_name(corpus, names, atom)?
+                                            ),
+                                            GuardedDeadReason::Negative {
+                                                atom,
+                                                exact_producers,
+                                            } => format!(
+                                                "{} is guaranteed by {} independently exact producers",
+                                                crate::evidence::atom_name(corpus, names, atom)?,
+                                                exact_producers.len()
+                                            ),
+                                        };
+                                        notes.insert(format!("Case [{branch}]: a producer of {head} is dead: {reason}."));
+                                    }
+                                }
                                 for (rank, step) in steps.iter().enumerate() {
                                     let mut remaining = usize::MAX;
                                     let value = expression_text(
@@ -460,7 +514,8 @@ pub fn rewrites<'a>(corpus: &Corpus, program: &'a GroundProgram) -> Result<Vec<R
             // Count distinct instances, not proofs, independently for each literal.
             let proved: BTreeSet<_> = proofs.iter().map(|p| p.candidate().id).collect();
             let covers_all_instances = proved.len() == instances[&rule];
-            let message = if proofs.iter().any(|p| p.guarded_settlement().is_some()) {
+            let message = if proofs.iter().any(|p| p.guarded_settlement().is_some())
+                && !proofs.iter().all(|p| p.is_redundant_negation()) {
                 if covers_all_instances { "This cyclic premise can be expressed using settled facts under its rule's guard." }
                 else { "This cyclic premise can be expressed using settled facts in some checked cases." }
             } else if !covers_all_instances {

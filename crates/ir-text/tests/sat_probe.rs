@@ -7,7 +7,7 @@ fn load_text(text: &str) -> LoadedProgram {
 }
 
 #[test]
-fn component_probes_follow_three_successively_settled_providers() {
+fn structurally_settled_providers_do_not_need_component_probes() {
     let mut text = String::new();
     for i in 0..3 {
         if i == 0 {
@@ -67,33 +67,31 @@ relation cleared_{i}();cleared_{i}():-docked_{i}(),!held_{i}();"
         .unwrap();
     assert_eq!(admitted.receipts(), ordinary.receipts());
     assert!(admitted.program().is_admitted());
-    let events = events.into_inner();
-    let mut answered = Vec::new();
-    for (name, snapshot, r) in &events {
-        if r.answer == SatProbeAnswer::Unknown {
-            assert!(r.reason.as_deref().unwrap().contains("upstream unresolved"));
-        } else {
-            assert_eq!(r.answer, SatProbeAnswer::Unsat);
-            assert_eq!(
-                r.existence.as_ref().unwrap().answer,
-                SatExistenceAnswer::EveryWorld
-            );
-            let stage = name.chars().last().unwrap().to_digit(10).unwrap();
-            if !answered.iter().any(|(s, _)| *s == stage) {
-                answered.push((stage, *snapshot));
-            }
-        }
+    assert!(events.into_inner().is_empty());
+    let mut settled = std::collections::BTreeMap::new();
+    for proof in admitted
+        .program()
+        .rewrite_proofs()
+        .filter_map(|p| p.guarded_settlement())
+    {
+        let GuardedCertificate::Joint(joint) = &proof.certificate else {
+            continue;
+        };
+        let name = &p
+            .corpus
+            .relation(proof.proof.candidate.rule.head.atom.relation)
+            .unwrap()
+            .name;
+        let stage = name.chars().last().unwrap().to_digit(10).unwrap();
+        settled.entry(stage).or_insert(joint.snapshot);
     }
-    assert_eq!(
-        answered.iter().map(|(s, _)| *s).collect::<Vec<_>>(),
-        [0, 1, 2],
-        "{events:?}"
-    );
-    assert!(answered.windows(2).all(|w| w[0].1 < w[1].1));
+    assert_eq!(settled.keys().copied().collect::<Vec<_>>(), [0, 1, 2]);
     assert!(
-        events
-            .iter()
-            .any(|(_, _, r)| r.answer == SatProbeAnswer::Unknown)
+        settled
+            .values()
+            .collect::<Vec<_>>()
+            .windows(2)
+            .all(|w| w[0] < w[1])
     );
 }
 
@@ -174,7 +172,9 @@ fn unresolved_upstream_is_unknown_and_probe_results_are_not_cached() {
 
 #[test]
 fn component_probe_exhaustion_and_cancellation_do_not_become_checker_answers() {
-    let p = load_text(include_str!("fixtures/guarded-settlement.den"));
+    let p = load_text(
+        "relation a();relation b();a():-!b();b():-!a();verification v{assumptions:[];obligations:[];}",
+    );
     let l = Limits::default();
     let ops: OperationalLimits = (&l).into();
     let request = p.verification_requests(&l).unwrap().remove(0).1;
@@ -207,7 +207,7 @@ fn component_probe_exhaustion_and_cancellation_do_not_become_checker_answers() {
             None,
         )
         .unwrap();
-    assert!(admitted.program().is_admitted());
+    assert!(!admitted.program().is_admitted());
     assert_eq!(admitted.receipts(), ordinary.receipts());
     assert!(!events.borrow().is_empty());
     assert!(
@@ -365,7 +365,16 @@ fn candidate_probe_agrees_with_certificates_at_their_actual_snapshots() {
         include_str!("fixtures/implied-guard.den"),
         include_str!("fixtures/guarded-settlement-producers.den"),
     ] {
-        let loaded = load_text(text);
+        // A live unresolved external premise keeps the whole-component pass
+        // from preempting this candidate-relative diagnostic test.
+        let text = text
+            .replace("!claim_fails();", "!claim_fails(), !other();")
+            .replace(
+                "hazard_claim() :- !hc_unsat();",
+                "hazard_claim() :- !hc_unsat(), !other();",
+            )
+            + "\ninput extra_external(); relation other(); relation other_b(); other():-extra_external(); other():-!other_b();other_b():-!other();";
+        let loaded = load_text(&text);
         let l = Limits::default();
         let ops = (&l).into();
         let request = loaded.verification_requests(&l).unwrap().remove(0).1;
@@ -387,7 +396,7 @@ fn candidate_probe_agrees_with_certificates_at_their_actual_snapshots() {
                 }),
             )
             .unwrap();
-        assert!(admitted.program().is_admitted());
+        assert!(!admitted.program().is_admitted());
         let events = events.into_inner();
         for event in events.iter().filter(|e| e.candidate_probe.is_some()) {
             assert!(
@@ -426,7 +435,14 @@ fn candidate_probe_agrees_with_certificates_at_their_actual_snapshots() {
             counts.candidates,
             counts.ruled_out + counts.not_ruled_out + counts.unknown + counts.unexamined
         );
-        assert_eq!(counts.unknown, 0);
+        // The deliberate unresolved external can make other candidate queries
+        // unknown. Every certificate above must still have an UNSAT report.
+        assert!(
+            reports
+                .iter()
+                .filter(|r| r.answer == SatProbeAnswer::Unknown)
+                .all(|r| r.reason.is_some())
+        );
     }
     assert!(certificates >= 6);
     assert!(implied > 0);

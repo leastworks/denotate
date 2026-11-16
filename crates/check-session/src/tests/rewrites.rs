@@ -15,17 +15,24 @@ fn lowered_test_dsl_forwarding_agrees_with_cartesian_stable_model_oracle() {
         .admit(&limits)
         .unwrap();
     assert!(p.is_admitted());
-    assert_eq!(p.rewrite_proofs().count(), 2);
+    assert_eq!(p.rewrite_proofs().count(), 6);
     assert_eq!(compare(&lowered.corpus, &domains, &p), 8);
     let proofs: Vec<_> = p.rewrite_proofs().collect();
-    let certificate = proofs[0].symbolic().unwrap().upper_bounds.as_ref().unwrap();
-    assert!(std::sync::Arc::ptr_eq(
-        certificate,
-        proofs[1].symbolic().unwrap().upper_bounds.as_ref().unwrap()
-    ));
+    let GuardedCertificate::Joint(certificate) =
+        &proofs[0].guarded_settlement().unwrap().certificate
+    else {
+        panic!()
+    };
+    for proof in &proofs {
+        let GuardedCertificate::Joint(other) = &proof.guarded_settlement().unwrap().certificate
+        else {
+            panic!()
+        };
+        assert!(std::sync::Arc::ptr_eq(certificate, other));
+    }
     assert_eq!(certificate.snapshot, proofs[0].snapshot);
-    // The certificate includes the forwarding rules, not just mapped_to's
-    // immediately visible guard or a single reported cycle path.
+    // The joint proof retains every forwarding producer, even though execution
+    // now uses expressions rather than the old positive forwarding edges.
     assert_eq!(certificate.producers.len(), 6);
     let m = p.symbolic(&limits).unwrap();
     let ctx = m.context();
@@ -44,10 +51,18 @@ fn lowered_test_dsl_forwarding_agrees_with_cartesian_stable_model_oracle() {
             .unwrap();
         let expected = ctx.and(&guard, &present, &limits).unwrap();
         let available = dsl_fixture::atom(&lowered, "available", &[slot]);
-        assert!(
-            ctx.equivalent(&certificate.conditions[&available], &expected, &limits)
-                .unwrap()
-        );
+        for branch in certificate.tree.walk() {
+            if let GuardedCertificate::Acyclic { domain, values, .. } = branch {
+                assert!(
+                    ctx.equivalent(
+                        &values[&available],
+                        &ctx.and(domain, &expected, &limits).unwrap(),
+                        &limits
+                    )
+                    .unwrap()
+                );
+            }
+        }
     }
 }
 
@@ -136,12 +151,12 @@ fn masking_self_contradiction_and_mutual_ambiguity_match_independent_stable_mode
 // Completion/supported-model oracle, independent of BDDs and the rewrite
 // implementation. Unlike stable models, these can contain positive self-support.
 #[test]
-fn upper_bound_iteration_budget_failure_never_commits_partial_discharge() {
+fn joint_staging_budget_failure_never_commits_partial_replacements() {
     let lowered = dsl_fixture::Fixture::exclusive().lower();
     let limits = Limits::default();
     let raw =
         GroundProgram::prepare(&lowered.corpus, &dsl_fixture::domains(&lowered), &limits).unwrap();
-    let mut interrupted_bound = false;
+    let mut interrupted_joint = false;
     let mut completed = false;
     for max_work in (0..5000).step_by(7) {
         let p = raw
@@ -152,7 +167,7 @@ fn upper_bound_iteration_budget_failure_never_commits_partial_discharge() {
             })
             .unwrap();
         if let Some(cause) = p.admission_limit() {
-            interrupted_bound |= cause.phase.starts_with("upper-bound");
+            interrupted_joint |= cause.phase.starts_with("structural split");
             assert!(!p.is_admitted());
             assert_eq!(p.rewrite_proofs().count(), 0);
             assert_eq!(
@@ -162,9 +177,9 @@ fn upper_bound_iteration_budget_failure_never_commits_partial_discharge() {
         } else {
             completed = true;
             assert!(p.is_admitted());
-            assert_eq!(p.rewrite_proofs().count(), 2);
+            assert_eq!(p.rewrite_proofs().count(), 6);
             break;
         }
     }
-    assert!(interrupted_bound && completed);
+    assert!(interrupted_joint && completed);
 }

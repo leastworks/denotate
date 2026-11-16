@@ -3,7 +3,7 @@
 use super::*;
 
 #[derive(Clone, Copy)]
-pub(super) struct CaseLimits {
+pub(crate) struct CaseLimits {
     pub candidates: usize,
     pub depth: usize,
     pub leaves: usize,
@@ -35,7 +35,7 @@ struct Choice {
     cyclic: [usize; 2],
 }
 
-fn recoverable(error: &CheckError) -> bool {
+pub(crate) fn recoverable(error: &CheckError) -> bool {
     matches!(
         error,
         CheckError::LimitExceeded {
@@ -418,7 +418,7 @@ impl Search<'_, '_> {
 
 /// Iterative SCC traversal, like the executable graph builder. Scores count
 /// cyclic atoms, including positive cycles and self-loops; polarity proves nothing.
-fn cyclic_size(
+pub(crate) fn cyclic_size(
     cone: &BorrowedCone<'_>,
     retained: &mut usize,
     budget: &mut Budget<'_>,

@@ -33,7 +33,10 @@ second <- second_input when input_value(kind) is 2 and not available(first);
 3. **Check** through `denotate-check-session` (BDD).
 4. **Present** with test DSL wording on top of `denotate-presentation`: conflicting
    inputs, quoted guards, example observations, related locations, and explicit
-   safe-removal eligibility for redundant guards (rewrite warnings).
+   safe-removal eligibility for redundant guards (rewrite warnings). Removal edit
+   metadata requires proof that the negated condition is always true under its guard, for
+   every instance. A discharge or joint certificate can establish this; a genuine
+   expression equivalence does not authorize deletion and uses `guarded-settlement`.
 5. **Export** to `.den` (`src/export.rs`, `just export-test-dsl`): one `.den` file
    per source plus a generated library root, with embedded origins. The assumption
    and default verification are printed in `library/library.den`, so `just check-den`

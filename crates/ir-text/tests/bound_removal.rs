@@ -200,7 +200,9 @@ fn bound_warning_details_are_bounded_after_union_and_expand_explicitly() {
         text += &format!("member(i{i:03});\n");
         text += &format!("kept(i{i:03}) :- chosen(i{i:03});\n");
     }
-    text += "a(X) :- member(X), !b(X); b(X) :- member(X), !chosen(X); b(X) :- member(X), !kept(X); kept(X) :- a(X); verification checks { assumptions: []; obligations: []; }";
+    // A live unresolved external premise prevents a joint acyclic evaluation;
+    // a's upper bound is still chosen(X), so the bound-removal path remains useful.
+    text += "relation external(); external() :- !external(); a(X) :- member(X), !b(X), external(); b(X) :- member(X), !chosen(X); b(X) :- member(X), !kept(X); kept(X) :- a(X); verification checks { assumptions: []; obligations: []; }";
     let p = loaded(text, 0);
     let limits = Limits::default();
     let ops = (&limits).into();
@@ -210,7 +212,7 @@ fn bound_warning_details_are_bounded_after_union_and_expand_explicitly() {
         panic!()
     };
     let prepared = prepared.admit(&ops).unwrap();
-    assert!(prepared.program().is_admitted());
+    assert!(!prepared.program().is_admitted());
     let CheckOutcome::Complete(report) = prepared.verify(&ops).unwrap() else {
         panic!()
     };

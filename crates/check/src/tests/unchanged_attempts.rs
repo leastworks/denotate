@@ -15,10 +15,11 @@ fn run(
     let observe = |e: &AdmissionProgress| events.borrow_mut().push(e.clone());
     let mut budget = Budget::new(limits);
     let p = if reuse {
-        raw.clone().admit_observed(&mut budget, Some(&observe))
+        raw.clone()
+            .admit_fallback_for_test(&mut budget, Some(&observe))
     } else {
         raw.clone()
-            .admit_without_negative_reuse(&mut budget, Some(&observe))
+            .admit_fallback_without_negative_reuse(&mut budget, Some(&observe))
     }
     .unwrap();
     (p, events.into_inner())
@@ -220,7 +221,7 @@ fn unchanged_attempts_match_exhaustive_oracles_with_and_without_limits() {
     let defaults = Limits::default();
     let mut budget = Budget::tracked(&defaults);
     raw.clone()
-        .admit_without_negative_reuse(&mut budget, None)
+        .admit_fallback_without_negative_reuse(&mut budget, None)
         .unwrap();
     let full_work = budget.snapshot().work;
     let mut differing = 0;

@@ -294,7 +294,7 @@ fn findings(
     publications
         .values()
         .flat_map(|p| p["diagnostics"].as_array().unwrap())
-        .filter(|d| d["data"]["program"] == root && d["data"]["kind"] != "redundant")
+        .filter(|d| d["data"]["program"] == root && d["data"]["finding"].get("rewrite").is_none())
         .map(|d| {
             assert!(d["data"]["finding"].is_object());
             translate(

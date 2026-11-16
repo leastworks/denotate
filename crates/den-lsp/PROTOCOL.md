@@ -283,6 +283,25 @@ without throttling. These are progress observations, never finding identities or
 semantic inputs. The CLI uses the same fields. Temporary bounds/cone storage
 exhaustion is a local skip; other storage and global work exhaustion still stop.
 
+Before bounds work, `stage: "structural-split"` reports the original component's
+joint search in optional `structuralSplit`. It has `candidatesScored`,
+`fixedCandidates`, `cutoffs`, `depth`, `maxDepth`, `leaves`, `state`, and nullable
+`chosen`, `cyclicAtoms`, `branchCyclicAtoms`, `branchConeAtoms`, `branchLiveAtoms`,
+with the same meanings as case-search fields below. Nullable `candidatesAvailable`,
+`nodeCandidatesScored`, `scoringWork` and `scoringLimit` describe the current node;
+`candidatesScored` remains cumulative over the component search. `searchLimit`,
+`depthLimit` and `leafLimit` report effective whole-component allowances;
+`searchWork` reports charged work so far. The selected
+branch sizes give its score `(max, sum)`. A scoring cutoff can be followed by
+`split`: the best improving candidate remains useful. Here the branch graph is the
+original whole component, with no relaxed reader. States include `scoring`,
+`evaluating`, `split`, `staging`, `certified`, `unresolved-external`, `negative`,
+`fallback`, `disabled` and the scoring/depth/leaf/expression/certificate cutoffs. `fallback`
+immediately includes `{phase, resource, message}` in its `fallback` field and
+continues ordinary admission; it is not a semantic inconclusive result. Attempt
+counts use kind `structural-split`. The field is null outside this stage. These
+fields are shared by CLI and editor progress; no finding identity changes.
+
 During bounded case search, `guarded.splits` is an object with cumulative
 `candidatesScored`, `fixedCandidates`, `cutoffs`, current `depth`, `maxDepth` reached,
 `leaves`, and `state`. Optional `chosen` names the most recently selected settled
@@ -344,7 +363,11 @@ and zero omission counts; the CLI requests it with `--verbose`. Full chains are
 computed only on request. An editor expansion command remains a follow-up;
 ordinary publication never expands them.
 
-Guarded-settlement warnings use diagnostic code/kind `guarded-settlement` (Warning),
+A negative premise proved always true under its settled guard is a redundant
+negation, including when established by a joint certificate: code/kind `redundant`,
+the specific redundancy message, and removal eligibility only with full instance
+coverage and a frontend-certified source edit. Its finding identity is unchanged.
+Other guarded-settlement warnings use code/kind `guarded-settlement` (Warning),
 with the existing `(verification, source rule, premise occurrence)` finding identity.
 `data.evidence.kind` remains `rewrite-proof`; `coversAllInstances` retains its meaning.
 `guardedDetail` is `"direct"` or `"full"`, alongside the shared omission counts.
@@ -359,6 +382,13 @@ including false upper-bound and independently exact true-guarantee seeds, or an
 empty permitted domain. Supporting locations include the union of every branch's
 sources. Finding identities, evidence kind, note/location caps and executable
 replacement semantics are unchanged.
+A joint component certificate uses those same warnings and identities for every
+replaced occurrence. Default notes explicitly say the replacements were proved
+and installed together, naming the settled split atoms. Full detail shows every
+leaf's topological values and reasons its dead producers were pruned. Supporting
+locations include the original component's producers, including dead branches.
+Unlike candidate-relative certificates, these leaves have no relaxed reading
+producer or bounds. Constants are permitted; note/location caps still apply.
 When a guard is inferred from producer summaries, notes name the retained implied
 guard and the source premise/producer set. Full detail expands the settled producer
 conditions. Supporting sources outside the replaced premise's cone are related
@@ -910,7 +940,10 @@ Editor deadlines retain the checker phase instead of replacing it with a generic
 `timeoutMs` defaults to 10000; it is a cooperative allowance per operation/query,
 not a program or workspace deadline. Optional `limits` accepts nonnegative integer
 `maxAtoms`, `maxRules`, `maxDependencies`, `maxWork`, `maxBddVariables`, `maxBddNodes`,
-`maxBddTasks` and `maxConditionNodes`, with checker defaults for omitted fields.
+`maxBddTasks`, `maxConditionNodes`, `maxStructuralSplitDepth`,
+`maxStructuralSplitLeaves` and `maxStructuralSplitWork`, with checker defaults for
+omitted fields. Structural split limits bound an optional attempt per component;
+exhausting them continues ordinary admission.
 Zero permits no use. Limits do not include loading, presentation, session retention
 or separate attribution allowances. An update replaces the whole object; omitted
 settings revert to defaults. Invalid values or unknown names inside `limits` are

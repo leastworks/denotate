@@ -225,17 +225,18 @@ The file intentionally retains program names and is not an anonymized export.
   cap; only a repeated failure becomes a skip. It is also released at replacement
   or end of the snapshot. Work already spent remains charged.
 
-  Existing producer removal and negation discharge get the first opportunity;
-  guarded settlement runs only when they have no batch. This deliberately preserves
-  established discharge warnings and their failure-local attempts. Bounds and
+  Candidate-relative guarded settlement runs after producer removal and negation
+  discharge have no batch. The component-wide structural split pass described
+  below now precedes bound-backed removal/discharge; it may therefore replace
+  warnings that those later passes used to produce. Bounds and
   settlement have separate attempt identities. Replacements invalidate attempts
   whose complete inputs changed; commits track expression leaves as settled
   dependencies. Replay, completion,
   certification and keyed local queries execute the same attached expression.
   The certificate stays separate from the executable condition and points back
   to original source. New `guarded-settlement` warnings describe an equivalence,
-  not redundancy; they are advisory for CLI exit codes. Existing warning behavior
-  and finding identities are unchanged. Display is bounded, with full steps on
+  not redundancy; they are advisory for CLI exit codes. Finding identities remain
+  tied to the source rule and occurrence. Display is bounded, with full steps on
   request; no source edit is authorized.
 
 - **Split guarded certificates on independently settled atoms.** When ordinary
@@ -277,6 +278,66 @@ The file intentionally retains program names and is not an anonymized export.
   also depends on producers omitted by successful proof cones. Cutoffs retain the
   original rule; global work, deadlines and cancellation still propagate. Limits
   and ranking are provisional [checker policies](checker-policies.md#case-splits).
+
+- **Prove an acyclic partition of the original component before computing bounds.**
+  After structural reduction, summaries and cheap exact-cover removals, admission
+  tries binary splits over globally settled atoms for each unresolved negative
+  component in provider-first order. The domain is all permitted worlds W. The
+  existing deadness pass removes impossible settled conditions, dead positive
+  premises and negatives guaranteed by independently exact producers. Every
+  component atom remains a root, so a disconnected cyclic island cannot vanish.
+  Splits rank the executable graph; this path computes no upper, guaranteed or
+  guarded bounds. Cheap producer frequency and selected exclusivity-group size
+  order candidates before scoring. The charged scoring allowance controls search
+  effort, not soundness: keep the best improving split found when it expires,
+  rather than losing useful work because later candidates remain unscored. An acyclic leaf is evaluated topologically, using only globally
+  settled external facts and earlier leaf values. A live unresolved external
+  dependency fails the attempt; it is never interpreted as absence.
+
+  The certificate is joint, over the original component: each leaf owns its order,
+  every atom's value and the pruning reasons. All original producer summaries,
+  including dead producers, are shared by its edge proofs. In each permitted
+  world, pruning preserves supported interpretations and the remaining graph is
+  acyclic, hence has one supported model, also its stable model. Its topological
+  values are that model. Replacing every internal premise simultaneously by its
+  signed value produces an acyclic component with the same model. Thus neither
+  an old meaning is lost nor a new one introduced. Combining disjoint branch
+  values preserves this argument over W. Original external guards remain; the
+  expressions do not claim meaning outside W.
+
+  These edge proofs are not independently installable: one can use producers
+  rewritten by another. They share one certificate and commit atomically, including
+  constant replacements and several occurrences in one rule. Independent batches
+  retain their symmetric dependency checks. Complete expressions, evidence and
+  storage accounting are staged before mutation; a failed stage installs nothing.
+  Shared evidence is charged once per joint batch. Positive forwarding sources
+  remain in finding replay scopes even when their executable premise was replaced.
+  Collection confirms those authored facts and gives the expanded evidence DAG
+  its own topological order; execution order can now precede an authored source.
+  This preserves source attribution without reintroducing execution dependencies.
+  Global work, deadlines and
+  cancellation propagate; optional cutoffs or BDD/storage failures fall back to the
+  ordinary pipeline without turning a semantic result inconclusive.
+
+  Existing `(verification, source rule, occurrence)` finding identities are kept.
+  Earlier settlement can replace discharge or redundant-producer warnings with
+  guarded-settlement warnings, and report more occurrences at once. Default notes
+  explain the joint proof; full detail shows each branch's evaluation and dead
+  producers. Equivalence alone does not permit deleting an authored condition:
+  redundant negations keep code `redundant`, the specific redundancy wording and
+  frontend-certified removal edits when every original instance is covered.
+  This applies whether discharge or a joint certificate proves the negated premise
+  always true under its settled guard. Joint staging records this guard-relative
+  fact under its existing budget; it does not change the global executable
+  replacement. Presentation reads that classification without another proof query.
+  Positive, false or genuinely varying replacements retain `guarded-settlement`
+  and have no inferred removal edit. Mixed or partial source coverage cannot
+  authorize deletion. Cutoffs remain provisional [policies](checker-policies.md#structural-splits).
+  Search effort is bounded by total charged work per component; depth and leaves
+  remain configurable safety caps. A short one-sided split path must not be cut
+  off just because a balanced tree would already have many leaves. Local exhaustion
+  restores the outer budget and falls back; global exhaustion still propagates.
+  No branch or failed-component memoization is introduced in this increment.
 
 - **Rank a bounded window of guarded candidates by their prepared cones.** An
   informative guard can leave almost the entire component live. Running expensive

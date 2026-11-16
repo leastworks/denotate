@@ -12,6 +12,16 @@ use std::{
 
 const CYCLE: &str = "relation a(); relation b(); a():-!b();b():-!a();\nrelation bad();obligation clean:empty(bad);\nsort S;const left,right:S;input choice(s:S);assumption exclusive:at_most_one(choice,group_by:());\nverification free{assumptions:[];obligations:[clean];} verification selected{assumptions:[exclusive];obligations:[clean];}";
 const CHAIN: &str = include_str!("../../tests/fixtures/guarded-chain.den");
+// Keep candidate-relative dump coverage after the joint pass: a live external
+// ambiguity prevents whole-component evaluation, while the reader's premise can
+// still have a guarded certificate.
+fn candidate_fallback(text: &str) -> String {
+    let text = text.replace(
+        "hazard_claim() :- !hc_unsat();",
+        "hazard_claim() :- !hc_unsat(), !other();",
+    );
+    text + "\ninput extra(); relation other(); relation other_b(); other():-extra(); other():-!other_b(); other_b():-!other();\n"
+}
 fn records(path: &Path) -> Vec<Value> {
     fs::read_to_string(path)
         .unwrap()
@@ -75,7 +85,7 @@ fn component_dump_multiple_contexts_determinism_and_output_parity() {
 
 #[test]
 fn component_dump_guard_pruning_and_sources_are_from_the_attempt_snapshot() {
-    let f = Fixture::new(CHAIN);
+    let f = Fixture::new(&candidate_fallback(CHAIN));
     let file = f.0.join("attempts.jsonl");
     let baseline = f.run(&["--json", "--no-progress"]);
     assert_eq!(
@@ -106,10 +116,10 @@ fn component_dump_guard_pruning_and_sources_are_from_the_attempt_snapshot() {
             .any(|r| r["record"] == "attempt-outcome" && r["state"] == "settled")
     );
     // Retained attempted cones preceded the final graph: do not reconstruct them
-    // from the completely admitted result, where no unresolved component remains.
+    // from the final graph, where the original cycle has already gone.
     assert_eq!(
         r.iter().find(|r| r["record"] == "graph-end").unwrap()["components"],
-        0
+        1 // only the intentionally ambiguous external component remains
     );
     assert!(r.iter().any(|r| r["record"] == "cone-atom"));
 }
@@ -216,8 +226,9 @@ fn component_dump_fresh_cold_warm_and_reused_graphs_agree() {
 
 #[test]
 fn component_dump_survives_admission_deadline_and_mid_attempt_cancellation() {
-    let f = Fixture::new(CHAIN);
-    let p = loaded(CHAIN);
+    let source = candidate_fallback(CHAIN);
+    let f = Fixture::new(&source);
+    let p = loaded(&source);
     let limits = Limits::default();
     let request = p.verification_requests(&limits).unwrap().remove(0).1;
     let v = p.corpus.verifications().next().unwrap();
@@ -280,7 +291,8 @@ fn component_dump_small_guarded_hub_has_signed_guards_and_pruning() {
     let script = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/bench-den-zoo.mjs");
     let generated=std::process::Command::new("node").args(["--input-type=module","-e","import {pathToFileURL} from 'node:url'; const {source}=await import(pathToFileURL(process.argv[1])); process.stdout.write(source('guarded-hub',4,{hubWriters:2,hubReaders:2,hubValues:1}));"]).arg(script).output().unwrap();
     assert!(generated.status.success());
-    let f = Fixture::new(std::str::from_utf8(&generated.stdout).unwrap());
+    let source = candidate_fallback(std::str::from_utf8(&generated.stdout).unwrap());
+    let f = Fixture::new(&source);
     let file = f.0.join("hub.jsonl");
     let expected = f.run(&["--json", "--no-progress"]);
     assert_eq!(

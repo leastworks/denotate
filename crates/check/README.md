@@ -37,7 +37,19 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    exact coverage. Removals, bound removals and discharge visit components in
    provider-first target levels, then by size. Each successful component batch
    commits immediately; the schedule is rebuilt with the graph. All cheap removals
-   must have no batch before bounds begin. When cheap removals have no batch, lower guarantees
+   must have no batch before bounds begin. Next, structural split search tries the
+   original negative-cycle component under W: split on settled atoms, prune dead
+   producers, and evaluate every acyclic leaf topologically. Live unresolved
+   external premises fail the attempt. One shared joint certificate installs all
+   internal replacements atomically, including constants and multiple occurrences;
+   no bounds are computed. `Limits::max_structural_split_depth`,
+   `max_structural_split_leaves` and `max_structural_split_work` bound this optional
+   attempt, including BDD preflight work. A local cutoff or partial/oversized
+   certificate falls back; global work/deadlines/cancellation still stop admission.
+   Negations proved always true under their settled guard keep redundant-negation
+   warnings and safe frontend edits, independently of which proof path established
+   them. Genuine expression replacements remain equivalence warnings. If that
+   search has no batch, lower guarantees
    from exact producers strengthen descending cycle upper bounds. A non-exact
    producer is removed if its body's upper bound implies the independent exact
    head cover under W. Exact producers are retained; recursive lower coverage is
@@ -179,6 +191,12 @@ its provisional window, threshold and progress fields.
 If ordinary guarded bounds fail locally or settlement is negative, a bounded case
 search can split the effective domain on globally settled input or derived atoms.
 An executable-cone SCC score chooses useful splits; it is never proof evidence.
+The earlier component-wide structural search uses the same score and cutoffs, but
+its `GuardedCertificate::Joint` shares the original producers and an `Acyclic` leaf
+certificate with every atom's value and deadness reasons. All occurrence proofs
+must commit together. It uses no candidate relaxation or bounds. See the
+[joint proof decision](../../docs/decisions.md) and
+[structural-split policies](../../docs/checker-policies.md#structural-splits).
 Each live branch obtains fresh candidate-relaxed bounds and a non-circular
 certificate, including constant leaves justified by false upper bounds or
 independently exact producers. Only a complete tree becomes a replacement, with

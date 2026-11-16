@@ -558,9 +558,10 @@ impl ConditionContext {
             // plus the stopping step (no construction ran). Keep global work
             // exhaustion distinct from an operation's task bound, including ties.
             let work_bound = budget.remaining() / 2 <= budget.limits.max_bdd_tasks;
+            let work_error = budget.work_exhaustion("BDD preflight");
             budget.charge(allowed.saturating_add(1), "BDD preflight")?;
             if work_bound {
-                return Err(limit("BDD preflight", "work", budget.limits.max_work, None));
+                return Err(work_error);
             }
             return Err(limit("BDD preflight", "BDD tasks", allowed, None));
         };
@@ -600,6 +601,50 @@ mod tests {
     use super::*;
     use biodivine_lib_bdd::{BddNode, BddPointer};
     use denotate_ir::{Corpus, RelationRole};
+
+    #[test]
+    fn structural_split_preflights_use_the_local_work_allowance_and_release_it() {
+        let mut corpus = Corpus::new();
+        let inputs: Vec<_> = ["x", "y"]
+            .into_iter()
+            .map(|name| {
+                GroundAtom::new(
+                    corpus
+                        .declare_relation(name, RelationRole::Input, [])
+                        .unwrap(),
+                    [],
+                )
+            })
+            .collect();
+        let defaults = Limits::default();
+        let p = GroundProgram::prepare(&corpus, &Domains::new(), &defaults).unwrap();
+        let ctx = p.condition_context(&defaults).unwrap();
+        let x = ctx.input(&inputs[0], &defaults).unwrap();
+        let y = ctx.input(&inputs[1], &defaults).unwrap();
+        let mut preflight_exhausted = false;
+        for cap in 0..30 {
+            let limits = Limits {
+                max_structural_split_work: cap,
+                ..defaults.clone()
+            };
+            let mut budget = Budget::tracked(&limits);
+            let result =
+                budget.structural_split(|budget| ctx.apply(&x, &y, op_function::and, budget));
+            if let Err(CheckError::LimitExceeded {
+                phase,
+                resource,
+                details,
+            }) = result
+            {
+                assert_eq!(phase, "structural split");
+                assert_eq!(resource, "structural split work");
+                preflight_exhausted |= details.subphase == Some("BDD preflight");
+            }
+            // Reuse the same query budget outside the optional scope.
+            assert!(ctx.apply(&x, &y, op_function::and, &mut budget).is_ok());
+        }
+        assert!(preflight_exhausted);
+    }
 
     #[test]
     fn failed_preflights_are_charged_and_work_bound_stops_are_global() {

@@ -52,11 +52,12 @@ fn cycle_first_admits_before_downstream_chain_and_reviews_disappearing_warning()
         let (p, events) = admit(&raw, &Limits::default());
         assert!(p.is_admitted());
         assert!(p.downstream_incomplete().is_none());
-        assert!(
-            events
-                .iter()
-                .any(|e| e.phase == AdmissionPhase::Relevant && e.discharged_negations > 0)
-        );
+        assert!(events.iter().any(|e| {
+            e.phase == AdmissionPhase::Relevant
+                && e.structural_split
+                    .as_ref()
+                    .is_some_and(|s| s.state == "certified")
+        }));
         // These candidates become exact before phase B. Their old warnings are
         // intentionally absent; admitted meanings still match both oracles.
         assert!(

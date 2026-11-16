@@ -173,6 +173,20 @@ impl<'a> AdmissionDetails<'a> {
                     "iterationMs":g.iteration.as_secs_f64()*1000., "reused":g.reused, "state":g.state,
                     "splits": splits})
             });
+        let structural_split = event.structural_split.as_ref().map(|s| {
+            let names = self.names.get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)));
+            json!({"candidatesScored":s.candidates_scored,"fixedCandidates":s.fixed_candidates,
+                "candidatesAvailable":s.candidates_available,"nodeCandidatesScored":s.node_candidates_scored,
+                "scoringWork":s.scoring_work,"scoringLimit":s.scoring_limit,
+                "searchWork":s.search_work,"searchLimit":s.search_limit,
+                "depthLimit":s.depth_limit,"leafLimit":s.leaf_limit,
+                "cutoffs":s.cutoffs,"chosen":s.chosen.as_ref().map(|a|atom_text(a,&**names)),
+                "cyclicAtoms":s.cyclic_atoms,"branchCyclicAtoms":s.branch_cyclic_atoms,
+                "branchConeAtoms":s.branch_cone_atoms,"branchLiveAtoms":s.branch_live_atoms,
+                "depth":s.depth,"maxDepth":s.max_depth,"leaves":s.leaves,"state":s.state,
+                "fallback":event.split_fallback.map(|r|json!({"phase":r.phase,"resource":r.resource,
+                    "message":denotate_presentation::exhaustion_text(r.phase,r.resource,r.details)}))})
+        });
         detail["admission"] = json!({
             "phase": event.phase.label(),
             "round": event.round,
@@ -195,6 +209,7 @@ impl<'a> AdmissionDetails<'a> {
             })).collect::<Vec<_>>(),
             "prerequisiteMs": event.prerequisites.iter().map(|(k, d)| ((*k).to_string(), json!(d.as_secs_f64()*1000.))).collect::<serde_json::Map<_, _>>(),
             "guarded": guarded,
+            "structuralSplit": structural_split,
             "skipped": event.skipped.as_ref().map(|s| s.kind.label()),
             "skipTarget": event.skipped.as_ref().map(|s| {
                 let names = self.names.get_or_init(|| Arc::new(crate::presentation::diagnostic_names(&self.program.corpus)));
@@ -386,6 +401,26 @@ pub fn admission_text(a: &Value) -> String {
             text.push_str(&format!(
                 " at {uri}:{}:{}",
                 c["location"]["line"], c["location"]["column"]
+            ));
+        }
+    }
+    if let Some(s) = a.get("structuralSplit").filter(|s| s.is_object()) {
+        text.push_str(&format!("; structural split: {} scored, {} fixed, {} cutoffs; chosen {}; cyclic {} → {}; depth {} (max {}), {} leaves; {}; branch {} atoms ({} live)",
+            s["candidatesScored"],s["fixedCandidates"],s["cutoffs"],s["chosen"].as_str().unwrap_or("none"),s["cyclicAtoms"],s["branchCyclicAtoms"],s["depth"],s["maxDepth"],s["leaves"],s["state"].as_str().unwrap_or(""),s["branchConeAtoms"],s["branchLiveAtoms"]));
+        text.push_str(&format!(
+            "; node candidates {}/{}; scoring work {}/{}",
+            s["nodeCandidatesScored"],
+            s["candidatesAvailable"],
+            s["scoringWork"],
+            s["scoringLimit"]
+        ));
+        text.push_str(&format!(
+            "; search work {}/{}; caps depth {}, leaves {}",
+            s["searchWork"], s["searchLimit"], s["depthLimit"], s["leafLimit"]
+        ));
+        if let Some(reason) = s["fallback"]["message"].as_str() {
+            text.push_str(&format!(
+                "; optional structural split skipped: {reason}; continuing ordinary admission"
             ));
         }
     }

@@ -359,3 +359,82 @@ fn selected_notice_findings_reach_both_editor_adapters_with_the_same_identity() 
             .any(|r| r.label == "blocking dependency cycle")
     );
 }
+
+#[test]
+fn rewrite_codes_and_safe_edits_follow_truth_under_the_guard() {
+    use denotate_presentation::Kind;
+    use denotate_test_dsl::warnings::{Contribution, present_rewrites};
+    for (source, redundant, equivalent) in [
+        (
+            "input i,j,x; slot a,b; a <- i when present(x) and not available(b); b <- j when not present(x) and not available(a);",
+            2,
+            0,
+        ),
+        (
+            "input i; slot a; a <- i when not available(a); mask a when present(i);",
+            1,
+            0,
+        ),
+        (
+            "input i,x; slot a; a <- i when not present(x); mask a when present(x) and available(a);",
+            0,
+            1,
+        ),
+        (
+            "input i,x,y; slot a,b,c; a <- i when present(x) and not available(b); b <- i when present(y) and not available(c); c <- i when not present(x) and not present(y) and not available(a);",
+            2,
+            1,
+        ),
+    ] {
+        let p = program(source);
+        let limits = Limits::default();
+        let g = p.lowered.prepare(&limits).unwrap().admit(&limits).unwrap();
+        assert!(g.is_admitted(), "{source}");
+        let warnings =
+            present_rewrites(&p.lowered, &g, &p.sources, SourceView::TestDsl.as_str()).unwrap();
+        let authored: Vec<_> = warnings
+            .iter()
+            .filter(|w| w.owner == Contribution::Program)
+            .collect();
+        assert_eq!(
+            authored.iter().filter(|w| w.kind == Kind::Rewrite).count(),
+            redundant,
+            "{source}: {authored:?}"
+        );
+        assert_eq!(
+            authored
+                .iter()
+                .filter(|w| w.kind == Kind::GuardedSettlement)
+                .count(),
+            equivalent,
+            "{source}: {authored:?}"
+        );
+        for warning in authored {
+            if warning.kind == Kind::Rewrite {
+                assert!(
+                    warning
+                        .message
+                        .starts_with("This negated condition is redundant:")
+                );
+                assert!(warning.edit.is_some());
+            } else {
+                assert!(
+                    warning
+                        .message
+                        .starts_with("This cyclic premise can be expressed")
+                );
+                assert!(warning.edit.is_none());
+            }
+        }
+        let output = p.check(&limits, || {}).unwrap();
+        for (code, count) in [("redundant", redundant), ("guarded-settlement", equivalent)] {
+            let ds: Vec<_> = output
+                .diagnostics
+                .iter()
+                .filter(|d| d.code == Some(lsp_types::NumberOrString::String(code.into())))
+                .collect();
+            assert_eq!(ds.len(), count, "{source}: {:?}", output.diagnostics);
+            assert!(ds.iter().all(|d| d.data.as_ref().unwrap()["kind"] == code));
+        }
+    }
+}

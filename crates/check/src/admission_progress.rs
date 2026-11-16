@@ -53,6 +53,15 @@ impl AdmissionPhase {
 /// Bounded case-search observations, never proof evidence or cache inputs.
 #[derive(Debug, Clone, Default)]
 pub struct GuardedSplitProgress {
+    pub search_work: Option<usize>,
+    pub search_limit: Option<usize>,
+    pub depth_limit: Option<usize>,
+    pub leaf_limit: Option<usize>,
+    /// Current node; only the whole-component search uses work-bounded scoring.
+    pub candidates_available: Option<usize>,
+    pub node_candidates_scored: Option<usize>,
+    pub scoring_work: Option<usize>,
+    pub scoring_limit: Option<usize>,
     pub candidates_scored: usize,
     pub fixed_candidates: usize,
     pub cutoffs: usize,
@@ -121,6 +130,8 @@ pub struct AdmissionProgress {
     pub failure: Option<Inconclusive>,
     pub attempts: BTreeMap<AdmissionAttemptKind, AdmissionAttempts>,
     pub guarded: Option<GuardedAttempt>,
+    pub structural_split: Option<GuardedSplitProgress>,
+    pub split_fallback: Option<Inconclusive>,
     /// Snapshot totals also survive clearing the current candidate at commit.
     pub lookahead_work: usize,
     pub lookahead_limit: usize,
@@ -173,6 +184,8 @@ impl<'a> AdmissionReporter<'a> {
                     attempts: BTreeMap::new(),
                     prerequisites: BTreeMap::new(),
                     guarded: None,
+                    structural_split: None,
+                    split_fallback: None,
                     lookahead_work: 0,
                     lookahead_limit: 0,
                     candidate_probe: None,
@@ -377,6 +390,22 @@ impl<'a> AdmissionReporter<'a> {
         }
         self.emit(program, true);
     }
+    pub fn structural_split(
+        &self,
+        program: &GroundProgram,
+        stats: &GuardedSplitProgress,
+        fallback: Option<Inconclusive>,
+    ) {
+        if !self.enabled() {
+            return;
+        }
+        {
+            let mut s = self.state.borrow_mut();
+            s.progress.structural_split = Some(stats.clone());
+            s.progress.split_fallback = fallback;
+        }
+        self.emit(program, true);
+    }
     pub fn guarded_end(
         &self,
         program: &GroundProgram,
@@ -531,6 +560,10 @@ impl<'a> AdmissionReporter<'a> {
         let mut s = self.state.borrow_mut();
         let changed = s.progress.stage != stage;
         s.progress.stage = stage;
+        if stage != "structural-split" {
+            s.progress.structural_split = None;
+            s.progress.split_fallback = None;
+        }
         if !stage.starts_with("guarded-") {
             s.progress.guarded = None;
         }
@@ -554,6 +587,10 @@ impl<'a> AdmissionReporter<'a> {
         let mut s = self.state.borrow_mut();
         let changed = s.progress.stage != stage;
         s.progress.stage = stage;
+        if stage != "structural-split" {
+            s.progress.structural_split = None;
+            s.progress.split_fallback = None;
+        }
         if !stage.starts_with("guarded-") {
             s.progress.guarded = None;
         }
@@ -737,7 +774,7 @@ mod tests {
         assert_eq!(events[0].unresolved_components, 2);
         assert_eq!(events[0].blocked_atoms, 4);
         assert!(events.iter().any(|e| {
-            e.stage == "upper-bounds"
+            e.stage == "structural-split"
                 && e.current
                     .as_ref()
                     .is_some_and(|c| c.atoms == 2 && c.source.is_some())
@@ -751,7 +788,11 @@ mod tests {
         assert_eq!(last.stage, "complete");
         assert_eq!(last.unresolved_components, 0);
         assert_eq!(last.blocked_atoms, 0);
-        assert_eq!(last.discharged_negations, 4);
+        assert!(events.iter().any(|e| {
+            e.attempts
+                .get(&AdmissionAttemptKind::StructuralSplit)
+                .is_some_and(|a| a.completed > 0)
+        }));
         assert!(last.current.is_none());
     }
     #[test]

@@ -7,7 +7,7 @@ fn admit(raw: &GroundProgram, limits: &Limits) -> (GroundProgram, Vec<AdmissionP
     let events = RefCell::new(Vec::new());
     let p = raw
         .clone()
-        .admit_observed(
+        .admit_fallback_for_test(
             &mut Budget::new(limits),
             Some(&|e| events.borrow_mut().push(e.clone())),
         )

@@ -4,6 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {fit,stats,aggregate,measurements,run,summarize,families,source} from '../bench-den-zoo.mjs';
+// Whole-component certificates can now finish before candidate-relative probes,
+// bounds or ranking. Recovery must preserve whichever actual path completed.
+const joint = r => r.attemptSummaries.some(s => s.attempts.some(a => a.kind==='structural-split' && a.completed>0));
 test('fits distinguish linear quadratic mixed and insufficient observations',()=>{
   assert.ok(Math.abs(fit([[1,2],[2,4],[4,8]]).slope-1)<1e-10);
   assert.ok(fit([[1,1],[2,4],[4,16]]).flag);
@@ -36,15 +39,15 @@ test('each family reaches its semantic and structural path; two-size smoke has n
     const r=run({out:path.join(root,'tiny'),binary:'target/debug/examples/bench_schema',family:families,sizes:[2],repeat:1,threshold:1.3});
     for(const [name,{runs}] of Object.entries(r.families)) {
       const r=runs[0];assert.ok(r.checkerFinished,name);assert.ok(r.sizes.atoms>0,name);
-      if(name==='negative-guarded') {assert.equal(r.after.admitted,true);assert.ok(r.sizes.dischargeProofs>0);}
+      if(name==='negative-guarded') {assert.equal(r.after.admitted,true);assert.ok(r.sizes.dischargeProofs>0||joint(r));}
       if(['negative-unresolved','certification','removal-heavy','presentation'].includes(name))assert.equal(r.after.admitted,false,name);
       if(name==='certification') {assert.ok(r.outcomes[0].emptiness.some(e=>e.outcome!=='proved'));assert.equal(r.phases.checking.complete,true);}
       if(name==='removal-heavy') {assert.ok(r.sizes.removalProofs>=2);assert.equal(r.sizes.dischargeProofs,0);assert.ok(r.outcomes[0].emptiness.some(e=>e.outcome==='counterexample'));}
       if(name==='presentation')assert.ok(r.sizes.findings>=2);
       if(name.startsWith('fan-in'))assert.ok(r.outcomes[0].emptiness.some(e=>e.outcome==='counterexample'));
-      if(name==='guarded-ring'||name==='guarded-fan-in'||name==='guarded-worlds') {assert.equal(r.before.ground.largestComponentAtoms,name==='guarded-ring'?12:6);assert.equal(r.after.admitted,true);assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));assert.ok(r.attemptSummaries.some(a=>a.complete&&a.attempts.some(c=>c.kind==='guarded-bounds')));}
-      if(name.startsWith('guarded-')) {assert.ok(r.guardedAttempts.some(g=>g.attempt.state==='completed'&&g.attempt.restricted&&g.attempt.coneAtoms>0));assert.ok(r.guardedAttempts.every(g=>Number.isFinite(g.attempt.preprocessingMs)&&Number.isFinite(g.attempt.iterationMs)));}
-      if(name==='guarded-hub') {assert.equal(r.after.admitted,true);assert.equal(r.exit,0);assert.equal(r.outcomes[0].findings.filter(f=>f.kind==='guarded-settlement').length,1);assert.equal(r.outcomes[0].notices[0].result.state,'varying');}
+      if(name==='guarded-ring'||name==='guarded-fan-in'||name==='guarded-worlds') {assert.equal(r.before.ground.largestComponentAtoms,name==='guarded-ring'?12:6);assert.equal(r.after.admitted,true);assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));assert.ok(joint(r)||r.attemptSummaries.some(a=>a.complete&&a.attempts.some(c=>c.kind==='guarded-bounds')));}
+      if(name.startsWith('guarded-')) {assert.ok(joint(r)||r.guardedAttempts.some(g=>g.attempt.state==='completed'&&g.attempt.restricted&&g.attempt.coneAtoms>0));assert.ok(r.guardedAttempts.every(g=>Number.isFinite(g.attempt.preprocessingMs)&&Number.isFinite(g.attempt.iterationMs)));}
+      if(name==='guarded-hub') {assert.equal(r.after.admitted,true);assert.equal(r.exit,0);assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));assert.equal(r.outcomes[0].notices[0].result.state,'varying');}
       if(name==='schema-layered')assert.equal(r.after.admitted,true);
       if(name==='component-chain') {
         assert.equal(r.after.admitted,true);
@@ -53,7 +56,7 @@ test('each family reaches its semantic and structural path; two-size smoke has n
         assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));
       }
     }
-    assert.ok(r.families['guarded-ring'].attempts.some(a=>a.kind==='guarded-bounds'));
+    assert.ok(r.families['guarded-ring'].attempts.some(a=>['guarded-bounds','structural-split'].includes(a.kind)));
     const smoke=run({out:path.join(root,'smoke'),binary:'target/debug/examples/bench_schema',family:['fan-in-input','negative-unresolved'],sizes:[1,2],repeat:1,threshold:1.3,inputOrder:'structural'});
     assert.equal(smoke.inputOrder,'structural');
     for(const f of Object.values(smoke.families))for(const r of f.runs) {assert.equal(r.inputOrder.requested,'structural');assert.equal(r.inputOrder.effective,'structural');assert.ok(Number.isFinite(r.phases.admission.bddResultNodes));assert.ok(Number.isFinite(r.phases.admission.peakAccountedConditionNodes));}
@@ -128,7 +131,7 @@ test('a recoverable admission skip does not discard a later completed result',()
   assert.equal(measurements(records,[{state:'incomplete',admissionSkips:[{reason:{phase:'BDD operation',resource:'BDD tasks'}}]}]).admission.complete,false);
 });
 
-test('decoy options and deferred candidate positions survive saved reports',()=>{
+test('decoy options and the successful admission path survive saved reports',()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-cone-order-'));
   try {
     for(const hubDecoyShape of ['full','near-full']) {
@@ -138,10 +141,12 @@ test('decoy options and deferred candidate positions survive saved reports',()=>
       const r=report.families['guarded-hub'].runs[0];
       assert.equal(r.after.admitted,true);
       const attempts=r.guardedAttempts.filter(a=>a.phase==='relevant').map(a=>a.attempt);
+      if (!joint(r)) {
       assert.ok(attempts.some(a=>a.pruning==='complete'&&a.coneAtoms<a.beforePruningAtoms));
       const first=attempts.filter(a=>a.position!==null).sort((a,b)=>a.position-b.position)[0];
       assert.equal(first.deferred,false);
       assert.ok(first.liveAtoms*10<first.componentAtoms*9);
+      }
       assert.deepEqual(summarize(out),report);
     }
   } finally {fs.rmSync(root,{recursive:true,force:true});}
@@ -157,7 +162,7 @@ test('writer chains prune, admit and preserve dimensions and progress on recover
       const r=report.families['guarded-hub'].runs[0];
       assert.equal(r.after.admitted,true);
       assert.equal(r.exit,0);
-      assert.ok(r.guardedAttempts.some(({attempt:a})=>a.pruning==='complete'&&a.coneAtoms<a.beforePruningAtoms&&a.coneRules<a.beforePruningRules));
+      assert.ok(joint(r)||r.guardedAttempts.some(({attempt:a})=>a.pruning==='complete'&&a.coneAtoms<a.beforePruningAtoms&&a.coneRules<a.beforePruningRules));
       assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));
       assert.deepEqual(summarize(out),report);
     }

@@ -100,6 +100,10 @@ fn assert_rewrite_inventory(p: &LoadedProgram, ground: &GroundProgram) {
             actual.message,
             if !covered {
                 "This condition or definition is redundant in some checked cases, but not all its uses are justified for removal."
+            } else if proofs.iter().any(|p| p.guarded_settlement().is_some())
+                && !proofs.iter().all(|p| p.is_redundant_negation())
+            {
+                "This cyclic premise can be expressed using settled facts under its rule's guard."
             } else if literal.is_some() {
                 "This negated condition is redundant: whenever its settled guard holds, the excluded condition cannot hold."
             } else {
@@ -169,7 +173,7 @@ fn rewrite_coverage_is_per_literal_and_per_original_instance_cold_and_warm() {
                 coverage,
                 BTreeMap::from([
                     (left.body[1].atom().id(), true),
-                    (left.body[2].atom().id(), false),
+                    (left.body[2].atom().id(), true),
                 ])
             );
             assert!(
@@ -248,14 +252,14 @@ fn hiding_library_rewrites_preserves_home_warnings_other_findings_and_full_inven
     let before: BTreeSet<_> = out
         .diagnostics
         .iter()
-        .filter(|d| d.kind == Kind::Rewrite)
+        .filter(|d| matches!(d.kind, Kind::Rewrite | Kind::GuardedSettlement))
         .map(|d| d.identity.clone())
         .collect();
     assert_eq!(before.len(), 2);
     let errors = out
         .diagnostics
         .iter()
-        .filter(|d| d.kind != Kind::Rewrite)
+        .filter(|d| !matches!(d.kind, Kind::Rewrite | Kind::GuardedSettlement))
         .count();
     assert!(errors > 0);
     out.hide_library_rewrites(&consumer);
@@ -263,14 +267,14 @@ fn hiding_library_rewrites_preserves_home_warnings_other_findings_and_full_inven
     assert_eq!(
         out.diagnostics
             .iter()
-            .filter(|d| d.kind != Kind::Rewrite)
+            .filter(|d| !matches!(d.kind, Kind::Rewrite | Kind::GuardedSettlement))
             .count(),
         errors
     );
     assert!(
         out.diagnostics
             .iter()
-            .filter(|d| d.kind == Kind::Rewrite)
+            .filter(|d| matches!(d.kind, Kind::Rewrite | Kind::GuardedSettlement))
             .all(
                 |d| consumer.sources.snapshot(d.primary.snapshot()).unwrap().uri
                     == "file:///app/app.den"
@@ -290,7 +294,11 @@ fn hiding_library_rewrites_preserves_home_warnings_other_findings_and_full_inven
     let mut out = checked(&home);
     out.hide_library_rewrites(&home);
     assert_eq!(out.status["hiddenLibraryRewrites"], 0);
-    assert!(out.diagnostics.iter().any(|d| d.kind == Kind::Rewrite));
+    assert!(
+        out.diagnostics
+            .iter()
+            .any(|d| matches!(d.kind, Kind::Rewrite | Kind::GuardedSettlement))
+    );
 }
 
 #[test]
@@ -559,7 +567,11 @@ fn phase_exhaustion_and_rewrite_proofs_remain_distinct() {
         LIB,
     );
     let out = checked(&p);
-    assert!(out.diagnostics.iter().any(|f| f.kind == Kind::Rewrite));
+    assert!(
+        out.diagnostics
+            .iter()
+            .any(|f| matches!(f.kind, Kind::Rewrite | Kind::GuardedSettlement))
+    );
     assert!(
         !out.diagnostics
             .iter()

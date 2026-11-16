@@ -1,8 +1,44 @@
 {
   "creator_warnings": [
-    "This negated condition is redundant: whenever its settled guard holds, the excluded condition cannot hold."
+    "This negated condition is redundant: whenever its settled guard holds, the excluded condition cannot hold.",
+    "This cyclic premise can be expressed using settled facts under its rule's guard."
   ],
-  "diagnostics": [],
+  "diagnostics": [
+    {
+      "code": "guarded-settlement",
+      "message": "This cyclic premise can be expressed using settled facts under its rule's guard.",
+      "range": {
+        "end": {
+          "character": 87,
+          "line": 0
+        },
+        "start": {
+          "character": 75,
+          "line": 0
+        }
+      },
+      "relatedInformation": [
+        {
+          "location": {
+            "range": {
+              "end": {
+                "character": 87,
+                "line": 0
+              },
+              "start": {
+                "character": 75,
+                "line": 0
+              }
+            },
+            "uri": "file:///corpus.testdsl"
+          },
+          "message": "equivalent condition"
+        }
+      ],
+      "severity": 2,
+      "source": "test DSL"
+    }
+  ],
   "groups": [],
   "text": "input i, x; slot a; a <- i when not present(x); mask a when present(x) and available(a);",
   "witness_findings": [],

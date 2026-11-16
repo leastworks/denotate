@@ -361,7 +361,7 @@ impl Program {
                 .ok_or_else(|| Failure::Creator("User warning has no source origin.".into()))?;
             let mut d = diagnostic(
                 self.location(span)?.range,
-                "redundant",
+                warning.kind.code(),
                 warning.message,
                 DiagnosticSeverity::WARNING,
             );
@@ -382,7 +382,7 @@ impl Program {
                 "finding": denotate_presentation::Identity::Rewrite { rule: warning.rule, literal: warning.literal }
                     .data_in(&self.lowered.keys, output.results.value.context.verification.as_ref())
                     .map_err(|e| Failure::Creator(e.to_string()))?,
-                "kind": "redundant", "fallback": false,
+                "kind": warning.kind.code(), "fallback": false,
                 "evidence": {"kind": "rewrite-proof", "coversAllInstances": warning.covers_all_instances},
             }));
             output.diagnostics.push(d);

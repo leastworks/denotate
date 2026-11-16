@@ -78,9 +78,15 @@ fn guarded_settlement_variants_preserve_models_and_notice_results() {
                 .rewrite_proofs()
                 .filter_map(|p| p.guarded_settlement())
                 .collect::<Vec<_>>();
-            assert_eq!(proofs.len(), 1);
-            assert_eq!(proofs[0].proof.candidate.rule.head.atom.relation, reader);
-            assert!(proofs[0].implied_guard.is_some());
+            assert!(
+                proofs
+                    .iter()
+                    .any(|p| p.proof.candidate.rule.head.atom.relation == reader)
+            );
+            let GuardedCertificate::Joint(joint) = &proofs[0].certificate else {
+                panic!()
+            };
+            assert!(proofs.iter().all(|p| matches!(&p.certificate, GuardedCertificate::Joint(j) if std::sync::Arc::ptr_eq(j, joint))));
             // Neither declared class is present. Dropping I while retaining only
             // !docked would invent a claim here.
             assert_eq!(
@@ -120,7 +126,7 @@ fn guarded_settlement_variants_preserve_models_and_notice_results() {
                 direct
                     .notes
                     .iter()
-                    .any(|n| n.contains("Implied guard retained"))
+                    .any(|n| n.contains("Joint component certificate"))
             );
             assert!(
                 !direct
@@ -142,7 +148,7 @@ fn guarded_settlement_variants_preserve_models_and_notice_results() {
             assert!(
                 full.notes
                     .iter()
-                    .any(|n| n.starts_with("Implied-guard producer") && n.contains("hc_type_ok"))
+                    .any(|n| n.starts_with("Case [") && n.contains("Settlement step"))
             );
             assert_eq!(
                 direct.data(&p.keys).unwrap()["finding"],
@@ -161,9 +167,15 @@ fn guarded_settlement_variants_preserve_models_and_notice_results() {
 }
 
 fn check(p: &LoadedProgram, session: Option<&mut Session>) -> (ScopedResults, serde_json::Value) {
-    let limits = Limits::default();
-    let ops = (&limits).into();
-    let request = p.verification_requests(&limits).unwrap().remove(0).1;
+    check_with_limits(p, session, &Limits::default())
+}
+fn check_with_limits(
+    p: &LoadedProgram,
+    session: Option<&mut Session>,
+    limits: &Limits,
+) -> (ScopedResults, serde_json::Value) {
+    let ops = limits.into();
+    let request = p.verification_requests(limits).unwrap().remove(0).1;
     let mut session = session;
     let prepared = if let Some(s) = session.as_deref_mut() {
         let fixed = s
@@ -413,7 +425,7 @@ obligation unique_classless: at_most_one(classless_claim, group_by: ());
                         .as_array()
                         .unwrap()
                         .iter()
-                        .any(|n| n.as_str().unwrap().contains("Implied guard retained"))
+                        .any(|n| n.as_str().unwrap().contains("Joint component certificate"))
                 })
                 .unwrap();
             let identity = d["data"]["finding"].clone();
@@ -552,7 +564,7 @@ fn decoy_hub(n: usize, decoys: usize, shape: &str) -> String {
 }
 
 #[test]
-fn cone_order_uses_pruned_decoys_and_agrees_fresh_cold_warm() {
+fn joint_split_bypasses_decoy_ranking_and_agrees_fresh_cold_warm() {
     use std::cell::RefCell;
     for shape in ["full", "near-full"] {
         let p = loaded(&decoy_hub(53, 12, shape), 0);
@@ -582,30 +594,32 @@ fn cone_order_uses_pruned_decoys_and_agrees_fresh_cold_warm() {
                 .any(|p| p.proof.candidate.rule.head.atom.relation == reader)
         );
         let events = events.borrow();
-        let first = events
-            .iter()
-            .filter_map(|e| e.guarded.as_ref())
-            .find(|g| g.position.is_some())
-            .unwrap();
-        // Deadness propagation now makes some former decoys useful: ranking
-        // must prefer the reduced cone, not a particular authored reader name.
-        assert!(!first.deferred);
-        assert!(first.live_atoms.unwrap() * 10 < first.component_atoms.unwrap() * 9);
-        assert!(
-            events
+        if events.iter().any(|e| e.guarded.is_some()) {
+            assert!(
+                events
+                    .iter()
+                    .filter_map(|e| e.structural_split.as_ref())
+                    .any(|s| s.cutoffs > 0)
+            );
+            let first = events
                 .iter()
                 .filter_map(|e| e.guarded.as_ref())
-                .any(|g| { g.pruning == Some("complete") && g.cone_atoms < g.before_atoms })
-        );
-        assert!(
-            events
-                .iter()
-                .filter_map(|e| e.guarded.as_ref())
-                // A deferred candidate's start event precedes its cone counts.
-                .filter(|g| g.deferred)
-                .filter_map(|g| g.live_atoms.zip(g.component_atoms))
-                .all(|(live, total)| live * 10 >= total * 9)
-        );
+                .find(|g| g.position.is_some())
+                .unwrap();
+            assert!(!first.deferred);
+            assert!(first.live_atoms.unwrap() * 10 < first.component_atoms.unwrap() * 9);
+        } else {
+            assert_joint_without_bounds(prepared.program(), &events);
+            assert!(
+                events
+                    .iter()
+                    .filter_map(|e| e.structural_split.as_ref())
+                    .any(|s| s
+                        .branch_live_atoms
+                        .zip(s.branch_cone_atoms)
+                        .is_some_and(|(live, all)| live < all))
+            );
+        }
         let fresh = check(&p, None);
         let mut session = Session::default();
         assert_eq!(fresh, check(&p, Some(&mut session)));
@@ -667,10 +681,8 @@ fn chain_pruning_transitive_edit_agrees_fresh_cold_and_warm() {
                 .program()
                 .rewrite_proofs()
                 .filter_map(|p| p.guarded_settlement())
-                .any(|p| p
-                    .certificate
-                    .bounds()
-                    .any(|b| !b.cone.pruning.sources.is_empty()))
+                .any(|p| p.certificate.walk().any(|c| matches!(c,
+                    GuardedCertificate::Acyclic { pruning, .. } if !pruning.is_empty())))
         );
         let fresh = check(&p, None);
         assert_eq!(fresh, check(&p, Some(&mut Session::default())));
@@ -680,7 +692,7 @@ fn chain_pruning_transitive_edit_agrees_fresh_cold_and_warm() {
 }
 
 #[test]
-fn tagged_hub_looks_past_writers_and_agrees_fresh_cold_warm() {
+fn joint_split_bypasses_tagged_writer_lookahead_and_agrees_fresh_cold_warm() {
     use std::cell::RefCell;
     let script =
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../scripts/bench-den-zoo.mjs");
@@ -706,13 +718,9 @@ fn tagged_hub_looks_past_writers_and_agrees_fresh_cold_warm() {
         .unwrap();
     assert!(prepared.program().is_admitted());
     let events = events.borrow();
-    let first = events
-        .iter()
-        .filter_map(|e| e.guarded.as_ref())
-        .find(|g| g.position.is_some())
-        .unwrap();
-    assert!(first.lookahead_work > 0, "exercise the extended window");
-    assert!(!first.deferred);
+    assert_joint_without_bounds(prepared.program(), &events);
+    // No writer lookahead is needed when the entire hub has acyclic leaves.
+    assert!(events.iter().all(|e| e.guarded.is_none()));
     assert!(
         prepared
             .program()
@@ -766,7 +774,11 @@ fn case_splits_present_branches_and_preserve_finding_identity() {
     let d = direct
         .diagnostics
         .iter()
-        .find(|d| d.notes.iter().any(|n| n.starts_with("Case split on")))
+        .find(|d| {
+            d.notes
+                .iter()
+                .any(|n| n.starts_with("Joint component certificate"))
+        })
         .unwrap();
     let f = full
         .diagnostics
@@ -780,9 +792,8 @@ fn case_splits_present_branches_and_preserve_finding_identity() {
             .any(|n| n.starts_with("Case [") && n.contains("Settlement step"))
     );
     assert!(events.borrow().iter().any(|e| {
-        e.guarded
+        e.structural_split
             .as_ref()
-            .and_then(|g| g.splits.as_ref())
             .is_some_and(|s| s.max_depth >= 2)
     }));
 }
@@ -823,14 +834,18 @@ fn sibling_contexts_split_empty_reading_guards_and_preserve_every_permitted_mode
     let RequestPreparation::Complete(raw) = req.prepare(&p.corpus, &p.keys, &ops).unwrap() else {
         panic!()
     };
-    let prepared = raw.admit(&ops).unwrap();
+    let events = std::cell::RefCell::new(Vec::new());
+    let prepared = raw
+        .admit_with_progress(&ops, Some(&|e| events.borrow_mut().push(e.clone())))
+        .unwrap();
     let g = prepared.program();
     assert!(g.is_admitted());
+    assert_joint_without_bounds(g, &events.borrow());
     assert!(
         g.rewrite_proofs()
             .filter_map(|p| p.guarded_settlement())
             .any(|p| p.proof.candidate.condition.is_true()
-                && matches!(p.certificate, GuardedCertificate::Split { .. }))
+                && matches!(p.certificate, GuardedCertificate::Joint(_)))
     );
     compare_permitted(&p.corpus, &p.domains, g, |w| w.len() == 1);
     for world in subsets(&g.input_atoms().cloned().collect::<Vec<_>>())
@@ -847,4 +862,78 @@ fn sibling_contexts_split_empty_reading_guards_and_preserve_every_permitted_mode
     let mut warm = Session::default();
     assert_eq!(fresh, check(&p, Some(&mut warm)));
     assert_eq!(fresh, check(&p, Some(&mut warm)));
+}
+
+fn assert_joint_without_bounds(p: &GroundProgram, events: &[AdmissionProgress]) {
+    let mut joint = None;
+    for proof in p.rewrite_proofs().filter_map(|p| p.guarded_settlement()) {
+        let GuardedCertificate::Joint(j) = &proof.certificate else {
+            panic!("expected joint certificate")
+        };
+        if let Some(first) = joint {
+            assert!(std::sync::Arc::ptr_eq(first, j));
+        } else {
+            joint = Some(j);
+        }
+    }
+    assert!(joint.is_some());
+    assert_eq!(events.iter().filter(|e| e.stage == "committed").count(), 1);
+    assert!(events.iter().all(|e| e.attempts.keys().all(|k| !matches!(
+        k,
+        AdmissionAttemptKind::UpperBounds
+            | AdmissionAttemptKind::GuaranteedBounds
+            | AdmissionAttemptKind::GuardedBounds
+    ))));
+}
+
+#[test]
+fn split_limit_edits_and_guarded_redundancy_agree_fresh_cold_warm() {
+    let p = loaded(
+        "input x(); relation a(); relation b(); a():-x(),!b(); b():-!x(),!a(); obligation o:empty(a); verification v{assumptions:[];obligations:[o];}",
+        0,
+    );
+    let mut warm = Session::default();
+    let mut identities = None;
+    for (depth, leaves, work) in [
+        (0, 8, 1000000),
+        (8, 64, 1000000),
+        (8, 64, 0),
+        (8, 1, 1000000),
+        (8, 64, 1000000),
+    ] {
+        let limits = Limits {
+            max_structural_split_depth: depth,
+            max_structural_split_leaves: leaves,
+            max_structural_split_work: work,
+            ..Limits::default()
+        };
+        let fresh = check_with_limits(&p, None, &limits);
+        assert_eq!(
+            fresh,
+            check_with_limits(&p, Some(&mut Session::default()), &limits)
+        );
+        assert_eq!(fresh, check_with_limits(&p, Some(&mut warm), &limits));
+        assert_eq!(fresh, check_with_limits(&p, Some(&mut warm), &limits));
+        let warnings: Vec<_> = fresh.1["diagnostics"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["data"]["kind"] == "redundant")
+            .collect();
+        assert_eq!(warnings.len(), 2);
+        assert!(warnings.iter().all(|d| {
+            d["message"]
+                .as_str()
+                .unwrap()
+                .starts_with("This negated condition is redundant:")
+        }));
+        let keys: Vec<_> = warnings
+            .iter()
+            .map(|d| d["data"]["finding"].clone())
+            .collect();
+        if let Some(previous) = &identities {
+            assert_eq!(&keys, previous);
+        }
+        identities = Some(keys);
+    }
 }

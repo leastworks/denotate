@@ -19,6 +19,9 @@ pub struct DeterministicLimits {
     pub max_bdd_nodes: usize,
     pub max_bdd_tasks: usize,
     pub max_condition_nodes: usize,
+    pub max_structural_split_depth: usize,
+    pub max_structural_split_leaves: usize,
+    pub max_structural_split_work: usize,
 }
 impl From<&Limits> for DeterministicLimits {
     fn from(l: &Limits) -> Self {
@@ -31,6 +34,9 @@ impl From<&Limits> for DeterministicLimits {
             max_bdd_nodes: l.max_bdd_nodes,
             max_bdd_tasks: l.max_bdd_tasks,
             max_condition_nodes: l.max_condition_nodes,
+            max_structural_split_depth: l.max_structural_split_depth,
+            max_structural_split_leaves: l.max_structural_split_leaves,
+            max_structural_split_work: l.max_structural_split_work,
         }
     }
 }
@@ -66,6 +72,9 @@ impl DeterministicLimits {
             max_bdd_nodes: self.max_bdd_nodes,
             max_bdd_tasks: self.max_bdd_tasks,
             max_condition_nodes: self.max_condition_nodes,
+            max_structural_split_depth: self.max_structural_split_depth,
+            max_structural_split_leaves: self.max_structural_split_leaves,
+            max_structural_split_work: self.max_structural_split_work,
         }
     }
 }

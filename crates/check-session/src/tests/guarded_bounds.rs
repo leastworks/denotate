@@ -39,10 +39,8 @@ fn pruned_transitive_sources_remain_local_query_dependencies_after_edits() {
                     .program()
                     .rewrite_proofs()
                     .filter_map(|p| p.guarded_settlement())
-                    .any(|p| p
-                        .certificate
-                        .bounds()
-                        .any(|b| !b.cone.pruning.sources.is_empty()))
+                    .any(|p| p.certificate.walk().any(|c| matches!(c,
+                        GuardedCertificate::Acyclic { pruning, .. } if !pruning.is_empty())))
             );
             let report = match session.as_deref_mut() {
                 Some(s) => s.verify(&prepared, &ops).unwrap(),
@@ -143,17 +141,12 @@ verification checks{assumptions:[];obligations:[unique];}";
                     .collect::<Vec<_>>()
             );
             let proof = first.guarded_settlement().unwrap();
-            assert!(
-                proof
-                    .certificate
-                    .bounds()
-                    .next()
-                    .unwrap()
-                    .cone
-                    .producers
-                    .iter()
-                    .any(|p| !p.live && !p.condition.is_false())
-            );
+            let GuardedCertificate::Joint(joint) = &proof.certificate else {
+                panic!()
+            };
+            assert_eq!(joint.snapshot, first.snapshot);
+            assert!(joint.tree.walk().any(|c| matches!(c,
+                GuardedCertificate::Acyclic { pruning, .. } if !pruning.is_empty())));
             assert!(!proof.proof.candidate.rule.body.is_empty());
             let current = prepared
                 .program()
@@ -186,7 +179,7 @@ verification checks{assumptions:[];obligations:[unique];}";
                 shown
                     .diagnostics
                     .iter()
-                    .any(|d| d.notes.iter().any(|n| n.starts_with("Settlement step")))
+                    .any(|d| d.notes.iter().any(|n| n.contains("Settlement step")))
             );
             let diagnostics: Vec<_> = shown.diagnostics.iter().map(|d| json!({"message":d.message,"notes":d.notes,"data":d.data(&p.keys).unwrap()})).collect();
             (report.checked.results.value, inputs, diagnostics)

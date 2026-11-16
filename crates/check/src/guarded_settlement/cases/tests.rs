@@ -56,7 +56,7 @@ fn four_guard_cycle_uses_two_levels_and_preserves_models_and_implied_guard() {
         let events = RefCell::new(Vec::new());
         let p = raw
             .clone()
-            .admit_observed(
+            .admit_fallback_for_test(
                 &mut Budget::new(&l),
                 Some(&|e| events.borrow_mut().push(e.clone())),
             )

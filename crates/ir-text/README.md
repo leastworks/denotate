@@ -234,11 +234,17 @@ never runs an additional check, changes a semantic budget or enters a cache key.
 All public `Limits` resource ceilings are configurable for this invocation:
 `--max-atoms`, `--max-rules`, `--max-dependencies`, `--max-work`,
 `--max-bdd-variables`, `--max-bdd-nodes`, `--max-bdd-tasks`, and
-`--max-condition-nodes`, plus `--timeout-ms`. Values are nonnegative integers;
-zero allows no use of that resource. `--help` lists the actual default values.
+`--max-condition-nodes`, plus `--timeout-ms`. Structural splitting also exposes
+`--max-structural-split-depth`, `--max-structural-split-leaves` and
+`--max-structural-split-work`. These apply per component attempt: exhausting one
+falls back to ordinary admission, while global work and deadlines still apply.
+Raise leaves alongside depth when exploring deeper trees (a one-sided path of
+N splits has N+1 leaves); raising only depth may just hit the leaf cap.
+Values are nonnegative integers; zero allows no use of that resource. `--help` lists the actual default values.
 Limits remain per operation/query; the cooperative timeout is not a total command
-deadline and does not cover loading or presentation. Exhaustion remains explicit
-inconclusive, with the existing exit-code policy. Cache-retention policies and
+deadline and does not cover loading or presentation. Exhaustion of required work
+remains explicit inconclusive, with the existing exit-code policy; optional split
+exhaustion reports its fallback in progress. Cache-retention policies and
 separate diagnostic attribution allowances are unchanged.
 
 `--empty-examples N` retains a positive number of examples per emptiness obligation

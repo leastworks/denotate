@@ -147,6 +147,11 @@ pub struct Limits {
     /// the historical low-level API). Symbolic evaluation is one shared query.
     /// Counts shared conditions conservatively, not exact heap usage.
     pub max_condition_nodes: usize,
+    /// Optional whole-component structural splitting. Exhausting these falls
+    /// back to ordinary admission; global work and deadlines still apply.
+    pub max_structural_split_depth: usize,
+    pub max_structural_split_leaves: usize,
+    pub max_structural_split_work: usize,
 }
 impl Default for Limits {
     fn default() -> Self {
@@ -163,6 +168,9 @@ impl Default for Limits {
             max_bdd_nodes: 100_000,
             max_bdd_tasks: 100_000,
             max_condition_nodes: 1_000_000,
+            max_structural_split_depth: 32,
+            max_structural_split_leaves: 64,
+            max_structural_split_work: 100_000_000,
         }
     }
 }
@@ -172,6 +180,7 @@ pub(crate) struct Budget<'a> {
     start: Instant,
     work: usize,
     charges: Option<WorkCharges>,
+    structural_split_start: Option<usize>,
     #[cfg(any(test, feature = "test-support"))]
     pub profile: Option<PreparationProfile>,
 }
@@ -192,6 +201,7 @@ impl<'a> Budget<'a> {
             start: Instant::now(),
             work: 0,
             charges: None,
+            structural_split_start: None,
             #[cfg(any(test, feature = "test-support"))]
             profile: None,
         }
@@ -298,10 +308,44 @@ impl<'a> Budget<'a> {
         self.start += elapsed;
     }
     pub fn remaining(&self) -> usize {
-        self.limits.max_work.saturating_sub(self.work)
+        let global = self.limits.max_work.saturating_sub(self.work);
+        self.structural_split_start.map_or(global, |start| {
+            global.min(
+                self.limits
+                    .max_structural_split_work
+                    .saturating_sub(self.work - start),
+            )
+        })
+    }
+    /// A preflight can stop before consuming its allowance. Preserve which
+    /// budget bounded it; only the global one may stop admission. Ties are global.
+    pub(crate) fn work_exhaustion(&self, phase: &'static str) -> CheckError {
+        if self.remaining() < self.limits.max_work.saturating_sub(self.work) {
+            CheckError::limit(
+                "structural split",
+                "structural split work",
+                self.limits.max_structural_split_work,
+                None,
+            )
+            .in_phase("structural split", Some(phase))
+        } else {
+            CheckError::limit(phase, "work", self.limits.max_work, None)
+        }
     }
     pub fn used(&self) -> usize {
         self.work
+    }
+    /// Charge all nested search, evaluation and staging work to the existing
+    /// query, with an additional optional-search allowance. Always restore it
+    /// before fallback, including on errors. No second deadline or receipt.
+    pub(crate) fn structural_split<T>(
+        &mut self,
+        run: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let previous = self.structural_split_start.replace(self.work);
+        let result = run(self);
+        self.structural_split_start = previous;
+        result
     }
     pub fn check(&self, phase: &'static str) -> Result<()> {
         self.limits.cancellation.check()?;
@@ -314,7 +358,7 @@ impl<'a> Budget<'a> {
     }
     pub fn charge(&mut self, amount: usize, phase: &'static str) -> Result<()> {
         self.check(phase)?;
-        if amount > self.remaining() {
+        if amount > self.limits.max_work.saturating_sub(self.work) {
             if let Some(charges) = &mut self.charges {
                 let rejected = charges.rejected_work.entry(phase.into()).or_default();
                 *rejected = rejected
@@ -333,6 +377,19 @@ impl<'a> Budget<'a> {
             );
             self.limits.progress.failure(&error);
             return Err(error);
+        }
+        if let Some(start) = self.structural_split_start {
+            let used = self.work - start;
+            let limit = self.limits.max_structural_split_work;
+            if amount > limit.saturating_sub(used) {
+                return Err(CheckError::limit(
+                    "structural split",
+                    "structural split work",
+                    limit,
+                    used.checked_add(amount),
+                )
+                .in_phase("structural split", Some(phase)));
+            }
         }
         self.work = self
             .work

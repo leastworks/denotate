@@ -21,7 +21,7 @@ pub struct Options {
     pub candidate_probe: Option<denotate_check::CandidateProbeLimits>,
     pub sat_probe_limits: denotate_check::SatProbeLimits,
 }
-pub fn limit_values(l: &Limits) -> [(&'static str, u128); 9] {
+pub fn limit_values(l: &Limits) -> [(&'static str, u128); 12] {
     [
         ("--timeout-ms", l.timeout.as_millis()),
         ("--max-atoms", l.max_atoms as u128),
@@ -32,6 +32,18 @@ pub fn limit_values(l: &Limits) -> [(&'static str, u128); 9] {
         ("--max-bdd-nodes", l.max_bdd_nodes as u128),
         ("--max-bdd-tasks", l.max_bdd_tasks as u128),
         ("--max-condition-nodes", l.max_condition_nodes as u128),
+        (
+            "--max-structural-split-depth",
+            l.max_structural_split_depth as u128,
+        ),
+        (
+            "--max-structural-split-leaves",
+            l.max_structural_split_leaves as u128,
+        ),
+        (
+            "--max-structural-split-work",
+            l.max_structural_split_work as u128,
+        ),
     ]
 }
 pub fn help() -> String {
@@ -65,6 +77,7 @@ pub fn help() -> String {
         "\nLimits apply per operation/query, not to the whole command.\n\
         Deadlines are cooperative, not hard timeouts; loading and presentation are outside them.\n\
         Condition nodes count retained BDD condition sizes conservatively, not heap bytes.\n\
+        Structural split limits apply per component attempt; exhausting them falls back to ordinary admission.\n\
         Progress is on stderr even with --json; redirect stderr to retain a trace.\n\
         Exit codes: 0 proved, 1 findings, 2 incomplete/invalid/partial, 3 operational failure.\n",
     );
@@ -182,7 +195,10 @@ impl Options {
                 | "--max-bdd-variables"
                 | "--max-bdd-nodes"
                 | "--max-bdd-tasks"
-                | "--max-condition-nodes" => {
+                | "--max-condition-nodes"
+                | "--max-structural-split-depth"
+                | "--max-structural-split-leaves"
+                | "--max-structural-split-work" => {
                     let n: usize = value()?.parse().map_err(|_| {
                         (
                             2,
@@ -198,6 +214,15 @@ impl Options {
                         "--max-bdd-nodes" => options.limits.max_bdd_nodes = n,
                         "--max-bdd-tasks" => options.limits.max_bdd_tasks = n,
                         "--max-condition-nodes" => options.limits.max_condition_nodes = n,
+                        "--max-structural-split-depth" => {
+                            options.limits.max_structural_split_depth = n
+                        }
+                        "--max-structural-split-leaves" => {
+                            options.limits.max_structural_split_leaves = n
+                        }
+                        "--max-structural-split-work" => {
+                            options.limits.max_structural_split_work = n
+                        }
                         _ => unreachable!(),
                     }
                 }

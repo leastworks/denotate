@@ -39,9 +39,12 @@ pub use guarded_bounds::{
 mod local;
 mod request;
 mod rewrite;
-pub use guarded_settlement::{GuardedCertificate, GuardedSettlementProof, GuardedSettlementStep};
+pub use guarded_settlement::{
+    GuardedCertificate, GuardedSettlementProof, GuardedSettlementStep, JointCertificate,
+};
 mod settled_expression;
 mod structural;
+mod structural_split;
 pub use settled_expression::{SettledExpression, SettledReplacement};
 mod sat_probe;
 pub use sat_probe::{

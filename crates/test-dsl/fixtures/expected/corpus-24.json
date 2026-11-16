@@ -1,5 +1,8 @@
 {
-  "creator_warnings": [],
+  "creator_warnings": [
+    "This cyclic premise can be expressed using settled facts under its rule's guard.",
+    "This cyclic premise can be expressed using settled facts under its rule's guard."
+  ],
   "diagnostics": [
     {
       "code": "redundant",

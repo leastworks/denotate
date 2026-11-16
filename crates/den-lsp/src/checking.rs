@@ -1198,19 +1198,19 @@ mod tests {
             assert_eq!(expected.status, actual.status);
             assert_eq!(expected.diagnostics, actual.diagnostics);
             let events = events.lock().unwrap();
-            let upper = events
+            let split = events
                 .iter()
-                .find(|e| e["admission"]["stage"] == "upper-bounds")
+                .find(|e| e["admission"]["stage"] == "structural-split")
                 .unwrap();
-            assert_eq!(upper["verification"], "::v");
-            assert_eq!(upper["admission"]["unresolvedComponents"], 1);
-            assert_eq!(upper["admission"]["current"]["atoms"], 2);
-            assert!(upper["admission"]["current"]["atom"]
+            assert_eq!(split["verification"], "::v");
+            assert_eq!(split["admission"]["unresolvedComponents"], 1);
+            assert_eq!(split["admission"]["current"]["atoms"], 2);
+            assert!(split["admission"]["current"]["atom"]
                 .as_str()
                 .unwrap()
                 .ends_with("()"));
             assert_eq!(
-                upper["admission"]["current"]["location"]["uri"],
+                split["admission"]["current"]["location"]["uri"],
                 "file:///p.den"
             );
             let done = events
@@ -1218,7 +1218,10 @@ mod tests {
                 .find(|e| e["admission"]["stage"] == "complete")
                 .unwrap();
             assert_eq!(done["admission"]["unresolvedComponents"], 0);
-            assert_eq!(done["admission"]["dischargedNegations"], 2);
+            assert_eq!(done["admission"]["dischargedNegations"], 0);
+            assert!(events
+                .iter()
+                .any(|e| e["admission"]["structuralSplit"]["state"] == "certified"));
             assert!(events
                 .iter()
                 .any(|e| e["verification"] == "::w" && e["admission"]["stage"] == "reused"));

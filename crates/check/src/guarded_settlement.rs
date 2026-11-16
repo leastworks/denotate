@@ -15,9 +15,9 @@ use std::{
 };
 
 mod certificate;
-pub use certificate::GuardedCertificate;
 use certificate::Settlement;
-mod cases;
+pub use certificate::{GuardedCertificate, JointCertificate};
+pub(crate) mod cases;
 
 // Optimization cutoffs: no rewrite is installed when a complete certificate does
 // not fit. Global work/BDD/dependency limits remain independent.
@@ -132,11 +132,19 @@ pub struct GuardedSettlementProof {
     pub occurrence: denotate_ir::OccurrenceId,
     pub replacement: Arc<SettledExpression<GroundAtom>>,
     pub implied_guard: Option<ImpliedGuardProof>,
+    /// The signed negative premise is true throughout W under its original
+    /// settled guard. Presentation may offer removal; the executable replacement
+    /// and joint certificate are unchanged. Never inferred from equivalence alone.
+    pub redundant_negation: bool,
 }
 
 impl GuardedSettlementProof {
     pub(crate) fn nodes(&self) -> usize {
         self.certificate.nodes()
+            // Joint trees store leaf values, not the combined per-edge expression.
+            + if matches!(self.certificate, GuardedCertificate::Joint(_)) {
+                self.replacement.nodes()
+            } else { 0 }
             + self
                 .implied_guard
                 .as_ref()
@@ -1407,6 +1415,7 @@ impl GroundProgram {
             occurrence: literal.term.occurrence,
             replacement: expression,
             implied_guard: implied.map(|i| i.proof.clone()),
+            redundant_negation: false,
         };
         *retained = crate::symbolic::retain(baseline, 0, proof.nodes(), budget)?;
         Ok(Some(proof))

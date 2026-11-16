@@ -179,7 +179,7 @@ fn cancellation_during_guaranteed_bounds_propagates() {
     let limits = Limits::default();
     let raw = GroundProgram::prepare(&c, &Domains::new(), &limits).unwrap();
     let token = limits.cancellation.clone();
-    let result = raw.admit_observed(
+    let result = raw.admit_fallback_for_test(
         &mut Budget::new(&limits),
         Some(&|e| {
             if e.stage == "guaranteed-bounds" {

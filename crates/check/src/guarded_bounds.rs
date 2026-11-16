@@ -156,6 +156,57 @@ pub(crate) struct Preparation {
     pub pruning: Option<&'static str>,
 }
 
+/// All atoms of a component, with no relaxed reader. Keeping every head is
+/// essential: a joint certificate cannot discard a disconnected cyclic island.
+pub(crate) fn component_cone<'a>(
+    program: &GroundProgram,
+    component: &Component,
+    summaries: &'a BTreeMap<GroundRuleId, ProducerSummary>,
+    domain: &Condition,
+    ctx: &ConditionContext,
+    retained: &mut usize,
+    budget: &mut Budget<'_>,
+) -> Result<Arc<BorrowedCone<'a>>> {
+    let ids = &program.component_rules[component.id.index];
+    *retained = crate::symbolic::retain(
+        *retained,
+        0,
+        domain.node_count() + component.atoms.len() + 2 * ids.len() + 1,
+        budget,
+    )?;
+    budget.charge(component.atoms.len(), "structural split component")?;
+    let mut producers = Vec::new();
+    for id in ids {
+        budget.tick("structural split producer")?;
+        let summary = summaries
+            .get(&program.rules[*id].id)
+            .ok_or(CheckError::Internal(
+                "incomplete structural split summaries",
+            ))?;
+        let live = !ctx
+            .apply(domain, &summary.condition, and, budget)?
+            .is_false();
+        producers.push(GuardedProducer { summary, live });
+    }
+    let cone = Arc::new(GuardedCone {
+        component: component.id,
+        snapshot: program.graph_revision,
+        domain: domain.clone(),
+        relaxed_rule: None,
+        atoms: component.atoms.clone(),
+        producers,
+        pruning: Pruning::default(),
+    });
+    prune::prepare_roots(
+        cone,
+        &component.atoms,
+        ctx,
+        retained,
+        budget,
+        &mut Preparation::default(),
+    )
+}
+
 pub(crate) fn prepare<'a>(
     program: &GroundProgram,
     component: &Component,

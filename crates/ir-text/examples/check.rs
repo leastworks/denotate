@@ -998,8 +998,8 @@ mod tests {
             ),
             (
                 include_str!("../tests/fixtures/guarded-settlement.den"),
-                "unsat",
-                Some("every-world"),
+                "settled-before-probe",
+                None,
             ),
             (
                 "input x();relation a();a():-x(),!a();verification v{assumptions:[];obligations:[];}",
@@ -1022,6 +1022,11 @@ mod tests {
                     let (code, output, trace) = f.traced(&flags);
                     assert_eq!(code, normal_code);
                     assert_eq!(output, normal_output);
+                    if answer == "settled-before-probe" {
+                        assert!(!trace.contains("SAT probe"));
+                        assert!(trace.contains("structural split:") && trace.contains("certified"));
+                        continue;
+                    }
                     assert!(trace.contains("SAT probe"), "{trace}");
                     let records: Vec<serde_json::Value> = fs::read_to_string(path)
                         .unwrap()
@@ -1249,7 +1254,7 @@ mod tests {
         let f = Fixture::new(include_str!("../tests/fixtures/case-split.den"));
         let (code, direct) = f.run(&["--no-progress"]);
         assert_eq!(code, 0, "{direct}");
-        assert!(direct.contains("Case split on settled facts"));
+        assert!(direct.contains("Joint component certificate"));
         assert!(!direct.contains("Case ["));
         let (code, full) = f.run(&["--no-progress", "--verbose"]);
         assert_eq!(code, 0, "{full}");
@@ -1258,7 +1263,7 @@ mod tests {
         let (code, observed, trace) = f.traced(&["--profile-memory", path.to_str().unwrap()]);
         assert_eq!(code, Ok(0));
         assert_eq!(observed, direct);
-        assert!(trace.contains("case splits:") && trace.contains("branch cone"));
+        assert!(trace.contains("structural split:") && trace.contains("branch "));
         let records = fs::read_to_string(path)
             .unwrap()
             .lines()
@@ -1266,7 +1271,7 @@ mod tests {
             .collect::<Vec<_>>();
         let splits = records
             .iter()
-            .map(|r| &r["detail"]["admission"]["guarded"]["splits"])
+            .map(|r| &r["detail"]["admission"]["structuralSplit"])
             .filter(|s| s.is_object())
             .collect::<Vec<_>>();
         assert!(splits.iter().any(|s| {
@@ -1288,7 +1293,8 @@ mod tests {
     fn guarded_candidate_cones_and_timings_reach_cli_and_structured_progress() {
         let f = Fixture::new("input kind(); input ready(); input priority();
 relation booked(); relation fails(); relation claim(); relation inspected(); relation held(); relation cleared();
-booked():-kind(),cleared(); fails():-ready(),!booked(); claim():-!kind(),!fails();
+booked():-kind(),cleared(); fails():-ready(),!booked(); claim():-!kind(),!fails(),!other();
+input extra(); relation other(); relation other_b(); other():-extra(); other():-!other_b(); other_b():-!other();
 inspected():-kind(); inspected():-claim(); held():-priority(),inspected(); cleared():-ready(),!held();
 relation bad(); obligation clean:empty(bad); verification checks{assumptions:[];obligations:[clean];}");
         let path = f.0.join("guarded.jsonl");
@@ -1452,14 +1458,14 @@ verification checks{assumptions:[];obligations:[no_absent];}",
                 assert!(progress.contains("stopped:"), "{progress}");
                 assert!(progress.contains("condition nodes"), "{progress}");
             } else {
-                assert!(progress.contains("upper-bounds"), "{progress}");
+                assert!(progress.contains("structural-split"), "{progress}");
                 assert!(progress.contains("2 atoms, 2 rule instances"), "{progress}");
                 assert!(progress.contains(".den:1:"), "{progress}");
                 assert!(
                     progress.contains("0 unresolved negation components"),
                     "{progress}"
                 );
-                assert!(progress.contains("2 negations discharged"), "{progress}");
+                assert!(progress.contains("certified"), "{progress}");
                 assert!(progress.contains("reused"), "{progress}");
             }
         }
@@ -1562,6 +1568,37 @@ verification checks{assumptions:[];obligations:[no_absent];}",
         assert_eq!(result, Ok(0), "{progress}");
     }
     #[test]
+    fn structural_search_work_cutoff_is_optional_and_preserves_redundant_warnings() {
+        let f = Fixture::new(
+            "input x(); relation a(); relation b(); a():-x(),!b(); b():-!x(),!a(); relation never(); obligation o:empty(never); verification v{assumptions:[];obligations:[o];}",
+        );
+        for work in ["0", "1000000"] {
+            let (result, text, trace) = f.traced(&[
+                "--max-structural-split-depth",
+                "8",
+                "--max-structural-split-leaves",
+                "64",
+                "--max-structural-split-work",
+                work,
+            ]);
+            assert_eq!(result, Ok(1), "{text}\n{trace}");
+            assert!(
+                text.contains("This negated condition is redundant:"),
+                "{text}"
+            );
+            if work == "0" {
+                assert!(
+                    trace.contains("optional structural split skipped"),
+                    "{trace}"
+                );
+                assert!(trace.contains("structural split work"), "{trace}");
+                assert!(trace.contains("continuing ordinary admission"), "{trace}");
+            } else {
+                assert!(trace.contains("certified"), "{trace}");
+            }
+        }
+    }
+    #[test]
     fn every_limit_has_an_independent_override_and_invalid_values_are_rejected() {
         let args = [
             "root",
@@ -1583,6 +1620,12 @@ verification checks{assumptions:[];obligations:[no_absent];}",
             "7",
             "--max-condition-nodes",
             "8",
+            "--max-structural-split-depth",
+            "10",
+            "--max-structural-split-leaves",
+            "11",
+            "--max-structural-split-work",
+            "12",
         ];
         let o = options::Options::parse(args.map(str::to_owned), Limits::default()).unwrap();
         let l = o.limits;
@@ -1595,9 +1638,12 @@ verification checks{assumptions:[];obligations:[no_absent];}",
                 l.max_bdd_variables,
                 l.max_bdd_nodes,
                 l.max_bdd_tasks,
-                l.max_condition_nodes
+                l.max_condition_nodes,
+                l.max_structural_split_depth,
+                l.max_structural_split_leaves,
+                l.max_structural_split_work
             ],
-            [1, 2, 3, 4, 5, 6, 7, 8]
+            [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12]
         );
         assert_eq!(l.timeout, std::time::Duration::from_millis(9));
         for (flag, _) in options::limit_values(&Limits::default()) {
@@ -2444,7 +2490,7 @@ kept():-middle(); kept():-term(); term():-!kept(); verification checks{assumptio
             let (code, full) = f.run(&["--no-progress", "--verbose"]);
             assert_eq!(code, 0, "{full}");
             assert!(full.contains("Settlement step"));
-            assert!(full.contains("reading producer relaxed to its guard"));
+            assert!(full.contains("Joint component certificate"));
             let failing = source
                 .replace(
                     "notice cleared_varies",
