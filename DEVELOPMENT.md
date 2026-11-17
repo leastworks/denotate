@@ -120,7 +120,8 @@ and tiny CLI smoke; it is included in `just verify`.
 
 Start with [Shipping News](editors/den/examples/shipping-news/README.md) for a runnable
 tutorial on lowering a DSL to `.den`. Steps 1–9 build a complete mapping example;
-lesson 10 models computed values feeding task conditions. The illustrative DSL has
+lesson 10 models computed values feeding task conditions, and lesson 11 introduces
+knowledge-form lowering for incremental schema classification. The illustrative DSL has
 no parser or UDF runtime.
 
 - [Architecture](docs/architecture.md): layers and what belongs where.

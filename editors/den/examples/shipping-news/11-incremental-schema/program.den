@@ -1,0 +1,123 @@
+use schema;
+
+namespace fields { const direction, request_kind, response_kind, note, category: Field; }
+namespace values { const request, response, booking, cancellation, text: Value; }
+namespace formats {
+    const forest, booking, cancellation, booking_request, booking_response,
+          cancellation_request, cancellation_response: Format;
+    coverage_root(forest);
+    children(forest, booking, cancellation);
+    children(booking, booking_request, booking_response);
+    children(cancellation, cancellation_request, cancellation_response);
+}
+namespace decisions {
+    const accept_direction, accept_request_kind, accept_response_kind, accept_note,
+          raw_request, raw_response, raw_request_booking, raw_request_cancellation,
+          raw_response_booking, raw_response_cancellation, raw_note,
+          request, response, request_booking, request_cancellation,
+          response_booking, response_cancellation, note_present, note_absent,
+          set_request_booking, set_request_cancellation, set_response_booking,
+          set_response_cancellation, booking, cancellation, not_booking,
+          fallback_guard, booking_request, booking_response, cancellation_request,
+          cancellation_response, any_booking, any_cancellation, recognized: Decision;
+
+    accepts(accept_direction, fields::direction);
+    accepts(accept_request_kind, fields::request_kind);
+    accepts(accept_response_kind, fields::response_kind);
+    accepts(accept_note, fields::note);
+    observes(raw_request, fields::direction, values::request);
+    observes(raw_response, fields::direction, values::response);
+    observes(raw_request_booking, fields::request_kind, values::booking);
+    observes(raw_request_cancellation, fields::request_kind, values::cancellation);
+    observes(raw_response_booking, fields::response_kind, values::booking);
+    observes(raw_response_cancellation, fields::response_kind, values::cancellation);
+    observes(raw_note, fields::note, values::text);
+    both(request, accept_direction, raw_request);
+    both(response, accept_direction, raw_response);
+    both(request_booking, accept_request_kind, raw_request_booking);
+    both(request_cancellation, accept_request_kind, raw_request_cancellation);
+    both(response_booking, accept_response_kind, raw_response_booking);
+    both(response_cancellation, accept_response_kind, raw_response_cancellation);
+    both(note_present, accept_note, raw_note);
+    opposite(note_absent, note_present);
+
+    // Four "when ... => set category = <literal>" statements.
+    both(set_request_booking, request, request_booking);
+    both(set_request_cancellation, request, request_cancellation);
+    both(set_response_booking, response, response_booking);
+    both(set_response_cancellation, response, response_cancellation);
+    // Each category value has two producers. False requires BOTH to be false.
+    either(booking, set_request_booking, set_response_booking);
+    either(cancellation, set_request_cancellation, set_response_cancellation);
+    opposite(not_booking, booking);
+    both(fallback_guard, not_booking, note_absent);
+
+    both(booking_request, booking, request);
+    both(booking_response, booking, response);
+    both(cancellation_request, cancellation, request);
+    both(cancellation_response, cancellation, response);
+    either(any_booking, booking_request, booking_response);
+    either(any_cancellation, cancellation_request, cancellation_response);
+    either(recognized, any_booking, any_cancellation);
+
+    required_decision(accept_direction); required_decision(accept_request_kind);
+    required_decision(accept_response_kind); required_decision(accept_note);
+    required_decision(request); required_decision(response);
+    required_decision(booking); required_decision(cancellation);
+    required_decision(note_present); required_decision(note_absent);
+    required_decision(not_booking); required_decision(fallback_guard);
+    required_decision(set_request_booking); required_decision(set_request_cancellation);
+    required_decision(set_response_booking); required_decision(set_response_cancellation);
+    required_decision(recognized);
+}
+namespace statements {
+    const request_booking, request_cancellation, response_booking, response_cancellation: Statement;
+    set_guard(request_booking, decisions::set_request_booking);
+    set_guard(request_cancellation, decisions::set_request_cancellation);
+    set_guard(response_booking, decisions::set_response_booking);
+    set_guard(response_cancellation, decisions::set_response_cancellation);
+    set_output(request_booking, fields::category, values::booking);
+    set_output(request_cancellation, fields::category, values::cancellation);
+    set_output(response_booking, fields::category, values::booking);
+    set_output(response_cancellation, fields::category, values::cancellation);
+}
+namespace formats {
+    leaf(booking_request, decisions::booking_request);
+    leaf(booking_response, decisions::booking_response);
+    leaf(cancellation_request, decisions::cancellation_request);
+    leaf(cancellation_response, decisions::cancellation_response);
+    expected(booking_request, fields::direction); expected(booking_response, fields::direction);
+    expected(cancellation_request, fields::direction); expected(cancellation_response, fields::direction);
+    expected(booking_request, fields::request_kind); expected(cancellation_request, fields::request_kind);
+    not_expected(booking_response, fields::request_kind); not_expected(cancellation_response, fields::request_kind);
+    expected(booking_response, fields::response_kind); expected(cancellation_response, fields::response_kind);
+    not_expected(booking_request, fields::response_kind); not_expected(cancellation_request, fields::response_kind);
+    // "when Booking and Request => note optional": inherited by this leaf.
+    expected(booking_request, fields::note);
+    not_expected(booking_response, fields::note); not_expected(cancellation_request, fields::note);
+    not_expected(cancellation_response, fields::note);
+}
+namespace schema {
+    message_field(fields::direction); message_field(fields::request_kind);
+    message_field(fields::response_kind); message_field(fields::note);
+    candidate(fields::direction, values::request); candidate(fields::direction, values::response);
+    candidate(fields::request_kind, values::booking); candidate(fields::request_kind, values::cancellation);
+    candidate(fields::response_kind, values::booking); candidate(fields::response_kind, values::cancellation);
+    candidate(fields::note, values::text);
+
+    relation recognized();
+    recognized() :- known_true(decisions::recognized);
+    assumption recognized_message: at_least_one(recognized, group_by: ());
+    // This runs on all scalar messages, including rejected and undecided ones.
+    verification propagation {
+        assumptions: [scalar_inputs];
+        obligations: [no_conflicting_knowledge, no_unknown_decisions, at_most_one_path,
+                      at_most_one_set_value, no_message_writes];
+    }
+    // A valid assumption cone does not establish that every decision became known.
+    verification recognized_messages {
+        assumptions: [scalar_inputs, recognized_message];
+        obligations: [no_conflicting_knowledge, no_unknown_decisions,
+                      at_most_one_set_value, no_message_writes];
+    }
+}

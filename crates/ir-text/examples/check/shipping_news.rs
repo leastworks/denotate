@@ -16,8 +16,10 @@ use std::{
 
 #[path = "shipping_news/computations.rs"]
 mod computations;
+#[path = "shipping_news/knowledge.rs"]
+mod knowledge;
 
-const STEPS: [&str; 10] = [
+const STEPS: [&str; 11] = [
     "01-declarations",
     "02-direct-mappings",
     "03-guards",
@@ -28,6 +30,7 @@ const STEPS: [&str; 10] = [
     "08-condition-notices",
     "09-complete",
     "10-computed-values",
+    "11-incremental-schema",
 ];
 fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../editors/den/examples/shipping-news")

@@ -1,0 +1,84 @@
+// A sample lowering vocabulary, not a new Denotate execution mode.
+namespace schema;
+sort Decision;
+sort Field;
+sort Value;
+sort Format;
+sort Statement;
+
+relation candidate(field: Field, value: Value);
+input raw_value(field: Field, value: Value) within candidate;
+assumption scalar_inputs: at_most_one(raw_value, group_by: field);
+
+// The lowerer emits finite Boolean gates. Multiple producers become an OR;
+// an empty producer set becomes always_false, not a self-supporting false rule.
+relation observes(decision: Decision, field: Field, value: Value);
+relation both(result: Decision, left: Decision, right: Decision);
+relation either(result: Decision, left: Decision, right: Decision);
+relation opposite(result: Decision, operand: Decision);
+relation same(result: Decision, operand: Decision);
+relation always_true(decision: Decision);
+relation always_false(decision: Decision);
+relation known_true(decision: Decision);
+relation known_false(decision: Decision);
+known_true(D) :- observes(D, F, V), raw_value(F, V);
+known_false(D) :- observes(D, F, V), !raw_value(F, V);
+known_true(D) :- always_true(D);
+known_false(D) :- always_false(D);
+known_true(D) :- both(D, A, B), known_true(A), known_true(B);
+known_false(D) :- both(D, A, B), known_false(A);
+known_false(D) :- both(D, A, B), known_false(B);
+known_true(D) :- either(D, A, B), known_true(A);
+known_true(D) :- either(D, A, B), known_true(B);
+known_false(D) :- either(D, A, B), known_false(A), known_false(B);
+known_true(D) :- opposite(D, A), known_false(A);
+known_false(D) :- opposite(D, A), known_true(A);
+known_true(D) :- same(D, A), known_true(A);
+known_false(D) :- same(D, A), known_false(A);
+
+// Coverage is universal over leaves, aggregated through a binary forest tree.
+// expected/not_expected are complementary fixed catalogs emitted by the lowerer.
+// An optional field still has a message source when its raw value is absent.
+relation leaf(format: Format, decision: Decision);
+relation children(parent: Format, left: Format, right: Format);
+relation coverage_root(format: Format);
+relation expected(format: Format, field: Field);
+relation not_expected(format: Format, field: Field);
+relation message_field(field: Field);
+relation accepts(decision: Decision, field: Field);
+relation excluded(format: Format);
+relation matched(format: Format);
+excluded(L) :- leaf(L, D), known_false(D);
+matched(L) :- leaf(L, D), known_true(D);
+relation covered(field: Field, format: Format);
+covered(F, L) :- expected(L, F);
+covered(F, L) :- message_field(F), excluded(L);
+covered(F, N) :- children(N, A, B), covered(F, A), covered(F, B);
+known_true(D) :- accepts(D, F), coverage_root(R), covered(F, R);
+known_false(D) :- accepts(D, F), not_expected(L, F), matched(L);
+relation message_source(field: Field);
+message_source(F) :- accepts(D, F), known_true(D);
+
+// Set statements carry literal outputs. Equal writes are allowed; distinct
+// resulting values conflict. Message ownership is checked separately.
+relation set_guard(statement: Statement, decision: Decision);
+relation set_output(statement: Statement, field: Field, value: Value);
+relation writes(statement: Statement, field: Field, value: Value);
+writes(S, F, V) :- set_guard(S, D), known_true(D), set_output(S, F, V);
+relation set_value(field: Field, value: Value);
+set_value(F, V) :- writes(_, F, V);
+relation invalid_message_write(statement: Statement, field: Field);
+invalid_message_write(S, F) :- writes(S, F, _), message_source(F);
+
+// Reporting is downstream of propagation. Negating these flags here never
+// feeds a decision: unknown means neither flag, not known false.
+relation required_decision(decision: Decision);
+relation conflicting_knowledge(decision: Decision);
+conflicting_knowledge(D) :- known_true(D), known_false(D);
+relation unknown_decision(decision: Decision);
+unknown_decision(D) :- required_decision(D), !known_true(D), !known_false(D);
+obligation no_conflicting_knowledge: empty(conflicting_knowledge);
+obligation no_unknown_decisions: empty(unknown_decision);
+obligation at_most_one_path: at_most_one(matched, group_by: ());
+obligation at_most_one_set_value: at_most_one(set_value, group_by: field);
+obligation no_message_writes: empty(invalid_message_write);
