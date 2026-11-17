@@ -17,6 +17,9 @@ relation both(result: Decision, left: Decision, right: Decision);
 relation either(result: Decision, left: Decision, right: Decision);
 relation opposite(result: Decision, operand: Decision);
 relation same(result: Decision, operand: Decision);
+// Workspace reads wait for ownership/applicability. An unknown source decision
+// cannot be bypassed by observing that the raw input is absent or unequal.
+relation reads(result: Decision, accepted: Decision, observation: Decision);
 relation always_true(decision: Decision);
 relation always_false(decision: Decision);
 relation known_true(decision: Decision);
@@ -35,6 +38,9 @@ known_true(D) :- opposite(D, A), known_false(A);
 known_false(D) :- opposite(D, A), known_true(A);
 known_true(D) :- same(D, A), known_true(A);
 known_false(D) :- same(D, A), known_false(A);
+known_true(D) :- reads(D, A, V), known_true(A), known_true(V);
+known_false(D) :- reads(D, A, _), known_false(A);
+known_false(D) :- reads(D, A, V), known_true(A), known_false(V);
 
 // Coverage is universal over leaves, aggregated through a binary forest tree.
 // expected/not_expected are complementary fixed catalogs emitted by the lowerer.
@@ -44,6 +50,9 @@ relation children(parent: Format, left: Format, right: Format);
 relation coverage_root(format: Format);
 relation expected(format: Format, field: Field);
 relation not_expected(format: Format, field: Field);
+// One aggregate guard per leaf/field: the OR of ALL declarations giving it.
+// Static expected/not_expected and guarded expectations are alternative catalogs.
+relation expected_when(format: Format, field: Field, guard: Decision);
 relation message_field(field: Field);
 relation accepts(decision: Decision, field: Field);
 relation excluded(format: Format);
@@ -52,23 +61,61 @@ excluded(L) :- leaf(L, D), known_false(D);
 matched(L) :- leaf(L, D), known_true(D);
 relation covered(field: Field, format: Format);
 covered(F, L) :- expected(L, F);
+covered(F, L) :- expected_when(L, F, G), known_true(G);
 covered(F, L) :- message_field(F), excluded(L);
 covered(F, N) :- children(N, A, B), covered(F, A), covered(F, B);
 known_true(D) :- accepts(D, F), coverage_root(R), covered(F, R);
 known_false(D) :- accepts(D, F), not_expected(L, F), matched(L);
+known_false(D) :- accepts(D, F), expected_when(L, F, G), matched(L), known_false(G);
 relation message_source(field: Field);
 message_source(F) :- accepts(D, F), known_true(D);
 
 // Set statements carry literal outputs. Equal writes are allowed; distinct
 // resulting values conflict. Message ownership is checked separately.
-relation set_guard(statement: Statement, decision: Decision);
+relation writer_guard(statement: Statement, decision: Decision);
 relation set_output(statement: Statement, field: Field, value: Value);
 relation writes(statement: Statement, field: Field, value: Value);
-writes(S, F, V) :- set_guard(S, D), known_true(D), set_output(S, F, V);
+writes(S, F, V) :- writer_guard(S, D), known_true(D), set_output(S, F, V);
 relation set_value(field: Field, value: Value);
 set_value(F, V) :- writes(_, F, V);
+
+// Required computation outputs, following lesson 10: an open result is chosen
+// even when inactive; it becomes a workspace value only when the writer applies.
+// W2/W4 use one result literal. No function implementation is executed here.
+relation computation_output(statement: Statement, field: Field);
+relation result_choice(statement: Statement, field: Field, value: Value);
+input computed_result(statement: Statement, field: Field, value: Value) within result_choice;
+relation observes_result(decision: Decision, statement: Statement, field: Field, value: Value);
+known_true(D) :- observes_result(D, S, F, V), computed_result(S, F, V);
+known_false(D) :- observes_result(D, S, F, V), !computed_result(S, F, V);
+relation result_present(statement: Statement, field: Field);
+result_present(S, F) :- computed_result(S, F, _);
+relation missing_result(statement: Statement, field: Field);
+missing_result(S, F) :- computation_output(S, F), !result_present(S, F);
+assumption every_output_has_result: empty(missing_result);
+assumption at_most_one_result: at_most_one(computed_result, group_by: (statement, field));
+relation computed_value(field: Field, value: Value);
+computed_value(F, V) :- writer_guard(S, G), known_true(G), computation_output(S, F), computed_result(S, F, V);
 relation invalid_message_write(statement: Statement, field: Field);
 invalid_message_write(S, F) :- writes(S, F, _), message_source(F);
+invalid_message_write(S, F) :- writer_guard(S, G), known_true(G), computation_output(S, F), message_source(F);
+
+// Validation follows structural matching. These failure decisions MUST NOT
+// feed matching, exclusion or acceptance. Final recognition reads them instead.
+relation required_field(check: Decision, format: Format, field: Field, guard: Decision, present: Decision);
+relation absent_field(check: Decision, format: Format, field: Field, guard: Decision, present: Decision);
+known_true(D) :- required_field(D, L, _, G, P), leaf(L, T), known_true(T), known_true(G), known_false(P);
+known_false(D) :- required_field(D, L, _, _, _), leaf(L, T), known_false(T);
+known_false(D) :- required_field(D, _, _, G, _), known_false(G);
+known_false(D) :- required_field(D, _, _, _, P), known_true(P);
+known_true(D) :- absent_field(D, L, _, G, P), leaf(L, T), known_true(T), known_true(G), known_true(P);
+known_false(D) :- absent_field(D, L, _, _, _), leaf(L, T), known_false(T);
+known_false(D) :- absent_field(D, _, _, G, _), known_false(G);
+known_false(D) :- absent_field(D, _, _, _, P), known_false(P);
+relation missing_field(format: Format, field: Field);
+missing_field(L, F) :- required_field(D, L, F, _, _), known_true(D);
+relation forbidden_field(format: Format, field: Field);
+forbidden_field(L, F) :- absent_field(D, L, F, _, _), known_true(D);
 
 // Reporting is downstream of propagation. Negating these flags here never
 // feeds a decision: unknown means neither flag, not known false.

@@ -32,13 +32,13 @@ namespace decisions {
     observes(raw_response_booking, fields::response_kind, values::booking);
     observes(raw_response_cancellation, fields::response_kind, values::cancellation);
     observes(raw_note, fields::note, values::text);
-    both(request, accept_direction, raw_request);
-    both(response, accept_direction, raw_response);
-    both(request_booking, accept_request_kind, raw_request_booking);
-    both(request_cancellation, accept_request_kind, raw_request_cancellation);
-    both(response_booking, accept_response_kind, raw_response_booking);
-    both(response_cancellation, accept_response_kind, raw_response_cancellation);
-    both(note_present, accept_note, raw_note);
+    reads(request, accept_direction, raw_request);
+    reads(response, accept_direction, raw_response);
+    reads(request_booking, accept_request_kind, raw_request_booking);
+    reads(request_cancellation, accept_request_kind, raw_request_cancellation);
+    reads(response_booking, accept_response_kind, raw_response_booking);
+    reads(response_cancellation, accept_response_kind, raw_response_cancellation);
+    reads(note_present, accept_note, raw_note);
     opposite(note_absent, note_present);
 
     // Four "when ... => set category = <literal>" statements.
@@ -72,10 +72,10 @@ namespace decisions {
 }
 namespace statements {
     const request_booking, request_cancellation, response_booking, response_cancellation: Statement;
-    set_guard(request_booking, decisions::set_request_booking);
-    set_guard(request_cancellation, decisions::set_request_cancellation);
-    set_guard(response_booking, decisions::set_response_booking);
-    set_guard(response_cancellation, decisions::set_response_cancellation);
+    writer_guard(request_booking, decisions::set_request_booking);
+    writer_guard(request_cancellation, decisions::set_request_cancellation);
+    writer_guard(response_booking, decisions::set_response_booking);
+    writer_guard(response_cancellation, decisions::set_response_cancellation);
     set_output(request_booking, fields::category, values::booking);
     set_output(request_cancellation, fields::category, values::cancellation);
     set_output(response_booking, fields::category, values::booking);

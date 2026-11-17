@@ -1,0 +1,40 @@
+use schema;
+namespace fields { const fee: Field; }
+namespace values { const zero, five: Value; }
+namespace decisions { const path, yes, accept_fee, raw_zero, raw_five, raw_present, fee_zero, fee_nonzero, fee_present, fee_absent, gives_fee, required_guard, missing, valid, recognized: Decision; }
+namespace formats {
+    const request: Format;
+    coverage_root(request); leaf(request, decisions::path);
+}
+always_true(decisions::path); always_true(decisions::yes);
+message_field(fields::fee);
+candidate(fields::fee, values::zero); candidate(fields::fee, values::five);
+accepts(decisions::accept_fee, fields::fee);
+observes(decisions::raw_zero, fields::fee, values::zero);
+observes(decisions::raw_five, fields::fee, values::five);
+either(decisions::raw_present, decisions::raw_zero, decisions::raw_five);
+reads(decisions::fee_zero, decisions::accept_fee, decisions::raw_zero);
+reads(decisions::fee_present, decisions::accept_fee, decisions::raw_present);
+opposite(decisions::fee_nonzero, decisions::fee_zero);
+opposite(decisions::fee_absent, decisions::fee_present);
+
+either(decisions::gives_fee, decisions::fee_nonzero, decisions::fee_zero);
+// Compile-time lift: (fee != 0) OR (fee = 0) holds for every value,
+// absent included. Lift ownership only; keep the guarded validation below.
+expected(formats::request, fields::fee);
+same(decisions::required_guard, decisions::fee_zero);
+required_field(decisions::missing, formats::request, fields::fee,
+               decisions::required_guard, decisions::fee_present);
+// The path never reads validation. Only final recognition does.
+opposite(decisions::valid, decisions::missing);
+both(decisions::recognized, decisions::path, decisions::valid);
+required_decision(decisions::accept_fee); required_decision(decisions::fee_present);
+required_decision(decisions::fee_zero); required_decision(decisions::required_guard);
+required_decision(decisions::missing); required_decision(decisions::recognized);
+namespace schema {
+    verification propagation {
+        assumptions: [scalar_inputs];
+        obligations: [no_conflicting_knowledge, no_unknown_decisions, at_most_one_path,
+                      at_most_one_set_value, no_message_writes];
+    }
+}

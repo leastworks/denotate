@@ -1,0 +1,52 @@
+use schema;
+namespace fields { const kind, f: Field; }
+namespace values { const r, s, ten, twenty: Value; }
+namespace decisions { const yes, accept_kind, accept_f, raw_r, raw_s, raw_ten, raw_twenty, raw_kind_present, raw_f_present, kind_r, kind_s, kind_present, f_ten, f_present, a, b, path, missing_a_kind, missing_b_kind, missing_f, missing_kind, invalid, valid, recognized: Decision; }
+// Leaf B's term reads f, but its declaration of f is static for that leaf.
+// It does not wait for B to match: excluding A is enough to establish coverage.
+namespace formats {
+    const forest, a, b: Format;
+    coverage_root(forest); children(forest, a, b);
+    leaf(a, decisions::a); leaf(b, decisions::b);
+    expected(a, fields::kind); expected(b, fields::kind);
+    not_expected(a, fields::f);
+    expected(b, fields::f);
+}
+message_field(fields::kind); message_field(fields::f);
+candidate(fields::kind, values::r); candidate(fields::kind, values::s);
+candidate(fields::f, values::ten); candidate(fields::f, values::twenty);
+always_true(decisions::yes);
+accepts(decisions::accept_kind, fields::kind); accepts(decisions::accept_f, fields::f);
+observes(decisions::raw_r, fields::kind, values::r);
+observes(decisions::raw_s, fields::kind, values::s);
+observes(decisions::raw_ten, fields::f, values::ten);
+observes(decisions::raw_twenty, fields::f, values::twenty);
+either(decisions::raw_kind_present, decisions::raw_r, decisions::raw_s);
+either(decisions::raw_f_present, decisions::raw_ten, decisions::raw_twenty);
+reads(decisions::kind_r, decisions::accept_kind, decisions::raw_r);
+reads(decisions::kind_s, decisions::accept_kind, decisions::raw_s);
+reads(decisions::kind_present, decisions::accept_kind, decisions::raw_kind_present);
+reads(decisions::f_ten, decisions::accept_f, decisions::raw_ten);
+reads(decisions::f_present, decisions::accept_f, decisions::raw_f_present);
+same(decisions::a, decisions::kind_r);
+both(decisions::b, decisions::kind_s, decisions::f_ten);
+either(decisions::path, decisions::a, decisions::b);
+required_field(decisions::missing_a_kind, formats::a, fields::kind, decisions::yes, decisions::kind_present);
+required_field(decisions::missing_b_kind, formats::b, fields::kind, decisions::yes, decisions::kind_present);
+required_field(decisions::missing_f, formats::b, fields::f, decisions::yes, decisions::f_present);
+either(decisions::missing_kind, decisions::missing_a_kind, decisions::missing_b_kind);
+either(decisions::invalid, decisions::missing_kind, decisions::missing_f);
+opposite(decisions::valid, decisions::invalid);
+both(decisions::recognized, decisions::path, decisions::valid);
+required_decision(decisions::accept_kind); required_decision(decisions::accept_f);
+required_decision(decisions::kind_r); required_decision(decisions::kind_s);
+required_decision(decisions::f_ten); required_decision(decisions::f_present);
+required_decision(decisions::a); required_decision(decisions::b);
+required_decision(decisions::recognized);
+namespace schema {
+    verification propagation {
+        assumptions: [scalar_inputs];
+        obligations: [no_conflicting_knowledge, no_unknown_decisions, at_most_one_path,
+                      at_most_one_set_value, no_message_writes];
+    }
+}

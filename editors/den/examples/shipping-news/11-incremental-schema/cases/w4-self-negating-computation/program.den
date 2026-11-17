@@ -1,0 +1,37 @@
+use schema;
+namespace fields { const g, a: Field; }
+namespace values { const one, two: Value; }
+namespace decisions { const path, accept_g, raw_g_one, g_one, a_present, a_absent, writer, recognized, raw_result: Decision; }
+// when a absent and g = 1 => compute a = 1
+// a has no message source. Inactive writers leave it absent.
+namespace formats {
+    const request: Format;
+    coverage_root(request); leaf(request, decisions::path);
+    expected(request, fields::g);
+}
+namespace statements { const writer: Statement; }
+message_field(fields::g);
+candidate(fields::g, values::one); candidate(fields::g, values::two);
+always_true(decisions::path);
+accepts(decisions::accept_g, fields::g);
+observes(decisions::raw_g_one, fields::g, values::one);
+reads(decisions::g_one, decisions::accept_g, decisions::raw_g_one);
+opposite(decisions::a_absent, decisions::a_present);
+both(decisions::writer, decisions::a_absent, decisions::g_one);
+writer_guard(statements::writer, decisions::writer);
+computation_output(statements::writer, fields::a);
+result_choice(statements::writer, fields::a, values::one);
+observes_result(decisions::raw_result, statements::writer, fields::a, values::one);
+reads(decisions::a_present, decisions::writer, decisions::raw_result);
+// Recognition alone does not establish that all writer decisions are known.
+same(decisions::recognized, decisions::path);
+required_decision(decisions::accept_g); required_decision(decisions::g_one);
+required_decision(decisions::a_present); required_decision(decisions::a_absent);
+required_decision(decisions::writer); required_decision(decisions::recognized);
+namespace schema {
+    verification propagation {
+        assumptions: [scalar_inputs, every_output_has_result, at_most_one_result];
+        obligations: [no_conflicting_knowledge, no_unknown_decisions, at_most_one_path,
+                      at_most_one_set_value, no_message_writes];
+    }
+}

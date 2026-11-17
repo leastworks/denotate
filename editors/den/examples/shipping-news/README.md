@@ -13,8 +13,9 @@ program with its own library. Steps 1–9 retain the features and repair the del
 errors in earlier ones. [09-complete](09-complete/) is the complete mapping sample.
 [Lesson 10](10-computed-values/README.md) adds a focused computation model: task results
 become workspace values, classification reads them, and classifications guard other tasks.
-[Lesson 11](11-incremental-schema/README.md) starts the advanced incremental-schema
-example: partial classification makes fields readable, which enables further classification.
+[Lesson 11](11-incremental-schema/README.md) models incremental schema decisions:
+partial classification makes fields readable, which enables further classification.
+Its small loop cases add guarded expectations, validation and unresolved decisions.
 Each lesson builds a DSL feature and ends with a brief recap of the Denotate concepts
 used to support it.
 
@@ -57,7 +58,7 @@ about library rewrites; the full status inventory remains available with `--json
 | [08 — Help authors understand their conditions](08-condition-notices/) | All six proved; one always-true and one impossible notice | 0 |
 | [09 — Review what the completed library guarantees](09-complete/) | Same results as step 08; understand the model's limits | 0 |
 | [10 — Use computed values in task conditions](10-computed-values/README.md) | Both verifications proved; all three notices vary | 0 |
-| [11 — Decide which message fields belong to the schema](11-incremental-schema/README.md) | Both verifications proved; knowledge propagation needs no cyclic rewrites | 0 |
+| [11 — Decide which message fields belong to the schema](11-incremental-schema/README.md) | Main forest: both proved, no cyclic rewrites; separate loop cases have documented findings | 0 |
 
 There is no claim that every destination must have a mapping. The mapping contract
 is **at most one applicable writer**, not coverage of all destinations.

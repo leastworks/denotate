@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "knowledge_cases.rs"]
+mod cases;
+
 // An independent three-valued evaluator: no .den gates, checker grounding,
 // symbolic conditions or replay results enter this reference.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -25,6 +28,13 @@ impl Truth {
             (False, _) | (_, False) => False,
             (True, True) => True,
             _ => Unknown,
+        }
+    }
+    fn read(self, observation: bool) -> Self {
+        match self {
+            Unknown => Unknown,
+            False => False,
+            True => Self::from_bool(observation),
         }
     }
     fn or(self, other: Self) -> Self {
@@ -100,7 +110,7 @@ fn reference(raw: [bool; 7]) -> BTreeMap<&'static str, Truth> {
             ("response_cancellation", "accept_response_kind", 5),
             ("note_present", "accept_note", 6),
         ] {
-            next.insert(name, get(accept).and(Truth::from_bool(raw[input])));
+            next.insert(name, get(accept).read(raw[input]));
         }
         next.insert("note_absent", get("note_present").not());
         for (writer, direction, kind) in [
@@ -370,7 +380,7 @@ fn knowledge_checks_same_value_writes_and_absent_message_ownership_separately() 
         ("note", "text", Some("no_message_writes")),
     ] {
         let mut s = Snapshot::new(11);
-        s.append(&format!("use schema; namespace extra {{ const duplicate: Statement; set_guard(duplicate, decisions::set_request_booking); set_output(duplicate, fields::{field}, values::{value}); }}"));
+        s.append(&format!("use schema; namespace extra {{ const duplicate: Statement; writer_guard(duplicate, decisions::set_request_booking); set_output(duplicate, fields::{field}, values::{value}); }}"));
         let p = s.load();
         let result = check(&p, &mut Session::default());
         assert_eq!(
