@@ -51,6 +51,9 @@ impl Config {
                     "maxConditionNodes" => &mut config.limits.max_condition_nodes,
                     "maxStructuralSplitDepth" => &mut config.limits.max_structural_split_depth,
                     "maxStructuralSplitLeaves" => &mut config.limits.max_structural_split_leaves,
+                    "maxStructuralSplitScoringWork" => {
+                        &mut config.limits.max_structural_split_scoring_work
+                    }
                     "maxStructuralSplitWork" => &mut config.limits.max_structural_split_work,
                     _ => return Err(format!("Unknown limit {name}")),
                 };
@@ -75,6 +78,7 @@ impl Config {
             "maxBddVariables":self.limits.max_bdd_variables,"maxBddNodes":self.limits.max_bdd_nodes,
             "maxBddTasks":self.limits.max_bdd_tasks,"maxConditionNodes":self.limits.max_condition_nodes,
             "maxStructuralSplitWork":self.limits.max_structural_split_work,
+            "maxStructuralSplitScoringWork":self.limits.max_structural_split_scoring_work,
             "maxStructuralSplitLeaves":self.limits.max_structural_split_leaves,
             "maxStructuralSplitDepth":self.limits.max_structural_split_depth
         }})

@@ -67,9 +67,23 @@ pub struct SplitReplacementSizes {
     pub elapsed: Duration,
 }
 
+/// Cumulative charged cone work for one structural search, not wall time.
+#[derive(Debug, Clone, Default)]
+pub struct SplitConeProgress {
+    pub built: usize,
+    pub reused: usize,
+    pub discarded: usize,
+    pub storage_fallbacks: usize,
+    pub uncached_retries: usize,
+    pub liveness_work: usize,
+    pub pruning_work: usize,
+    pub scc_work: usize,
+}
+
 /// Bounded case-search observations, never proof evidence or cache inputs.
 #[derive(Debug, Clone, Default)]
 pub struct GuardedSplitProgress {
+    pub cones: SplitConeProgress,
     pub expression_nodes: Option<usize>,
     /// Profiling-only, independently budgeted inspection of a completed batch.
     pub replacement_sizes: Option<SplitReplacementSizes>,

@@ -236,7 +236,11 @@ All public `Limits` resource ceilings are configurable for this invocation:
 `--max-bdd-variables`, `--max-bdd-nodes`, `--max-bdd-tasks`, and
 `--max-condition-nodes`, plus `--timeout-ms`. Structural splitting also exposes
 `--max-structural-split-depth`, `--max-structural-split-leaves` and
-`--max-structural-split-work`. These apply per component attempt: exhausting one
+`--max-structural-split-work`. `--max-structural-split-scoring-work` controls the
+per-node scoring allowance (default 1,000,000): stop further scoring between
+complete scores and keep the best improving choice; one score can cross it. Zero
+disables scoring. It reserves no work for leaves. The other three controls apply
+per component attempt: exhausting one
 falls back to ordinary admission, while global work and deadlines still apply.
 Raise leaves alongside depth when exploring deeper trees (a one-sided path of
 N splits has N+1 leaves); raising only depth may just hit the leaf cap.

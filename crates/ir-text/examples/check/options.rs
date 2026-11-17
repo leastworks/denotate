@@ -21,7 +21,7 @@ pub struct Options {
     pub candidate_probe: Option<denotate_check::CandidateProbeLimits>,
     pub sat_probe_limits: denotate_check::SatProbeLimits,
 }
-pub fn limit_values(l: &Limits) -> [(&'static str, u128); 12] {
+pub fn limit_values(l: &Limits) -> [(&'static str, u128); 13] {
     [
         ("--timeout-ms", l.timeout.as_millis()),
         ("--max-atoms", l.max_atoms as u128),
@@ -39,6 +39,10 @@ pub fn limit_values(l: &Limits) -> [(&'static str, u128); 12] {
         (
             "--max-structural-split-leaves",
             l.max_structural_split_leaves as u128,
+        ),
+        (
+            "--max-structural-split-scoring-work",
+            l.max_structural_split_scoring_work as u128,
         ),
         (
             "--max-structural-split-work",
@@ -198,7 +202,8 @@ impl Options {
                 | "--max-condition-nodes"
                 | "--max-structural-split-depth"
                 | "--max-structural-split-leaves"
-                | "--max-structural-split-work" => {
+                | "--max-structural-split-work"
+                | "--max-structural-split-scoring-work" => {
                     let n: usize = value()?.parse().map_err(|_| {
                         (
                             2,
@@ -219,6 +224,9 @@ impl Options {
                         }
                         "--max-structural-split-leaves" => {
                             options.limits.max_structural_split_leaves = n
+                        }
+                        "--max-structural-split-scoring-work" => {
+                            options.limits.max_structural_split_scoring_work = n
                         }
                         "--max-structural-split-work" => {
                             options.limits.max_structural_split_work = n

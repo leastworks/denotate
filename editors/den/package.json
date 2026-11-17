@@ -41,6 +41,12 @@
               "description": "Optional structural split leaves allowance per component; exhausting it falls back to ordinary admission.",
               "maximum": 9007199254740991
             },
+            "maxStructuralSplitScoringWork": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Candidate scoring work per structural split node (default 1000000). Checked between complete scores; one score can exceed it. Keeps the best improving choice so far. Zero disables scoring.",
+              "maximum": 9007199254740991
+            },
             "maxStructuralSplitWork": {
               "type": "integer",
               "minimum": 0,

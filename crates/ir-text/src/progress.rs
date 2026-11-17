@@ -179,6 +179,9 @@ impl<'a> AdmissionDetails<'a> {
             json!({"candidatesScored":s.candidates_scored,"fixedCandidates":s.fixed_candidates,
                 "candidatesAvailable":s.candidates_available,"nodeCandidatesScored":s.node_candidates_scored,
                 "scoringWork":s.scoring_work,"scoringLimit":s.scoring_limit,
+                "cones":{"built":s.cones.built,"reused":s.cones.reused,
+                    "discarded":s.cones.discarded,"storageFallbacks":s.cones.storage_fallbacks,"uncachedRetries":s.cones.uncached_retries,
+                    "livenessWork":s.cones.liveness_work,"pruningWork":s.cones.pruning_work,"sccWork":s.cones.scc_work},
                 "searchWork":s.search_work,"searchLimit":s.search_limit,
                 "depthLimit":s.depth_limit,"leafLimit":s.leaf_limit,
                 "cutoffs":s.cutoffs,"chosen":s.chosen.as_ref().map(|a|atom_text(a,&**names)),
@@ -464,6 +467,10 @@ pub fn admission_text(a: &Value) -> String {
             "; search work {}/{}; caps depth {}, leaves {}",
             s["searchWork"], s["searchLimit"], s["depthLimit"], s["leafLimit"]
         ));
+        if let Some(cones) = s.get("cones") {
+            text.push_str(&format!("; cones {} built, {} reused, {} discarded; cone work liveness {}, pruning {}, SCC {}; {} uncached retries",
+                cones["built"], cones["reused"], cones["discarded"], cones["livenessWork"], cones["pruningWork"], cones["sccWork"], cones["uncachedRetries"]));
+        }
         if let Some(nodes) = s["expressionNodes"].as_u64() {
             text.push_str(&format!(
                 "; {nodes} shared expression nodes, {} leaves evaluated",

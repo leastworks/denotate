@@ -168,28 +168,36 @@ pub(crate) fn component_cone<'a>(
     ctx: &ConditionContext,
     retained: &mut usize,
     budget: &mut Budget<'_>,
+    work: &mut SplitConeProgress,
 ) -> Result<Arc<BorrowedCone<'a>>> {
-    let ids = &program.component_rules[component.id.index];
-    *retained = crate::symbolic::retain(
-        *retained,
-        0,
-        domain.node_count() + component.atoms.len() + 2 * ids.len() + 1,
-        budget,
-    )?;
-    budget.charge(component.atoms.len(), "structural split component")?;
-    let mut producers = Vec::new();
-    for id in ids {
-        budget.tick("structural split producer")?;
-        let summary = summaries
-            .get(&program.rules[*id].id)
-            .ok_or(CheckError::Internal(
-                "incomplete structural split summaries",
-            ))?;
-        let live = !ctx
-            .apply(domain, &summary.condition, and, budget)?
-            .is_false();
-        producers.push(GuardedProducer { summary, live });
-    }
+    work.built += 1;
+    let start = budget.used();
+    let result: Result<_> = (|| {
+        let ids = &program.component_rules[component.id.index];
+        *retained = crate::symbolic::retain(
+            *retained,
+            0,
+            domain.node_count() + component.atoms.len() + 2 * ids.len() + 1,
+            budget,
+        )?;
+        budget.charge(component.atoms.len(), "structural split component")?;
+        let mut producers = Vec::new();
+        for id in ids {
+            budget.tick("structural split producer")?;
+            let summary = summaries
+                .get(&program.rules[*id].id)
+                .ok_or(CheckError::Internal(
+                    "incomplete structural split summaries",
+                ))?;
+            let live = !ctx
+                .apply(domain, &summary.condition, and, budget)?
+                .is_false();
+            producers.push(GuardedProducer { summary, live });
+        }
+        Ok(producers)
+    })();
+    work.liveness_work += budget.used() - start;
+    let producers = result?;
     let cone = Arc::new(GuardedCone {
         component: component.id,
         snapshot: program.graph_revision,
@@ -199,14 +207,19 @@ pub(crate) fn component_cone<'a>(
         producers,
         pruning: Pruning::default(),
     });
-    prune::prepare_roots(
+    let start = budget.used();
+    let mut preparation = Preparation::default();
+    let result = prune::prepare_roots(
         cone,
         &component.atoms,
         ctx,
         retained,
         budget,
-        &mut Preparation::default(),
-    )
+        &mut preparation,
+    );
+    work.storage_fallbacks += usize::from(preparation.pruning == Some("condition nodes"));
+    work.pruning_work += budget.used() - start;
+    result
 }
 
 pub(crate) fn prepare<'a>(

@@ -164,7 +164,10 @@ programs. For example:
 These are example overrides, not recommended defaults. `limits` accepts `maxAtoms`,
 `maxRules`, `maxDependencies`, `maxWork`, `maxBddVariables`, `maxBddNodes`,
 `maxBddTasks`, `maxConditionNodes`, `maxStructuralSplitDepth`,
-`maxStructuralSplitLeaves` and `maxStructuralSplitWork`, matching the CLI controls.
+`maxStructuralSplitLeaves`, `maxStructuralSplitWork` and
+`maxStructuralSplitScoringWork`, matching the CLI controls. Scoring is bounded per
+node, between complete scores; one score may exceed the allowance, and the best
+improving choice survives its cutoff. Zero disables scoring.
 The structural split allowances apply per component attempt; exhausting one
 continues ordinary admission. Omitted fields use
 checker defaults; zero allows no use. Limits apply per operation/query, and timeout

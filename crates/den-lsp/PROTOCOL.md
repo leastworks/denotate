@@ -305,7 +305,12 @@ joint search in optional `structuralSplit`. It has `candidatesScored`,
 `chosen`, `cyclicAtoms`, `branchCyclicAtoms`, `branchConeAtoms`, `branchLiveAtoms`,
 with the same meanings as case-search fields below. Nullable `candidatesAvailable`,
 `nodeCandidatesScored`, `scoringWork` and `scoringLimit` describe the current node;
-`candidatesScored` remains cumulative over the component search. `searchLimit`,
+`candidatesScored` remains cumulative over the component search. `cones` reports
+cumulative `built`, `reused`, `discarded`, `livenessWork`, `pruningWork`, `sccWork`,
+`storageFallbacks` (pruning limited by condition storage), and `uncachedRetries`.
+Work fields count charged operations, not time; these are observations, never
+proof or cache inputs. The best and in-flight pairs share one storage cap, and a
+waiting sibling may be rebuilt after deeper scoring. `searchLimit`,
 `depthLimit` and `leafLimit` report effective whole-component allowances;
 `searchWork` reports charged work so far. `expressionNodes` is the number of
 interned expression nodes constructed during this attempt; `evaluatedLeaves`
@@ -996,7 +1001,8 @@ Editor deadlines retain the checker phase instead of replacing it with a generic
 not a program or workspace deadline. Optional `limits` accepts nonnegative integer
 `maxAtoms`, `maxRules`, `maxDependencies`, `maxWork`, `maxBddVariables`, `maxBddNodes`,
 `maxBddTasks`, `maxConditionNodes`, `maxStructuralSplitDepth`,
-`maxStructuralSplitLeaves` and `maxStructuralSplitWork`, with checker defaults for
+`maxStructuralSplitLeaves`, `maxStructuralSplitWork` and
+`maxStructuralSplitScoringWork`, with checker defaults for
 omitted fields. Structural split limits bound an optional attempt per component;
 exhausting them continues ordinary admission.
 Zero permits no use. Limits do not include loading, presentation, session retention

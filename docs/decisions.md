@@ -258,6 +258,26 @@ The file intentionally retains program names and is not an anonymized export.
   tied to the source rule and occurrence. Display is bounded, with full steps on
   request; no source edit is authorized.
 
+- **Structural split scoring reuses bounded branch cones.**
+  Scoring already proves branch liveness and computes each branch's cyclic size.
+  Rebuilding the same cone when entering that child repeats those BDD and graph
+  operations. Reuse the completed cone and score within the immutable component
+  attempt; the certificate and its semantic checks are unchanged.
+
+  Keep the best pair and in-flight scoring pair under one small charged reservation,
+  rather than an owned sibling cone on every recursive frame. Deeper scoring may
+  release a waiting sibling, and superseded candidates release theirs. The split
+  choice is independent of retention: on a miss, rebuild. Release parent scratch
+  before descent and the reservation before staging. If optional storage obstructs
+  completion, retry without retention; previous work is never refunded. The exact
+  reservation is provisional in checker policies.
+
+  The per-node scoring allowance is configurable and part of cache validity. It
+  stops further complete scores, keeps the best improving split, and does not reserve
+  work for leaf evaluation. A single score can exceed it, subject to total search
+  and query limits. Cheaper approximate scoring and multi-way splitting remain
+  separate work: neither is needed to reuse an already completed computation.
+
 - **Split guarded certificates on independently settled atoms.** When ordinary
   guarded settlement has a completed negative answer or a recoverable bounds
   failure, it may partition the effective domain I ∧ W on a settled atom c.

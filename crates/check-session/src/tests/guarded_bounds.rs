@@ -323,3 +323,56 @@ fn deep_joint_certificate_agrees_fresh_cold_warm_and_after_support_edits() {
         },
     );
 }
+
+#[test]
+fn structural_scoring_allowance_changes_invalidate_warm_results() {
+    let text = "input x(); input y(); relation g0(); relation g1(); relation g2(); relation g3();
+    g0():-x(); g0():-y(); g1():-!x(); g1():-y(); g2():-x(); g2():-!y(); g3():-!x(); g3():-!y();
+    relation a0(); relation a1(); relation a2(); relation a3();
+    a0():-g0(),!a1(); a1():-g1(),!a2(); a2():-g2(),!a3(); a3():-g3(),!a0();
+    obligation o:empty(a0); verification v{assumptions:[];obligations:[o];}";
+    let file = SourceFile::new("file:///scoring.den", 0, text);
+    let p = load(
+        &ProgramMembership::single("root", [file.uri.clone()]),
+        &[file],
+    )
+    .unwrap();
+    let mut warm = Session::default();
+    for allowance in [1, 0, 1_000_000, 1] {
+        let limits = Limits {
+            max_structural_split_scoring_work: allowance,
+            ..Limits::default()
+        };
+        let ops = (&limits).into();
+        let request = p.verification_requests(&limits).unwrap().remove(0).1;
+        assert_eq!(request.limits.max_structural_split_scoring_work, allowance);
+        let run = |mut session: Option<&mut Session>| {
+            let raw = match session.as_deref_mut() {
+                Some(s) => s.prepare(&request, &p.corpus, &p.keys, &ops).unwrap(),
+                None => request.prepare(&p.corpus, &p.keys, &ops).unwrap(),
+            };
+            let RequestPreparation::Complete(raw) = raw else {
+                panic!()
+            };
+            let prepared = raw.admit(&ops).unwrap();
+            let report = match session {
+                Some(s) => s.verify(&prepared, &ops).unwrap(),
+                None => prepared.verify_local(&ops).unwrap(),
+            };
+            let LocalCheckOutcome::Complete(report) = report else {
+                panic!()
+            };
+            let shown = presentation::present(&p, &report.checked).unwrap();
+            let diagnostics: Vec<_> = shown.diagnostics.iter().map(|d| json!({"message":d.message,"notes":d.notes,"data":d.data(&p.keys).unwrap()})).collect();
+            (
+                prepared.program().is_admitted(),
+                report.checked.results.value,
+                diagnostics,
+            )
+        };
+        let fresh = run(None);
+        assert_eq!(fresh, run(Some(&mut Session::default())));
+        assert_eq!(fresh, run(Some(&mut warm)));
+        assert_eq!(fresh, run(Some(&mut warm)));
+    }
+}

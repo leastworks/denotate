@@ -152,6 +152,7 @@ pub struct Limits {
     pub max_structural_split_depth: usize,
     pub max_structural_split_leaves: usize,
     pub max_structural_split_work: usize,
+    pub max_structural_split_scoring_work: usize,
 }
 impl Default for Limits {
     fn default() -> Self {
@@ -171,6 +172,7 @@ impl Default for Limits {
             max_structural_split_depth: 32,
             max_structural_split_leaves: 64,
             max_structural_split_work: 100_000_000,
+            max_structural_split_scoring_work: 1_000_000,
         }
     }
 }

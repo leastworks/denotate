@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, fmt::Write};
 
 pub fn limits(l: &Limits) -> Value {
     json!({"max_atoms":l.max_atoms,"max_rules":l.max_rules,"max_dependencies":l.max_dependencies,
-        "max_work":l.max_work,"max_structural_split_depth":l.max_structural_split_depth,"max_structural_split_leaves":l.max_structural_split_leaves,"max_structural_split_work":l.max_structural_split_work,"max_bdd_variables":l.max_bdd_variables,"max_bdd_nodes":l.max_bdd_nodes,
+        "max_work":l.max_work,"max_structural_split_depth":l.max_structural_split_depth,"max_structural_split_leaves":l.max_structural_split_leaves,"max_structural_split_work":l.max_structural_split_work,"max_structural_split_scoring_work":l.max_structural_split_scoring_work,"max_bdd_variables":l.max_bdd_variables,"max_bdd_nodes":l.max_bdd_nodes,
         "max_bdd_tasks":l.max_bdd_tasks,"max_condition_nodes":l.max_condition_nodes,"timeout_ms":l.timeout.as_millis()})
 }
 pub fn variant(mode: &str, unconstrained: bool) -> Value {

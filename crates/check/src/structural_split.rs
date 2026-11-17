@@ -14,8 +14,10 @@ use std::{
     sync::Arc,
 };
 
+mod cones;
 mod expressions;
 mod sizes;
+use cones::{Cones, ScoredCone};
 use expressions::Expressions;
 
 // Scoring is cooperative at complete candidate boundaries. One candidate can
@@ -29,7 +31,7 @@ struct SplitLimits {
 impl From<&Limits> for SplitLimits {
     fn from(limits: &Limits) -> Self {
         Self {
-            scoring_work: 1_000_000,
+            scoring_work: limits.max_structural_split_scoring_work,
             depth: limits.max_structural_split_depth.min(256),
             leaves: limits.max_structural_split_leaves,
         }
@@ -82,6 +84,7 @@ struct Search<'a, 'm> {
     work_start: usize,
     stats: GuardedSplitProgress,
     expressions: Expressions,
+    cones: Cones<'a>,
 }
 
 impl GroundProgram {
@@ -107,6 +110,7 @@ impl GroundProgram {
             limits: SplitLimits::from(budget.limits),
             work_start: budget.used(),
             expressions: Expressions::default(),
+            cones: Cones::default(),
             stats: GuardedSplitProgress {
                 leaves: 1,
                 search_limit: Some(budget.limits.max_structural_split_work),
@@ -125,7 +129,30 @@ impl GroundProgram {
             if domain.is_false() {
                 return Ok(Vec::new());
             }
-            let Some(tree) = search.node(&domain, 0, retained, budget, progress)? else {
+            search.cones.reserve(retained, budget)?;
+            let mut result = search.node(&domain, 0, None, retained, budget, progress);
+            let storage_obstructed = matches!(
+                &result,
+                Err(CheckError::LimitExceeded {
+                    phase: "symbolic storage",
+                    resource: "condition nodes",
+                    ..
+                })
+            ) || matches!(&result, Ok(None))
+                && search.stats.cones.storage_fallbacks != 0;
+            if search.cones.reserved != 0 && storage_obstructed {
+                // Optional retention may not force a negative result. Restart
+                // on the same immutable graph without it; never refund work.
+                search.cones.release(retained, &mut search.stats.cones);
+                search.expressions = Expressions::default();
+                *retained = baseline;
+                search.stats.leaves = 1;
+                search.stats.evaluated_leaves = 0;
+                search.stats.cones.uncached_retries += 1;
+                result = search.node(&domain, 0, None, retained, budget, progress);
+            }
+            search.cones.release(retained, &mut search.stats.cones);
+            let Some(tree) = result? else {
                 return Ok(Vec::new());
             };
             search.stats.state = "staging";
@@ -182,7 +209,7 @@ impl GroundProgram {
     }
 }
 
-impl Search<'_, '_> {
+impl<'a> Search<'a, '_> {
     fn report(&mut self, budget: &Budget<'_>, progress: &AdmissionReporter<'_>) {
         self.stats.search_work = Some(budget.used() - self.work_start);
         self.stats.expression_nodes = Some(self.expressions.len());
@@ -203,13 +230,14 @@ impl Search<'_, '_> {
         &mut self,
         domain: &Condition,
         depth: usize,
+        cached: Option<usize>,
         retained: &mut usize,
         budget: &mut Budget<'_>,
         progress: &AdmissionReporter<'_>,
     ) -> Result<Option<Tree>> {
         let baseline = *retained;
         let expressions = self.expressions.storage;
-        let result = self.node_inner(domain, depth, retained, budget, progress);
+        let result = self.node_inner(domain, depth, cached, retained, budget, progress);
         *retained = baseline + self.expressions.storage - expressions;
         if let Ok(Some(tree)) = &result {
             *retained = crate::symbolic::retain(*retained, 0, tree.nodes(), budget)?;
@@ -220,24 +248,25 @@ impl Search<'_, '_> {
         &mut self,
         domain: &Condition,
         depth: usize,
+        cached: Option<usize>,
         retained: &mut usize,
         budget: &mut Budget<'_>,
         progress: &AdmissionReporter<'_>,
     ) -> Result<Option<Tree>> {
+        let baseline = *retained;
         budget.tick("structural split branch")?;
         self.stats.depth = depth;
         self.stats.max_depth = self.stats.max_depth.max(depth);
         let ctx = self.meaning.context();
-        let cone = component_cone(
-            self.program,
-            self.component,
-            self.summaries,
-            domain,
-            ctx,
-            retained,
-            budget,
-        )?;
-        let size = cyclic_size(&cone, retained, budget)?;
+        let ScoredCone { cone, cyclic: size } = match self.cones.take(cached) {
+            Some(value) => {
+                self.stats.cones.reused += 1;
+                *retained =
+                    crate::symbolic::retain(*retained, 0, value.cone.temporary_nodes(), budget)?;
+                value
+            }
+            None => self.prepare_cone(domain, retained, budget)?,
+        };
         self.stats.cyclic_atoms = Some(size);
         self.stats.chosen = None;
         self.stats.candidates_available = None;
@@ -318,6 +347,9 @@ impl Search<'_, '_> {
         self.stats.scoring_work = Some(0);
         self.stats.scoring_limit = Some(self.limits.scoring_work);
         self.report(budget, progress);
+        // Only this node's best pair and in-flight score may use the shared
+        // reservation. Waiting ancestor siblings yield before deeper scoring.
+        self.cones.clear(&mut self.stats.cones);
         let mut best = None;
         let mut best_score = (size, size.saturating_mul(2));
         let mut scoring_used = 0;
@@ -340,19 +372,12 @@ impl Search<'_, '_> {
             *self.stats.node_candidates_scored.as_mut().unwrap() += 1;
             self.stats.candidates_scored += 1;
             let mut sizes = [0; 2];
+            let mut cached = [None; 2];
             for (i, d) in [&yes, &no].into_iter().enumerate() {
                 let before = *retained;
-                let c = component_cone(
-                    self.program,
-                    self.component,
-                    self.summaries,
-                    d,
-                    ctx,
-                    retained,
-                    budget,
-                )?;
-                sizes[i] = cyclic_size(&c, retained, budget)?;
-                drop(c);
+                let c = self.prepare_cone(d, retained, budget)?;
+                sizes[i] = c.cyclic;
+                cached[i] = self.cones.keep(c);
                 *retained = before;
             }
             scoring_used += budget.used() - candidate_start;
@@ -361,9 +386,13 @@ impl Search<'_, '_> {
             if score < best_score {
                 let old = best.as_ref().map_or(
                     0,
-                    |(_, a, b, _): &(GroundAtom, Condition, Condition, [usize; 2])| {
-                        1 + a.node_count() + b.node_count()
-                    },
+                    |(_, a, b, _, _): &(
+                        GroundAtom,
+                        Condition,
+                        Condition,
+                        [usize; 2],
+                        [Option<usize>; 2],
+                    )| { 1 + a.node_count() + b.node_count() },
                 );
                 *retained = crate::symbolic::retain(
                     *retained,
@@ -371,25 +400,35 @@ impl Search<'_, '_> {
                     1 + yes.node_count() + no.node_count(),
                     budget,
                 )?;
-                best = Some((atom, yes, no, sizes));
+                if let Some((_, _, _, _, previous)) = &best {
+                    self.cones.discard(*previous, &mut self.stats.cones);
+                }
+                best = Some((atom, yes, no, sizes, cached));
                 best_score = score;
                 if score == (0, 0) {
                     break;
                 }
+            } else {
+                self.cones.discard(cached, &mut self.stats.cones);
             }
         }
-        let Some((atom, yes, no, sizes)) = best else {
+        let Some((atom, yes, no, sizes, cached)) = best else {
             return Ok(None);
         };
+        // Ranking and the parent cone have no readers below this point. Do not
+        // retain that scratch on every recursive frame.
+        drop(cone);
+        *retained =
+            crate::symbolic::retain(baseline, 0, 1 + yes.node_count() + no.node_count(), budget)?;
         self.stats.leaves += 1;
         self.stats.chosen = Some(atom.clone());
         self.stats.branch_cyclic_atoms = Some(sizes);
         self.stats.state = "split";
         self.report(budget, progress);
-        let Some(left) = self.node(&yes, depth + 1, retained, budget, progress)? else {
+        let Some(left) = self.node(&yes, depth + 1, cached[0], retained, budget, progress)? else {
             return Ok(None);
         };
-        let Some(right) = self.node(&no, depth + 1, retained, budget, progress)? else {
+        let Some(right) = self.node(&no, depth + 1, cached[1], retained, budget, progress)? else {
             return Ok(None);
         };
         self.stats.state = "combining";
@@ -428,6 +467,31 @@ impl Search<'_, '_> {
             certificate,
             values,
         }))
+    }
+
+    fn prepare_cone(
+        &mut self,
+        domain: &Condition,
+        retained: &mut usize,
+        budget: &mut Budget<'_>,
+    ) -> Result<ScoredCone<'a>> {
+        let cone = component_cone(
+            self.program,
+            self.component,
+            self.summaries,
+            domain,
+            self.meaning.context(),
+            retained,
+            budget,
+            &mut self.stats.cones,
+        )?;
+        let start = budget.used();
+        let result = cyclic_size(&cone, retained, budget);
+        self.stats.cones.scc_work += budget.used() - start;
+        Ok(ScoredCone {
+            cone,
+            cyclic: result?,
+        })
     }
 
     fn evaluate(

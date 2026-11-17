@@ -443,8 +443,13 @@ These values participate in request/cache validity. A zero depth or leaf cap dis
 the attempt; zero work leaves no search allowance. The limits apply to this
 whole-component path, not the older candidate-relative case search.
 
-Candidate scoring additionally has **1,000,000 charged work per node**. Check the scoring allowance between complete candidate scores; one
-in-flight score can cross it, and the global work/BDD limits always apply. Ranking
+Candidate scoring additionally has **1,000,000 charged work per node**, configurable
+with `max_structural_split_scoring_work`, `--max-structural-split-scoring-work` and
+`denotate.limits.maxStructuralSplitScoringWork`. It participates in request/cache
+validity; zero disables scoring. Check the allowance between complete candidate scores; one
+in-flight score can cross it and consume the remaining search allowance. It limits
+further scoring, without reserving work for leaves. Total search work and global
+work/BDD limits always apply. Ranking
 and fixed-candidate checks count against total search work, outside this per-node scoring allowance.
 There is no fixed candidate-count cap on this path. Pre-rank by the number of live
 component producers mentioning the settled atom, then by the smallest selected
@@ -453,6 +458,26 @@ order. Score by `(max branch cyclic atoms, sum)` with strict improvement. A perf
 score stops early; exhausting scoring keeps the best useful split already found.
 Fixed conditions consume no split or scoring allowance. The older candidate-relative
 case search keeps its separate policy above.
+Scored branch cones and their SCC sizes may be handed to the children. One
+attempt-local cache holds the best candidate's two cones and, when space allows,
+the in-flight score's pair. Non-improving scores leave the best pair intact;
+superseding it releases the old pair. Starting deeper scoring releases any waiting
+ancestor sibling.
+The selected atom and branch domains survive eviction, so children rebuild on a
+miss. Superseded or non-improving candidates release their cones; consuming a cone
+transfers it to the active node, and parent cone/ranking scratch is dropped before
+descent. Nothing is retained across components, snapshots or sessions.
+
+The cache uses a charged reservation of `min(max_condition_nodes / 64, 65_536)`
+slots, only when available. A cone which cannot fit is dropped. The
+reservation is released before staging or on failure. If it obstructs completion
+(condition storage exhaustion, or a negative search after storage-limited pruning),
+retry once without retention; all work remains charged against the same allowances.
+This is a provisional bounded-storage policy, not a promise that retry work is free.
+Progress reports cumulative cone builds/reuses/discards, liveness/pruning/SCC work,
+pruning storage fallbacks and uncached retries. These measurements do not change
+proof evidence or identities.
+
 Joint expressions are interned across all leaf values and edge replacements. The
 structural-split interner folds direct complementary children in conjunctions and
 disjunctions, and combination reuses an identical interned branch rather than

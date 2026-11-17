@@ -141,6 +141,11 @@ or part of a session's retained admission result.
 
 The early structural split pass uses the same executable expressions and rewrite
 identities, with a joint certificate shared across a component's replacements.
+Scored branch cones may be reused only within that immutable component attempt.
+One bounded cache owns the best pair and in-flight scoring pair; recursive frames carry local
+cache tokens, not owned waiting sibling graphs. Eviction preserves the choice and
+rebuilds children; storage pressure retries without retention under the same work
+budget. Neither cones nor tokens enter session artifacts.
 Its expressions form an interned DAG shared across leaf values and replacements;
 structural combination reuses equal branches and folds direct complementary terms
 without comparing domain-restricted truths. Profiling may inspect the completed

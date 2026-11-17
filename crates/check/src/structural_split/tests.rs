@@ -371,6 +371,7 @@ fn optional_caps_fall_back_and_global_work_failure_propagates() {
     ] {
         let mut search = Search {
             expressions: Expressions::default(),
+            cones: Cones::default(),
             program: &p,
             component,
             summaries: &summaries,
@@ -388,6 +389,7 @@ fn optional_caps_fall_back_and_global_work_failure_propagates() {
                 .node(
                     &m.context().permitted_worlds(),
                     0,
+                    None,
                     &mut retained,
                     &mut Budget::new(&l),
                     &progress
@@ -558,21 +560,22 @@ fn scoring_cutoff_keeps_a_useful_partial_split() {
             &[(guards[i], false), (cycle[(i + 1) % 4], true)],
         );
     }
-    let l = Limits::default();
+    let l = Limits {
+        max_structural_split_scoring_work: 1,
+        ..Limits::default()
+    };
     let mut p = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
     let batch = {
         let m = p.symbolic(&l).unwrap();
         let summaries = crate::test_support::rewrites::summaries(&p, &m, &l);
         let mut search = Search {
             expressions: Expressions::default(),
+            cones: Cones::default(),
             program: &p,
             component: p.component_for(&atom(cycle[0])).unwrap(),
             summaries: &summaries,
             meaning: &m,
-            limits: SplitLimits {
-                scoring_work: 1,
-                ..Default::default()
-            },
+            limits: SplitLimits::from(&l),
             work_start: 0,
             stats: GuardedSplitProgress {
                 leaves: 1,
@@ -586,6 +589,7 @@ fn scoring_cutoff_keeps_a_useful_partial_split() {
             .node(
                 &m.context().permitted_worlds(),
                 0,
+                None,
                 &mut retained,
                 &mut budget,
                 &progress,
@@ -698,4 +702,200 @@ fn configurable_depth_leaves_and_total_work_leave_fallback_usable() {
         assert!(events.borrow().iter().any(|e| e.stage == "bound-removals"));
         oracle(&c, &admitted);
     }
+}
+
+#[test]
+fn scoring_allowance_without_an_improving_choice_keeps_the_cycle_unsupported() {
+    let mut c = denotate_ir::Corpus::new();
+    let x = rel(&mut c, "x", true);
+    let y = rel(&mut c, "y", true);
+    let a = rel(&mut c, "a", false);
+    let b = rel(&mut c, "b", false);
+    rule(&mut c, a, &[(b, true)]);
+    rule(&mut c, b, &[(a, true)]);
+    rule(&mut c, a, &[(x, false), (y, false), (b, true)]);
+    let l = Limits {
+        max_structural_split_scoring_work: 1,
+        ..Limits::default()
+    };
+    let p = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+    let m = p.symbolic(&l).unwrap();
+    let summaries = crate::test_support::rewrites::summaries(&p, &m, &l);
+    let events = std::cell::RefCell::new(Vec::new());
+    let observer = |e: &AdmissionProgress| events.borrow_mut().push(e.clone());
+    let result = p
+        .structural_splits(
+            p.component_for(&atom(a)).unwrap(),
+            &summaries,
+            &m,
+            &mut 0,
+            &mut Budget::new(&l),
+            &AdmissionReporter::new(Some(&observer)),
+            &mut false,
+        )
+        .unwrap();
+    assert!(result.is_empty());
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .filter_map(|e| e.structural_split.as_ref())
+            .any(|s| s.state == "scoring-cutoff"
+                && s.scoring_work > s.scoring_limit
+                && s.chosen.is_none())
+    );
+    assert!(!p.is_admitted());
+    oracle(&c, &p);
+}
+
+#[test]
+fn branch_cone_reuse_eviction_and_storage_bypass_preserve_the_certificate() {
+    let mut c = denotate_ir::Corpus::new();
+    let x = rel(&mut c, "x", true);
+    let y = rel(&mut c, "y", true);
+    let guards: [_; 4] = std::array::from_fn(|i| rel(&mut c, &format!("g{i}"), false));
+    let cycle: [_; 4] = std::array::from_fn(|i| rel(&mut c, &format!("a{i}"), false));
+    for i in 0..4 {
+        rule(&mut c, guards[i], &[(x, i & 1 != 0)]);
+        rule(&mut c, guards[i], &[(y, i & 2 != 0)]);
+        rule(
+            &mut c,
+            cycle[i],
+            &[(guards[i], false), (cycle[(i + 1) % 4], true)],
+        );
+    }
+    let l = Limits {
+        max_structural_split_scoring_work: 1,
+        ..Limits::default()
+    };
+    let raw = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+    let m = raw.symbolic(&l).unwrap();
+    let summaries = crate::test_support::rewrites::summaries(&raw, &m, &l);
+    let mut expected = None;
+    // Zero slots forces rebuilding; one slot cannot retain even one cone. The
+    // normal reservation reuses children but deeper scoring evicts siblings.
+    for reservation in [0, 1, 65_536] {
+        let mut search = Search {
+            program: &raw,
+            component: raw.component_for(&atom(cycle[0])).unwrap(),
+            summaries: &summaries,
+            meaning: &m,
+            limits: SplitLimits::from(&l),
+            work_start: 0,
+            expressions: Expressions::default(),
+            cones: Cones {
+                reserved: reservation,
+                ..Default::default()
+            },
+            stats: GuardedSplitProgress {
+                leaves: 1,
+                ..Default::default()
+            },
+        };
+        let mut retained = reservation;
+        let mut budget = Budget::new(&l);
+        let reporter = AdmissionReporter::new(None);
+        let tree = search
+            .node(
+                &m.context().permitted_worlds(),
+                0,
+                None,
+                &mut retained,
+                &mut budget,
+                &reporter,
+            )
+            .unwrap()
+            .unwrap();
+        search.cones.release(&mut retained, &mut search.stats.cones);
+        if reservation > 1 {
+            assert!(search.stats.cones.reused > 0);
+            assert!(
+                search.stats.cones.discarded > 0,
+                "a waiting sibling must be expendable"
+            );
+        } else {
+            assert_eq!(search.stats.cones.reused, 0);
+        }
+        let proofs = search
+            .stage(tree, &mut retained, &mut budget, &reporter)
+            .unwrap();
+        let values: Vec<_> = proofs
+            .iter()
+            .map(|p| {
+                (
+                    p.proof.candidate.rule.id,
+                    p.occurrence,
+                    p.replacement.clone(),
+                )
+            })
+            .collect();
+        if let Some(expected) = &expected {
+            assert_eq!(&values, expected);
+        } else {
+            expected = Some(values);
+        }
+        let mut p = raw.clone();
+        p.commit_joint_for_test(proofs, &mut Budget::new(&l))
+            .unwrap();
+        assert!(p.is_admitted());
+        oracle(&c, &p);
+    }
+}
+
+#[test]
+fn optional_cone_storage_yields_to_a_successful_rebuild() {
+    let mut c = denotate_ir::Corpus::new();
+    let x = rel(&mut c, "x", true);
+    let y = rel(&mut c, "y", true);
+    let guards: [_; 4] = std::array::from_fn(|i| rel(&mut c, &format!("g{i}"), false));
+    let cycle: [_; 4] = std::array::from_fn(|i| rel(&mut c, &format!("a{i}"), false));
+    for i in 0..4 {
+        rule(&mut c, guards[i], &[(x, i & 1 != 0)]);
+        rule(&mut c, guards[i], &[(y, i & 2 != 0)]);
+        rule(
+            &mut c,
+            cycle[i],
+            &[(guards[i], false), (cycle[(i + 1) % 4], true)],
+        );
+    }
+    let l = Limits {
+        max_condition_nodes: 1_000_000,
+        max_structural_split_scoring_work: 1,
+        ..Limits::default()
+    };
+    let raw = GroundProgram::prepare(&c, &Domains::new(), &l).unwrap();
+    let m = raw.symbolic(&l).unwrap();
+    let summaries = crate::test_support::rewrites::summaries(&raw, &m, &l);
+    // Model other retained admission evidence leaving room for the reservation,
+    // but too little for this tree while that optional space remains reserved.
+    let mut retained = l.max_condition_nodes - l.max_condition_nodes / 64 - 32;
+    let events = std::cell::RefCell::new(Vec::new());
+    let observer = |e: &AdmissionProgress| events.borrow_mut().push(e.clone());
+    let batch = raw
+        .structural_splits(
+            raw.component_for(&atom(cycle[0])).unwrap(),
+            &summaries,
+            &m,
+            &mut retained,
+            &mut Budget::new(&l),
+            &AdmissionReporter::new(Some(&observer)),
+            &mut false,
+        )
+        .unwrap();
+    assert!(
+        !batch.is_empty(),
+        "rebuilding must remain possible under storage pressure"
+    );
+    assert!(
+        events
+            .borrow()
+            .iter()
+            .filter_map(|e| e.structural_split.as_ref())
+            .any(|s| s.cones.uncached_retries > 0)
+    );
+    let mut p = raw.clone();
+    p.commit_joint_for_test(batch, &mut Budget::new(&l))
+        .unwrap();
+    assert!(p.is_admitted());
+    oracle(&c, &p);
 }

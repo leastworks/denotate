@@ -53,6 +53,11 @@ only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
    `max_structural_split_leaves` and `max_structural_split_work` bound this optional
    attempt, including BDD preflight work. A local cutoff or partial/oversized
    certificate falls back; global work/deadlines/cancellation still stop admission.
+   `max_structural_split_scoring_work` bounds further scoring per node, cooperatively
+   between complete scores, keeping the best improving choice. It reserves no leaf
+   work. The chosen cones/SCC scores can be reused under a small charged reservation;
+   the best and in-flight pairs share one cap, and deeper scoring evicts waiting siblings.
+   Storage pressure retries without that reservation, with work still charged.
    Joint expression DAGs retain sharing through semantic projection/rebinding;
    equal branches and direct complementary terms simplify structurally during
    interning. No domain-relative equivalence query is added. Profiling optionally

@@ -1654,6 +1654,8 @@ verification checks{assumptions:[];obligations:[no_absent];}",
             "11",
             "--max-structural-split-work",
             "12",
+            "--max-structural-split-scoring-work",
+            "13",
         ];
         let o = options::Options::parse(args.map(str::to_owned), Limits::default()).unwrap();
         let l = o.limits;
@@ -1669,9 +1671,10 @@ verification checks{assumptions:[];obligations:[no_absent];}",
                 l.max_condition_nodes,
                 l.max_structural_split_depth,
                 l.max_structural_split_leaves,
-                l.max_structural_split_work
+                l.max_structural_split_work,
+                l.max_structural_split_scoring_work
             ],
-            [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12]
+            [1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]
         );
         assert_eq!(l.timeout, std::time::Duration::from_millis(9));
         for (flag, _) in options::limit_values(&Limits::default()) {

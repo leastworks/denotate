@@ -8,7 +8,7 @@ mod admission_progress;
 pub use admission_progress::{
     AdmissionAttempts, AdmissionComponent, AdmissionConditionPool, AdmissionObserver,
     AdmissionPhase, AdmissionProgress, AdmissionStorage, GuardedAttempt, GuardedSplitProgress,
-    SplitReplacementSizes,
+    SplitConeProgress, SplitReplacementSizes,
 };
 mod admission_scope;
 mod admission_skips;
