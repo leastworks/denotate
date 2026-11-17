@@ -12,6 +12,8 @@ use serde_json::json;
 use std::{collections::BTreeSet, fmt::Write};
 
 type Failure = (u8, String);
+#[path = "check/committed.rs"]
+mod committed;
 #[path = "check/component_dump.rs"]
 mod component_dump;
 #[path = "check/options.rs"]
@@ -28,6 +30,12 @@ mod trace;
 
 fn checker_failure(error: CheckError) -> Failure {
     let (phase, resource, details) = match error {
+        CheckError::StoppedAfterRound { round } => {
+            return (
+                2,
+                format!("Stopped after round {round}; obligation checking was not run."),
+            );
+        }
         CheckError::Deadline { phase, details } => (phase, "deadline", details),
         CheckError::LimitExceeded {
             phase,
@@ -317,6 +325,9 @@ fn check_program(
         candidate_probe,
         dump_component,
         dump_component_limit,
+        export_committed,
+        export_limits,
+        stop_after_round,
         limits,
         progress: report_progress,
         ..
@@ -436,6 +447,9 @@ fn check_program(
             "Partial run: selected verification {raw}; other verifications were not run."
         )
         .unwrap();
+    }
+    if export_committed.is_some() && requests.len() != 1 {
+        return Err((2, "--export-committed requires exactly one verification; use --verification when several exist".into()));
     }
     progress.emit(Phase::AssumptionValidation, json!({}));
     let prepare = || {
@@ -656,19 +670,47 @@ fn check_program(
         let observer =
             |event: &denotate_check::AdmissionProgress| admission.report(progress, &detail, event);
         let dump_observer = |event: denotate_check::AdmissionDump<'_>| {
+            if let (Some(path), denotate_check::AdmissionDumpEvent::Graph { state, round, .. }) =
+                (&export_committed, &event.event)
+            {
+                let started = std::time::Instant::now();
+                let result =
+                    committed::publish(std::path::Path::new(path), &export_limits, |writer| {
+                        let (source_digest, remaining) =
+                            committed::source_digest(&membership, &sources, &export_limits)?;
+                        denotate_ir_text::committed::write_committed(
+                            writer,
+                            &p.corpus,
+                            event.program,
+                            declaration,
+                            &denotate_ir_text::committed::Metadata {
+                                source_digest: &source_digest,
+                                checker_commit: env!("DENOTATE_CHECKER_COMMIT"),
+                                round: *round,
+                                state,
+                            },
+                            &remaining,
+                        )
+                    });
+                match result {
+                    Ok(stats) => trace.warning(format_args!("Committed export: {path} (round {round}, {state}); {} bytes, {} shared helpers, {:.3}s. Load in a fresh folder with an empty den.root.", stats.bytes, stats.helpers, started.elapsed().as_secs_f64())),
+                    Err(error) => trace.warning(format_args!("Committed export failed: {path}: {error}; no new artifact published")),
+                }
+            }
             if let Some(dump) = &mut *dump.borrow_mut() {
                 dump.capture(&p, declaration, event);
             }
         };
-        let dump_enabled = dump.borrow().is_some();
+        let dump_enabled = dump.borrow().is_some() || export_committed.is_some();
         let admitted = prepared
-            .admit_with_probes(
+            .admit_until_round(
                 &operations,
                 (report_progress || limits.profile.enabled() || candidate_probe.is_some())
                     .then_some(&observer),
                 candidate_probe.clone(),
                 sat_probe.then_some((sat_probe_limits.clone(), &component_observer)),
                 dump_enabled.then_some(&dump_observer),
+                stop_after_round,
             )
             .map_err(checker_failure)?
             .with_emptiness_examples(empty_examples.unwrap_or_default());
@@ -2627,6 +2669,9 @@ kept():-middle(); kept():-term(); term():-!kept(); verification checks{assumptio
 #[path = "check/shipping_news.rs"]
 mod shipping_news;
 
+#[cfg(test)]
+#[path = "check/committed_tests.rs"]
+mod committed_tests;
 #[cfg(test)]
 #[path = "check/component_dump_tests.rs"]
 mod component_dump_tests;

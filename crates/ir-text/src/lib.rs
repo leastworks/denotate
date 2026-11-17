@@ -1,6 +1,7 @@
 //! `.den` text to an owned checked program. No filesystem access, LSP scheduling,
 //! cache policy, or diagnostic wording is hidden in the loader.
 mod ast;
+pub mod committed;
 pub mod filesystem;
 pub mod index;
 mod load;

@@ -1064,12 +1064,25 @@ impl PreparedCheck<'_> {
     /// Component probes run after cheap reductions, borrowing exact settled
     /// conditions. Results are observational and never retained in admission.
     pub fn admit_with_probes(
+        self,
+        operations: &OperationalLimits,
+        observer: Option<&AdmissionObserver<'_>>,
+        probe: Option<CandidateProbeLimits>,
+        components: Option<(SatProbeLimits, &SatProbeObserver<'_>)>,
+        dump: Option<&AdmissionDumpObserver<'_>>,
+    ) -> Result<Self> {
+        self.admit_until_round(operations, observer, probe, components, dump, None)
+    }
+    /// Experimental round stop, independent of progress/cancellation. A stopped
+    /// graph is delivered through the dump observer and is never cached complete.
+    pub fn admit_until_round(
         mut self,
         operations: &OperationalLimits,
         observer: Option<&AdmissionObserver<'_>>,
         probe: Option<CandidateProbeLimits>,
         components: Option<(SatProbeLimits, &SatProbeObserver<'_>)>,
         dump: Option<&AdmissionDumpObserver<'_>>,
+        stop_after_round: Option<usize>,
     ) -> Result<Self> {
         let limits = self.request.limits.with_operations(operations);
         let mut budget = Budget::tracked(&limits);
@@ -1079,13 +1092,19 @@ impl PreparedCheck<'_> {
                     dump,
                     AdmissionDumpEvent::Graph {
                         state: "interrupted",
+                        round: 0,
                         error: Some(&error),
                     },
                 )
             });
             return Err(error);
         }
-        if let Some((program, receipt)) = self.shared_admission.as_ref().and_then(|c| c.get()) {
+        if let Some((program, receipt)) = self
+            .shared_admission
+            .as_ref()
+            .filter(|_| stop_after_round.is_none())
+            .and_then(|c| c.get())
+        {
             self.program.core = program.clone();
             self.receipts.invalidate(&QueryKey::Admission);
             self.receipts
@@ -1101,15 +1120,21 @@ impl PreparedCheck<'_> {
                     dump,
                     AdmissionDumpEvent::Graph {
                         state: "reused",
+                        round: 0,
                         error: None,
                     },
                 )
             });
             return Ok(self);
         }
-        self.program =
-            self.program
-                .admit_diagnosed(&mut budget, observer, probe, components, dump)?;
+        self.program = self.program.admit_diagnosed(
+            &mut budget,
+            observer,
+            probe,
+            components,
+            dump,
+            stop_after_round,
+        )?;
         self.receipts.invalidate(&QueryKey::Admission);
         budget.record(
             &mut self.receipts,

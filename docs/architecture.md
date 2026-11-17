@@ -356,6 +356,16 @@ locations, and streams bounded JSONL. Diagnostic allowance exhaustion and write
 failures stay outside checker results. Reuse emits the reused graph without fresh
 attempts. See the [dump guide](../crates/ir-text/examples/check/COMPONENT-DUMP.md).
 
+Committed-program export uses the same borrowed graph hook. The checker exposes
+live residual producers, original pre-admission producers and fixed truth; `ir-text`
+streams plain `.den` under independent limits, and the CLI owns atomic filesystem
+publication. Selected assumption cones are duplicated from their independent
+original meaning, while the executable program uses committed rewrites. Expression
+DAGs keep sharing across replacements. No BDD, cached admission or source origin
+is serialized. Explicit round stops are checker control, separate from optional
+progress observers and from export cancellation; they return an uncached
+`StoppedAfterRound` error after the whole round. Ordinary runs are unchanged.
+
 ## Programs and checking in the editor
 
 A `.den` program is a `den.root` folder plus its referenced libraries; a file outside

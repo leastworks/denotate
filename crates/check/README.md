@@ -6,6 +6,16 @@ checks admissibility, replays concrete input worlds, and proves or refutes
 only replayed counterexamples. Runtime dependencies: `denotate-ir`, pinned
 `biodivine-lib-bdd`.
 
+For experimental resumption, `PreparedCheck::admit_until_round` optionally stops
+after a complete admission round and returns `StoppedAfterRound`. Its borrowed
+`AdmissionDumpEvent::Graph` includes the last committed graph and round, even on
+interruption. The stop is independent of progress delivery and cancellation, bypasses
+completed-admission reuse, and cannot populate that cache. Default admission entry
+points retain their existing behavior. `residual_rules`, `original_residual_rules`
+and `fixed_true_atoms` expose the executable graph and independent assumption
+source without traversing fixed derivation evidence. Serialization belongs to
+[`ir-text`](../ir-text/README.md#committed-program-experiments).
+
 ## Pipeline
 
 1. **Domains.** `Domains` maps every sort to its typed constants. The checker never

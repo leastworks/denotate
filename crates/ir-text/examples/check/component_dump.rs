@@ -145,7 +145,7 @@ impl Dump {
         };
         let result = (|| -> Result<(), String> {
             match event.event {
-                AdmissionDumpEvent::Graph { state, error } => {
+                AdmissionDumpEvent::Graph { state, error, .. } => {
                     formatter.graph(verification, state, error)
                 }
                 AdmissionDumpEvent::Guarded {

@@ -191,6 +191,20 @@ probed cone; it still does not admit the program or establish anything about
 unrelated regions. Unresolved upstream components remain unknown in this increment.
 Admitting programs based on SAT stays a separate future choice.
 
+### Committed program exports
+
+Committed-program export (`--export-committed FILE`) is a separate experiment for
+skipping already-committed proof search on a later run. It does not retain BDDs;
+loading, grounding, preparation and symbolic evaluation recur. Measure these phases
+separately. Independent defaults are 100 million traversal work units, 1 GiB of
+output and 120 seconds (`--export-max-work`, `--export-max-bytes`,
+`--export-timeout-ms`). These bound streaming output and temporary expression/name
+indexes; they are not an exact heap-byte budget. Export time is excluded from
+admission's deadline. Failure cannot change a verdict or publish a partial file.
+An explicit `--stop-after-round N` instead intentionally skips checking and returns
+incomplete (2), without caching partial admission. See the
+[export guide](../crates/ir-text/README.md#committed-program-experiments).
+
 ### Component dumps
 
 `--dump-component FILE` records actual guarded attempts and the final committed

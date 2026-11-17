@@ -6,6 +6,33 @@ Settled design choices and why they were made. Current behavior is specified in 
 alternatives that were rejected. Revisit a decision only with new evidence, such as a
 real program that the current choice serves badly.
 
+## Resume experiments through plain ground source, preserving assumption meaning
+
+Repeated private-program experiments can spend many minutes redoing successful
+admission rounds before reaching the component under investigation. Export the
+committed ground program as `.den`, rather than a version-sensitive binary
+checkpoint. Ground instances prevent removed source-rule instances from returning;
+shared helper relations preserve replacement-expression DAGs without DNF expansion.
+Resolved domains, exact eligible inputs, fixed true tuples and unrelated residual
+regions stay in the artifact. BDD conditions and proof history do not: preparation
+and symbolic evaluation still repeat.
+
+Preserving meaning under the source's W is insufficient if the export changes W.
+For `good() :- x(), !y()` with selected coverage of `good`, W is `x ∧ ¬y`.
+Admission can discharge `!y`; reusing `good() :- x()` as the assumption's meaning
+would wrongly permit `y`. Export selected assumptions over separate original cones,
+sharing the original inputs and fixed truth. Copy only the reachable ground
+instances: copying whole relations could duplicate an unrelated cycle at other
+tuples and invent program-wide findings. Exhaustive tests compare W first,
+then stable models projected onto original atoms.
+
+One export contains one verification. It is derived experimental source, not a
+verdict or substitute for reviewing the original program. Locations/identities
+belong to the export and already-applied rewrite warnings disappear. Independent
+limits and atomic, no-overwrite publication keep diagnostic export failure outside
+checker outcomes. An explicit stop after an entire admission round is intentionally
+incomplete, skips checking and cannot populate the complete-admission cache.
+
 ## Amortize deadline clock reads, preserve cancellation and boundary checks
 
 Per-charge monotonic clock reads were measurable overhead during grounding and

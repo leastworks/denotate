@@ -28,6 +28,10 @@ pub enum CheckError {
     Construction(denotate_ir::ConstructionError),
     /// Superseded work, not a resource limit or a semantic result.
     Cancelled,
+    /// An explicit experiment stop at a completed admission round. Not cacheable.
+    StoppedAfterRound {
+        round: usize,
+    },
     Deadline {
         phase: &'static str,
         details: LimitDetails,

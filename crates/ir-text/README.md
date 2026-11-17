@@ -5,7 +5,7 @@ embedded origins, folder-root membership and the incremental editor index. The f
 itself is described in [docs/den-format.md](../../docs/den-format.md).
 
 It compiles the committed parser generated from `grammars/den` (needs a C compiler, not
-Node). Apart from the `filesystem` command adapter it performs no IO: callers supply
+Node). Apart from the `filesystem` command adapter it accesses no filesystem: callers supply
 program membership and authoritative snapshots.
 
 ## Loading
@@ -87,6 +87,46 @@ Unselected ground cones stay deferred; loading alone does not establish their va
 remains one declaration and selection through printing and reloading. Grouping uses
 resolved domains, including explicit overrides. Coverage results and diagnostics are described in the
 [format](../../docs/den-format.md#coverage-obligations).
+
+## Committed-program experiments
+
+`committed::write_committed` streams one verification's committed ground graph to
+a caller-owned writer under independent work, byte, deadline and cancellation limits.
+It includes resolved domains, exact input eligibility, fixed true facts and the
+whole residual program. Shared replacement expressions become shared helper
+relations. Selected assumptions refer to separate, original ground dependency cones;
+otherwise a rewrite justified by an assumption could weaken that very assumption
+on reload. This preserves the permitted worlds as well as meaning within them.
+
+The CLI exposes this as `--export-committed FILE`. Choose a new `.den` file in a
+separate folder containing a `den.root` with `{}`; then run that folder normally:
+
+```sh
+just check-den <source-program> --verification checks --export-committed <resume-folder>/committed.den --stop-after-round 3
+just check-den <resume-folder>
+```
+
+With several verifications, `--verification` is required. Export runs on admission
+completion or interruption, including its deadline. `--stop-after-round N` stops
+after the entire round (possibly several commits), skips checking, and returns 2.
+If admission finishes before N, checking continues normally. The stop works with
+`--no-progress`, uses no cancellation token, and never caches partial admission as
+complete. Ctrl+C retains its existing behavior; it does not promise an export.
+
+Output streams through a sibling temporary file and is published atomically without
+overwriting an existing file. A failed export reports its cause and publishes
+nothing; exporting alone does not change the check's verdict or exit status.
+`--export-max-work`, `--export-max-bytes` and `--export-timeout-ms` default to
+100 million work units, 1 GiB and 120 seconds, independently of admission limits.
+
+The header records the source digest, build base commit (local changes may be
+present), selected declarations, round and state. This is a local experimental artifact, with names intact. It contains no
+original `loc(...)` origins: locations and identities refer to the new ground source;
+warnings for already-applied executable rewrites disappear; copied assumption cones
+can still receive warnings of their own. Warning removal can change a resumed CLI
+exit from findings to proved without changing any obligation conclusion. It retains
+no BDDs or proofs, and resuming still repeats loading, grounding, preparation and symbolic evaluation.
+Compare obligation/notice conclusions, not diagnostic identities or warning counts.
 
 ## Editor index
 

@@ -323,6 +323,16 @@ impl Rewrites {
     }
 }
 
+// Called at every successful round boundary, after all structural/proof commits.
+// This is control flow, not a resource failure or an optional progress callback.
+fn round_boundary(round: usize, stop_after_round: Option<usize>) -> Result<()> {
+    if stop_after_round.is_some_and(|limit| round >= limit) {
+        Err(CheckError::StoppedAfterRound { round })
+    } else {
+        Ok(())
+    }
+}
+
 impl GroundProgram {
     pub(crate) fn rewrite_storage_nodes(&self) -> usize {
         self.rewrites.nodes
@@ -520,14 +530,16 @@ impl GroundProgram {
         config: Option<CandidateProbeLimits>,
         components: Option<(SatProbeLimits, &SatProbeObserver<'_>)>,
         dump: Option<&AdmissionDumpObserver<'_>>,
+        stop_after_round: Option<usize>,
     ) -> Result<Self> {
-        self.admit_attempts(
+        self.admit_attempts_controlled(
             budget,
             observer,
             Attempts::default(),
             config,
             components,
             dump,
+            stop_after_round,
         )
     }
     #[cfg(test)]
@@ -546,6 +558,18 @@ impl GroundProgram {
     }
 
     fn admit_attempts(
+        self,
+        budget: &mut Budget<'_>,
+        observer: Option<&AdmissionObserver<'_>>,
+        attempts: Attempts,
+        probe: Option<CandidateProbeLimits>,
+        components: Option<(SatProbeLimits, &SatProbeObserver<'_>)>,
+        dump: Option<&AdmissionDumpObserver<'_>>,
+    ) -> Result<Self> {
+        self.admit_attempts_controlled(budget, observer, attempts, probe, components, dump, None)
+    }
+
+    fn admit_attempts_controlled(
         mut self,
         budget: &mut Budget<'_>,
         observer: Option<&AdmissionObserver<'_>>,
@@ -553,6 +577,7 @@ impl GroundProgram {
         probe: Option<CandidateProbeLimits>,
         components: Option<(SatProbeLimits, &SatProbeObserver<'_>)>,
         dump: Option<&AdmissionDumpObserver<'_>>,
+        stop_after_round: Option<usize>,
     ) -> Result<Self> {
         self.rewrites.skips.clear();
         self.rewrites.skipped_attempts = 0;
@@ -572,6 +597,7 @@ impl GroundProgram {
                     dump,
                     AdmissionDumpEvent::Graph {
                         state: "interrupted",
+                        round: 0,
                         error: Some(&error),
                     },
                 )
@@ -588,6 +614,7 @@ impl GroundProgram {
                     dump,
                     AdmissionDumpEvent::Graph {
                         state: "inconsistent-assumptions",
+                        round: 0,
                         error: None,
                     },
                 )
@@ -597,7 +624,14 @@ impl GroundProgram {
         let mut round = 0;
         let mut phase = AdmissionPhase::Relevant;
         let result = self
-            .rewrite_loop(budget, &progress, &mut attempts, phase, &mut round)
+            .rewrite_loop(
+                budget,
+                &progress,
+                &mut attempts,
+                phase,
+                &mut round,
+                stop_after_round,
+            )
             .and_then(|()| {
                 progress.round_end(&self);
                 // Downstream never attempts guarded replacements. Release the
@@ -605,7 +639,14 @@ impl GroundProgram {
                 attempts.clear_prepared();
                 phase = AdmissionPhase::Downstream;
                 progress.phase(phase);
-                self.rewrite_loop(budget, &progress, &mut attempts, phase, &mut round)
+                self.rewrite_loop(
+                    budget,
+                    &progress,
+                    &mut attempts,
+                    phase,
+                    &mut round,
+                    stop_after_round,
+                )
             });
         budget.excluding_time(|| progress.candidate_probe_summary(&self));
         progress.round_end(&self);
@@ -615,7 +656,10 @@ impl GroundProgram {
             self.dump(
                 dump,
                 AdmissionDumpEvent::Graph {
-                    state: if result.is_ok() {
+                    round,
+                    state: if matches!(result, Err(CheckError::StoppedAfterRound { .. })) {
+                        "stopped"
+                    } else if result.is_ok() {
                         "complete"
                     } else {
                         "interrupted"
@@ -646,6 +690,7 @@ impl GroundProgram {
         attempts: &mut Attempts,
         phase: AdmissionPhase,
         round: &mut usize,
+        stop_after_round: Option<usize>,
     ) -> Result<()> {
         let profile = budget.limits.profile.clone();
         loop {
@@ -673,13 +718,13 @@ impl GroundProgram {
                             || (self.input_groups.is_empty()
                                 && self.assumption_condition.is_none()))
                     {
-                        return Ok(());
+                        return round_boundary(*round, stop_after_round);
                     }
                     scope = crate::admission_scope::AdmissionScope::build(self, phase, budget)?;
                 }
             }
             if scope.targets.is_empty() {
-                return Ok(());
+                return round_boundary(*round, stop_after_round);
             }
             progress.snapshot(self, *round, "summary-frontier");
             let summary_plan = {
@@ -967,7 +1012,7 @@ impl GroundProgram {
             }
             drop(candidates_profile);
             if batch.is_empty() {
-                return Ok(());
+                return round_boundary(*round, stop_after_round);
             }
             drop(producers);
             drop(exact_heads);
@@ -984,6 +1029,7 @@ impl GroundProgram {
                     crate::admission_storage::report(self, None, &BTreeMap::new(), attempts, 0),
                 );
             }
+            round_boundary(*round, stop_after_round)?;
         }
     }
 

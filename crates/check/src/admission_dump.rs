@@ -14,6 +14,7 @@ pub enum AdmissionDumpEvent<'a> {
     /// The last committed graph, including on cancellation or deadline failure.
     Graph {
         state: &'static str,
+        round: usize,
         error: Option<&'a CheckError>,
     },
     /// The final guard and cone actually passed to bounds, never a ranking preview.
@@ -40,6 +41,21 @@ pub enum AdmissionDumpEvent<'a> {
 pub type AdmissionDumpObserver<'a> = dyn Fn(AdmissionDump<'_>) + 'a;
 
 impl GroundProgram {
+    /// Executable committed residual rules, excluding fixed evidence and removed producers.
+    pub fn residual_rules(&self) -> impl Iterator<Item = &GroundRule> {
+        self.rules
+            .iter()
+            .filter(|r| !self.rewrites.dropped.contains(&r.id))
+    }
+    /// Independently prepared residual rules before admission. Needed to preserve
+    /// assumption meaning when exporting context-dependent committed rewrites.
+    pub fn original_residual_rules(&self) -> impl Iterator<Item = &GroundRule> {
+        self.rules.iter().map(|r| self.original_rule(r.id).unwrap())
+    }
+    /// Fixed truth, without its retained derivation/evidence graph.
+    pub fn fixed_true_atoms(&self) -> impl Iterator<Item = &GroundAtom> {
+        self.fixed.iter().flat_map(|f| f.derivations.keys())
+    }
     pub(crate) fn dump(
         &self,
         observer: Option<&AdmissionDumpObserver<'_>>,

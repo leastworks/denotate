@@ -15,6 +15,9 @@ pub struct Options {
     pub profile_memory: Option<String>,
     pub dump_component: Option<String>,
     pub dump_component_limit: usize,
+    pub export_committed: Option<String>,
+    pub export_limits: denotate_ir_text::committed::ExportLimits,
+    pub stop_after_round: Option<usize>,
     pub limits: Limits,
     pub input_order: InputOrder,
     pub sat_probe: bool,
@@ -71,6 +74,11 @@ pub fn help() -> String {
         --profile-memory FILE     Stream detailed memory/BDD JSON lines to a new file\n\
         --dump-component FILE     Stream bounded admission component diagnostics (local JSONL)\n\
         --dump-component-limit N  Aggregate data record cap (default 100000)\n\
+        --export-committed FILE   Atomically write one verification's committed graph to a new .den file\n\
+        --stop-after-round N      Stop after a whole admission round; requires --export-committed (exit 2)\n\
+        --export-max-work N       Independent export work cap (default 100000000)\n\
+        --export-max-bytes N      Independent export byte cap (default 1073741824)\n\
+        --export-timeout-ms N     Independent export deadline (default 120000)\n\
         --help, -h                Show this help\n\n\
         Checker limits (nonnegative integers; zero allows no use of that resource):\n",
     );
@@ -103,6 +111,9 @@ impl Options {
             profile_memory: None,
             dump_component: None,
             dump_component_limit: 100_000,
+            export_committed: None,
+            export_limits: Default::default(),
+            stop_after_round: None,
             limits,
             input_order: InputOrder::Key,
             sat_probe: false,
@@ -125,6 +136,31 @@ impl Options {
                 "--no-progress" => options.progress = false,
                 "--profile-memory" => options.profile_memory = Some(value()?),
                 "--dump-component" => options.dump_component = Some(value()?),
+                "--export-committed" => options.export_committed = Some(value()?),
+                "--stop-after-round" => {
+                    let n = value()?
+                        .parse::<usize>()
+                        .ok()
+                        .filter(|n| *n > 0)
+                        .ok_or((2, "--stop-after-round requires a positive integer".into()))?;
+                    options.stop_after_round = Some(n);
+                }
+                "--export-max-work" | "--export-max-bytes" => {
+                    let n = value()?
+                        .parse::<usize>()
+                        .map_err(|_| (2, format!("{option} requires a nonnegative integer")))?;
+                    if option == "--export-max-work" {
+                        options.export_limits.max_work = n;
+                    } else {
+                        options.export_limits.max_bytes = n;
+                    }
+                }
+                "--export-timeout-ms" => {
+                    options.export_limits.timeout =
+                        Duration::from_millis(value()?.parse::<u64>().map_err(|_| {
+                            (2, format!("{option} requires a nonnegative integer"))
+                        })?);
+                }
                 "--dump-component-limit" => {
                     options.dump_component_limit = value()?
                         .parse()
@@ -241,6 +277,9 @@ impl Options {
                     ));
                 }
             }
+        }
+        if options.stop_after_round.is_some() && options.export_committed.is_none() {
+            return Err((2, "--stop-after-round requires --export-committed".into()));
         }
         Ok(options)
     }
