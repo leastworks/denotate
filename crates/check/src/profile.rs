@@ -37,7 +37,51 @@ pub struct ProfileEvent {
 /// Optional detailed observations. Atom handles belong to the current invocation;
 /// drivers resolve them to authored/semantic identities before storing the stream.
 #[derive(Debug, Clone)]
+pub struct RecursiveComponentShape {
+    pub component: usize,
+    pub atoms: usize,
+    pub rules: usize,
+    pub relations: Vec<(denotate_ir::RelationId, usize)>,
+    pub omitted_relations: usize,
+    pub cycles: Vec<Vec<crate::GroundAtom>>,
+    pub cycle_search_truncated: bool,
+}
+#[derive(Debug, Clone)]
+pub struct RecursiveRelation {
+    pub relation: denotate_ir::RelationId,
+    pub atoms: usize,
+    pub conditions: usize,
+    pub nodes: usize,
+}
+#[derive(Debug, Clone)]
+pub struct RecursiveSnapshot {
+    pub component: usize,
+    pub state: &'static str,
+    pub error: Option<crate::CheckError>,
+    pub completed_rounds: usize,
+    pub rule_visits: usize,
+    pub rule_evaluations: usize,
+    pub changed_heads: usize,
+    pub previous_round_changed_heads: usize,
+    pub restarts: usize,
+    pub scheduler_entries: usize,
+    /// Whole evaluator's accepted accounting, including masks and reservations.
+    pub accounted_nodes: usize,
+    /// Per-condition sum for this component, counting shared arrays repeatedly.
+    pub component_nodes: usize,
+    /// Distinct live arrays in this component; not unique Boolean functions/nodes.
+    pub storage: BddStorage,
+    /// Cumulative newly wrapped results since this component started, not live allocations.
+    pub result_arrays: u64,
+    pub result_nodes: u64,
+    pub largest: Vec<(crate::GroundAtom, usize)>,
+    pub relations: Vec<RecursiveRelation>,
+    pub omitted_relations: usize,
+}
+#[derive(Debug, Clone)]
 pub enum ConditionObservation {
+    RecursiveShape(RecursiveComponentShape),
+    RecursiveSnapshot(RecursiveSnapshot),
     BindDeclarations {
         relations: Vec<(denotate_ir::RelationId, denotate_ir::RelationKey)>,
         constants: Vec<(denotate_ir::ConstantId, denotate_ir::ConstantKey)>,
@@ -106,6 +150,14 @@ impl Profile {
     }
     pub fn enabled(&self) -> bool {
         self.0.is_some()
+    }
+    pub(crate) fn result_traffic(&self) -> (u64, u64) {
+        self.0.as_ref().map_or((0, 0), |s| {
+            (
+                s.results.load(Ordering::Relaxed),
+                s.nodes.load(Ordering::Relaxed),
+            )
+        })
     }
     pub(crate) fn bdd_created(&self, nodes: usize) {
         if let Some(s) = &self.0 {

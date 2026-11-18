@@ -1439,6 +1439,43 @@ mod tests {
     }
 
     #[test]
+    fn recursive_condition_profile_survives_exhaustion_with_named_shape_and_storage() {
+        let f = Fixture::new(
+            "input x(); input y(); relation a(); relation b(); a():-b(); b():-a(); b():-x(),y(); relation bad(); bad():-a(),!x(); obligation clear:empty(bad); verification checks{assumptions:[];obligations:[clear];}",
+        );
+        for limited in [false, true] {
+            let path = f.0.join(format!("recursive-{limited}.jsonl"));
+            let mut flags = vec!["--json", "--no-progress"];
+            if limited {
+                flags.extend(["--max-bdd-nodes", "3"]);
+            }
+            let expected = f.traced(&flags);
+            flags.extend([
+                "--profile-memory",
+                path.to_str().unwrap(),
+                "--profile-conditions",
+            ]);
+            let actual = f.traced(&flags);
+            assert_eq!(expected.0, actual.0);
+            assert_eq!(expected.1, actual.1);
+            let text = fs::read_to_string(path).unwrap();
+            assert!(!text.contains("unresolved-profile-id"));
+            let rows: Vec<serde_json::Value> = text
+                .lines()
+                .map(|l| serde_json::from_str(l).unwrap())
+                .collect();
+            assert!(rows.iter().any(|r| r["kind"] == "recursive-component-shape"
+                && r["atoms"] == 2
+                && r["cycles"].as_array().is_some_and(|c| !c.is_empty())));
+            assert!(rows.iter().any(|r| r["kind"] == "recursive-component"
+                && r["state"] == if limited { "exhausted" } else { "complete" }
+                && r["ruleEvaluations"].is_number()
+                && r["retainedArrayNodes"].is_number()
+                && r["relations"].is_array()));
+        }
+    }
+
+    #[test]
     fn condition_profile_rebinds_owned_local_runtime_atoms() {
         let shape = schema_generator::Shape {
             encoding: schema_generator::Encoding::Knowledge,

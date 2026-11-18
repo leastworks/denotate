@@ -69,7 +69,12 @@ component-wide failures. Unknown conditions and their originating atom/resource
 travel with evaluated state; owned local queries project both atom identities to
 semantic keys. Presentation names these supplied causes rather than tracing
 dependencies again. Restarting an affected positive component prevents partial
-fixed-point conditions from being published as exact results.
+fixed-point conditions from being published as exact results. Positive components
+schedule readers of changed atoms in deterministic sparse rounds; the reverse
+index is invocation-local and includes replacement dependencies. Its optional
+storage reservation is released before falling back to scanning on storage
+pressure. Profiling may expose partial approximations during this computation,
+but they remain observations and cannot enter proof or session results.
 
 Restricted input domains follow the same boundaries: `Corpus` validates provider
 signatures and their static, stratified dependency cones; the checker evaluates them

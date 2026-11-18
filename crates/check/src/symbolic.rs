@@ -1,4 +1,6 @@
+mod observation;
 mod retention;
+mod schedule;
 use crate::{
     boolean::limit,
     limits::{Budget, Result},
@@ -578,6 +580,8 @@ impl GroundProgram {
                                 .expect("current component"),
                         )
                     });
+            let mut observation =
+                observation::Observation::new(self, component, &budget.limits.profile);
             let previous_retained = retained;
             if let Some(observe) = observe {
                 observe(component.id, None);
@@ -588,13 +592,39 @@ impl GroundProgram {
             // component from bottom: earlier approximations may have read that
             // head before its condition grew beyond the allowance.
             let mut failed = BTreeMap::new();
+            let mut schedule: Option<schedule::Schedule> = None;
+            let mut scan_only = !component.recursive;
+            #[cfg(test)]
+            {
+                scan_only |= SCAN_ONLY.with(|v| v.get());
+            }
+            let mut scheduling_fallback = false;
             let result = 'restart: loop {
                 let failures_before = failed.len();
                 let pass = (|| -> Result<()> {
                     budget.tick("symbolic evaluation")?;
+                    if !scan_only && schedule.is_none() {
+                        schedule = schedule::Schedule::build(self, index, retained, budget)?;
+                        if let Some(schedule) = &schedule {
+                            retained = retain(retained, 0, schedule.nodes, budget)?;
+                        } else {
+                            scan_only = true;
+                        }
+                    }
+                    if let Some(o) = &mut observation {
+                        o.scheduler(schedule.as_ref().map_or(0, |s| s.nodes));
+                    }
                     loop {
                         let mut changed = false;
-                        for rule_index in &self.component_rules[index] {
+                        let mut scan = 0..self.component_rules[index].len();
+                        while let Some(position) = match &mut schedule {
+                            Some(s) => s.pop(),
+                            None => scan.next(),
+                        } {
+                            let rule_index = &self.component_rules[index][position];
+                            if let Some(o) = &mut observation {
+                                o.visit(&meaning, retained);
+                            }
                             budget.tick("symbolic evaluation")?;
                             let rule = &self.rules[*rule_index];
                             let head = &rule.head.atom;
@@ -606,6 +636,9 @@ impl GroundProgram {
                                 continue;
                             }
                             let _profile_target = budget.limits.profile.target(head);
+                            if let Some(o) = &mut observation {
+                                o.evaluated();
+                            }
                             let next =
                                 meaning.evaluate_producer(rule, index, old, &mut retained, budget);
                             match next {
@@ -613,14 +646,54 @@ impl GroundProgram {
                                     meaning.unknown.remove(head);
                                     meaning.conditions.insert(head.clone(), c);
                                     changed = true;
+                                    if let Some(o) = &mut observation {
+                                        o.changed(head);
+                                    }
+                                    if let Some(s) = &mut schedule {
+                                        s.changed(self.atom_index[head], position, budget)?;
+                                    }
                                 }
                                 Ok(Some(PartialCondition::Unknown(u))) => {
                                     meaning.conditions.remove(head);
-                                    changed |= !meaning.unknown.contains_key(head);
+                                    if !meaning.unknown.contains_key(head) {
+                                        changed = true;
+                                        if let Some(o) = &mut observation {
+                                            o.changed(head);
+                                        }
+                                        if let Some(s) = &mut schedule {
+                                            s.changed(self.atom_index[head], position, budget)?;
+                                        }
+                                    }
                                     meaning.unknown.insert(head.clone(), u);
                                 }
                                 Ok(None) => {}
                                 Err(error) if local_exhaustion(&error) => {
+                                    if matches!(
+                                        &error,
+                                        CheckError::LimitExceeded {
+                                            resource: "condition nodes",
+                                            ..
+                                        }
+                                    ) && schedule.is_some()
+                                    {
+                                        if let Some(o) = &mut observation {
+                                            o.emit(
+                                                &meaning,
+                                                retained,
+                                                "scheduler-fallback",
+                                                Some(&error),
+                                            );
+                                        }
+                                        // Scheduling must not use the room an exact condition needs.
+                                        // Release it and restart from bottom before marking a head unknown.
+                                        schedule = None;
+                                        scan_only = true;
+                                        scheduling_fallback = true;
+                                        return Ok(());
+                                    }
+                                    if let Some(o) = &mut observation {
+                                        o.emit(&meaning, retained, "exhausted", Some(&error));
+                                    }
                                     // No partial condition or producer contribution
                                     // escapes this restart. Consumed work stays charged.
                                     let _atom = budget.limits.progress.sampled(
@@ -642,7 +715,11 @@ impl GroundProgram {
                                 Err(error) => return Err(error),
                             }
                         }
-                        if !component.recursive || !changed {
+                        if let Some(o) = &mut observation {
+                            o.round();
+                        }
+                        let pending = schedule.as_mut().is_some_and(|s| s.next_round());
+                        if !component.recursive || !changed || (schedule.is_some() && !pending) {
                             break;
                         }
                     }
@@ -653,7 +730,7 @@ impl GroundProgram {
                 }
                 // Install each new failure only after discarding the whole
                 // component's intermediate approximations.
-                if failed.len() != failures_before {
+                if failed.len() != failures_before || scheduling_fallback {
                     if let Err(error) = budget.charge(component.atoms.len(), "symbolic restart") {
                         break Err(error);
                     }
@@ -663,10 +740,23 @@ impl GroundProgram {
                         }
                         meaning.unknown.remove(atom);
                     }
-                    retained = previous_retained;
+                    retained = previous_retained + schedule.as_ref().map_or(0, |s| s.nodes);
                     meaning.unknown.extend(failed.clone());
+                    scheduling_fallback = false;
+                    if let Some(s) = &mut schedule {
+                        if let Err(error) = s.restart(budget) {
+                            break Err(error);
+                        }
+                    }
+                    if let Some(o) = &mut observation {
+                        o.restart();
+                    }
                     continue 'restart;
                 }
+                if let Some(o) = &mut observation {
+                    o.emit(&meaning, retained, "complete", None);
+                }
+                retained -= schedule.as_ref().map_or(0, |s| s.nodes);
                 break Ok(());
             };
             #[cfg(any(test, feature = "test-support"))]
@@ -674,6 +764,9 @@ impl GroundProgram {
                 measured(component.id, start.elapsed());
             }
             if let Err(error) = result {
+                if let Some(o) = &mut observation {
+                    o.emit(&meaning, retained, "interrupted", Some(&error));
+                }
                 if !partial {
                     return Err(error);
                 }
@@ -843,3 +936,10 @@ impl SymbolicMeaning<'_> {
         )
     }
 }
+
+#[cfg(test)]
+mod observation_tests;
+
+// Test-only reference schedule; never a request option or retained session state.
+#[cfg(test)]
+thread_local! { static SCAN_ONLY: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }

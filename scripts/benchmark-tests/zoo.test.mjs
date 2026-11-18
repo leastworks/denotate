@@ -49,6 +49,7 @@ test('each family reaches its semantic and structural path; two-size smoke has n
       if(name.startsWith('guarded-')) {assert.ok(joint(r)||r.guardedAttempts.some(g=>g.attempt.state==='completed'&&g.attempt.restricted&&g.attempt.coneAtoms>0));assert.ok(r.guardedAttempts.every(g=>Number.isFinite(g.attempt.preprocessingMs)&&Number.isFinite(g.attempt.iterationMs)));}
       if(name==='guarded-hub') {assert.equal(r.after.admitted,true);assert.equal(r.exit,0);assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));assert.equal(r.outcomes[0].notices[0].result.state,'varying');}
       if(name==='writer-ring') {assert.equal(r.after.admitted,true);assert.equal(r.outcomes[0].emptiness[0].outcome,'proved');assert.equal(r.outcomes[0].notices[0].result.state,'varying');}
+      if(name==='knowledge-scc') {assert.equal(r.exit,0);assert.equal(r.after.admitted,true);assert.equal(r.before.ground.largestComponentAtoms,2);assert.equal(r.outcomes[0].emptiness[0].outcome,'proved');assert.equal(r.outcomes[0].notices[0].result.state,'varying');}
       if(name==='schema-layered')assert.equal(r.after.admitted,true);
       if(name==='component-chain') {
         assert.equal(r.after.admitted,true);

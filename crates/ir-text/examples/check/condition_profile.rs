@@ -52,6 +52,16 @@ pub fn install(p: &LoadedProgram, profile: &Profile, file: Option<super::profile
         let atom = |a: &GroundAtom| json!({"relation": names(a.relation.into()), "arguments": a.arguments.iter().map(|c| names((*c).into())).collect::<Vec<_>>()});
         let mut detail = match event.observation {
             O::BindDeclarations { .. } | O::UnbindDeclarations { .. } => unreachable!(),
+            O::RecursiveShape(s) => json!({"kind":"recursive-component-shape", "component":s.component,"atoms":s.atoms,"rules":s.rules,
+                "relations":s.relations.iter().map(|(r,n)| json!({"relation":names((*r).into()),"atoms":n})).collect::<Vec<_>>(),
+                "omittedRelations":s.omitted_relations,"cycles":s.cycles.iter().map(|c| c.iter().map(atom).collect::<Vec<_>>()).collect::<Vec<_>>(),"cycleSearchTruncated":s.cycle_search_truncated}),
+            O::RecursiveSnapshot(s) => json!({"kind":"recursive-component", "component":s.component,"state":s.state,"error":s.error.map(|e|e.to_string()),
+                "completedRounds":s.completed_rounds,"ruleVisits":s.rule_visits,"ruleEvaluations":s.rule_evaluations,"changedHeads":s.changed_heads,"previousRoundChangedHeads":s.previous_round_changed_heads,"restarts":s.restarts,"schedulerEntries":s.scheduler_entries,"schedule":if s.scheduler_entries==0 {"scan"}else{"worklist"},
+                "accountedNodes":s.accounted_nodes,"componentNodes":s.component_nodes,
+                "retainedArrays":s.storage.distinct_arrays,"retainedArrayNodes":s.storage.nodes,"retainedNodeBytes":s.storage.node_bytes,"conditionReferences":s.storage.references,
+                "resultArrays":s.result_arrays,"resultNodes":s.result_nodes,
+                "largest":s.largest.iter().map(|(a,n)|json!({"atom":atom(a),"nodes":n})).collect::<Vec<_>>(),
+                "relations":s.relations.iter().map(|r|json!({"relation":names(r.relation.into()),"atoms":r.atoms,"conditions":r.conditions,"nodes":r.nodes})).collect::<Vec<_>>(),"omittedRelations":s.omitted_relations}),
             O::InputOrder {atoms, report} => json!({"kind":"input-order", "atoms":atoms.iter().map(atom).collect::<Vec<_>>(), "requested":report.requested.label(), "effective":report.effective.label(), "fallback":report.fallback}),
             O::Retained {atom:a, nodes} => json!({"kind":"retained-condition", "atom":atom(&a), "nodes":nodes, "minimumNodes":64}),
             O::AssumptionStep {kind, group, atom:a, seen_nodes, permitted_nodes} => json!({"kind":"assumption-step", "restriction":kind,"group":group,"atom":a.as_ref().map(atom),"seenNodes":seen_nodes,"permittedNodes":permitted_nodes}),

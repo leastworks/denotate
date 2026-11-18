@@ -173,7 +173,12 @@ source without traversing fixed derivation evidence. Serialization belongs to
    presence/absence evidence. Observation certification can prune a false composite
    condition and records that condition and its settled leaves explicitly.
 5. **Symbolic meaning.** `symbolic` computes a condition per fact over the input
-   variables; `check_at_most_one` gives scoped group results: `Proved`,
+   variables. Positive recursive components use dependency-driven sparse rounds:
+   evaluate every producer initially, then only readers of changed premises,
+   in the existing producer order. This computes the same least fixpoint; dense
+   growth can still require many evaluations. Scheduling metadata is charged and
+   falls back to full scans if its storage is unavailable or needed by conditions.
+   `check_at_most_one` gives scoped group results: `Proved`,
    `Overlap(condition)`, `Unsupported` or `Inconclusive { phase, resource }`.
    An individual atom's BDD task/node or retained-condition limit makes its exact
    condition unknown, rather than ending admission or independent checking.
@@ -666,3 +671,10 @@ verification-only `checking_within_w` option instead keeps its full-W algebra.
 Proof queries, completion, notices and SAT probes share the same legal-world
 contract. Programs with declarations temporarily use global verification rather
 than the local cache's at-most-one-only absent extension.
+
+Opt-in `Profile::observe_conditions` includes in-progress recursive-component
+snapshots: rounds, producer visits/evaluations, changed heads, relation totals,
+largest current conditions, retained array storage and cumulative result traffic.
+It also supplies a bounded graph-only cycle sample. These observations are partial
+approximations, not settled facts, and never enter cached semantic results.
+The CLI projects them with `--profile-memory FILE --profile-conditions`.

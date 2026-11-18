@@ -831,6 +831,23 @@ batch boundary described above. Neither recovery applies to shared context setup
 transactional graph installation, nor raises the storage cap. Earlier global work remains charged, so a
 later unrestricted bound can still exhaust work before another guarded attempt.
 
+Positive recursive evaluation uses deterministic sparse rounds. Every producer is
+visited initially; a changed atom schedules its readers, including replacement
+expression dependencies. Later readers run in the current round, earlier readers
+in the next, preserving the original producer order among scheduled rules. External
+premises are already settled and internal dependencies are positive, so omitting
+unchanged bodies preserves the least fixpoint. This removes repeated whole-SCC
+scans on sparse propagation, not the cost of genuinely growing conditions.
+
+The invocation-local reverse index and current/next queues reserve three logical
+condition slots per rule, two per indexed atom, and one per internal dependency. Construction and
+notifications charge work. If the reservation cannot fit, retain full scans. If a
+condition later exhausts storage while that reservation exists, drop the worklist
+and restart from bottom with full scans before declaring any new head unknown.
+Consumed work is not refunded; global work, deadlines and cancellation still stop
+evaluation. No limit is raised. A completed component releases its scheduling
+reservation; nothing is cached across graphs.
+
 Individual atom evaluation also recovers from per-operation BDD node/task and
 condition-storage exhaustion. The exhausted head becomes unknown for this
 snapshot. Its positive component restarts from bottom, releasing all partial
@@ -1310,3 +1327,27 @@ allowances. Exactly-one enumeration uses resolved grouping domains and the exist
 atom bound; exhaustion is explicit. No limits or input-order default changed.
 Structural ordering treats declared groups as the same weighted preferences as
 selected input exclusivity, without imposing a new mandatory block order.
+
+
+Detailed profiling also emits `recursive-component-shape` and
+`recursive-component` records. A recursive component reports its atom/rule counts,
+top 20 relations by atom count, and up to three closed cycles of at most 12 edges
+from a bounded graph search (4,096 dependency visits and 4,096 search steps).
+Truncation is explicit; no sampled cycle does not mean no cycle.
+
+During evaluation, snapshots are sampled at most once per second, with a clock
+check every 256 rule visits; completion, exhaustion and interruption force a
+snapshot before approximations are cleared. They include completed rounds, current
+and previous-round distinct changed heads, rule visits/evaluations, restarts,
+scheduling reservation, the ten largest current conditions and the top 20 relations
+by counted nodes with omitted counts. These are recursive approximations, separate
+from the exact `retained-condition` observations at component boundaries.
+`accountedNodes` covers the evaluator including context and reservations;
+`componentNodes` sums the current component's conditions. `retainedArrays`,
+`retainedArrayNodes` and `retainedNodeBytes` deduplicate shared array references,
+not equivalent functions or nodes in independently allocated arrays. `resultArrays`
+and `resultNodes` count newly wrapped results since the component started; they
+are cumulative traffic, not live allocation or peak memory. Superseded unreferenced
+arrays are dropped normally; there is no permanent BDD node store to clear here.
+Profiling adds scans and output, not semantic work charges or BDD operations, and
+can affect deadlines. Disabled profiling collects none of these snapshots.

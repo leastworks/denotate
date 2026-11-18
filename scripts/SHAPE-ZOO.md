@@ -329,3 +329,12 @@ The `repeated-field` family models constant appenders and conditional tasks whos
 output-presence bits are inputs, with an `is absent` reader. Each size unit adds
 one of each producer. Compare `key` and `structural` orders with condition profiling
 to measure the wide presence OR and confirm the effective order in the report.
+
+
+`knowledge-scc` generates dual positive knowledge-propagation rings, with `size`
+decisions in each SCC and one input deciding known true versus known false. The
+initial rule order runs against propagation. It checks consistency and queries a
+varying decision, exposing repeated scans independently of large BDD conditions.
+Use `just bench-den-zoo --family knowledge-scc --sizes 128,1024 -- --profile-conditions`
+for in-component records (or generate its source and use the schema runner).
+This sparse workload is not a promise of one-pass evaluation for arbitrary SCCs.

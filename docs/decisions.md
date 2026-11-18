@@ -6,6 +6,24 @@ Settled design choices and why they were made. Current behavior is specified in 
 alternatives that were rejected. Revisit a decision only with new evidence, such as a
 real program that the current choice serves badly.
 
+## Positive recursive evaluation schedules changed premises
+
+A full scan of all producers on every round can turn a simple propagation chain
+inside a positive SCC into quadratic evaluation work. Start with every producer,
+then revisit only readers of changed atoms. Keep the original producer order
+within each sparse round and include replacement-expression dependencies. All
+internal dependencies are positive and external premises are fixed, so the fair
+worklist computes the same least fixpoint as repeated scans. It cannot make
+inherently large symbolic conditions cheap.
+
+The worklist is optional metadata, charged to existing work and storage limits.
+If its storage is unavailable, scan; if it obstructs a condition, release it and
+restart from bottom before marking a head unknown. This avoids treating an
+optimization's reservation as a semantic inability to evaluate a condition.
+Partial approximations remain private even when profiling shows them. Detailed
+snapshots separate counted condition nodes, distinct retained arrays, cumulative
+result traffic and process memory; none is a substitute for the others.
+
 ## Structural input ordering is bounded optimization work
 
 Ordering allowances may fall back to semantic-key order; they do not make a

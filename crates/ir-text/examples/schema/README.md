@@ -414,3 +414,24 @@ and exclusive ring selectors use at-most-one; every ring result uses exactly-one
 per use. `--overlaps` leaves ring selectors unconstrained. These constraints apply
 during admission as well as checking, without named assumption selection. Older
 captured runs using selected input assumptions remain historical measurements.
+
+
+For a long-running positive SCC, `recursive-component-shape` gives relation atom
+counts and bounded short cycle examples. `recursive-component` reports sampled
+in-progress conditions and forced exhaustion/completion snapshots. Read
+`completedRounds`, `ruleVisits`, `ruleEvaluations`, `changedHeads`,
+`previousRoundChangedHeads` and `restarts` together: sparse rounds may remain
+numerous while evaluating very few rules each. Counters accumulate across restarts
+within this component invocation. A `complete` snapshot means evaluation finished,
+not that every head is known; checker outcomes still decide that. `schedule` identifies `worklist`
+or `scan`; `scheduler-fallback` records releasing worklist metadata under storage
+pressure. The `conditions` summary retains the latest 64 shape and 64 snapshot
+records with an omitted count; the JSONL retains all emitted records.
+
+`componentNodes` is a per-condition sum. `retainedArrayNodes` deduplicates shared
+array references in this component, not mathematically equal functions in
+separately allocated arrays. `resultNodes` is cumulative result-node traffic,
+not retained or peak allocated nodes. Use sampled RSS/footprint alongside them.
+Largest in-progress conditions are approximations and are never merged into the
+summary's exact completed-condition list. Reports can be recovered after a killed
+run even if no component finished.

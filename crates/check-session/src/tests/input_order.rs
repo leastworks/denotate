@@ -255,3 +255,39 @@ fn ordering_allowances_invalidate_preparation_and_report_before_assumptions() {
         }
     }
 }
+
+#[test]
+fn recursive_worklist_results_agree_in_cold_warm_and_edited_sessions() {
+    let mut warm = Session::default();
+    for negated in [false, true, false] {
+        let text = format!(
+            "input x(); input y(); relation a(); relation b(); a():-b(); b():-a(); b():-x(),{}y(); relation bad(); bad():-a(),!x(); obligation clear:empty(bad); verification checks{{assumptions:[];obligations:[clear];}}",
+            if negated { "!" } else { "" }
+        );
+        let source = SourceFile::new("file:///recursive.den", 0, text);
+        let p = load(
+            &ProgramMembership::single("root", [source.uri.clone()]),
+            &[source],
+        )
+        .unwrap();
+        let limits = Limits::default();
+        let ops = (&limits).into();
+        let (_, request) = p.verification_requests(&limits).unwrap().remove(0);
+        let run = |session: &mut Session| {
+            let RequestPreparation::Complete(prepared) =
+                session.prepare(&request, &p.corpus, &p.keys, &ops).unwrap()
+            else {
+                panic!()
+            };
+            let prepared = prepared.admit(&ops).unwrap();
+            let LocalCheckOutcome::Complete(result) = session.verify(&prepared, &ops).unwrap()
+            else {
+                panic!()
+            };
+            result.checked.results.value
+        };
+        let fresh = run(&mut Session::default());
+        assert_eq!(fresh, run(&mut warm));
+        assert_eq!(fresh, run(&mut warm));
+    }
+}
