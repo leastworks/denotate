@@ -16,6 +16,8 @@ type Failure = (u8, String);
 mod committed;
 #[path = "check/component_dump.rs"]
 mod component_dump;
+#[path = "check/condition_profile.rs"]
+mod condition_profile;
 #[path = "check/options.rs"]
 mod options;
 #[path = "check/profile_writer.rs"]
@@ -282,7 +284,14 @@ fn run_streaming(
         trace.phase(event);
     });
     let progress = CheckProgress::new((options.progress || profile.enabled()).then_some(callback));
-    let result = check_program(options, output, &progress, &trace, flush);
+    let result = check_program(
+        options,
+        output,
+        &progress,
+        &trace,
+        flush,
+        profile_file.clone(),
+    );
     active.lock().unwrap().take();
     flush(output)?;
     match &result {
@@ -310,6 +319,7 @@ fn check_program(
     progress: &CheckProgress,
     trace: &trace::Trace,
     flush: &mut dyn FnMut(&mut String) -> Result<(), Failure>,
+    profile_file: Option<profile_writer::Shared>,
 ) -> Result<u8, Failure> {
     let options::Options {
         root,
@@ -362,6 +372,9 @@ fn check_program(
         Some(&mut filesystem::FileOriginResolver),
     )
     .map_err(|e| (2, format_errors(e)))?;
+    if options.profile_conditions {
+        condition_profile::install(&p, &limits.profile, profile_file);
+    }
     trace.message(format_args!(
         "Loaded: {} sorts, {} constants, {} relations, {} rules, {} verifications",
         p.corpus.sorts().count(),
@@ -1286,6 +1299,95 @@ mod tests {
             f.traced(&["--profile-memory", path.to_str().unwrap()]).0,
             Err((3, _))
         ));
+    }
+
+    #[test]
+    fn condition_profile_preserves_outcomes_and_records_preparation_failures() {
+        let constants = (0..70)
+            .map(|i| format!("c{i}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let f = Fixture::new(&format!(
+            "sort S; const {constants}: S; input i(s:S); relation any(); any() :- i(_); assumption scalar: at_most_one(i, group_by: ()); obligation no_any: empty(any); verification checks {{ assumptions: [scalar]; obligations: [no_any]; }}"
+        ));
+        for limited in [false, true] {
+            let mut flags = vec!["--json", "--no-progress"];
+            if limited {
+                flags.extend(["--max-bdd-tasks", "0"]);
+            }
+            let (expected, output, _) = f.traced(&flags);
+            let path = f.0.join(format!("conditions-{limited}.jsonl"));
+            flags.extend([
+                "--profile-memory",
+                path.to_str().unwrap(),
+                "--profile-conditions",
+            ]);
+            let (actual, profiled, _) = f.traced(&flags);
+            assert_eq!(actual, expected);
+            assert_eq!(profiled, output);
+            let rows: Vec<serde_json::Value> = fs::read_to_string(path)
+                .unwrap()
+                .lines()
+                .map(|l| serde_json::from_str(l).unwrap())
+                .collect();
+            assert!(rows.iter().any(|r| r["kind"] == "input-order"));
+            assert!(rows.iter().any(|r| r["kind"] == "assumption-step"));
+            if limited {
+                assert!(rows.iter().any(|r| r["kind"] == "failed-operation"
+                    && r["leftNodes"].is_number()
+                    && r["rightNodes"].is_number()
+                    && r["target"].is_object()));
+            } else {
+                assert!(
+                    rows.iter().any(
+                        |r| r["kind"] == "retained-condition" && r["atom"]["relation"] == "any"
+                    )
+                );
+            }
+        }
+        assert!(f.traced(&["--profile-conditions"]).0.is_err());
+    }
+
+    #[test]
+    fn condition_profile_rebinds_owned_local_runtime_atoms() {
+        let shape = schema_generator::Shape {
+            encoding: schema_generator::Encoding::Knowledge,
+            depth: 2,
+            width: 3,
+            knowledge: schema_generator::knowledge::Knowledge {
+                trees: 2,
+                fields_per_leaf: 2,
+                unlocked_fields: 2,
+                writers_per_field: 2,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let f = Fixture::new(&schema_generator::source(&shape).unwrap());
+        let path = f.0.join("local-conditions.jsonl");
+        let flags = ["--json", "--no-progress", "--input-order", "structural"];
+        let (before, normal, _) = f.traced(&flags);
+        let (after, profiled, _) = f.traced(
+            &[
+                flags.as_slice(),
+                &[
+                    "--profile-memory",
+                    path.to_str().unwrap(),
+                    "--profile-conditions",
+                ],
+            ]
+            .concat(),
+        );
+        assert_eq!(after, before);
+        assert_eq!(profiled, normal);
+        let text = fs::read_to_string(path).unwrap();
+        assert!(!text.contains("unresolved-profile-id"));
+        assert!(
+            text.lines()
+                .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+                .any(|r| r["kind"] == "retained-condition"
+                    && r["atom"]["relation"] == "schema::known_false")
+        );
     }
 
     #[test]

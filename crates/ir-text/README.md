@@ -227,6 +227,13 @@ ordering, key-index and admission-round events and
 20 ms memory samples summarized per span. It also works with `--no-progress`.
 The CLI also emits `type: "progress"` records containing the existing structured
 phase/admission details, and a `type: "run-end"` record with its exit code/error.
+`--profile-conditions` additionally streams `type: "condition-profile"` records:
+actual input order (before assumptions), assumption-build checkpoints, retained
+conditions of at least 64 nodes at completed component boundaries, and failed
+Boolean operations with their operand sizes and current target when available.
+These optional records use declaration names and values, add reporting overhead,
+and may affect deadline-limited measurements. See the [benchmark guide](examples/schema/README.md#inspecting-knowledge-form-scale)
+for aggregation and interpretation. No extra BDD is constructed for observation.
 Existing `type: "profile"` fields are unchanged. Post-admission progress carries
 updated sizes and remaining negative-component counts. A missing terminal record
 means completion was not observed. Unavailable metrics are null; these are process observations, not cache bytes or

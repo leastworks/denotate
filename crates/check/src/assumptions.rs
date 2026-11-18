@@ -32,7 +32,11 @@ impl GroundProgram {
                     &raw
                 }
             };
-            let meaning = independent.symbolic_with_budget(budget)?;
+            let meaning = {
+                let _span = budget.limits.profile.span("assumptions-independent", None);
+                independent.symbolic_with_budget(budget)?
+            };
+            let _span = budget.limits.profile.span("assumptions-conjunction", None);
             let ctx = meaning.context();
             let mut permitted = ConditionContext::build(self, budget)?.permitted_worlds();
             for r in restrictions {
@@ -98,9 +102,26 @@ impl GroundProgram {
                     let key = columns.iter().map(|i| atom.arguments[*i]).collect();
                     groups.entry(key).or_default().push(atom);
                 }
-                for atoms in groups.values() {
+                for (group, atoms) in groups.values().enumerate() {
+                    let kind = match r.kind() {
+                        Cardinality::Empty => "empty",
+                        Cardinality::AtMostOne => "at-most-one",
+                        Cardinality::AtLeastOne => "at-least-one",
+                        Cardinality::ExactlyOne => "exactly-one",
+                    };
+                    budget
+                        .limits
+                        .profile
+                        .condition(|| ConditionObservation::AssumptionStep {
+                            kind,
+                            group,
+                            atom: atoms.first().map(|a| (*a).clone()),
+                            seen_nodes: 0,
+                            permitted_nodes: permitted.node_count(),
+                        });
                     let mut seen = ctx.false_condition();
                     for atom in atoms {
+                        let _target = budget.limits.profile.target(atom);
                         budget.tick("assumptions")?;
                         let value = match meaning.fact(atom)? {
                             SymbolicFact::Settled(c) => c,
@@ -135,6 +156,16 @@ impl GroundProgram {
                     if r.kind().has_coverage() {
                         permitted = ctx.apply(&permitted, &seen, op_function::and, budget)?;
                     }
+                    budget
+                        .limits
+                        .profile
+                        .condition(|| ConditionObservation::AssumptionStep {
+                            kind,
+                            group,
+                            atom: atoms.first().map(|a| (*a).clone()),
+                            seen_nodes: seen.node_count(),
+                            permitted_nodes: permitted.node_count(),
+                        });
                 }
             }
             // Even false is retained: it is an inconsistent context, not a proof.

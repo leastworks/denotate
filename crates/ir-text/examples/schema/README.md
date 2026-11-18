@@ -376,3 +376,35 @@ They also check combined shapes, cold/warm repair, matching ring input inventori
 source bounds and explicit inconclusive preparation. Larger measurements are
 experiments, with no timing or node-count goldens. Lesson 12 and a general lowering
 reference remain separate work.
+
+### Inspecting knowledge-form scale
+
+Add `--profile-conditions` to `just bench-den-schema` for detailed observations in
+`memory.jsonl` and a bounded `conditions` summary in `report.json`. The same option
+is available to `just check-den` when `--profile-memory FILE` is supplied. It is
+separately opt-in because per-condition reporting adds work and output.
+
+The stream records the actual input order before assumptions are built, including
+requested/effective policy and fallback. The summary shows each ring writer's
+result-alternative positions and span. It also records assumption construction
+checkpoints (`seenNodes` for the running group union, `permittedNodes` for the
+accumulating world condition), and failed Boolean operations with their truth
+table, operand sizes, enclosing phases and current atom where available. These
+are existing intermediate values; no extra restriction BDD is computed for profiling.
+The assumption-independent evaluation and final conjunction have separate spans.
+
+Retained-condition records describe exact conditions at completed component
+boundaries, at least 64 nodes each. They exclude small values and partial recursive
+approximations; they are snapshots, not a peak-live count or an additive heap size.
+The summary keeps five largest atoms per phase, relation and decision kind,
+separating `known_true` and `known_false`. Generator `profile-kind` comments classify
+anonymous gates; the checker knows only generic atoms. Unknown-decision audits
+are classified separately. The raw stream preserves all emitted observations;
+the summary caps failure records at 64 and assumption checkpoints at 4096, with
+explicit omitted counts. Report recovery uses the same aggregation, including
+when checking stopped before producing an outcome.
+
+Use matched limits and the same binary for `key` and `structural` comparisons.
+The structural policy may choose different actual orders for different lowerings.
+Raising limits is an experiment, not an automatic policy for positive recursion:
+positive knowledge propagation can still build expensive conditions.

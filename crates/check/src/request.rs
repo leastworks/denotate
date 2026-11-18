@@ -561,6 +561,12 @@ impl CheckRequest {
                 });
             }
         };
+        limits
+            .profile
+            .condition(|| crate::ConditionObservation::InputOrder {
+                atoms: program.ordered_input_atoms().cloned().collect(),
+                report: program.input_order_report().clone(),
+            });
         if let Some(view) = &mut specialized {
             view.inherit_input_order(&program)?;
         }

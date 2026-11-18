@@ -1,6 +1,8 @@
 //! Generate and measure a synthetic Shipping News format tree through the real CLI.
 #[path = "schema/attempts.rs"]
 mod attempts;
+#[path = "schema/conditions.rs"]
+mod conditions;
 #[path = "schema/generate.rs"]
 mod generate;
 #[cfg(test)]

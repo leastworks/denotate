@@ -408,6 +408,7 @@ impl GroundProgram {
                             if old.is_true() {
                                 continue;
                             }
+                            let _profile_target = budget.limits.profile.target(head);
                             let next =
                                 meaning.evaluate_producer(rule, index, old, &mut retained, budget);
                             match next {
@@ -489,6 +490,20 @@ impl GroundProgram {
                 }
                 retained = previous_retained;
                 meaning.inconclusive.insert(component.id, cause);
+            }
+            if budget.limits.profile.conditions_enabled() {
+                for atom in &component.atoms {
+                    if let Some(c) = meaning.conditions.get(atom) {
+                        if c.node_count() >= 64 {
+                            budget.limits.profile.condition(|| {
+                                crate::ConditionObservation::Retained {
+                                    atom: atom.clone(),
+                                    nodes: c.node_count(),
+                                }
+                            });
+                        }
+                    }
+                }
             }
         }
         if let Some(retention) = &mut retention {

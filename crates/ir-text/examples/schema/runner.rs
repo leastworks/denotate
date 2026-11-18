@@ -31,6 +31,7 @@ const HELP: &str = "Usage: just bench-den-schema [OPTIONS] [-- CHECKER_LIMITS...
 --writers-per-field N --chain-length N  Knowledge writers / chain (defaults 1, 0)\n\
 --self-dependent         Close the knowledge chain through itself\n\
 --ring-terms N --ring-writers N --ring-lanes N --result-values N (defaults 0, 4, 1, 3)\n\
+--profile-conditions      Include detailed condition observations in the profile\n\
 --samply                  Also save a CPU recording; requires samply on PATH\n\
 --source FILE             Use an authored source (shared shape-zoo runner)\n\
 --generate-only           Save sources and configuration without invoking check\n\
@@ -67,6 +68,10 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
             return Err(format!("repeated option {arg}"));
         }
         match arg.as_str() {
+            "--profile-conditions" => {
+                forwarded.push(arg);
+                continue;
+            }
             "--self-dependent" => {
                 shape.knowledge.self_dependent = true;
                 continue;
@@ -195,7 +200,10 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
     let flags = check_options::limit_values(&denotate_check::Limits::default());
     let mut check_flags = forwarded.iter();
     while let Some(flag) = check_flags.next() {
-        if flag == "--sat-probe" || flag == "--sat-probe-candidates" {
+        if flag == "--sat-probe"
+            || flag == "--sat-probe-candidates"
+            || flag == "--profile-conditions"
+        {
             continue;
         }
         if flag != "--input-order"
@@ -216,7 +224,9 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         }
     }
     let parsed = check_options::Options::parse(
-        std::iter::once("program".into()).chain(forwarded.clone()),
+        std::iter::once("program".into())
+            .chain(forwarded.clone())
+            .chain(["--profile-memory".into(), "profile.jsonl".into()]),
         Default::default(),
     )
     .map_err(|(_, e)| e)?;
@@ -368,6 +378,9 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
     let mut sat_probes = BTreeMap::new();
     let mut candidate_probes = Vec::new();
     let mut malformed = 0;
+    let mut conditions = super::conditions::Conditions::new(
+        &fs::read_to_string(dir.join("program/schema.den")).unwrap_or_default(),
+    );
     if let Ok(file) = fs::File::open(dir.join("memory.jsonl")) {
         for line in BufReader::new(file).lines() {
             let line = line.map_err(|e| e.to_string())?;
@@ -376,6 +389,7 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
                 continue;
             };
             match v["type"].as_str() {
+                Some("condition-profile") => conditions.observe(v),
                 Some("profile") => {
                     if let Some(id) = v["span"].as_u64() {
                         if v["event"] == "start" {
@@ -460,6 +474,7 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
     report["satProbes"] = json!(sat_probes.into_values().collect::<Vec<_>>());
     report["guardedAttempts"] = json!(guarded.into_values().collect::<Vec<_>>());
     report["outcomes"] = json!(outcomes);
+    report["conditions"] = conditions.finish();
     report["phases"] = json!(phases);
     report["unfinishedSpans"] = json!(active.into_values().collect::<Vec<_>>());
     report["admissionRounds"] = json!(rounds.into_values().collect::<Vec<_>>());

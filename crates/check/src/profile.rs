@@ -4,7 +4,7 @@ use std::{
     collections::BTreeMap,
     fmt,
     sync::{
-        Arc, Mutex,
+        Arc, Mutex, OnceLock,
         atomic::{AtomicU64, Ordering},
     },
     time::{Duration, Instant},
@@ -34,12 +34,56 @@ pub struct ProfileEvent {
     /// Not heap bytes or peak live solver nodes; rejected demands are excluded.
     pub peak_accounted_condition_nodes: usize,
 }
+/// Optional detailed observations. Atom handles belong to the current invocation;
+/// drivers resolve them to authored/semantic identities before storing the stream.
+#[derive(Debug, Clone)]
+pub enum ConditionObservation {
+    BindDeclarations {
+        relations: Vec<(denotate_ir::RelationId, denotate_ir::RelationKey)>,
+        constants: Vec<(denotate_ir::ConstantId, denotate_ir::ConstantKey)>,
+    },
+    UnbindDeclarations {
+        ids: Vec<denotate_ir::OccurrenceId>,
+    },
+    InputOrder {
+        atoms: Vec<crate::GroundAtom>,
+        report: crate::InputOrderReport,
+    },
+    /// A condition retained at a completed component boundary, not a recursive
+    /// approximation. Values below 64 nodes are omitted from this diagnostic stream.
+    Retained {
+        atom: crate::GroundAtom,
+        nodes: usize,
+    },
+    AssumptionStep {
+        kind: &'static str,
+        group: usize,
+        atom: Option<crate::GroundAtom>,
+        seen_nodes: usize,
+        permitted_nodes: usize,
+    },
+    FailedOperation {
+        operation: [Option<bool>; 4],
+        left_nodes: usize,
+        right_nodes: Option<usize>,
+        error: crate::CheckError,
+    },
+}
+#[derive(Debug, Clone)]
+pub struct ConditionProfileEvent {
+    pub stages: Vec<&'static str>,
+    pub target: Option<crate::GroundAtom>,
+    pub observation: ConditionObservation,
+}
+type Observer = dyn Fn(ConditionProfileEvent) + Send + Sync;
 struct State {
     send: Box<dyn Fn(ProfileEvent) + Send + Sync>,
     next: AtomicU64,
     results: AtomicU64,
     nodes: AtomicU64,
-    condition_peaks: Mutex<BTreeMap<u64, usize>>,
+    condition_peaks: Mutex<BTreeMap<u64, (&'static str, usize)>>,
+    observer: OnceLock<Box<Observer>>,
+    targets: Mutex<BTreeMap<u64, crate::GroundAtom>>,
 }
 #[derive(Clone, Default)]
 pub struct Profile(Option<Arc<State>>);
@@ -56,6 +100,8 @@ impl Profile {
             results: AtomicU64::new(0),
             nodes: AtomicU64::new(0),
             condition_peaks: Default::default(),
+            observer: OnceLock::new(),
+            targets: Default::default(),
         })))
     }
     pub fn enabled(&self) -> bool {
@@ -69,15 +115,93 @@ impl Profile {
     }
     pub(crate) fn retained_conditions(&self, nodes: usize) {
         if let Some(s) = &self.0 {
-            for peak in s.condition_peaks.lock().unwrap().values_mut() {
+            for (_, peak) in s.condition_peaks.lock().unwrap().values_mut() {
                 *peak = (*peak).max(nodes);
             }
         }
     }
+    /// Install once before checking on an enabled Profile; clones share the first
+    /// observer. Create a fresh Profile for a new observation sink. Detailed
+    /// observation is opt-in independently of memory spans; disabled runs do no
+    /// atom cloning or per-producer locking.
+    pub fn observe_conditions(&self, send: impl Fn(ConditionProfileEvent) + Send + Sync + 'static) {
+        if let Some(s) = &self.0 {
+            let _ = s.observer.set(Box::new(send));
+        }
+    }
+    pub fn conditions_enabled(&self) -> bool {
+        self.0.as_ref().is_some_and(|s| s.observer.get().is_some())
+    }
+    pub(crate) fn condition(&self, make: impl FnOnce() -> ConditionObservation) {
+        if let Some(s) = &self.0 {
+            if let Some(send) = s.observer.get() {
+                let stages = s
+                    .condition_peaks
+                    .lock()
+                    .unwrap()
+                    .values()
+                    .map(|(stage, _)| *stage)
+                    .collect();
+                let target = s
+                    .targets
+                    .lock()
+                    .unwrap()
+                    .last_key_value()
+                    .map(|(_, a)| a.clone());
+                send(ConditionProfileEvent {
+                    stages,
+                    target,
+                    observation: make(),
+                });
+            }
+        }
+    }
+    pub(crate) fn declarations(
+        &self,
+        make: impl FnOnce() -> (
+            Vec<(denotate_ir::RelationId, denotate_ir::RelationKey)>,
+            Vec<(denotate_ir::ConstantId, denotate_ir::ConstantKey)>,
+        ),
+    ) -> ProfileDeclarations {
+        let mut ids = Vec::new();
+        if self.conditions_enabled() {
+            let (relations, constants) = make();
+            ids.extend(
+                relations
+                    .iter()
+                    .map(|(id, _)| denotate_ir::OccurrenceId::from(*id)),
+            );
+            ids.extend(
+                constants
+                    .iter()
+                    .map(|(id, _)| denotate_ir::OccurrenceId::from(*id)),
+            );
+            self.condition(|| ConditionObservation::BindDeclarations {
+                relations,
+                constants,
+            });
+        }
+        ProfileDeclarations {
+            profile: self.clone(),
+            ids,
+        }
+    }
+    pub(crate) fn target(&self, atom: &crate::GroundAtom) -> ConditionTarget {
+        let state = self
+            .0
+            .as_ref()
+            .filter(|_| self.conditions_enabled())
+            .map(|s| {
+                let id = s.next.fetch_add(1, Ordering::Relaxed);
+                s.targets.lock().unwrap().insert(id, atom.clone());
+                (s.clone(), id)
+            });
+        ConditionTarget(state)
+    }
     pub fn span(&self, stage: &'static str, round: Option<usize>) -> ProfileSpan {
         let state = self.0.as_ref().map(|s| {
             let id = s.next.fetch_add(1, Ordering::Relaxed);
-            s.condition_peaks.lock().unwrap().insert(id, 0);
+            s.condition_peaks.lock().unwrap().insert(id, (stage, 0));
             (s.send)(ProfileEvent {
                 id,
                 stage,
@@ -106,6 +230,27 @@ impl Profile {
         }
     }
 }
+pub(crate) struct ProfileDeclarations {
+    profile: Profile,
+    ids: Vec<denotate_ir::OccurrenceId>,
+}
+impl Drop for ProfileDeclarations {
+    fn drop(&mut self) {
+        if !self.ids.is_empty() {
+            let ids = std::mem::take(&mut self.ids);
+            self.profile
+                .condition(|| ConditionObservation::UnbindDeclarations { ids });
+        }
+    }
+}
+pub(crate) struct ConditionTarget(Option<(Arc<State>, u64)>);
+impl Drop for ConditionTarget {
+    fn drop(&mut self) {
+        if let Some((s, id)) = &self.0 {
+            s.targets.lock().unwrap().remove(id);
+        }
+    }
+}
 pub struct ProfileSpan {
     state: Option<(Arc<State>, u64, Instant, u64, u64)>,
     stage: &'static str,
@@ -121,7 +266,12 @@ impl Drop for ProfileSpan {
     fn drop(&mut self) {
         if let Some((s, id, start, results, nodes)) = &self.state {
             let nodes = s.nodes.load(Ordering::Relaxed).saturating_sub(*nodes);
-            let peak = s.condition_peaks.lock().unwrap().remove(id).unwrap_or(0);
+            let peak = s
+                .condition_peaks
+                .lock()
+                .unwrap()
+                .remove(id)
+                .map_or(0, |(_, peak)| peak);
             (s.send)(ProfileEvent {
                 id: *id,
                 stage: self.stage,

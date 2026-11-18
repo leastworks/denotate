@@ -271,9 +271,18 @@ impl ConditionContext {
             variables,
         };
         // Linear prefix scheme: each next choice excludes all previous choices.
-        for group in &program.input_groups {
+        for (group_index, group) in program.input_groups.iter().enumerate() {
             let mut seen = context.false_condition();
+            context_step(
+                &context,
+                budget,
+                "input-uniqueness-start",
+                group_index,
+                group.first(),
+                0,
+            );
             for atom in group {
+                let _target = budget.limits.profile.target(atom);
                 if !context.inputs.contains_key(atom) {
                     continue;
                 }
@@ -282,6 +291,14 @@ impl ConditionContext {
                 context.permitted =
                     context.apply(&context.permitted, &conflict, op_function::and_not, budget)?;
                 seen = context.apply(&seen, &value, op_function::or, budget)?;
+                context_step(
+                    &context,
+                    budget,
+                    "input-uniqueness",
+                    group_index,
+                    Some(atom),
+                    seen.node_count(),
+                );
             }
         }
         if let Some(condition) = &program.assumption_condition {
@@ -536,11 +553,25 @@ impl ConditionContext {
         Ok(())
     }
     pub(crate) fn complement(&self, a: &Condition, budget: &mut Budget<'_>) -> Result<Condition> {
-        self.check(a, budget)?;
-        budget.charge(a.node_count(), "BDD complement")?;
-        let result = self.wrap(a.bdd.not(), budget);
-        self.check(&result, budget)?;
-        Ok(result)
+        let result: Result<Condition> = (|| {
+            self.check(a, budget)?;
+            budget.charge(a.node_count(), "BDD complement")?;
+            let result = self.wrap(a.bdd.not(), budget);
+            self.check(&result, budget)?;
+            Ok(result)
+        })();
+        if let Err(error) = &result {
+            budget
+                .limits
+                .profile
+                .condition(|| crate::ConditionObservation::FailedOperation {
+                    operation: [Some(true), Some(false), None, None],
+                    left_nodes: a.node_count(),
+                    right_nodes: None,
+                    error: error.clone(),
+                });
+        }
+        result
     }
     pub(crate) fn apply(
         &self,
@@ -549,47 +580,87 @@ impl ConditionContext {
         op: fn(Option<bool>, Option<bool>) -> Option<bool>,
         budget: &mut Budget<'_>,
     ) -> Result<Condition> {
-        self.check(a, budget)?;
-        self.check(b, budget)?;
-        // The library's result-node bound alone does not bound a large apply
-        // cache for a small result. Preflight the task graph before building it.
-        let allowed = budget.limits.max_bdd_tasks.min(budget.remaining() / 2);
-        let Some((_, tasks)) = Bdd::check_binary_op(allowed, &a.bdd, &b.bdd, op) else {
-            budget.check("BDD preflight")?;
-            budget.observe("BDD preflight", "BDD tasks", allowed.saturating_add(1));
-            // The failed traversal consumed work too. Charge its task allowance
-            // plus the stopping step (no construction ran). Keep global work
-            // exhaustion distinct from an operation's task bound, including ties.
-            let work_bound = budget.remaining() / 2 <= budget.limits.max_bdd_tasks;
-            let work_error = budget.work_exhaustion("BDD preflight");
-            budget.charge(allowed.saturating_add(1), "BDD preflight")?;
-            if work_bound {
-                return Err(work_error);
-            }
-            return Err(limit("BDD preflight", "BDD tasks", allowed, None));
-        };
-        budget.check("BDD operation")?;
-        budget.observe("BDD operation", "BDD tasks", tasks);
-        budget.charge(2 * tasks + 1, "BDD operation")?;
-        let Some(bdd) = Bdd::binary_op_with_limit(budget.limits.max_bdd_nodes, &a.bdd, &b.bdd, op)
-        else {
+        let result: Result<Condition> = (|| {
+            self.check(a, budget)?;
+            self.check(b, budget)?;
+            // The library's result-node bound alone does not bound a large apply
+            // cache for a small result. Preflight the task graph before building it.
+            let allowed = budget.limits.max_bdd_tasks.min(budget.remaining() / 2);
+            let Some((_, tasks)) = Bdd::check_binary_op(allowed, &a.bdd, &b.bdd, op) else {
+                budget.check("BDD preflight")?;
+                budget.observe("BDD preflight", "BDD tasks", allowed.saturating_add(1));
+                // The failed traversal consumed work too. Charge its task allowance
+                // plus the stopping step (no construction ran). Keep global work
+                // exhaustion distinct from an operation's task bound, including ties.
+                let work_bound = budget.remaining() / 2 <= budget.limits.max_bdd_tasks;
+                let work_error = budget.work_exhaustion("BDD preflight");
+                budget.charge(allowed.saturating_add(1), "BDD preflight")?;
+                if work_bound {
+                    return Err(work_error);
+                }
+                return Err(limit("BDD preflight", "BDD tasks", allowed, None));
+            };
             budget.check("BDD operation")?;
-            budget.observe(
-                "BDD operation",
-                "BDD nodes",
-                budget.limits.max_bdd_nodes.saturating_add(1),
-            );
-            return Err(limit(
-                "BDD operation",
-                "BDD nodes",
-                budget.limits.max_bdd_nodes,
-                None,
-            ));
-        };
-        budget.observe("BDD operation", "BDD nodes", bdd.size());
-        budget.charge(0, "BDD operation")?;
-        Ok(self.wrap(bdd, budget))
+            budget.observe("BDD operation", "BDD tasks", tasks);
+            budget.charge(2 * tasks + 1, "BDD operation")?;
+            let Some(bdd) =
+                Bdd::binary_op_with_limit(budget.limits.max_bdd_nodes, &a.bdd, &b.bdd, op)
+            else {
+                budget.check("BDD operation")?;
+                budget.observe(
+                    "BDD operation",
+                    "BDD nodes",
+                    budget.limits.max_bdd_nodes.saturating_add(1),
+                );
+                return Err(limit(
+                    "BDD operation",
+                    "BDD nodes",
+                    budget.limits.max_bdd_nodes,
+                    None,
+                ));
+            };
+            budget.observe("BDD operation", "BDD nodes", bdd.size());
+            budget.charge(0, "BDD operation")?;
+            Ok(self.wrap(bdd, budget))
+        })();
+        if let Err(error) = &result {
+            budget
+                .limits
+                .profile
+                .condition(|| crate::ConditionObservation::FailedOperation {
+                    operation: [
+                        op(Some(false), Some(false)),
+                        op(Some(false), Some(true)),
+                        op(Some(true), Some(false)),
+                        op(Some(true), Some(true)),
+                    ],
+                    left_nodes: a.node_count(),
+                    right_nodes: Some(b.node_count()),
+                    error: error.clone(),
+                });
+        }
+        result
     }
+}
+
+fn context_step(
+    context: &ConditionContext,
+    budget: &Budget<'_>,
+    kind: &'static str,
+    group: usize,
+    atom: Option<&GroundAtom>,
+    seen_nodes: usize,
+) {
+    budget
+        .limits
+        .profile
+        .condition(|| crate::ConditionObservation::AssumptionStep {
+            kind,
+            group,
+            atom: atom.cloned(),
+            seen_nodes,
+            permitted_nodes: context.permitted.node_count(),
+        });
 }
 
 pub(crate) fn limit(

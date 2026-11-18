@@ -538,6 +538,14 @@ delivery; the checker performs no OS memory reads. The observer is excluded from
 result payload, not internal allocator traffic; retained snapshots deduplicate
 shared `Condition` storage. See [memory profiling](../../docs/checker-policies.md#memory-profiling).
 
+`Profile::observe_conditions` opts into a separate detailed callback before a run.
+It observes generic ground atoms, retained condition sizes, assumption checkpoints,
+input order and failed Boolean operations. Atom handles belong to that invocation;
+drivers resolve names/semantic identities before persisting records. Disabled
+observation does no per-producer atom cloning or locking. The callback performs
+no additional Boolean evaluation or logical charging; elapsed-time overhead can
+still affect deadlines. It is intended for diagnosis, not cached query results.
+
 `Limits` bounds atoms, rule instances, dependencies, work, BDD storage and elapsed
 time; exhaustion yields explicit inconclusive outcomes with phase and resource.
 `CheckError`, `Inconclusive` and keyed `ResourceReason` carry `LimitDetails`: optional

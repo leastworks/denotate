@@ -1226,3 +1226,16 @@ them is explicit inconclusive; a partial set is never used. Diagnostic cone
 annotations retain their separate optional allowance. No limits are raised and the
 uniqueness path's two-candidate certification policy is unchanged. Search can still
 be exponential in the retained dependencies; failure-specific narrowing is deferred.
+
+## Detailed condition observations
+
+`check-den --profile-memory FILE --profile-conditions` additionally observes
+retained symbolic conditions of at least 64 nodes at completed component
+boundaries, failed Boolean operations and their operand sizes, assumption-build
+checkpoints, and the actual input order before assumption construction. The
+callback reports generic atoms; workload-specific classification belongs to the
+benchmark generator. This opt-in stream neither evaluates extra BDDs nor changes
+accounting, verdicts, limits or input-order selection. It adds reporting overhead
+and can affect deadline-limited runs. The benchmark guide documents snapshot
+semantics and bounded report aggregation. No new positive-program limit policy
+is selected by this instrumentation.

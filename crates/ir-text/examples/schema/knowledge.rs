@@ -91,11 +91,12 @@ struct Gates {
     text: String,
     names: BTreeSet<String>,
     serial: usize,
+    kind: &'static str,
     required: Vec<String>,
 }
 impl Gates {
     fn new() -> Self {
-        let mut g = Self { text: include_str!("../../../../editors/den/examples/shipping-news/11-incremental-schema/library/knowledge.den").replace("namespace schema;", "namespace schema {"), names: BTreeSet::new(), serial: 0, required: vec![] };
+        let mut g = Self { text: include_str!("../../../../editors/den/examples/shipping-news/11-incremental-schema/library/knowledge.den").replace("namespace schema;", "namespace schema {"), names: BTreeSet::new(), serial: 0, kind: "other", required: vec![] };
         g.text += "\n}\nuse schema;\nnamespace workload {\n";
         g.constant("yes", true);
         g.constant("no", false);
@@ -107,6 +108,7 @@ impl Gates {
     }
     fn name(&mut self, n: &str) -> String {
         if self.names.insert(n.into()) {
+            self.line(format!("// profile-kind {n} {}", self.kind));
             self.line(format!("const {n}: Decision;"));
         }
         n.into()
@@ -132,7 +134,12 @@ impl Gates {
         n.into()
     }
     fn binary(&mut self, kind: &str, a: &str, b: &str) -> String {
+        let previous = self.kind;
+        if kind == "reads" {
+            self.kind = "value-read";
+        }
         let n = self.fresh();
+        self.kind = previous;
         self.gate(kind, &n, a, Some(b))
     }
     fn fold(&mut self, kind: &str, xs: Vec<String>) -> String {
@@ -160,7 +167,10 @@ impl Gates {
         self.gate("opposite", &n, a, None)
     }
     fn observe(&mut self, name: &str, atom: &str) -> String {
+        let previous = self.kind;
+        self.kind = "value-read";
         self.name(name);
+        self.kind = previous;
         self.line(format!(
             "known_true({name}) :- {atom};\nknown_false({name}) :- !{atom};"
         ));
@@ -258,6 +268,7 @@ pub fn source(s: &Shape) -> Result<String, String> {
 fn ring(s: &Shape, g: &mut Gates) {
     let k = &s.knowledge;
     g.line(ring_inputs(s));
+    g.kind = "term";
     for t in 0..k.ring_terms {
         g.name(&format!("term{t}"));
     }
@@ -265,6 +276,7 @@ fn ring(s: &Shape, g: &mut Gates) {
         let mut values = vec![];
         let mut readiness = vec![];
         for w in 0..k.ring_writers {
+            g.kind = "writer-applicability";
             let selected = g.observe(&format!("selected{t}_{w}"), &format!("selector(f{t}_{w})"));
             let mut lanes = vec![];
             for l in 0..k.ring_lanes {
@@ -288,6 +300,7 @@ fn ring(s: &Shape, g: &mut Gates) {
         }
         // Reading a multiply-written slot waits for all possible writers. No
         // result value can make a term false while an applicability is unknown.
+        g.kind = "value-read";
         let ready = g.fold("both", readiness);
         let value = g.fold("either", values);
         g.gate("reads", &format!("term{t}"), &ready, Some(&value));
@@ -299,6 +312,7 @@ fn ring(s: &Shape, g: &mut Gates) {
 }
 fn chain(s: &Shape, g: &mut Gates) {
     let k = &s.knowledge;
+    g.kind = "writer-applicability";
     g.line("input chain_start();");
     let seed = g.observe("chain_seed", "chain_start()");
     for i in 0..k.chain_length {
@@ -346,6 +360,7 @@ fn forest(s: &Shape, g: &mut Gates) -> Result<(), String> {
     let mut leaves = vec![];
     for tree in 0..k.trees {
         for (i, node) in nodes.iter().enumerate() {
+            g.kind = "leaf-term";
             let name = format!("path{tree}_{i}");
             g.name(&name);
             if node.level == s.depth {
@@ -381,6 +396,7 @@ fn forest(s: &Shape, g: &mut Gates) -> Result<(), String> {
     let mut validations = vec![];
     for (tree, owner, field, selector) in &fields {
         g.line(format!("const {field}: Field;"));
+        g.kind = "coverage";
         let mut cover = vec![];
         let mut matching_leaves = vec![];
         for (lt, li, path) in &leaves {
@@ -399,9 +415,11 @@ fn forest(s: &Shape, g: &mut Gates) -> Result<(), String> {
             cover.push(if owns { "yes".into() } else { g.not(path) });
         }
         let coverage = g.fold("both", cover);
+        g.kind = "acceptance";
         let accepted = g.gate("same", &format!("accept_{field}"), &coverage, None);
         g.audit(&accepted);
         if *selector {
+            g.kind = "value-read";
             for branch in 0..s.width {
                 g.line(format!("candidate({field}, branch{branch});"));
                 let raw = g.observe(
@@ -410,6 +428,7 @@ fn forest(s: &Shape, g: &mut Gates) -> Result<(), String> {
                 );
                 let visible = g.binary("reads", &accepted, &raw);
                 let guard = g.binary("both", &format!("path{tree}_{owner}"), &visible);
+                g.kind = "writer-applicability";
                 let mut writers = vec![];
                 for w in 0..k.writers_per_field {
                     writers.push(g.gate(
@@ -428,6 +447,7 @@ fn forest(s: &Shape, g: &mut Gates) -> Result<(), String> {
                 );
             }
         } else {
+            g.kind = "value-read";
             g.line(format!("candidate({field}, payload);"));
             let raw = g.observe(
                 &format!("raw_{field}"),
@@ -436,6 +456,7 @@ fn forest(s: &Shape, g: &mut Gates) -> Result<(), String> {
             let visible = g.gate("reads", &format!("present_{field}"), &accepted, Some(&raw));
             g.audit(&visible);
             // Alternate required/absent checks. Validation never feeds path terms.
+            g.kind = "validation";
             let failure = if owner % 2 == 0 {
                 visible
             } else {
@@ -445,6 +466,7 @@ fn forest(s: &Shape, g: &mut Gates) -> Result<(), String> {
             validations.push(g.binary("both", &matched, &failure));
         }
     }
+    g.kind = "recognition";
     let paths = g.fold("either", leaves.iter().map(|(_, _, p)| p.clone()).collect());
     let invalid = g.fold("either", validations);
     let valid = g.not(&invalid);

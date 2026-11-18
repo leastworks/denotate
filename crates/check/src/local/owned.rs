@@ -3,6 +3,7 @@
 use super::*;
 
 pub(super) struct Runtime {
+    _profile_declarations: crate::profile::ProfileDeclarations,
     pub(super) program: GroundProgram,
     pub(super) keys: SemanticKeys,
     pub(super) atoms: BTreeMap<AtomKey, GroundAtom>,
@@ -77,6 +78,12 @@ impl Runtime {
                 relations.insert(a.relation.clone(), id);
             }
         }
+        let profile_declarations = budget.limits.profile.declarations(|| {
+            (
+                relations.iter().map(|(k, id)| (*id, k.clone())).collect(),
+                constants.iter().map(|(k, id)| (*id, k.clone())).collect(),
+            )
+        });
         let atoms: BTreeMap<_, _> = all
             .iter()
             .map(|a| {
@@ -349,6 +356,7 @@ impl Runtime {
                 .collect(),
         };
         Ok(Self {
+            _profile_declarations: profile_declarations,
             program,
             keys,
             atoms,

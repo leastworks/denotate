@@ -13,6 +13,7 @@ pub struct Options {
     pub hide_library_rewrites: bool,
     pub progress: bool,
     pub profile_memory: Option<String>,
+    pub profile_conditions: bool,
     pub dump_component: Option<String>,
     pub dump_component_limit: usize,
     pub export_committed: Option<String>,
@@ -71,6 +72,7 @@ pub fn help() -> String {
         --empty-examples N|all    Retain N present tuples per empty obligation (default 3)\n\
         --hide-library-rewrites   Hide library rewrite diagnostics\n\
         --no-progress             Silence progress on stderr\n\
+        --profile-conditions      Include condition sizes, assumption steps and failed BDD operations\n\
         --profile-memory FILE     Stream detailed memory/BDD JSON lines to a new file\n\
         --dump-component FILE     Stream bounded admission component diagnostics (local JSONL)\n\
         --dump-component-limit N  Aggregate data record cap (default 100000)\n\
@@ -109,6 +111,7 @@ impl Options {
             hide_library_rewrites: false,
             progress: true,
             profile_memory: None,
+            profile_conditions: false,
             dump_component: None,
             dump_component_limit: 100_000,
             export_committed: None,
@@ -135,6 +138,7 @@ impl Options {
                 "--verbose" => options.verbose = true,
                 "--no-progress" => options.progress = false,
                 "--profile-memory" => options.profile_memory = Some(value()?),
+                "--profile-conditions" => options.profile_conditions = true,
                 "--dump-component" => options.dump_component = Some(value()?),
                 "--export-committed" => options.export_committed = Some(value()?),
                 "--stop-after-round" => {
@@ -280,6 +284,9 @@ impl Options {
         }
         if options.stop_after_round.is_some() && options.export_committed.is_none() {
             return Err((2, "--stop-after-round requires --export-committed".into()));
+        }
+        if options.profile_conditions && options.profile_memory.is_none() {
+            return Err((2, "--profile-conditions requires --profile-memory".into()));
         }
         Ok(options)
     }
