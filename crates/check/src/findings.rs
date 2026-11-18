@@ -134,7 +134,7 @@ impl<'p> Verification<'p> {
     }
 }
 
-impl<'p> SymbolicMeaning<'p> {
+impl<'p, const WITHIN_W: bool> SymbolicMeaning<'p, WITHIN_W> {
     /// Converts budget exhaustion before a report exists to a top-level outcome.
     pub fn verify_checked(&self, limits: &Limits) -> Result<AnalysisOutcome<Verification<'p>>> {
         AnalysisOutcome::from_result(self.verify_at_most_one(limits))

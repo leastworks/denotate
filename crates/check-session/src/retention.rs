@@ -328,6 +328,7 @@ fields!(LocalInput {
     input_groups,
     request_scope,
     backend,
+    checking_within_w,
     limits,
     admission_limit
 });

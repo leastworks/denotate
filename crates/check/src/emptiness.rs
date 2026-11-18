@@ -80,7 +80,7 @@ impl<A, W, E> EmptinessSummary<A, W, E> {
         self.complete() && self.present == 0
     }
 }
-impl SymbolicMeaning<'_> {
+impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
     pub(crate) fn check_emptiness(
         &self,
         limits: &Limits,

@@ -996,7 +996,7 @@ Editor deadlines retain the checker phase instead of replacing it with a generic
 ### Configuration
 
 `initializationOptions.denotate` or
-`workspace/didChangeConfiguration {settings: {denotate: {timeoutMs, limits}}}`:
+`workspace/didChangeConfiguration {settings: {denotate: {timeoutMs, limits, checkingWithinW}}}`:
 `timeoutMs` defaults to 10000; it is a cooperative allowance per operation/query,
 not a program or workspace deadline. Optional `limits` accepts nonnegative integer
 `maxAtoms`, `maxRules`, `maxDependencies`, `maxWork`, `maxBddVariables`, `maxBddNodes`,
@@ -1010,10 +1010,16 @@ or separate attribution allowances. An update replaces the whole object; omitted
 settings revert to defaults. Invalid values or unknown names inside `limits` are
 logged as errors and leave the last valid configuration in place (defaults at startup).
 
+`checkingWithinW` is a boolean, default false. True opts in to exact W-masked
+verification checking; raw checking remains the default because masking can
+increase storage. It participates in checking cache keys, not preparation, W or
+admission identity. Changing it rechecks programs and prevents stale publication
+just like other configuration changes.
+
 This is window-wide policy. All limits participate in snapshot validity and checker
 request inputs. Changes cancel obsolete work and recheck every program; old results
 cannot publish under new limits. Loading progress includes the effective
-`configuration: {timeoutMs, limits, showLibraryRewrites}`. The client prints it in
+`configuration: {timeoutMs, limits, showLibraryRewrites, checkingWithinW}`. The client prints it in
 Output; current published resource reasons also produce labeled `window/logMessage`
 entries. A resource message may concern advisory/attribution work and is not itself
 a new verdict or finding.

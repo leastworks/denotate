@@ -15,6 +15,7 @@ mod rewrites;
 mod sparse;
 mod symbolic;
 mod symbolic_exhaustion;
+mod symbolic_within_w;
 mod unchanged_attempts;
 
 mod incremental_inventory;

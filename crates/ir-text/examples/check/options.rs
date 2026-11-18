@@ -21,6 +21,7 @@ pub struct Options {
     pub stop_after_round: Option<usize>,
     pub limits: Limits,
     pub input_order: InputOrder,
+    pub checking_within_w: bool,
     pub sat_probe: bool,
     pub candidate_probe: Option<denotate_check::CandidateProbeLimits>,
     pub sat_probe_limits: denotate_check::SatProbeLimits,
@@ -67,6 +68,7 @@ pub fn help() -> String {
         --sat-probe               Diagnostic uniqueness and existence search during admission (progress only)\n\
         --sat-probe-timeout-ms N   Time per probe question, independent of checker timeout (default 10000)\n\
         --sat-probe-refinements N  Maximum unfounded-set refinement rounds (default 64)\n\
+        --checking-within-w       Opt in to W-masked checking (may increase storage)\n\
         --json                    Print existing status summaries on stdout\n\
         --verbose                 Expand all related locations and structural proof chains\n\
         --empty-examples N|all    Retain N present tuples per empty obligation (default 3)\n\
@@ -119,6 +121,7 @@ impl Options {
             stop_after_round: None,
             limits,
             input_order: InputOrder::Key,
+            checking_within_w: false,
             sat_probe: false,
             candidate_probe: None,
             sat_probe_limits: Default::default(),
@@ -135,6 +138,7 @@ impl Options {
             match option.as_str() {
                 "--validate-all-assumptions" => options.validate_all_assumptions = true,
                 "--json" => options.json = true,
+                "--checking-within-w" => options.checking_within_w = true,
                 "--verbose" => options.verbose = true,
                 "--no-progress" => options.progress = false,
                 "--profile-memory" => options.profile_memory = Some(value()?),

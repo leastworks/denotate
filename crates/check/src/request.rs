@@ -156,6 +156,8 @@ pub struct CheckRequest {
     pub domains: BTreeMap<SortKey, Vec<ConstantKey>>,
     pub backend: BackendIdentity,
     pub limits: DeterministicLimits,
+    /// Opt-in exact W-masked verification; does not affect preparation or admission.
+    pub checking_within_w: bool,
 }
 impl CheckRequest {
     /// Named assumptions selected by this request. Named verifications use exact
@@ -250,6 +252,7 @@ impl CheckRequest {
             scope: RequestScope::WholeProgram,
             domains: keyed_domains,
             backend: BackendIdentity::bdd(),
+            checking_within_w: false,
             limits: limits.into(),
         })
     }
@@ -1181,6 +1184,17 @@ impl PreparedCheck<'_> {
         operations: &OperationalLimits,
         metrics: Option<&mut VerificationMetrics>,
     ) -> Result<CheckOutcome<'_>> {
+        if self.request.checking_within_w {
+            self.verify_observed_mode::<true>(operations, metrics)
+        } else {
+            self.verify_observed_mode::<false>(operations, metrics)
+        }
+    }
+    fn verify_observed_mode<const WITHIN_W: bool>(
+        &self,
+        operations: &OperationalLimits,
+        metrics: Option<&mut VerificationMetrics>,
+    ) -> Result<CheckOutcome<'_>> {
         let limits = self.request.limits.with_operations(operations);
         if !self.program.assumptions_consistent() {
             operations.cancellation.check()?;
@@ -1197,7 +1211,7 @@ impl PreparedCheck<'_> {
         }
         let mut receipts = self.receipts.clone();
         let mut budget = Budget::tracked(&limits);
-        let meaning = self.program.symbolic_impl(&mut budget, true);
+        let meaning = self.program.symbolic_for_checking::<WITHIN_W>(&mut budget);
         if let Err(error) = &meaning {
             Inconclusive::from_error(error.clone())?;
             budget.failure(error);
@@ -1287,9 +1301,19 @@ impl PreparedCheck<'_> {
                 .progress
                 .advisory("notice", CheckingTarget::Notice(n.id));
             let mut budget = Budget::tracked(&limits);
-            let result =
-                self.program
-                    .analyze_condition_with_budget(n.condition, n.within, &mut budget)?;
+            let result = if self.request.checking_within_w {
+                self.program.analyze_condition_with_budget::<true>(
+                    n.condition,
+                    n.within,
+                    &mut budget,
+                )?
+            } else {
+                self.program.analyze_condition_with_budget::<false>(
+                    n.condition,
+                    n.within,
+                    &mut budget,
+                )?
+            };
             // Deadlines are operational outcomes, never recorded as semantic work.
             if !matches!(
                 result.state,

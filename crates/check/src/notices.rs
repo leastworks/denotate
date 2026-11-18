@@ -84,9 +84,9 @@ impl GroundProgram {
         within: Option<RelationId>,
         limits: &Limits,
     ) -> Result<ConditionAnalysis> {
-        self.analyze_condition_with_budget(condition, within, &mut Budget::new(limits))
+        self.analyze_condition_with_budget::<false>(condition, within, &mut Budget::new(limits))
     }
-    pub(crate) fn analyze_condition_with_budget(
+    pub(crate) fn analyze_condition_with_budget<const WITHIN_W: bool>(
         &self,
         condition: RelationId,
         within: Option<RelationId>,
@@ -105,7 +105,7 @@ impl GroundProgram {
             ));
         }
         let run = (|| {
-            let meaning = self.symbolic_impl(budget, true)?;
+            let meaning = self.symbolic_for_checking::<WITHIN_W>(budget)?;
             let ctx = meaning.context();
             let mut blocked_by = BTreeSet::new();
             let mut settled =

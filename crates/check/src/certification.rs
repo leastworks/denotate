@@ -279,7 +279,7 @@ fn retain_provider(
     Ok(())
 }
 
-impl SymbolicMeaning<'_> {
+impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
     pub(crate) fn certify_counterexample(
         &self,
         original: &mut Counterexample,

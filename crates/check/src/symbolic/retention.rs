@@ -45,10 +45,10 @@ impl Retention {
         Ok(Self { releases, nodes })
     }
 
-    pub fn before(
+    pub fn before<const W: bool>(
         &mut self,
         index: usize,
-        meaning: &mut SymbolicMeaning<'_>,
+        meaning: &mut SymbolicMeaning<'_, W>,
         retained: &mut usize,
         budget: &mut Budget<'_>,
     ) -> Result<()> {

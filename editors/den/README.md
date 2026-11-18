@@ -147,6 +147,13 @@ remains. A phase that stays unchanged does not by itself prove the process is st
 
 ## Checker limits
 
+`denotate.checkingWithinW` (boolean, default false) opts in to checking within
+selected assumptions. It can reduce large conditions but increase storage for
+independent input groups. Changing it rechecks programs and invalidates checking
+results from the other mode; it does not change assumption construction, admission
+or resource limits. The matching CLI option is `--checking-within-w`.
+
+
 Set `denotate.timeoutMs` and `denotate.limits` in user or workspace settings. One
 configuration applies to every program in the VS Code window, including library
 programs. For example:

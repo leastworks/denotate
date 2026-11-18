@@ -836,6 +836,19 @@ The file intentionally retains program names and is not an anonymized export.
   combine safely with input uniqueness and other restrictions. Missing-producer
   coverage groups retain their meaning. Whole-program reports and general-context
   checking remain unchanged; this is not projection of W or local verdict reuse.
+- **Verification can compute exact meaning within W; proof construction stays unrestricted.**
+  After cone-scoped W construction, the knowledge ring still exhausted checking
+  while evaluating combinations forbidden by its assumptions. Per-world least
+  fixpoints are independent, so storing `c ∧ W` throughout checking preserves
+  every permitted world's result, including stratified derived negation. Truth
+  and short circuits must use W, not raw Boolean true. A distinct symbolic type
+  keeps these conditions out of admission and rewrite-proof APIs. Generalized
+  cofactors are deferred; cached local evaluations remain unrestricted. Masking
+  can enlarge simple conditions, so its resource costs are measured separately
+  from semantic equivalence. Masking is opt-in (`checking_within_w`, default
+  false): the ring improves, but independent assumption groups can exceed storage
+  limits that raw evaluation satisfies. The option changes checking cache identity
+  only, preserving W/admission reuse; no limit defaults change.
 - **Share a context, not its selected checks.** Residual grounding, permitted worlds,
   indexes and admission depend on the program, resolved domains, restrictions and
   deterministic limits. Obligation groups, notices, verification identity and

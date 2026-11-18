@@ -41,6 +41,7 @@ pub struct LocalInput {
     pub input_groups: BTreeSet<BTreeSet<AtomKey>>,
     pub request_scope: RequestScope,
     pub backend: BackendIdentity,
+    pub checking_within_w: bool,
     pub limits: DeterministicLimits,
     pub admission_limit: Option<Inconclusive>,
 }
@@ -390,6 +391,7 @@ impl PreparedCheck<'_> {
                 .collect(),
             request_scope: self.request.scope.clone(),
             backend: self.request.backend.clone(),
+            checking_within_w: self.request.checking_within_w,
             limits: self.request.limits.clone(),
             admission_limit: self.program.admission_limit().map(Into::into),
         })

@@ -319,6 +319,19 @@ whole-program BDD evaluation, with W shared only within the same selection:
 local absent-extension and constraint-projection shortcuts are not sound for general
 constraints. No context-dependent BDD or verdict is reused across selections.
 
+Verification checking may opt in to evaluation within independently established W
+(`CheckRequest::checking_within_w`, default false). Its
+symbolic meaning has a distinct type from all-input meaning: stored conditions
+are exactly `c ∧ W`, including inputs and fixed truth. Admission and rewrite-proof
+consumers accept only the unrestricted type. Checking negation and short circuits
+use W as truth; positive fixpoints and stratified negation are computed per world,
+so discarding worlds outside W cannot affect any permitted world's result.
+Whole-program checking, notices and the local coverage/emptiness pass use this
+mode when enabled; default checking remains unrestricted. This choice enters
+checking cache identity without changing preparation, W or admission identity.
+The cached local uniqueness/no-meaning path still exports/imports unrestricted
+conditions; no W-restricted value crosses that cache boundary.
+
 BDD variable order is an explicit request configuration. The default is semantic
 input-key order; diagnostic reverse and bounded structural orders use the ground
 graph after fixed/`within` preparation, before W. Structural analysis never asks

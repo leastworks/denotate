@@ -48,6 +48,18 @@ impl PreparedCheck<'_> {
         cache: &mut dyn LocalMemoStore,
         observations: Option<&mut VerificationMetrics>,
     ) -> Result<LocalCheckOutcome<'_>> {
+        if self.request.checking_within_w {
+            self.verify_local_mode::<true>(operations, cache, observations)
+        } else {
+            self.verify_local_mode::<false>(operations, cache, observations)
+        }
+    }
+    fn verify_local_mode<const WITHIN_W: bool>(
+        &self,
+        operations: &OperationalLimits,
+        cache: &mut dyn LocalMemoStore,
+        observations: Option<&mut VerificationMetrics>,
+    ) -> Result<LocalCheckOutcome<'_>> {
         operations.cancellation.check()?;
         if self.program.assumption_condition.is_some() {
             return Ok(match self.verify_observed(operations, observations)? {
@@ -111,7 +123,7 @@ impl PreparedCheck<'_> {
             }
         };
         drop(context_stage);
-        let mut presentation = SymbolicMeaning {
+        let mut presentation: SymbolicMeaning<'_> = SymbolicMeaning {
             program: &self.program,
             context,
             conditions: BTreeMap::new(),
@@ -454,7 +466,9 @@ impl PreparedCheck<'_> {
         )?;
         if !self.program.coverage.is_empty() || !self.program.emptiness.is_empty() {
             let mut coverage_budget = Budget::tracked(&limits);
-            let meaning = self.program.symbolic_impl(&mut coverage_budget, true);
+            let meaning = self
+                .program
+                .symbolic_for_checking::<WITHIN_W>(&mut coverage_budget);
             if let Err(e) = &meaning {
                 coverage_budget.failure(e);
             }

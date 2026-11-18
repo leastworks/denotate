@@ -318,10 +318,12 @@ get the same treatment if a real program shows checking storage dominating. Open
 directions: reuse unchanged components' conditions across rounds; evicting needed
 conditions, only with a deterministic policy, a diagnostic reason and evidence that
 frontier retention is not enough; demand-driven evaluation, computing an atom's
-condition only under its readers' guards; and assumption-relative evaluation, which
-might collapse exclusive alternatives that can co-occur only outside W. Rewrites
-already preserve meaning only within W, but evaluating every condition relative to
-W needs its own measurement and soundness argument. On a production-scale program, a large cone unblocked by
+condition only under its readers' guards; and broader assumption-relative
+evaluation. Verification now has opt-in exact masked evaluation within W;
+admission/proof construction and cached local evaluations remain unrestricted.
+Avoiding the measured storage inflation from unrelated constraints remains open.
+Measurements must account for both collapsing forbidden alternatives and enlarging
+simple conditions with those constraints. On a production-scale program, a large cone unblocked by
 a structural split overflowed condition storage; a shared manager would also store
 common sub-functions once.
 

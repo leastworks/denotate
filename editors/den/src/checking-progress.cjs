@@ -32,7 +32,7 @@ function activity(active) {
   const d = active.detail;
   return [`Checking: ${active.label} (run ${active.revision})`, ...(d ? [
     `${phase(d)}; reported ${Math.floor(d.elapsedMs / 1000)}s after check started`,
-    ...(d.configuration ? [`Effective checker limits (per operation/query): timeoutMs=${d.configuration.timeoutMs}; ${Object.entries(d.configuration.limits).map(([k, v]) => `${k}=${v}`).join(', ')}`] : []),
+    ...(d.configuration ? [`Effective checker limits (per operation/query): checkingWithinW=${d.configuration.checkingWithinW ?? false}; timeoutMs=${d.configuration.timeoutMs}; ${Object.entries(d.configuration.limits).map(([k, v]) => `${k}=${v}`).join(', ')}`] : []),
     ...(d.files !== undefined ? [`${d.files} source files`] : []),
     ...(d.memory ? [`Process memory (bytes; peaks are lifetime): ${JSON.stringify(d.memory)}`] : []),
     ...(d.verification ? [`${d.verification} (${d.verificationIndex}/${d.verificationTotal}); ${d.assumptions} assumptions, ${d.obligations} obligations, ${d.notices} notices`] : []),

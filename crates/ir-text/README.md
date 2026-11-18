@@ -299,6 +299,12 @@ remains explicit inconclusive, with the existing exit-code policy; optional spli
 exhaustion reports its fallback in progress. Cache-retention policies and
 separate diagnostic attribution allowances are unchanged.
 
+`--checking-within-w` opts in to evaluating verification conditions within the
+selected assumptions. It can greatly reduce conditions for mutually exclusive
+alternatives, but increase storage for independent input groups. Default checking
+remains unrestricted. It does not change admission, assumption construction or
+limits; API callers set `CheckRequest::checking_within_w`.
+
 `--empty-examples N` retains a positive number of examples per emptiness obligation
 (default three); `--empty-examples all` retains every confirmed tuple, including in
 JSON summaries. Counts remain lower bounds if checking is incomplete. It does not

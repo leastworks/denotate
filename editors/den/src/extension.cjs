@@ -15,6 +15,7 @@ exports.activate = async (context) => {
       outputChannel: output,
       initializationOptions: { originSnapshotBridge: true, checkingProgress: true, denotate: {
         showLibraryRewrites: vscode.workspace.getConfiguration('denotate').get('showLibraryRewrites', true),
+        checkingWithinW: vscode.workspace.getConfiguration('denotate').get('checkingWithinW', false),
         timeoutMs: vscode.workspace.getConfiguration('denotate').get('timeoutMs', 10000),
         limits: vscode.workspace.getConfiguration('denotate').get('limits', {})
       } },

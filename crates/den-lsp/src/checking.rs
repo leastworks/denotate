@@ -107,7 +107,10 @@ fn check_with_progress(
             .map_err(Failure::Invalid)?;
     job.limits.cancellation.check()?;
     let mut publication = presentation::configuration(&program).map_err(Failure::Internal)?;
-    let requests = program.verification_requests(&job.limits)?;
+    let mut requests = program.verification_requests(&job.limits)?;
+    for (_, request) in &mut requests {
+        request.checking_within_w = s.config.checking_within_w;
+    }
     progress.emit(Phase::AssumptionValidation, json!({}));
     let validated = validate_selected_assumption_cones_using(
         &program.corpus,

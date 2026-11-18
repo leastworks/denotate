@@ -303,6 +303,25 @@ is independent of placement. Charged cutoffs fall back to key order.
 map. Order participates in shared-context and local-query reuse; local inputs also
 carry the actual projected sequence. See the [policy](../../docs/checker-policies.md#diagnostic-input-ordering)
 for the deterministic heuristic and its bounds.
+
+Opt-in verification-only symbolic evaluation (`CheckRequest::checking_within_w`,
+default false) stores exact `c ∧ W` conditions: truth is
+W, false is false, negation is `W ∧ ¬c`, and recursive convergence compares these
+masked conditions. This is a separate const-generic `SymbolicMeaning<true>` type;
+public symbolic entry points and admission/proof consumers use the unrestricted
+default type. Inputs, fixed facts and executable replacement expressions follow
+the same checking algebra. A true-throughout-W alternative still masks an unknown
+one; unresolved atoms are never interpreted as absent.
+
+Whole-program verification, notices, and the local path's whole-program
+coverage/emptiness pass use this mode when enabled. The default retains the raw
+evaluation path. The option participates in checking query identity, but not
+shared preparation, W or admission identity. Cached local uniqueness/no-meaning
+evaluation, its exported conditions and import boundary remain unrestricted.
+Assumption construction and admission are unchanged. Masking can enlarge small
+conditions by carrying unrelated constraints; existing limits still apply, and
+an exhausted computation remains inconclusive.
+
 An empty W reports `inconsistent_assumptions` with no obligation results. Unknown W
 is inconclusive. The IR classifies constraint cones before this evaluation; selected
 cones requiring grounding must have no reachable negative cycle after one

@@ -526,7 +526,7 @@ pub fn answer_owned_local(
             retained = crate::symbolic::retain(retained, 0, imported.node_count(), &mut budget)?;
             conditions.insert(rt.atoms[key].clone(), imported);
         }
-        let mut meaning = SymbolicMeaning {
+        let mut meaning: SymbolicMeaning<'_> = SymbolicMeaning {
             program: &rt.program,
             context,
             conditions,

@@ -1212,6 +1212,40 @@ query. Their verdicts are recomputed; grounding and plan reuse remain available.
 A future optimization must retain or correctly quantify every external constraint
 input and preserve cold/warm results, replay, consistency and cancellation behavior.
 
+## Verification evaluation within W
+
+`CheckRequest::checking_within_w` is opt-in and defaults to false. The CLI flag is
+`--checking-within-w`; the editor setting is `denotate.checkingWithinW`. Once
+assumptions and admission are established, enabled whole-program verification,
+notices and the local path's coverage/emptiness pass evaluate exact conditions
+masked by W. Default checking retains unrestricted evaluation. The default public symbolic APIs, admission, rewrite proofs and W
+construction remain unrestricted. Cached local uniqueness/no-meaning evaluation
+also remains unrestricted, including export and import of its conditions.
+
+All checking conditions imply W. Truth is W; negation subtracts a condition from
+W; conjunction and disjunction preserve the mask. A raw difference of two masked
+conditions therefore tests convergence within W. No generalized cofactor or
+approximate condition is used. True-throughout-W alternatives preserve logical
+short circuits in the presence of exhausted operands. Unknown/blocked atoms retain
+their meaning, and inconsistent assumptions retain their separate status.
+
+Masking uses the existing BDD/work/storage limits. Same-sized truth comparisons
+are charged before inspecting condition contents; no new allowance or automatic
+fallback policy is introduced. W may greatly enlarge an otherwise small condition,
+so measurements must include unrelated assumption groups as well as workloads
+whose forbidden input combinations cause large unrestricted conditions. Report
+resource regressions explicitly; semantic equivalence is not a promise that costs
+or finite-budget outcomes are identical.
+
+The initial measurements show both effects: a knowledge-form ring that exhausted
+unrestricted checking now proves, while independent copies under 512 unrelated
+exactly-one input groups exceed the default condition-storage allowance after
+masking. Eager masking is therefore not a general storage reduction. This is why
+masking ships opt-in. Changing the option invalidates checking query
+identity only; shared preparation, W and admission remain eligible for reuse. A
+strategy for avoiding this inflation needs separate review; increasing limits is not a fix
+for carrying the same unrelated constraints in every condition.
+
 ## Certification search
 
 Emptiness and coverage can encounter atoms blocked by an unsupported component.

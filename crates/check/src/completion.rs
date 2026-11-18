@@ -41,7 +41,7 @@ pub struct NoMeaning {
     pub rewrites: Vec<RewriteProofId>,
 }
 
-impl SymbolicMeaning<'_> {
+impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
     pub(crate) fn complete_component(
         &self,
         component: &Component,

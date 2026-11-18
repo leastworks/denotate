@@ -207,6 +207,10 @@ fn run_streaming(
     });
     let trace = trace::Trace::new(stderr, options.progress);
     trace.message(format_args!("Root: {}", options.root));
+    trace.message(format_args!(
+        "Checking within W: {}",
+        options.checking_within_w
+    ));
     trace.message(
         "Effective limits (per operation/query; timeout is cooperative, not a command deadline):",
     );
@@ -330,6 +334,7 @@ fn check_program(
         empty_examples,
         hide_library_rewrites,
         input_order,
+        checking_within_w,
         sat_probe,
         sat_probe_limits,
         candidate_probe,
@@ -405,6 +410,7 @@ fn check_program(
         .map_err(|e| (2, e.to_string()))?;
     for (_, request) in &mut requests {
         request.backend = backend.clone();
+        request.checking_within_w = checking_within_w;
     }
     let checked = requests
         .iter()
@@ -1168,6 +1174,34 @@ mod tests {
         );
         assert!(report["existence"]["world"].is_null());
     }
+    #[test]
+    fn checking_within_w_is_opt_in_and_preserves_raw_default() {
+        let groups = (0..32)
+            .map(|i| format!("g{i}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let f = Fixture::new(&format!(
+            "sort G;const {groups}:G;sort V;const x,y:V;input i(g:G,v:V);relation r(g:G,v:V);r(G,V):-i(G,V);assumption a:exactly_one(i,group_by:(g));obligation o:at_most_one(r,group_by:(g));verification checks{{assumptions:[a];obligations:[o];}}"
+        ));
+        for (enabled, expected) in [(false, 0), (true, 2), (false, 0)] {
+            let mut args = vec!["--json", "--max-condition-nodes", "1000"];
+            if enabled {
+                args.push("--checking-within-w");
+            }
+            let (code, output, trace) = f.traced(&args);
+            assert_eq!(code, Ok(expected), "{output}");
+            assert!(trace.contains(&format!("Checking within W: {enabled}")));
+            if enabled {
+                assert!(output.contains("condition nodes"));
+            }
+        }
+        assert!(
+            !options::Options::parse(["root".into()], Limits::default())
+                .unwrap()
+                .checking_within_w
+        );
+    }
+
     #[test]
     fn diagnostic_input_orders_preserve_answers_and_report_configuration() {
         for (body, expected) in [

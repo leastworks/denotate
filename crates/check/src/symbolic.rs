@@ -34,38 +34,65 @@ pub(crate) enum PartialCondition {
     Unknown(EvaluationUnknown<GroundAtom>),
 }
 impl PartialCondition {
-    fn is_true(&self) -> bool {
-        matches!(self, Self::Known(c) if c.is_true())
+    fn is_true<const W: bool>(
+        &self,
+        meaning: &SymbolicMeaning<'_, W>,
+        budget: &mut Budget<'_>,
+    ) -> Result<bool> {
+        match self {
+            Self::Known(c) => meaning.condition_is_true(c, budget),
+            Self::Unknown(_) => Ok(false),
+        }
     }
     fn is_false(&self) -> bool {
         matches!(self, Self::Known(c) if c.is_false())
     }
-    fn not(self, ctx: &ConditionContext, budget: &mut Budget<'_>) -> Result<Self> {
+    fn not<const W: bool>(
+        self,
+        meaning: &SymbolicMeaning<'_, W>,
+        budget: &mut Budget<'_>,
+    ) -> Result<Self> {
         Ok(match self {
-            Self::Known(c) => Self::Known(ctx.complement(&c, budget)?),
+            Self::Known(c) => Self::Known(if W {
+                meaning
+                    .context
+                    .apply(&meaning.truth(), &c, op_function::and_not, budget)?
+            } else {
+                meaning.context.complement(&c, budget)?
+            }),
             unknown => unknown,
         })
     }
-    fn combine(
+    fn combine<const W: bool>(
         self,
         other: Self,
         all: bool,
-        ctx: &ConditionContext,
+        meaning: &SymbolicMeaning<'_, W>,
         budget: &mut Budget<'_>,
     ) -> Result<Self> {
         // A false conjunct or true alternative decides the expression even if
         // another premise is unknown. Otherwise conservatively propagate unknown.
         if (all && (self.is_false() || other.is_false()))
-            || (!all && (self.is_true() || other.is_true()))
+            || (!all && (self.is_true(meaning, budget)? || other.is_true(meaning, budget)?))
         {
             return Ok(Self::Known(if all {
-                ctx.false_condition()
+                meaning.context.false_condition()
             } else {
-                ctx.true_condition()
+                meaning.truth()
             }));
         }
+        // Masked truth is W, not raw true. Avoid repeatedly conjoining W with
+        // operands that already imply it. Unknown operands remain unknown.
+        if W && all {
+            if self.is_true(meaning, budget)? {
+                return Ok(other);
+            }
+            if other.is_true(meaning, budget)? {
+                return Ok(self);
+            }
+        }
         Ok(match (self, other) {
-            (Self::Known(a), Self::Known(b)) => Self::Known(ctx.apply(
+            (Self::Known(a), Self::Known(b)) => Self::Known(meaning.context.apply(
                 &a,
                 &b,
                 if all {
@@ -89,8 +116,11 @@ pub struct SymbolicMetrics {
 
 /// Settled fact conditions for admitted components over ALL input observations.
 /// A blocked component is not a restriction on the input universe.
+/// The default type and public evaluation entry points retain that contract.
+/// Internal verification uses `SymbolicMeaning<true>`, exact only within W;
+/// admission/proof APIs accept the unrestricted default type only.
 #[derive(Debug)]
-pub struct SymbolicMeaning<'p> {
+pub struct SymbolicMeaning<'p, const WITHIN_W: bool = false> {
     pub(crate) program: &'p GroundProgram,
     pub(crate) context: ConditionContext,
     pub(crate) conditions: BTreeMap<GroundAtom, Condition>,
@@ -99,7 +129,28 @@ pub struct SymbolicMeaning<'p> {
     pub(crate) unknown: BTreeMap<GroundAtom, EvaluationUnknown<GroundAtom>>,
     pub(crate) metrics: SymbolicMetrics,
 }
-impl SymbolicMeaning<'_> {
+impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
+    fn truth(&self) -> Condition {
+        if WITHIN_W {
+            self.context.permitted_worlds()
+        } else {
+            self.context.true_condition()
+        }
+    }
+    fn condition_is_true(&self, condition: &Condition, budget: &mut Budget<'_>) -> Result<bool> {
+        if !WITHIN_W {
+            return Ok(condition.is_true());
+        }
+        let truth = self.truth();
+        if truth.is_true() {
+            return Ok(condition.is_true());
+        }
+        if condition.node_count() != truth.node_count() {
+            return Ok(false);
+        }
+        budget.charge(condition.node_count(), "symbolic truth within W")?;
+        Ok(condition.same_representation(&truth))
+    }
     fn partial_condition(&self, atom: &GroundAtom) -> Result<PartialCondition> {
         self.unknown.get(atom).cloned().map_or_else(
             || self.known(atom).map(PartialCondition::Known),
@@ -114,7 +165,7 @@ impl SymbolicMeaning<'_> {
         budget.tick("settled expression")?;
         Ok(match expression {
             SettledExpression::Constant(v) => PartialCondition::Known(if *v {
-                self.context.true_condition()
+                self.truth()
             } else {
                 self.context.false_condition()
             }),
@@ -130,20 +181,18 @@ impl SymbolicMeaning<'_> {
                     return Err(CheckError::Internal("replacement reads unresolved atom"));
                 }
             },
-            SettledExpression::Not(c) => self
-                .partial_expression(c, budget)?
-                .not(&self.context, budget)?,
+            SettledExpression::Not(c) => self.partial_expression(c, budget)?.not(self, budget)?,
             SettledExpression::All(cs) | SettledExpression::Any(cs) => {
                 let all = matches!(expression, SettledExpression::All(_));
                 let mut result = PartialCondition::Known(if all {
-                    self.context.true_condition()
+                    self.truth()
                 } else {
                     self.context.false_condition()
                 });
                 for c in cs {
                     let next = self.partial_expression(c, budget)?;
-                    result = result.combine(next, all, &self.context, budget)?;
-                    if (all && result.is_false()) || (!all && result.is_true()) {
+                    result = result.combine(next, all, self, budget)?;
+                    if (all && result.is_false()) || (!all && result.is_true(self, budget)?) {
                         break;
                     }
                 }
@@ -193,7 +242,7 @@ impl SymbolicMeaning<'_> {
         }
         if let Some(value) = self.program.fixed_value(atom) {
             return Ok(if value {
-                self.context.true_condition()
+                self.truth()
             } else {
                 self.context.false_condition()
             });
@@ -249,6 +298,22 @@ impl GroundProgram {
         AnalysisOutcome::from_result(self.symbolic_impl(&mut Budget::new(limits), true))
     }
 
+    /// Verification-only meaning. The type prevents use by raw admission/proof APIs.
+    pub(crate) fn symbolic_for_checking<const WITHIN_W: bool>(
+        &self,
+        budget: &mut Budget<'_>,
+    ) -> Result<SymbolicMeaning<'_, WITHIN_W>> {
+        self.symbolic_selected_impl(
+            budget,
+            true,
+            None,
+            None,
+            None,
+            None,
+            #[cfg(any(test, feature = "test-support"))]
+            None,
+        )
+    }
     pub(crate) fn symbolic_impl(
         &self,
         budget: &mut Budget<'_>,
@@ -309,7 +374,7 @@ impl GroundProgram {
             None,
         )
     }
-    fn symbolic_selected_impl(
+    fn symbolic_selected_impl<const WITHIN_W: bool>(
         &self,
         budget: &mut Budget<'_>,
         partial: bool,
@@ -320,7 +385,7 @@ impl GroundProgram {
         #[cfg(any(test, feature = "test-support"))] mut measured: Option<
             &mut dyn FnMut(ComponentId, Duration),
         >,
-    ) -> Result<SymbolicMeaning<'_>> {
+    ) -> Result<SymbolicMeaning<'_, WITHIN_W>> {
         let reserved = keep.map_or(0, |(_, reserved)| reserved);
         let mut retention = keep
             .map(|(keep, _)| {
@@ -330,7 +395,7 @@ impl GroundProgram {
         let _stage = budget.limits.progress.nested("symbolic-evaluation");
         let start = Instant::now();
         let context = ConditionContext::build_selected(self, input_facts, budget)?;
-        let mut meaning = SymbolicMeaning {
+        let mut meaning: SymbolicMeaning<'_, WITHIN_W> = SymbolicMeaning {
             program: self,
             context,
             conditions: BTreeMap::new(),
@@ -355,6 +420,11 @@ impl GroundProgram {
             }
             let input = &input;
             let condition = meaning.context.input_with_budget(input, budget)?;
+            let condition = if WITHIN_W {
+                meaning.context.restrict(&condition, budget)?
+            } else {
+                condition
+            };
             retained = retain(retained, 0, condition.node_count(), budget)?;
             meaning.conditions.insert(input.clone(), condition);
         }
@@ -425,7 +495,7 @@ impl GroundProgram {
                                 continue;
                             }
                             let old = meaning.partial_condition(head)?;
-                            if old.is_true() {
+                            if old.is_true(&meaning, budget)? {
                                 continue;
                             }
                             let _profile_target = budget.limits.profile.target(head);
@@ -577,7 +647,7 @@ pub(crate) fn retain(
     Ok(next)
 }
 
-impl SymbolicMeaning<'_> {
+impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
     fn evaluate_producer(
         &self,
         rule: &GroundRule,
@@ -587,7 +657,7 @@ impl SymbolicMeaning<'_> {
         budget: &mut Budget<'_>,
     ) -> Result<Option<PartialCondition>> {
         let head = &rule.head.atom;
-        let mut body = PartialCondition::Known(self.context.true_condition());
+        let mut body = PartialCondition::Known(self.truth());
         for literal in &rule.body {
             budget.tick("symbolic evaluation")?;
             let mut premise = self.partial_condition(&literal.term.atom)?;
@@ -604,9 +674,9 @@ impl SymbolicMeaning<'_> {
                         ));
                     }
                 }
-                premise = premise.not(&self.context, budget)?;
+                premise = premise.not(self, budget)?;
             }
-            body = body.combine(premise, true, &self.context, budget)?;
+            body = body.combine(premise, true, self, budget)?;
             if body.is_false() {
                 break;
             }
@@ -614,14 +684,14 @@ impl SymbolicMeaning<'_> {
         if !body.is_false() {
             for replacement in &rule.replacements {
                 let value = self.partial_expression(&replacement.expression, budget)?;
-                body = body.combine(value, true, &self.context, budget)?;
+                body = body.combine(value, true, self, budget)?;
                 if body.is_false() {
                     break;
                 }
             }
         }
-        // Preserve the unrestricted convergence check on
-        // exact conditions; equality under W is insufficient.
+        // Raw evaluation must compare over all inputs. Checking stores exact
+        // c ∧ W throughout, so the same raw difference is equality within W.
         if let (PartialCondition::Known(a), PartialCondition::Known(b)) = (&old, &body) {
             if self
                 .context
@@ -631,7 +701,7 @@ impl SymbolicMeaning<'_> {
                 return Ok(None);
             }
         }
-        let next = old.combine(body, false, &self.context, budget)?;
+        let next = old.combine(body, false, self, budget)?;
         let old_size = self.conditions.get(head).map_or(0, Condition::node_count);
         match &next {
             PartialCondition::Known(c) => {
@@ -641,7 +711,9 @@ impl SymbolicMeaning<'_> {
         }
         Ok(Some(next))
     }
+}
 
+impl SymbolicMeaning<'_> {
     pub(crate) fn settled_expression(
         &self,
         expression: &SettledExpression<GroundAtom>,

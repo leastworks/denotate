@@ -54,7 +54,7 @@ impl<T, W, A> CoverageSummary<T, W, A> {
     }
 }
 
-impl SymbolicMeaning<'_> {
+impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
     pub(crate) fn check_coverage(
         &self,
         limits: &Limits,

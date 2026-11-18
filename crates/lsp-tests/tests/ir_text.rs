@@ -2974,3 +2974,42 @@ fn window_limits_initialize_recheck_all_roots_reject_invalid_and_discard_stale_r
         .any(|v| v["type"] == 1 && v["message"].as_str().unwrap().contains("using defaults")));
     invalid.shutdown();
 }
+
+#[test]
+fn checking_within_w_configuration_rechecks_and_omission_restores_raw_mode() {
+    let groups = (0..32)
+        .map(|i| format!("g{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let source = format!("sort G;const {groups}:G;sort V;const x,y:V;input i(g:G,v:V);relation r(g:G,v:V);r(G,V):-i(G,V);assumption a:exactly_one(i,group_by:(g));obligation o:at_most_one(r,group_by:(g));verification checks{{assumptions:[a];obligations:[o];}}");
+    let mut c = Client::start_with_config(
+        "base/00-valid",
+        json!({"checkingWithinW":true,"limits":{"maxConditionNodes":1000}}),
+    );
+    let (uri, _) = c.open("example.den");
+    c.change(&uri, 2, &source);
+    checking_idle(&mut c);
+    let state = |c: &mut Client| {
+        c.request("denotate/roots", json!({"uri":uri}))["verifications"][0]["summary"]["state"]
+            .clone()
+    };
+    assert_eq!(state(&mut c), "incomplete");
+    for (config, expected) in [
+        (json!({"limits":{"maxConditionNodes":1000}}), "proved"),
+        (
+            json!({"checkingWithinW":true,"limits":{"maxConditionNodes":1000}}),
+            "incomplete",
+        ),
+        (
+            json!({"checkingWithinW":false,"limits":{"maxConditionNodes":1000}}),
+            "proved",
+        ),
+    ] {
+        c.notify(
+            "workspace/didChangeConfiguration",
+            json!({"settings":{"denotate":config}}),
+        );
+        checking_idle(&mut c);
+        assert_eq!(state(&mut c), expected);
+    }
+}

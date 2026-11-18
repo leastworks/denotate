@@ -18,12 +18,25 @@ fn run(
     p: &LoadedProgram,
     session: &mut Session,
 ) -> Vec<(ScopedResults, presentation::Presentation)> {
+    let raw = run_mode(p, session, false);
+    let masked = run_mode(p, session, true);
+    for (a, b) in raw.iter().zip(&masked) {
+        assert_eq!(states(&a.0), states(&b.0));
+    }
+    raw
+}
+fn run_mode(
+    p: &LoadedProgram,
+    session: &mut Session,
+    within_w: bool,
+) -> Vec<(ScopedResults, presentation::Presentation)> {
     let limits = Limits::default();
     let ops = (&limits).into();
     p.verification_requests(&limits)
         .unwrap()
         .into_iter()
-        .map(|(_, request)| {
+        .map(|(_, mut request)| {
+            request.checking_within_w = within_w;
             let RequestPreparation::Complete(prepared) =
                 session.prepare(&request, &p.corpus, &p.keys, &ops).unwrap()
             else {

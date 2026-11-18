@@ -8,6 +8,7 @@ pub struct Config {
     pub timeout_ms: u64,
     pub limits: DeterministicLimits,
     pub show_library_rewrites: bool,
+    pub checking_within_w: bool,
 }
 impl Default for Config {
     fn default() -> Self {
@@ -16,6 +17,7 @@ impl Default for Config {
             timeout_ms: limits.timeout.as_millis().try_into().unwrap_or(u64::MAX),
             limits: (&limits).into(),
             show_library_rewrites: true,
+            checking_within_w: false,
         }
     }
 }
@@ -31,6 +33,9 @@ impl Config {
         if let Some(v) = value.get("showLibraryRewrites") {
             config.show_library_rewrites =
                 v.as_bool().ok_or("Expected boolean showLibraryRewrites")?;
+        }
+        if let Some(v) = value.get("checkingWithinW") {
+            config.checking_within_w = v.as_bool().ok_or("Expected boolean checkingWithinW")?;
         }
         if let Some(limits) = value.get("limits") {
             for (name, value) in limits.as_object().ok_or("Expected a limits object")? {
@@ -71,7 +76,7 @@ impl Config {
         })
     }
     pub fn data(&self) -> Value {
-        json!({"timeoutMs":self.timeout_ms,"showLibraryRewrites":self.show_library_rewrites,
+        json!({"timeoutMs":self.timeout_ms,"showLibraryRewrites":self.show_library_rewrites,"checkingWithinW":self.checking_within_w,
         "limits":{
             "maxAtoms":self.limits.max_atoms,"maxRules":self.limits.max_rules,
             "maxDependencies":self.limits.max_dependencies,"maxWork":self.limits.max_work,
@@ -113,6 +118,14 @@ mod tests {
             properties["denotate.timeoutMs"]["default"],
             defaults["timeoutMs"]
         );
+        assert_eq!(
+            properties["denotate.checkingWithinW"]["default"],
+            defaults["checkingWithinW"]
+        );
+        assert!(!Config::default().checking_within_w);
+        let enabled = Config::read(&json!({"checkingWithinW":true})).unwrap();
+        assert!(enabled.checking_within_w);
+        assert_eq!(Config::read(&enabled.data()).unwrap(), enabled);
         let schema = properties["denotate.limits"]["properties"]
             .as_object()
             .unwrap();
@@ -122,6 +135,8 @@ mod tests {
     #[test]
     fn malformed_limits_are_rejected_as_a_whole() {
         for config in [
+            json!({"checkingWithinW":"true"}),
+            json!({"checkingWithinW":null}),
             json!({"limits":null}),
             json!({"limits":[]}),
             json!({"limits":{"maxAtoms":-1}}),

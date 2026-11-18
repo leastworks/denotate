@@ -54,6 +54,13 @@ See [memory profiling](../../docs/checker-policies.md#memory-profiling).
 - `Session::verify_with_metrics` and the checker's corresponding methods optionally
   time the actual notice pass. Metrics reset on entry, stay outside semantic results
   and receipts, and are never cached.
+- `CheckRequest::checking_within_w` (default false) opts in to W-masked checking.
+  It participates in local evaluation and answer identity, so switching modes
+  cannot reuse checking results from the other mode. It does not change fixed
+  preparation, W or shared admission identity. Cached local uniqueness/no-meaning
+  evaluation remains raw in both modes; general contexts, coverage/emptiness and
+  notices use the selected mode. Cross-run preparation/admission retention is
+  otherwise unchanged.
 - Retained queries use semantic keys, never arena IDs. Unchanged query inputs reuse
   answers; edits invalidate work at each query's granularity. Source binding and
   run-scoped preparation still execute after trivia-only edits.

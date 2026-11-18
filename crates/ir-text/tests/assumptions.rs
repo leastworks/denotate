@@ -13,9 +13,17 @@ fn program(text: &str) -> LoadedProgram {
     load_text(text).unwrap()
 }
 fn run(p: &LoadedProgram, session: &mut Session) -> (ScopedResults, presentation::Presentation) {
+    run_mode(p, session, false)
+}
+fn run_mode(
+    p: &LoadedProgram,
+    session: &mut Session,
+    within_w: bool,
+) -> (ScopedResults, presentation::Presentation) {
     let limits = Limits::default();
     let ops = OperationalLimits::from(&limits);
-    let request = p.verification_requests(&limits).unwrap().remove(0).1;
+    let mut request = p.verification_requests(&limits).unwrap().remove(0).1;
+    request.checking_within_w = within_w;
     let RequestPreparation::Complete(prepared) =
         session.prepare(&request, &p.corpus, &p.keys, &ops).unwrap()
     else {
@@ -482,5 +490,113 @@ fn assumption_cone_edits_preserve_w_with_external_uniqueness_inputs_cold_and_war
         let (fresh, fp) = run(&p, &mut Session::default());
         assert_eq!(warm, fresh);
         assert_eq!(wp.status, fp.status);
+    }
+}
+
+#[test]
+fn checking_within_w_preserves_findings_and_replayed_examples() {
+    let mut session = Session::default();
+    for (selection, within_w) in [
+        ("a", false),
+        ("a", true),
+        ("a", true),
+        ("", true),
+        ("a", false),
+    ] {
+        let p = program(&format!(
+            "sort S; const x,y:S; input i(x:S); relation r(x:S); r(X):-i(X); r(y):-i(x); assumption a:exactly_one(i,group_by:()); obligation e:empty(r); obligation u:at_most_one(r,group_by:()); obligation c:at_least_one(r,group_by:(x)); obligation one:exactly_one(r,group_by:()); relation paradox(); paradox():-i(x),!paradox(); verification v{{assumptions:[{selection}];obligations:[e,u,c,one];}}"
+        ));
+        let limits = Limits::default();
+        let ops = OperationalLimits::from(&limits);
+        let mut request = p.verification_requests(&limits).unwrap().remove(0).1;
+        request.checking_within_w = within_w;
+        let RequestPreparation::Complete(prepared) =
+            request.prepare(&p.corpus, &p.keys, &ops).unwrap()
+        else {
+            panic!()
+        };
+        let prepared = prepared.admit(&ops).unwrap();
+        let unrestricted = prepared
+            .program()
+            .symbolic(&limits)
+            .unwrap()
+            .verify_at_most_one(&limits)
+            .unwrap();
+        let CheckOutcome::Complete(checked) = prepared.verify(&ops).unwrap() else {
+            panic!()
+        };
+        let masked = &checked.verification;
+        assert_eq!(
+            unrestricted.all_obligations_proved(),
+            masked.all_obligations_proved()
+        );
+        assert_eq!(unrestricted.groups.len(), masked.groups.len());
+        for a in &unrestricted.groups {
+            let b = masked
+                .groups
+                .iter()
+                .find(|b| b.group.key == a.group.key)
+                .unwrap();
+            assert_eq!(
+                std::mem::discriminant(&a.outcome),
+                std::mem::discriminant(&b.outcome)
+            );
+            if let VerifiedOutcome::Counterexample(e) = &b.outcome {
+                let replay = prepared
+                    .program()
+                    .evaluate(e.observation.present.iter().cloned(), &limits)
+                    .unwrap();
+                for tuple in &e.tuples {
+                    assert_eq!(replay.fact(tuple).unwrap(), FactState::Settled(true));
+                }
+            }
+        }
+        for (key, a) in &unrestricted.coverage {
+            let b = &masked.coverage[key];
+            assert_eq!(
+                (a.missing, a.unsupported, a.complete()),
+                (b.missing, b.unsupported, b.complete())
+            );
+        }
+        for (key, a) in &unrestricted.emptiness {
+            let b = &masked.emptiness[key];
+            assert_eq!(
+                (a.present, a.unresolved, a.complete()),
+                (b.present, b.unresolved, b.complete())
+            );
+            for e in &b.examples {
+                let replay = prepared
+                    .program()
+                    .evaluate(e.observation.present.iter().cloned(), &limits)
+                    .unwrap();
+                assert_eq!(replay.fact(&e.tuple).unwrap(), FactState::Settled(true));
+            }
+        }
+        assert_eq!(unrestricted.unresolved.len(), masked.unresolved.len());
+        for a in &unrestricted.unresolved {
+            let b = masked
+                .unresolved
+                .iter()
+                .find(|b| b.component == a.component)
+                .unwrap();
+            assert_eq!(a.outcome, b.outcome);
+            let (CompletionOutcome::NoMeaning(a), CompletionOutcome::NoMeaning(b)) =
+                (&a.completion, &b.completion)
+            else {
+                panic!("expected no-meaning")
+            };
+            assert!(
+                prepared
+                    .program()
+                    .condition_context(&limits)
+                    .unwrap()
+                    .equivalent(&a.bad_input, &b.bad_input, &limits)
+                    .unwrap()
+            );
+        }
+        let (warm, wp) = run_mode(&p, &mut session, within_w);
+        let (cold, cp) = run_mode(&p, &mut Session::default(), within_w);
+        assert_eq!(warm, cold);
+        assert_eq!(wp.status, cp.status);
     }
 }

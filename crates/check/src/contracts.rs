@@ -135,7 +135,7 @@ pub struct PropertyReport {
     pub metrics: SymbolicMetrics,
 }
 
-impl SymbolicMeaning<'_> {
+impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
     /// Check all represented at_most_one obligations over every input assignment.
     /// Uses the selected permitted-world condition; an inconsistent context is
     /// an explicit error at this low-level property-query boundary.
