@@ -420,3 +420,10 @@ publishes their findings on the program's own files
 - Editor parity: for every parser-backed regression program, both editors publish the
   same findings (`crates/den-lsp/src/publication_tests.rs`).
 - LSP scenarios over real stdio (`crates/lsp-tests/`) and installed VS Code smoke tests.
+
+The standalone CNF size experiment (`denotate-check::cnf_measurement`) prepares the
+fixed fold and whole residual graph without constructing W or invoking admission.
+It owns completion encoding and bounded CNF elimination; the `measure_cnf` example
+in `ir-text` owns discovery and JSON output. It encodes declared input cardinality
+but no selected assumptions, retains the original rules, and produces measurements
+only. It does not participate in checker/session/editor verdicts.

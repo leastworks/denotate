@@ -685,3 +685,21 @@ largest current conditions, retained array storage and cumulative result traffic
 It also supplies a bounded graph-only cycle sample. These observations are partial
 approximations, not settled facts, and never enter cached semantic results.
 The CLI projects them with `--profile-memory FILE --profile-conditions`.
+
+## CNF size experiment
+
+`cnf_measurement::Measurement` folds fixed facts and grounds the whole residual
+program without W, admission, or input-dependent BDD evaluation. It measures
+completion plus declared input cardinality U; selected assumptions and obligations
+are not encoded. It returns no semantic verdict. The command adapter is
+`just measure-den-cnf ROOT [--eliminate]` (see the ir-text README).
+
+Completion uses no extra head-disjunction variable, uses the head directly for a
+single conjunction, reuses single-literal bodies,
+and deduplicates bodies. Optional bounded CNF resolution eliminates single-reader,
+single-definition acyclic atoms only, preserving input and recursive variables.
+Each candidate allows at most 64 positive/negative clause pairs and must not grow
+clauses or literal occurrences. The original ground graph is unchanged; removed
+clauses retain a reverse-order model reconstruction log. Later query APIs must
+protect or translate any eliminated query targets. This is a size experiment,
+not a SAT checking backend or an execution planner.

@@ -1374,3 +1374,13 @@ are cumulative traffic, not live allocation or peak memory. Superseded unreferen
 arrays are dropped normally; there is no permanent BDD node store to clear here.
 Profiling adds scans and output, not semantic work charges or BDD operations, and
 can affect deadlines. Disabled profiling collects none of these snapshots.
+
+## Whole-program CNF size experiment
+
+`just measure-den-cnf` measures original residual completion and declared input
+cardinality without input-dependent BDDs. It does not select a new checking backend
+or alter admission. Optional non-growing CNF elimination is limited to acyclic,
+single-reader definitions; recursive boundaries and input variables stay queryable.
+The report separates final CNF vector storage from reconstruction storage and makes
+no peak-memory or solver-performance claim. Selected assumptions and semantic
+queries follow in a later increment; the current measurements cover U only.

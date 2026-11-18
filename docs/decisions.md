@@ -1258,3 +1258,17 @@ The file intentionally retains program names and is not an anonymized export.
 - **Rename is validated by re-resolving, not by a reference list.** A dry run over
   every affected program catches capture, new ambiguity and structural changes that a
   list of references cannot.
+
+## CNF size experiments preserve the original rule program
+
+Whole-program completion size can be measured independently of admission and BDD
+checking. The size experiment folds fixed facts, encodes the residual program and
+declared input cardinality, and returns no semantic verdict. Selected assumptions
+and checking queries are outside this increment.
+
+Optional variable elimination operates on CNF only, with reconstruction information;
+the original ground rules remain available for stable-model validation. Inlining
+across recursive negation in Datalog would change meaning. Inputs and recursive
+atoms stay protected in the initial experiment. Completion models alone are not
+stable-model witnesses, and smaller CNF does not establish lower total memory:
+reconstruction storage is reported separately.

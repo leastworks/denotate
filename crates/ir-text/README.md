@@ -333,3 +333,27 @@ JSON also includes quiet notice results. Inconsistent contexts keep only their c
 Error; notice findings do not change exit codes.
 Notice outcomes do not change exit codes. See the
 [format documentation](../../docs/den-format.md#contextual-condition-notices).
+
+## Whole-program CNF measurements
+
+```sh
+just measure-den-cnf ROOT --eliminate
+```
+
+This size-only experiment emits JSON with before/after variable, clause and literal
+occurrence counts; before-elimination counts and payload bytes by relation; vector storage and separate
+reconstruction storage; fixed/residual sizes; and loading, preparation and encoding
+times. It encodes the whole residual completion and declared input cardinality U,
+without selected assumptions, BDD construction, admission or checking verdicts.
+It works with a discovered `den.root` closure, including library declarations.
+
+`--max-atoms`, `--max-rules`, `--max-dependencies`, `--max-work`, and `--timeout-ms`
+use checker defaults. Encoding uses those size limits for variables, clauses and
+literal occurrences respectively. Preparation and measurement have separate budgets.
+An exhausted phase exits 2 with an error, without a successful report.
+
+`--eliminate` compares bounded CNF resolution with the original encoding; inputs
+and recursive atoms remain protected. Storage counts cover named vector capacities,
+not total memory, allocator overhead, preprocessing scratch, peak RSS, or a SAT
+solver's storage. Reconstruction adds retained memory even when the final CNF shrinks.
+The command does not claim that its completion models are stable models.

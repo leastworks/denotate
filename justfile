@@ -81,6 +81,11 @@ score-den +args:
 bench-den-origins +args:
     cargo +1.93.0 run --release --locked -p denotate-ir-text --example bench_origins -- "$@"
 
+# Measure whole-program CNF size without BDDs or checking verdicts.
+[positional-arguments]
+measure-den-cnf +args:
+    cargo +1.93.0 run --release --locked -p denotate-ir-text --example measure_cnf -- "$@"
+
 # Compare cold/warm/edited folding: ITEMS [VERIFICATIONS=4] [--ground-assumption] [--two-selections] [--no-retention].
 [positional-arguments]
 bench-den-fixed +args:

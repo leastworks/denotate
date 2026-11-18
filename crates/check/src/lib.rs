@@ -48,6 +48,7 @@ mod settled_expression;
 mod structural;
 mod structural_split;
 pub use settled_expression::{SettledExpression, SettledReplacement};
+pub mod cnf_measurement;
 mod sat_probe;
 pub use sat_probe::{
     CandidateProbeCounts, CandidateProbeLimits, CandidateProbePair, CandidateProbeReport,
