@@ -1,4 +1,4 @@
-//! Encoding-size experiment only: no SAT/BDD solving and no checking verdicts.
+//! Encoding-size experiment only: bounded local BDD proofs, no checking verdicts.
 //! CNF elimination never modifies the original ground rules.
 use crate::{
     limits::{Budget, Result},
@@ -28,7 +28,9 @@ pub struct RelationSize {
 pub struct Report {
     pub before: Size,
     pub after: Size,
+    /// Before elimination, after any pre-encoding simplification.
     pub relations: BTreeMap<RelationId, RelationSize>,
+    pub after_relations: BTreeMap<RelationId, RelationSize>,
     pub eliminated: usize,
     pub reconstruction_bytes: usize,
     pub residual_atoms: usize,
@@ -97,9 +99,13 @@ impl Cnf {
     }
     fn by_relation(&self) -> BTreeMap<RelationId, RelationSize> {
         let mut rows = BTreeMap::<_, RelationSize>::new();
-        for (r, atom) in &self.owners {
+        let eliminated: BTreeSet<_> = self.eliminated.iter().map(|(v, _)| *v).collect();
+        for (i, (r, atom)) in self.owners.iter().enumerate() {
             let row = rows.entry(*r).or_default();
             row.payload_bytes += std::mem::size_of::<(RelationId, bool)>();
+            if eliminated.contains(&i) {
+                continue;
+            }
             if *atom {
                 row.atom_variables += 1;
             } else {
@@ -236,10 +242,19 @@ impl Measurement {
         let mut b = Budget::new(limits);
         b.tick("CNF measurement")?;
         let (mut cnf, candidates) = encode(&self.program, &mut b)?;
+        self.report_cnf(&mut cnf, &candidates, eliminate, &mut b)
+    }
+    fn report_cnf(
+        &self,
+        cnf: &mut Cnf,
+        candidates: &[usize],
+        eliminate: bool,
+        b: &mut Budget<'_>,
+    ) -> Result<Report> {
         let before = cnf.size();
         let relations = cnf.by_relation();
         if eliminate {
-            cnf.eliminate(&candidates, &mut b)?;
+            cnf.eliminate(candidates, b)?;
         }
         let reconstruction_bytes = cnf.eliminated.capacity()
             * std::mem::size_of::<(usize, Vec<Clause>)>()
@@ -256,6 +271,7 @@ impl Measurement {
             before,
             after: cnf.size(),
             relations,
+            after_relations: cnf.by_relation(),
             eliminated: cnf.eliminated.len(),
             reconstruction_bytes,
             residual_atoms: self.program.core.atoms.len(),
@@ -264,133 +280,12 @@ impl Measurement {
         })
     }
 }
+mod model;
+mod simplify;
+pub use simplify::{Pass, PassStats, SimplificationLimits, Variant};
+
 fn encode(p: &GroundProgram, b: &mut Budget<'_>) -> Result<(Cnf, Vec<usize>)> {
-    let mut cnf = Cnf::default();
-    let mut vars = BTreeMap::new();
-    for a in &p.core.atoms {
-        b.tick("CNF measurement")?;
-        let l = cnf.var(a.relation, true, b)?;
-        if p.inputs.contains(a) || p.component_for(a)?.recursive {
-            cnf.protected.insert(l as usize - 1);
-        }
-        vars.insert(a, l);
-    }
-    let mut bodies = vec![BTreeSet::<Vec<i32>>::new(); vars.len()];
-    let mut readers = vec![BTreeSet::new(); vars.len()];
-    for r in &p.core.rules {
-        let h = vars[&r.head.atom] as usize - 1;
-        let mut body = Vec::new();
-        let mut dead = false;
-        for l in &r.body {
-            b.tick("CNF measurement")?;
-            match p.fixed_value(&l.term.atom) {
-                Some(v) if v != (l.polarity == Polarity::Positive) => {
-                    dead = true;
-                    break;
-                }
-                Some(_) => (),
-                None => {
-                    // Missing negative producers denote false; grounding normally
-                    // retains these atoms explicitly.
-                    let Some(v) = vars.get(&l.term.atom) else {
-                        // No possible producer: closed-world false, including a
-                        // negative reference to an empty fixed relation.
-                        if l.polarity == Polarity::Positive {
-                            dead = true;
-                        }
-                        continue;
-                    };
-                    readers[*v as usize - 1].insert(h);
-                    body.push(if l.polarity == Polarity::Positive {
-                        *v
-                    } else {
-                        -*v
-                    });
-                }
-            }
-        }
-        if !dead {
-            if let Some(body) = normalize(body) {
-                bodies[h].insert(body);
-            }
-        }
-    }
-    let mut candidates = Vec::new();
-    for (h, definitions) in bodies.iter().enumerate() {
-        b.tick("CNF measurement")?;
-        if p.inputs.contains(&p.core.atoms[h]) {
-            continue;
-        }
-        if definitions.len() == 1 && readers[h].len() == 1 && !readers[h].contains(&h) {
-            candidates.push(h);
-        }
-        let owner = cnf.owners[h].0;
-        let head = (h + 1) as i32;
-        if definitions.contains(&Vec::new()) {
-            cnf.clause(vec![head], owner, b)?;
-            continue;
-        }
-        // A single conjunction can use its head as the Tseitin variable.
-        // This is CNF construction, including recursive definitions, not a rule rewrite.
-        if definitions.len() == 1 {
-            let body = definitions.first().unwrap();
-            for l in body {
-                cnf.clause(vec![-head, *l], owner, b)?;
-            }
-            cnf.clause(
-                std::iter::once(head)
-                    .chain(body.iter().map(|l| -*l))
-                    .collect(),
-                owner,
-                b,
-            )?;
-            continue;
-        }
-        let mut producers = Vec::new();
-        for body in definitions {
-            let term = if body.len() == 1 {
-                body[0]
-            } else {
-                let aux = cnf.var(owner, false, b)?;
-                for l in body {
-                    cnf.clause(vec![-aux, *l], owner, b)?;
-                }
-                cnf.clause(
-                    std::iter::once(aux)
-                        .chain(body.iter().map(|l| -*l))
-                        .collect(),
-                    owner,
-                    b,
-                )?;
-                aux
-            };
-            producers.push(term);
-            cnf.clause(vec![-term, head], owner, b)?;
-        }
-        cnf.clause(std::iter::once(-head).chain(producers).collect(), owner, b)?;
-    }
-    for group in &p.universe_groups {
-        let lits: Vec<_> = group.atoms.iter().map(|a| vars[a]).collect();
-        if group.kind.has_coverage() {
-            cnf.clause(lits.clone(), group.relation, b)?;
-        }
-        if group.kind.has_uniqueness() {
-            let mut prefix: Option<i32> = None;
-            for l in lits {
-                if let Some(prev) = prefix {
-                    cnf.clause(vec![-prev, -l], group.relation, b)?;
-                    let next = cnf.var(group.relation, false, b)?;
-                    cnf.clause(vec![-prev, next], group.relation, b)?;
-                    cnf.clause(vec![-l, next], group.relation, b)?;
-                    cnf.clause(vec![-next, prev, l], group.relation, b)?;
-                    prefix = Some(next);
-                } else {
-                    prefix = Some(l);
-                }
-            }
-        }
-    }
-    Ok((cnf, candidates))
+    model::Model::new(p, b)?.encode(b)
 }
 
 #[cfg(test)]

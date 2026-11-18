@@ -32,3 +32,7 @@ test = true
 [[example]]
 name = "bench_schema"
 test = true
+
+[[example]]
+name = "measure_cnf"
+test = true

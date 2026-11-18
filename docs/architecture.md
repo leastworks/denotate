@@ -423,7 +423,8 @@ publishes their findings on the program's own files
 
 The standalone CNF size experiment (`denotate-check::cnf_measurement`) prepares the
 fixed fold and whole residual graph without constructing W or invoking admission.
-It owns completion encoding and bounded CNF elimination; the `measure_cnf` example
+It owns completion encoding, bounded CNF elimination and optional U-only acyclic
+pre-encoding simplification with local proofs; the `measure_cnf` example
 in `ir-text` owns discovery and JSON output. It encodes declared input cardinality
 but no selected assumptions, retains the original rules, and produces measurements
 only. It does not participate in checker/session/editor verdicts.

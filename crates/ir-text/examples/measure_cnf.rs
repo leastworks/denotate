@@ -1,22 +1,49 @@
 //! Size-only experiment: the input universe U, without selected assumptions.
 use denotate_check::{
     Limits,
-    cnf_measurement::{Measurement, Size},
+    cnf_measurement::{Measurement, RelationSize, Report, SimplificationLimits, Size},
 };
-use denotate_ir_text::{filesystem, load};
+use denotate_ir_text::{LoadedProgram, filesystem, load};
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 fn size(s: &Size) -> Value {
     json!({"variables":s.variables,"clauses":s.clauses,"literal_occurrences":s.literals,"cnf_vector_bytes":s.storage_bytes})
 }
-fn run() -> Result<(), String> {
-    let mut args = std::env::args().skip(1);
-    let root = args.next().ok_or("usage: just measure-den-cnf ROOT [--eliminate] [--max-atoms N] [--max-rules N] [--max-dependencies N] [--max-work N] [--timeout-ms N]")?;
+fn relation_json(
+    p: &LoadedProgram,
+    sizes: &std::collections::BTreeMap<denotate_ir::RelationId, RelationSize>,
+) -> Result<Vec<Value>, String> {
+    let mut relations: Vec<_> = sizes.iter().map(|(r, s)| {
+        let key = p.keys.relation(*r).map_err(|e| format!("{e:?}"))?;
+        Ok(json!({"relation":format!("{key:?}"),"atom_variables":s.atom_variables,"auxiliary_variables":s.auxiliary_variables,"clauses":s.clauses,"literal_occurrences":s.literals,"payload_bytes":s.payload_bytes}))
+    }).collect::<Result<_, String>>()?;
+    relations.sort_by_key(|r| r["relation"].as_str().unwrap().to_owned());
+    Ok(relations)
+}
+fn report_json(p: &LoadedProgram, report: &Report) -> Result<Value, String> {
+    let relations = relation_json(p, &report.relations)?;
+    let after_relations = relation_json(p, &report.after_relations)?;
+    Ok(
+        json!({"before":size(&report.before),"after":size(&report.after),
+        "eliminated_variables":report.eliminated,"reconstruction_vector_bytes":report.reconstruction_bytes,
+        "fixed_atoms":report.fixed_atoms,"residual_atoms":report.residual_atoms,"residual_rules":report.residual_rules,
+        "before_by_relation":relations,"after_by_relation":after_relations}),
+    )
+}
+fn measure(args: impl IntoIterator<Item = String>) -> Result<Value, String> {
+    let mut args = args.into_iter();
+    let root = args.next().ok_or("usage: just measure-den-cnf ROOT [--eliminate] [--simplify] [--local-cone-atoms N] [--local-bdd-nodes N] [--local-work N] [--max-atoms N] [--max-rules N] [--max-dependencies N] [--max-work N] [--timeout-ms N]")?;
     let mut limits = Limits::default();
+    let mut local = SimplificationLimits::default();
     let mut eliminate = false;
+    let mut simplify = false;
     while let Some(arg) = args.next() {
         if arg == "--eliminate" {
             eliminate = true;
+            continue;
+        }
+        if arg == "--simplify" {
+            simplify = true;
             continue;
         }
         let value: usize = args
@@ -30,6 +57,9 @@ fn run() -> Result<(), String> {
             "--max-dependencies" => limits.max_dependencies = value,
             "--max-work" => limits.max_work = value,
             "--timeout-ms" => limits.timeout = Duration::from_millis(value as u64),
+            "--local-cone-atoms" => local.max_cone_atoms = value,
+            "--local-bdd-nodes" => local.max_bdd_nodes = value,
+            "--local-work" => local.max_proof_work = value,
             _ => return Err(format!("unknown option {arg}")),
         }
     }
@@ -43,32 +73,138 @@ fn run() -> Result<(), String> {
         Measurement::prepare(&p.corpus, &p.domains, &limits).map_err(|e| e.to_string())?;
     let preparation = start.elapsed();
     let start = Instant::now();
-    let report = prepared
-        .measure(eliminate, &limits)
-        .map_err(|e| e.to_string())?;
-    let encoding = start.elapsed();
-    let mut relations: Vec<_> = report.relations.iter().map(|(r, s)| {
-        let key = p.keys.relation(*r).map_err(|e| format!("{e:?}"))?;
-        Ok(json!({"relation":format!("{key:?}"),"atom_variables":s.atom_variables,"auxiliary_variables":s.auxiliary_variables,"clauses":s.clauses,"literal_occurrences":s.literals,"payload_bytes":s.payload_bytes}))
-    }).collect::<Result<_, String>>()?;
-    relations.sort_by_key(|r| r["relation"].as_str().unwrap().to_owned());
-    println!("{}", serde_json::to_string_pretty(&json!({
-        "scope":"whole-program completion plus declared input cardinality; no selected assumptions",
-        "verdict":"not-checked", "before":size(&report.before),"after":size(&report.after),
-        "eliminated_variables":report.eliminated,"reconstruction_vector_bytes":report.reconstruction_bytes,
-        "fixed_atoms":report.fixed_atoms,"residual_atoms":report.residual_atoms,"residual_rules":report.residual_rules,
-        "loading_ms":loading.as_secs_f64()*1000.,"preparation_ms":preparation.as_secs_f64()*1000.,"encoding_and_elimination_ms":encoding.as_secs_f64()*1000.,
-        "before_by_relation":relations,
-        "limits":{"max_atoms":limits.max_atoms,"max_rules":limits.max_rules,"max_dependencies":limits.max_dependencies,"max_work":limits.max_work,"timeout_ms":limits.timeout.as_millis()}
-    })).unwrap());
-    Ok(())
+    let mut output = if simplify {
+        // Comparison always includes both elimination controls; --eliminate is
+        // redundant when --simplify is present.
+        let mut variants = Vec::new();
+        for v in prepared
+            .simplify_comparison(&local, &limits)
+            .map_err(|e| e.to_string())?
+        {
+            let mut row = report_json(&p, &v.report)?;
+            row["variant"] = json!(v.name);
+            row["elapsed_ms"] = json!(v.elapsed.as_secs_f64() * 1000.);
+            row["rewrite_record_vector_bytes"] = json!(v.proof_bytes);
+            row["alias_mapping_vector_bytes"] = json!(v.mapping_bytes);
+            row["model_vector_bytes_including_mapping"] = json!(v.model_bytes);
+            row["passes"]=json!(v.passes.iter().map(|s|json!({"pass":s.pass.label(),"candidates":s.candidates,"proved":s.proved,"unchanged":s.unchanged,"unsupported_recursive_heads":s.unsupported,"cut_off":s.cut_off,"elapsed_ms":s.elapsed.as_secs_f64()*1000.})).collect::<Vec<_>>());
+            variants.push(row);
+        }
+        json!({"variants":variants,"local_limits":{"cone_atoms":local.max_cone_atoms,"bdd_nodes_created":local.max_bdd_nodes,"work_per_proof":local.max_proof_work}})
+    } else {
+        report_json(
+            &p,
+            &prepared
+                .measure(eliminate, &limits)
+                .map_err(|e| e.to_string())?,
+        )?
+    };
+    output["scope"] =
+        json!("whole-program completion plus declared input cardinality; no selected assumptions");
+    output["verdict"] = json!("not-checked");
+    output["loading_ms"] = json!(loading.as_secs_f64() * 1000.);
+    output["preparation_ms"] = json!(preparation.as_secs_f64() * 1000.);
+    output["encoding_and_elimination_ms"] = json!(start.elapsed().as_secs_f64() * 1000.);
+    output["limits"] = json!({"max_atoms":limits.max_atoms,"max_rules":limits.max_rules,"max_dependencies":limits.max_dependencies,"max_work":limits.max_work,"timeout_ms":limits.timeout.as_millis()});
+    Ok(output)
 }
 fn main() -> std::process::ExitCode {
-    match run() {
-        Ok(()) => std::process::ExitCode::SUCCESS,
+    match measure(std::env::args().skip(1)) {
+        Ok(output) => {
+            println!("{}", serde_json::to_string_pretty(&output).unwrap());
+            std::process::ExitCode::SUCCESS
+        }
         Err(e) => {
             eprintln!("measure-den-cnf: {e}");
             std::process::ExitCode::from(2)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    struct Fixture(std::path::PathBuf);
+    impl Fixture {
+        fn new() -> Self {
+            static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let path = std::env::temp_dir().join(format!(
+                "denotate-cnf-{}-{}",
+                std::process::id(),
+                NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            ));
+            std::fs::create_dir(&path).unwrap();
+            std::fs::write(path.join("den.root"), "{}").unwrap();
+            std::fs::write(
+                path.join("program.den"),
+                "input x(); relation a(); relation b(); a() :- x(); b() :- x();",
+            )
+            .unwrap();
+            Self(path)
+        }
+        fn args(&self, flags: &[&str]) -> Vec<String> {
+            std::iter::once(self.0.to_str().unwrap())
+                .chain(flags.iter().copied())
+                .map(str::to_owned)
+                .collect()
+        }
+    }
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            std::fs::remove_dir_all(&self.0).unwrap();
+        }
+    }
+    #[test]
+    fn command_reports_independent_passes_and_both_elimination_controls() {
+        let root = Fixture::new();
+        let plain = measure(root.args(&[])).unwrap();
+        let compared = measure(root.args(&["--simplify", "--eliminate"])).unwrap();
+        assert_eq!(compared["verdict"], "not-checked");
+        let variants = compared["variants"].as_array().unwrap();
+        assert_eq!(variants.len(), 8);
+        for row in variants {
+            let vars: u64 = row["after_by_relation"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| {
+                    r["atom_variables"].as_u64().unwrap()
+                        + r["auxiliary_variables"].as_u64().unwrap()
+                })
+                .sum();
+            let clauses: u64 = row["after_by_relation"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| r["clauses"].as_u64().unwrap())
+                .sum();
+            assert_eq!(vars, row["after"]["variables"].as_u64().unwrap());
+            assert_eq!(clauses, row["after"]["clauses"].as_u64().unwrap());
+        }
+        assert_eq!(variants[0]["before"], plain["before"]);
+        let hashing = variants
+            .iter()
+            .find(|v| v["variant"] == "structural-hashing")
+            .unwrap();
+        assert!(
+            hashing["after"]["variables"].as_u64().unwrap()
+                < plain["after"]["variables"].as_u64().unwrap()
+        );
+        assert!(hashing["rewrite_record_vector_bytes"].as_u64().unwrap() > 0);
+        assert!(hashing["before_by_relation"].as_array().unwrap().len() > 0);
+    }
+    #[test]
+    fn local_limits_skip_proofs_global_limits_do_not_return_successful_reports() {
+        let root = Fixture::new();
+        let cut = measure(root.args(&["--simplify", "--local-work", "0"])).unwrap();
+        assert!(
+            cut["variants"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|v| v["passes"].as_array().unwrap())
+                .any(|p| p["cut_off"].as_u64().unwrap() > 0)
+        );
+        assert!(measure(root.args(&["--simplify", "--max-work", "0"])).is_err());
     }
 }

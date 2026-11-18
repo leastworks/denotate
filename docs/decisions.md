@@ -1272,3 +1272,22 @@ across recursive negation in Datalog would change meaning. Inputs and recursive
 atoms stay protected in the initial experiment. Completion models alone are not
 stable-model witnesses, and smaller CNF does not establish lower total memory:
 reconstruction storage is reported separately.
+
+
+## Pre-encoding simplification starts with U-only acyclic definitions
+
+The size experiment can share identical acyclic derived definitions, fold constants
+under declared input cardinality U, and remove dead bodies, implied premises and
+syntactically subsumed producers. Inputs remain distinct. Each local proof uses the
+current transformed snapshot; bounded cones leave external atoms free and include
+whole input groups or conservatively omit their constraints. Selected assumptions
+are not used. The original ground graph and sequential rewrite mappings stay intact
+through encoding, independently of CNF variable elimination.
+
+Even a correct implication in the original least model does not justify a recursive
+removal: in `p :- seed; p :- q; q :- p`, removing `p :- seed` because `seed` implies
+`q` loses the only finite support. This first increment therefore skips recursive
+heads, including for syntactic subsumption. Recursive rewrites need independent
+support or a before/after least-fixpoint certificate. Exhaustive tiny stable-model
+tests cover composition, no-meaning and multiple-meaning cases. These passes remain
+measurement-only until a later increment adopts them for checking.

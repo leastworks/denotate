@@ -1378,9 +1378,21 @@ can affect deadlines. Disabled profiling collects none of these snapshots.
 ## Whole-program CNF size experiment
 
 `just measure-den-cnf` measures original residual completion and declared input
-cardinality without input-dependent BDDs. It does not select a new checking backend
+cardinality without global input-dependent BDDs. It does not select a new checking backend
 or alter admission. Optional non-growing CNF elimination is limited to acyclic,
 single-reader definitions; recursive boundaries and input variables stay queryable.
 The report separates final CNF vector storage from reconstruction storage and makes
 no peak-memory or solver-performance claim. Selected assumptions and semantic
 queries follow in a later increment; the current measurements cover U only.
+
+
+Optional `--simplify` compares acyclic structural hashing, U-only constant folding,
+dead-body/premise elimination and syntactic subsumption, independently and composed.
+Local proofs have their own cone, cumulative BDD allocation and work caps (64 atoms,
+4,096 nodes, 50,000 work by default), also charging work to the variant's global
+allowance. Subsumption shares 50,000 work per head. Cone cuts introduce free variables;
+cardinality groups are included whole or weakened away, never truncated. Failed or
+cut-off proofs leave the candidate unchanged. Cancellation/deadlines and global
+exhaustion abort measurement. These are experimental measurement allowances, not
+new checker policies. Each variant starts from the same original program; retained
+model/mapping/rewrite vectors and CNF reconstruction are reported separately.

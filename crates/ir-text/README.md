@@ -341,19 +341,38 @@ just measure-den-cnf ROOT --eliminate
 ```
 
 This size-only experiment emits JSON with before/after variable, clause and literal
-occurrence counts; before-elimination counts and payload bytes by relation; vector storage and separate
+occurrence counts; before/after-elimination counts and payload bytes by relation; vector storage and separate
 reconstruction storage; fixed/residual sizes; and loading, preparation and encoding
 times. It encodes the whole residual completion and declared input cardinality U,
-without selected assumptions, BDD construction, admission or checking verdicts.
+without selected assumptions, global BDD construction, admission or checking verdicts.
 It works with a discovered `den.root` closure, including library declarations.
 
 `--max-atoms`, `--max-rules`, `--max-dependencies`, `--max-work`, and `--timeout-ms`
 use checker defaults. Encoding uses those size limits for variables, clauses and
 literal occurrences respectively. Preparation and measurement have separate budgets.
-An exhausted phase exits 2 with an error, without a successful report.
+A globally exhausted phase exits 2 with an error, without a successful report.
 
 `--eliminate` compares bounded CNF resolution with the original encoding; inputs
 and recursive atoms remain protected. Storage counts cover named vector capacities,
 not total memory, allocator overhead, preprocessing scratch, peak RSS, or a SAT
 solver's storage. Reconstruction adds retained memory even when the final CNF shrinks.
 The command does not claim that its completion models are stable models.
+
+
+Add `--simplify` to compare eight variants: baseline, baseline plus elimination,
+each of four independent passes (structural hashing, constants, dead bodies and
+redundant premises, syntactic subsumption), all passes, and all plus elimination.
+This includes both elimination controls whether or not `--eliminate` is supplied.
+Each variant has its own global measurement allowance and reports per-pass time,
+proved/unchanged/cut-off candidates, skipped recursive heads, and CNF size by relation.
+The JSON also reports working-model vector bytes (including the alias table), the
+alias-table subset separately, and retained rewrite-record bytes. Variants are
+measured sequentially; their storage figures are not added together as peak memory.
+
+Local U-only BDD proofs are bounded by `--local-cone-atoms` (default 64, including
+added input-group members), `--local-bdd-nodes` (4,096 cumulative created nodes per
+proof, including clones), and `--local-work` (50,000 per proof). Subsumption uses
+the work allowance per head. Cut points are free variables, and input-cardinality
+groups are included whole or omitted conservatively. A local cutoff skips that
+candidate, with a counter in the report. This experiment does not change ordinary
+checking, selected assumptions or input variable identities.

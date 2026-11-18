@@ -703,3 +703,21 @@ clauses or literal occurrences. The original ground graph is unchanged; removed
 clauses retain a reverse-order model reconstruction log. Later query APIs must
 protect or translate any eliminated query targets. This is a size experiment,
 not a SAT checking backend or an execution planner.
+
+`Measurement::simplify_comparison` (CLI `--simplify`) independently measures
+structural sharing, constants under U, dead bodies/redundant premises, syntactic
+subsumption, and their composition, with baseline/elimination controls. Only
+acyclic derived heads are rewritten in this increment. Inputs and recursive
+boundaries are distinct terminals. Local BDD proofs expand bounded provider cones;
+complete cardinality groups are included when they fit, otherwise that restriction
+is omitted conservatively. No global conditions or selected assumptions are used.
+
+Every variant starts from the original graph. Sequential rewrite records identify
+aliases, constants, removed bodies and implied premises against the transformed
+snapshot. The alias table restores original atom identities. These records and the
+original rules remain available through encoding; the comparison API returns size
+summaries, not a checking or witness API. Local proof exhaustion leaves the candidate
+unchanged. Global budget exhaustion, cancellation and deadlines abort the report.
+The report separates model, mapping, rewrite-record and CNF reconstruction vector
+storage; the mapping is included in the model total. These exclude allocator and
+map/set scratch overhead, BDD workspace and the retained original graph.
