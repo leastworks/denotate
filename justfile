@@ -127,9 +127,10 @@ edit-test-dsl folder: build-test-dsl
     code --extensionDevelopmentPath="{{justfile_directory()}}/editors/test-dsl" "$(cd "{{invocation_directory()}}" && cd "$1" && pwd)"
 
 # Load and check a folder-rooted .den program: ROOT_FOLDER_OR_DEN.ROOT.
+# Optimized build: real programs are much slower unoptimized.
 [positional-arguments]
 check-den +args:
-    cargo +1.93.0 run --locked -p denotate-ir-text --example check -- "$@"
+    cargo +1.93.0 run --release --locked -p denotate-ir-text --example check -- "$@"
 
 # Source-linked test DSL findings; also try mixed, requires-c or fixed.
 demo-overlap mode="overlap":

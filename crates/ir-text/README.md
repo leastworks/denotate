@@ -163,19 +163,20 @@ just check-den --help
 just test-crate denotate-ir-text
 ```
 
-`examples/check.rs` backs `just check-den`. By default it prints shared presented
-diagnostics grouped by verification: source URI, one-based line/Unicode-scalar column,
-kind, message, notes and labeled related locations. By default only producing rules,
-the checked obligation and upstream origins are expanded; other related entries
-collapse to "+N more". Direct structural rewrite justifications remain visible.
-`--verbose` prints all related locations and requests full structural rewrite
-chains and notes; the default computes only bounded direct evidence. `--json` retains the previous
-`Results: {...}` status summaries with their existing headers and notices.
-Ground validation covers the assumptions selected by the executed verifications
-(`--verification` narrows this union). Deferred unselected assumptions receive
-Information diagnostics without making the run incomplete. For an authoring check
-of every declaration, including without verifications, use `--validate-all-assumptions`;
-this validates their cones without activating their constraints.
+`examples/check.rs` backs `just check-den`, which builds it optimized (`--release`).
+By default it prints shared presented diagnostics grouped by verification: source URI,
+one-based line/Unicode-scalar column, kind, message, notes and labeled related
+locations. By default only producing rules, the checked obligation and upstream
+origins are expanded; other related entries collapse to "+N more". Direct structural
+rewrite justifications remain visible. `--verbose` prints all related locations and
+requests full structural rewrite chains and notes; the default computes only bounded
+direct evidence. `--json` retains the previous `Results: {...}` status summaries with
+their existing headers and notices. Ground validation covers the assumptions selected
+by the executed verifications (`--verification` narrows this union). Deferred
+unselected assumptions receive Information diagnostics without making the run
+incomplete. For an authoring check of every declaration, including without
+verifications, use `--validate-all-assumptions`; this validates their cones without
+activating their constraints.
 
 Detailed progress goes to **stderr** by default, also with `--json`. It reports
 effective limits, source inventory, loading and assumption validation, each selected
