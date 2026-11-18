@@ -55,6 +55,17 @@ impl CheckProgress {
             report(detail);
         }
     }
+    pub fn preparation_observer(&self, context: &Value) -> denotate_check::CheckingProgress {
+        let progress = self.clone();
+        let context = context.clone();
+        denotate_check::CheckingProgress::new(move |e| {
+            if let Some(denotate_check::CheckingTarget::InputOrder(report)) = e.target {
+                let mut detail = context.clone();
+                detail["inputOrder"] = input_order_data(&report);
+                progress.emit(Phase::Preparation, detail);
+            }
+        })
+    }
     pub fn enabled(&self) -> bool {
         self.report.is_some()
     }
@@ -657,6 +668,7 @@ impl AdmissionDetails<'_> {
                     json!({"kind":"component","index":c.index,"atoms":c.atoms,"ruleInstances":c.rules,
                     "atom":atom_text(&c.representative,&*names),"location":c.source.and_then(|s|locations.get(&s).cloned())}),
                 ),
+                Some(denotate_check::CheckingTarget::InputOrder(_)) => None,
                 None => None,
             };
             let failure = e.failure.as_ref().and_then(|e| match e {
@@ -785,4 +797,12 @@ pub fn remaining_text(v: &Value) -> String {
         text.push_str(&format!("\n  ... {} cycle edges in total", v["cycleEdges"]));
     }
     text
+}
+
+/// Shared early/completed report; no input atom projection or source lookup.
+pub fn input_order_data(r: &denotate_check::InputOrderReport) -> Value {
+    json!({"requested":r.requested.label(),"effective":r.effective.label(),"fallback":r.fallback,
+        "fallbackLimit":r.fallback_limit,"fallbackObserved":r.fallback_observed,
+        "inputs":r.inputs,"structuralEntries":r.structural_entries,"structuralWork":r.structural_work,
+        "hyperedges":r.hyperedges,"passes":r.passes})
 }

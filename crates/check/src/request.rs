@@ -19,6 +19,8 @@ pub struct DeterministicLimits {
     pub max_bdd_nodes: usize,
     pub max_bdd_tasks: usize,
     pub max_condition_nodes: usize,
+    pub max_input_order_entries: usize,
+    pub max_input_order_work: usize,
     pub max_structural_split_depth: usize,
     pub max_structural_split_leaves: usize,
     pub max_structural_split_work: usize,
@@ -35,6 +37,8 @@ impl From<&Limits> for DeterministicLimits {
             max_bdd_nodes: l.max_bdd_nodes,
             max_bdd_tasks: l.max_bdd_tasks,
             max_condition_nodes: l.max_condition_nodes,
+            max_input_order_entries: l.max_input_order_entries,
+            max_input_order_work: l.max_input_order_work,
             max_structural_split_depth: l.max_structural_split_depth,
             max_structural_split_leaves: l.max_structural_split_leaves,
             max_structural_split_work: l.max_structural_split_work,
@@ -74,6 +78,8 @@ impl DeterministicLimits {
             max_bdd_nodes: self.max_bdd_nodes,
             max_bdd_tasks: self.max_bdd_tasks,
             max_condition_nodes: self.max_condition_nodes,
+            max_input_order_entries: self.max_input_order_entries,
+            max_input_order_work: self.max_input_order_work,
             max_structural_split_depth: self.max_structural_split_depth,
             max_structural_split_leaves: self.max_structural_split_leaves,
             max_structural_split_work: self.max_structural_split_work,
@@ -95,7 +101,7 @@ impl BackendIdentity {
         let configuration = match order {
             InputOrder::Key => "atom-key-order-v1/per-query-budgets-v1",
             InputOrder::ReverseKey => "reverse-atom-key-order-v1/per-query-budgets-v1",
-            InputOrder::Structural => "structural-order-v2/per-query-budgets-v1",
+            InputOrder::Structural => "structural-order-v3/per-query-budgets-v1",
         };
         Self {
             backend: "bdd".into(),
@@ -564,6 +570,9 @@ impl CheckRequest {
                 });
             }
         };
+        if program.input_order_report().requested != InputOrder::Key {
+            limits.progress.input_order(program.input_order_report());
+        }
         limits
             .profile
             .condition(|| crate::ConditionObservation::InputOrder {

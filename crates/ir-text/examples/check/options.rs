@@ -26,13 +26,18 @@ pub struct Options {
     pub candidate_probe: Option<denotate_check::CandidateProbeLimits>,
     pub sat_probe_limits: denotate_check::SatProbeLimits,
 }
-pub fn limit_values(l: &Limits) -> [(&'static str, u128); 13] {
+pub fn limit_values(l: &Limits) -> [(&'static str, u128); 15] {
     [
         ("--timeout-ms", l.timeout.as_millis()),
         ("--max-atoms", l.max_atoms as u128),
         ("--max-rules", l.max_rules as u128),
         ("--max-dependencies", l.max_dependencies as u128),
         ("--max-work", l.max_work as u128),
+        (
+            "--max-input-order-entries",
+            l.max_input_order_entries as u128,
+        ),
+        ("--max-input-order-work", l.max_input_order_work as u128),
         ("--max-bdd-variables", l.max_bdd_variables as u128),
         ("--max-bdd-nodes", l.max_bdd_nodes as u128),
         ("--max-bdd-tasks", l.max_bdd_tasks as u128),
@@ -244,6 +249,8 @@ impl Options {
                 | "--max-bdd-nodes"
                 | "--max-bdd-tasks"
                 | "--max-condition-nodes"
+                | "--max-input-order-entries"
+                | "--max-input-order-work"
                 | "--max-structural-split-depth"
                 | "--max-structural-split-leaves"
                 | "--max-structural-split-work"
@@ -263,6 +270,8 @@ impl Options {
                         "--max-bdd-nodes" => options.limits.max_bdd_nodes = n,
                         "--max-bdd-tasks" => options.limits.max_bdd_tasks = n,
                         "--max-condition-nodes" => options.limits.max_condition_nodes = n,
+                        "--max-input-order-entries" => options.limits.max_input_order_entries = n,
+                        "--max-input-order-work" => options.limits.max_input_order_work = n,
                         "--max-structural-split-depth" => {
                             options.limits.max_structural_split_depth = n
                         }

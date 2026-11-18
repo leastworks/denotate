@@ -59,16 +59,31 @@ the group, and forcing them together can separate those co-read inputs. Assumpti
 enforcement is unchanged. Eight FORCE placement passes use integer centers and
 semantic-key ties, retaining the best weighted span cost seen. No platform-dependent floating-point ordering is used.
 
-The heuristic charges preparation work and stops at one million cumulative
-structural entries or four million traversal/placement visits. These optimization
-cutoffs return key order, with the reason and spent work retained in the report.
-They bound expanded support and metadata, not bytes or BDD nodes. Global work
-exhaustion and cancellation still propagate. CLI progress/profile records expose
-`inputOrder` (requested/effective order, fallback, inputs, structural entries,
-hyperedges and completed passes); non-default runs also print it on stdout.
+The heuristic charges preparation work. Two configurable optimization allowances
+bound it: `--max-input-order-entries` (default 1,000,000 peak retained placement
+entries) and `--max-input-order-work` (default 4,000,000 cumulative work). Entries
+count unique support members and container metadata, including temporary unions
+and traversal stacks; they are not heap bytes. Canonical support sets and unions
+of provider IDs are shared. A repeated edge still adds its weight without retaining
+another support vector. Construction, comparison, sorting and traversal remain
+charged work. Exact distinct supports can still have quadratic total size.
 
-The backend configuration includes the requested order (`structural-order-v2`
-identifies placement without hard group blocks). Shared contexts partition
+An ordering allowance cutoff returns key order, naming the allowance, its limit
+and the observed demand. Spent work remains charged to preparation. Global work
+exhaustion, deadlines and cancellation still propagate. Zero provides no allowance
+for that resource. Eight placement passes and
+the weighted-span heuristic are unchanged; key order remains the default.
+
+The CLI emits requested/effective order immediately after selection, before W
+construction, even when later preparation fails. Completed non-default runs also
+retain the stdout summary. `inputOrder` includes requested/effective order,
+fallback, `fallbackLimit`, `fallbackObserved`, inputs, `structuralEntries` (peak
+retained entries), `structuralWork` (cumulative), hyperedges and completed passes.
+The early progress event carries no projected input atoms or source lookups.
+
+The backend configuration includes the requested order (`structural-order-v3`
+identifies shared supports and configurable ordering allowances). The allowances
+are part of deterministic request identity. Shared contexts partition
 by selection and configuration; the assumption-specialized graph receives the
 request's exact map before W is built. Local query inputs retain the actual ordered
 input keys, including any completion context, so structural edits and switching

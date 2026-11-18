@@ -246,6 +246,12 @@ fn run_streaming(
             ));
             return;
         }
+        if event["phase"] == "preparation" {
+            if let Some(v) = event.get("inputOrder") {
+                trace.message(format!("Input order: {v}"));
+                return;
+            }
+        }
         if let Some(v) = event.get("checking") {
             trace.message(format!(
                 "{}: {}",
@@ -404,7 +410,7 @@ fn check_program(
         )
         .unwrap();
     }
-    let operations = OperationalLimits::from(&limits);
+    let mut operations = OperationalLimits::from(&limits);
     let mut requests = p
         .verification_requests(&limits)
         .map_err(|e| (2, e.to_string()))?;
@@ -633,6 +639,11 @@ fn check_program(
             denotate_check::FixedPreparation::prepare_with_validation(&validated, &limits)
         });
         progress.emit(Phase::Preparation, detail.clone());
+        operations.progress = if progress.enabled() {
+            progress.preparation_observer(&detail)
+        } else {
+            Default::default()
+        };
         let prepared = match fixed {
             Ok(fixed) => session
                 .prepare_with_fixed(&request, &p.corpus, &p.keys, &operations, fixed)
@@ -686,8 +697,7 @@ fn check_program(
             }
         };
         let order = prepared.program().input_order_report();
-        let ordering = json!({"requested":order.requested.label(), "effective":order.effective.label(), "fallback":order.fallback,
-            "inputs":order.inputs, "structuralEntries":order.structural_entries, "hyperedges":order.hyperedges, "passes":order.passes});
+        let ordering = denotate_ir_text::progress::input_order_data(order);
         detail["inputOrder"] = ordering.clone();
         trace.message(format_args!("Input order: {ordering}"));
         if input_order != denotate_check::InputOrder::Key {
@@ -1226,6 +1236,26 @@ mod tests {
                 .unwrap()
                 .checking_within_w
         );
+    }
+
+    #[test]
+    fn input_order_fallback_is_visible_before_preparation_finishes() {
+        let f = Fixture::new(&format!("{BODY}{RESTRICTED}"));
+        for flag in ["--max-input-order-entries", "--max-input-order-work"] {
+            let (result, output, trace) = f.traced(&["--input-order", "structural", flag, "0"]);
+            assert_eq!(result, Ok(0), "{trace}");
+            assert!(output.contains("\"effective\":\"key\""), "{output}");
+            assert!(output.contains("\"fallbackLimit\":0"), "{output}");
+            let early = trace
+                .lines()
+                .position(|l| l.contains("Input order:"))
+                .unwrap();
+            let end = trace
+                .lines()
+                .position(|l| l.contains("preparation: verification") && l.contains("phase time"))
+                .unwrap();
+            assert!(early < end, "{trace}");
+        }
     }
 
     #[test]

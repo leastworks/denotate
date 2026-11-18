@@ -6,6 +6,23 @@ Settled design choices and why they were made. Current behavior is specified in 
 alternatives that were rejected. Revisit a decision only with new evidence, such as a
 real program that the current choice serves badly.
 
+## Structural input ordering is bounded optimization work
+
+Ordering allowances may fall back to semantic-key order; they do not make a
+program inconclusive unless the shared preparation budget itself is exhausted.
+Expose the entry and work allowances as deterministic request configuration, so
+raising an allowance cannot reuse a preparation that fell back under a smaller
+one. Report the effective order before constructing W, when the information is
+already available and most useful for diagnosing a slow preparation.
+
+Retained support storage and cumulative work are different demands. Intern exact
+support sets, reuse unions of provider sets, and retain a repeated hyperedge only
+once while accumulating its original weight. Charge construction and comparisons
+even on a storage hit. This removes repeated expansion for shared wide aggregates
+without changing the placement objective, its eight passes or its tie-breaking.
+Distinct exact support sets can still be quadratic; neither a new near-linear
+complexity guarantee nor a default-order change follows from this representation.
+
 ## Input cardinality is part of the input universe
 
 Scalar values and exclusive enum/check outcomes describe which input assignments

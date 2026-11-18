@@ -173,3 +173,85 @@ verification again{assumptions:[rows,cols];obligations:[unique];}";
         }
     }
 }
+
+#[test]
+fn ordering_allowances_invalidate_preparation_and_report_before_assumptions() {
+    use std::sync::{Arc, Mutex};
+    for declared in ["", "at_most_one(group_by:())", "exactly_one(group_by:())"] {
+        let text = format!(
+            "sort S;const a,b:S; input i(x:S) {}; relation bad();bad():-i(a),i(b); assumption valid:empty(bad);obligation clear:empty(bad);verification checks{{assumptions:[valid];obligations:[clear];}}",
+            declared
+        );
+        let source = SourceFile::new("file:///allowances.den", 0, text);
+        let p = load(
+            &ProgramMembership::single("root", [source.uri.clone()]),
+            &[source],
+        )
+        .unwrap();
+        let mut warm = Session::default();
+        for (entries, work, expected) in [
+            (0, 4_000_000, InputOrder::Key),
+            (1_000_000, 4_000_000, InputOrder::Structural),
+            (1_000_000, 0, InputOrder::Key),
+            (0, 4_000_000, InputOrder::Key),
+        ] {
+            let limits = Limits {
+                profile: Profile::new(|_| {}),
+                max_input_order_entries: entries,
+                max_input_order_work: work,
+                ..Limits::default()
+            };
+            let mut request = p.verification_requests(&limits).unwrap().remove(0).1;
+            request.backend = BackendIdentity::bdd_with_order(InputOrder::Structural);
+            let events = Arc::new(Mutex::new(Vec::new()));
+            let send = events.clone();
+            limits.profile.observe_conditions(move |e| {
+                if matches!(e.observation, ConditionObservation::AssumptionStep { .. }) {
+                    send.lock().unwrap().push("assumption");
+                }
+            });
+            let send = events.clone();
+            let ops = OperationalLimits {
+                progress: CheckingProgress::new(move |e| {
+                    if matches!(e.target, Some(CheckingTarget::InputOrder(_))) {
+                        send.lock().unwrap().push("order");
+                    }
+                }),
+                ..(&limits).into()
+            };
+            let run = |session: &mut Session| {
+                let RequestPreparation::Complete(prep) =
+                    session.prepare(&request, &p.corpus, &p.keys, &ops).unwrap()
+                else {
+                    panic!()
+                };
+                assert_eq!(prep.program().input_order_report().effective, expected);
+                if expected == InputOrder::Key {
+                    let r = prep.program().input_order_report();
+                    assert_eq!(r.fallback_limit, Some(0));
+                    assert!(r.fallback_observed.unwrap() > 0);
+                }
+                let order = prep
+                    .program()
+                    .ordered_input_atoms()
+                    .map(|a| AtomKey::from_atom(&p.keys, a).unwrap())
+                    .collect::<Vec<_>>();
+                let prep = prep.admit(&ops).unwrap();
+                let LocalCheckOutcome::Complete(report) = session.verify(&prep, &ops).unwrap()
+                else {
+                    panic!()
+                };
+                (
+                    order,
+                    presentation::present(&p, &report.checked).unwrap().status,
+                )
+            };
+            let fresh = run(&mut Session::default());
+            assert_eq!(fresh, run(&mut warm));
+            assert_eq!(fresh, run(&mut warm));
+            let e = events.lock().unwrap();
+            assert_eq!(e.first(), Some(&"order"));
+            assert!(e.contains(&"assumption"));
+        }
+    }
+}

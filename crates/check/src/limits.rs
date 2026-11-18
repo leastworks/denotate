@@ -152,6 +152,10 @@ pub struct Limits {
     /// the historical low-level API). Symbolic evaluation is one shared query.
     /// Counts shared conditions conservatively, not exact heap usage.
     pub max_condition_nodes: usize,
+    /// Optional input placement allowances; a cutoff falls back to key order.
+    /// Entries bound peak retained metadata; work also consumes max_work.
+    pub max_input_order_entries: usize,
+    pub max_input_order_work: usize,
     /// Optional whole-component structural splitting. Exhausting these falls
     /// back to ordinary admission; global work and deadlines still apply.
     pub max_structural_split_depth: usize,
@@ -174,6 +178,8 @@ impl Default for Limits {
             max_bdd_nodes: 100_000,
             max_bdd_tasks: 100_000,
             max_condition_nodes: 1_000_000,
+            max_input_order_entries: 1_000_000,
+            max_input_order_work: 4_000_000,
             max_structural_split_depth: 32,
             max_structural_split_leaves: 64,
             max_structural_split_work: 100_000_000,

@@ -324,3 +324,8 @@ Inspect `guardedAttempts`: `deferred` and `componentAtoms` explain the ranking;
 `position` distinguishes actual bounds attempts from waiting candidates. Compare
 admission and downstream work separately. A scheduling improvement can leave
 ordinary downstream warning work incomplete at the same limits.
+
+The `repeated-field` family models constant appenders and conditional tasks whose
+output-presence bits are inputs, with an `is absent` reader. Each size unit adds
+one of each producer. Compare `key` and `structural` orders with condition profiling
+to measure the wide presence OR and confirm the effective order in the report.

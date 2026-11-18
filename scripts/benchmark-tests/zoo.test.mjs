@@ -268,3 +268,16 @@ test('writer ring completes the verification with co-read inputs outside uniquen
     assert.equal(r.outcomes[0].notices[0].result.state,'varying');
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('repeated field has independent appender and task-output paths and an absence reader',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-repeated-field-'));
+  try {
+    for(const inputOrder of ['key','structural']) {
+      const report=run({out:path.join(root,inputOrder),binary:'target/debug/examples/bench_schema',family:['repeated-field'],sizes:[3],repeat:1,inputOrder});
+      const r=report.families['repeated-field'].runs[0];
+      assert.equal(r.exit,0);
+      assert.equal(r.after.admitted,true);
+      assert.equal(r.outcomes[0].notices[0].result.state,'varying');
+    }
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});

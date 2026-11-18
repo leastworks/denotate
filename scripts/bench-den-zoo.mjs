@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-export const families = ['fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','writer-ring','guarded-hub','component-chain','symbolic-exhaustion','schema-layered'];
+export const families = ['repeated-field','fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','writer-ring','guarded-hub','component-chain','symbolic-exhaustion','schema-layered'];
 export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1,hubVariant='pairs',hubTagValues=2,ringLanes=8,ringRelays=6,ringReaders=1}={}) {
   if (!['pairs','tagged'].includes(hubVariant)) throw Error('invalid hub variant');
   if (hubVariant==='pairs' && hubTagValues!==2) throw Error('tag values requires tagged hub variant');
@@ -93,6 +93,15 @@ export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,
       add(`held${i}() :- priority${i}(), inspected${i}();`);
       add(`cleared${i}() :- ready${i}(), !held${i}();`);
     }
+  } else if (family === 'repeated-field') {
+    // Constant appenders and tasks returning subsets of a repeated field.
+    // Key order separates each guard from its output/presence bit.
+    add('relation present(); relation absent(); absent() :- !present(); bad() :- present(), absent();');
+    for (let i=0;i<n;i++) {
+      add(`input appender${i}(); input guard${i}(); present() :- appender${i}(), guard${i}();`);
+      add(`input applies${i}(); input output${i}(); present() :- applies${i}(), output${i}();`);
+    }
+    add('notice field_missing: varies(absent);');
   } else if (family === 'guarded-fan-in') {
     // One wide condition, rather than a large condition retained at every ring
     // head. Grouped variables make OR_i(priority_i AND ready_i) exponential.
@@ -215,7 +224,7 @@ export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,
     add('relation seed(); seed(); relation a(); relation b(); a() :- !b(); b() :- !a();');
     for(let i=0;i<n;i++) add(`relation support${i}(); support${i}() :- ${i?`support${i-1}`:'seed'}(); relation result${i}(); result${i}() :- support${i}(); result${i}() :- a();`);
   } else throw Error('schema-layered uses the schema generator');
-  return s+`obligation no_bad: empty(bad); verification checks { assumptions: [${assumptions}]; obligations: [no_bad${family==='symbolic-exhaustion'?', no_independent':''}]; ${family==='guarded-hub'?'notices: [hazard_condition];':family==='writer-ring'?'notices: [downstream_varies];':''} }\n`;
+  return s+`obligation no_bad: empty(bad); verification checks { assumptions: [${assumptions}]; obligations: [no_bad${family==='symbolic-exhaustion'?', no_independent':''}]; ${family==='guarded-hub'?'notices: [hazard_condition];':family==='writer-ring'?'notices: [downstream_varies];':family==='repeated-field'?'notices: [field_missing];':''} }\n`;
 }
 export function fit(points, threshold = 1.3) {
   const usable = points.filter(([x, y]) => Number.isFinite(x) && x > 0 && Number.isFinite(y) && y > 0);

@@ -15,7 +15,9 @@ fn fixture(reverse: bool) -> (GroundProgram, SemanticKeys) {
     }
     for (a, b) in [("a", "x"), ("b", "y"), ("c", "z")] {
         let out = rel(&mut c, &format!("{a}{b}"), false);
-        rule(&mut c, out, &[(inputs[a], false), (inputs[b], false)]);
+        for _ in 0..if a == "a" { 3 } else { 1 } {
+            rule(&mut c, out, &[(inputs[a], false), (inputs[b], false)]);
+        }
     }
     for r in c.relations() {
         keys.bind_relation(
@@ -155,6 +157,15 @@ fn structural_cutoff_falls_back_but_global_exhaustion_and_cancellation_propagate
             ..
         })
     ));
+    let expired = Limits {
+        timeout: std::time::Duration::ZERO,
+        ..l.clone()
+    };
+    assert!(matches!(
+        p.clone()
+            .choose_input_order(&k, &[], InputOrder::Structural, &mut Budget::new(&expired)),
+        Err(CheckError::Deadline { .. })
+    ));
     l.cancellation.cancel();
     assert!(matches!(
         p.choose_input_order(&k, &[], InputOrder::Structural, &mut Budget::new(&l)),
@@ -281,4 +292,89 @@ fn exclusive_writer_ring_agrees_with_stable_and_supported_models_in_every_order(
             }
         }
     }
+}
+
+#[test]
+fn shared_supports_preserve_the_expanded_heuristic_and_edge_weights() {
+    for reverse in [false, true] {
+        let (mut p, k) = fixture(reverse);
+        p = p.with_atom_key_order(&k).unwrap();
+        p.input_groups = vec![p.inputs.iter().take(3).cloned().collect()];
+        let l = Limits {
+            max_work: usize::MAX,
+            max_input_order_entries: usize::MAX,
+            max_input_order_work: usize::MAX,
+            ..Limits::default()
+        };
+        let mut b = Budget::new(&l);
+        let mut meter = Meter {
+            budget: &mut b,
+            visits: 0,
+            entries: 0,
+            peak: 0,
+            cap: usize::MAX,
+            work_cap: usize::MAX,
+        };
+        let before = p
+            .reference_place(&k, &[], &mut meter, &mut InputOrderReport::default())
+            .unwrap_or_else(|_| panic!("reference cutoff"));
+        let expected = before
+            .iter()
+            .map(|i| p.ordered_inputs()[*i].clone())
+            .collect::<Vec<_>>();
+        let actual = p
+            .choose_input_order(&k, &[], InputOrder::Structural, &mut Budget::new(&l))
+            .unwrap();
+        assert_eq!(
+            expected,
+            actual.ordered_input_atoms().cloned().collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn a_wide_aggregate_shared_by_many_readers_no_longer_repeats_its_support() {
+    let mut c = Corpus::new();
+    let aggregate = rel(&mut c, "aggregate", false);
+    for i in 0..600 {
+        let input = rel(&mut c, &format!("input{i:04}"), true);
+        rule(&mut c, aggregate, &[(input, false)]);
+    }
+    for i in 0..2000 {
+        let reader = rel(&mut c, &format!("reader{i:04}"), false);
+        rule(&mut c, reader, &[(aggregate, true)]);
+    }
+    let mut keys = SemanticKeys::default();
+    for r in c.relations() {
+        keys.bind_relation(
+            &c,
+            r.id,
+            RelationKey::Named(QualifiedKey::new("stress", r.name.as_str())),
+        )
+        .unwrap();
+    }
+    let l = Limits::default();
+    let p = GroundProgram::prepare(&c, &Domains::new(), &l)
+        .unwrap()
+        .with_atom_key_order(&keys)
+        .unwrap();
+    let mut b = Budget::new(&l);
+    let mut m = Meter {
+        budget: &mut b,
+        visits: 0,
+        entries: 0,
+        peak: 0,
+        cap: 1_000_000,
+        work_cap: 4_000_000,
+    };
+    assert!(
+        p.reference_place(&keys, &[], &mut m, &mut InputOrderReport::default())
+            .is_err()
+    );
+    let p = p
+        .choose_input_order(&keys, &[], InputOrder::Structural, &mut Budget::new(&l))
+        .unwrap();
+    assert_eq!(p.input_order_report().effective, InputOrder::Structural);
+    let world = p.evaluate([], &l).unwrap();
+    assert_eq!(world.established_facts().count(), 2000);
 }

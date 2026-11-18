@@ -298,7 +298,12 @@ an experimental variable layout; `bdd()` still means key order. Preparation choo
 one map after grounding and copies it to the assumption-specialized view before W.
 Structural placement uses only dependencies and selected constraints. Uniqueness
 groups are weighted preferences, without forced contiguity; assumption enforcement
-is independent of placement. Charged cutoffs fall back to key order.
+is independent of placement. Configurable `max_input_order_entries` and
+`max_input_order_work` allowances fall back to key order; global exhaustion still
+stops preparation. Support vectors and repeated unions are shared while hyperedge
+weights are preserved. Entry accounting bounds peak retained metadata; cumulative
+work remains charged to the preparation budget. The early `CheckingTarget::InputOrder` event reports the chosen
+order and cutoff demand before assumption construction.
 `GroundProgram::input_order_report()` describes the requested/effective order and any fallback; `ordered_input_atoms()` exposes the
 map. Order participates in shared-context and local-query reuse; local inputs also
 carry the actual projected sequence. See the [policy](../../docs/checker-policies.md#diagnostic-input-ordering)

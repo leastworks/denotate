@@ -9,6 +9,7 @@ use std::{
 
 #[derive(Debug, Clone)]
 pub enum CheckingTarget {
+    InputOrder(InputOrderReport),
     Atom(GroundAtom),
     Obligation(ObligationId),
     Notice(NoticeId),
@@ -65,6 +66,17 @@ impl CheckingProgress {
             current: Mutex::new(Frame::default()),
             last: Mutex::new((None, Default::default())),
         })))
+    }
+    pub(crate) fn input_order(&self, report: &InputOrderReport) {
+        if let Some(s) = &self.0 {
+            (s.send)(CheckingEvent {
+                stage: "input-order",
+                state: "complete",
+                target: Some(CheckingTarget::InputOrder(report.clone())),
+                failure: None,
+                continues: false,
+            });
+        }
     }
     pub fn enabled(&self) -> bool {
         self.0.is_some()
