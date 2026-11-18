@@ -1,5 +1,7 @@
 //! Pure, deterministic synthetic lowering. No checker or IO dependencies.
 use std::fmt::Write;
+#[path = "knowledge.rs"]
+pub mod knowledge;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Encoding {
@@ -7,6 +9,8 @@ pub enum Encoding {
     Coverage,
     Negated,
     Assumed,
+    Knowledge,
+    PlainTermRing,
 }
 impl Encoding {
     pub fn parse(s: &str) -> Result<Self, String> {
@@ -15,6 +19,8 @@ impl Encoding {
             "coverage" => Ok(Self::Coverage),
             "negated" => Ok(Self::Negated),
             "assumed" => Ok(Self::Assumed),
+            "knowledge" => Ok(Self::Knowledge),
+            "plain-term-ring" => Ok(Self::PlainTermRing),
             _ => Err(format!("unknown encoding {s}")),
         }
     }
@@ -39,6 +45,7 @@ impl Topology {
 }
 #[derive(Clone, Debug)]
 pub struct Shape {
+    pub knowledge: knowledge::Knowledge,
     /// All message fields, including one selector per tree level.
     pub fields: usize,
     /// Payload fields read by leaf terms, in addition to the selectors.
@@ -59,6 +66,7 @@ pub struct Shape {
 impl Default for Shape {
     fn default() -> Self {
         Self {
+            knowledge: Default::default(),
             fields: 6,
             reads: 2,
             depth: 1,
@@ -78,6 +86,12 @@ impl Default for Shape {
 }
 impl Shape {
     pub fn validate(&self) -> Result<(), String> {
+        if matches!(self.encoding, Encoding::Knowledge | Encoding::PlainTermRing) {
+            if self.depth == 0 || self.width < 2 {
+                return Err("depth must be positive and width at least two".into());
+            }
+            return knowledge::validate(self, self.encoding == Encoding::PlainTermRing);
+        }
         if self.depth == 0 || self.width < 2 || self.reads == 0 {
             return Err("depth and reads must be positive; width must be at least two".into());
         }
@@ -150,6 +164,12 @@ pub struct Node {
 
 pub fn source(s: &Shape) -> Result<String, String> {
     s.validate()?;
+    if s.encoding == Encoding::Knowledge {
+        return knowledge::source(s);
+    }
+    if s.encoding == Encoding::PlainTermRing {
+        return knowledge::plain_ring(s);
+    }
     let nodes = s.tree()?;
     let leaves: Vec<_> = nodes
         .iter()

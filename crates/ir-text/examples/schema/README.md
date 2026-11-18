@@ -287,3 +287,92 @@ deltas, independently of later progress updates. `guardedAttempts` preserves eac
 restricted candidate's cone size, preprocessing/iteration times and last state. See [attempt reporting](../../../../scripts/SHAPE-ZOO.md#guarded-bounds-reproduction).
 `binarySha256` identifies the measured CLI artifact; the revision and dirty flag
 continue to describe the source checkout.
+
+## Knowledge-form workloads
+
+`--encoding knowledge` emits lesson 11's knowledge flags and strict reads, using
+its shared library. It checks decision completeness without selecting recognition.
+Every recursive dependency in propagation is positive; the downstream audit alone
+negates flags. Admission is expected without cyclic rewrites. An admitted program
+can still report `no_unknown_decisions` (exit 1).
+
+Three shapes can coexist in one generated program. They have separate inputs;
+combining them measures their aggregate cost, not a new coupling between them.
+
+- **Forest:** `--trees` (default 1), `--depth` / `--width` (1 / 2),
+  `--fields-per-leaf` (1), `--unlocked-fields` (1), `--writers-per-field` (1).
+  A shared selector chooses a tree. Each internal node owns the next selector;
+  excluding other branches makes it readable before the final leaf is known.
+  The next path reads the literal classification value produced by the selected
+  branch's set statements. Extra unlocked fields belong to internal nodes;
+  leaf fields belong to their leaf. Equal-result writers are allowed.
+  Even-numbered owners validate absence, odd-numbered owners require presence.
+  Validation follows matching and never determines exclusion. No matching leaf
+  is a known classification rejection, distinct from an unknown decision.
+- **Chains:** `--chain-length` (default 0) with `--writers-per-field`. A known input
+  starts a chain of literal-result writers. `--self-dependent` closes the first
+  writer through the last decision: when the start input is true, the source
+  decisions stay unknown. Set `--trees 0` to measure a chain alone.
+- **Term rings:** `--ring-terms K` (default 0), `--ring-writers W` (4),
+  `--ring-lanes L` (1), `--result-values NV` (3). Each term requires value `v0`
+  in an element written by W computations, guarded by the next term. Each writer
+  has its own selected flow, enabled by any lane's `fa AND NOT fb`. An open result
+  is chosen for every writer even while inactive. Reading an element waits for
+  **all** its possible writers' applicability decisions; raw results cannot
+  resolve a field test early. This includes result values other than `v0`.
+
+Ring selectors are mutually exclusive by default. With K >= 2, all decisions
+settle: the selected flow's writer depends on a different element, whose writers
+are known inactive. K = 1 deliberately retains self-support and reports unknowns.
+`--overlaps` drops selector exclusivity, allowing an unresolved active ring. This
+flag requires a ring in the knowledge encoding; it does not overlap forest paths.
+These are semantic expectations, not completion guarantees at default limits.
+Preparation and symbolic checking can still exhaust limits even when admission
+needs no cyclic rewrite; such runs remain explicitly incomplete.
+
+Examples (all use the existing persistent runner and explicit checker limits):
+
+```sh
+just bench-den-schema --encoding knowledge
+just bench-den-schema --encoding knowledge --trees 2 --depth 2 --width 3 --fields-per-leaf 2 --unlocked-fields 2 --writers-per-field 2
+just bench-den-schema --encoding knowledge --trees 0 --chain-length 32 --writers-per-field 2
+just bench-den-schema --encoding knowledge --trees 0 --chain-length 32 --self-dependent
+just bench-den-schema --encoding knowledge --trees 0 --ring-terms 3 --ring-writers 4 --ring-lanes 1 --result-values 3 --input-order structural -- --timeout-ms 30000
+just bench-den-schema --encoding knowledge --trees 0 --ring-terms 1 --ring-writers 1
+just bench-den-schema --encoding knowledge --trees 0 --ring-terms 2 --ring-writers 1 --overlaps
+```
+
+The generated shapes are bounded before source allocation, independently of checker
+limits. Invalid/overflowing shapes are rejected, never truncated. Legacy-only knobs
+(`--fields`, `--reads`, `--topology`, catalog controls, etc.) are rejected for these
+encodings, as are knowledge-only knobs for legacy encodings. `run.json.shape`
+records the knowledge dimensions instead of inapplicable legacy defaults.
+
+### Matched plain term-ring baseline
+
+`--encoding plain-term-ring` ports the synthetic ring's constraint, flow, writer
+and element indirections, with `term_holds :- !unsatisfied`. It takes the same K,
+W, L, NV, selector/result restrictions and downstream observation as the knowledge
+ring. It requires `--trees 0` and a positive ring size, with no chain. It is an
+admission workload with different semantics; outcomes are not required to agree
+with the knowledge form. In particular, self-support and overlapping rings are
+not interchangeable across these lowerings.
+
+```sh
+just bench-den-schema --encoding plain-term-ring --trees 0 --ring-terms 3 --ring-writers 4 --ring-lanes 1 --result-values 3 --input-order structural -- --timeout-ms 30000
+just bench-den-schema --encoding knowledge --trees 0 --ring-terms 3 --ring-writers 4 --ring-lanes 1 --result-values 3 --input-order structural -- --timeout-ms 30000
+```
+
+Run both with the same checker build/profile, input order and limits. Repeat at
+7 terms / 7 writers while keeping the lanes and result domain unchanged. Compare
+prepared atoms/rules, phase durations, sampled memory and BDD work, including
+incomplete runs. The knowledge translation adds gates and knowledge flags; fewer
+admission proofs do not imply smaller grounding or cheaper checking. Historical
+measurements from other checker revisions are context, not a speedup baseline.
+
+Tests enumerate tiny forests and rings against an independent per-message
+reference, including K = 1, overlapping selectors and multiple writers/results.
+They also check combined shapes, cold/warm repair, matching ring input inventories,
+source bounds and explicit inconclusive preparation. Larger measurements are
+experiments, with no timing or node-count goldens. Lesson 12 and a general lowering
+reference remain separate work.

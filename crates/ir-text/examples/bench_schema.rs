@@ -3,6 +3,9 @@
 mod attempts;
 #[path = "schema/generate.rs"]
 mod generate;
+#[cfg(test)]
+#[path = "schema/knowledge_tests.rs"]
+mod knowledge_tests;
 #[path = "schema/runner.rs"]
 mod runner;
 #[cfg(test)]

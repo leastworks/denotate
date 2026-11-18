@@ -70,6 +70,17 @@ and source-size sweeps. Each family needs its own semantic and target-path check
 
 ## Lowering guidance
 
+[Shipping News lesson 11](../editors/den/examples/shipping-news/11-incremental-schema/README.md)
+now models incremental classification with explicit true/false knowledge, strict
+field readiness and validation after path matching. Its small loop cases separate
+known rejection from unknown decisions. The schema benchmark extends this to
+forests, chains and term rings, with an independently checked tiny-world reference
+and a separate plain term-ring baseline. This is a lowering convention, not a
+change to Denotate's stable semantics.
+
+Still to write: the direct/coverage/assumed comparison lesson described below,
+lesson 12 and a general lowering reference, informed by scale and corpus feedback.
+
 Denotate is generic for stratified programs and for programs that follow a DSL's own
 evaluation order. Advanced Shipping News lessons will show an incremental schema
 (formats, expected and accepted fields, recognition) lowered three ways: directly

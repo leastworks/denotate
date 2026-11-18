@@ -16,7 +16,7 @@ const HELP: &str = "Usage: just bench-den-schema [OPTIONS] [-- CHECKER_LIMITS...
 --dump-component FILE     Save component JSONL under this run directory\n\
 --sat-probe               Enable diagnostic uniqueness/existence probes (limits may follow --)\n\
 --sat-probe-candidates    Diagnose guarded candidates during admission\n\
---encoding NAME           ambiguous | coverage (default) | negated | assumed\n\
+--encoding NAME           ambiguous | coverage (default) | negated | assumed | knowledge | plain-term-ring\n\
 --topology NAME           independent (default) | coupled | mixed | layered\n\
 --coupling-percent N      Layered conditions with cross reads (0..100; default 50)\n\
 --fields N                Total message fields, including selectors (default 6)\n\
@@ -27,6 +27,10 @@ const HELP: &str = "Usage: just bench-den-schema [OPTIONS] [-- CHECKER_LIMITS...
 --computed N              Separate computed elements (default 1)\n\
 --catalog N --catalog-layers N   Fixed catalog entries / propagation layers (defaults 4, 2)\n\
 --overlaps                Inject sibling overlaps (ordinary verdicts are then not promised)\n\
+--trees N --fields-per-leaf N --unlocked-fields N  Knowledge forest (defaults 1, 1, 1)\n\
+--writers-per-field N --chain-length N  Knowledge writers / chain (defaults 1, 0)\n\
+--self-dependent         Close the knowledge chain through itself\n\
+--ring-terms N --ring-writers N --ring-lanes N --result-values N (defaults 0, 4, 1, 3)\n\
 --samply                  Also save a CPU recording; requires samply on PATH\n\
 --source FILE             Use an authored source (shared shape-zoo runner)\n\
 --generate-only           Save sources and configuration without invoking check\n\
@@ -63,6 +67,10 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
             return Err(format!("repeated option {arg}"));
         }
         match arg.as_str() {
+            "--self-dependent" => {
+                shape.knowledge.self_dependent = true;
+                continue;
+            }
             "--overlaps" => {
                 shape.overlaps = true;
                 continue;
@@ -102,6 +110,15 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
             "--input-order" => forwarded.extend([arg, value]),
             _ => {
                 let target = match arg.as_str() {
+                    "--trees" => &mut shape.knowledge.trees,
+                    "--fields-per-leaf" => &mut shape.knowledge.fields_per_leaf,
+                    "--unlocked-fields" => &mut shape.knowledge.unlocked_fields,
+                    "--writers-per-field" => &mut shape.knowledge.writers_per_field,
+                    "--chain-length" => &mut shape.knowledge.chain_length,
+                    "--ring-terms" => &mut shape.knowledge.ring_terms,
+                    "--ring-writers" => &mut shape.knowledge.ring_writers,
+                    "--ring-lanes" => &mut shape.knowledge.ring_lanes,
+                    "--result-values" => &mut shape.knowledge.result_values,
                     "--fields" => &mut shape.fields,
                     "--reads" => &mut shape.reads,
                     "--coupling-percent" => &mut shape.coupling_percent,
@@ -120,6 +137,59 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
                     .map_err(|_| format!("{arg} needs a nonnegative integer"))?;
             }
         }
+    }
+    let knowledge = matches!(
+        shape.encoding,
+        Encoding::Knowledge | Encoding::PlainTermRing
+    );
+    let specific = [
+        "--trees",
+        "--fields-per-leaf",
+        "--unlocked-fields",
+        "--writers-per-field",
+        "--chain-length",
+        "--self-dependent",
+        "--ring-terms",
+        "--ring-writers",
+        "--ring-lanes",
+        "--result-values",
+    ];
+    let legacy = [
+        "--fields",
+        "--reads",
+        "--topology",
+        "--coupling-percent",
+        "--shadowed",
+        "--wide-heads",
+        "--producers",
+        "--computed",
+        "--catalog",
+        "--catalog-layers",
+    ];
+    for flag in if knowledge {
+        &legacy[..]
+    } else {
+        &specific[..]
+    } {
+        if seen.contains(*flag) {
+            return Err(format!("{flag} does not apply to this encoding"));
+        }
+    }
+    if shape.encoding == Encoding::PlainTermRing {
+        for flag in [
+            "--depth",
+            "--width",
+            "--fields-per-leaf",
+            "--unlocked-fields",
+            "--writers-per-field",
+        ] {
+            if seen.contains(flag) {
+                return Err(format!("{flag} does not apply to plain-term-ring"));
+            }
+        }
+    }
+    if knowledge && source_path.is_some() {
+        return Err("knowledge shape options cannot be combined with --source".into());
     }
     shape.validate()?;
     let flags = check_options::limit_values(&denotate_check::Limits::default());
@@ -218,6 +288,12 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         "layoutDepth":if shape.topology==Topology::Layered {Some(shape.depth+2)} else {None},
         "shape":{"couplingPercent":shape.coupling_percent,"fields":shape.fields,"reads":shape.reads,"depth":shape.depth,"width":shape.width,"encoding":format!("{:?}",shape.encoding).to_lowercase(),"topology":format!("{:?}",shape.topology).to_lowercase(),"overlaps":shape.overlaps,"shadowed":shape.shadowed,"wideHeads":shape.wide_heads,"producers":shape.producers,"computed":shape.computed,"catalog":shape.catalog,"catalogLayers":shape.catalog_layers},
         "componentDump":component_path,"componentDumpRecordLimit":parsed.dump_component_limit,"candidateProbe":parsed.candidate_probe.as_ref().map(|p| json!({"timeoutMs":p.timeout.as_millis(),"maxCandidates":p.max_candidates,"maxWork":p.max_work})),"inputOrder":parsed.input_order.label(),"satProbe":{"enabled":parsed.sat_probe,"timeoutMs":parsed.sat_probe_limits.timeout.as_millis(),"maxRefinements":parsed.sat_probe_limits.max_refinements},"limits":limits,"binary":binary,"binarySha256":binary_hash,"checkArgs":check_args});
+    if knowledge {
+        manifest["shape"] = json!({"encoding":if shape.encoding==Encoding::Knowledge {"knowledge"} else {"plain-term-ring"}, "depth":shape.depth,"width":shape.width,"overlaps":shape.overlaps,"knowledge":shape.knowledge.metadata()});
+        for key in ["layout", "layoutDepth", "crossReadCount"] {
+            manifest.as_object_mut().unwrap().remove(key);
+        }
+    }
     if source_path.is_some() {
         for key in ["shape", "layout", "layoutDepth", "crossReadCount"] {
             manifest.as_object_mut().unwrap().remove(key);
