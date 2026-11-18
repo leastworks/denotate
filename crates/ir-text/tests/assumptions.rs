@@ -406,3 +406,81 @@ fn library_contracts_use_each_consumers_metadata() {
         assert_eq!(result, run(&p, &mut Session::default()).0);
     }
 }
+
+#[test]
+fn empty_assumption_cones_keep_domain_defined_coverage_groups() {
+    for kind in ["at_least_one", "exactly_one"] {
+        for grouping in ["x", ""] {
+            let p = program(&format!(
+                "sort S; const x,y:S; relation r(x:S); input outside(); assumption a:{kind}(r,group_by:({grouping})); {VERIFY}"
+            ));
+            let (result, presented) = run(&p, &mut Session::default());
+            assert!(result.inconsistent_assumptions, "{kind} {grouping}");
+            assert_eq!(presented.status["state"], "inconsistent-assumptions");
+        }
+    }
+}
+
+#[test]
+fn assumption_cone_edits_preserve_w_with_external_uniqueness_inputs_cold_and_warm() {
+    let mut session = Session::with_grounding();
+    let limits = Limits::default();
+    let ops = OperationalLimits::from(&limits);
+    for (body, selection) in [
+        ("i(x)", "a,u"),
+        ("j()", "a,u"),
+        ("!i(y)", "a,u"),
+        ("i(x)", ""),
+        ("i(x)", "a,u"),
+    ] {
+        let p = program(&format!(
+            "sort S; const x,y:S; input i(x:S); input j(); relation r(); r():-{body}; assumption a:empty(r); assumption u:at_most_one(i,group_by:()); obligation o:empty(r); verification v{{assumptions:[{selection}];obligations:[o];}}"
+        ));
+        let request = p.verification_requests(&limits).unwrap().remove(0).1;
+        let RequestPreparation::Complete(prepared) =
+            session.prepare(&request, &p.corpus, &p.keys, &ops).unwrap()
+        else {
+            panic!()
+        };
+        let inputs = prepared
+            .program()
+            .input_atoms()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(inputs.len(), 3);
+        for bits in 0usize..8 {
+            let world = inputs
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| bits & (1 << i) != 0)
+                .map(|(_, a)| a.clone())
+                .collect::<Vec<_>>();
+            let present = |relation: &str, value: Option<&str>| {
+                world.iter().any(|a| {
+                    p.corpus.relation(a.relation).unwrap().name == relation
+                        && value
+                            .is_none_or(|v| p.corpus.constant(a.arguments[0]).unwrap().name == v)
+                })
+            };
+            let x = present("i", Some("x"));
+            let y = present("i", Some("y"));
+            let r = match body {
+                "i(x)" => x,
+                "!i(y)" => !y,
+                "j()" => present("j", None),
+                _ => unreachable!(),
+            };
+            let allowed = selection.is_empty() || (!r && !(x && y));
+            assert_eq!(
+                prepared.program().evaluate(world, &limits).is_ok(),
+                allowed,
+                "body={body}, selection={selection}, bits={bits}"
+            );
+        }
+        drop(prepared);
+        let (warm, wp) = run(&p, &mut session);
+        let (fresh, fp) = run(&p, &mut Session::default());
+        assert_eq!(warm, fresh);
+        assert_eq!(wp.status, fp.status);
+    }
+}

@@ -827,6 +827,15 @@ The file intentionally retains program names and is not an anonymized export.
   validation are fresh across edits, with the independent fixed fold still reusable.
   The explicit all-declaration API and `check-den --validate-all-assumptions` preserve
   the authoring check on demand, including without verifications.
+- **Build W from the selected restriction cones, with the full input universe.**
+  A positive knowledge-form program spent its assumption-preparation deadline
+  evaluating unrelated rules before any restriction was combined. The same input
+  restrictions alone were cheap. Independent evaluation now follows only the
+  selected restriction relations' ground dependencies, without assuming W. It
+  preserves every input variable and its chosen order so restriction conditions
+  combine safely with input uniqueness and other restrictions. Missing-producer
+  coverage groups retain their meaning. Whole-program reports and general-context
+  checking remain unchanged; this is not projection of W or local verdict reuse.
 - **Share a context, not its selected checks.** Residual grounding, permitted worlds,
   indexes and admission depend on the program, resolved domains, restrictions and
   deterministic limits. Obligation groups, notices, verification identity and

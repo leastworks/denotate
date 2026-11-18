@@ -309,7 +309,11 @@ fold across input-dependent edits. Logical exhaustion remains inconclusive;
 cancellation/deadlines never install partial reusable preparation.
 
 Selected general assumptions are another preparation boundary: once their meaning
-is independently established, the checker computes W before admission.
+is independently established, the checker computes W before admission. Independent
+symbolic evaluation is scoped to the selected restriction relations' ground
+dependency cones, retaining the full input universe and chosen variable order for
+W. This evaluation scope does not narrow grounding, validation or subsequent
+program-wide reports.
 Input-only at-most-one contexts retain local memoized queries. General contexts use
 whole-program BDD evaluation, with W shared only within the same selection:
 local absent-extension and constraint-projection shortcuts are not sound for general

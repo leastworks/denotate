@@ -34,7 +34,20 @@ impl GroundProgram {
             };
             let meaning = {
                 let _span = budget.limits.profile.span("assumptions-independent", None);
-                independent.symbolic_with_budget(budget)?
+                let mut relations = BTreeSet::new();
+                for restriction in restrictions {
+                    budget.tick("assumption roots")?;
+                    relations.insert(restriction.relation());
+                }
+                let mut roots = Vec::new();
+                for atom in independent.atoms() {
+                    budget.tick("assumption roots")?;
+                    if relations.contains(&atom.relation) {
+                        roots.push(atom.clone());
+                    }
+                }
+                let cone = independent.dependency_cone_with_budget(roots, budget)?;
+                independent.symbolic_for_assumptions(budget, &cone)?
             };
             let _span = budget.limits.profile.span("assumptions-conjunction", None);
             let ctx = meaning.context();

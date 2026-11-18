@@ -288,6 +288,11 @@ rejects unknown obligation or verification keys and requests whose constraints o
 obligations do not match their named verification. Input-only `at_most_one` contexts
 retain their local checking path. General input/derived cardinality constraints
 compute W independently during preparation, then use whole-program checking.
+Only the selected restriction relations' dependency cones are symbolically
+evaluated to build W, using the independent specialized graph where needed. The
+full input universe and chosen order are retained, including inputs outside those
+cones. Empty coverage groups still constrain W. This does not narrow subsequent
+admission, notices or other program-wide reports.
 `BackendIdentity::bdd_with_order(InputOrder::{Key, ReverseKey, Structural})` selects
 an experimental variable layout; `bdd()` still means key order. Preparation chooses
 one map after grounding and copies it to the assumption-specialized view before W.

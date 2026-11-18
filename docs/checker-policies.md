@@ -1192,11 +1192,19 @@ Real LSP round trips at three program sizes, with no timing thresholds.
 General selected cardinality restrictions are evaluated independently during
 preparation, under the existing work, grouping, BDD and retained-condition limits.
 An incomplete W is never installed. Its consistency is checked before admission.
-The first implementation evaluates fresh whole-program symbolic meaning to obtain
-constraint conditions, ignoring unrelated blocked components, then checks through
-the whole-program path. This can exhaust on unrelated work; the result is explicit
-inconclusive. Restrict evaluation to the constraint cones only when measurements
-justify it and the same independent semantics is preserved.
+Independent symbolic evaluation covers the union of the selected restriction
+relations' ground dependency cones, in the independently specialized view when
+needed. It keeps the whole program's input-variable universe and chosen order:
+cone selection limits evaluation, not the inputs represented by W. No selected
+restriction establishes its own meaning. Cone indexing and traversal use the
+existing work and cancellation limits; exhaustion remains inconclusive. Group
+enumeration still includes domain-defined coverage groups with no producer.
+Whole-program admission, findings and checking follow as before.
+
+This avoids evaluating unrelated positive components before W exists. The
+knowledge-form 7×7 ring demonstrated that cost: independent evaluation exhausted
+its deadline while the same input restrictions alone built a small W. This change
+does not promise cheap whole-program checking afterward.
 
 Local verdict caching remains enabled for input-only at-most-one contexts. General
 constraints invalidate the absent-extension argument for projecting W into a local

@@ -231,6 +231,7 @@ impl GroundProgram {
             budget,
             false,
             Some(cone),
+            None,
             Some((keep, reserved)),
             observe,
             #[cfg(any(test, feature = "test-support"))]
@@ -265,6 +266,7 @@ impl GroundProgram {
             budget,
             partial,
             cone,
+            cone.map(|c| &c.facts),
             None,
             None,
             #[cfg(any(test, feature = "test-support"))]
@@ -279,20 +281,46 @@ impl GroundProgram {
         cone: Option<&DependencyCone>,
         measured: &mut dyn FnMut(ComponentId, Duration),
     ) -> Result<SymbolicMeaning<'_>> {
-        self.symbolic_selected_impl(budget, partial, cone, None, None, Some(measured))
+        self.symbolic_selected_impl(
+            budget,
+            partial,
+            cone,
+            cone.map(|c| &c.facts),
+            None,
+            None,
+            Some(measured),
+        )
+    }
+    /// Evaluate selected dependencies without projecting the variable universe.
+    /// Assumption conditions must combine with W in the whole program's order.
+    pub(crate) fn symbolic_for_assumptions(
+        &self,
+        budget: &mut Budget<'_>,
+        cone: &DependencyCone,
+    ) -> Result<SymbolicMeaning<'_>> {
+        self.symbolic_selected_impl(
+            budget,
+            false,
+            Some(cone),
+            None,
+            None,
+            None,
+            #[cfg(any(test, feature = "test-support"))]
+            None,
+        )
     }
     fn symbolic_selected_impl(
         &self,
         budget: &mut Budget<'_>,
         partial: bool,
         cone: Option<&DependencyCone>,
+        input_facts: Option<&BTreeSet<GroundAtom>>,
         keep: Option<(&BTreeSet<GroundAtom>, usize)>,
         observe: Option<&dyn Fn(ComponentId, Option<&EvaluationUnknown<GroundAtom>>)>,
         #[cfg(any(test, feature = "test-support"))] mut measured: Option<
             &mut dyn FnMut(ComponentId, Duration),
         >,
     ) -> Result<SymbolicMeaning<'_>> {
-        let admission = keep.is_some();
         let reserved = keep.map_or(0, |(_, reserved)| reserved);
         let mut retention = keep
             .map(|(keep, _)| {
@@ -301,15 +329,7 @@ impl GroundProgram {
             .transpose()?;
         let _stage = budget.limits.progress.nested("symbolic-evaluation");
         let start = Instant::now();
-        let context = ConditionContext::build_selected(
-            self,
-            if admission {
-                None
-            } else {
-                cone.map(|c| &c.facts)
-            },
-            budget,
-        )?;
+        let context = ConditionContext::build_selected(self, input_facts, budget)?;
         let mut meaning = SymbolicMeaning {
             program: self,
             context,
@@ -330,7 +350,7 @@ impl GroundProgram {
             budget,
         )?;
         for input in meaning.context.inputs().cloned().collect::<Vec<_>>() {
-            if admission && cone.is_some_and(|c| !c.facts.contains(&input)) {
+            if input_facts.is_none() && cone.is_some_and(|c| !c.facts.contains(&input)) {
                 continue;
             }
             let input = &input;
