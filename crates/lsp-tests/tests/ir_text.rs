@@ -3013,3 +3013,54 @@ fn checking_within_w_configuration_rechecks_and_omission_restores_raw_mode() {
         assert_eq!(state(&mut c), expected);
     }
 }
+
+#[test]
+fn input_cardinality_services_and_unsaved_empty_universe() {
+    let mut c = Client::start("ir-text/standalone");
+    let (uri, _) = c.open("example.den");
+    let text="sort S; const a:S; relation eligible(x:S); eligible(a); input i(x:S) within eligible exactly_one(group_by:(x)); relation clear(); obligation ok:empty(clear); verification v{assumptions:[];obligations:[ok];}";
+    c.change(&uri, 2, text);
+    checking_idle(&mut c);
+    let roots = c.request("denotate/roots", json!({"uri":uri}));
+    assert_eq!(
+        roots["verifications"][0]["summary"]["inputUniverse"]["state"],
+        "nonempty"
+    );
+    let definition = query(
+        &mut c,
+        "textDocument/definition",
+        &uri,
+        text,
+        "group_by:(x)",
+        10,
+    );
+    assert_eq!(
+        definition[0]["targetSelectionRange"]["start"],
+        position(text, "input i(x", 8)
+    );
+    let hover = query(&mut c, "textDocument/hover", &uri, text, "input i", 6);
+    assert!(hover.to_string().contains("exactly_one"), "{hover}");
+    let edit=c.request("textDocument/rename",json!({"textDocument":{"uri":uri},"position":position(text,"group_by:(x)",10),"newName":"field"}));
+    let renamed = support::apply_edits(
+        text,
+        edit["documentChanges"][0]["edits"].as_array().unwrap(),
+    );
+    assert!(
+        renamed.contains("input i(field:S)") && renamed.contains("group_by:(field)"),
+        "{renamed}"
+    );
+    c.change(&uri, 3, &renamed.replace("eligible(a);", ""));
+    checking_idle(&mut c);
+    let roots = c.request("denotate/roots", json!({"uri":uri}));
+    assert_eq!(
+        roots["verifications"][0]["summary"]["state"],
+        "empty-input-universe"
+    );
+    assert!(c
+        .diagnostics(&uri)
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["code"] == "empty-input-universe"));
+    c.shutdown();
+}

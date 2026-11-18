@@ -129,7 +129,7 @@ with `uri` and one-based scalar `line`/`column`. These local reports contain sou
 information. The top-level `state` continues to answer uniqueness: UNSAT alone
 means at most one stable meaning. After UNSAT, `existence` contains a separate
 report; it is null when uniqueness is SAT or unknown. Its `state` is `every-world`,
-`no-meaning`, `inconsistent-assumptions`, or `unknown`. It includes `reason`,
+`no-meaning`, `inconsistent-assumptions`, `empty-input-universe`, or `unknown`. It includes `reason`,
 `world` (true cone inputs, others false, with the same locations), `worlds` (proposed
 permitted worlds), `covers` (emitted covering cubes, not their number of concrete
 worlds), `refinements`, `solves`, `variables`, `clauses`, `literals`, `coneAtoms`,
@@ -1144,3 +1144,22 @@ With `DENOTATE_TEST_MODE=1` the server exposes the shared checking test protocol
 The `.den` server's checking-idle barrier also waits for pending origin replies; its
 ticket identity is `{program, revision}`. `denotate/test/idle` and `validated` remain
 fast editor barriers and do not imply that checking finished.
+
+### Declared input cardinality domains
+
+A completed preparation with input cardinality declarations adds `inputUniverse`
+to its verification summary: `state` is `nonempty` or `empty`; `declarations` holds
+`relation`, `kind` (`at-most-one` or `exactly-one`), `groupBy` column indices, and
+`empty` (whether this declaration has an exactly-one group without candidates).
+These entries are separate from `activeAssumptions` and apply in every verification.
+Programs without such declarations retain the previous summary shape.
+
+An empty declared universe produces an Error diagnostic with code
+`empty-input-universe` and finding identity
+`{"verification": [namespaceKey, name], "context": "empty-input-universe"}`.
+Its contributions include the verification and only the declarations with empty groups. Summary
+`state` and `consistency` are `empty-input-universe`; obligation results are absent.
+Notice unknown reasons also allow `empty-input-universe`, without additional
+notice diagnostics. This differs from `inconsistent-assumptions`: U is already
+empty before any assumption is selected. Editor aggregate state treats it as a
+finding, and the CLI returns the existing findings exit code.

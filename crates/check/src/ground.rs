@@ -159,7 +159,10 @@ pub struct GroundCore {
     pub(crate) component_rules: Vec<Vec<usize>>,
     pub(crate) dependencies: Vec<Dependency>,
     pub(crate) input_groups: Vec<Vec<GroundAtom>>,
+    pub(crate) input_cardinalities: BTreeMap<RelationId, denotate_ir::InputCardinality>,
+    pub(crate) universe_groups: Vec<crate::input_universe::UniverseGroup>,
     pub(crate) assumption_condition: Option<Condition>,
+    pub(crate) input_constraints_inconsistent: bool,
     metrics: PreparationMetrics,
 }
 impl std::ops::Deref for GroundProgram {
@@ -175,7 +178,7 @@ impl std::ops::DerefMut for GroundProgram {
 }
 
 impl GroundProgram {
-    /// Prepare unrestricted input worlds (W = true). This does not infer input
+    /// Prepare the declared input universe (W = U). This does not infer input
     /// constraints from relation names, signatures or checked obligations.
     /// Use `prepare_with_input_groups` when the caller selects input exclusivity;
     /// Test DSL callers should use that frontend's `LoweredProgram::prepare`.
@@ -199,7 +202,9 @@ impl GroundProgram {
         budget: &mut Budget<'_>,
     ) -> Result<Self> {
         let obligations = corpus.obligations().map(|o| o.id).collect();
-        Self::prepare_using(corpus, domains, constraints, &obligations, budget, None)
+        let mut p = Self::prepare_using(corpus, domains, constraints, &obligations, budget, None)?;
+        p.check_input_consistency(budget)?;
+        Ok(p)
     }
     pub(crate) fn prepare_using(
         corpus: &Corpus,
@@ -279,8 +284,19 @@ impl GroundProgram {
     ) -> Result<Self> {
         limits.cancellation.check()?;
         keys.validate(corpus).map_err(CheckError::Keys)?;
-        Self::prepare_with_input_groups(corpus, domains, constraints, limits)?
-            .with_atom_key_order(keys)
+        let mut budget = Budget::new(limits);
+        let obligations = corpus.obligations().map(|o| o.id).collect();
+        let mut p = Self::prepare_using(
+            corpus,
+            domains,
+            constraints,
+            &obligations,
+            &mut budget,
+            None,
+        )?
+        .with_atom_key_order(keys)?;
+        p.check_input_consistency(&mut budget)?;
+        Ok(p)
     }
     // Only fresh construction may choose an order: previously issued Conditions
     // must never be interpreted using a different variable map.
@@ -347,7 +363,10 @@ impl GroundProgram {
                 component_rules: vec![],
                 dependencies: vec![],
                 input_groups: vec![],
+                input_cardinalities: BTreeMap::new(),
+                universe_groups: vec![],
                 assumption_condition: None,
+                input_constraints_inconsistent: false,
                 metrics: PreparationMetrics::default(),
             }),
             groups: vec![],
@@ -460,6 +479,7 @@ impl GroundProgram {
         constraints: &[InputAtMostOne],
         budget: &mut Budget<'_>,
     ) -> Result<()> {
+        self.build_input_universe(corpus, budget)?;
         for constraint in constraints {
             budget.tick("input groups")?;
             let relation = corpus
@@ -504,6 +524,23 @@ impl GroundProgram {
                 present.iter().cloned(),
                 budget,
             )?;
+        }
+        for group in &self.universe_groups {
+            let mut found = false;
+            for atom in &group.atoms {
+                budget.tick("input observation")?;
+                if present.contains(atom) {
+                    if found {
+                        return Err(CheckError::InvalidObservation(atom.clone()));
+                    }
+                    found = true;
+                }
+            }
+            if !found && group.kind == denotate_ir::Cardinality::ExactlyOne {
+                return Err(CheckError::InvalidInputGroup(
+                    "observation omits an exactly-one input group",
+                ));
+            }
         }
         for group in &self.input_groups {
             let mut found = false;

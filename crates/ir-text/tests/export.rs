@@ -19,6 +19,8 @@ fn fixture() -> (
     let p = c
         .declare_relation("input", RelationRole::Input, [Parameter::new("x", s)])
         .unwrap();
+    c.constrain_input(p, Cardinality::AtMostOne, [Column::Name("x".into())])
+        .unwrap();
     let r = c
         .declare_relation_in(
             &ns,

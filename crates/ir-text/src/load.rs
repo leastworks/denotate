@@ -114,6 +114,7 @@ fn ir_construction<T>(
             }
             ConstructionError::UnknownSort(_) => "Unknown sort in IR construction".into(),
             ConstructionError::UnknownConstant(_) => "Unknown constant in IR construction".into(),
+            ConstructionError::InvalidInputCardinality { reason, .. } => reason.to_string(),
             ConstructionError::InvalidInputDomain { reason, .. } => {
                 format!("Invalid input domain: {reason}")
             }
@@ -617,7 +618,7 @@ pub fn load_with_resolver(
                         b.origin(m, id, n.span.clone())?;
                     }
                 }
-                Decl::Relation(n, input, parameters, _) => {
+                Decl::Relation(n, input, parameters, _, _) => {
                     let lookup = (module.clone(), n.text.clone(), n.generated);
                     if b.relations.contains_key(&lookup) {
                         return Err(diagnostic(
@@ -704,7 +705,7 @@ pub fn load_with_resolver(
     let mut input_domain_sites = BTreeMap::new();
     for m in &scopes {
         for s in &m.statements {
-            if let Decl::Relation(n, _, _, Some(provider)) = &s.decl {
+            if let Decl::Relation(n, _, _, Some(provider), _) = &s.decl {
                 let input = b.relation(m, n)?;
                 let provider_id = b.relation(m, provider)?;
                 ir_construction(
@@ -714,6 +715,23 @@ pub fn load_with_resolver(
                     &b.program.corpus,
                 )?;
                 input_domain_sites.insert(input, (m, provider.span.clone()));
+            }
+        }
+    }
+    for m in &scopes {
+        for s in &m.statements {
+            if let Decl::Relation(n, _, _, _, Some((kind, columns))) = &s.decl {
+                let input = b.relation(m, n)?;
+                ir_construction(
+                    m,
+                    n.span.clone(),
+                    b.program.corpus.constrain_input(
+                        input,
+                        *kind,
+                        columns.iter().map(|c| Column::Name(c.text.clone())),
+                    ),
+                    &b.program.corpus,
+                )?;
             }
         }
     }

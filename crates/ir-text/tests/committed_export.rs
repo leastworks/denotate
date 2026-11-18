@@ -534,3 +534,24 @@ fn committed_zoo_obligation_and_notice_conclusions_agree_cold_and_warm() {
         conclusions(&q, &mut Session::default())
     );
 }
+
+#[test]
+fn committed_export_preserves_the_declared_universe() {
+    let p = load_text(
+        "sort S; const a,b:S; relation eligible(x:S); eligible(a); eligible(b); input i(x:S) within eligible exactly_one(group_by:()); relation a(); relation b(); a():-i(a),!b(); b():-i(b),!a(); relation invalid(); invalid():-a(),b(); obligation ok:empty(invalid); verification v{assumptions:[];obligations:[ok];}",
+    );
+    let graph = admitted(&p);
+    let source = export(&p, &graph);
+    assert!(source.contains("exactly_one(group_by: ())"), "{source}");
+    let q = load_text(&source);
+    let restored = admitted(&q);
+    assert!(!restored.input_universe_is_empty());
+    let limits = Limits::default();
+    let inputs = restored.input_atoms().cloned().collect::<Vec<_>>();
+    assert_eq!(inputs.len(), 2);
+    assert!(restored.evaluate([], &limits).is_err());
+    assert!(restored.evaluate(inputs.clone(), &limits).is_err());
+    for input in inputs {
+        assert!(restored.evaluate([input], &limits).is_ok());
+    }
+}

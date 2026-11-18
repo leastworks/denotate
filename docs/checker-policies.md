@@ -1206,7 +1206,8 @@ knowledge-form 7×7 ring demonstrated that cost: independent evaluation exhauste
 its deadline while the same input restrictions alone built a small W. This change
 does not promise cheap whole-program checking afterward.
 
-Local verdict caching remains enabled for input-only at-most-one contexts. General
+Local verdict caching remains enabled for input-only at-most-one contexts without
+input cardinality declarations. General
 constraints invalidate the absent-extension argument for projecting W into a local
 query. Their verdicts are recomputed; grounding and plan reuse remain available.
 A future optimization must retain or correctly quantify every external constraint
@@ -1218,8 +1219,9 @@ input and preserve cold/warm results, replay, consistency and cancellation behav
 `--checking-within-w`; the editor setting is `denotate.checkingWithinW`. Once
 assumptions and admission are established, enabled whole-program verification,
 notices and the local path's coverage/emptiness pass evaluate exact conditions
-masked by W. Default checking retains unrestricted evaluation. The default public symbolic APIs, admission, rewrite proofs and W
-construction remain unrestricted. Cached local uniqueness/no-meaning evaluation
+masked by W. Default checking, public symbolic APIs, admission, rewrite proofs
+and W construction remain independent of this option; their conditions are exact
+throughout the declared input universe U, using component masks when declared. Cached local uniqueness/no-meaning evaluation
 also remains unrestricted, including export and import of its conditions.
 
 All checking conditions imply W. Truth is W; negation subtracts a condition from
@@ -1281,3 +1283,15 @@ accounting, verdicts, limits or input-order selection. It adds reporting overhea
 and can affect deadline-limited runs. The benchmark guide documents snapshot
 semantics and bounded report aggregation. No new positive-program limit policy
 is selected by this instrumentation.
+
+## Declared input-domain evaluation
+
+Input at-most-one/exactly-one declarations define U before selected W. Default
+symbolic evaluation masks by the declared groups touching each component's closed
+structural input support; semantic queries still intersect exact W. This is not
+the experimental full-W checking policy: selected assumptions are not copied into
+component conditions. Mask and group construction consume existing work/BDD storage
+allowances. Exactly-one enumeration uses resolved grouping domains and the existing
+atom bound; exhaustion is explicit. No limits or input-order default changed.
+Structural ordering treats declared groups as the same weighted preferences as
+selected input exclusivity, without imposing a new mandatory block order.

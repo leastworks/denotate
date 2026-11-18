@@ -7,8 +7,7 @@ sort Format;
 sort Statement;
 
 relation candidate(field: Field, value: Value);
-input raw_value(field: Field, value: Value) within candidate;
-assumption scalar_inputs: at_most_one(raw_value, group_by: field);
+input raw_value(field: Field, value: Value) within candidate at_most_one(group_by: field);
 
 // The lowerer emits finite Boolean gates. Multiple producers become an OR;
 // an empty producer set becomes always_false, not a self-supporting false rule.
@@ -84,7 +83,7 @@ set_value(F, V) :- writes(_, F, V);
 // W2/W4 use one result literal. No function implementation is executed here.
 relation computation_output(statement: Statement, field: Field);
 relation result_choice(statement: Statement, field: Field, value: Value);
-input computed_result(statement: Statement, field: Field, value: Value) within result_choice;
+input computed_result(statement: Statement, field: Field, value: Value) within result_choice at_most_one(group_by: (statement, field));
 relation observes_result(decision: Decision, statement: Statement, field: Field, value: Value);
 known_true(D) :- observes_result(D, S, F, V), computed_result(S, F, V);
 known_false(D) :- observes_result(D, S, F, V), !computed_result(S, F, V);
@@ -93,7 +92,6 @@ result_present(S, F) :- computed_result(S, F, _);
 relation missing_result(statement: Statement, field: Field);
 missing_result(S, F) :- computation_output(S, F), !result_present(S, F);
 assumption every_output_has_result: empty(missing_result);
-assumption at_most_one_result: at_most_one(computed_result, group_by: (statement, field));
 relation computed_value(field: Field, value: Value);
 computed_value(F, V) :- writer_guard(S, G), known_true(G), computation_output(S, F), computed_result(S, F, V);
 relation invalid_message_write(statement: Statement, field: Field);

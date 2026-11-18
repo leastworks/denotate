@@ -63,7 +63,9 @@ impl AdmissionScope {
             };
             let input_guards = phase == AdmissionPhase::Downstream
                 && !blocked
-                && (!p.input_groups.is_empty() || p.assumption_condition.is_some());
+                && (!p.input_groups.is_empty()
+                    || !p.input_cardinalities.is_empty()
+                    || p.assumption_condition.is_some());
             if !target && !input_guards {
                 continue;
             }

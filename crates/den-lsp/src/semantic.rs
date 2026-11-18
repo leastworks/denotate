@@ -356,7 +356,23 @@ impl Semantics {
                                         d.name.spelling()
                                     )
                                 },
-                                |(label, _)| format!("{kind} {label}"),
+                                |(label, _)| {
+                                    let domain = d
+                                        .input_cardinality
+                                        .as_ref()
+                                        .map(|(kind, columns)| {
+                                            format!(
+                                                " {kind}(group_by: ({}))",
+                                                columns
+                                                    .iter()
+                                                    .map(Name::spelling)
+                                                    .collect::<Vec<_>>()
+                                                    .join(", ")
+                                            )
+                                        })
+                                        .unwrap_or_default();
+                                    format!("{kind} {label}{domain}")
+                                },
                             )
                         }
                         Kind::Constant => {

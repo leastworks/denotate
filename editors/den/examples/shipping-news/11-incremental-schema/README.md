@@ -273,3 +273,12 @@ and input-world selection separate, and validate the lowering with an independen
 per-message reference.
 
 [Back to Shipping News](../README.md)
+
+The library declares scalar message inputs with
+`at_most_one(group_by: field)` on `raw_value`. This is part of the legal message
+universe in both verifications, including admission; it needs no assumption
+selection. Computation results also declare at-most-one per `(statement, field)`.
+Their existence remains the selected `every_output_has_result` assumption: it
+requires results only for declared computation outputs, not every possible
+statement/field pair. The generated term-ring workloads have a result for every
+use and can declare `exactly_one(group_by: u)` directly.

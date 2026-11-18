@@ -163,10 +163,14 @@ impl Run {
         receipts: WorkReceipts,
     ) -> Self {
         let mut outcomes = Outcomes::from_results(p, &results);
-        outcomes.consistency = match consistency {
-            Some(true) => "consistent",
-            Some(false) => "inconsistent",
-            None => "unknown",
+        outcomes.consistency = if results.empty_input_universe {
+            "empty-input-universe"
+        } else {
+            match consistency {
+                Some(true) => "consistent",
+                Some(false) => "inconsistent",
+                None => "unknown",
+            }
         };
         if results.notices.values().any(|n| {
             matches!(
@@ -203,7 +207,7 @@ pub fn measure(
     let mut run = Run {
         row: json!({"timings_ns":{"preparation":null,"admission":null,"checking":null,"notices":null},
         "size":null,"cache":null,"preparation_cache":null,"bdd":null,"outcomes":null,
-        "effective_path":if mode=="global-bdd" {"global-bdd"}else if general {"global-bdd-general-assumptions"}else{"local-bdd"},
+        "effective_path":if mode=="global-bdd" {"global-bdd"}else if general {"global-bdd-general-assumptions"}else if p.corpus.relations().any(|r|r.input_cardinality.is_some()) {"global-bdd-input-universe"}else{"local-bdd"},
         "selection_kind":if request.obligations.is_empty() {if request.notices.is_empty(){"consistency-only"}else{"notices-only"}}else{"obligations"},
             "selected":{"assumptions":request.constraints.len(),"obligations":request.obligations.len(),"notices":request.notices.len()}}),
         outcomes: None,

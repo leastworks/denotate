@@ -220,7 +220,8 @@ test('tagged hub is a separate value domain, with persistent configuration',()=>
     const text=source('guarded-hub',2,options);
     assert.equal(text,source('guarded-hub',2,options));
     assert.match(text,/tagged\(T\) :- applies0\(\), result0\(T\)/);
-    assert.match(text,/has_result0: at_least_one/);
+    assert.match(text,/input result0\(t: Tag\) within tags exactly_one\(group_by: \(\)\)/);
+    assert.match(text,/input declared\(c: Class\) within classes at_most_one\(group_by: \(\)\)/);
     assert.match(text,/t2: Tag/);
     assert.doesNotMatch(text,/fa0_1/);
     const out=path.join(root,'run');

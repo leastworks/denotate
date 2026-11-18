@@ -96,7 +96,7 @@ When the requirement is simply “no more than one value for each item”, an
 
 An input normally has one possible atom for every combination of its parameters'
 resolved sort values. `within` instead names a derived relation whose true tuples
-are its entire input universe:
+are its entire set of eligible input tuples:
 
 ```den
 sort S;
@@ -134,11 +134,48 @@ tuple gives one atom and a false provider gives none.
 
 Restrictions belong to the input declaration and apply in every verification.
 Assumptions constrain assignments within that universe; they do not affect domain
-evaluation. Eligibility alone permits the all-absent world; selected assumptions may
-exclude it. Coverage groups still range over
+evaluation. Eligibility alone permits the all-absent world; input cardinality
+declarations or selected assumptions may exclude it. Coverage groups still range over
 the grouping columns' resolved sort domains: an empty provider with sort values
 `a` and `b` gives two failing groups for `at_least_one(selected, group_by: x)`.
 It does not remove those groups or prove coverage.
+
+## Input cardinality domains
+
+An input may constrain its assignments as well as its eligible tuples:
+
+```den
+input value(field: Field, value: Value) within candidate
+    at_most_one(group_by: (field));
+input result(output: Output, value: Value) within result_candidate
+    exactly_one(group_by: (output));
+```
+
+There is at most one cardinality clause per input. It follows optional `within`
+and precedes optional `loc(...)`. Only `at_most_one` and `exactly_one` are allowed;
+columns name distinct parameters of this input. A single column may omit the
+parentheses. `group_by: ()` describes one group containing all eligible tuples.
+
+These declarations define the legal input universe **U** in every verification,
+without selection. They do not assert properties of derived relations. Selected
+assumptions further restrict U to W; no obligation becomes an assumption.
+Admission, checking, notices, replay and the diagnostic SAT probe respect U.
+Its construction depends on the resolved domains and fixed `within` facts, never
+on selected assumptions or admission proofs.
+
+Groups range over all combinations of the grouping columns' resolved domain
+values. Exactly-one requires one eligible tuple in each group, including groups
+with no candidates. Such a group makes U empty: the checker reports
+`empty-input-universe`, separately from inconsistent selected assumptions, and
+checks no obligations. An empty grouping sort yields no groups and imposes no
+restriction; `group_by: ()` always has one group. Enumeration and BDD construction
+are bounded preparation work; exhaustion is inconclusive, with consistency
+reported as unknown until established.
+
+For sparse pairs of grouping values (for example, only some statement/field pairs
+are computation outputs), exactly-one over the Cartesian grouping domains may be
+too strong. Keep the coverage requirement over the declared output relation as a
+named assumption, and use an input at-most-one declaration for scalar values.
 
 ## Coverage obligations
 
@@ -307,7 +344,7 @@ verification normal_operation {
 
 - A verification names the assumptions that define its permitted input worlds and the
   obligations checked in them. Both lists are required, in this order; either may be
-  `[]`. `assumptions: []` permits every assignment over the declared input universe.
+  `[]`. `assumptions: []` permits every assignment satisfying the input declarations.
   An optional `notices: [...]` list follows `obligations`. With no obligations or
   notices selected, the verification is consistency-only: semantic analysis still
   runs and the declaration gets a warning. Selecting only notices is allowed and

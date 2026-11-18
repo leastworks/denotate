@@ -302,6 +302,9 @@ impl<'a> AdmissionDetails<'a> {
             (U::Unsat, Some(E::NoMeaning)) => {
                 "at most one stable meaning per permitted world; a permitted world has no stable meaning"
             }
+            (U::Unsat, Some(E::EmptyInputUniverse)) => {
+                "no permitted worlds: the declared input universe is empty"
+            }
             (U::Unsat, Some(E::InconsistentAssumptions)) => {
                 "no permitted worlds: selected assumptions are inconsistent"
             }

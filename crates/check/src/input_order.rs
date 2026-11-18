@@ -212,7 +212,11 @@ impl GroundProgram {
             add_edge(&mut edges, edge.into_iter().collect(), 1, meter)?;
         }
         let mut groups = BTreeSet::<Vec<usize>>::new();
-        for group in &self.input_groups {
+        for group in self
+            .input_groups
+            .iter()
+            .chain(self.universe_groups.iter().map(|g| &g.atoms))
+        {
             meter.visit(group.len())?;
             let mut group: Vec<_> = group.iter().map(|a| inputs[a]).collect();
             group.sort_unstable();

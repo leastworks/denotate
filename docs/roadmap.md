@@ -78,6 +78,14 @@ forests, chains and term rings, with an independently checked tiny-world referen
 and a separate plain term-ring baseline. This is a lowering convention, not a
 change to Denotate's stable semantics.
 
+Inputs now declare scalar or exclusive assignments directly with
+[`at_most_one` or `exactly_one`](den-format.md#input-cardinality-domains), applying
+in every verification. Further input typing could express implications between
+predicates, such as thresholds. Another possible extension is checked lemmas:
+prove a compiler invariant without assuming it, then use the proven result.
+Neither follows automatically from proving an ordinary obligation. Binary value
+encoding and masks for general selected assumptions need scale evidence first.
+
 Still to write: the direct/coverage/assumed comparison lesson described below,
 lesson 12 and a general lowering reference, informed by scale and corpus feedback.
 

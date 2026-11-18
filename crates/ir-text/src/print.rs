@@ -473,7 +473,7 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
         add(
             r.id.into(),
             format!(
-                "{} {}({params}){}",
+                "{} {}({params}){}{}",
                 if r.role == RelationRole::Input {
                     "input"
                 } else {
@@ -484,6 +484,22 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
                     .map(|id| format!(
                         " within {}",
                         reference(id.into(), c.namespace(r.id).unwrap())
+                    ))
+                    .unwrap_or_default(),
+                r.input_cardinality
+                    .as_ref()
+                    .map(|c| format!(
+                        " {}(group_by: ({}))",
+                        if c.kind == Cardinality::ExactlyOne {
+                            "exactly_one"
+                        } else {
+                            "at_most_one"
+                        },
+                        c.group_by
+                            .iter()
+                            .map(|i| spelling(&r.parameters[*i].name, NameKind::Parameter))
+                            .collect::<Vec<_>>()
+                            .join(", ")
                     ))
                     .unwrap_or_default()
             ),

@@ -9,6 +9,7 @@ pub enum Kind {
     InvalidAssumption,
     UnvalidatedAssumption,
     InconsistentAssumptions,
+    EmptyInputUniverse,
     AssumedConclusion,
     ImpossibleCondition,
     AlwaysTrueCondition,
@@ -29,6 +30,7 @@ impl Kind {
             Self::InvalidAssumption => "invalid-assumption",
             Self::UnvalidatedAssumption => "unvalidated-assumption",
             Self::InconsistentAssumptions => "inconsistent-assumptions",
+            Self::EmptyInputUniverse => "empty-input-universe",
             Self::AssumedConclusion => "assumed-conclusion",
             Self::ImpossibleCondition => "impossible-condition",
             Self::AlwaysTrueCondition => "always-true-condition",
@@ -49,7 +51,8 @@ impl Kind {
             Self::InvalidAssumption
             | Self::Counterexample
             | Self::NoMeaning
-            | Self::InconsistentAssumptions => Severity::Error,
+            | Self::InconsistentAssumptions
+            | Self::EmptyInputUniverse => Severity::Error,
             Self::UnsupportedRegion
             | Self::Rewrite
             | Self::GuardedSettlement
@@ -856,6 +859,28 @@ pub fn context_findings(
             message: format!("Downstream rewrite work is incomplete ({}). Cycle admission results are unchanged.", exhaustion_text(&reason.phase, &reason.resource, reason.details)),
             notes: vec![],
             contributions: vec![primary],
+        });
+    }
+    if report.results.value.empty_input_universe {
+        let mut contributions = vec![primary];
+        contributions.extend(
+            corpus
+                .relations()
+                .filter(|r| {
+                    keys.relation(r.id).is_ok_and(|key| {
+                        report.results.value.empty_input_declarations.contains(key)
+                    })
+                })
+                .map(|r| Contribution {
+                    occurrence: r.id.into(),
+                    role: Role::Declaration,
+                }),
+        );
+        findings.push(ContextFinding {
+            identity: Identity::EmptyInputUniverse,
+            kind: Kind::EmptyInputUniverse,
+            message: "Input declarations permit no input world: an exactly-one group has no candidate tuple; obligations were not checked.".into(),
+            notes: vec![], contributions,
         });
     }
     if report.results.value.inconsistent_assumptions {

@@ -8,10 +8,15 @@ use denotate_ir::{Cardinality, ConstantId, Restriction};
 use std::collections::{BTreeMap, BTreeSet};
 
 impl GroundProgram {
+    /// Whether W is nonempty. `input_universe_is_empty` distinguishes an empty U
+    /// from inconsistency introduced by selected assumptions.
     pub fn assumptions_consistent(&self) -> bool {
-        self.assumption_condition
-            .as_ref()
-            .is_none_or(|w| !w.is_false())
+        !self.input_constraints_inconsistent
+            && !self.input_universe_is_empty()
+            && self
+                .assumption_condition
+                .as_ref()
+                .is_none_or(|w| !w.is_false())
     }
     pub(crate) fn install_assumptions(
         &mut self,
@@ -29,6 +34,7 @@ impl GroundProgram {
                     raw = self.clone();
                     raw.input_groups.clear();
                     raw.assumption_condition = None;
+                    raw.input_constraints_inconsistent = false;
                     &raw
                 }
             };

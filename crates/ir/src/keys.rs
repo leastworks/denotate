@@ -189,6 +189,7 @@ pub struct RuleSchema {
 pub struct RelationSchema {
     pub input: bool,
     pub input_domain: Option<RelationKey>,
+    pub input_cardinality: Option<crate::InputCardinality>,
     pub parameters: Vec<(Arc<str>, SortKey)>,
 }
 
@@ -282,6 +283,7 @@ impl SemanticKeys {
     pub fn relation_schema(&self, relation: &Relation) -> Result<RelationSchema> {
         self.relation(relation.id)?;
         Ok(RelationSchema {
+            input_cardinality: relation.input_cardinality.clone(),
             input: relation.role == RelationRole::Input,
             input_domain: relation
                 .input_domain

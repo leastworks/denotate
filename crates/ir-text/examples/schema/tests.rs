@@ -197,7 +197,8 @@ fn assumed_acceptance_matches_the_independent_layout_for_every_tiny_raw_message(
                                 }
                             }
                             Err(CheckError::InvalidInputGroup(
-                                "observation violates selected assumptions",
+                                "observation violates selected assumptions"
+                                | "observation violates the input universe or selected assumptions",
                             )) => {}
                             other => panic!("unexpected world result: {other:?}"),
                         }

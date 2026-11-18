@@ -491,8 +491,14 @@ impl Retained for WorkReceipts {
 fields!(RelationSchema {
     input,
     parameters,
-    input_domain
+    input_domain,
+    input_cardinality
 });
+impl Retained for denotate_ir::InputCardinality {
+    fn heap(&self, p: &mut Payload) {
+        self.group_by.heap(p);
+    }
+}
 fields!(GroundingInput {
     input_domains,
     key,

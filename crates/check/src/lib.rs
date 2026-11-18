@@ -100,6 +100,7 @@ mod notices;
 pub use notices::*;
 
 mod input_order;
+mod input_universe;
 pub use input_order::{InputOrder, InputOrderReport};
 
 mod implied_guard;

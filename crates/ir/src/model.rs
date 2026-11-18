@@ -56,6 +56,10 @@ pub enum ConstructionError {
         provider: RelationId,
         reason: &'static str,
     },
+    InvalidInputCardinality {
+        input: RelationId,
+        reason: &'static str,
+    },
     DuplicateReference {
         verification: String,
         reference: OccurrenceId,
@@ -114,6 +118,8 @@ pub struct Relation {
     pub parameters: Vec<Parameter>,
     /// Optional fact-derived eligibility relation; matching positional signature.
     pub input_domain: Option<RelationId>,
+    /// Assignment cardinality in the declared input universe.
+    pub input_cardinality: Option<InputCardinality>,
 }
 
 /// Names identify variables within a rule, never across rules. Reusing a Term
@@ -220,7 +226,7 @@ impl From<&str> for Column {
 }
 
 /// Independent checks required by a cardinality obligation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Cardinality {
     AtMostOne,
     AtLeastOne,
@@ -234,6 +240,13 @@ impl Cardinality {
     pub fn has_uniqueness(self) -> bool {
         matches!(self, Self::AtMostOne | Self::ExactlyOne)
     }
+}
+
+/// One partition of an input's tuples; only AtMostOne and ExactlyOne are valid.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct InputCardinality {
+    pub kind: Cardinality,
+    pub group_by: Vec<usize>,
 }
 
 /// Cardinality of distinct tuples, grouped where the requirement has grouping.
@@ -649,6 +662,7 @@ impl Corpus {
                 role,
                 parameters,
                 input_domain: None,
+                input_cardinality: None,
             },
         );
         self.occurrences.insert(id.into());
@@ -702,6 +716,7 @@ impl Corpus {
                 role: RelationRole::Derived,
                 parameters: vec![],
                 input_domain: None,
+                input_cardinality: None,
             },
         );
         self.generated_relations.insert(id);
@@ -1027,6 +1042,34 @@ impl Corpus {
         self.occurrences.insert(id.into());
         self.namespaces.insert(id.into(), namespace);
         Ok(id)
+    }
+
+    /// Constrain assignments to an input, independently of verification selection.
+    pub fn constrain_input(
+        &mut self,
+        input: RelationId,
+        kind: Cardinality,
+        group_by: impl IntoIterator<Item = Column>,
+    ) -> Result<()> {
+        let r = self
+            .relation(input)
+            .ok_or(ConstructionError::UnknownRelation(input))?;
+        let invalid = |reason| ConstructionError::InvalidInputCardinality { input, reason };
+        if r.role != RelationRole::Input {
+            return Err(invalid("cardinality belongs on an input"));
+        }
+        if !matches!(kind, Cardinality::AtMostOne | Cardinality::ExactlyOne) {
+            return Err(invalid(
+                "input cardinality must be at_most_one or exactly_one",
+            ));
+        }
+        if r.input_cardinality.is_some() {
+            return Err(invalid("only one cardinality declaration per input"));
+        }
+        let group_by = self.group_columns(input, group_by)?;
+        self.relations.get_mut(&input).unwrap().input_cardinality =
+            Some(InputCardinality { kind, group_by });
+        Ok(())
     }
 
     fn group_columns(

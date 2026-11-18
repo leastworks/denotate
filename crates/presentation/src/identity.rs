@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 pub enum Identity {
     Assumption(AssumptionId),
     InconsistentAssumptions,
+    EmptyInputUniverse,
     DownstreamWork,
     Notice(NoticeId),
     AssumedConclusion(AssumptionId, ObligationId),
@@ -99,6 +100,7 @@ impl Identity {
             }
             Self::Notice(id) => json!({"notice":qualified(&keys.notice(*id)?.0)}),
             Self::DownstreamWork => json!({"context":"downstream-work"}),
+            Self::EmptyInputUniverse => json!({"context":"empty-input-universe"}),
             Self::InconsistentAssumptions => json!({"context":"inconsistent-assumptions"}),
             Self::AssumedConclusion(a, o) => {
                 json!({"assumption":qualified(&keys.assumption(*a)?.0),"obligation":qualified(&keys.obligation(*o)?.0),"notice":"assumed-conclusion"})
@@ -158,6 +160,7 @@ pub fn notice_result_data(result: &NoticeResult) -> Value {
             NoticeState::Unknown(NoticeUnknown::Unsupported)=>json!({"kind":"unsupported"}),
             NoticeState::Unknown(NoticeUnknown::Inconclusive(c))=>crate::with_limit_details(json!({"kind":"inconclusive","phase":c.phase,"resource":c.resource}), c.details),
             NoticeState::Unknown(NoticeUnknown::Deadline { phase, details })=>crate::with_limit_details(json!({"kind":"deadline","phase":phase,"resource":"deadline"}), *details),
+            NoticeState::Unknown(NoticeUnknown::EmptyInputUniverse)=>json!({"kind":"empty-input-universe"}),
             NoticeState::Unknown(NoticeUnknown::InconsistentAssumptions)=>json!({"kind":"inconsistent-assumptions"}),
             _=>Value::Null,
         }, "whenTrue":result.when_true.as_ref().map(example), "whenFalse":result.when_false.as_ref().map(example)})
@@ -194,7 +197,8 @@ pub fn summary(results: &ScopedResults) -> Value {
         ScopedResult::Unsupported(_) => "unsupported",
         ScopedResult::Inconclusive(_) => "inconclusive",
     };
-    let complete = !results.inconsistent_assumptions
+    let complete = !results.empty_input_universe
+        && !results.inconsistent_assumptions
         && results.unfinished.is_none()
         && results.incomplete.is_empty()
         && results.unknown_atoms.is_empty()
@@ -206,8 +210,8 @@ pub fn summary(results: &ScopedResults) -> Value {
             .values()
             .all(|r| matches!(r, ScopedResult::Proved));
     let mut summary = json!({
-        "state":if results.inconsistent_assumptions { "inconsistent-assumptions" } else if complete { "proved" } else if results.emptiness.values().any(|e| e.present > 0) || results.coverage.values().any(|c| c.missing > 0) || results.groups.values().any(|r| matches!(r,ScopedResult::Counterexample(..))) || results.regions.values().any(|r| matches!(r.completion,RegionCompletion::NoMeaning{..})) { "findings" } else { "incomplete" },
-        "consistency": if results.inconsistent_assumptions { "inconsistent" } else if results.unfinished.is_some() && results.context.constraints.iter().any(|c| matches!(c, InputConstraint::Cardinality {..})) { "unknown" } else { "consistent" },
+        "state":if results.empty_input_universe { "empty-input-universe" } else if results.inconsistent_assumptions { "inconsistent-assumptions" } else if complete { "proved" } else if results.emptiness.values().any(|e| e.present > 0) || results.coverage.values().any(|c| c.missing > 0) || results.groups.values().any(|r| matches!(r,ScopedResult::Counterexample(..))) || results.regions.values().any(|r| matches!(r.completion,RegionCompletion::NoMeaning{..})) { "findings" } else { "incomplete" },
+        "consistency": if results.empty_input_universe { "empty-input-universe" } else if results.inconsistent_assumptions { "inconsistent" } else if results.unfinished.is_some() { "unknown" } else { "consistent" },
         "backend":{"backend":results.context.backend.backend,"configuration":results.context.backend.configuration},
         "activeAssumptions":results.context.constraints.iter().map(|c| json!({"kind":match c.kind() {Cardinality::AtMostOne=>"at-most-one",Cardinality::AtLeastOne=>"at-least-one",Cardinality::ExactlyOne=>"exactly-one",Cardinality::Empty=>"empty"},"relation":relation(c.relation()),"groupBy":c.group_by()})).collect::<Vec<_>>(),
         "groups":results.groups.iter().map(|(k,v)|json!({"identity":group_identity(k, results) ,"outcome":kinds(v),"reason":result_reason(v)})).collect::<Vec<_>>(),
@@ -215,6 +219,9 @@ pub fn summary(results: &ScopedResults) -> Value {
         "unfinished":results.unfinished.as_ref().map(|r|crate::exhaustion_data(&r.phase, &r.resource, r.details)),
         "incomplete":results.incomplete.iter().map(|(k,r)|crate::with_limit_details(json!({"region":k.0.iter().map(atom_data).collect::<Vec<_>>(),"phase":r.phase,"resource":r.resource}), r.details)).collect::<Vec<_>>()
     });
+    if !results.input_universe.is_empty() {
+        summary["inputUniverse"] = json!({"state": if results.empty_input_universe { "empty" } else { "nonempty" }, "declarations": results.input_universe.iter().map(|(r,c)| json!({"relation":relation(r), "kind":if c.kind == Cardinality::ExactlyOne { "exactly-one" } else { "at-most-one" }, "groupBy":c.group_by,"empty":results.empty_input_declarations.contains(r)})).collect::<Vec<_>>()});
+    }
     if !results.unknown_atoms.is_empty() {
         summary["unknownAtoms"] = json!(results.unknown_atoms.iter().map(|(a,u)| json!({
             "atom":atom_data(a), "causeAtom":atom_data(&u.atom),
@@ -223,7 +230,7 @@ pub fn summary(results: &ScopedResults) -> Value {
     }
     if !results.context.notices.is_empty() {
         summary["notices"] = json!(results.context.notices.iter().map(|key| {
-            let result = results.notices.get(key).map(notice_result_data).unwrap_or_else(|| json!({"kind":"condition-variability","state":"unknown","reason":{"kind":if results.inconsistent_assumptions {"inconsistent-assumptions"} else {"not-checked"}}}));
+            let result = results.notices.get(key).map(notice_result_data).unwrap_or_else(|| json!({"kind":"condition-variability","state":"unknown","reason":{"kind":if results.empty_input_universe {"empty-input-universe"} else if results.inconsistent_assumptions {"inconsistent-assumptions"} else {"not-checked"}}}));
             json!({"identity":{"notice":qualified(&key.0)},"result":result})
         }).collect::<Vec<_>>());
     }

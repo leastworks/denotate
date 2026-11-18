@@ -61,7 +61,9 @@ impl PreparedCheck<'_> {
         observations: Option<&mut VerificationMetrics>,
     ) -> Result<LocalCheckOutcome<'_>> {
         operations.cancellation.check()?;
-        if self.program.assumption_condition.is_some() {
+        if self.program.assumption_condition.is_some()
+            || !self.program.input_cardinalities.is_empty()
+        {
             return Ok(match self.verify_observed(operations, observations)? {
                 CheckOutcome::Complete(checked) => {
                     LocalCheckOutcome::Complete(LocalCheckedReport {
@@ -128,6 +130,7 @@ impl PreparedCheck<'_> {
             context,
             conditions: BTreeMap::new(),
             released: BTreeSet::new(),
+            universe_masks: Vec::new(),
             inconclusive: BTreeMap::new(),
             unknown: BTreeMap::new(),
             metrics: SymbolicMetrics {

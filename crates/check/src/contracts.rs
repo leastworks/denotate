@@ -151,7 +151,11 @@ impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
     ) -> Result<PropertyReport> {
         limits.cancellation.check()?;
         if !self.program.assumptions_consistent() {
-            return Err(CheckError::InconsistentAssumptions);
+            return Err(if self.program.input_universe_is_empty() {
+                CheckError::EmptyInputUniverse
+            } else {
+                CheckError::InconsistentAssumptions
+            });
         }
         let start = Instant::now();
         let mut budget = if queries.is_some() {

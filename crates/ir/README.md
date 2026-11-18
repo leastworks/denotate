@@ -34,6 +34,13 @@ order; index order is not exposed. Rejected declarations consume no occurrence I
   cached recipe installs into any namespace.
 - `top_level(&corpus)` enumerates the occurrences that need file placement on export.
 
+`Corpus::constrain_input(input, Cardinality::AtMostOne | Cardinality::ExactlyOne,
+group_by)` attaches one assignment-domain declaration to an input. It rejects
+non-inputs, other cardinality kinds, duplicate declarations and invalid columns.
+`Relation::input_cardinality` and `RelationSchema::input_cardinality` retain its
+kind and column indices; it has the input's identity and provenance rather than a
+separate selectable assumption identity. The checker applies it in every context.
+
 `empty` / `empty_in` create an ungrouped `Requirement::Empty`; the construction API
 takes no grouping argument.
 

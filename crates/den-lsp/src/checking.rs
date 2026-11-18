@@ -289,7 +289,10 @@ fn check_with_progress(
     {
         "incomplete"
     } else if verifications.iter().any(|v| {
-        v["summary"]["state"] == "findings" || v["summary"]["state"] == "inconsistent-assumptions"
+        matches!(
+            v["summary"]["state"].as_str(),
+            Some("findings" | "inconsistent-assumptions" | "empty-input-universe")
+        )
     }) {
         "findings"
     } else {

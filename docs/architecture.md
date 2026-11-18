@@ -314,20 +314,34 @@ symbolic evaluation is scoped to the selected restriction relations' ground
 dependency cones, retaining the full input universe and chosen variable order for
 W. This evaluation scope does not narrow grounding, validation or subsequent
 program-wide reports.
-Input-only at-most-one contexts retain local memoized queries. General contexts use
+Input-only at-most-one contexts without cardinality declarations retain local
+memoized queries. General contexts and declared input domains use
 whole-program BDD evaluation, with W shared only within the same selection:
 local absent-extension and constraint-projection shortcuts are not sound for general
 constraints. No context-dependent BDD or verdict is reused across selections.
+
+Input cardinality declarations belong to IR relation schemas, beside input
+eligibility. Preparation builds disjoint per-input groups over resolved domains
+and eligible tuples, before any selected assumption. Their conjunction defines U;
+W is U further restricted by selected assumptions. Every verification reports the
+input declarations separately. Empty U is a context error, never a vacuous proof.
+The symbolic evaluator uses fixed component masks from closed structural input
+support, including unresolved components. Consumer masks imply provider masks;
+operands are re-masked before truth shortcuts and negation. Semantic reads use
+exact W. Mask construction and retention are charged, and masks are rebuilt for
+changed graph snapshots. The universe and relation schemas invalidate through
+ordinary explicit preparation inputs. Programs with input declarations bypass
+local cached checking until it supports legal extensions of projected worlds.
 
 Verification checking may opt in to evaluation within independently established W
 (`CheckRequest::checking_within_w`, default false). Its
 symbolic meaning has a distinct type from all-input meaning: stored conditions
 are exactly `c ∧ W`, including inputs and fixed truth. Admission and rewrite-proof
-consumers accept only the unrestricted type. Checking negation and short circuits
+consumers accept only the default type, exact throughout the legal input universe U. Checking negation and short circuits
 use W as truth; positive fixpoints and stratified negation are computed per world,
 so discarding worlds outside W cannot affect any permitted world's result.
 Whole-program checking, notices and the local coverage/emptiness pass use this
-mode when enabled; default checking remains unrestricted. This choice enters
+mode when enabled; default checking uses only declared input-domain masks. This choice enters
 checking cache identity without changing preparation, W or admission identity.
 The cached local uniqueness/no-meaning path still exports/imports unrestricted
 conditions; no W-restricted value crosses that cache boundary.

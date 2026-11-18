@@ -108,6 +108,7 @@ exports.activate = async (context) => {
       status.text = working ? progressView.text(progress) : `Denotate: ${label} · ${count} · ${outcome}`;
       status.tooltip = [progress ? progressView.details(progress) : 'Click to open Denotate output.', label, `${count}: ${outcome}`, `Checking: ${result.checking}`, `Backend: ${result.backend}`,
         ...(verifications ?? []).map(v => `${v.verification}: ${v.summary?.state ?? v.checking} (${v.checking}); assumptions [${v.assumptions.join(', ')}]; ${v.mode}; ${v.consistency}`),
+        ...(verifications ?? []).filter(v => v.summary?.inputUniverse).map(v => `${v.verification}: input universe ${v.summary.inputUniverse.state}; ${v.summary.inputUniverse.declarations.length} input cardinality declaration(s)`),
         ...(verifications ?? []).filter(v => v.summary?.hiddenLibraryRewrites > 0).map(v => `${v.verification}: ${v.summary.hiddenLibraryRewrites} library rewrite findings hidden by setting`),
         ...((verifications ?? []).some(v => v.mode === 'consistency-only') ? ['Consistency-only: no obligations selected; context-wide semantic diagnostics still run.'] : []),
         `Unchecked obligations: ${result.uncheckedObligations?.join(', ') || (verifications ? 'none' : 'configuration incomplete')}`,

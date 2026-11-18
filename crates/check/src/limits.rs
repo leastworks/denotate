@@ -45,6 +45,7 @@ pub enum CheckError {
     /// Low-level property queries cannot report vacuous proofs. Request checking
     /// represents this as an inconsistent context with no obligation results.
     InconsistentAssumptions,
+    EmptyInputUniverse,
     Receipts(crate::ReceiptError),
     InvalidDomain {
         sort: SortId,

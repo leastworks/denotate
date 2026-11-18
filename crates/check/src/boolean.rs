@@ -103,7 +103,7 @@ pub(crate) fn condition_storage<'a>(
 
 /// Boolean conditions over ground input facts.
 /// Raw Boolean algebra is unrestricted; semantic queries and witnesses respect
-/// the preparation's selected constraints. General restrictions were evaluated
+/// the declared input universe and selected constraints. General restrictions were evaluated
 /// independently during preparation. Creating this context only installs their W;
 /// derived fact conditions for checking come from SymbolicMeaning.
 #[derive(Debug)]
@@ -114,6 +114,7 @@ pub struct ConditionContext {
     no: Condition,
     yes: Condition,
     permitted: Condition,
+    pub(crate) universe_factors: Vec<Condition>,
 }
 
 impl GroundProgram {
@@ -203,11 +204,12 @@ impl ConditionContext {
     ) -> Result<Self> {
         // General constraints can couple a cone to any input. Preserve the full
         // universe; never use the input-at-most-one absent-extension shortcut.
-        let selected = if program.assumption_condition.is_some() {
-            None
-        } else {
-            selected
-        };
+        let selected =
+            if program.assumption_condition.is_some() || !program.input_cardinalities.is_empty() {
+                None
+            } else {
+                selected
+            };
         use std::sync::atomic::{AtomicU64, Ordering};
         static NEXT_LOCAL: AtomicU64 = AtomicU64::new(1);
         let universe = (
@@ -269,7 +271,32 @@ impl ConditionContext {
             permitted: wrap(variables.mk_true()),
             inputs,
             variables,
+            universe_factors: Vec::new(),
         };
+        for (index, group) in program.universe_groups.iter().enumerate() {
+            let mut seen = context.false_condition();
+            let mut factor = context.true_condition();
+            for atom in &group.atoms {
+                let value = context.input_with_budget(atom, budget)?;
+                let conflict = context.apply(&seen, &value, op_function::and, budget)?;
+                factor = context.apply(&factor, &conflict, op_function::and_not, budget)?;
+                seen = context.apply(&seen, &value, op_function::or, budget)?;
+            }
+            if group.kind == denotate_ir::Cardinality::ExactlyOne {
+                factor = context.apply(&factor, &seen, op_function::and, budget)?;
+            }
+            context.permitted =
+                context.apply(&context.permitted, &factor, op_function::and, budget)?;
+            context_step(
+                &context,
+                budget,
+                "input-domain",
+                index,
+                group.atoms.first(),
+                factor.node_count(),
+            );
+            context.universe_factors.push(factor);
+        }
         // Linear prefix scheme: each next choice excludes all previous choices.
         for (group_index, group) in program.input_groups.iter().enumerate() {
             let mut seen = context.false_condition();
@@ -305,7 +332,17 @@ impl ConditionContext {
             context.permitted =
                 context.apply(&context.permitted, condition, op_function::and, budget)?;
         }
-        crate::symbolic::retain(0, 0, context.permitted.node_count(), budget)?;
+        crate::symbolic::retain(
+            0,
+            0,
+            context.permitted.node_count()
+                + context
+                    .universe_factors
+                    .iter()
+                    .map(Condition::node_count)
+                    .sum::<usize>(),
+            budget,
+        )?;
         Ok(context)
     }
 
@@ -514,7 +551,11 @@ impl ConditionContext {
         budget.charge(self.permitted.node_count(), "permitted observation")?;
         if !self.permitted.bdd.eval_in(&valuation) {
             return Err(CheckError::InvalidInputGroup(
-                "observation violates selected assumptions",
+                if self.universe_factors.is_empty() {
+                    "observation violates selected assumptions"
+                } else {
+                    "observation violates the input universe or selected assumptions"
+                },
             ));
         }
         let result = condition.bdd.eval_in(&valuation);
@@ -523,7 +564,9 @@ impl ConditionContext {
     }
 
     pub(crate) fn stored_conditions(&self) -> impl Iterator<Item = &Condition> {
-        [&self.no, &self.yes, &self.permitted].into_iter()
+        [&self.no, &self.yes, &self.permitted]
+            .into_iter()
+            .chain(self.universe_factors.iter())
     }
     fn wrap(&self, bdd: Bdd, budget: &Budget<'_>) -> Condition {
         budget.limits.profile.bdd_created(bdd.size());

@@ -6,6 +6,46 @@ Settled design choices and why they were made. Current behavior is specified in 
 alternatives that were rejected. Revisit a decision only with new evidence, such as a
 real program that the current choice serves badly.
 
+## Input cardinality is part of the input universe
+
+Scalar values and exclusive enum/check outcomes describe which input assignments
+can represent a message. Declare at-most-one or exactly-one on the input, beside
+`within`, rather than requiring every verification to select the same assumption.
+This is visible input typing, not global activation of a named assumption. General
+constraints on derived relations remain named and selected. One grouping per input
+is supported initially; binary encoding and cross-input implications are deferred.
+
+Component evaluation carries only the declared group factors touched by its closed
+structural input support. For a dependency, the consumer's support contains the
+provider's support, so its mask implies the provider's mask. Each mask contains U.
+Re-mask operands into the consumer's mask before negation, combination or truth
+shortcuts. Positive iteration is pointwise in each world; outside-mask values cannot
+change a legal world's least fixpoint. Final questions use exact W, a subset of U.
+The default symbolic type is now exact on U, not on illegal input combinations;
+the separate opt-in checking mode remains exact on the smaller selected W.
+
+Admission keeps its proof obligations. Bounds are lower/upper guarantees on legal
+worlds; their removal containment queries use W. Guarded certificates and case
+splits cover their question's W-domain, and retain their ordinary anti-self-support
+and stable-model checks. Discharge proves implication within W. Structural proofs
+that use no Boolean query remain pointwise syntactic identities. None may use a
+claim about an illegal world to change a legal one. The universe is computed before
+these proofs; no rewrite or selected assumption establishes its own input typing.
+Tiny exhaustive stable-model tests compare the original and rewritten programs on
+legal worlds, in addition to concrete replay and cold/warm agreement.
+
+Input-only selected at-most-one assumptions can now be inconsistent: two declared
+exactly-one groups require two tuples, while a selected at-most-one over their
+union forbids that. Check their conjunction after choosing the input order, before
+admission. Keep only its consistency result independently of the BDD variable map;
+empty U and inconsistency introduced by the selected assumptions stay distinct.
+
+Input declaration shape is part of the relation schema used in cache identity;
+resolved domains and fixed eligibility already participate in preparation identity.
+Programs with declarations use whole-program verification initially: the local
+cache's all-absent extension cannot satisfy a general exactly-one group. Keeping
+that optimization would require a separate legal-world extension contract.
+
 ## Resume experiments through plain ground source, preserving assumption meaning
 
 Repeated private-program experiments can spend many minutes redoing successful

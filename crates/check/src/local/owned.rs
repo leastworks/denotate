@@ -531,6 +531,7 @@ pub fn answer_owned_local(
             context,
             conditions,
             released: BTreeSet::new(),
+            universe_masks: Vec::new(),
             inconclusive: BTreeMap::new(),
             unknown: value
                 .unknown

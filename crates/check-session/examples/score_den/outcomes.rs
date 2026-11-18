@@ -92,13 +92,13 @@ impl Outcomes {
         for key in &r.context.notices {
             let value = match r.notices.get(key) {
                 None => {
-                    json!({"state":"unknown", "reason":{"kind":if r.inconsistent_assumptions {"inconsistent-assumptions"}else{"not-checked"}}})
+                    json!({"state":"unknown", "reason":{"kind":if r.empty_input_universe {"empty-input-universe"} else if r.inconsistent_assumptions {"inconsistent-assumptions"}else{"not-checked"}}})
                 }
                 Some(n) => {
                     let reason = match &n.state {
                         NoticeState::Unknown(NoticeUnknown::Inconclusive(r)) => limit(*r),
                         NoticeState::Unknown(other) => {
-                            json!({"kind":match other {NoticeUnknown::Unsupported=>"unsupported",NoticeUnknown::Deadline { .. }=>"deadline",NoticeUnknown::InconsistentAssumptions=>"inconsistent-assumptions",NoticeUnknown::Inconclusive(_)=>unreachable!()}})
+                            json!({"kind":match other {NoticeUnknown::Unsupported=>"unsupported",NoticeUnknown::Deadline { .. }=>"deadline",NoticeUnknown::EmptyInputUniverse=>"empty-input-universe",NoticeUnknown::InconsistentAssumptions=>"inconsistent-assumptions",NoticeUnknown::Inconclusive(_)=>unreachable!()}})
                         }
                         _ => Value::Null,
                     };
@@ -115,8 +115,9 @@ impl Outcomes {
             let k = o.requirement.kind();
             let mut components = BTreeMap::new();
             if k.has_uniqueness() {
-                let mut uniqueness = unavailable(r.inconsistent_assumptions);
-                if !r.inconsistent_assumptions {
+                let mut uniqueness =
+                    unavailable(r.inconsistent_assumptions || r.empty_input_universe);
+                if !r.inconsistent_assumptions && !r.empty_input_universe {
                     if let Some(domain) = r.group_domains.get(key) {
                         // No Cartesian enumeration. Trivial groups are proved even
                         // when no explicit query/finding was needed for them.
@@ -168,7 +169,7 @@ impl Outcomes {
                     "missing_groups":c.missing,"count_kind":if c.complete(){"exact"}else{"lower-bound"},
                     "examined_groups":c.examined,"unsupported_groups":c.unsupported,
                     "inconclusive":c.inconclusive.map(limit),"no_groups":c.no_groups,
-                })).unwrap_or_else(|| unavailable(r.inconsistent_assumptions)));
+                })).unwrap_or_else(|| unavailable(r.inconsistent_assumptions || r.empty_input_universe)));
             }
             if k == Cardinality::Empty {
                 components.insert("emptiness",r.emptiness.get(key).map(|e| json!({
@@ -176,10 +177,10 @@ impl Outcomes {
                     "findings":usize::from(e.present>0),"present_tuples":e.present,
                     "count_kind":if e.complete(){"exact"}else{"lower-bound"},
                     "unresolved":e.unresolved,"inconclusive":e.inconclusive.map(limit),
-                })).unwrap_or_else(|| unavailable(r.inconsistent_assumptions)));
+                })).unwrap_or_else(|| unavailable(r.inconsistent_assumptions || r.empty_input_universe)));
             }
             let has = |s| components.values().any(|v| v["state"] == s);
-            let verdict = if r.inconsistent_assumptions {
+            let verdict = if r.inconsistent_assumptions || r.empty_input_universe {
                 "not-checked"
             } else {
                 state(
@@ -196,8 +197,12 @@ impl Outcomes {
             keyed.insert(Scope::Obligation(key.clone()),json!({"kind":kind(k),"state":verdict,"complete":complete,"findings":findings,"components":components}));
         }
         Self {
-            consistency: if r.inconsistent_assumptions {
+            consistency: if r.empty_input_universe {
+                "empty-input-universe"
+            } else if r.inconsistent_assumptions {
                 "inconsistent"
+            } else if r.unfinished.is_some() {
+                "unknown"
             } else {
                 "consistent"
             },
@@ -316,7 +321,7 @@ impl Outcomes {
             && unsupported == 0
             && obligations.iter().all(|o| o["complete"] == true);
         json!({"consistency":self.consistency,"complete":complete,
-            "state":if self.consistency=="inconsistent" {"inconsistent-assumptions"}
+            "state":if self.consistency=="empty-input-universe" {"empty-input-universe"} else if self.consistency=="inconsistent" {"inconsistent-assumptions"}
                 else if findings>0||no_meaning>0 {"findings"} else if !complete {"incomplete"} else {"proved"},
             "obligations":obligations,"obligations_by_kind":by_kind,"obligation_findings":findings,
             "regions":{"unsupported":unsupported,"no_meaning":no_meaning,"inconclusive":incomplete_regions},

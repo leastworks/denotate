@@ -521,6 +521,7 @@ fn singleton(n: usize) -> GroundingInput {
             RelationSchema {
                 input: true,
                 input_domain: None,
+                input_cardinality: None,
                 parameters: vec![],
             },
         )]),

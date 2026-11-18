@@ -61,14 +61,12 @@ export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,
     for(let i=0;i<ringRelays;i++)add(`kinds(t${i});`);
     add(`sort Lane; const ${Array.from({length:n},(_,w)=>Array.from({length:ringLanes},(_,j)=>`l${w}_${j}`)).flat().join(', ')}: Lane; relation lanes(l: Lane);`);
     for(let w=0;w<n;w++)for(let j=0;j<ringLanes;j++)add(`lanes(l${w}_${j});`);
-    add('input route(l: Lane) within lanes; assumption one_route: at_most_one(route, group_by: ());');
-    add('input received(t: Kind) within kinds; assumption one_received: at_most_one(received, group_by: ());');
+    add('input route(l: Lane) within lanes at_most_one(group_by: ());');
+    add('input received(t: Kind) within kinds at_most_one(group_by: ());');
     add('relation kind(t: Kind); relation written();');
-    assumptions='one_route, one_received';
+
     for(let w=0;w<n;w++) {
-      add(`relation applies${w}(); input result${w}(t: Kind) within kinds;`);
-      add(`assumption has_result${w}: at_least_one(result${w}, group_by: ()); assumption one_result${w}: at_most_one(result${w}, group_by: ());`);
-      assumptions+=`, has_result${w}, one_result${w}`;
+      add(`relation applies${w}(); input result${w}(t: Kind) within kinds exactly_one(group_by: ());`);
       add(`kind(T) :- applies${w}(), result${w}(T); written() :- applies${w}();`);
       for(let j=0;j<ringLanes;j++)add(`input fa${w}_${j}(); input fb${w}_${j}(); applies${w}() :- route(l${w}_${j}), fa${w}_${j}(), !fb${w}_${j}();`);
     }
@@ -115,9 +113,7 @@ export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,
     // claim's guard-live cone. Each input group stays adjacent in key order.
     add('sort Group; sort Choice; const left, right: Choice;');
     add(`const ${Array.from({length:2*n},(_,i)=>`g${i}`).join(', ')}: Group;`);
-    add('input option(group: Group, choice: Choice);');
-    add('assumption exclusive: at_most_one(option, group_by: (group));');
-    assumptions = 'exclusive';
+    add('input option(group: Group, choice: Choice) at_most_one(group_by: (group));');
     add('input kind(); input gate();');
     for (const name of ['booked', 'fails', 'claim', 'inspected', 'held', 'cleared']) add(`relation ${name}();`);
     add('booked() :- kind(), gate(), cleared();');
@@ -134,20 +130,19 @@ export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,
     if (hubReader!=='split' || !hubRoutes || hubDecoys || hubReaders!==1 || hubValues!==1) throw Error('tagged hub requires split reader, routes and no pair/decoy dimensions');
     if (![hubWriters,hubTagValues].every(Number.isSafeInteger) || hubWriters<1 || hubTagValues<1) throw Error('tagged hub requires positive writers and tag values');
     add('sort Class; const perishable, hazardous, general: Class;');
-    add('relation classes(c: Class); classes(perishable); classes(hazardous); classes(general); input declared(c: Class) within classes;');
-    add('assumption one_class: at_most_one(declared, group_by: ()); input docked(); input priority_call();');
+    add('relation classes(c: Class); classes(perishable); classes(hazardous); classes(general); input declared(c: Class) within classes at_most_one(group_by: ());');
+    add('input docked(); input priority_call();');
     add(`sort Lane; const ${Array.from({length:n},(_,i)=>`l${i}`).join(', ')}: Lane; relation lanes(l: Lane);`);
     for(let i=0;i<n;i++)add(`lanes(l${i});`);
-    add('input route(l: Lane) within lanes; assumption one_route: at_most_one(route, group_by: ());');
+    add('input route(l: Lane) within lanes at_most_one(group_by: ());');
     for(let i=0;i<n;i++)add(`input fa${i}(); input fb${i}();`);
     add(`sort Tag; const ${Array.from({length:hubTagValues},(_,i)=>`t${i}`).join(', ')}: Tag; relation tags(t: Tag);`);
     for(let v=0;v<hubTagValues;v++)add(`tags(t${v});`);
-    add('input received(t: Tag) within tags; assumption one_received: at_most_one(received, group_by: ()); input kept();');
-    add('sort Check; const c0: Check; relation checks(c: Check); checks(c0); input satisfies(c: Check) within checks; assumption disjoint_checks: at_most_one(satisfies, group_by: ());');
-    assumptions='one_class, one_route, one_received, disjoint_checks';
+    add('input received(t: Tag) within tags at_most_one(group_by: ()); input kept();');
+    add('sort Check; const c0: Check; relation checks(c: Check); checks(c0); input satisfies(c: Check) within checks at_most_one(group_by: ());');
+
     for(let w=0;w<hubWriters;w++) {
-      add(`input result${w}(t: Tag) within tags; assumption has_result${w}: at_least_one(result${w}, group_by: ()); assumption one_result${w}: at_most_one(result${w}, group_by: ());`);
-      assumptions+=`, has_result${w}, one_result${w}`;
+      add(`input result${w}(t: Tag) within tags exactly_one(group_by: ());`);
     }
     add('relation tagged(t: Tag); tagged(T) :- received(T), kept();');
     for(let w=0;w<hubWriters;w++)add(`relation applies${w}(); relation triggered${w}(); tagged(T) :- applies${w}(), result${w}(T); applies${w}() :- triggered${w}();`);
@@ -165,12 +160,10 @@ export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,
     if(!Number.isSafeInteger(hubDecoys)||hubDecoys<0||!['full','near-full'].includes(hubDecoyShape))throw Error('invalid hub decoys');
     if (![hubWriters,hubReaders,hubValues].every(Number.isSafeInteger) || hubWriters<0 || hubReaders<1 || hubValues<1) throw Error('invalid hub chain dimensions');
     if (hubDecoys && (hubWriters || hubReaders!==1 || hubValues!==1)) throw Error('chain dimensions and decoys are separate workloads');
-    add(`sort Class; const perishable, hazardous${Array.from({length:hubReaders-1},(_,j)=>`, reader${j+1}`).join('')}: Class; input declared(kind: Class);`);
+    add(`sort Class; const perishable, hazardous${Array.from({length:hubReaders-1},(_,j)=>`, reader${j+1}`).join('')}: Class; input declared(kind: Class) at_most_one(group_by: ());`);
     add('sort Lane;');
     add(`const ${Array.from({length:n},(_,i)=>`l${i}`).join(', ')}: Lane; input route(lane: Lane);`);
-    add('assumption one_class: at_most_one(declared, group_by: ());');
-    if(hubRoutes)add('assumption one_route: at_most_one(route, group_by: ());');
-    assumptions=hubRoutes?'one_class, one_route':'one_class';
+    if(hubRoutes)s=s.replace('input route(lane: Lane);', 'input route(lane: Lane) at_most_one(group_by: ());');
     add('input docked(); input priority_call();');
     for(const name of ['tagged','claim_fails','hazard_claim','inspected','held','cleared'])add(`relation ${name}();`);
     if (hubWriters) {
@@ -200,7 +193,7 @@ export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,
     if(hubDecoys) {
       // The class bit makes the two class tests complementary even without a
       // selected assumption. Final meanings stay small without route exclusivity.
-      s=s.replace('input declared(kind: Class);', 'relation declared(kind: Class); input class_bit(); declared(perishable) :- class_bit(); declared(hazardous) :- !class_bit();');
+      s=s.replace('input declared(kind: Class) at_most_one(group_by: ());', 'relation declared(kind: Class); input class_bit(); declared(perishable) :- class_bit(); declared(hazardous) :- !class_bit();');
       s=s.replace('cleared() :- docked(), !held();', '').replace('priority_call(), inspected()', 'inspected()');
       let decoys='';
       for(let i=0;i<hubDecoys;i++) {

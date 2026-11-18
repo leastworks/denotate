@@ -451,3 +451,36 @@ fn verification_references_use_typed_root_specific_resolution_and_list_completio
         }
     }
 }
+
+#[test]
+fn input_domain_group_columns_share_parameter_resolution_and_completion() {
+    let source = "sort S; relation candidates(field:S, value:S); input values(field:S, value:S) within candidates exactly_one(group_by: (field));";
+    let mut index = Index::default();
+    update(&mut index, "input", source);
+    index
+        .set_membership(&ProgramMembership::single("root", ["input".into()]))
+        .unwrap();
+    assert!(index.diagnostics("root", "input").is_empty());
+    let byte = source.rfind("field").unwrap();
+    let file = &index.files["input"];
+    let reference = file.reference_at(byte).unwrap();
+    let targets = index.candidates(
+        "root",
+        "input",
+        &reference.scope,
+        &reference.lookup,
+        Some(&reference.name),
+    );
+    assert_eq!(targets.len(), 1);
+    assert_eq!(
+        index.declaration(&targets[0]).unwrap().kind,
+        Kind::Parameter
+    );
+    let (lookup, scope, _) = file.completion_context(byte).unwrap();
+    let completions = index.candidates("root", "input", &scope, &lookup, None);
+    let names = completions
+        .iter()
+        .map(|s| index.declaration(s).unwrap().name.text.as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    assert_eq!(names, std::collections::BTreeSet::from(["field", "value"]));
+}

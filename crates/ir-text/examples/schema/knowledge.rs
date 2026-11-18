@@ -201,7 +201,13 @@ impl Gates {
 fn ring_inputs(s: &Shape) -> String {
     let k = &s.knowledge;
     let mut o = String::new();
-    o += "sort RingTerm; sort RingUse; sort RingFlow; sort Lane; sort ResultValue;\nrelation flows(f: RingFlow); relation lanes(l: Lane); relation result_candidate(u: RingUse, v: ResultValue);\ninput selector(f: RingFlow) within flows; input fa(l: Lane) within lanes; input fb(l: Lane) within lanes; input result(u: RingUse, v: ResultValue) within result_candidate; input w();\nassumption one_selector: at_most_one(selector, group_by: ());\nassumption has_result: at_least_one(result, group_by: u); assumption one_result: at_most_one(result, group_by: u);\n";
+    o += "sort RingTerm; sort RingUse; sort RingFlow; sort Lane; sort ResultValue;\nrelation flows(f: RingFlow); relation lanes(l: Lane); relation result_candidate(u: RingUse, v: ResultValue);\ninput selector(f: RingFlow) within flows; input fa(l: Lane) within lanes; input fb(l: Lane) within lanes; input result(u: RingUse, v: ResultValue) within result_candidate exactly_one(group_by: u); input w();\n";
+    if !s.overlaps {
+        o = o.replace(
+            "input selector(f: RingFlow) within flows;",
+            "input selector(f: RingFlow) within flows at_most_one(group_by: ());",
+        );
+    }
     for v in 0..k.result_values {
         writeln!(o, "const v{v}: ResultValue;").unwrap();
     }
@@ -241,7 +247,7 @@ pub fn plain_ring(s: &Shape) -> Result<String, String> {
         }
     }
     o += "relation invalid(t: RingTerm); invalid(T) :- term_holds(T), term_constraint(T, C), !satisfies(C); obligation term_has_its_element: empty(invalid);\nrelation downstream(); downstream() :- term_holds(t0), w(); notice downstream_varies: varies(downstream);\n";
-    writeln!(o,"verification checks {{ assumptions: [has_result, one_result{}]; obligations: [term_has_its_element]; notices: [downstream_varies]; }}",if s.overlaps {""} else {", one_selector"}).unwrap();
+    writeln!(o,"verification checks {{ assumptions: []; obligations: [term_has_its_element]; notices: [downstream_varies]; }}").unwrap();
     Ok(o)
 }
 
@@ -249,7 +255,7 @@ pub fn source(s: &Shape) -> Result<String, String> {
     validate(s, false)?;
     let mut g = Gates::new();
     let k = &s.knowledge;
-    let mut assumptions = vec!["scalar_inputs"];
+    let assumptions = vec![];
     if k.trees > 0 {
         forest(s, &mut g)?;
     }
@@ -258,10 +264,6 @@ pub fn source(s: &Shape) -> Result<String, String> {
     }
     if k.ring_terms > 0 {
         ring(s, &mut g);
-        assumptions.extend(["has_result", "one_result"]);
-        if !s.overlaps {
-            assumptions.push("one_selector");
-        }
     }
     Ok(g.finish(&assumptions))
 }

@@ -285,7 +285,7 @@ wall time under the existing cooperative deadlines.
 selected assumptions constrain permitted worlds, and only its selected obligations
 produce groups (including the compact domains for trivial groups). Preparation
 rejects unknown obligation or verification keys and requests whose constraints or
-obligations do not match their named verification. Input-only `at_most_one` contexts
+obligations do not match their named verification. Input-only `at_most_one` contexts without input cardinality declarations
 retain their local checking path. General input/derived cardinality constraints
 compute W independently during preparation, then use whole-program checking.
 Only the selected restriction relations' dependency cones are symbolically
@@ -308,8 +308,8 @@ Opt-in verification-only symbolic evaluation (`CheckRequest::checking_within_w`,
 default false) stores exact `c ∧ W` conditions: truth is
 W, false is false, negation is `W ∧ ¬c`, and recursive convergence compares these
 masked conditions. This is a separate const-generic `SymbolicMeaning<true>` type;
-public symbolic entry points and admission/proof consumers use the unrestricted
-default type. Inputs, fixed facts and executable replacement expressions follow
+public symbolic entry points and admission/proof consumers use the default type,
+exact throughout the declared legal universe U. Inputs, fixed facts and executable replacement expressions follow
 the same checking algebra. A true-throughout-W alternative still masks an unknown
 one; unresolved atoms are never interpreted as absent.
 
@@ -322,7 +322,7 @@ Assumption construction and admission are unchanged. Masking can enlarge small
 conditions by carrying unrelated constraints; existing limits still apply, and
 an exhausted computation remains inconclusive.
 
-An empty W reports `inconsistent_assumptions` with no obligation results. Unknown W
+An empty U reports `empty_input_universe`; otherwise an empty W reports `inconsistent_assumptions` with no obligation results. Unknown W
 is inconclusive. The IR classifies constraint cones before this evaluation; selected
 cones requiring grounding must have no reachable negative cycle after one
 specialization by independently settled fixed truth.
@@ -643,3 +643,21 @@ retains no diagnostic state in sessions. Its delivery time is excluded from the
 admission deadline. Reused admission emits its graph and no invented attempts.
 The CLI [component-dump guide](../ir-text/examples/check/COMPONENT-DUMP.md) describes
 the bounded writer and its independent failure reporting.
+
+### Declared input universe
+
+`Corpus::constrain_input` attaches one `InputCardinality` (at-most-one or exactly-one)
+to an input. Preparation enumerates resolved grouping domains and `within`-eligible
+tuples. `input_universe_is_empty()` distinguishes impossible input typing from
+inconsistent selected assumptions. Concrete observations must satisfy both.
+
+`ConditionContext` installs the universe before selected restrictions. Default
+symbolic evaluation uses one fixed mask per component: the conjunction of declared
+group factors intersecting its closed structural input support. Child conditions
+are intersected with the consumer mask; truth is that mask and negation subtracts
+from it. Raw difference is exact convergence within the mask. Final semantic
+queries still use full W. Selected assumptions are not component masks. The
+verification-only `checking_within_w` option instead keeps its full-W algebra.
+Proof queries, completion, notices and SAT probes share the same legal-world
+contract. Programs with declarations temporarily use global verification rather
+than the local cache's at-most-one-only absent extension.

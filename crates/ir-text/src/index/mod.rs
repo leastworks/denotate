@@ -154,6 +154,7 @@ pub struct Declaration {
     pub name: Name,
     pub scope: Scope,
     pub input: bool,
+    pub input_cardinality: Option<(String, Vec<Name>)>,
     pub parameters: Option<Vec<(String, Option<Name>)>>,
     pub sort: Option<Name>,
     pub parent: Option<String>,

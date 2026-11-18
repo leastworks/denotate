@@ -556,6 +556,32 @@ fn check_program(
             })
             .collect::<Vec<_>>();
         writeln!(output, "Selected assumptions: [{}]", assumptions.join(", ")).unwrap();
+        for r in p
+            .corpus
+            .relations()
+            .filter(|r| r.input_cardinality.is_some())
+        {
+            let card = r.input_cardinality.as_ref().unwrap();
+            writeln!(
+                output,
+                "Input universe: {} {}(group_by: ({}))",
+                name(p.corpus.namespace(r.id).unwrap(), &r.name),
+                if card.kind == denotate_ir::Cardinality::ExactlyOne {
+                    "exactly_one"
+                } else {
+                    "at_most_one"
+                },
+                card.group_by
+                    .iter()
+                    .map(|i| denotate_ir_text::spelling(
+                        &r.parameters[*i].name,
+                        denotate_ir_text::NameKind::Parameter
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+            .unwrap();
+        }
         trace.message(format_args!(
             "Selected assumptions: [{}]",
             assumptions.join(", ")
@@ -2339,6 +2365,24 @@ verification checks{assumptions:[];obligations:[no_absent];}",
         .run(&[]);
         assert_eq!(code, 2);
         assert!(message.contains("domain provider depends on an input"));
+    }
+    #[test]
+    fn input_cardinality_is_visible_and_empty_universe_is_an_error() {
+        for (facts, code) in [("eligible(a);", 0), ("", 1)] {
+            let f = Fixture::new(&format!(
+                "sort S; const a:S; relation eligible(x:S); {facts} input i(x:S) within eligible exactly_one(group_by: ()); relation clear(); obligation ok:empty(clear); verification v{{assumptions:[];obligations:[ok];}}"
+            ));
+            let (actual, human) = f.run(&[]);
+            assert_eq!(actual, code, "{human}");
+            assert!(
+                human.contains("Input universe: ::i exactly_one(group_by: ())"),
+                "{human}"
+            );
+            let (actual, json) = f.run(&["--json"]);
+            assert_eq!(actual, code, "{json}");
+            assert!(json.contains("inputUniverse"), "{json}");
+            assert_eq!(json.contains("empty-input-universe"), code == 1, "{json}");
+        }
     }
     #[test]
     fn general_assumption_consistency_is_a_finding_not_a_vacuous_proof() {

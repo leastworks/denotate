@@ -655,3 +655,20 @@ fn unselected_assumptions_are_reported_without_ground_validation() {
     );
     assert_eq!(report["failures"], json!([]));
 }
+
+#[test]
+fn empty_input_universe_does_not_report_trivial_obligations_proved() {
+    let text = "sort S; const a:S; relation allowed(x:S); input i(x:S) within allowed exactly_one(group_by:()); relation r(x:S); obligation unique:at_most_one(r,group_by:()); obligation absent:empty(r); verification v{assumptions:[];obligations:[unique,absent];}";
+    for mode in super::driver::MODES {
+        let r = run(text, mode);
+        let o = r.outcomes.as_ref().unwrap();
+        assert_eq!(o.consistency, "empty-input-universe");
+        for name in ["unique", "absent"] {
+            assert_eq!(obligation(o, name)["state"], "not-checked");
+        }
+        assert_eq!(r.row["outcomes"]["state"], "empty-input-universe");
+        if mode != "global-bdd" {
+            assert_eq!(r.row["effective_path"], "global-bdd-input-universe");
+        }
+    }
+}

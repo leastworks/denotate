@@ -501,6 +501,28 @@ pub fn write_committed(
         if let Some(provider) = names.inputs.get(&r.id) {
             write!(out, " within {provider}")?;
         }
+        if let Some(card) = &r.input_cardinality {
+            write!(
+                out,
+                " {}(group_by: (",
+                if card.kind == denotate_ir::Cardinality::ExactlyOne {
+                    "exactly_one"
+                } else {
+                    "at_most_one"
+                }
+            )?;
+            for (index, column) in card.group_by.iter().enumerate() {
+                if index > 0 {
+                    write!(out, ", ")?;
+                }
+                write!(
+                    out,
+                    "{}",
+                    spelling(&r.parameters[*column].name, NameKind::Parameter)
+                )?;
+            }
+            write!(out, "))")?;
+        }
         write!(out, ";")?;
         close(&mut out, block)?;
     }

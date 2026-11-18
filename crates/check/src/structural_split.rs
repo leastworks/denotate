@@ -324,7 +324,12 @@ impl<'a> Search<'a, '_> {
                 }
             }
         }
-        for group in &self.program.input_groups {
+        for group in self
+            .program
+            .input_groups
+            .iter()
+            .chain(self.program.universe_groups.iter().map(|g| &g.atoms))
+        {
             for atom in group {
                 budget.tick("structural split exclusive group ranking")?;
                 if let Some((_, size)) = atoms.get_mut(atom) {

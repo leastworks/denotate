@@ -110,13 +110,13 @@ namespace schema {
     assumption recognized_message: at_least_one(recognized, group_by: ());
     // This runs on all scalar messages, including rejected and undecided ones.
     verification propagation {
-        assumptions: [scalar_inputs];
+        assumptions: [];
         obligations: [no_conflicting_knowledge, no_unknown_decisions, at_most_one_path,
                       at_most_one_set_value, no_message_writes];
     }
     // A valid assumption cone does not establish that every decision became known.
     verification recognized_messages {
-        assumptions: [scalar_inputs, recognized_message];
+        assumptions: [recognized_message];
         obligations: [no_conflicting_knowledge, no_unknown_decisions,
                       at_most_one_set_value, no_message_writes];
     }

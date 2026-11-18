@@ -601,10 +601,13 @@ impl CheckRequest {
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        if !general.is_empty() {
-            if let Err(error) =
+        {
+            let consistency = if !general.is_empty() {
                 program.install_assumptions(&general, specialized.as_ref(), &mut budget)
-            {
+            } else {
+                program.check_input_consistency(&mut budget)
+            };
+            if let Err(error) = consistency {
                 budget.failure(&error);
                 let reason = Inconclusive::from_error(error)?;
                 budget.record(&mut receipts, QueryKey::Preparation, dependencies)?;
@@ -663,6 +666,9 @@ impl CheckRequest {
         ScopedResults {
             downstream_incomplete: None,
             inconsistent_assumptions: false,
+            empty_input_universe: false,
+            empty_input_declarations: BTreeSet::new(),
+            input_universe: BTreeMap::new(),
             notices: BTreeMap::new(),
             context: self.clone(),
             groups: BTreeMap::new(),
@@ -853,6 +859,9 @@ pub struct ScopedResults {
     pub downstream_incomplete: Option<ResourceReason>,
     pub admission_skips: Vec<KeyedAdmissionSkip>,
     pub inconsistent_assumptions: bool,
+    pub empty_input_universe: bool,
+    pub empty_input_declarations: BTreeSet<RelationKey>,
+    pub input_universe: BTreeMap<RelationKey, denotate_ir::InputCardinality>,
     pub notices: BTreeMap<NoticeKey, NoticeResult>,
     pub context: CheckRequest,
     pub groups: BTreeMap<GroupKey, ScopedResult>,
@@ -873,7 +882,7 @@ impl ScopedResults {
     /// exactly-one), not a combined coverage/uniqueness verdict. Coverage is
     /// reported separately in `coverage`.
     pub fn group(&self, key: &GroupKey) -> Option<ScopedResult> {
-        if self.inconsistent_assumptions {
+        if self.inconsistent_assumptions || self.empty_input_universe {
             return None;
         }
         if let Some(result) = self.groups.get(key) {
@@ -1438,7 +1447,27 @@ impl PreparedCheck<'_> {
                 .collect::<Result<_>>()?,
             downstream_incomplete: self.program.downstream_incomplete().map(Into::into),
             admission_skips,
-            inconsistent_assumptions: !self.program.assumptions_consistent(),
+            inconsistent_assumptions: !self.program.assumptions_consistent()
+                && !self.program.input_universe_is_empty(),
+            empty_input_universe: self.program.input_universe_is_empty(),
+            empty_input_declarations: self
+                .program
+                .universe_groups
+                .iter()
+                .filter(|g| g.kind == denotate_ir::Cardinality::ExactlyOne && g.atoms.is_empty())
+                .map(|g| keys.relation(g.relation).cloned().map_err(CheckError::Keys))
+                .collect::<Result<_>>()?,
+            input_universe: self
+                .program
+                .input_cardinalities
+                .iter()
+                .map(|(r, c)| {
+                    Ok((
+                        keys.relation(*r).map_err(CheckError::Keys)?.clone(),
+                        c.clone(),
+                    ))
+                })
+                .collect::<Result<_>>()?,
             notices: BTreeMap::new(),
             context: self.request.clone(),
             groups: BTreeMap::new(),

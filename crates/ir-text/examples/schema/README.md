@@ -166,7 +166,7 @@ The four encodings vary how acceptance is established:
    assumption recognized_message: at_least_one(recognized, group_by: ());
    ```
 
-All encodings select `one_value_per_field`. Only assumed acceptance selects
+All encodings declare scalar `raw_value` inputs with `at_most_one`. Only assumed acceptance selects
 consistency and recognition. Recognition is `recognized() :- leaf(T), matches(T)`;
 it means **some** leaf, not exactly one. Each parent has an `empty(overlap)`
 obligation checking pairs of children. Distinct selector values make siblings
@@ -408,3 +408,9 @@ Use matched limits and the same binary for `key` and `structural` comparisons.
 The structural policy may choose different actual orders for different lowerings.
 Raising limits is an experiment, not an automatic policy for positive recursion:
 positive knowledge propagation can still build expensive conditions.
+
+Input-domain cardinality is emitted on the input declaration: scalar raw values
+and exclusive ring selectors use at-most-one; every ring result uses exactly-one
+per use. `--overlaps` leaves ring selectors unconstrained. These constraints apply
+during admission as well as checking, without named assumption selection. Older
+captured runs using selected input assumptions remain historical measurements.

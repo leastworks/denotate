@@ -158,9 +158,7 @@ pub(crate) fn report(
         symbolic: pool(
             meaning.map_or(0, |m| m.metrics().retained_condition_nodes),
             crate::boolean::condition_storage(
-                meaning
-                    .into_iter()
-                    .flat_map(|m| m.conditions.values().chain(m.context.stored_conditions())),
+                meaning.into_iter().flat_map(|m| m.stored_conditions()),
             ),
         ),
         summaries: pool(

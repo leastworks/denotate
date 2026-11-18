@@ -189,7 +189,7 @@ pub fn source(s: &Shape) -> Result<String, String> {
     for t in 0..nodes.len() {
         writeln!(out, "const format{t}: Format;").unwrap();
     }
-    out += "relation field_candidates(field: Field, value: Value);\nrelation expectable(field: Field);\nrelation unguessed(field: Field);\ninput raw_value(field: Field, value: Value) within field_candidates;\nrelation accepted(field: Field);\nrelation visible(field: Field, value: Value);\nvisible(F, V) :- raw_value(F, V), accepted(F);\nrelation expected(field: Field);\nrelation declaration(format: Format, field: Field, kind: DeclarationKind);\nrelation matches(format: Format);\nrelation leaf(format: Format);\nrelation recognized();\nrecognized() :- leaf(T), matches(T);\nrelation may_lack(field: Field);\nrelation leaf_expects(format: Format, field: Field);\n";
+    out += "relation field_candidates(field: Field, value: Value);\nrelation expectable(field: Field);\nrelation unguessed(field: Field);\ninput raw_value(field: Field, value: Value) within field_candidates at_most_one(group_by: field);\nrelation accepted(field: Field);\nrelation visible(field: Field, value: Value);\nvisible(F, V) :- raw_value(F, V), accepted(F);\nrelation expected(field: Field);\nrelation declaration(format: Format, field: Field, kind: DeclarationKind);\nrelation matches(format: Format);\nrelation leaf(format: Format);\nrelation recognized();\nrecognized() :- leaf(T), matches(T);\nrelation may_lack(field: Field);\nrelation leaf_expects(format: Format, field: Field);\n";
     for f in 0..s.fields {
         if f < s.depth {
             for v in 0..s.width {
@@ -374,9 +374,9 @@ pub fn source(s: &Shape) -> Result<String, String> {
             .unwrap();
         }
     }
-    out += "assumption one_value_per_field: at_most_one(raw_value, group_by: (field));\nverification checks {\n  assumptions: [one_value_per_field";
+    out += "verification checks {\n  assumptions: [";
     if s.encoding == Encoding::Assumed {
-        out += ", consistent_acceptance, recognized_message";
+        out += "consistent_acceptance, recognized_message";
     }
     writeln!(out, " ];\n  obligations: [{}];\n}}", obligations.join(", ")).unwrap();
     Ok(out)

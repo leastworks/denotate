@@ -34,13 +34,28 @@ pub(crate) enum PartialCondition {
     Unknown(EvaluationUnknown<GroundAtom>),
 }
 impl PartialCondition {
+    fn masked<const W: bool>(
+        self,
+        meaning: &SymbolicMeaning<'_, W>,
+        mask: &Condition,
+        budget: &mut Budget<'_>,
+    ) -> Result<Self> {
+        Ok(match self {
+            Self::Known(c) => {
+                Self::Known(meaning.context.apply(mask, &c, op_function::and, budget)?)
+            }
+            unknown => unknown,
+        })
+    }
+
     fn is_true<const W: bool>(
         &self,
         meaning: &SymbolicMeaning<'_, W>,
+        mask: &Condition,
         budget: &mut Budget<'_>,
     ) -> Result<bool> {
         match self {
-            Self::Known(c) => meaning.condition_is_true(c, budget),
+            Self::Known(c) => meaning.condition_is_true(c, mask, budget),
             Self::Unknown(_) => Ok(false),
         }
     }
@@ -50,16 +65,16 @@ impl PartialCondition {
     fn not<const W: bool>(
         self,
         meaning: &SymbolicMeaning<'_, W>,
+        mask: &Condition,
         budget: &mut Budget<'_>,
     ) -> Result<Self> {
         Ok(match self {
-            Self::Known(c) => Self::Known(if W {
-                meaning
-                    .context
-                    .apply(&meaning.truth(), &c, op_function::and_not, budget)?
-            } else {
-                meaning.context.complement(&c, budget)?
-            }),
+            Self::Known(c) => Self::Known(meaning.context.apply(
+                mask,
+                &c,
+                op_function::and_not,
+                budget,
+            )?),
             unknown => unknown,
         })
     }
@@ -68,26 +83,29 @@ impl PartialCondition {
         other: Self,
         all: bool,
         meaning: &SymbolicMeaning<'_, W>,
+        mask: &Condition,
         budget: &mut Budget<'_>,
     ) -> Result<Self> {
         // A false conjunct or true alternative decides the expression even if
         // another premise is unknown. Otherwise conservatively propagate unknown.
         if (all && (self.is_false() || other.is_false()))
-            || (!all && (self.is_true(meaning, budget)? || other.is_true(meaning, budget)?))
+            || (!all
+                && (self.is_true(meaning, mask, budget)?
+                    || other.is_true(meaning, mask, budget)?))
         {
             return Ok(Self::Known(if all {
                 meaning.context.false_condition()
             } else {
-                meaning.truth()
+                mask.clone()
             }));
         }
-        // Masked truth is W, not raw true. Avoid repeatedly conjoining W with
-        // operands that already imply it. Unknown operands remain unknown.
-        if W && all {
-            if self.is_true(meaning, budget)? {
+        // Masked truth is the current mask, not raw true. Avoid conjoining it
+        // again with operands that already imply it. Unknowns remain unknown.
+        if all {
+            if self.is_true(meaning, mask, budget)? {
                 return Ok(other);
             }
-            if other.is_true(meaning, budget)? {
+            if other.is_true(meaning, mask, budget)? {
                 return Ok(self);
             }
         }
@@ -114,22 +132,36 @@ pub struct SymbolicMetrics {
     pub retained_condition_nodes: usize,
 }
 
-/// Settled fact conditions for admitted components over ALL input observations.
+/// Settled fact conditions for admitted components, exact on the declared input universe U.
 /// A blocked component is not a restriction on the input universe.
-/// The default type and public evaluation entry points retain that contract.
+/// Per-component masks contain U; values outside U are not a semantic contract.
 /// Internal verification uses `SymbolicMeaning<true>`, exact only within W;
-/// admission/proof APIs accept the unrestricted default type only.
+/// admission/proof APIs accept the U-exact default type only.
 #[derive(Debug)]
 pub struct SymbolicMeaning<'p, const WITHIN_W: bool = false> {
     pub(crate) program: &'p GroundProgram,
     pub(crate) context: ConditionContext,
     pub(crate) conditions: BTreeMap<GroundAtom, Condition>,
     pub(crate) released: BTreeSet<GroundAtom>,
+    pub(crate) universe_masks: Vec<Condition>,
     pub(crate) inconclusive: BTreeMap<ComponentId, Inconclusive>,
     pub(crate) unknown: BTreeMap<GroundAtom, EvaluationUnknown<GroundAtom>>,
     pub(crate) metrics: SymbolicMetrics,
 }
 impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
+    pub(crate) fn stored_conditions(&self) -> impl Iterator<Item = &Condition> {
+        self.conditions
+            .values()
+            .chain(self.universe_masks.iter())
+            .chain(self.context.stored_conditions())
+    }
+
+    fn component_mask(&self, index: usize) -> Condition {
+        self.universe_masks
+            .get(index)
+            .cloned()
+            .unwrap_or_else(|| self.truth())
+    }
     fn truth(&self) -> Condition {
         if WITHIN_W {
             self.context.permitted_worlds()
@@ -137,11 +169,13 @@ impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
             self.context.true_condition()
         }
     }
-    fn condition_is_true(&self, condition: &Condition, budget: &mut Budget<'_>) -> Result<bool> {
-        if !WITHIN_W {
-            return Ok(condition.is_true());
-        }
-        let truth = self.truth();
+    fn condition_is_true(
+        &self,
+        condition: &Condition,
+        mask: &Condition,
+        budget: &mut Budget<'_>,
+    ) -> Result<bool> {
+        let truth = mask;
         if truth.is_true() {
             return Ok(condition.is_true());
         }
@@ -149,7 +183,7 @@ impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
             return Ok(false);
         }
         budget.charge(condition.node_count(), "symbolic truth within W")?;
-        Ok(condition.same_representation(&truth))
+        Ok(condition.same_representation(truth))
     }
     fn partial_condition(&self, atom: &GroundAtom) -> Result<PartialCondition> {
         self.unknown.get(atom).cloned().map_or_else(
@@ -162,15 +196,35 @@ impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
         expression: &SettledExpression<GroundAtom>,
         budget: &mut Budget<'_>,
     ) -> Result<PartialCondition> {
+        // Proof consumers read under the full context. Per-component masks are
+        // used only by the evaluation loop, whose support is structurally closed.
+        let mask = if self.universe_masks.is_empty() {
+            self.truth()
+        } else {
+            self.context.permitted_worlds()
+        };
+        self.partial_expression_masked(expression, &mask, budget)
+    }
+    fn partial_expression_masked(
+        &self,
+        expression: &SettledExpression<GroundAtom>,
+        mask: &Condition,
+        budget: &mut Budget<'_>,
+    ) -> Result<PartialCondition> {
         budget.tick("settled expression")?;
         Ok(match expression {
             SettledExpression::Constant(v) => PartialCondition::Known(if *v {
-                self.truth()
+                mask.clone()
             } else {
                 self.context.false_condition()
             }),
             SettledExpression::Atom(a) => match self.fact(a)? {
-                SymbolicFact::Settled(c) => PartialCondition::Known(c),
+                SymbolicFact::Settled(c) => PartialCondition::Known(self.context.apply(
+                    mask,
+                    &c,
+                    op_function::and,
+                    budget,
+                )?),
                 SymbolicFact::Inconclusive(reason) => PartialCondition::Unknown(
                     self.unknown.get(a).cloned().unwrap_or(EvaluationUnknown {
                         atom: a.clone(),
@@ -181,18 +235,20 @@ impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
                     return Err(CheckError::Internal("replacement reads unresolved atom"));
                 }
             },
-            SettledExpression::Not(c) => self.partial_expression(c, budget)?.not(self, budget)?,
+            SettledExpression::Not(c) => self
+                .partial_expression_masked(c, mask, budget)?
+                .not(self, mask, budget)?,
             SettledExpression::All(cs) | SettledExpression::Any(cs) => {
                 let all = matches!(expression, SettledExpression::All(_));
                 let mut result = PartialCondition::Known(if all {
-                    self.truth()
+                    mask.clone()
                 } else {
                     self.context.false_condition()
                 });
                 for c in cs {
-                    let next = self.partial_expression(c, budget)?;
-                    result = result.combine(next, all, self, budget)?;
-                    if (all && result.is_false()) || (!all && result.is_true(self, budget)?) {
+                    let next = self.partial_expression_masked(c, mask, budget)?;
+                    result = result.combine(next, all, self, mask, budget)?;
+                    if (all && result.is_false()) || (!all && result.is_true(self, mask, budget)?) {
                         break;
                     }
                 }
@@ -395,11 +451,55 @@ impl GroundProgram {
         let _stage = budget.limits.progress.nested("symbolic-evaluation");
         let start = Instant::now();
         let context = ConditionContext::build_selected(self, input_facts, budget)?;
+        let mut mask_nodes = 0;
+        let universe_masks = if !WITHIN_W && !self.input_cardinalities.is_empty() {
+            let supports = self.universe_supports(cone, budget)?;
+            let support_storage =
+                supports.len() + supports.iter().map(BTreeSet::len).sum::<usize>();
+            let context_storage = context.permitted_worlds().node_count()
+                + context
+                    .universe_factors
+                    .iter()
+                    .map(Condition::node_count)
+                    .sum::<usize>();
+            let mut shared = BTreeMap::<BTreeSet<usize>, Condition>::new();
+            let mut masks = Vec::with_capacity(supports.len());
+            for support in supports {
+                budget.tick("input universe masks")?;
+                let mask = if let Some(mask) = shared.get(&support) {
+                    mask.clone()
+                } else {
+                    let mut mask = context.true_condition();
+                    for index in &support {
+                        mask = context.apply(
+                            &mask,
+                            &context.universe_factors[*index],
+                            op_function::and,
+                            budget,
+                        )?;
+                    }
+                    mask_nodes = retain(mask_nodes, 0, mask.node_count(), budget)?;
+                    retain(
+                        reserved + support_storage + context_storage,
+                        0,
+                        mask_nodes,
+                        budget,
+                    )?;
+                    shared.insert(support, mask.clone());
+                    mask
+                };
+                masks.push(mask);
+            }
+            masks
+        } else {
+            Vec::new()
+        };
         let mut meaning: SymbolicMeaning<'_, WITHIN_W> = SymbolicMeaning {
             program: self,
             context,
             conditions: BTreeMap::new(),
             released: BTreeSet::new(),
+            universe_masks,
             inconclusive: BTreeMap::new(),
             unknown: BTreeMap::new(),
             metrics: SymbolicMetrics {
@@ -409,7 +509,15 @@ impl GroundProgram {
             },
         };
         let mut retained = retain(
-            reserved + meaning.context.permitted_worlds().node_count(),
+            reserved
+                + mask_nodes
+                + meaning.context.permitted_worlds().node_count()
+                + meaning
+                    .context
+                    .universe_factors
+                    .iter()
+                    .map(Condition::node_count)
+                    .sum::<usize>(),
             0,
             retention.as_ref().map_or(0, |r| r.nodes),
             budget,
@@ -420,11 +528,10 @@ impl GroundProgram {
             }
             let input = &input;
             let condition = meaning.context.input_with_budget(input, budget)?;
-            let condition = if WITHIN_W {
-                meaning.context.restrict(&condition, budget)?
-            } else {
-                condition
-            };
+            let mask = meaning.component_mask(self.component_for(input)?.id.index);
+            let condition = meaning
+                .context
+                .apply(&condition, &mask, op_function::and, budget)?;
             retained = retain(retained, 0, condition.node_count(), budget)?;
             meaning.conditions.insert(input.clone(), condition);
         }
@@ -495,7 +602,7 @@ impl GroundProgram {
                                 continue;
                             }
                             let old = meaning.partial_condition(head)?;
-                            if old.is_true(&meaning, budget)? {
+                            if old.is_true(&meaning, &meaning.component_mask(index), budget)? {
                                 continue;
                             }
                             let _profile_target = budget.limits.profile.target(head);
@@ -657,10 +764,13 @@ impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
         budget: &mut Budget<'_>,
     ) -> Result<Option<PartialCondition>> {
         let head = &rule.head.atom;
-        let mut body = PartialCondition::Known(self.truth());
+        let mask = self.component_mask(index);
+        let mut body = PartialCondition::Known(mask.clone());
         for literal in &rule.body {
             budget.tick("symbolic evaluation")?;
-            let mut premise = self.partial_condition(&literal.term.atom)?;
+            let mut premise = self
+                .partial_condition(&literal.term.atom)?
+                .masked(self, &mask, budget)?;
             if literal.polarity == Polarity::Negative {
                 if let Some(atom_index) = self.program.atom_index.get(&literal.term.atom) {
                     let provider = self.program.atom_components[*atom_index];
@@ -674,24 +784,25 @@ impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
                         ));
                     }
                 }
-                premise = premise.not(self, budget)?;
+                premise = premise.not(self, &mask, budget)?;
             }
-            body = body.combine(premise, true, self, budget)?;
+            body = body.combine(premise, true, self, &mask, budget)?;
             if body.is_false() {
                 break;
             }
         }
         if !body.is_false() {
             for replacement in &rule.replacements {
-                let value = self.partial_expression(&replacement.expression, budget)?;
-                body = body.combine(value, true, self, budget)?;
+                let value =
+                    self.partial_expression_masked(&replacement.expression, &mask, budget)?;
+                body = body.combine(value, true, self, &mask, budget)?;
                 if body.is_false() {
                     break;
                 }
             }
         }
-        // Raw evaluation must compare over all inputs. Checking stores exact
-        // c ∧ W throughout, so the same raw difference is equality within W.
+        // Both operands use the same fixed component mask (or opt-in full W),
+        // so their raw difference tests exact convergence within that mask.
         if let (PartialCondition::Known(a), PartialCondition::Known(b)) = (&old, &body) {
             if self
                 .context
@@ -701,7 +812,7 @@ impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
                 return Ok(None);
             }
         }
-        let next = old.combine(body, false, self, budget)?;
+        let next = old.combine(body, false, self, &mask, budget)?;
         let old_size = self.conditions.get(head).map_or(0, Condition::node_count);
         match &next {
             PartialCondition::Known(c) => {

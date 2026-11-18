@@ -693,6 +693,7 @@ fn finding_identity(
         Identity::DownstreamWork => panic!("corpus must complete downstream rewrite work"),
         Identity::Assumption(_)
         | Identity::InconsistentAssumptions
+        | Identity::EmptyInputUniverse
         | Identity::AssumedConclusion(..)
         | Identity::Notice(_) => panic!(
             "test DSL input-cardinality contracts are consistent and do not assume their conclusion"

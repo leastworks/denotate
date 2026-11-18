@@ -210,7 +210,15 @@ impl PreparedCheck<'_> {
                 ))?;
             restrictions.push((*r, c.kind(), c.group_by().to_vec()));
         }
-        probe_component(&self.program, component, &restrictions, probe, &limits)
+        let mut report = probe_component(&self.program, component, &restrictions, probe, &limits)?;
+        if self.program.input_universe_is_empty() {
+            if let Some(existence) = &mut report.existence {
+                if existence.answer == SatExistenceAnswer::InconsistentAssumptions {
+                    existence.answer = SatExistenceAnswer::EmptyInputUniverse;
+                }
+            }
+        }
+        Ok(report)
     }
 }
 
@@ -221,6 +229,15 @@ fn cone(
     restrictions: &[Restriction],
     b: &mut Budget<'_>,
 ) -> Result<Cone> {
+    let restrictions = restrictions
+        .iter()
+        .cloned()
+        .chain(
+            p.input_cardinalities
+                .iter()
+                .map(|(r, c)| (*r, c.kind, c.group_by.clone())),
+        )
+        .collect::<Vec<_>>();
     if p.rewrite_proofs().next().is_some() {
         return Err(CheckError::InvalidRequest(
             "SAT probe requires a pre-admission program",
@@ -236,7 +253,7 @@ fn cone(
     let mut atoms = BTreeSet::new();
     let mut groups = Vec::new();
     let mut assumption_atoms = 0;
-    for (relation, kind, columns) in restrictions {
+    for (relation, kind, columns) in &restrictions {
         let mut grouped = BTreeMap::<Vec<ConstantId>, Vec<GroundAtom>>::new();
         if kind.has_coverage() {
             let signature = &p.signatures[relation];

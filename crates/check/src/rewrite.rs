@@ -608,12 +608,17 @@ impl GroundProgram {
         self.rewrites.downstream_incomplete = None;
         if !self.assumptions_consistent() {
             budget.excluding_time(|| progress.candidate_probe_summary(&self));
-            progress.finish(&self, "inconsistent-assumptions");
+            let state = if self.input_universe_is_empty() {
+                "empty-input-universe"
+            } else {
+                "inconsistent-assumptions"
+            };
+            progress.finish(&self, state);
             budget.excluding_time(|| {
                 self.dump(
                     dump,
                     AdmissionDumpEvent::Graph {
-                        state: "inconsistent-assumptions",
+                        state,
                         round: 0,
                         error: None,
                     },
@@ -696,7 +701,8 @@ impl GroundProgram {
         loop {
             if self.is_admitted()
                 && (phase == AdmissionPhase::Relevant
-                    || (self.input_groups.is_empty() && self.assumption_condition.is_none()))
+                    || ((self.input_groups.is_empty() && self.input_cardinalities.is_empty())
+                        && self.assumption_condition.is_none()))
             {
                 return Ok(());
             }
@@ -715,7 +721,8 @@ impl GroundProgram {
                     progress.snapshot(self, *round, "structural-committed");
                     if self.is_admitted()
                         && (phase == AdmissionPhase::Relevant
-                            || (self.input_groups.is_empty()
+                            || ((self.input_groups.is_empty()
+                                && self.input_cardinalities.is_empty())
                                 && self.assumption_condition.is_none()))
                     {
                         return round_boundary(*round, stop_after_round);
@@ -752,10 +759,7 @@ impl GroundProgram {
                 )?;
                 if profile.enabled() {
                     stage.retained(crate::boolean::condition_storage(
-                        meaning
-                            .conditions
-                            .values()
-                            .chain(meaning.context.stored_conditions()),
+                        meaning.stored_conditions(),
                     ));
                 }
                 meaning
@@ -805,9 +809,7 @@ impl GroundProgram {
             if profile.enabled() {
                 summaries_profile.retained(crate::boolean::condition_storage(
                     meaning
-                        .conditions
-                        .values()
-                        .chain(ctx.stored_conditions())
+                        .stored_conditions()
                         .chain(summaries.values().flat_map(|s| {
                             std::iter::once(&s.condition)
                                 .chain(s.settled.iter().map(|p| &p.condition))
@@ -982,9 +984,7 @@ impl GroundProgram {
             if profile.enabled() {
                 candidates_profile.retained(crate::boolean::condition_storage(
                     meaning
-                        .conditions
-                        .values()
-                        .chain(ctx.stored_conditions())
+                        .stored_conditions()
                         .chain(
                             summaries
                                 .values()

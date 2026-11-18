@@ -36,6 +36,7 @@ pub enum NoticeUnknown {
         details: LimitDetails,
     },
     InconsistentAssumptions,
+    EmptyInputUniverse,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoticeWitness {
@@ -101,7 +102,11 @@ impl GroundProgram {
         budget.limits.cancellation.check()?;
         if !self.assumptions_consistent() {
             return Ok(ConditionAnalysis::unknown(
-                NoticeUnknown::InconsistentAssumptions,
+                if self.input_universe_is_empty() {
+                    NoticeUnknown::EmptyInputUniverse
+                } else {
+                    NoticeUnknown::InconsistentAssumptions
+                },
             ));
         }
         let run = (|| {

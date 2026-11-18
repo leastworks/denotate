@@ -26,7 +26,13 @@ pub(crate) struct Atom {
 pub(crate) enum Decl {
     Sort(Name),
     Constants(Vec<Name>, Name),
-    Relation(Name, bool, Vec<(Name, Name)>, Option<Name>),
+    Relation(
+        Name,
+        bool,
+        Vec<(Name, Name)>,
+        Option<Name>,
+        Option<(denotate_ir::Cardinality, Vec<Name>)>,
+    ),
     Rule(Atom, Vec<(bool, Atom)>),
     Contract {
         name: Name,
@@ -505,6 +511,21 @@ fn scope(
                     params,
                     node.child_by_field_name("domain")
                         .map(|n| name(source, n))
+                        .transpose()?,
+                    children(node)
+                        .into_iter()
+                        .find(|n| n.kind() == "input_cardinality")
+                        .map(|n| -> Result<_> {
+                            let kind = match text(source, field(source, n, "kind")?) {
+                                "exactly_one" => denotate_ir::Cardinality::ExactlyOne,
+                                _ => denotate_ir::Cardinality::AtMostOne,
+                            };
+                            let columns = n
+                                .children_by_field_name("column", &mut n.walk())
+                                .map(|c| name_in(source, c, true))
+                                .collect::<Result<Vec<_>>>()?;
+                            Ok((kind, columns))
+                        })
                         .transpose()?,
                 )
             }

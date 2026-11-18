@@ -287,6 +287,7 @@ impl Projection {
                 name,
                 scope: scope.clone(),
                 input: false,
+                input_cardinality: None,
                 parameters: None,
                 sort: None,
                 parent,
@@ -432,6 +433,27 @@ impl Projection {
                     d.parameters = (!node.has_error()).then_some(parameters);
                     if let Some(provider) = field(node, "domain") {
                         self.reference(provider, &scope, Lookup::Name(Kind::Relation));
+                    }
+                    if let Some(relation) = decoded(&self.source, n, false) {
+                        for card in node
+                            .named_children(&mut node.walk())
+                            .filter(|n| n.kind() == "input_cardinality")
+                        {
+                            let mut columns = Vec::new();
+                            for column in card.children_by_field_name("column", &mut card.walk()) {
+                                if let Some(name) = self.reference(
+                                    column,
+                                    &scope,
+                                    Lookup::Parameter(relation.clone()),
+                                ) {
+                                    columns.push(name);
+                                }
+                            }
+                            if let Some(kind) = field(card, "kind") {
+                                self.declarations.get_mut(&id).unwrap().input_cardinality =
+                                    Some((self.source.text[kind.byte_range()].into(), columns));
+                            }
+                        }
                     }
                 }
                 "statement" => self.rule(node, &scope),
@@ -671,7 +693,13 @@ impl Projection {
             } else {
                 after
             };
-            let boundary = |t: &&Token| matches!(t.text.as_str(), ";" | "{" | "}" | "loc" | ")");
+            let boundary = |t: &&Token| {
+                matches!(t.text.as_str(), ";" | "{" | "}" | "loc" | ")")
+                    || (after
+                        .first()
+                        .is_some_and(|first| first.span.start != t.span.start)
+                        && matches!(t.text.as_str(), "at_most_one" | "exactly_one"))
+            };
             if !after.iter().any(|t| t.span.end <= byte && boundary(t)) {
                 let name: Vec<_> = after.iter().take_while(|t| !boundary(t)).collect();
                 let span = match (name.first(), name.last()) {
@@ -754,6 +782,12 @@ impl Projection {
                 "relation" | "input" | "const" | "sort" | "namespace" | "module"
             )
         }) {
+            if statement.first().is_some_and(|t| t.text == "input")
+                && statement.iter().any(|t| t.text == "group_by")
+            {
+                let relation = parse_name(&statement.get(1)?.text).ok()?;
+                return Some((Lookup::Parameter(relation), scope, span));
+            }
             if statement.iter().any(|t| t.text == "within") {
                 return Some((Lookup::Name(Kind::Relation), scope, span));
             }

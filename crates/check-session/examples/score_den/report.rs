@@ -184,7 +184,10 @@ pub fn human(report: &Value) -> String {
                     timing("checking"),
                     timing("notices"),
                     states,
-                    if r["effective_path"] == "global-bdd-general-assumptions" {
+                    if matches!(
+                        r["effective_path"].as_str(),
+                        Some("global-bdd-general-assumptions" | "global-bdd-input-universe")
+                    ) {
                         " [global fallback]"
                     } else {
                         ""

@@ -8,6 +8,7 @@ pub enum SatExistenceAnswer {
     EveryWorld,
     NoMeaning,
     InconsistentAssumptions,
+    EmptyInputUniverse,
     Unknown,
 }
 impl SatExistenceAnswer {
@@ -15,6 +16,7 @@ impl SatExistenceAnswer {
         match self {
             Self::EveryWorld => "every-world",
             Self::NoMeaning => "no-meaning",
+            Self::EmptyInputUniverse => "empty-input-universe",
             Self::InconsistentAssumptions => "inconsistent-assumptions",
             Self::Unknown => "unknown",
         }
