@@ -53,11 +53,21 @@ Ordering happens after fixed/`within` preparation and grounding, before W or any
 input-dependent BDD. Structural ordering traverses the dependency graph, with no
 symbolic evaluation: settled rule premises contribute input-support hyperedges,
 as do selected assumptions. Input-only uniqueness groups receive extra weight.
-Every group is a weighted preference, including groups disjoint from all others.
-No group forces contiguous placement: its members may be read with inputs outside
-the group, and forcing them together can separate those co-read inputs. Assumption
-enforcement is unchanged. Eight FORCE placement passes use integer centers and
-semantic-key ties, retaining the best weighted span cost seen. No platform-dependent floating-point ordering is used.
+Selected-assumption groups remain weighted preferences: they can overlap and their
+members may be read with outside inputs. Declared at-most-one/exactly-one groups
+instead form indivisible placement blocks. Their members are semantic-key ordered;
+blocks tie-break by their minimum member key. Unconstrained inputs are singleton
+blocks. Hyperedges attach to blocks, and eight FORCE passes use integer centers
+and semantic-key ties, retaining the best weighted span cost seen. No
+platform-dependent floating-point ordering is used. Assumption enforcement is
+unchanged.
+
+Declared groups partition the input atoms. Keeping each group's variables together
+makes the BDD representation of U, and of each component's conjunction of declared
+group masks, linear in the total group membership. This does not bound cumulative
+construction work, total retained masks, arbitrary fact conditions or selected W.
+Explicit `key` and `reverse-key` orders stay unchanged; a non-leading grouping
+column can scatter their groups. The report counts those scattered groups.
 
 The heuristic charges preparation work. Two configurable optimization allowances
 bound it: `--max-input-order-entries` (default 1,000,000 peak retained placement
@@ -68,21 +78,29 @@ of provider IDs are shared. A repeated edge still adds its weight without retain
 another support vector. Construction, comparison, sorting and traversal remain
 charged work. Exact distinct supports can still have quadratic total size.
 
-An ordering allowance cutoff returns key order, naming the allowance, its limit
-and the observed demand. Spent work remains charged to preparation. Global work
-exhaustion, deadlines and cancellation still propagate. Zero provides no allowance
-for that resource. Eight placement passes and
-the weighted-span heuristic are unchanged; key order remains the default.
+An ordering allowance cutoff returns `grouped-key` when nontrivial declared groups
+exist: blocks in minimum-member key order, members in key order. Otherwise it
+returns `key`. The report names the allowance, its limit and the observed demand.
+Building the declared-block baseline is mandatory even when an optional allowance
+is zero; its O(inputs) storage is bounded by existing grounding/input limits.
+Its construction and fallback expansion charge global preparation work. The
+heuristic additionally accounts the retained block arrays within its placement
+allowance; block-baseline construction temporaries are outside that optional
+meter. Spent work remains charged. Global work exhaustion, deadlines and
+cancellation still propagate. Zero disables the corresponding optional placement
+resource, not the mandatory block baseline. Key order remains the default.
 
 The CLI emits requested/effective order immediately after selection, before W
 construction, even when later preparation fails. Completed non-default runs also
 retain the stdout summary. `inputOrder` includes requested/effective order,
 fallback, `fallbackLimit`, `fallbackObserved`, inputs, `structuralEntries` (peak
-retained entries), `structuralWork` (cumulative), hyperedges and completed passes.
+retained heuristic entries), `structuralWork` (cumulative heuristic work),
+`declaredBlocks` (nontrivial declared groups packed), `placementBlocks` (all
+placement positions), `scatteredDeclaredGroups`, hyperedges and completed passes.
 The early progress event carries no projected input atoms or source lookups.
 
-The backend configuration includes the requested order (`structural-order-v3`
-identifies shared supports and configurable ordering allowances). The allowances
+The backend configuration includes the requested order (`structural-order-v4`
+identifies declared blocks, including grouped fallback). The allowances
 are part of deterministic request identity. Shared contexts partition
 by selection and configuration; the assumption-specialized graph receives the
 request's exact map before W is built. Local query inputs retain the actual ordered
@@ -104,9 +122,13 @@ each lane's route and flag inputs. Re-score the updated placement on the product
 program before drawing a conclusion about its benefit there. Key order stays the
 default and structural order remains a diagnostic. A default change would need
 corpus-scale cutoff and support-expansion evidence, plus an edit-stability policy.
-The weighted-span objective is not a BDD-size guarantee: the writer-ring improved,
-while the split-reader hub retained larger split-certificate BDDs with the same
-proof path and outcomes. Both shapes must remain in placement comparisons.
+The weighted-span objective is not a BDD-size guarantee. Earlier unconstrained
+preferences improved the writer ring while enlarging split-reader certificates.
+With declared blocks, the 32-group interleaving control now completes where it
+previously exhausted U construction. Conversely, the four-writer/eight-lane ring
+changes from proved to deadline-limited under the same raised limits; the
+four-writer/two-lane control still proves. Keep both trade-offs in placement
+comparisons. Compact U alone does not guarantee affordable later conditions.
 
 ## Backend retirement
 
@@ -1325,8 +1347,9 @@ the experimental full-W checking policy: selected assumptions are not copied int
 component conditions. Mask and group construction consume existing work/BDD storage
 allowances. Exactly-one enumeration uses resolved grouping domains and the existing
 atom bound; exhaustion is explicit. No limits or input-order default changed.
-Structural ordering treats declared groups as the same weighted preferences as
-selected input exclusivity, without imposing a new mandatory block order.
+Structural ordering keeps declared groups contiguous, including on heuristic
+fallback; selected input exclusivity remains a weighted preference. See
+[diagnostic input ordering](#diagnostic-input-ordering) for scope and accounting.
 
 
 Detailed profiling also emits `recursive-component-shape` and

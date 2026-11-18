@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-export const families = ['knowledge-scc','repeated-field','fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','writer-ring','guarded-hub','component-chain','symbolic-exhaustion','schema-layered'];
+export const families = ['declared-groups','knowledge-scc','repeated-field','fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','writer-ring','guarded-hub','component-chain','symbolic-exhaustion','schema-layered'];
 export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1,hubVariant='pairs',hubTagValues=2,ringLanes=8,ringRelays=6,ringReaders=1}={}) {
   if (!['pairs','tagged'].includes(hubVariant)) throw Error('invalid hub variant');
   if (hubVariant==='pairs' && hubTagValues!==2) throw Error('tag values requires tagged hub variant');
@@ -93,6 +93,16 @@ export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,
       add(`held${i}() :- priority${i}(), inspected${i}();`);
       add(`cleared${i}() :- ready${i}(), !held${i}();`);
     }
+  } else if (family === 'declared-groups') {
+    // Shared outside inputs pull the first/second values into separate clusters.
+    add(`sort Group; const ${Array.from({length:n},(_,i)=>`g${i}`).join(', ')}: Group;`);
+    add('sort Value; const a,b: Value; input value(g:Group,v:Value) at_most_one(group_by:(g));');
+    add('input left(); input right(); relation uses_left(g:Group); relation uses_right(g:Group);');
+    for(let i=0;i<12;i++) {
+      add('uses_left(G):-value(G,a),left();');
+      add('uses_right(G):-value(G,b),right();');
+    }
+    add('relation any(); any():-value(_,_); bad():-any(),!any();');
   } else if (family === 'knowledge-scc') {
     // Two dual positive SCCs: knowledge travels against the initial rule order.
     // An input decides truth/falsehood; the cycle alone cannot invent knowledge.

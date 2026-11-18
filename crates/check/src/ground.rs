@@ -319,6 +319,7 @@ impl GroundProgram {
         self.input_order = Some(ordered);
         self.order_report = InputOrderReport {
             inputs: self.inputs.len(),
+            placement_blocks: self.inputs.len(),
             ..Default::default()
         };
         Ok(self)

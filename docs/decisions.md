@@ -749,17 +749,29 @@ The file intentionally retains program names and is not an anonymized export.
   warnings made unnecessary by earlier settlement are accepted trade-offs for
   preserving progress. Shared preparation and global exhaustion still stop;
   enforced work sharing remains separate scheduling work.
-- **Input uniqueness groups guide BDD placement without forcing contiguity.**
-  A writer-ring reproduction reads each route input together with two lane flags.
-  Forcing the route uniqueness group into one contiguous block separated those
-  co-read inputs and made structural ordering expensive. Every uniqueness group
-  now remains a weighted hyperedge, with the same weight, while individual inputs
-  can move independently. All assumptions remain enforced; only the diagnostic
-  structural order changes. Key order stays the default. Semantic-key tie breaks,
-  bounded placement with explicit key-order fallback, and order-sensitive reuse
-  remain. The structural configuration is version 2 to distinguish measurements
-  and request identities from the former heuristic. Corpus-scale support expansion,
-  edit stability and any default change remain separate work.
+- **Declared input groups are blocks; selected-assumption groups are preferences.**
+  Originally, a writer-ring reproduction showed that forcing a route uniqueness
+  group together separated each route from its co-read flags. Structural order
+  version 2 therefore let all inputs move independently; version 3 added shared
+  supports and configurable allowances. Selected assumptions retain that policy:
+  their potentially overlapping groups remain weighted hyperedges.
+
+  Input cardinality declarations changed the trade-off. They define U before
+  selected assumptions, and component evaluation carries their masks. A real
+  program exhausted preparation while building U: interleaved declared groups
+  doubled its size per group. Version 4 packs each declared at-most-one/exactly-one
+  group into a block, with members in semantic-key order and hyperedges on blocks.
+  These groups partition inputs, so the representation of U and each group mask
+  conjunction is linear in total membership. Fact conditions and selected W can
+  still be expensive, and separating co-read inputs can regress writer rings.
+
+  A structural allowance cutoff uses `grouped-key`, ordered by each block's minimum
+  key, preserving contiguity even with zero optional allowance. The mandatory
+  O(inputs) block baseline is globally work-charged and bounded by grounding/input
+  limits; optional heuristic accounting includes its retained arrays. Explicit
+  key/reverse-key orders stay unchanged, report scattered declared groups, and
+  key remains the default. Order-sensitive cache identity includes version 4.
+  Binary encodings, edit stability and a default-order change remain separate work.
 - **Admission retains proof readers, not every evaluated intermediate.** A real
   provider cone filled storage during symbolic evaluation, then its shared summary
   construction stopped admission. Proofs need complete producer sets for target

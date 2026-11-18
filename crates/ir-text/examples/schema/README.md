@@ -22,7 +22,10 @@ Sampling adds overhead, and the report records whether it was enabled.
 
 `--input-order key|reverse-key|structural` forwards the diagnostic BDD layout to
 the CLI (default `key`). `run.json` records the requested order;
-`report.json.inputOrderDetails` records the effective order and any fallback.
+`report.json.inputOrderDetails` records the effective order and any fallback. Structural
+placement keeps declared cardinality groups contiguous, with `grouped-key` fallback
+when its allowance runs out. Explicit key/reverse-key orders report
+`scatteredDeclaredGroups` without changing the layout.
 Compare separate runs with identical shape and limit flags. The order can affect
 costs, witness choice and rewrite-warning inventory, but not conclusive semantics.
 

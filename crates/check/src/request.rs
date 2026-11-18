@@ -101,7 +101,7 @@ impl BackendIdentity {
         let configuration = match order {
             InputOrder::Key => "atom-key-order-v1/per-query-budgets-v1",
             InputOrder::ReverseKey => "reverse-atom-key-order-v1/per-query-budgets-v1",
-            InputOrder::Structural => "structural-order-v3/per-query-budgets-v1",
+            InputOrder::Structural => "structural-order-v4/per-query-budgets-v1",
         };
         Self {
             backend: "bdd".into(),

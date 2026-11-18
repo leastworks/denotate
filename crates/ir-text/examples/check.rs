@@ -1259,6 +1259,35 @@ mod tests {
     }
 
     #[test]
+    fn declared_blocks_report_grouped_fallback_and_explicit_scattering() {
+        let f = Fixture::new(
+            "sort S;const a,b:S;input cell(row:S,col:S) at_most_one(group_by:(col));relation bad();bad():-cell(a,a),cell(b,a);obligation clear:empty(bad);verification v{assumptions:[];obligations:[clear];}",
+        );
+        for order in ["key", "reverse-key", "structural"] {
+            let (result, output, trace) =
+                f.traced(&["--input-order", order, "--max-input-order-entries", "0"]);
+            assert_eq!(result, Ok(0), "{trace}");
+            let effective = if order == "structural" {
+                "grouped-key"
+            } else {
+                order
+            };
+            assert!(
+                trace.contains(&format!("\"effective\":\"{effective}\"")),
+                "{trace}"
+            );
+            let scattered = if order == "structural" { 0 } else { 2 };
+            assert!(
+                trace.contains(&format!("\"scatteredDeclaredGroups\":{scattered}")),
+                "{trace}"
+            );
+            if order == "structural" {
+                assert!(output.contains("\"effective\":\"grouped-key\""), "{output}");
+            }
+        }
+    }
+
+    #[test]
     fn diagnostic_input_orders_preserve_answers_and_report_configuration() {
         for (body, expected) in [
             (format!("{BODY}{RESTRICTED}"), 0),

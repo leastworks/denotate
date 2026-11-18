@@ -48,7 +48,10 @@ fn structural_order_is_deterministic_and_uses_dependencies_not_allocation() {
         let p = p
             .choose_input_order(&k, &[], InputOrder::Structural, &mut Budget::new(&l))
             .unwrap();
-        assert_eq!(p.input_order_report().effective, InputOrder::Structural);
+        assert_eq!(
+            p.input_order_report().effective,
+            EffectiveInputOrder::Structural
+        );
         let order = keyed_order(&p, &k);
         // Three independent pairs can each be placed adjacent, whatever their names.
         for rule in &p.core.rules {
@@ -131,7 +134,10 @@ fn structural_cutoff_falls_back_but_global_exhaustion_and_cancellation_propagate
         .clone()
         .choose_input_order_bounded(&k, &[], InputOrder::Structural, &mut budget, 1)
         .unwrap();
-    assert_eq!(fallback.input_order_report().effective, InputOrder::Key);
+    assert_eq!(
+        fallback.input_order_report().effective,
+        EffectiveInputOrder::Key
+    );
     assert!(fallback.input_order_report().fallback.is_some());
     assert!(budget.snapshot().work > 0);
     assert_eq!(keyed_order(&key, &k), keyed_order(&fallback, &k));
@@ -275,7 +281,10 @@ fn exclusive_writer_ring_agrees_with_stable_and_supported_models_in_every_order(
                 .unwrap()
                 .admit(&l)
                 .unwrap();
-            assert_eq!(p.input_order_report().effective, order);
+            assert_eq!(
+                p.input_order_report().effective,
+                EffectiveInputOrder::from(order)
+            );
             assert!(p.is_admitted());
             let rewritten: Vec<_> = p.rules().cloned().collect();
             for (world, models) in &worlds {
@@ -374,7 +383,10 @@ fn a_wide_aggregate_shared_by_many_readers_no_longer_repeats_its_support() {
     let p = p
         .choose_input_order(&keys, &[], InputOrder::Structural, &mut Budget::new(&l))
         .unwrap();
-    assert_eq!(p.input_order_report().effective, InputOrder::Structural);
+    assert_eq!(
+        p.input_order_report().effective,
+        EffectiveInputOrder::Structural
+    );
     let world = p.evaluate([], &l).unwrap();
     assert_eq!(world.established_facts().count(), 2000);
 }

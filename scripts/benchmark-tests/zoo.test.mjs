@@ -49,6 +49,7 @@ test('each family reaches its semantic and structural path; two-size smoke has n
       if(name.startsWith('guarded-')) {assert.ok(joint(r)||r.guardedAttempts.some(g=>g.attempt.state==='completed'&&g.attempt.restricted&&g.attempt.coneAtoms>0));assert.ok(r.guardedAttempts.every(g=>Number.isFinite(g.attempt.preprocessingMs)&&Number.isFinite(g.attempt.iterationMs)));}
       if(name==='guarded-hub') {assert.equal(r.after.admitted,true);assert.equal(r.exit,0);assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));assert.equal(r.outcomes[0].notices[0].result.state,'varying');}
       if(name==='writer-ring') {assert.equal(r.after.admitted,true);assert.equal(r.outcomes[0].emptiness[0].outcome,'proved');assert.equal(r.outcomes[0].notices[0].result.state,'varying');}
+      if(name==='declared-groups') {assert.equal(r.exit,0);assert.equal(r.outcomes[0].emptiness[0].outcome,'proved');}
       if(name==='knowledge-scc') {assert.equal(r.exit,0);assert.equal(r.after.admitted,true);assert.equal(r.before.ground.largestComponentAtoms,2);assert.equal(r.outcomes[0].emptiness[0].outcome,'proved');assert.equal(r.outcomes[0].notices[0].result.state,'varying');}
       if(name==='schema-layered')assert.equal(r.after.admitted,true);
       if(name==='component-chain') {
@@ -260,7 +261,9 @@ test('writer ring dimensions and all input orders survive report recovery',()=>{
 test('writer ring completes the verification with co-read inputs outside uniqueness groups',()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-writer-ring-storage-'));
   try {
-    const report=run({out:path.join(root,'run'),binary:'target/debug/examples/bench_schema',family:['writer-ring'],sizes:[4],repeat:1,inputOrder:'structural',
+    // Eight lanes per writer now exposes the declared-block trade-off and belongs
+    // in measured runs. Keep a conclusive co-read control in the correctness gate.
+    const report=run({out:path.join(root,'run'),binary:'target/debug/examples/bench_schema',family:['writer-ring'],sizes:[4],repeat:1,ringLanes:2,inputOrder:'structural',
       limits:['--timeout-ms','30000','--max-work','2000000000','--max-bdd-nodes','1000000','--max-bdd-tasks','10000000','--max-condition-nodes','100000000']});
     const r=report.families['writer-ring'].runs[0];
     assert.equal(r.inputOrder.effective,'structural');assert.equal(r.inputOrder.fallback,null);

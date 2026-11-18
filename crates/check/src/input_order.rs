@@ -37,10 +37,48 @@ impl std::str::FromStr for InputOrder {
     }
 }
 
+/// Actual placement, including the constrained fallback of structural order.
+/// GroupedKey is reported, not a separately selectable request configuration.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EffectiveInputOrder {
+    #[default]
+    Key,
+    ReverseKey,
+    Structural,
+    GroupedKey,
+}
+impl EffectiveInputOrder {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Key => "key",
+            Self::ReverseKey => "reverse-key",
+            Self::Structural => "structural",
+            Self::GroupedKey => "grouped-key",
+        }
+    }
+}
+impl From<InputOrder> for EffectiveInputOrder {
+    fn from(order: InputOrder) -> Self {
+        match order {
+            InputOrder::Key => Self::Key,
+            InputOrder::ReverseKey => Self::ReverseKey,
+            InputOrder::Structural => Self::Structural,
+        }
+    }
+}
+
+mod blocks;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InputOrderReport {
     pub requested: InputOrder,
-    pub effective: InputOrder,
+    pub effective: EffectiveInputOrder,
+    /// Nontrivial declared groups packed by structural order (zero in raw modes).
+    /// Empty/singleton groups require no special block.
+    pub declared_blocks: usize,
+    pub placement_blocks: usize,
+    /// Declared groups scattered by an explicitly requested raw order.
+    pub scattered_declared_groups: usize,
     pub fallback: Option<&'static str>,
     pub inputs: usize,
     /// Peak retained placement entries, including temporary containers; not bytes.
@@ -133,29 +171,56 @@ impl GroundProgram {
             self = self.with_atom_key_order(keys)?;
         }
         if order == InputOrder::Key {
+            self.order_report.scattered_declared_groups =
+                blocks::scattered(&self, self.input_order.as_ref().unwrap(), budget)?;
             return Ok(self);
         }
         self.order_report = InputOrderReport {
             requested: order,
-            effective: order,
+            effective: order.into(),
             inputs: self.inputs.len(),
+            placement_blocks: self.inputs.len(),
             ..Default::default()
         };
+        if order == InputOrder::ReverseKey {
+            self.order_report.scattered_declared_groups =
+                blocks::scattered(&self, self.input_order.as_ref().unwrap(), budget)?;
+        }
         let key_order = self.input_order.as_ref().unwrap();
         let chosen = if order == InputOrder::ReverseKey {
             budget.charge(key_order.len(), "input ordering")?;
             key_order.iter().rev().cloned().collect()
         } else {
+            let blocks = blocks::Blocks::build(&self, key_order, budget)?;
             let mut report = self.order_report.clone();
-            let result = self.structural_order(keys, constraints, budget, cutoff, &mut report);
+            report.declared_blocks = blocks.as_ref().map_or(0, |b| b.declared);
+            report.placement_blocks = blocks.as_ref().map_or(key_order.len(), |b| b.members.len());
+            let result = self.structural_order(
+                keys,
+                constraints,
+                blocks.as_ref(),
+                budget,
+                cutoff,
+                &mut report,
+            );
             let ordered = match result {
                 Ok(indices) => indices.into_iter().map(|i| key_order[i].clone()).collect(),
                 Err(Stop::Cutoff(reason, limit, observed)) => {
                     report.fallback_limit = Some(limit);
                     report.fallback_observed = Some(observed);
-                    report.effective = InputOrder::Key;
                     report.fallback = Some(reason);
-                    key_order.clone()
+                    if let Some(blocks) = &blocks {
+                        report.effective = EffectiveInputOrder::GroupedKey;
+                        budget.charge(key_order.len(), "declared input blocks")?;
+                        blocks
+                            .flatten(0..blocks.members.len())
+                            .into_iter()
+                            .map(|i| key_order[i].clone())
+                            .collect()
+                    } else {
+                        report.effective = EffectiveInputOrder::Key;
+                        key_order.clone()
+                    }
                 }
                 Err(Stop::Check(e)) => return Err(e),
             };
@@ -183,6 +248,7 @@ impl GroundProgram {
         &self,
         keys: &SemanticKeys,
         constraints: &[InputConstraint],
+        blocks: Option<&blocks::Blocks>,
         budget: &mut Budget<'_>,
         cap: usize,
         report: &mut InputOrderReport,
@@ -196,7 +262,7 @@ impl GroundProgram {
             cap,
             work_cap,
         };
-        let result = self.place(keys, constraints, &mut meter, report);
+        let result = self.place(keys, constraints, blocks, &mut meter, report);
         report.structural_entries = meter.peak;
         report.structural_work = meter.visits;
         result
@@ -206,12 +272,20 @@ impl GroundProgram {
         &self,
         keys: &SemanticKeys,
         constraints: &[InputConstraint],
+        blocks: Option<&blocks::Blocks>,
         meter: &mut Meter<'_, '_>,
         report: &mut InputOrderReport,
     ) -> Placement<Vec<usize>> {
         let ordered = self.input_order.as_ref().unwrap();
-        meter.store(ordered.len())?;
-        let inputs: BTreeMap<_, _> = ordered.iter().enumerate().map(|(i, a)| (a, i)).collect();
+        // Count the retained block baseline even when the first reservation
+        // exceeds the optional allowance. It remains available for fallback.
+        meter.store(ordered.len() + blocks.map_or(0, |b| 2 * ordered.len() + b.members.len()))?;
+        let inputs: BTreeMap<_, _> = ordered
+            .iter()
+            .enumerate()
+            .map(|(i, a)| (a, blocks.map_or(i, |b| b.input_to_block[i])))
+            .collect();
+        let placements = blocks.map_or(ordered.len(), |b| b.members.len());
         let mut supports = BTreeMap::<ComponentId, usize>::new();
         let mut pool = Supports::default();
         let mut edges = BTreeMap::<usize, u64>::new();
@@ -254,6 +328,7 @@ impl GroundProgram {
             let mut group: Vec<_> = group.iter().map(|a| inputs[a]).collect();
             sort_work(group.len(), meter)?;
             group.sort_unstable();
+            group.dedup();
             let id = pool.intern(group, meter)?;
             meter.release(count);
             if groups.insert(id) {
@@ -304,6 +379,7 @@ impl GroundProgram {
             for mut group in exclusive.into_values().filter(|g| g.len() > 1) {
                 sort_work(group.len(), meter)?;
                 group.sort_unstable();
+                group.dedup();
                 let id = pool.intern(group, meter)?;
                 if groups.insert(id) {
                     meter.store(1)?;
@@ -317,8 +393,8 @@ impl GroundProgram {
         meter.release(groups.len());
         drop(groups);
         report.hyperedges = edges.len();
-        meter.store(6 * ordered.len())?; // order, best, positions and weighted centers
-        let mut order: Vec<_> = (0..ordered.len()).collect();
+        meter.store(6 * placements)?; // order, best, positions and weighted centers
+        let mut order: Vec<_> = (0..placements).collect();
         let mut best = order.clone();
         let mut best_cost = u128::MAX;
         for pass in 0..=PASSES {
@@ -368,7 +444,12 @@ impl GroundProgram {
                 )
             });
         }
-        Ok(best)
+        if let Some(blocks) = blocks {
+            meter.visit(ordered.len())?;
+            Ok(blocks.flatten(best))
+        } else {
+            Ok(best)
+        }
     }
 
     fn support(
@@ -408,9 +489,9 @@ impl GroundProgram {
                     }
                 }
                 sort_work(local.len(), meter)?;
+                let local_count = local.len();
                 local.sort_unstable();
                 local.dedup();
-                let local_count = local.len();
                 let local = pool.intern(local, meter)?;
                 meter.release(local_count);
                 let mut parts = Vec::new();
@@ -511,6 +592,9 @@ fn add_edge(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod declared_tests;
 
 #[cfg(test)]
 mod reference;

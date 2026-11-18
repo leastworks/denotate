@@ -101,7 +101,7 @@ pub use notices::*;
 
 mod input_order;
 mod input_universe;
-pub use input_order::{InputOrder, InputOrderReport};
+pub use input_order::{EffectiveInputOrder, InputOrder, InputOrderReport};
 
 mod implied_guard;
 pub use implied_guard::{ImpliedGuardPremise, ImpliedGuardProof};

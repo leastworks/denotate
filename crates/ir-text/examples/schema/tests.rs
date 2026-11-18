@@ -504,13 +504,20 @@ fn zoo_tiny_sources_match_independent_oracles() {
                         world.iter().filter(|a| a.relation == r).count() <= 1
                     });
                 }
-                if name != "guarded-worlds" {
+                if name != "guarded-worlds" && name != "declared-groups" {
                     return true;
                 }
                 let option = p
                     .corpus
                     .relations()
-                    .find(|r| r.name == "option")
+                    .find(|r| {
+                        r.name
+                            == if name == "declared-groups" {
+                                "value"
+                            } else {
+                                "option"
+                            }
+                    })
                     .unwrap()
                     .id;
                 let mut groups = std::collections::BTreeSet::new();

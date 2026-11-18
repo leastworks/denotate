@@ -340,8 +340,9 @@ common sub-functions once.
 - **Structural BDD input order** exists as a diagnostic (`--input-order structural`).
   It cut BDD work sharply on synthetic shapes whose input names separate co-read
   inputs. The first production run barely changed with the former hard uniqueness
-  blocks; those blocks have since been replaced by weighted preferences after a
-  writer-ring reproduction exposed their cost. Re-score that change on real lowered
+  blocks. Selected-assumption groups now use weighted preferences, while declared
+  input groups stay contiguous to keep U and component masks compact. Re-score
+  that trade-off (including the writer ring) on real lowered
   programs before selecting a default (compare with `reverse-key` too). To scale
   further, placement should treat derived atoms as hypergraph
   nodes, since today's support expansion is quadratic at scale, and a default needs

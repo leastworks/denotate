@@ -55,6 +55,7 @@ enforced work share; an individual expensive attempt can still consume global wo
 
 | Preset | Variable shape | Atoms / rules | Expected path |
 | --- | --- | --- | --- |
+| declared-groups | n declared two-value groups, co-read with outside anchors | 4n+4 / 26n+1 | competing hyperedges formerly interleaved groups and inflated U; structural blocks preserve compact U and masks |
 | fan-in-fixed | n fixed sources of one head | n+2 / 2n+1 | fixed folding, present-tuple failure |
 | fan-in-input | n independent inputs to one head | n+2 / n+1 | symbolic disjunction, replayed failure |
 | symbolic-exhaustion | n input producers, a dependent negative cycle and an independent guarded cycle | n+7 / n+5 | atom-local exhaustion; independent admission and checking continue |
@@ -77,6 +78,20 @@ No semantic outcome, cost counter, timing, or solver witness is a performance go
 The tiny path checks assert verdicts, surviving SCCs, removal/discharge counts as
 path-presence checks, and produced findings, without historical cost thresholds.
 
+## Declared groups
+
+`declared-groups` repeats rules reading each group's first value with `left()` and
+its second with `right()`. Those edges compete with group contiguity. Compare the
+pre-block structural heuristic with the current build using identical sources and
+limits; `--profile-conditions` records U construction steps. The checker unit
+control additionally measures component masks for at-most-one and exactly-one.
+A small U does not guarantee small fact conditions or selected W.
+
+```sh
+just bench-den-zoo --family declared-groups --sizes 4,8,16,32 --repeat 1 \
+  --input-order structural --out target/declared-groups
+```
+
 ## Writer ring
 
 `writer-ring` makes `--sizes` the number of writers. `--ring-lanes` (default 8)
@@ -85,8 +100,7 @@ kinds and relay predicates, and `--ring-readers` (default 1) downstream readers.
 All dimensions are positive integers and survive saved-report recovery.
 
 A lane applies when `route(l)`, `fa()` and `!fb()` hold. Routes are mutually
-exclusive across writers. Each writer has an exactly-one kind result (separate
-coverage and uniqueness assumptions); otherwise an optional received kind supplies
+exclusive across writers. Each writer has a declared exactly-one kind result; otherwise an optional received kind supplies
 the value. Each kind enables one relay in a negative ring. At most one context is
 true in any permitted world, so the ring has one meaning, the emptiness obligation
 is proved, and the downstream notice varies. Exhaustion is reported explicitly;
@@ -99,9 +113,10 @@ just bench-den-zoo --family writer-ring --sizes 2,4,8,16 --repeat 1 \
 ```
 
 Compare with `--input-order key` in a new directory, retaining the same checker
-limits. Each run records requested/effective order and any fallback. Route groups
-stay weighted preferences rather than hard blocks, allowing lane inputs to be
-placed together. Neither placement nor node counts are golden expectations. Larger
+limits. Each run records requested/effective order and any fallback. Declared route and result groups are contiguous blocks under structural order;
+selected-assumption groups remain weighted preferences. Packing a route group can
+separate its members from their co-read lane flags, so compare later condition
+costs as well as U construction. Neither placement nor node counts are golden expectations. Larger
 writer counts may still be expensive; their cause needs separate measurement.
 
 ## Tagged-value hub

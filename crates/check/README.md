@@ -28,7 +28,12 @@ source without traversing fixed derivation evidence. Serialization belongs to
    instances and builds provider-first ground components, keeping original rule, atom
    and argument occurrence IDs. `prepare_with_input_groups` adds input assumptions W
    (`InputAtMostOne` on input relations): permitted worlds have at most one tuple per
-   group. `admit` applies justified rewrites.
+   group. `admit` applies justified rewrites. Diagnostic structural ordering packs
+   declared input cardinality groups into semantic-key-ordered blocks before U/W
+   construction; selected assumptions remain weighted preferences. Its report uses
+   `EffectiveInputOrder::GroupedKey` on a placement-allowance fallback and counts
+   scattered declared groups in explicit key/reverse-key modes. See the
+   [ordering policy](../../docs/checker-policies.md#diagnostic-input-ordering).
 3. **Admissibility.** Positive cycles are admitted. A negative edge inside an SCC blocks
    that component and its dependents unless a rewrite proves the negation redundant
    under W. Blocked regions are reported (`Unsupported`), never treated as false.
@@ -301,11 +306,13 @@ admission, notices or other program-wide reports.
 `BackendIdentity::bdd_with_order(InputOrder::{Key, ReverseKey, Structural})` selects
 an experimental variable layout; `bdd()` still means key order. Preparation chooses
 one map after grounding and copies it to the assumption-specialized view before W.
-Structural placement uses only dependencies and selected constraints. Uniqueness
-groups are weighted preferences, without forced contiguity; assumption enforcement
-is independent of placement. Configurable `max_input_order_entries` and
-`max_input_order_work` allowances fall back to key order; global exhaustion still
-stops preparation. Support vectors and repeated unions are shared while hyperedge
+Structural placement uses dependencies, declared cardinality blocks and selected
+constraints. Selected uniqueness groups are weighted preferences; declared groups
+are contiguous blocks. Assumption enforcement is independent of placement.
+Configurable `max_input_order_entries` and `max_input_order_work` allowances fall
+back to grouped-key order when declared blocks exist, and key order otherwise;
+global exhaustion still stops preparation. The mandatory block baseline remains
+with zero optional allowance. Support vectors and repeated unions are shared while hyperedge
 weights are preserved. Entry accounting bounds peak retained metadata; cumulative
 work remains charged to the preparation budget. The early `CheckingTarget::InputOrder` event reports the chosen
 order and cutoff demand before assumption construction.

@@ -225,7 +225,12 @@ fn ordering_allowances_invalidate_preparation_and_report_before_assumptions() {
                 else {
                     panic!()
                 };
-                assert_eq!(prep.program().input_order_report().effective, expected);
+                let effective = if expected == InputOrder::Key && !declared.is_empty() {
+                    EffectiveInputOrder::GroupedKey
+                } else {
+                    expected.into()
+                };
+                assert_eq!(prep.program().input_order_report().effective, effective);
                 if expected == InputOrder::Key {
                     let r = prep.program().input_order_report();
                     assert_eq!(r.fallback_limit, Some(0));
@@ -289,5 +294,83 @@ fn recursive_worklist_results_agree_in_cold_warm_and_edited_sessions() {
         let fresh = run(&mut Session::default());
         assert_eq!(fresh, run(&mut warm));
         assert_eq!(fresh, run(&mut warm));
+    }
+}
+
+#[test]
+fn declared_block_edits_and_fallback_agree_in_fresh_cold_and_warm_sessions() {
+    let mut warm = Session::default();
+    for (kind, column) in [
+        ("at_most_one", "col"),
+        ("exactly_one", "row"),
+        ("exactly_one", "col"),
+        ("at_most_one", "col"),
+    ] {
+        let text = format!(
+            "sort S;const a,b:S;input cell(row:S,col:S) {kind}(group_by:({column})); relation bad();bad():-cell(a,a),cell(b,a);obligation clear:empty(bad);verification checks{{assumptions:[];obligations:[clear];}}"
+        );
+        let source = SourceFile::new("file:///blocks.den", 0, text);
+        let p = load(
+            &ProgramMembership::single("root", [source.uri.clone()]),
+            &[source],
+        )
+        .unwrap();
+        let mut reference = None;
+        for (order, entries) in [
+            (InputOrder::Key, 1_000_000),
+            (InputOrder::ReverseKey, 1_000_000),
+            (InputOrder::Structural, 1_000_000),
+            (InputOrder::Structural, 0),
+        ] {
+            let limits = Limits {
+                max_input_order_entries: entries,
+                ..Limits::default()
+            };
+            let ops = (&limits).into();
+            let mut request = p.verification_requests(&limits).unwrap().remove(0).1;
+            request.backend = BackendIdentity::bdd_with_order(order);
+            let run = |session: &mut Session| {
+                let RequestPreparation::Complete(prep) =
+                    session.prepare(&request, &p.corpus, &p.keys, &ops).unwrap()
+                else {
+                    panic!()
+                };
+                let layout = prep
+                    .program()
+                    .ordered_input_atoms()
+                    .map(|a| AtomKey::from_atom(&p.keys, a).unwrap())
+                    .collect::<Vec<_>>();
+                let prep = prep.admit(&ops).unwrap();
+                let LocalCheckOutcome::Complete(report) = session.verify(&prep, &ops).unwrap()
+                else {
+                    panic!()
+                };
+                (
+                    layout,
+                    presentation::present(&p, &report.checked).unwrap().status,
+                )
+            };
+            let fresh = run(&mut Session::default());
+            assert_eq!(fresh, run(&mut warm));
+            assert_eq!(fresh, run(&mut warm));
+            let semantic = (
+                fresh.1["state"].clone(),
+                fresh.1["consistency"].clone(),
+                fresh.1["emptiness"][0]["outcome"].clone(),
+            );
+            assert_eq!(
+                semantic.2,
+                if column == "col" {
+                    "proved"
+                } else {
+                    "counterexample"
+                }
+            );
+            if let Some(expected) = &reference {
+                assert_eq!(&semantic, expected);
+            } else {
+                reference = Some(semantic);
+            }
+        }
     }
 }

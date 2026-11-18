@@ -803,6 +803,6 @@ pub fn remaining_text(v: &Value) -> String {
 pub fn input_order_data(r: &denotate_check::InputOrderReport) -> Value {
     json!({"requested":r.requested.label(),"effective":r.effective.label(),"fallback":r.fallback,
         "fallbackLimit":r.fallback_limit,"fallbackObserved":r.fallback_observed,
-        "inputs":r.inputs,"structuralEntries":r.structural_entries,"structuralWork":r.structural_work,
+        "scatteredDeclaredGroups":r.scattered_declared_groups,"inputs":r.inputs,"declaredBlocks":r.declared_blocks,"placementBlocks":r.placement_blocks,"structuralEntries":r.structural_entries,"structuralWork":r.structural_work,
         "hyperedges":r.hyperedges,"passes":r.passes})
 }
