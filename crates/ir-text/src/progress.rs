@@ -671,6 +671,9 @@ impl AdmissionDetails<'_> {
                 Some(denotate_check::CheckingTarget::SatExistence(s)) => {
                     Some(denotate_presentation::stable_existence_stats(&s))
                 }
+                Some(denotate_check::CheckingTarget::SatUniqueness(s)) => {
+                    Some(denotate_presentation::stable_uniqueness_stats(&s))
+                }
                 Some(denotate_check::CheckingTarget::InputOrder(_)) => None,
                 None => None,
             };

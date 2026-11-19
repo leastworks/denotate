@@ -449,7 +449,12 @@ whole-program fallback when upstream is ambiguous. Each cone has its own complet
 refinement and exclusion gates; W is shared and remains authoritative. Finite-support
 cubes preserve the derived interpretation in every matching world. Scoped work shares
 one existence budget; local ambiguity never becomes a global finding. Global uniqueness
-remains a full-program query. Numeric statistics are checker-owned, with presentation/CLI
+reuses completed local proofs within the same invocation. Otherwise
+it searches the downstream closure of uncertified negative components plus upstream,
+and extends any pair through full-program reduct validation before reporting it.
+An unextendable pair falls back to a full-program pair query, sharing the uniqueness
+phase's remaining allowance. Unclassified components are always included; measurement
+records are not proof inputs. Numeric statistics are checker-owned, with presentation/CLI
 adapters responsible for JSON and human output.
 Emptiness uses the shared report and presentation structures; finite derivations
 are reconstructed from each example's reduct-validated original interpretation

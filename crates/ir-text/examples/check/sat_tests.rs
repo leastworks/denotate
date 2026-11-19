@@ -158,6 +158,17 @@ fn sat_existence_reports_live_cube_statistics_and_skipped_phases_do_not_run() {
     let (code, out, progress) = f.traced(&["--engine", "sat", "--json"]);
     assert_eq!(code, Ok(1)); // ambiguous, but all worlds have meaning
     assert!(out.contains("existenceStats"));
+    assert!(out.contains("uniquenessStats"));
+    for field in [
+        "downstream-cone",
+        "pairQueries",
+        "extensionQueries",
+        "fallbackReason",
+    ] {
+        assert!(out.contains(field), "{out}");
+        assert!(progress.contains(field), "{progress}");
+    }
+    assert!(progress.contains("SAT uniqueness finished:"));
     for field in [
         "cubes",
         "inputsPerCube",

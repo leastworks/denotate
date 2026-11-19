@@ -51,6 +51,13 @@ pub(super) fn run(
                 denotate_presentation::stable_existence_stats(stats)
             ));
         }
+        if let Some(denotate_check::CheckingTarget::SatUniqueness(ref stats)) = e.target {
+            observer.message(format!(
+                "SAT uniqueness {}: {}",
+                e.state,
+                denotate_presentation::stable_uniqueness_stats(stats)
+            ));
+        }
         let target = match &e.target {
             Some(denotate_check::CheckingTarget::Obligation(id)) => {
                 names.get(id).map(String::as_str).unwrap_or("obligation")
@@ -59,7 +66,10 @@ pub(super) fn run(
         };
         if !matches!(
             e.target,
-            Some(denotate_check::CheckingTarget::SatExistence(_))
+            Some(
+                denotate_check::CheckingTarget::SatExistence(_)
+                    | denotate_check::CheckingTarget::SatUniqueness(_)
+            )
         ) {
             observer.message(format!("{} {}: {}", e.stage, target, e.state));
         }
@@ -154,6 +164,13 @@ pub(super) fn run(
             }
             if let Some(stats) = s["meaning"].get("existenceStats").filter(|v| !v.is_null()) {
                 writeln!(output, "Existence search: {stats}").unwrap();
+            }
+            if let Some(stats) = s
+                .get("meaning")
+                .and_then(|m| m.get("uniquenessStats"))
+                .filter(|s| !s.is_null())
+            {
+                writeln!(output, "Uniqueness search: {stats}").unwrap();
             }
             print_diagnostics(p, &presented, output, verbose)?;
             for o in s["obligations"].as_array().unwrap() {

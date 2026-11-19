@@ -219,6 +219,14 @@ identify this prepared residual graph only. No world values are needed for these
 throttled, with an initial sample and a final snapshot, including on exhaustion;
 `--no-progress` silences it but keeps final statistics.
 
+`meaning.uniquenessStats` and uniqueness progress report `local-proofs` when completed
+cone proofs suffice, or `downstream-cone` for the region that can differ and its
+upstream. Component ordinals, encoded atom/input counts, attempted pair/extension
+queries and any whole-program fallback reason are included. A scoped pair is extended
+and reduct-validated as two full-program models before it becomes a finding.
+Skipping existence keeps unclassified negative components in the uniqueness scope;
+it never treats them as proved.
+
 Exit codes keep the existing precedence: **2** for incomplete/unanalysed obligations or deliberately skipped meaning,
 invalid configuration or a filtered `--verification` run; otherwise **1** for failures
 (including empty/inconsistent context or non-unique meaning), **0** for proved,

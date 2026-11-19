@@ -1,5 +1,7 @@
 use super::*;
 mod components;
+mod uniqueness;
+pub use uniqueness::UniquenessStats;
 pub(super) mod cubes;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -90,6 +92,7 @@ pub enum Uniqueness {
 pub struct Meaning {
     pub mode: MeaningMode,
     pub existence_stats: Option<ExistenceStats>,
+    pub uniqueness_stats: Option<UniquenessStats>,
     pub existence: Existence,
     pub uniqueness: Uniqueness,
 }
@@ -177,6 +180,7 @@ impl Engine {
             existence: Existence::NotAnalysed,
             uniqueness: Uniqueness::NotAnalysed,
             existence_stats: None,
+            uniqueness_stats: None,
         };
         if options.meaning == MeaningMode::None {
             return Ok(meaning);
@@ -212,22 +216,26 @@ impl Engine {
             }
             Ok(false) => {}
         }
+        let mut unique_cones = BTreeSet::new();
         if options.meaning == MeaningMode::Full {
-            let (existence, stats) = self.existence_using(options, &mut b)?;
+            let (existence, stats) = self.existence_using(options, &mut unique_cones, &mut b)?;
             meaning.existence = existence;
             meaning.existence_stats = Some(stats);
         }
-        meaning.uniqueness = self.uniqueness()?;
+        let (uniqueness, stats) = self.scoped_uniqueness(&unique_cones)?;
+        meaning.uniqueness = uniqueness;
+        meaning.uniqueness_stats = Some(stats);
         Ok(meaning)
     }
     #[cfg(test)]
     fn existence(&mut self, options: &CheckOptions) -> Result<(Existence, ExistenceStats)> {
         let limits = self.limits.clone();
-        self.existence_using(options, &mut Budget::new(&limits))
+        self.existence_using(options, &mut BTreeSet::new(), &mut Budget::new(&limits))
     }
     fn existence_using(
         &mut self,
         options: &CheckOptions,
+        unique_cones: &mut BTreeSet<usize>,
         b: &mut Budget<'_>,
     ) -> Result<(Existence, ExistenceStats)> {
         let _progress = self.limits.progress.scope("SAT existence", None, true);
@@ -236,7 +244,7 @@ impl Engine {
         let result: Result<Existence> = (|| {
             b.charge(self.cone.input.len(), "SAT existence support")?;
             stats.support_size = self.cone.input.iter().filter(|v| **v).count();
-            self.decomposed_existence(options, &mut stats, b)
+            self.decomposed_existence(options, &mut stats, unique_cones, b)
         })();
         match result {
             Ok(v) => Ok((v, stats)),
@@ -249,19 +257,18 @@ impl Engine {
             }
         }
     }
-    fn uniqueness(&mut self) -> Result<Uniqueness> {
-        let _progress = self.limits.progress.scope("SAT uniqueness", None, true);
-        let limits = self.limits.clone();
-        let mut b = Budget::new(&limits);
+    fn whole_uniqueness(&mut self, b: &mut Budget<'_>) -> Result<Uniqueness> {
+        b.check("SAT uniqueness")?;
         self.stats = Stats::default();
         if let Some(e) = &self.append_failed {
             return Ok(Uniqueness::Inconclusive(query_inconclusive(e.clone())?));
         }
         let conflicts = self.cnf.solver.num_conflicts();
         let propagations = self.cnf.solver.num_propagations();
+        let timeout = self.cnf.solver.cb().timeout;
         let stop = self.cnf.solver.cb_mut();
         stop.start = Instant::now();
-        stop.timeout = limits.timeout;
+        stop.timeout = b.remaining_time();
         stop.polls = Some(PollLimit {
             used: std::cell::Cell::new(0),
             max: self.config.max_solver_polls,
@@ -269,14 +276,14 @@ impl Engine {
         let result: Result<Uniqueness> = (|| {
             if self.pair_encoding.is_none() {
                 let built: Result<(Lit, Encoding)> = (|| {
-                    let gate = self.cnf.var(&mut b)?;
+                    let gate = self.cnf.var(b)?;
                     self.cnf.gate = Some(gate);
                     let second = encode(
                         &self.cone,
                         &mut self.cnf,
                         self.truth,
                         Some(&self.program_encoding.vars),
-                        &mut b,
+                        b,
                     )?;
                     let mut differences = Vec::new();
                     for i in 0..self.cone.atoms.len() {
@@ -286,11 +293,11 @@ impl Engine {
                         }
                         let a = self.program_encoding.vars[i];
                         let z = second.vars[i];
-                        let left = self.cnf.and(&[a, !z], &mut b)?;
-                        let right = self.cnf.and(&[!a, z], &mut b)?;
+                        let left = self.cnf.and(&[a, !z], b)?;
+                        let right = self.cnf.and(&[!a, z], b)?;
                         differences.extend([left, right]);
                     }
-                    self.cnf.clause(differences, &mut b)?;
+                    self.cnf.clause(differences, b)?;
                     Ok((gate, second))
                 })();
                 match built {
@@ -303,7 +310,7 @@ impl Engine {
             }
             loop {
                 let gate = self.pair_encoding.as_ref().unwrap().0;
-                if !self.solve(&[self.active, gate], conflicts, propagations, &mut b)? {
+                if !self.solve(&[self.active, gate], conflicts, propagations, b)? {
                     return Ok(Uniqueness::AtMostOne);
                 }
                 let mut pair = Vec::new();
@@ -320,7 +327,7 @@ impl Engine {
                         .iter()
                         .map(|l| self.cnf.solver.value_lit(*l) == lbool::TRUE)
                         .collect::<Vec<_>>();
-                    let unfounded = least_unfounded(&self.cone, &values, &mut b)?;
+                    let unfounded = least_unfounded(&self.cone, &values, b)?;
                     if unfounded.is_empty() {
                         pair.push(self.model(Mode::Program, &values));
                         continue;
@@ -332,7 +339,7 @@ impl Engine {
                         "refinements",
                     )?;
                     self.cnf.gate = Some(if side == 0 { self.active } else { gate });
-                    if let Err(e) = refine(&self.cone, e, unfounded, &mut self.cnf, &mut b) {
+                    if let Err(e) = refine(&self.cone, e, unfounded, &mut self.cnf, b) {
                         self.append_failed = Some(e.clone());
                         return Err(e);
                     }
@@ -343,7 +350,7 @@ impl Engine {
                 if !refined {
                     let second = pair.pop().unwrap();
                     let first = pair.pop().unwrap();
-                    let observation = first.observation(&mut b)?;
+                    let observation = first.observation(b)?;
                     return Ok(Uniqueness::Multiple {
                         observation,
                         first,
@@ -352,6 +359,7 @@ impl Engine {
                 }
             }
         })();
+        self.cnf.solver.cb_mut().timeout = timeout;
         self.stats.variables = self.cnf.solver.num_vars() as usize;
         self.stats.clauses = self.cnf.clauses;
         self.stats.literals = self.cnf.literals;

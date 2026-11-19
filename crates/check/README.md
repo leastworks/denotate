@@ -823,10 +823,18 @@ and throttled progress expose cube widths, distinct inputs, whole-program encode
 input support and exclusion/selector emission; `scopes` adds per-cone counters,
 processing position and result/eligibility state, with `components_total` and an optional
 fallback reason. Component ordinals identify this prepared graph only. Measurements
-do not change cube selection. Uniqueness lazily adds a second program
-encoding sharing inputs and asks for a difference in derived truth; both models must
-pass reduct validation. Its selector and loop clauses cannot constrain later world
-queries. No original rules are rewritten or admitted by these checks.
+do not change cube selection.
+
+Global uniqueness reuses completed negative-cone proofs from this check. If all are
+existent and unique, no global pair query is needed. Otherwise it queries the downstream
+closure of uncertified negative components plus upstream dependencies, excluding
+unrelated positive work. Unclassified components stay in scope, including when existence
+is skipped or incomplete. A scoped pair must extend through two full-program,
+reduct-validated queries before it becomes a counterexample. An absent or inconclusive
+extension triggers the whole-program pair query with the remaining phase allowance.
+`UniquenessStats` reports scope, downstream component ordinals, encoded atoms/inputs,
+query attempts and fallback reason. Proofs are invocation-local, not extracted from
+those measurements. Selectors and loop clauses cannot constrain later world queries. No original rules are rewritten or admitted by these checks.
 
 `denotate-presentation::emptiness_finding` shares the ordinary emptiness wording,
 identity and derivation placement. A SAT example's negative premises are absences

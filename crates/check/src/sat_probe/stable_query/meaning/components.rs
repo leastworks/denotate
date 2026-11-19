@@ -2,16 +2,27 @@ use super::*;
 
 /// A compact, dependency-closed original program, with its own completion and
 /// refinement gate. U/W remain in the shared world encoding, never in this cone.
-struct Scope {
-    cone: Cone,
-    global: Vec<usize>,
+pub(super) struct Scope {
+    pub(super) cone: Cone,
+    pub(super) global: Vec<usize>,
     gate: Lit,
     encoding: Encoding,
 }
+pub(super) struct ScopedModels {
+    pub(super) world: Model,
+    pub(super) first: Vec<bool>,
+    pub(super) second: Option<Vec<bool>>,
+}
 impl Engine {
     fn component_scope(&mut self, root: usize, b: &mut Budget<'_>) -> Result<Scope> {
+        self.components_scope(vec![root], b)
+    }
+    pub(super) fn components_scope(
+        &mut self,
+        mut pending: Vec<usize>,
+        b: &mut Budget<'_>,
+    ) -> Result<Scope> {
         let mut reached = BTreeSet::new();
-        let mut pending = vec![root];
         let mut atoms = BTreeSet::new();
         let mut rules = BTreeSet::new();
         while let Some(i) = pending.pop() {
@@ -84,7 +95,7 @@ impl Engine {
         pins: &[Lit],
         pair: Option<(Lit, &Encoding)>,
         b: &mut Budget<'_>,
-    ) -> Result<Option<Vec<bool>>> {
+    ) -> Result<Option<ScopedModels>> {
         if let Some(e) = &self.append_failed {
             return Err(e.clone());
         }
@@ -110,7 +121,9 @@ impl Engine {
                 if !self.solve(&assumptions, conflicts, propagations, b)? {
                     return Ok(None);
                 }
-                let mut candidate = None;
+                let mut world = None;
+                let mut first = None;
+                let mut second = None;
                 let mut refined = false;
                 // W can itself contain positive recursion. Validate it too: its
                 // completion alone could otherwise admit forbidden input worlds.
@@ -145,12 +158,20 @@ impl Engine {
                         refined = true;
                         break;
                     }
-                    if gate == Some(scope.gate) {
-                        candidate = Some(values);
+                    if gate.is_none() {
+                        world = Some(self.model(Mode::World, &values));
+                    } else if gate == Some(scope.gate) {
+                        first = Some(values);
+                    } else {
+                        second = Some(values);
                     }
                 }
                 if !refined {
-                    return Ok(candidate);
+                    return Ok(Some(ScopedModels {
+                        world: world.unwrap(),
+                        first: first.unwrap(),
+                        second,
+                    }));
                 }
             }
         })();
@@ -159,6 +180,13 @@ impl Engine {
     }
 
     fn scope_unique(&mut self, scope: &Scope, b: &mut Budget<'_>) -> Result<bool> {
+        Ok(self.scope_pair(scope, b)?.is_none())
+    }
+    pub(super) fn scope_pair(
+        &mut self,
+        scope: &Scope,
+        b: &mut Budget<'_>,
+    ) -> Result<Option<ScopedModels>> {
         let built: Result<(Lit, Encoding)> = (|| {
             let gate = self.cnf.var(b)?;
             self.cnf.gate = Some(gate);
@@ -190,15 +218,14 @@ impl Engine {
                 return Err(e);
             }
         };
-        Ok(self
-            .scoped_query(scope, &[], Some((gate, &second)), b)?
-            .is_none())
+        self.scoped_query(scope, &[], Some((gate, &second)), b)
     }
 
     pub(super) fn decomposed_existence(
         &mut self,
         options: &CheckOptions,
         stats: &mut ExistenceStats,
+        unique_cones: &mut BTreeSet<usize>,
         b: &mut Budget<'_>,
     ) -> Result<Existence> {
         b.charge(
@@ -258,6 +285,9 @@ impl Engine {
                     stats.scopes.last_mut().unwrap().state = "checking-eligibility";
                     self.limits.progress.sat_existence(stats);
                     determined[i] = self.scope_unique(&scope, b)?;
+                    if determined[i] {
+                        unique_cones.insert(i);
+                    }
                 }
                 Ok(outcome)
             })();
@@ -324,7 +354,7 @@ impl Engine {
                 let Some(values) = self.scoped_query(scope, &pins, None, b)? else {
                     return Ok(Existence::NoMeaning(world.observation(b)?));
                 };
-                let local_cover = cubes::certified(&scope.cone, &values, b)?;
+                let local_cover = cubes::certified(&scope.cone, &values.first, b)?;
                 b.charge(local_cover.len(), "SAT component cube")?;
                 // Map only the certified input literals back to the shared world
                 // encoding; derived local indices never escape this scope.

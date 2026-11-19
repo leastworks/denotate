@@ -1484,6 +1484,15 @@ Numeric progress snapshots use the existing
 250 ms throttle, forcing the initial sample and scope completion/exhaustion. Final
 statistics are also retained in the report; instrumentation does not choose cubes.
 
+Uniqueness has its own single phase allowance. Completed local cone proofs can discharge
+it without another pair query; otherwise a downstream/upstream-closed scope excludes
+unrelated work. Scope construction, pair search, full-model extensions and any
+whole-program fallback all use the remaining uniqueness work/deadline allowance and
+ordinary per-query caps. Skipped or unfinished existence proofs never narrow the scope.
+The callback deadline cap is restored after each query, including fallback, so it cannot
+shorten a later check. No limits or input-order policy changed. `uniquenessStats` records
+the scope and attempted pair/extension queries separately from existence counters.
+
 The diagnostic sample uses the existing emptiness policy: three examples in semantic
 key order by default, or a caller-selected bound/all examples. Each example's
 derivation and dependency-input annotation have separate fresh diagnostic allowances;

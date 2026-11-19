@@ -796,6 +796,9 @@ fn component_existence_uses_local_meaning_not_whole_program_uniqueness() {
                     matches!(m.uniqueness, Uniqueness::Multiple { .. }),
                     multiple
                 );
+                let uniqueness_stats = m.uniqueness_stats.as_ref().unwrap();
+                assert_eq!(uniqueness_stats.scope, "downstream-cone");
+                assert!(uniqueness_stats.fallback_reason.is_none());
                 assert_eq!(m.existence_stats.unwrap().fallback.is_some(), fallback);
             }
         }
@@ -927,4 +930,97 @@ fn component_exhaustion_keeps_fixed_failures_and_has_no_reusable_partial_cover()
             .unwrap()
             .unique_everywhere()
     );
+}
+
+#[test]
+fn scoped_global_uniqueness_ignores_512_unrelated_positive_pairs() {
+    let mut text = String::from(
+        "input flag(); relation a(); relation b(); a():-flag(); a():-!b(); b():-!a();\n",
+    );
+    for i in 0..512 {
+        text.push_str(&format!("input x{i}(); relation y{i}(); y{i}():-x{i}();\n"));
+    }
+    text.push_str("verification v { assumptions: []; obligations: []; }");
+    let p = load_text(&text);
+    let mut warm = prepare(&p, "v");
+    for e in [&mut warm, &mut prepare(&p, "v")] {
+        for mode in [
+            MeaningMode::Full,
+            MeaningMode::Uniqueness,
+            MeaningMode::Full,
+        ] {
+            let m = e
+                .check(
+                    &p.keys,
+                    &CheckOptions {
+                        meaning: mode,
+                        ..Default::default()
+                    },
+                )
+                .unwrap()
+                .meaning
+                .unwrap();
+            if mode == MeaningMode::Full {
+                assert!(matches!(m.existence, Existence::EveryWorld));
+            } else {
+                assert!(matches!(m.existence, Existence::NotAnalysed));
+            }
+            let Uniqueness::Multiple {
+                observation,
+                first,
+                second,
+            } = m.uniqueness
+            else {
+                panic!("{m:?}")
+            };
+            assert!(first.differences(&second).unwrap().any(|(_, a, b)| a != b));
+            for i in 0..512 {
+                let x = atom(&p, &format!("x{i}"), &[]);
+                let y = atom(&p, &format!("y{i}"), &[]);
+                let value = observation.present.contains(&x);
+                for model in [&first, &second] {
+                    assert_eq!(model.value(&x), Some(value));
+                    assert_eq!(model.value(&y), Some(value));
+                }
+            }
+            let s = m.uniqueness_stats.unwrap();
+            assert_eq!(s.scope, "downstream-cone");
+            assert!(s.atoms < 512);
+            assert!(s.fallback_reason.is_none());
+        }
+    }
+}
+
+#[test]
+fn completed_cone_proofs_establish_global_uniqueness_without_another_pair_query() {
+    let p = load_text(
+        "input x(); relation a(); relation b(); a():-x(),!b(); b():-!x(),!a();
+        relation r(); r():-a(); verification v { assumptions: []; obligations: []; }",
+    );
+    let mut e = prepare(&p, "v");
+    for mode in [
+        MeaningMode::Full,
+        MeaningMode::Uniqueness,
+        MeaningMode::Full,
+    ] {
+        let m = e
+            .check(
+                &p.keys,
+                &CheckOptions {
+                    meaning: mode,
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .meaning
+            .unwrap();
+        assert!(matches!(m.uniqueness, Uniqueness::AtMostOne));
+        let s = m.uniqueness_stats.unwrap();
+        if mode == MeaningMode::Full {
+            assert_eq!(s.scope, "local-proofs");
+            assert_eq!(s.pair_queries, 0);
+        } else {
+            assert_eq!(s.scope, "downstream-cone");
+        }
+    }
 }

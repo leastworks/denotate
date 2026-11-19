@@ -1195,3 +1195,16 @@ only describes eligibility and is not a global finding. `fallbackReason` is null
 an explanation of why the search used the full program. Component ordinals are
 invocation-local, not stable semantic keys. Statistics are null when no existence
 search ran. These fields do not change the editor's BDD protocol or finding identities.
+
+
+The SAT CLI also reports `meaning.uniquenessStats` (null for skipped meaning or the
+original stratification shortcut). `scope` is `preparing`, `local-proofs`,
+`downstream-cone`, or `whole-program` for fallback. `components` lists the downstream
+closure's residual component ordinals; `atoms` and `inputs` count the encoded scope
+including its upstream. The latter counts retain the attempted scoped query's sizes
+if fallback occurs. `pairQueries` and `extensionQueries` count attempts in the global
+uniqueness phase, excluding existence's local eligibility queries. `fallbackReason`
+is null or explains an absent/inconclusive full-program extension. The same shape
+appears in uniqueness progress and the human CLI's `Uniqueness search` line.
+A scoped pair is never published without two full-program reduct-validated extensions;
+meaning evidence and finding identities keep whole-program scope.

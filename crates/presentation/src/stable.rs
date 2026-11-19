@@ -107,7 +107,7 @@ pub fn stable_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> Resul
                 json!({"state":"multiple-meanings","world":world(observation)?,"differences":differences})
             }
         };
-        json!({"scope":"whole-program","mode":m.mode.label(),"existence":existence,"uniqueness":uniqueness, "existenceStats":m.existence_stats.as_ref().map(stable_existence_stats)})
+        json!({"scope":"whole-program","mode":m.mode.label(),"existence":existence,"uniqueness":uniqueness, "existenceStats":m.existence_stats.as_ref().map(stable_existence_stats), "uniquenessStats":m.uniqueness_stats.as_ref().map(stable_uniqueness_stats)})
     } else {
         json!({"state":"not-analysed"})
     };
@@ -174,4 +174,10 @@ fn stable_cube_stats(s: &denotate_check::stable_query::CubeStats) -> Value {
     json!({"cubes":s.cubes,"inputsPerCube":{"min":s.min_inputs,"mean":s.mean_inputs(),"max":s.max_inputs},
         "supportSize":s.support_size,"distinctInputs":s.distinct_inputs,"distinctCubeLiterals":s.distinct_cube_literals,
         "emittedExclusionLiterals":s.emitted_exclusion_literals,"emittedSelectorLiterals":s.emitted_selector_literals})
+}
+
+/// Scope measurements for the global uniqueness check, separate from existence.
+pub fn stable_uniqueness_stats(s: &denotate_check::stable_query::UniquenessStats) -> Value {
+    json!({"scope":s.scope,"components":s.components,"atoms":s.atoms,"inputs":s.inputs,
+        "pairQueries":s.pair_queries,"extensionQueries":s.extension_queries,"fallbackReason":s.fallback_reason})
 }

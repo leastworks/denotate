@@ -1421,11 +1421,43 @@ its readers. W's own reduct is validated in scoped queries, including eligibilit
 Ambiguous upstream triggers a whole-program existence fallback with the remaining
 budget. Local ambiguity is not a global finding: downstream equations can eliminate
 an alternative (`a :- !b; b :- !a; c :- a, !c`), and individually satisfiable downstream
-cones can be incompatible (add `d :- b, !d`). Global uniqueness still uses two full
-program models. Coverage from one component never excludes a world from another.
+cones can be incompatible (add `d :- b, !d`). Global uniqueness requires two full
+program models, obtained as described below. Coverage from one component never excludes a world from another.
 One aggregate work/deadline/world allowance covers eligibility, certificates, all
 component searches and fallback; per-query caps and cumulative engine CNF caps remain.
 No partial result changes a verdict or erases earlier property findings.
+
+## Global SAT uniqueness reuses local proofs and scopes possible differences
+
+Completed existence/uniqueness proofs for negative cones are passed directly to
+uniqueness within one check; statistics and cached reports are not proof inputs.
+If every negative cone is proved existent and unique in every permitted world,
+provider-first composition proves global uniqueness: positive components have a
+unique least extension given their upstream. No further pair query is needed.
+
+Otherwise take the downstream closure X of negative components without a completed
+local proof, then include X's upstream dependencies for encoding. This deliberately
+includes unclassified components when existence was skipped, exhausted or stopped
+after a failure. Outside X, every negative ancestor is certified, so two whole-program
+stable models for the same permitted world agree there. By the splitting-set property,
+their restrictions to the dependency-closed query scope are stable models too. Any
+global difference must therefore appear in this scope. No scoped pair proves global
+at-most-one, without claiming existence.
+
+A scoped pair alone is not reported as global ambiguity. Pin its complete input
+observation and each scoped interpretation in separate full-program queries. Both
+extensions must pass the existing reduct validation, producing the same whole-program
+witness contract as before. If either extension is absent or inconclusive, use the
+whole-program pair query with the remaining uniqueness allowance. Cancellation and
+partial-append poisoning keep their existing behavior. Correct, complete local proofs
+normally ensure extension; the validation boundary remains defensive and is tested
+with a pair from a deliberately smaller scope that omits an inconsistent component.
+
+The uniqueness phase shares one work/deadline allowance across scope construction,
+the scoped pair, extension queries and fallback. Each query retains the existing
+solver caps, and emitted CNF still accumulates across the engine. No fresh phase
+allowance is granted on fallback. These are SAT CLI optimizations; BDD admission,
+obligation semantics and editor finding identities are unchanged.
 
 ## A larger local cone need not prove more under bounded resources
 

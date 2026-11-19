@@ -13,6 +13,7 @@ mod oracle;
 pub use checking::*;
 pub use meaning::{
     CubeStats, Existence, ExistenceScopeStats, ExistenceStats, Meaning, MeaningMode, Uniqueness,
+    UniquenessStats,
 };
 pub use oracle::*;
 
