@@ -1370,3 +1370,31 @@ mode. Sessions and editors are not switched; their cache/protocol integration is
 later increment. The ordinary exit-code precedence and advisory treatment of notices
 stay unchanged. Private-corpus comparisons remain reviewer follow-up, not a claimed
 performance result of the in-repo tests.
+
+
+## Expression proofs separate availability from truth and meaning
+
+The experimental stable oracle accepts a path context C and available values K.
+A value in K is known at runtime; it need not be true. For `x :- a, !b`, both a
+and b being available permits the expression `a && !b`. Merely a being available
+does not: two stable interpretations can agree on a and disagree on x. The driver
+owns readiness; the oracle returns expressions over K without imposing a schedule
+or additional IR ordering declarations.
+
+Feasibility, constants and equivalences are relative to full-program stable models
+under the selected verification and C. An empty model set is reported as infeasible,
+never as a vacuous constant/equivalence proof. This is different from an empty set of
+permitted inputs: `p :- flag, !p` has no full-program model for `flag = true` although
+that input is permitted. Likewise an expression can be valid in a program with
+multiple meanings. Existence and uniqueness remain independent checks for the
+caller; successful expression extraction does not discharge them.
+
+Supplied equivalences use SAT mismatch queries with reduct-confirmed counterexamples.
+Synthesis checks constants and then branches on the declared available values,
+sharing identical Boolean DAG nodes. Every feasible leaf has a proven constant;
+empty branches are don't-cares inside C. A pair of stable interpretations agreeing
+on all of K but differing on x proves K insufficient. A search cutoff does not.
+The initial implementation is bounded and deterministic for a fixed value order,
+with no recursive call stack or global BDD. It reuses exact verification-local
+queries rather than introducing unsat-core or cross-context proof reuse. More
+advanced synthesis and memoization need measured workloads, not new defaults here.

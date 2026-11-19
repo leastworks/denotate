@@ -1457,3 +1457,26 @@ from residual membership, independent of selected assumptions. All fixed obligat
 are evaluated directly, including coverage/exactly-one; symbolic coverage and notices
 remain deferred. Optional uniqueness attribution uses separate per-tuple allowances.
 This is a corpus-validation mode, not a feature-parity or performance claim.
+
+
+### Stable expression oracle allowances
+
+Each `constant`, `equivalent` or `synthesize` call shares one checker work/deadline
+allowance across its primitive queries. `OracleLimits` defaults to 256 queries,
+128 split branches, 1,024 expression nodes and 64 distinct available values.
+These are per-call bounds, configurable through the Rust API. Cached queries still
+count toward the query allowance. Each primitive search keeps the existing
+solve/refinement/poll/conflict/propagation caps, while emitted CNF totals continue
+to accumulate across the engine. A partially emitted expression query poisons the
+engine just like a partially emitted ordinary query; rebuild before reuse.
+
+Synthesis tries constants first, then a bounded iterative Shannon search in the
+caller's available-value order. Shared nodes and equal branches reduce the result;
+this is not cost-based synthesis or a minimality guarantee. Infeasible branches are
+don't-cares only within the stated stable-model context. Exhaustion returns
+inconclusive, not non-expressibility or a proof. A non-expressibility answer requires
+two validated interpretations that agree on every available value and disagree on
+the target. Models, exact subquery answers and valid loop refinements use the existing
+verification-local retention rules. Supplied-expression mismatch queries are not
+separately memoized; no unsat-core generalization is enabled. No corpus performance
+claim or ordinary BDD/default-limit change accompanies this API increment.

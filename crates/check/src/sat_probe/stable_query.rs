@@ -9,8 +9,10 @@ mod build;
 mod checking;
 mod meaning;
 mod obligations;
+mod oracle;
 pub use checking::*;
 pub use meaning::{Existence, Meaning, Uniqueness};
+pub use oracle::*;
 
 #[derive(Debug, Clone)]
 pub struct QueryLimits {
@@ -377,41 +379,7 @@ impl Engine {
                 self.stats.cache_hit = true;
                 return Ok(cached.answer.clone());
             }
-            let map = |l: i32, e: &Encoding| {
-                let i = l.unsigned_abs() as usize - 1;
-                let value = if i == self.cone.atoms.len() {
-                    self.truth
-                } else {
-                    e.vars[i]
-                };
-                if l > 0 { value } else { !value }
-            };
-            let e = if mode == Mode::Program {
-                &self.program_encoding
-            } else {
-                &self.world_encoding
-            };
-            // Put even pins behind a query selector, so all query exclusions have
-            // one lifetime and no query can poison another query's base clauses.
-            let appended: Result<Lit> = (|| {
-                let gate = self.cnf.var(b)?;
-                self.cnf.gate = Some(gate);
-                for l in &key.pins {
-                    self.cnf.clause(vec![map(*l, e)], b)?;
-                }
-                for cube in &key.exclude {
-                    self.cnf
-                        .clause(cube.iter().map(|l| !map(*l, e)).collect(), b)?;
-                }
-                Ok(gate)
-            })();
-            let gate = match appended {
-                Ok(g) => g,
-                Err(e) => {
-                    self.append_failed = Some(e.clone());
-                    return Err(e);
-                }
-            };
+            let gate = self.append_query(&key, b)?;
             let pins = [
                 if mode == Mode::Program {
                     self.active
@@ -438,6 +406,40 @@ impl Engine {
                 )?))
             }
         }
+    }
+    // Pins and exclusions share one isolated lifetime, including when the oracle
+    // appends an expression mismatch under the same selector.
+    fn append_query(&mut self, key: &QueryKey, b: &mut Budget<'_>) -> Result<Lit> {
+        let e = if key.mode == Mode::Program {
+            &self.program_encoding
+        } else {
+            &self.world_encoding
+        };
+        let map = |l: i32| {
+            let i = l.unsigned_abs() as usize - 1;
+            let value = if i == self.cone.atoms.len() {
+                self.truth
+            } else {
+                e.vars[i]
+            };
+            if l > 0 { value } else { !value }
+        };
+        let appended: Result<Lit> = (|| {
+            let gate = self.cnf.var(b)?;
+            self.cnf.gate = Some(gate);
+            for l in &key.pins {
+                self.cnf.clause(vec![map(*l)], b)?;
+            }
+            for cube in &key.exclude {
+                self.cnf
+                    .clause(cube.iter().map(|l| !map(*l)).collect(), b)?;
+            }
+            Ok(gate)
+        })();
+        if let Err(ref e) = appended {
+            self.append_failed = Some(e.clone());
+        }
+        appended
     }
     fn search(
         &mut self,

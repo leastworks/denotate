@@ -452,3 +452,17 @@ finding helpers as BDD checking. The shared presenter owns status classification
 structured meaning evidence; `ir-text` binds source locations, and the CLI owns IO,
 option compatibility and exit-code aggregation. Fixed obligations do not require a
 whole-program model; their evidence scope is explicitly the fixed dependency cone.
+
+
+The stable-query expression oracle is checker-owned, separate from the future
+execution driver. Its context is a conjunction of pins minus excluded cubes;
+its available-value list is a caller-supplied runtime capability, not an additional
+truth assumption. Constants, supplied equivalences and bounded synthesized Boolean
+DAGs are justified against full-program stable interpretations. SAT mismatch queries
+use isolated selectors and the existing reduct verifier. Iterative Shannon synthesis
+uses only available values for branches, sharing identical expression nodes and
+checking every feasible leaf for a constant. It does not establish readiness,
+whole-program totality or uniqueness. Expressions can be evaluated without access to
+the checker; their reachable leaves are their runtime dependencies. Exact context
+memoization remains inside the immutable verification engine; no execution plans or
+cross-session expression reuse are introduced.

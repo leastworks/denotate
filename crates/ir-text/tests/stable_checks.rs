@@ -613,3 +613,77 @@ fn uniqueness_queries_and_shared_evidence_agree_with_bdd_on_unique_meanings() {
         }
     }
 }
+
+#[test]
+fn oracle_respects_input_universe_and_returns_runtime_evaluable_expressions() {
+    let p = load_text(
+        "sort S; const a,b,c:S; domain S=[a,b,c];
+        relation eligible(s:S); eligible(a); eligible(b);
+        input value(s:S) within eligible exactly_one(group_by:());
+        relation selected(); selected():-value(b);
+        verification v{assumptions:[];obligations:[];}",
+    );
+    let mut e = prepare(&p, "v"); // BDD variables, tasks and nodes all zero.
+    let a = atom(&p, "value", &["a"]);
+    let b = atom(&p, "value", &["b"]);
+    let c = atom(&p, "value", &["c"]);
+    let target = atom(&p, "selected", &[]);
+    let q = Query::default();
+    let l = OracleLimits::default();
+    assert!(matches!(
+        e.constant(&q, &c, &l).unwrap(),
+        ConstantAnswer::Constant(false)
+    ));
+    let SynthesisAnswer::Expression(expr) = e.synthesize(&q, &target, &[a.clone()], &l).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(
+        expr.dependencies().unwrap(),
+        std::collections::BTreeSet::from([a.clone()])
+    );
+    assert_eq!(expr.evaluate(|_| Some(true)), Some(false));
+    assert_eq!(expr.evaluate(|_| Some(false)), Some(true));
+    assert!(matches!(
+        e.equivalent(&q, &target, &[a.clone()], &expr, &l).unwrap(),
+        EquivalenceAnswer::Equivalent
+    ));
+    let impossible = Query {
+        pins: vec![(a, true), (b, true)],
+        exclude: vec![],
+    };
+    assert!(matches!(e.feasible(&impossible).unwrap(), Answer::NoModel));
+}
+#[test]
+fn oracle_results_do_not_replace_verification_meaning_or_property_checks() {
+    let p = load_text(
+        "input a(); input b(); relation x(); x():-a(),!b();
+        relation p(); relation q(); p():-!q(); q():-!p();
+        obligation clean:empty(x);
+        verification v{assumptions:[];obligations:[clean];}",
+    );
+    let mut warm = prepare(&p, "v");
+    let target = atom(&p, "x", &[]);
+    let k = [atom(&p, "a", &[]), atom(&p, "b", &[])];
+    let l = OracleLimits::default();
+    let SynthesisAnswer::Expression(expr) =
+        warm.synthesize(&Query::default(), &target, &k, &l).unwrap()
+    else {
+        panic!()
+    };
+    assert!(matches!(
+        warm.equivalent(&Query::default(), &target, &k, &expr, &l)
+            .unwrap(),
+        EquivalenceAnswer::Equivalent
+    ));
+    for mut e in [warm, prepare(&p, "v")] {
+        let r = e.check(&p.keys, &CheckOptions::default()).unwrap();
+        assert!(!r.proved());
+        assert_eq!(empty(&r).present, 1);
+        assert!(empty(&r).complete());
+        assert!(matches!(
+            r.meaning.unwrap().uniqueness,
+            Uniqueness::Multiple { .. }
+        ));
+    }
+}

@@ -755,8 +755,9 @@ Answers are a confirmed model, `NoModel` (no stable model satisfies this query),
 `Inconclusive` with its resource/phase. Cancellation and invalid requests are errors.
 Preparation can also fail or exhaust its limits. `NoModel` is not a uniqueness,
 totality, consistency classification or obligation verdict. `Engine::check` provides
-those classifications separately, as described below. Expression extraction and
-session/editor integration remain future work; ordinary checking still uses BDDs.
+those classifications separately, as described below. The expression oracle is
+described below; session/editor integration remains future work. Ordinary checking
+still uses BDDs.
 
 Models expose residual values plus lazily resolved fixed values; world answers
 expose inputs only. Exact canonical query keys include the query mode, pins and
@@ -821,3 +822,53 @@ unique meaning for a proof.
 Uniqueness source attribution can exhaust independently of checking. Its
 `Counterexample::incomplete_attribution` records missing tuple derivations, while
 confirmed tuples remain failures. Ordinary BDD constructors leave this map empty.
+
+
+### Stable expression oracle
+
+The same immutable `stable_query::Engine` provides four driver-facing operations:
+
+- `feasible(&context)` returns a stable interpretation, `NoModel` or inconclusive.
+  This is full-program feasibility. Use `worlds` to ask about permitted inputs
+  independently of whether the program has a meaning there.
+- `constant(&context, &target, &allowance)` proves a Boolean constant or returns
+  stable interpretations of both values. An infeasible context is a separate answer.
+- `equivalent(&context, &target, &available, &expression, &allowance)` checks a
+  supplied expression by asking SAT for a mismatch. A counterexample passes the
+  original reduct validation; an infeasible context is never a vacuous success.
+- `synthesize(&context, &target, &available, &allowance)` first checks for constants,
+  then splits on available values in caller-supplied order. It returns an expression,
+  two interpretations agreeing on all available values but differing on the target,
+  infeasibility, or inconclusive. Exhaustion is not evidence of non-expressibility.
+
+`Query` pins and exclusions describe the complete path context. Available values
+are **not** pinned true: the execution driver promises that their runtime Boolean
+values are known. They may be derived atoms. The oracle can reason through any
+program definition, but the returned expression references only the supplied values.
+It does not decide their readiness or schedule computations. A proof is relative to
+stable interpretations of the context; it does not establish existence or uniqueness
+in every permitted world. Keep the meaning checks separate.
+
+`Expression` is a topologically ordered Boolean DAG of constants, atoms, not,
+and, or and conditional nodes. Child indices precede parents. Supplied DAGs and
+available atoms are validated even in infeasible contexts. `dependencies()` reports
+reachable leaves; `evaluate()` uses only caller-provided Boolean values, without
+consulting a checker model. Synthesized expressions share identical nodes, omit
+identical branches and remove unreachable nodes. Branches with no stable models are
+don't-cares. This is a deterministic reduced decision DAG for the supplied order,
+not a claim of a minimal expression or equivalence outside its context.
+
+For example, `x() :- a(), !b();` with both input atoms available synthesizes the
+function `a && !b`; neither available atom is assumed true. With only `a` available,
+the oracle returns two interpretations with the same `a` but different `x`. For
+`p() :- flag(), !p();`, the context `flag = true` is infeasible for full-program
+models even though it is a permitted input world. A caller must not mistake that
+answer for input impossibility.
+
+`OracleLimits` bounds compound queries, split branches, expression nodes and available
+values. One work/deadline allowance covers the entire operation; primitive solves
+retain the existing SAT limits. Exact context queries reuse the engine's bounded
+cache. Supplied-expression mismatch encodings are selector-isolated and currently
+rebuilt on each call; no separate expression cache or unsat-core generalization is
+introduced. All state belongs to one prepared verification. There is no driver,
+CLI, editor or session integration for these oracle operations yet.
