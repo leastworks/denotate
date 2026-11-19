@@ -1,10 +1,15 @@
 //! Experimental stable queries for one immutable program and named verification.
-//! No BDD conditions, admission, checking verdicts, or cross-session cache reuse.
+//! No BDD conditions, admission, or cross-session cache reuse.
 use super::*;
 use denotate_ir::{Corpus, SemanticKeys, VerificationId};
 use existence::{Encoding, encode, refine, world_cone};
 use std::{collections::VecDeque, sync::Arc};
+mod attribution;
 mod build;
+mod checking;
+mod meaning;
+pub use checking::*;
+pub use meaning::{Existence, Meaning, Uniqueness};
 
 #[derive(Debug, Clone)]
 pub struct QueryLimits {
@@ -109,6 +114,10 @@ pub struct Engine {
     world_cone: Cone,
     cnf: Cnf,
     program_encoding: Encoding,
+    pair_encoding: Option<(Lit, Encoding)>,
+    verification: VerificationId,
+    selection: Vec<(denotate_ir::ObligationId, Cardinality, RelationId)>,
+    notices: BTreeSet<denotate_ir::NoticeId>,
     world_encoding: Encoding,
     active: Lit,
     truth: Lit,
@@ -201,7 +210,21 @@ impl Engine {
                 .map(|r| r.id)
                 .collect(),
         );
+        let declaration = corpus.verification(verification).unwrap();
+        let selection = declaration
+            .obligations
+            .iter()
+            .map(|id| {
+                let r = &corpus.obligation(*id).unwrap().requirement;
+                (*id, r.kind(), r.relation())
+            })
+            .collect();
+        let notices = declaration.notices.iter().copied().collect();
         Ok(Self {
+            verification,
+            selection,
+            notices,
+            pair_encoding: None,
             program,
             input_relations,
             cone,
@@ -374,57 +397,20 @@ impl Engine {
         propagations: u64,
         b: &mut Budget<'_>,
     ) -> Result<Answer> {
-        let c = if mode == Mode::Program {
-            &self.cone
-        } else {
-            &self.world_cone
-        };
-        let e = if mode == Mode::Program {
-            &self.program_encoding
-        } else {
-            &self.world_encoding
-        };
         loop {
-            b.tick("SAT stable query")?;
-            self.cnf.solver.cb().check()?;
-            b.room(
-                self.stats.solves,
-                self.config.max_solves,
-                "SAT stable query",
-                "solves",
-            )?;
-            self.stats.solves += 1;
-            let answer = self.cnf.solver.solve_limited(pins);
-            self.cnf.solver.cb().check()?;
-            for (used, limit, resource) in [
-                (
-                    self.cnf.solver.num_conflicts() - conflicts,
-                    self.config.max_conflicts,
-                    "conflicts",
-                ),
-                (
-                    self.cnf.solver.num_propagations() - propagations,
-                    self.config.max_propagations,
-                    "propagations",
-                ),
-            ] {
-                if used > limit {
-                    return Err(CheckError::limit(
-                        "SAT stable query",
-                        resource,
-                        limit.try_into().unwrap_or(usize::MAX),
-                        Some(used.try_into().unwrap_or(usize::MAX)),
-                    ));
-                }
-            }
-            if answer == lbool::FALSE {
+            if !self.solve(pins, conflicts, propagations, b)? {
                 return Ok(Answer::NoModel);
             }
-            if answer != lbool::TRUE {
-                return Err(CheckError::Internal(
-                    "SAT stopped without an exhaustion reason",
-                ));
-            }
+            let c = if mode == Mode::Program {
+                &self.cone
+            } else {
+                &self.world_cone
+            };
+            let e = if mode == Mode::Program {
+                &self.program_encoding
+            } else {
+                &self.world_encoding
+            };
             b.charge(e.vars.len(), "SAT stable assignment")?;
             let values = e
                 .vars
@@ -433,18 +419,7 @@ impl Engine {
                 .collect::<Vec<_>>();
             let unfounded = least_unfounded(c, &values, b)?;
             if unfounded.is_empty() {
-                let mut bits = vec![0; self.cone.atoms.len().div_ceil(64)];
-                for (i, v) in values.iter().take(self.cone.atoms.len()).enumerate() {
-                    if *v {
-                        bits[i / 64] |= 1u64 << (i % 64);
-                    }
-                }
-                return Ok(Answer::Model(Model {
-                    program: self.program.clone(),
-                    input_relations: self.input_relations.clone(),
-                    values: bits.into(),
-                    mode,
-                }));
+                return Ok(Answer::Model(self.model(mode, &values)));
             }
             b.room(
                 self.stats.refinements,
@@ -464,6 +439,69 @@ impl Engine {
                 return Err(error);
             }
             self.stats.refinements += 1;
+        }
+    }
+    fn solve(
+        &mut self,
+        pins: &[Lit],
+        conflicts: u64,
+        propagations: u64,
+        b: &mut Budget<'_>,
+    ) -> Result<bool> {
+        b.tick("SAT stable query")?;
+        self.cnf.solver.cb().check()?;
+        b.room(
+            self.stats.solves,
+            self.config.max_solves,
+            "SAT stable query",
+            "solves",
+        )?;
+        self.stats.solves += 1;
+        let answer = self.cnf.solver.solve_limited(pins);
+        self.cnf.solver.cb().check()?;
+        for (used, limit, resource) in [
+            (
+                self.cnf.solver.num_conflicts() - conflicts,
+                self.config.max_conflicts,
+                "conflicts",
+            ),
+            (
+                self.cnf.solver.num_propagations() - propagations,
+                self.config.max_propagations,
+                "propagations",
+            ),
+        ] {
+            if used > limit {
+                return Err(CheckError::limit(
+                    "SAT stable query",
+                    resource,
+                    limit.try_into().unwrap_or(usize::MAX),
+                    Some(used.try_into().unwrap_or(usize::MAX)),
+                ));
+            }
+        }
+        if answer == lbool::FALSE {
+            return Ok(false);
+        }
+        if answer != lbool::TRUE {
+            return Err(CheckError::Internal(
+                "SAT stopped without an exhaustion reason",
+            ));
+        }
+        Ok(true)
+    }
+    fn model(&self, mode: Mode, values: &[bool]) -> Model {
+        let mut bits = vec![0; self.cone.atoms.len().div_ceil(64)];
+        for (i, v) in values.iter().take(self.cone.atoms.len()).enumerate() {
+            if *v {
+                bits[i / 64] |= 1u64 << (i % 64);
+            }
+        }
+        Model {
+            program: self.program.clone(),
+            input_relations: self.input_relations.clone(),
+            values: bits.into(),
+            mode,
         }
     }
     fn remember(&mut self, key: QueryKey, answer: &Answer, b: &mut Budget<'_>) -> Result<()> {

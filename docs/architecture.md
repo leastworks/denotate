@@ -435,5 +435,10 @@ admission. It reuses the probe's completion encoder, reduct validation and loop
 refinement. Assumption-only world selection is independent of full-program models:
 program equations and refinements are selector-gated. Immutable-engine query caches
 include mode and the complete pins/exclusions; they never cross verification or
-program boundaries. This is groundwork for semantic queries, not a new path through
-`CheckRequest`, presentation, sessions or editors.
+program boundaries. Its `Engine::check` API combines whole-program existence and
+uniqueness checks with selected emptiness checks, keeping their results separate.
+Emptiness uses the shared report and presentation structures; finite derivations
+are reconstructed from each example's reduct-validated original interpretation
+under an independent diagnostic allowance. Other selected obligation kinds and
+notices are explicitly not analysed. This remains outside `CheckRequest`, sessions,
+CLI and editor publication; no engine setting or protocol change is introduced here.

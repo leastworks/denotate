@@ -271,3 +271,181 @@ fn seeded_recursion_and_its_negation_are_query_order_independent() {
         }
     }
 }
+
+#[test]
+fn whole_program_meaning_and_emptiness_agree_with_exhaustive_tiny_worlds() {
+    let mut seed = 13579u64;
+    let mut next = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        seed as usize
+    };
+    for case in 0..100 {
+        let mut c = Corpus::new();
+        let i = rel(&mut c, "i", true);
+        let j = rel(&mut c, "j", true);
+        let a = rel(&mut c, "a", false);
+        let b = rel(&mut c, "b", false);
+        let d = rel(&mut c, "d", false);
+        let all = [i, j, a, b, d];
+        for _ in 0..7 {
+            let head = all[2 + next() % 3];
+            let body = (0..next() % 4)
+                .map(|_| (all[next() % 5], next() % 2 == 0))
+                .collect::<Vec<_>>();
+            rule(&mut c, head, &body);
+        }
+        let original =
+            GroundProgram::prepare_cartesian(&c, &Domains::new(), &Limits::default()).unwrap();
+        let atoms: Vec<_> = all.into_iter().map(atom).collect();
+        let inputs = BTreeSet::from([atom(i), atom(j)]);
+        let rules: Vec<_> = original.rules().cloned().collect();
+        let worlds = subsets(&inputs.iter().cloned().collect::<Vec<_>>());
+        let expected = worlds
+            .into_iter()
+            .map(|w| {
+                let models = stable_models(&atoms, &inputs, &rules, &w);
+                (w, models)
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut keys = SemanticKeys::default();
+        for r in c.relations() {
+            keys.bind_relation(
+                &c,
+                r.id,
+                RelationKey::Named(QualifiedKey::new("test", r.name.clone())),
+            )
+            .unwrap();
+        }
+        let obligations = [a, b, d].map(|r| {
+            let id = c
+                .empty(format!("empty_{}", c.relation(r).unwrap().name), r, "")
+                .unwrap();
+            (id, r)
+        });
+        let v = c
+            .verification_in(
+                Namespace::default(),
+                "checks",
+                [],
+                obligations.map(|(id, _)| id),
+            )
+            .unwrap();
+        let mut e = Engine::prepare(
+            &c,
+            &Domains::new(),
+            &keys,
+            v,
+            &Limits::default(),
+            QueryLimits::default(),
+        )
+        .unwrap();
+        for _ in 0..2 {
+            let r = e.check(&keys, &CheckOptions::default()).unwrap();
+            assert_eq!(r.context, Context::Permitted);
+            let meaning = r.meaning.as_ref().unwrap();
+            match &meaning.existence {
+                Existence::EveryWorld => {
+                    assert!(expected.values().all(|m| !m.is_empty()), "case {case}")
+                }
+                Existence::NoMeaning(w) => assert!(expected[&w.present].is_empty(), "case {case}"),
+                v => panic!("unexpected {v:?} for tiny case {case}"),
+            }
+            match &meaning.uniqueness {
+                Uniqueness::AtMostOne => {
+                    assert!(expected.values().all(|m| m.len() <= 1), "case {case}")
+                }
+                Uniqueness::Multiple {
+                    observation,
+                    first,
+                    second,
+                } => {
+                    let facts = |m: &Model| {
+                        atoms
+                            .iter()
+                            .filter(|a| m.value(a) == Some(true))
+                            .cloned()
+                            .collect::<BTreeSet<_>>()
+                    };
+                    let left = facts(first);
+                    let right = facts(second);
+                    assert_ne!(left, right);
+                    assert!(expected[&observation.present].contains(&left));
+                    assert!(expected[&observation.present].contains(&right));
+                }
+                v => panic!("unexpected {v:?} for tiny case {case}"),
+            }
+            for (id, relation) in obligations {
+                let tuple = atom(relation);
+                let possible = expected.values().flatten().any(|m| m.contains(&tuple));
+                let empty = &r.emptiness[&id];
+                assert!(empty.complete(), "case {case}");
+                assert_eq!(empty.present, usize::from(possible), "case {case}");
+                for example in &empty.examples {
+                    assert!(
+                        expected[&example.observation.present]
+                            .iter()
+                            .any(|m| m.contains(&tuple))
+                    );
+                    assert!(
+                        matches!(&example.attribution,Some(Attribution::Complete(e)) if e.contains_key(&tuple)),
+                        "case {case}: {example:?}"
+                    );
+                }
+            }
+            assert_eq!(
+                r.proved(),
+                expected.values().all(|m| m.len() == 1)
+                    && r.emptiness.values().all(EmptinessReport::proved)
+            );
+            // Neither pair constraints nor existence exclusions may leak into
+            // later independent queries on the same engine.
+            for world in expected.keys() {
+                let q = Query {
+                    pins: inputs
+                        .iter()
+                        .map(|a| (a.clone(), world.contains(a)))
+                        .collect(),
+                    exclude: vec![],
+                };
+                model(e.worlds(&q).unwrap());
+                assert_eq!(
+                    matches!(e.models(&q).unwrap(), Answer::Model(_)),
+                    !expected[world].is_empty()
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn whole_check_context_cutoffs_are_not_consistency_or_meaning_verdicts() {
+    for deadline in [false, true] {
+        let mut c = Corpus::new();
+        rel(&mut c, "flag", true);
+        let mut e = engine(&mut c, &[]);
+        if deadline {
+            e.limits.timeout = Duration::ZERO
+        } else {
+            e.config.max_solves = 0
+        }
+        let r = e
+            .check(&SemanticKeys::default(), &CheckOptions::default())
+            .unwrap();
+        let Context::Inconclusive(reason) = r.context else {
+            panic!("{r:?}")
+        };
+        assert_eq!(
+            reason.resource,
+            if deadline { "deadline" } else { "solves" }
+        );
+        assert!(r.meaning.is_none());
+        assert!(!r.proved());
+        e.limits.cancellation.cancel();
+        assert!(matches!(
+            e.check(&SemanticKeys::default(), &CheckOptions::default()),
+            Err(CheckError::Cancelled)
+        ));
+    }
+}

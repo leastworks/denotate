@@ -1310,6 +1310,33 @@ excluded cubes, and belong to one immutable verification. No projected-model reu
 or cross-session cache is introduced. A query's `NoModel` answer alone does not prove
 whole-program totality, uniqueness or an obligation.
 
+## SAT property results do not substitute for existence or uniqueness
+
+The experimental whole-verification check records context consistency, existence,
+uniqueness and properties independently. `p :- flag, !p` has no meaning when `flag`
+holds; a violation query cannot see that world through full-program equations.
+Conversely `a :- !b; b :- !a` has two meanings, even though `a, b` never hold together.
+Neither program is proved merely because a particular violation query is UNSAT.
+Empty declared U and inconsistent selected assumptions are separate context states;
+resource exhaustion is inconclusive, never unsupported.
+
+Original ground stratification is sufficient for unique meaning in every world.
+Otherwise existence selects worlds independently of program equations and uses the
+probe's sufficient stable-model cover. Uniqueness asks for two interpretations sharing
+inputs but differing in derived truth, and validates both against their reducts.
+The additional encoding is lazy and selector-gated. Its refinements are valid only
+for their respective interpretation; they must not exclude no-meaning input worlds
+or contaminate later primitive queries.
+
+An emptiness failure counts distinct violating tuples across stable models, not
+worlds. Query-local exclusions remove already counted tuples, and every retained
+tuple keeps its own model for attribution. Known failures survive later exhaustion;
+optional attribution has its own allowance per example. Finite positive support and
+negative truth in that model supply the existing presentation contract. Meaning is
+still reported separately: unlike ordinary BDD evidence that may certify just a
+cone, these witnesses have whole-program scope. Comparisons between engines must
+use matching scopes. This API is experimental; ordinary checking remains on BDDs.
+
 ## A larger local cone need not prove more under bounded resources
 
 Local BDD proof cones replace unexpanded definitions with free cut points. Enlarging

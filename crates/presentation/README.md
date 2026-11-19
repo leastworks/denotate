@@ -32,6 +32,9 @@ participating occurrences, and places them on source locations. It depends only 
   behind derived absences. The full world stays in structured evidence.
   Incomplete analysis stays visible alongside a failure; unknown worlds without a
   witness produce an inconclusive finding.
+  `emptiness_finding(corpus, obligation, report, names)` exposes this same renderer
+  for the experimental SAT check API. Its callers must also retain the independent
+  whole-program meaning result; no emptiness finding alone implies unique meaning.
 - Uniqueness and coverage world notes use checker-supplied structural input cones.
   Uniqueness includes the conflicting tuples; coverage includes all candidates of
   each missing group. Empty scopes omit the note; unavailable scopes explicitly

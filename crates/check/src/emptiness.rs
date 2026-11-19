@@ -246,7 +246,7 @@ impl<const WITHIN_W: bool> SymbolicMeaning<'_, WITHIN_W> {
 // A bounded top-k sample, independent of semantic traversal order. In particular,
 // sorting all candidates before checking would change resource-limited outcomes.
 // Keyless low-level callers use preparation-local atom order, as coverage does.
-fn retain_example(
+pub(crate) fn retain_example(
     report: &mut EmptinessReport,
     atom: &GroundAtom,
     observation: &Observation,

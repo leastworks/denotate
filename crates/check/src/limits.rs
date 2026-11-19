@@ -386,6 +386,9 @@ impl<'a> Budget<'a> {
         }
         Ok(())
     }
+    pub(crate) fn remaining_time(&self) -> Duration {
+        self.limits.timeout.saturating_sub(self.elapsed())
+    }
     fn elapsed(&self) -> Duration {
         #[cfg(test)]
         if let Some(clock) = &self.clock {

@@ -366,97 +366,24 @@ pub fn interpret<'a>(
         });
     }
     for (id, emptiness) in &report.emptiness {
-        if emptiness.proved() {
-            continue;
-        }
-        let obligation = corpus
-            .obligation(*id)
-            .ok_or(Error::InvalidFinding("foreign emptiness obligation"))?;
-        let message = if emptiness.present > 0 {
-            format!(
-                "Obligation {}: relation is not empty; {}{} distinct tuples can be present; showing {} examples{}",
-                obligation.name,
-                if emptiness.complete() {
-                    ""
-                } else {
-                    "at least "
-                },
-                emptiness.present,
-                emptiness.examples.len(),
-                if emptiness.complete() {
-                    "."
-                } else {
-                    "; checking incomplete."
-                }
-            )
-        } else {
-            format!(
-                "Obligation {}: emptiness checking incomplete{}.",
-                obligation.name,
-                emptiness
-                    .inconclusive
-                    .map(|c| format!(" ({})", exhaustion_text(c.phase, c.resource, c.details)))
-                    .unwrap_or_else(|| " (unresolved permitted worlds)".into())
-            )
-        };
-        let mut contributions = vec![Contribution {
-            occurrence: (*id).into(),
-            role: Role::Obligation,
-        }];
-        let notes = if emptiness.inconclusive.is_some() {
-            unknown_notes(
-                corpus,
-                names,
-                report,
-                report
-                    .unknown_atoms
-                    .keys()
-                    .filter(|a| a.relation == obligation.requirement.relation()),
-            )?
-        } else {
-            vec![]
-        };
-        let mut placement_groups = Vec::new();
-        for example in &emptiness.examples {
-            let mut group = PlacementGroup {
-                derivation: None,
-                contributions: vec![Contribution {
-                    occurrence: (*id).into(),
-                    role: Role::Obligation,
-                }],
-                notes: vec![presence_note(corpus, names, example)?],
-            };
-            match &example.attribution {
-                Some(Attribution::Complete(evidence)) => {
-                    group.derivation = Some(PlacementDerivation {
-                        tuple: &example.tuple,
-                        steps: evidence,
-                    });
-                    derivation_contributions(evidence, &mut group.contributions);
-                }
-                Some(Attribution::Incomplete(c)) => group.notes.push(format!(
-                    "Source attribution for {} is incomplete ({}); its counterexample is unchanged. Locations fall back to the obligation.",
-                    atom_name(corpus, names, &example.tuple)?, exhaustion_text(c.phase, c.resource, c.details),
-                )),
-                None => {}
-            }
-            contributions.extend(group.contributions.iter().copied());
-            placement_groups.push(group);
-        }
-        findings.push(Finding {
-            identity: Identity::Emptiness(*id),
-            kind: if emptiness.present > 0 {
-                Kind::Counterexample
+        if let Some(mut finding) = emptiness_finding(corpus, *id, emptiness, names)? {
+            let obligation = corpus.obligation(*id).unwrap();
+            let notes = if emptiness.inconclusive.is_some() {
+                unknown_notes(
+                    corpus,
+                    names,
+                    report,
+                    report
+                        .unknown_atoms
+                        .keys()
+                        .filter(|a| a.relation == obligation.requirement.relation()),
+                )?
             } else {
-                Kind::Inconclusive
-            },
-            message,
-            notes,
-            contributions,
-            placement_groups,
-            cycle_rules: vec![],
-            evidence: Evidence::Emptiness(emptiness),
-        });
+                vec![]
+            };
+            finding.notes = notes;
+            findings.push(finding);
+        }
     }
     for (id, coverage) in &report.coverage {
         let obligation = corpus
@@ -977,4 +904,94 @@ pub fn context_findings(
             contributions:vec![Contribution {occurrence:v.id.into(),role:Role::Declaration},Contribution {occurrence:a.into(),role:Role::RelatedOnly},Contribution {occurrence:o.into(),role:Role::RelatedOnly}] });
     }
     Ok(findings)
+}
+
+/// Shared emptiness wording and attribution for a confirmed checker report.
+/// SAT callers must present whole-program meaning separately; an absent finding
+/// here is not a claim of existence or uniqueness.
+pub fn emptiness_finding<'a>(
+    corpus: &Corpus,
+    id: ObligationId,
+    emptiness: &'a EmptinessReport,
+    names: &dyn Fn(OccurrenceId) -> String,
+) -> Result<Option<Finding<'a>>> {
+    if emptiness.proved() {
+        return Ok(None);
+    }
+    let obligation = corpus
+        .obligation(id)
+        .ok_or(Error::InvalidFinding("foreign emptiness obligation"))?;
+    let message = if emptiness.present > 0 {
+        format!(
+            "Obligation {}: relation is not empty; {}{} distinct tuples can be present; showing {} examples{}",
+            obligation.name,
+            if emptiness.complete() {
+                ""
+            } else {
+                "at least "
+            },
+            emptiness.present,
+            emptiness.examples.len(),
+            if emptiness.complete() {
+                "."
+            } else {
+                "; checking incomplete."
+            }
+        )
+    } else {
+        format!(
+            "Obligation {}: emptiness checking incomplete{}.",
+            obligation.name,
+            emptiness
+                .inconclusive
+                .map(|c| format!(" ({})", exhaustion_text(c.phase, c.resource, c.details)))
+                .unwrap_or_else(|| " (unresolved permitted worlds)".into())
+        )
+    };
+    let mut contributions = vec![Contribution {
+        occurrence: id.into(),
+        role: Role::Obligation,
+    }];
+    let notes = vec![];
+    let mut placement_groups = Vec::new();
+    for example in &emptiness.examples {
+        let mut group = PlacementGroup {
+            derivation: None,
+            contributions: vec![Contribution {
+                occurrence: id.into(),
+                role: Role::Obligation,
+            }],
+            notes: vec![presence_note(corpus, names, example)?],
+        };
+        match &example.attribution {
+                Some(Attribution::Complete(evidence)) => {
+                    group.derivation = Some(PlacementDerivation {
+                        tuple: &example.tuple,
+                        steps: evidence,
+                    });
+                    derivation_contributions(evidence, &mut group.contributions);
+                }
+                Some(Attribution::Incomplete(c)) => group.notes.push(format!(
+                    "Source attribution for {} is incomplete ({}); its counterexample is unchanged. Locations fall back to the obligation.",
+                    atom_name(corpus, names, &example.tuple)?, exhaustion_text(c.phase, c.resource, c.details),
+                )),
+                None => {}
+            }
+        contributions.extend(group.contributions.iter().copied());
+        placement_groups.push(group);
+    }
+    Ok(Some(Finding {
+        identity: Identity::Emptiness(id),
+        kind: if emptiness.present > 0 {
+            Kind::Counterexample
+        } else {
+            Kind::Inconclusive
+        },
+        message,
+        notes,
+        contributions,
+        placement_groups,
+        cycle_rules: vec![],
+        evidence: Evidence::Emptiness(emptiness),
+    }))
 }

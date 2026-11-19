@@ -1426,3 +1426,21 @@ entry. Inconclusive answers are never cached. Cache insertion is optional and ca
 turn an obtained answer into a work-limit failure; cancellation still propagates.
 These allowances are provisional for the new experimental API, not changes to the
 existing diagnostic probe or BDD checking defaults.
+
+The experimental `Engine::check` gives each selected emptiness obligation and each
+meaning phase its own work/deadline allowance. Individual SAT queries retain the
+solve/refinement/poll/conflict/propagation caps above; they share their phase's
+remaining work and time. Emitted CNF limits still accumulate across the engine.
+Existence defaults to at most 1,024 examined worlds (sufficient cover cubes may
+cover many more); emptiness counts at most 10,000 distinct tuples per obligation.
+Exhaustion is explicit and keeps previously confirmed failures and lower bounds.
+These are caller-configurable `CheckOptions`, not ordinary checker defaults.
+
+The diagnostic sample uses the existing emptiness policy: three examples in semantic
+key order by default, or a caller-selected bound/all examples. Each example's
+derivation and dependency-input annotation have separate fresh diagnostic allowances;
+they are collected after semantic checking and cannot affect completeness. Answer
+inspection is charged before a violation query so materialising a confirmed failure
+cannot erase it through work exhaustion. Retained models share their prepared graph;
+each retained world still costs a bitvector over the program. Whole-check reports
+are not cached, and the lazy uniqueness encoding can roughly double program CNF.

@@ -234,7 +234,7 @@ pub(super) fn refine(
 /// false body preserve one false premise: a fixed derived premise needs no input
 /// pin; otherwise pin one false input. This also prevents new producers from
 /// becoming enabled. Merely keeping the true derivation's input leaves is unsound.
-fn cover(c: &Cone, model: &[bool], b: &mut Budget<'_>) -> Result<BTreeSet<usize>> {
+pub(super) fn cover(c: &Cone, model: &[bool], b: &mut Budget<'_>) -> Result<BTreeSet<usize>> {
     let mut inputs = BTreeSet::new();
     for r in &c.rules {
         b.charge(1 + r.body.len() * 2, "SAT existence model cover")?;

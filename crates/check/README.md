@@ -754,9 +754,9 @@ and cannot remove a permitted world that has no full-program model.
 Answers are a confirmed model, `NoModel` (no stable model satisfies this query), or
 `Inconclusive` with its resource/phase. Cancellation and invalid requests are errors.
 Preparation can also fail or exhaust its limits. `NoModel` is not a uniqueness,
-totality, consistency classification or obligation verdict. Those integrations,
-expression extraction and session/editor reuse remain future work; ordinary
-checking still uses BDDs.
+totality, consistency classification or obligation verdict. `Engine::check` provides
+those classifications separately, as described below. Expression extraction and
+session/editor integration remain future work; ordinary checking still uses BDDs.
 
 Models expose residual values plus lazily resolved fixed values; world answers
 expose inputs only. Exact canonical query keys include the query mode, pins and
@@ -765,3 +765,35 @@ immutable verification only. A new program, domain or assumption selection requi
 a new engine; nothing is reused through arena handles across preparations. Conclusive
 cached answers are independent of later queries, and partial clause-emission failures
 make the engine unusable until rebuilt. See the checker policies for allowances.
+
+`check(&keys, &CheckOptions)` checks the prepared verification's `empty(R)`
+obligations and whole-program stable meaning. Pass the semantic keys of the same
+corpus used for preparation. The report separates:
+
+- Context: permitted, empty declared input universe, inconsistent assumptions, or
+  inconclusive.
+- Existence: every permitted world has a stable model, a confirmed no-meaning world,
+  or inconclusive.
+- Uniqueness: at most one model per world, two reduct-validated interpretations of
+  one world, or inconclusive. This does not imply existence.
+- Emptiness: distinct tuples present in at least one stable model, with exact counts
+  or lower bounds and bounded examples. Each example retains its own world, full
+  replay scope, dependency-cone inputs and separately bounded finite derivation.
+- Selected obligation kinds and notices not analysed by this increment.
+
+Only the complete report's `proved()` combines context, existence, uniqueness and
+all selected obligation results. In particular, zero violating stable models does
+not hide a no-meaning or multiple-meaning world. Notices remain advisory.
+
+Original ground stratification proves existence and uniqueness without search. For
+unstratified programs, existence independently chooses permitted worlds and reuses
+the probe's sufficient model-cover cubes. Uniqueness lazily adds a second program
+encoding sharing inputs and asks for a difference in derived truth; both models must
+pass reduct validation. Its selector and loop clauses cannot constrain later world
+queries. No original rules are rewritten or admitted by these checks.
+
+`denotate-presentation::emptiness_finding` shares the ordinary emptiness wording,
+identity and derivation placement. A SAT example's negative premises are absences
+in its validated stable interpretation; they do not assert that the interpretation
+is unique. Callers must retain the separate meaning report. CLI/editor publication
+and session reuse of these reports are not connected yet.
