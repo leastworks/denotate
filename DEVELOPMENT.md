@@ -46,9 +46,14 @@ The individual recipes (`just test-crates`, `just test-den`, `just test-dsl-lsp`
 `just test-dsl-extension`, `just fmt-check`) remain available for focused work.
 Use `just test-crate denotate-check` for one crate and `just fmt` to format Rust.
 
-Use focused tests during implementation, then run `just verify` once for the
-completed code change. After a small follow-up fix, rerun the affected tests;
-repeat the full gate only when the change or an unresolved failure warrants it.
+Use focused tests after each feature or implementation slice. Related features may
+be batched: keep their changes and handoffs separately reviewable, record each
+slice's focused checks, and run `just verify` once at the completed batch boundary
+before publishing. A slice can be ready for review with the full gate explicitly
+pending for the batch; do not describe it as fully verified. For an isolated change,
+the batch is that change. Do not start queued features solely to fill a batch.
+After a small follow-up fix, rerun the affected tests; repeat the full gate only
+when the change or an unresolved failure warrants it.
 Documentation and sample-only changes need their relevant link, example or
 tutorial checks, rather than the full code gate.
 

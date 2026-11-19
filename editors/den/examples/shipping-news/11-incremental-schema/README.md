@@ -277,8 +277,8 @@ per-message reference.
 The library declares scalar message inputs with
 `at_most_one(group_by: field)` on `raw_value`. This is part of the legal message
 universe in both verifications, including admission; it needs no assumption
-selection. Computation results also declare at-most-one per `(statement, field)`.
-Their existence remains the selected `every_output_has_result` assumption: it
-requires results only for declared computation outputs, not every possible
-statement/field pair. The generated term-ring workloads have a result for every
-use and can declare `exactly_one(group_by: u)` directly.
+selection. Computation results declare `exactly_one` per candidate-bearing `(statement, field)`
+group, so their existence needs no selected assumption either. The fixed obligation
+`no_missing_result_candidates` reports declared computation outputs with no choices;
+input cardinality alone creates no group for them. The generated term-ring workloads
+likewise declare `exactly_one(group_by: u)`.

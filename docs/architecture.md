@@ -326,8 +326,9 @@ local absent-extension and constraint-projection shortcuts are not sound for gen
 constraints. No context-dependent BDD or verdict is reused across selections.
 
 Input cardinality declarations belong to IR relation schemas, beside input
-eligibility. Preparation builds disjoint per-input groups over resolved domains
-and eligible tuples, before any selected assumption. Their conjunction defines U;
+eligibility. Preparation builds disjoint per-input groups by projecting eligible
+tuples over resolved domains, before any selected assumption. No candidates means
+no groups, including an empty grouping list. Their conjunction defines U;
 W is U further restricted by selected assumptions. Every verification reports the
 input declarations separately. Empty U is a context error, never a vacuous proof.
 The symbolic evaluator uses fixed component masks from closed structural input

@@ -3015,7 +3015,7 @@ fn checking_within_w_configuration_rechecks_and_omission_restores_raw_mode() {
 }
 
 #[test]
-fn input_cardinality_services_and_unsaved_empty_universe() {
+fn input_cardinality_services_and_unsaved_candidate_removal() {
     let mut c = Client::start("ir-text/standalone");
     let (uri, _) = c.open("example.den");
     let text="sort S; const a:S; relation eligible(x:S); eligible(a); input i(x:S) within eligible exactly_one(group_by:(x)); relation clear(); obligation ok:empty(clear); verification v{assumptions:[];obligations:[ok];}";
@@ -3052,15 +3052,20 @@ fn input_cardinality_services_and_unsaved_empty_universe() {
     c.change(&uri, 3, &renamed.replace("eligible(a);", ""));
     checking_idle(&mut c);
     let roots = c.request("denotate/roots", json!({"uri":uri}));
+    assert_eq!(roots["verifications"][0]["summary"]["state"], "proved");
     assert_eq!(
-        roots["verifications"][0]["summary"]["state"],
-        "empty-input-universe"
+        roots["verifications"][0]["summary"]["inputUniverse"]["state"],
+        "nonempty"
     );
-    assert!(c
+    assert!(!c
         .diagnostics(&uri)
         .as_array()
         .unwrap()
         .iter()
         .any(|d| d["code"] == "empty-input-universe"));
+    c.change(&uri, 4, &renamed);
+    checking_idle(&mut c);
+    let roots = c.request("denotate/roots", json!({"uri":uri}));
+    assert_eq!(roots["verifications"][0]["summary"]["state"], "proved");
     c.shutdown();
 }

@@ -2491,8 +2491,8 @@ verification checks{assumptions:[];obligations:[no_absent];}",
         assert!(message.contains("domain provider depends on an input"));
     }
     #[test]
-    fn input_cardinality_is_visible_and_empty_universe_is_an_error() {
-        for (facts, code) in [("eligible(a);", 0), ("", 1)] {
+    fn input_cardinality_is_visible_and_no_candidates_means_no_groups() {
+        for (facts, code) in [("eligible(a);", 0), ("", 0)] {
             let f = Fixture::new(&format!(
                 "sort S; const a:S; relation eligible(x:S); {facts} input i(x:S) within eligible exactly_one(group_by: ()); relation clear(); obligation ok:empty(clear); verification v{{assumptions:[];obligations:[ok];}}"
             ));

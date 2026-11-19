@@ -154,7 +154,8 @@ input result(output: Output, value: Value) within result_candidate
 There is at most one cardinality clause per input. It follows optional `within`
 and precedes optional `loc(...)`. Only `at_most_one` and `exactly_one` are allowed;
 columns name distinct parameters of this input. A single column may omit the
-parentheses. `group_by: ()` describes one group containing all eligible tuples.
+parentheses. `group_by: ()` describes one group containing all eligible tuples
+when at least one tuple is eligible, and no groups otherwise.
 
 These declarations define the legal input universe **U** in every verification,
 without selection. They do not assert properties of derived relations. Selected
@@ -163,19 +164,23 @@ Admission, checking, notices, replay and the diagnostic SAT probe respect U.
 Its construction depends on the resolved domains and fixed `within` facts, never
 on selected assumptions or admission proofs.
 
-Groups range over all combinations of the grouping columns' resolved domain
-values. Exactly-one requires one eligible tuple in each group, including groups
-with no candidates. Such a group makes U empty: the checker reports
-`empty-input-universe`, separately from inconsistent selected assumptions, and
-checks no obligations. An empty grouping sort yields no groups and imposes no
-restriction; `group_by: ()` always has one group. Enumeration and BDD construction
-are bounded preparation work; exhaustion is inconclusive, with consistency
-reported as unknown until established.
+An input declaration's groups are the projection of its eligible tuples onto the
+grouping columns. Exactly-one requires one tuple in each candidate-bearing group;
+it imposes no requirement on a grouping tuple with no candidates. Eligibility uses
+the program's resolved domains and fixed `within` facts. With no eligible tuples
+there are no groups, even for `group_by: ()`; the empty input assignment is legal.
+An empty non-grouping domain has the same effect for an input without `within`.
+Group construction remains bounded preparation work; exhaustion is inconclusive.
 
-For sparse pairs of grouping values (for example, only some statement/field pairs
-are computation outputs), exactly-one over the Cartesian grouping domains may be
-too strong. Keep the coverage requirement over the declared output relation as a
-named assumption, and use an input at-most-one declaration for scalar values.
+This rule is specific to **input declarations**. Coverage obligations and named
+assumptions still range over the grouping columns' resolved domain product, and
+`group_by: ()` still has one group there. To require candidates for every output,
+write a fixed structural obligation such as
+`at_least_one(result_candidate, group_by: (output))`. For sparse authored output
+pairs, derive the declared pairs with no candidate and require that relation to be
+empty. Candidate checks do not search input worlds; their enumeration is still
+bounded work. A missing candidate is a structural finding, not an empty input
+universe caused by the input declaration.
 
 ## Coverage obligations
 

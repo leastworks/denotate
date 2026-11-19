@@ -37,7 +37,7 @@ required_decision(decisions::missing); required_decision(decisions::recognized);
 namespace schema {
     verification propagation {
         assumptions: [];
-        obligations: [no_conflicting_knowledge, no_unknown_decisions, at_most_one_path,
+        obligations: [no_missing_result_candidates, no_conflicting_knowledge, no_unknown_decisions, at_most_one_path,
                       at_most_one_set_value, no_message_writes];
     }
 }

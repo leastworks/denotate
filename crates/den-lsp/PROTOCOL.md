@@ -1150,11 +1150,13 @@ fast editor barriers and do not imply that checking finished.
 A completed preparation with input cardinality declarations adds `inputUniverse`
 to its verification summary: `state` is `nonempty` or `empty`; `declarations` holds
 `relation`, `kind` (`at-most-one` or `exactly-one`), `groupBy` column indices, and
-`empty` (whether this declaration has an exactly-one group without candidates).
+`empty` (a defensive impossible-group flag, always false for current declarations).
+Groups come only from eligible tuples; zero candidates produces zero groups, not an
+empty universe. This includes `group_by: ()`.
 These entries are separate from `activeAssumptions` and apply in every verification.
 Programs without such declarations retain the previous summary shape.
 
-An empty declared universe produces an Error diagnostic with code
+The existing reserved empty-universe state produces an Error diagnostic with code
 `empty-input-universe` and finding identity
 `{"verification": [namespaceKey, name], "context": "empty-input-universe"}`.
 Its contributions include the verification and only the declarations with empty groups. Summary

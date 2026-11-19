@@ -123,7 +123,10 @@ fn computed_availability_matches_all_small_input_worlds() {
             let replay = program.evaluate(world.iter().cloned(), &Limits::default());
             if !valid {
                 assert!(
-                    matches!(replay, Err(CheckError::InvalidInputGroup(_))),
+                    matches!(
+                        replay,
+                        Err(CheckError::InvalidInputGroup(_) | CheckError::InvalidObservation(_))
+                    ),
                     "{verification}: {bits}"
                 );
                 continue;
@@ -234,11 +237,18 @@ fn sparse_output_coverage_does_not_hide_an_output_with_no_candidates() {
     );
     let p = s.load();
     let results = check(&p, &mut Session::default());
-    assert!(
-        results
-            .values()
-            .all(|r| r.summary["state"] == "inconsistent-assumptions")
-    );
+    for result in results.values() {
+        assert_eq!(result.summary["state"], "findings");
+        assert!(
+            result.summary["findings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|f| f["kind"] == "counterexample"
+                    && f["identity"]["obligation"]
+                        == json!(["shipping", "no_missing_result_candidates"]))
+        );
+    }
 }
 
 #[test]

@@ -14,8 +14,8 @@ namespace loop {
     // The guessed result does not start the task that would make it available.
     notice task_varies: varies($ready);
     verification inspect {
-        assumptions: [every_output_has_result, at_most_one_result];
-        obligations: [];
+        assumptions: [];
+        obligations: [no_missing_result_candidates];
         notices: [task_varies];
     }
 }

@@ -49,8 +49,8 @@ namespace shipping_example {
     notice customs_guard_varies: varies(customs_applies);
     notice receipt_varies: varies(receipt_present, within: customs_applies);
     verification valid_shipments {
-        assumptions: [every_output_has_result, at_most_one_result, valid_message];
-        obligations: [no_missing_customs_reference, no_unexpected_customs_reference];
+        assumptions: [valid_message];
+        obligations: [no_missing_result_candidates, no_missing_customs_reference, no_unexpected_customs_reference];
         notices: [domestic_varies, customs_guard_varies, receipt_varies];
     }
 }

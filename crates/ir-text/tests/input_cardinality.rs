@@ -100,9 +100,9 @@ fn within_domain_and_cardinality_edits_invalidate_warm_preparation() {
     let mut session = Session::default();
     for (kind, facts, domain, empty) in [
         ("exactly_one", "allowed(a);", "", false),
-        ("exactly_one", "", "", true),
+        ("exactly_one", "", "", false),
         ("at_most_one", "", "", false),
-        ("exactly_one", "", "domain S = [];", true),
+        ("exactly_one", "", "domain S = [];", false),
         ("exactly_one", "allowed(b);", "", false),
     ] {
         let p = load_text(&format!("sort S; const a,b:S; {domain} relation allowed(x:S); {facts} input i(x:S) within allowed {kind}(group_by: ()); relation bad(); obligation valid: empty(bad); {VERIFY}")).unwrap();
@@ -129,8 +129,8 @@ fn within_domain_and_cardinality_edits_invalidate_warm_preparation() {
 }
 
 #[test]
-fn empty_grouping_sort_has_no_groups_but_empty_group_by_has_one() {
-    for (group, empty) in [("(x)", false), ("()", true)] {
+fn no_eligible_tuples_have_no_groups_even_with_empty_group_by() {
+    for (group, empty) in [("(x)", false), ("()", false)] {
         let p = load_text(&format!("sort S; input i(x:S) exactly_one(group_by: {group}); relation bad(); obligation valid: empty(bad); {VERIFY}")).unwrap();
         assert_eq!(
             run(&p, &mut Session::default(), false)
@@ -244,7 +244,7 @@ fn witnesses_extend_independent_exactly_one_groups_and_notices_respect_u() {
 }
 
 #[test]
-fn group_enumeration_exhaustion_is_inconclusive_and_sat_probe_uses_u() {
+fn empty_candidates_do_not_enumerate_cartesian_groups_and_sat_probe_uses_u() {
     let p=load_text("sort S; const a,b,c:S; relation none(x:S,y:S); input i(x:S,y:S) within none exactly_one(group_by:(x,y)); relation bad(); obligation valid:empty(bad); verification checks{assumptions:[];obligations:[valid];}").unwrap();
     let mut limits = Limits::default();
     limits.max_atoms = 4;
@@ -253,7 +253,7 @@ fn group_enumeration_exhaustion_is_inconclusive_and_sat_probe_uses_u() {
         request
             .prepare(&p.corpus, &p.keys, &(&limits).into())
             .unwrap(),
-        RequestPreparation::Inconclusive { .. }
+        RequestPreparation::Complete(_)
     ));
     let p=load_text("input i() exactly_one(group_by:()); relation a(); relation b(); a():-i(); a():-!b(); b():-!a(); relation bad(); obligation valid:empty(bad); verification checks{assumptions:[];obligations:[valid];}").unwrap();
     let limits = Limits::default();
@@ -314,5 +314,226 @@ fn selected_input_uniqueness_can_conflict_with_declared_exactly_one() {
         )
         .unwrap();
         assert!(!low.assumptions_consistent());
+    }
+}
+
+fn sat(p: &LoadedProgram) -> stable_query::Engine {
+    stable_query::Engine::prepare(
+        &p.corpus,
+        &p.domains,
+        &p.keys,
+        p.corpus.verifications().next().unwrap().id,
+        &Limits {
+            max_bdd_variables: 0,
+            max_bdd_nodes: 0,
+            max_bdd_tasks: 0,
+            ..Limits::default()
+        },
+        stable_query::QueryLimits::default(),
+    )
+    .unwrap()
+}
+fn ground(p: &LoadedProgram, relation: &str, args: &[&str]) -> GroundAtom {
+    GroundAtom::new(
+        p.corpus
+            .relations()
+            .find(|r| r.name == relation)
+            .unwrap()
+            .id,
+        args.iter()
+            .map(|name| p.corpus.constants().find(|c| c.name == *name).unwrap().id),
+    )
+}
+
+#[test]
+fn eligible_projection_matches_every_tiny_world_in_bdd_and_sat() {
+    // Include an unused output sort value: no missing candidate group enters U.
+    let tuples = [("a", "x"), ("a", "y"), ("b", "x"), ("b", "y")];
+    for candidates in 0usize..16 {
+        let facts = tuples
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| candidates & (1 << i) != 0)
+            .map(|(_, (o, v))| format!("allowed({o},{v});"))
+            .collect::<String>();
+        for kind in ["at_most_one", "exactly_one"] {
+            for group in ["()", "(output)"] {
+                let p = load_text(&format!(
+                    "sort O; const a,b,c:O; sort V; const x,y:V;
+                    relation allowed(output:O,value:V); {facts}
+                    input i(output:O,value:V) within allowed {kind}(group_by:{group});
+                    relation bad(); obligation valid:empty(bad); {VERIFY}"
+                ))
+                .unwrap();
+                let limits = Limits::default();
+                let raw = GroundProgram::prepare(&p.corpus, &p.domains, &limits).unwrap();
+                let mut engine = sat(&p);
+                let atoms = tuples
+                    .iter()
+                    .map(|(o, v)| ground(&p, "i", &[o, v]))
+                    .collect::<Vec<_>>();
+                let masks = if group == "()" {
+                    vec![candidates]
+                } else {
+                    vec![candidates & 3, candidates & 12]
+                };
+                for bits in 0usize..16 {
+                    let legal = bits & !candidates == 0
+                        && masks.iter().filter(|m| **m != 0).all(|m| {
+                            let count = (bits & m).count_ones();
+                            if kind == "exactly_one" {
+                                count == 1
+                            } else {
+                                count <= 1
+                            }
+                        });
+                    let world = atoms
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| bits & (1 << i) != 0)
+                        .map(|(_, a)| a.clone())
+                        .collect::<Vec<_>>();
+                    assert_eq!(
+                        raw.evaluate(world, &limits).is_ok(),
+                        legal,
+                        "BDD {candidates} {kind} {group} {bits}"
+                    );
+                    let query = stable_query::Query {
+                        pins: atoms
+                            .iter()
+                            .enumerate()
+                            .map(|(i, a)| (a.clone(), bits & (1 << i) != 0))
+                            .collect(),
+                        exclude: vec![],
+                    };
+                    for answer in [
+                        engine.worlds(&query).unwrap(),
+                        engine.models(&query).unwrap(),
+                    ] {
+                        assert_eq!(
+                            matches!(answer, stable_query::Answer::Model(_)),
+                            legal,
+                            "SAT {candidates} {kind} {group} {bits}: {answer:?}"
+                        );
+                        assert!(!matches!(answer, stable_query::Answer::Inconclusive(_)));
+                    }
+                }
+                for masked in [false, true] {
+                    let (result, presented) = run(&p, &mut Session::default(), masked);
+                    assert!(!result.empty_input_universe);
+                    assert_eq!(presented.status["state"], "proved");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn empty_non_grouping_domain_has_no_input_groups_but_coverage_keeps_cartesian_groups() {
+    for group in ["()", "(output)"] {
+        for selected in [false, true] {
+            let selection = if selected { "required" } else { "" };
+            let p = load_text(&format!(
+                "sort O; const a:O; sort V;
+                input i(output:O,value:V) exactly_one(group_by:{group});
+                assumption required:at_least_one(i,group_by:{group});
+                obligation coverage:at_least_one(i,group_by:{group});
+                verification checks{{assumptions:[{selection}];obligations:[coverage];}}"
+            ))
+            .unwrap();
+            for masked in [false, true] {
+                let (r, _) = run(&p, &mut Session::default(), masked);
+                assert!(!r.empty_input_universe);
+                assert_eq!(r.inconsistent_assumptions, selected);
+                if !selected {
+                    assert_eq!(r.coverage.values().next().unwrap().missing, 1);
+                }
+            }
+            let r = sat(&p)
+                .check(&p.keys, &stable_query::CheckOptions::default())
+                .unwrap();
+            assert_eq!(
+                r.context,
+                if selected {
+                    stable_query::Context::InconsistentAssumptions
+                } else {
+                    stable_query::Context::Permitted
+                }
+            );
+            if !selected {
+                assert_eq!(r.coverage.values().next().unwrap().missing, 1);
+            }
+        }
+    }
+}
+
+#[test]
+fn candidate_coverage_remains_structural_and_named_assumptions_are_not_input_declarations() {
+    for kind in ["at_least_one", "exactly_one"] {
+        for selection in ["", "required"] {
+            let p = load_text(&format!(
+                "sort O; const a,b,c:O; domain O=[a,b]; sort V;const x:V;
+                relation allowed(output:O,value:V);allowed(a,x);
+                input i(output:O,value:V) within allowed exactly_one(group_by:output);
+                assumption required:{kind}(i,group_by:output);
+                obligation candidates:{kind}(allowed,group_by:output);
+                verification checks{{assumptions:[{selection}];obligations:[candidates];}}"
+            ))
+            .unwrap();
+            let (r, _) = run(&p, &mut Session::default(), false);
+            assert!(!r.empty_input_universe);
+            let report = sat(&p)
+                .check(&p.keys, &stable_query::CheckOptions::default())
+                .unwrap();
+            if selection.is_empty() {
+                assert!(!r.inconsistent_assumptions);
+                assert_eq!(r.coverage.values().next().unwrap().missing, 1);
+                assert_eq!(report.context, stable_query::Context::Permitted);
+                assert_eq!(report.coverage.values().next().unwrap().missing, 1);
+            } else {
+                assert!(r.inconsistent_assumptions);
+                assert_eq!(
+                    report.context,
+                    stable_query::Context::InconsistentAssumptions
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn last_candidate_edits_change_forced_values_and_agree_cold_warm_in_both_modes() {
+    for masked in [false, true] {
+        let mut session = Session::with_grounding();
+        for facts in [
+            "allowed(a);allowed(b);",
+            "allowed(a);",
+            "",
+            "allowed(a);allowed(b);",
+        ] {
+            let p = load_text(&format!(
+                "sort S;const a,b:S; relation allowed(x:S);{facts}
+                input i(x:S) within allowed exactly_one(group_by:x);
+                relation bad();bad():-i(b);obligation valid:empty(bad);{VERIFY}"
+            ))
+            .unwrap();
+            let (warm, presented) = run(&p, &mut session, masked);
+            assert_eq!(warm, run(&p, &mut Session::default(), masked).0);
+            assert!(!warm.empty_input_universe);
+            let count = usize::from(facts.contains("allowed(b)"));
+            assert_eq!(warm.emptiness.values().next().unwrap().present, count);
+            assert_eq!(
+                presented.status["state"],
+                if count > 0 { "findings" } else { "proved" }
+            );
+            let mut e = sat(&p);
+            for _ in 0..2 {
+                let r = e
+                    .check(&p.keys, &stable_query::CheckOptions::default())
+                    .unwrap();
+                assert_eq!(r.context, stable_query::Context::Permitted);
+                assert_eq!(r.emptiness.values().next().unwrap().present, count);
+            }
+        }
     }
 }

@@ -255,12 +255,12 @@ fn confirmed_failure_survives_meaning_exhaustion_and_attribution_exhaustion() {
 }
 
 #[test]
-fn empty_universe_inconsistent_selection_and_unanalysed_checks_are_distinct() {
+fn empty_candidate_groups_inconsistent_selection_and_unanalysed_checks_are_distinct() {
     for (prefix, assumptions, expected) in [
         (
             "sort S; input x(s:S) exactly_one(group_by:());",
             "",
-            Context::EmptyUniverse,
+            Context::Permitted,
         ),
         (
             "input x(); assumption a:at_least_one(x,group_by:()); assumption b:empty(x);",
@@ -276,10 +276,16 @@ fn empty_universe_inconsistent_selection_and_unanalysed_checks_are_distinct() {
             .check(&p.keys, &CheckOptions::default())
             .unwrap();
         assert_eq!(r.context, expected);
-        assert!(r.meaning.is_none());
-        assert!(!r.proved());
-        assert!(r.emptiness.is_empty());
-        assert_eq!(r.not_analysed.len(), 1);
+        if expected == Context::Permitted {
+            assert!(r.proved());
+            assert!(r.meaning.is_some());
+            assert!(r.not_analysed.is_empty());
+        } else {
+            assert!(r.meaning.is_none());
+            assert!(!r.proved());
+            assert!(r.emptiness.is_empty());
+            assert_eq!(r.not_analysed.len(), 1);
+        }
     }
     let p = load_text(
         "input x(); relation r(); obligation clean:empty(r);

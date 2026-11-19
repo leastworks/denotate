@@ -148,21 +148,29 @@ fn assumption_validation_uses_the_existing_ground_cone_rule() {
     ));
 }
 #[test]
-fn empty_universe_and_inconsistent_contexts_do_not_invent_models() {
-    for body in [
-        "sort S; input i(x:S) exactly_one(group_by: ()); verification v{assumptions:[];obligations:[];}",
-        "input i();assumption yes:at_least_one(i,group_by:());assumption no:empty(i);verification v{assumptions:[yes,no];obligations:[];}",
+fn empty_candidate_groups_and_inconsistent_contexts_have_distinct_outcomes() {
+    for (body, permitted) in [
+        (
+            "sort S; input i(x:S) exactly_one(group_by: ()); verification v{assumptions:[];obligations:[];}",
+            true,
+        ),
+        (
+            "input i();assumption yes:at_least_one(i,group_by:());assumption no:empty(i);verification v{assumptions:[yes,no];obligations:[];}",
+            false,
+        ),
     ] {
         let p = load_text(body);
         let mut e = prepare(&p, "v").unwrap();
-        assert!(matches!(
+        for answer in [
             e.worlds(&Query::default()).unwrap(),
-            Answer::NoModel
-        ));
-        assert!(matches!(
             e.models(&Query::default()).unwrap(),
-            Answer::NoModel
-        ));
+        ] {
+            match answer {
+                Answer::Model(_) => assert!(permitted),
+                Answer::NoModel => assert!(!permitted),
+                Answer::Inconclusive(reason) => panic!("unexpected inconclusive: {reason:?}"),
+            }
+        }
     }
 }
 

@@ -14,8 +14,8 @@ namespace loop {
     // Applying produces ready; ready prevents applying. This is a ground cycle.
     notice task_varies: varies($not_ready);
     verification inspect {
-        assumptions: [every_output_has_result, at_most_one_result];
-        obligations: [];
+        assumptions: [];
+        obligations: [no_missing_result_candidates];
         notices: [task_varies];
     }
 }

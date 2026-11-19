@@ -2,6 +2,83 @@ use super::*;
 use crate::test_support::rewrites::{atom, rel, rule, stable_models, subsets, supported_models};
 use denotate_ir::Corpus;
 
+#[test]
+fn cardinality_truth_tables_and_selector_isolation() {
+    for n in 0..=8 {
+        // Negated literals exercise the generic encoder as well as positive inputs.
+        for alternating_signs in [false, true] {
+            let limits = Limits::default();
+            let mut budget = Budget::new(&limits);
+            let mut cnf = Cnf {
+                solver: Solver::new(
+                    Default::default(),
+                    Stop {
+                        polls: None,
+                        cancellation: limits.cancellation.clone(),
+                        start: Instant::now(),
+                        timeout: limits.timeout,
+                        hook: None,
+                    },
+                ),
+                clauses: 0,
+                literals: 0,
+                gate: None,
+            };
+            let lits: Vec<_> = (0..n)
+                .map(|i| {
+                    let lit = cnf.var(&mut budget).unwrap();
+                    if alternating_signs && i % 2 == 0 {
+                        !lit
+                    } else {
+                        lit
+                    }
+                })
+                .collect();
+            let amo = cnf.var(&mut budget).unwrap();
+            let eo = cnf.var(&mut budget).unwrap();
+            for gate in [amo, eo] {
+                cnf.gate = Some(gate);
+                let before = cnf.solver.num_vars();
+                cnf.at_most_one(&lits, &mut budget).unwrap();
+                assert_eq!(
+                    cnf.solver.num_vars() - before,
+                    if n <= 5 { 0 } else { (n - 2) as u32 }
+                );
+            }
+            // Unlike a missing candidate group, a literal empty EO constraint is
+            // unsatisfiable, but must not poison queries with its selector off.
+            cnf.clause(lits.clone(), &mut budget).unwrap();
+            cnf.gate = None;
+            for bits in 0..1usize << n {
+                for (use_amo, use_eo) in [
+                    (false, false),
+                    (true, false),
+                    (false, true),
+                    (true, true),
+                    (false, false),
+                ] {
+                    let mut query: Vec<_> = lits
+                        .iter()
+                        .enumerate()
+                        .map(|(i, l)| if bits & (1 << i) != 0 { *l } else { !*l })
+                        .collect();
+                    query.extend([
+                        if use_amo { amo } else { !amo },
+                        if use_eo { eo } else { !eo },
+                    ]);
+                    let count = bits.count_ones();
+                    let permitted = (!use_amo || count <= 1) && (!use_eo || count == 1);
+                    assert_eq!(
+                        cnf.solver.solve_limited(&query),
+                        if permitted { lbool::TRUE } else { lbool::FALSE },
+                        "n={n}, bits={bits}, amo={use_amo}, eo={use_eo}"
+                    );
+                }
+            }
+        }
+    }
+}
+
 pub(super) fn run(c: &Corpus, target: RelationId, constraints: &[Restriction]) -> SatProbeReport {
     let l = Limits::default();
     let p = GroundProgram::prepare_cartesian(c, &Domains::new(), &l).unwrap();

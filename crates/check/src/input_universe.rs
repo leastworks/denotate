@@ -27,52 +27,30 @@ impl GroundProgram {
         let mut result = Vec::new();
         for (relation, declaration) in &self.input_cardinalities {
             let mut groups = BTreeMap::new();
-            if declaration.kind == Cardinality::ExactlyOne {
-                let domains = declaration
-                    .group_by
-                    .iter()
-                    .map(|i| &self.domains[&self.signatures[relation][*i]])
-                    .collect::<Vec<_>>();
-                if !domains.iter().any(|d| d.is_empty()) {
-                    let mut positions = vec![0; domains.len()];
-                    loop {
-                        budget.tick("input universe groups")?;
+            // Input typing ranges only over groups with eligible tuples. Unlike
+            // coverage assumptions/obligations, it does not invent empty groups
+            // from the grouping columns' Cartesian domain product.
+            for atom in &self.inputs {
+                budget.tick("input universe groups")?;
+                if atom.relation == *relation {
+                    budget.charge(declaration.group_by.len(), "input universe groups")?;
+                    let key = declaration
+                        .group_by
+                        .iter()
+                        .map(|i| atom.arguments[*i])
+                        .collect::<Vec<_>>();
+                    if !groups.contains_key(&key) {
                         budget.room(
                             result.len() + groups.len(),
                             budget.limits.max_atoms,
                             "input universe groups",
                             "groups",
                         )?;
-                        let key: Vec<_> = positions
-                            .iter()
-                            .enumerate()
-                            .map(|(i, p)| domains[i][*p])
-                            .collect();
-                        groups.insert(key, Vec::new());
-                        let mut i = positions.len();
-                        while i > 0 {
-                            i -= 1;
-                            positions[i] += 1;
-                            if positions[i] < domains[i].len() {
-                                break;
-                            }
-                            positions[i] = 0;
-                        }
-                        if positions.iter().all(|p| *p == 0) {
-                            break;
-                        }
                     }
-                }
-            }
-            for atom in &self.inputs {
-                budget.tick("input universe groups")?;
-                if atom.relation == *relation {
-                    let key = declaration
-                        .group_by
-                        .iter()
-                        .map(|i| atom.arguments[*i])
-                        .collect::<Vec<_>>();
-                    groups.entry(key).or_default().push(atom.clone());
+                    groups
+                        .entry(key)
+                        .or_insert_with(Vec::new)
+                        .push(atom.clone());
                 }
             }
             result.extend(
@@ -106,7 +84,9 @@ impl GroundProgram {
         }
         Ok(())
     }
-    /// Exactly-one groups enumerate resolved grouping domains, including empty candidate sets.
+    /// Defensive compatibility check for an impossible stored universe group.
+    /// Candidate-based construction produces only nonempty, disjoint groups;
+    /// zero eligible tuples therefore never makes the input universe empty.
     pub fn input_universe_is_empty(&self) -> bool {
         self.universe_groups
             .iter()
@@ -162,6 +142,32 @@ mod tests {
     use super::*;
     use crate::test_support::rewrites::{atom, rel, rule};
     use std::sync::Arc;
+
+    #[test]
+    fn candidate_group_construction_keeps_group_and_work_bounds() {
+        let mut c = Corpus::new();
+        for name in ["a", "b"] {
+            let input = rel(&mut c, name, true);
+            c.constrain_input(input, Cardinality::ExactlyOne, [])
+                .unwrap();
+        }
+        let mut p = GroundProgram::prepare(&c, &Domains::new(), &Limits::default()).unwrap();
+        for limits in [
+            Limits {
+                max_atoms: 1,
+                ..Limits::default()
+            },
+            Limits {
+                max_work: 0,
+                ..Limits::default()
+            },
+        ] {
+            assert!(matches!(
+                p.build_input_universe(&c, &mut Budget::new(&limits)),
+                Err(CheckError::LimitExceeded { .. })
+            ));
+        }
+    }
 
     #[test]
     fn declared_truth_keeps_logical_short_circuits_with_an_exhausted_operand() {

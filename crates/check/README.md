@@ -664,9 +664,13 @@ the bounded writer and its independent failure reporting.
 ### Declared input universe
 
 `Corpus::constrain_input` attaches one `InputCardinality` (at-most-one or exactly-one)
-to an input. Preparation enumerates resolved grouping domains and `within`-eligible
-tuples. `input_universe_is_empty()` distinguishes impossible input typing from
-inconsistent selected assumptions. Concrete observations must satisfy both.
+to an input. Preparation groups eligible tuples by their declared columns, after
+applying resolved domains and fixed `within` facts. It creates no group without
+candidates, including for `group_by: ()`. The current disjoint input declarations
+always permit an assignment; `input_universe_is_empty()` remains a defensive API
+check, and the existing empty-universe status remains reserved. Selected assumptions
+can still be inconsistent. Concrete observations must satisfy both U and W. Coverage
+obligations and named assumptions still enumerate Cartesian grouping domains.
 
 `ConditionContext` installs the universe before selected restrictions. Default
 symbolic evaluation uses one fixed mask per component: the conjunction of declared
@@ -703,6 +707,14 @@ clauses or literal occurrences. The original ground graph is unchanged; removed
 clauses retain a reverse-order model reconstruction log. Later query APIs must
 protect or translate any eliminated query targets. This is a size experiment,
 not a SAT checking backend or an execution planner.
+
+Input at-most-one clauses use the same encoding here and in the SAT engine:
+pairwise exclusions through five candidates, then a one-way sequential prefix
+counter. Five candidates need ten clauses either way, so pairwise avoids three
+registers at no clause cost. Larger groups need n-2 private auxiliaries and 3n-5
+binary clauses. Exactly-one adds the positive coverage clause. Prefix registers
+are existential auxiliaries, not equivalent named conditions; selector gating
+applies to every clause when used in a query.
 
 `Measurement::simplify_comparison` (CLI `--simplify`) independently measures
 structural sharing, constants under U, dead bodies/redundant premises, syntactic

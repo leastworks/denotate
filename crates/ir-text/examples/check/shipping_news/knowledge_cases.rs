@@ -485,3 +485,36 @@ fn an_independent_start_unlocks_literal_and_computed_writers() {
         assert!(failed(&check(&p, &mut Session::default())["schema::propagation"]).is_empty());
     }
 }
+
+#[test]
+fn missing_computation_candidates_are_structural_findings_and_repair_cold_warm() {
+    let mut s = snapshot(1); // W2: self-reading computation.
+    let mut session = Session::with_grounding();
+    let fact = "result_choice(statements::writer, fields::a, values::one);";
+    for missing in [false, true, false] {
+        if missing {
+            s.replace("program.den", fact, "// removed result candidate");
+        } else if s
+            .sources
+            .iter()
+            .any(|source| source.text.contains("// removed result candidate"))
+        {
+            s.replace("program.den", "// removed result candidate", fact);
+        }
+        let p = s.load();
+        let warm = check(&p, &mut session);
+        assert_eq!(
+            outcomes(&warm),
+            outcomes(&check(&p, &mut Session::default()))
+        );
+        let findings = warm["schema::propagation"].summary["findings"]
+            .as_array()
+            .unwrap();
+        assert_eq!(
+            findings.iter().any(|f| f["kind"] == "counterexample"
+                && f["identity"]["obligation"]
+                    == json!(["schema", "no_missing_result_candidates"])),
+            missing
+        );
+    }
+}

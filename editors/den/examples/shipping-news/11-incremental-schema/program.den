@@ -111,13 +111,13 @@ namespace schema {
     // This runs on all scalar messages, including rejected and undecided ones.
     verification propagation {
         assumptions: [];
-        obligations: [no_conflicting_knowledge, no_unknown_decisions, at_most_one_path,
+        obligations: [no_missing_result_candidates, no_conflicting_knowledge, no_unknown_decisions, at_most_one_path,
                       at_most_one_set_value, no_message_writes];
     }
     // A valid assumption cone does not establish that every decision became known.
     verification recognized_messages {
         assumptions: [recognized_message];
-        obligations: [no_conflicting_knowledge, no_unknown_decisions,
+        obligations: [no_missing_result_candidates, no_conflicting_knowledge, no_unknown_decisions,
                       at_most_one_set_value, no_message_writes];
     }
 }

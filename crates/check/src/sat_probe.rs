@@ -169,16 +169,28 @@ impl Cnf {
         Ok(!self.and(&lits.iter().map(|l| !*l).collect::<Vec<_>>(), b)?)
     }
     fn at_most_one(&mut self, lits: &[Lit], b: &mut Budget<'_>) -> Result<()> {
-        // Linear prefix encoding instead of a quadratic pairwise expansion.
-        let mut prefix: Option<Lit> = None;
-        for l in lits {
-            if let Some(p) = prefix {
-                self.clause(vec![!p, !*l], b)?;
-                prefix = Some(self.or(&[p, *l], b)?);
-            } else {
-                prefix = Some(*l);
+        // Keep this size policy in sync with cnf_measurement/model.rs. At five,
+        // pairwise ties the sequential clause count without needing registers.
+        if lits.len() <= 5 {
+            for (i, l) in lits.iter().enumerate() {
+                for r in &lits[i + 1..] {
+                    self.clause(vec![!*l, !*r], b)?;
+                }
             }
+            return Ok(());
         }
+        // One-way prefix implications suffice: registers are private existential
+        // variables, not named OR conditions. Reuse the first literal and omit
+        // the unused final register: n-2 auxiliaries and 3n-5 binary clauses.
+        let mut prefix = lits[0];
+        for l in &lits[1..lits.len() - 1] {
+            self.clause(vec![!prefix, !*l], b)?;
+            let next = self.var(b)?;
+            self.clause(vec![!prefix, next], b)?;
+            self.clause(vec![!*l, next], b)?;
+            prefix = next;
+        }
+        self.clause(vec![!prefix, !lits[lits.len() - 1]], b)?;
         Ok(())
     }
 }

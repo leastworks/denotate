@@ -436,7 +436,7 @@ mod tests {
     fn declared_cardinality_matches_exhaustive_input_worlds() {
         use denotate_ir::{Cardinality, Parameter, RelationRole};
         for kind in [Cardinality::AtMostOne, Cardinality::ExactlyOne] {
-            for n in 0..=3 {
+            for n in 0..=8 {
                 let mut c = Corpus::new();
                 let sort = c.declare_sort("S").unwrap();
                 let values: Vec<_> = (0..n)
@@ -456,14 +456,20 @@ mod tests {
                 let l = Limits::default();
                 let m = Measurement::prepare(&c, &Domains::from([(sort, values)]), &l).unwrap();
                 let (cnf, _) = encode(&m.program, &mut Budget::new(&l)).unwrap();
+                let auxiliaries = cnf.owners.iter().filter(|(_, named)| !named).count();
+                assert_eq!(auxiliaries, if n <= 5 { 0 } else { n - 2 });
                 for bits in 0..1usize << n {
-                    let permitted = assignments(cnf.owners.len())
-                        .any(|v| (0..n).all(|i| v[i] == (bits & (1 << i) != 0)) && holds(&cnf, &v));
+                    let inputs: Vec<_> = (0..n).map(|i| bits & (1 << i) != 0).collect();
+                    let permitted = assignments(auxiliaries).any(|aux| {
+                        let mut values = inputs.clone();
+                        values.extend(aux);
+                        holds(&cnf, &values)
+                    });
                     let count = bits.count_ones();
                     assert_eq!(
                         permitted,
                         if kind == Cardinality::ExactlyOne {
-                            count == 1
+                            n == 0 || count == 1
                         } else {
                             count <= 1
                         }

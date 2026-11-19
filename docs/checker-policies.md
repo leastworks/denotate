@@ -1347,8 +1347,21 @@ symbolic evaluation masks by the declared groups touching each component's close
 structural input support; semantic queries still intersect exact W. This is not
 the experimental full-W checking policy: selected assumptions are not copied into
 component conditions. Mask and group construction consume existing work/BDD storage
-allowances. Exactly-one enumeration uses resolved grouping domains and the existing
-atom bound; exhaustion is explicit. No limits or input-order default changed.
+allowances. Both input cardinality kinds group the eligible tuples over resolved
+domains, without enumerating absent Cartesian grouping combinations. New groups use
+the existing atom bound and enumeration is charged; exhaustion is explicit. Coverage
+obligations and named assumptions retain their separate Cartesian grouping semantics.
+No limits or input-order default changed.
+
+SAT input-group encoding (also used by the CNF measurement tool) uses pairwise
+exclusions for at most five candidates and a one-way sequential counter above
+that size. The counter reuses the first literal, omits the unused last register,
+and emits n-2 auxiliaries and 3n-5 binary clauses. Five is the clause-count tie,
+with no auxiliaries on the pairwise path. Exactly-one adds one coverage clause.
+Existing variable, clause, literal and work limits charge the actual encoding;
+this changes its size, not permitted worlds. All query-local clauses retain
+their selector. Other Boolean encodings still use equivalence where needed.
+
 Structural ordering keeps declared groups contiguous, including on heuristic
 fallback; selected input exclusivity remains a weighted preference. See
 [diagnostic input ordering](#diagnostic-input-ordering) for scope and accounting.

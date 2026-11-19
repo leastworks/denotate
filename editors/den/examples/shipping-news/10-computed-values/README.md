@@ -131,28 +131,27 @@ all 8 worlds; no validity assumption activates implicitly.
 
 ## Require results only for declared outputs
 
-There are two steps and three elements, but only three output pairs. Writing
-`exactly_one(step_result, group_by: (step, element))` would require results for all
-six pairs in the sort product and make this example inconsistent.
-
-The library expresses sparse coverage using existing vocabulary:
+There are two steps and three elements, but only three output pairs. The input
+cardinality declaration groups eligible tuples, so it requires a result only for
+those candidate-bearing pairs:
 
 ```den
-result_present(S, E) :- step_result(S, E, _);
-missing_result(S, E) :- step_output(S, E), !result_present(S, E);
-assumption every_output_has_result: empty(missing_result);
-assumption at_most_one_result: at_most_one(step_result, group_by: (step, element));
+input step_result(step: Step, element: Element, value: Value)
+    within result_candidate exactly_one(group_by: (step, element));
 ```
 
-The coverage assumption follows declared outputs. The uniqueness assumption can
-still use the full grouping domain: a nonexistent pair cannot have two results.
-Both constraints depend only on result inputs and fixed metadata, never on task
-applicability or the resulting workspace.
+This defines the input universe in every verification. The selected `valid_message`
+assumption still decides which of those inputs the business checks consider. Coverage
+obligations and named assumptions retain their Cartesian grouping semantics.
+
+A declaration with no eligible candidates creates no input group. The library checks
+that omission separately using the fixed `no_missing_result_candidates` obligation:
+every authored output must have at least one `result_candidate` tuple. This checks
+metadata, without searching input worlds or depending on task applicability.
 
 **Try an edit:** remove the reference's `result_choice` fact. Its output declaration
-still requires a result but has no eligible candidate. Both verifications report
-`inconsistent-assumptions` (exit 1); an empty candidate set does not hide the output.
-Restore the fact to repair the program.
+still exists, but has no candidate. `no_missing_result_candidates` reports it
+(exit 1); the remaining checks still run. Restore the fact to repair the program.
 
 ## Exercises: when the chain really closes
 

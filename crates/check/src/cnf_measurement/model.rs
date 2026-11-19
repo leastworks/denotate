@@ -264,18 +264,24 @@ impl Model {
                 cnf.clause(lits.clone(), *owner, b)?;
             }
             if kind.has_uniqueness() {
-                let mut prefix: Option<i32> = None;
-                for l in lits {
-                    if let Some(prev) = prefix {
+                // Same size policy as sat_probe::Cnf::at_most_one: pairwise
+                // through five, then one-way sequential prefix implications.
+                if lits.len() <= 5 {
+                    for (i, l) in lits.iter().enumerate() {
+                        for r in &lits[i + 1..] {
+                            cnf.clause(vec![-l, -r], *owner, b)?;
+                        }
+                    }
+                } else {
+                    let mut prev = lits[0];
+                    for l in &lits[1..lits.len() - 1] {
                         cnf.clause(vec![-prev, -l], *owner, b)?;
                         let next = cnf.var(*owner, false, b)?;
                         cnf.clause(vec![-prev, next], *owner, b)?;
                         cnf.clause(vec![-l, next], *owner, b)?;
-                        cnf.clause(vec![-next, prev, l], *owner, b)?;
-                        prefix = Some(next);
-                    } else {
-                        prefix = Some(l);
+                        prev = next;
                     }
+                    cnf.clause(vec![-prev, -lits[lits.len() - 1]], *owner, b)?;
                 }
             }
         }

@@ -50,6 +50,21 @@ This is visible input typing, not global activation of a named assumption. Gener
 constraints on derived relations remain named and selected. One grouping per input
 is supported initially; binary encoding and cross-input implications are deferred.
 
+Input declaration groups are projections of eligible tuples onto the grouping
+columns, not the Cartesian product of the grouping domains. Exactly-one chooses a
+tuple only in each candidate-bearing group. This makes sparse output-pair domains
+expressible directly as input typing. No candidates means no groups, including for
+`group_by: ()`; an empty value domain without `within` behaves the same way. This
+revises the initial rule that such missing groups made U empty. The current disjoint,
+one-declaration-per-input model therefore always has a legal input assignment.
+
+Obligations and selected assumptions retain Cartesian coverage, including one global
+group for `group_by: ()`. A lowerer that requires candidates for every authored
+output checks that fixed metadata separately; missing candidates must not be hidden
+by projecting away an output. Shipping News uses `no_missing_result_candidates` for
+that purpose. Unlike a selected assumption, the new input declaration applies in
+every verification; migrate only contracts that are unconditional input typing.
+
 Component evaluation carries only the declared group factors touched by its closed
 structural input support. For a dependency, the consumer's support contains the
 provider's support, so its mask implies the provider's mask. Each mask contains U.
@@ -80,6 +95,20 @@ resolved domains and fixed eligibility already participate in preparation identi
 Programs with declarations use whole-program verification initially: the local
 cache's all-absent extension cannot satisfy a general exactly-one group. Keeping
 that optimization would require a separate legal-world extension contract.
+
+## SAT cardinality groups use size-specific encodings
+
+SAT at-most-one group encodings use pairwise exclusions through five candidates
+and one-way sequential counters for larger groups, in both the engine and the CNF
+measurement tool. At five, pairwise and sequential each need ten clauses; pairwise
+needs no auxiliary variables. Above five, the sequential form uses n-2 auxiliaries
+and 3n-5 binary clauses. Exactly-one adds its coverage clause. The previous full
+Tseitin OR chain encoded unnecessary reverse implications and an unused final
+register. These registers are private existential variables, so one-way prefix
+implications suffice: any two true candidates conflict, and every assignment with
+at most one true candidate extends to a satisfying register assignment. Named
+conditions retain their equivalent encodings. Query-local constraints gate every
+clause, including those for registers, to preserve selector isolation.
 
 ## Resume experiments through plain ground source, preserving assumption meaning
 
