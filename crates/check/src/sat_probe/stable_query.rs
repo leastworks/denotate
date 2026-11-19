@@ -11,7 +11,9 @@ mod meaning;
 mod obligations;
 mod oracle;
 pub use checking::*;
-pub use meaning::{Existence, ExistenceStats, Meaning, MeaningMode, Uniqueness};
+pub use meaning::{
+    CubeStats, Existence, ExistenceScopeStats, ExistenceStats, Meaning, MeaningMode, Uniqueness,
+};
 pub use oracle::*;
 
 #[derive(Debug, Clone)]

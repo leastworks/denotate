@@ -341,6 +341,34 @@ fn whole_program_meaning_and_emptiness_agree_with_exhaustive_tiny_worlds() {
             QueryLimits::default(),
         )
         .unwrap();
+        // Every certified cube preserves this derived interpretation in every
+        // matching world, checked by the independent exhaustive reduct oracle.
+        for models in expected.values() {
+            for model in models {
+                let values: Vec<_> = (0..e.cone.fixed.len())
+                    .map(|i| e.cone.fixed[i].unwrap_or_else(|| model.contains(&e.cone.atoms[i])))
+                    .collect();
+                let limits = Limits::default();
+                let cover =
+                    meaning::cubes::certified(&e.cone, &values, &mut Budget::new(&limits)).unwrap();
+                for (world, alternatives) in &expected {
+                    if cover
+                        .iter()
+                        .all(|i| world.contains(&e.cone.atoms[*i]) == values[*i])
+                    {
+                        assert!(
+                            alternatives.iter().any(|other| e
+                                .cone
+                                .atoms
+                                .iter()
+                                .enumerate()
+                                .all(|(i, a)| e.cone.input[i] || other.contains(a) == values[i])),
+                            "case {case}: cube lost finite support"
+                        );
+                    }
+                }
+            }
+        }
         for _ in 0..2 {
             let r = e.check(&keys, &CheckOptions::default()).unwrap();
             assert_eq!(r.context, Context::Permitted);

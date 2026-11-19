@@ -160,6 +160,17 @@ pub fn stable_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> Resul
 
 /// Shared numeric layout for final status and progress observers.
 pub fn stable_existence_stats(s: &ExistenceStats) -> Value {
+    let mut value = stable_cube_stats(&s.total);
+    value["componentsTotal"] = json!(s.components_total);
+    value["fallbackReason"] = json!(s.fallback);
+    value["scopes"] =
+        json!(s.scopes.iter().map(|scope| {
+        json!({"component":scope.component,"position":scope.position,"state":scope.state,
+            "statistics":stable_cube_stats(&scope.counters)})
+    }).collect::<Vec<_>>());
+    value
+}
+fn stable_cube_stats(s: &denotate_check::stable_query::CubeStats) -> Value {
     json!({"cubes":s.cubes,"inputsPerCube":{"min":s.min_inputs,"mean":s.mean_inputs(),"max":s.max_inputs},
         "supportSize":s.support_size,"distinctInputs":s.distinct_inputs,"distinctCubeLiterals":s.distinct_cube_literals,
         "emittedExclusionLiterals":s.emitted_exclusion_literals,"emittedSelectorLiterals":s.emitted_selector_literals})

@@ -64,7 +64,7 @@ fn enumeration_appends_once_bypasses_cache_and_isolates_every_query() {
                 .collect();
             assert!(worlds.insert(cover.iter().map(|i| values[*i]).collect::<Vec<_>>()));
             let before = e.cnf.literals;
-            e.exclude_world_cube(&enumeration, &cover, &values, &mut stats, &mut b)
+            e.exclude_world_cube(&enumeration, &cover, |i| values[i], &mut stats, &mut b)
                 .unwrap();
             widths += cover.len();
             assert_eq!(e.cnf.literals - before, cover.len() + 1);
@@ -116,8 +116,14 @@ fn empty_cube_is_local_and_failed_append_requires_rebuild() {
     let mut b = Budget::new(&limits);
     let enumeration = e.start_enumeration(&mut b).unwrap();
     let mut stats = ExistenceStats::default();
-    e.exclude_world_cube(&enumeration, &BTreeSet::new(), &[], &mut stats, &mut b)
-        .unwrap();
+    e.exclude_world_cube(
+        &enumeration,
+        &BTreeSet::new(),
+        |_| unreachable!(),
+        &mut stats,
+        &mut b,
+    )
+    .unwrap();
     assert_eq!(stats.emitted_exclusion_literals, 0);
     assert_eq!(stats.emitted_selector_literals, 1);
     assert!(matches!(
@@ -137,7 +143,7 @@ fn empty_cube_is_local_and_failed_append_requires_rebuild() {
         e.exclude_world_cube(
             &other,
             &BTreeSet::new(),
-            &[],
+            |_| unreachable!(),
             &mut stats,
             &mut Budget::new(&limits)
         )
@@ -206,4 +212,54 @@ fn existence_statistics_survive_cutoff_and_repeated_checks() {
         .unwrap(),
         Answer::Model(_)
     ));
+}
+
+#[test]
+fn finite_support_shrinks_alternatives_but_does_not_use_positive_self_support() {
+    let e = prepared(12, false);
+    let limits = Limits::default();
+    // A valid, explicitly specified model: all flags and a's true, b's false.
+    let mut values: Vec<_> = e
+        .cone
+        .fixed
+        .iter()
+        .map(|fixed| fixed.unwrap_or(false))
+        .collect();
+    for i in 0..e.cone.atoms.len() {
+        values[i] = e.cone.input[i]
+            || e.cone
+                .rules
+                .iter()
+                .any(|r| r.head == i && r.body.iter().any(|(a, p)| *p && e.cone.input[*a]));
+    }
+    let small = cubes::certified(&e.cone, &values, &mut Budget::new(&limits)).unwrap();
+    let old = existence::cover(&e.cone, &values, &mut Budget::new(&limits)).unwrap();
+    assert!(small.is_empty());
+    assert!(old.len() > small.len());
+
+    let mut c = Corpus::new();
+    let x = rel(&mut c, "x", true);
+    let p = rel(&mut c, "p", false);
+    rule(&mut c, p, &[(p, false)]);
+    rule(&mut c, p, &[(x, false)]);
+    let v = c
+        .verification_in(denotate_ir::Namespace::default(), "v", [], [])
+        .unwrap();
+    let e = Engine::prepare(
+        &c,
+        &Domains::new(),
+        &SemanticKeys::default(),
+        v,
+        &limits,
+        QueryLimits::default(),
+    )
+    .unwrap();
+    let values: Vec<_> = e
+        .cone
+        .fixed
+        .iter()
+        .map(|fixed| fixed.unwrap_or(true))
+        .collect();
+    let cover = cubes::certified(&e.cone, &values, &mut Budget::new(&limits)).unwrap();
+    assert!(cover.iter().any(|i| e.cone.atoms[*i] == atom(x)));
 }

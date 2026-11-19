@@ -1182,6 +1182,16 @@ is incomplete, while `hasFailures` and property results are retained. Existence
 search adds `meaning.existenceStats`: `cubes`, `inputsPerCube` (`min`, `mean`, `max`),
 `supportSize`, `distinctInputs`, `distinctCubeLiterals`, `emittedExclusionLiterals`
 and `emittedSelectorLiterals`. A distinct cube contributes its width once; shared
-inputs can contribute to several cubes. The support is the whole-program encoded
-input universe, not a reduced component cone. Statistics are null when no existence
+inputs can contribute to several cubes. These aggregate counters sum all searches,
+including repeated upstream work and fallback, while aggregate `supportSize` remains
+the whole-program input universe. Cubes are distinct within each search's exclusions.
+`componentsTotal` counts original negative components. `scopes` is an ordered list of
+`{component, position, state, statistics}`: `component` is a zero-based ordinal in the
+prepared residual graph (null for whole-program fallback), `position` is one-based,
+and `statistics` has the same cube/count fields with that cone's input support.
+States are `preparing`, `searching`, `checking-eligibility`, `determined`,
+`existent-ambiguous`, `every-world`, `no-meaning`, or `inconclusive`. Local ambiguity
+only describes eligibility and is not a global finding. `fallbackReason` is null or
+an explanation of why the search used the full program. Component ordinals are
+invocation-local, not stable semantic keys. Statistics are null when no existence
 search ran. These fields do not change the editor's BDD protocol or finding identities.

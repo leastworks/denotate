@@ -731,6 +731,17 @@ fn probe_built(
 /// Linear worklist evaluation of the candidate's reduct, independent of the
 /// production evaluator/admission and of SAT. Positive cycles need real support.
 fn least_unfounded(c: &Cone, model: &[bool], b: &mut Budget<'_>) -> Result<BTreeSet<usize>> {
+    reduct(c, model, None, b)
+}
+
+// Optional first producers form a finite positive derivation, in worklist order.
+// Negative premises are tested against the candidate, not traversed as proofs.
+fn reduct(
+    c: &Cone,
+    model: &[bool],
+    mut producers: Option<&mut [Option<usize>]>,
+    b: &mut Budget<'_>,
+) -> Result<BTreeSet<usize>> {
     let mut truth = vec![false; c.fixed.len()];
     let mut queue = Vec::new();
     for i in 0..truth.len() {
@@ -754,6 +765,9 @@ fn least_unfounded(c: &Cone, model: &[bool], b: &mut Budget<'_>) -> Result<BTree
             }
         }
         if needed[j] == 0 && !truth[r.head] {
+            if let Some(producers) = producers.as_deref_mut() {
+                producers[r.head] = Some(j);
+            }
             truth[r.head] = true;
             queue.push(r.head);
         }
@@ -765,6 +779,9 @@ fn least_unfounded(c: &Cone, model: &[bool], b: &mut Budget<'_>) -> Result<BTree
             if needed[*j] == 0 {
                 let head = c.rules[*j].head;
                 if !truth[head] {
+                    if let Some(producers) = producers.as_deref_mut() {
+                        producers[head] = Some(*j);
+                    }
                     truth[head] = true;
                     queue.push(head);
                 }

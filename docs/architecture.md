@@ -443,7 +443,13 @@ uniqueness-only or no meaning analysis; skipped phases remain incomplete. An exi
 enumeration owns a mutable, selector-gated exclusion set and bypasses the ordinary
 query-answer cache. New cubes append once. Enumeration state never crosses checks
 or engine instances; its clauses remain isolated from program/property queries and
-later world queries. Numeric statistics are checker-owned, with presentation/CLI
+later world queries. Existence searches isolate original dependency cones of negative
+components, with local existence/uniqueness establishing upstream eligibility and a
+whole-program fallback when upstream is ambiguous. Each cone has its own completion,
+refinement and exclusion gates; W is shared and remains authoritative. Finite-support
+cubes preserve the derived interpretation in every matching world. Scoped work shares
+one existence budget; local ambiguity never becomes a global finding. Global uniqueness
+remains a full-program query. Numeric statistics are checker-owned, with presentation/CLI
 adapters responsible for JSON and human output.
 Emptiness uses the shared report and presentation structures; finite derivations
 are reconstructed from each example's reduct-validated original interpretation

@@ -210,7 +210,12 @@ cube (min/mean/max), whole-program encoded input support size, distinct inputs u
 in cubes, and `distinctCubeLiterals` versus `emittedExclusionLiterals`.
 `distinctCubeLiterals` sums the widths of distinct cubes, counting a repeated input
 once per cube, not once globally. `emittedSelectorLiterals` separately records the
-selector overhead. No world values are needed for these counters. Progress is
+selector overhead. These totals include every component search and any whole-program
+fallback. `scopes` gives each cone's component ordinal, position, state, input support
+and cube statistics; `componentsTotal` counts negative components, and `fallbackReason`
+explains a full-program fallback when upstream is ambiguous. A local ambiguous cone
+is an eligibility result, not a global multiple-meaning finding. Component ordinals
+identify this prepared residual graph only. No world values are needed for these counters. Progress is
 throttled, with an initial sample and a final snapshot, including on exhaustion;
 `--no-progress` silences it but keeps final statistics.
 

@@ -1388,8 +1388,44 @@ failure rules apply: the engine must be rebuilt after incomplete emission.
 Counters distinguish the sum of distinct cube widths from actual exclusion-literal
 emission, with selector literals separate. A complete append-only run emits exactly
 one payload occurrence per cube literal. This is an encoding-size property, not a
-witness, timing or iteration-count golden. Cube construction and whole-program
-support are unchanged; narrower cubes and component decomposition are separate work.
+witness, timing or iteration-count golden. The aggregate retains whole-program
+support; scoped measurements below report each cone separately.
+
+## SAT existence cubes preserve finite support, and components have isolated searches
+
+A certified cube preserves the derived interpretation of one reduct-validated model.
+For each true derived atom, retain one producer discovered by the reduct worklist;
+its positive premises were established earlier. Pin the free input premises of these
+producers. For each false derived atom, keep one false premise in every producer,
+preferring a non-input or an already pinned input. Negative derived premises are
+protected by these false-atom conditions, not by requiring an acyclic proof through
+both polarities. In particular, `p :- p` cannot replace the input that first derived p.
+
+For any input world matching the cube, keep the same derived interpretation. False
+heads still have no satisfied producer; true heads retain finite positive derivations
+in that interpretation's reduct. Thus it is a model, and every true atom is in the
+reduct's least model: no extra or missing derived truth is possible. Input truth may
+vary outside the cube. U and selected restrictions W are enforced separately by world
+selection, never added to the certificate. An unfinished certificate is not an exclusion.
+The implementation repeats the linear reduct walk to obtain finite producers; it
+neither shrinks with unsat cores nor changes the diagnostic probe's older cover.
+
+Existence visits original negative components in provider-first order. Each search
+encodes just that component and its transitive upstream, shares input variables with
+W, and owns its completion/refinement gate and enumeration selector. Positive or
+stratified components extend a fixed upstream interpretation uniquely. A negative
+component is eligible only when its upstream is uniquely determined in every permitted
+world. Local existence plus a separate two-model query establishes that condition for
+its readers. W's own reduct is validated in scoped queries, including eligibility.
+
+Ambiguous upstream triggers a whole-program existence fallback with the remaining
+budget. Local ambiguity is not a global finding: downstream equations can eliminate
+an alternative (`a :- !b; b :- !a; c :- a, !c`), and individually satisfiable downstream
+cones can be incompatible (add `d :- b, !d`). Global uniqueness still uses two full
+program models. Coverage from one component never excludes a world from another.
+One aggregate work/deadline/world allowance covers eligibility, certificates, all
+component searches and fallback; per-query caps and cumulative engine CNF caps remain.
+No partial result changes a verdict or erases earlier property findings.
 
 ## A larger local cone need not prove more under bounded resources
 

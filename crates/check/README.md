@@ -805,13 +805,25 @@ An explicit skip makes the aggregate report incomplete; switching modes on the s
 immutable engine cannot reuse a whole-check result because those reports are not cached.
 
 Original ground stratification proves the requested meaning phases without search. For
-unstratified programs, existence independently chooses permitted worlds and reuses
-the probe's sufficient model-cover cubes. Each search owns a selector and appends each
+unstratified programs, existence independently chooses permitted worlds. Its cubes
+preserve one finite positive derivation per true atom and one false premise per
+producer of a false atom, rather than every alternative producer's truth. Only the
+checked cone's inputs can enter its certificate; U/W remain separate.
+
+Negative components are searched in dependency order, with their own compact upstream
+cone encoding, reduct validation and exclusions. A reader requires upstream existence
+and uniqueness proved for that cone itself. Positive components preserve this property
+only when upstream is determined. Ambiguous upstream triggers a full-program fallback;
+local ambiguity is not a global finding. Eligibility, certificates, component searches
+and fallback share one existence allowance and the ordinary per-query limits. Each search owns a selector and appends each
 cube once; its mutable queries bypass ordinary answer caching. Ordinary world,
 program and property queries keep their separate selectors and immutable cache keys.
 Partial append failure still requires rebuilding the engine. Final `ExistenceStats`
 and throttled progress expose cube widths, distinct inputs, whole-program encoded
-input support and exclusion/selector emission; they do not change cube selection. Uniqueness lazily adds a second program
+input support and exclusion/selector emission; `scopes` adds per-cone counters,
+processing position and result/eligibility state, with `components_total` and an optional
+fallback reason. Component ordinals identify this prepared graph only. Measurements
+do not change cube selection. Uniqueness lazily adds a second program
 encoding sharing inputs and asks for a difference in derived truth; both models must
 pass reduct validation. Its selector and loop clauses cannot constrain later world
 queries. No original rules are rewritten or admitted by these checks.

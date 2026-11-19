@@ -761,3 +761,170 @@ fn meaning_modes_are_explicit_and_do_not_change_property_checks_or_reused_answer
     assert!(empty(&r).proved());
     assert!(!r.proved());
 }
+
+#[test]
+fn component_existence_uses_local_meaning_not_whole_program_uniqueness() {
+    let pair = "relation a(); relation b(); a():-!b(); b():-!a();";
+    for (tail, exists, multiple, fallback) in [
+        ("relation r(); r():-a();", true, true, false),
+        ("relation c(); c():-a(),!c();", true, false, true),
+        (
+            "relation c(); c():-a(),!c(); relation d(); d():-b(),!d();",
+            false,
+            false,
+            true,
+        ),
+    ] {
+        let p = load_text(&format!(
+            "{pair} {tail} verification v {{ assumptions: []; obligations: []; }}"
+        ));
+        let mut warm = prepare(&p, "v");
+        for e in [&mut warm, &mut prepare(&p, "v")] {
+            for _ in 0..2 {
+                let m = e
+                    .check(&p.keys, &CheckOptions::default())
+                    .unwrap()
+                    .meaning
+                    .unwrap();
+                assert_eq!(
+                    matches!(m.existence, Existence::EveryWorld),
+                    exists,
+                    "{m:?}"
+                );
+                assert_eq!(matches!(m.existence, Existence::NoMeaning(_)), !exists);
+                assert_eq!(
+                    matches!(m.uniqueness, Uniqueness::Multiple { .. }),
+                    multiple
+                );
+                assert_eq!(m.existence_stats.unwrap().fallback.is_some(), fallback);
+            }
+        }
+    }
+}
+
+#[test]
+fn component_cover_never_hides_an_independent_no_meaning_world() {
+    let p = load_text(
+        "input flag(); relation a(); relation b(); a():-!b(); b():-!a();
+        relation bad(); bad():-flag(),!bad(); verification v { assumptions: []; obligations: []; }",
+    );
+    let mut e = prepare(&p, "v");
+    for _ in 0..2 {
+        let m = e
+            .check(&p.keys, &CheckOptions::default())
+            .unwrap()
+            .meaning
+            .unwrap();
+        let Existence::NoMeaning(w) = m.existence else {
+            panic!("{m:?}")
+        };
+        assert!(w.present.contains(&atom(&p, "flag", &[])));
+        assert!(matches!(m.uniqueness, Uniqueness::Multiple { .. }));
+        // A zero-input cube for a/b must not remove this world from bad's search.
+        assert!(m.existence_stats.unwrap().fallback.is_none());
+    }
+}
+
+#[test]
+fn cone_uniqueness_can_establish_eligibility_for_a_reader() {
+    let p = load_text(
+        "input flag(); relation a(); relation b(); a():-flag(); a():-!flag();
+        a():-!b(); b():-!a(); relation c(); c():-a(),!c();
+        verification v { assumptions: []; obligations: []; }",
+    );
+    let m = prepare(&p, "v")
+        .check(&p.keys, &CheckOptions::default())
+        .unwrap()
+        .meaning
+        .unwrap();
+    assert!(matches!(m.existence, Existence::NoMeaning(_)));
+    let s = m.existence_stats.unwrap();
+    assert!(s.fallback.is_none());
+    assert!(s.scopes.iter().any(|s| s.state == "determined"));
+}
+
+#[test]
+fn cone_support_excludes_unrelated_inputs_but_worlds_keep_cross_boundary_groups() {
+    let p = load_text(
+        "sort S; const a,b,c,d: S; input x(s:S);
+        relation p(); relation q(); p():-x(a); p():-!q(); q():-!p();
+        relation copied(s:S); copied(X):-x(X);
+        assumption one: exactly_one(x, group_by: ());
+        verification v { assumptions: [one]; obligations: []; }",
+    );
+    let mut e = prepare(&p, "v");
+    for _ in 0..2 {
+        let m = e
+            .check(&p.keys, &CheckOptions::default())
+            .unwrap()
+            .meaning
+            .unwrap();
+        assert!(matches!(m.existence, Existence::EveryWorld));
+        assert!(matches!(m.uniqueness, Uniqueness::Multiple { .. }));
+        let s = m.existence_stats.unwrap();
+        assert_eq!(s.support_size, 4);
+        assert_eq!(s.scopes.len(), 1);
+        assert_eq!(s.scopes[0].counters.support_size, 1);
+        assert!(s.scopes[0].counters.max_inputs <= 1);
+    }
+}
+
+#[test]
+fn scoped_queries_validate_positive_recursive_assumption_definitions() {
+    // Completion alone lets loop() invent truth and would admit flag=false.
+    // The reduct oracle for W must reject that fabricated permitted world.
+    let p = load_text(
+        "input flag(); relation loop(); loop():-loop(); loop():-flag();
+        assumption selected: at_least_one(loop, group_by: ());
+        relation a(); relation b(); a():-flag(); a():-!b(); b():-!a();
+        verification v { assumptions: [selected]; obligations: []; }",
+    );
+    let mut e = prepare(&p, "v");
+    for _ in 0..2 {
+        let m = e
+            .check(&p.keys, &CheckOptions::default())
+            .unwrap()
+            .meaning
+            .unwrap();
+        assert!(m.unique_everywhere(), "{m:?}");
+        assert_eq!(m.existence_stats.unwrap().scopes[0].state, "determined");
+    }
+}
+
+#[test]
+fn component_exhaustion_keeps_fixed_failures_and_has_no_reusable_partial_cover() {
+    let p = load_text(
+        "input x(); relation a(); relation b(); a():-x(),!b(); b():-!x(),!a();
+        relation bad(); bad(); obligation clean:empty(bad);
+        verification v { assumptions: []; obligations: [clean]; }",
+    );
+    let mut e = prepare(&p, "v");
+    let limited = e
+        .check(
+            &p.keys,
+            &CheckOptions {
+                max_worlds: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(limited.has_failures());
+    let m = limited.meaning.unwrap();
+    assert!(matches!(m.existence, Existence::Inconclusive(_)));
+    let stats = m.existence_stats.unwrap();
+    assert!(stats.cubes > 0);
+    assert_eq!(stats.scopes.last().unwrap().state, "inconclusive");
+    for _ in 0..2 {
+        let full = e.check(&p.keys, &CheckOptions::default()).unwrap();
+        assert!(full.has_failures());
+        assert!(full.meaning.unwrap().unique_everywhere());
+    }
+    assert!(
+        prepare(&p, "v")
+            .check(&p.keys, &CheckOptions::default())
+            .unwrap()
+            .meaning
+            .unwrap()
+            .unique_everywhere()
+    );
+}

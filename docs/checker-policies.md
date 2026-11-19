@@ -1460,13 +1460,27 @@ selector. Enumeration searches retain the ordinary per-query caps and shared pha
 budget, but bypass ordinary answer-cache lookup and insertion. Other queries retain
 their exact-key cache. All emitted clauses, including old enumeration selectors and
 full-observation program queries, accumulate under the existing engine CNF limits.
-No cross-check solver compaction or reduced-cone search is introduced.
+No cross-check solver compaction is introduced. Existence searches use compact
+original dependency cones for negative components with determined upstream. Each
+has independent completion/refinement and enumeration gates; ambiguity in an upstream
+cone triggers whole-program fallback. Eligibility queries validate two cone models
+against the same W. Cube certification, eligibility, all cones and fallback share the
+existence work/deadline/world allowance, including the initial stratification scan;
+there is no new allowance per component. A certificate that exhausts is never used.
+All scoped encodings accumulate in the engine's existing CNF allowance. Compact cone
+vectors are released between components; their emitted clauses remain gated.
 
 Existence statistics count produced cubes and their widths, the whole-program encoded
 input support, distinct inputs touched, emitted exclusion payload and selector
 literals. `distinctCubeLiterals` counts a literal once per distinct cube, not once
 globally. The union of touched input indices is bounded by the encoded input universe;
-accounting uses the phase work budget. Numeric progress snapshots use the existing
+accounting uses the phase work budget. Aggregate counts sum work across scopes,
+including repeated upstream coverage and fallback; a cube is distinct within its own
+scope. `scopes` reports each component's support and counters, eligibility/result state
+and one-based processing position. `componentsTotal` counts original negative
+components; `fallbackReason` explains any whole-program search. Component ordinals
+are local to the prepared residual graph, not reusable semantic identities.
+Numeric progress snapshots use the existing
 250 ms throttle, forcing the initial sample and scope completion/exhaustion. Final
 statistics are also retained in the report; instrumentation does not choose cubes.
 

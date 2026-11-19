@@ -1,4 +1,6 @@
 use super::*;
+mod components;
+pub(super) mod cubes;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum MeaningMode {
@@ -20,20 +22,49 @@ impl MeaningMode {
 /// selected outside all previous cubes. Literal counts include neither selectors
 /// nor program-query pins, unless explicitly named selector_literals.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct ExistenceStats {
+pub struct CubeStats {
     pub cubes: usize,
     pub min_inputs: Option<usize>,
     pub max_inputs: usize,
     pub distinct_cube_literals: usize,
-    /// Inputs in the whole-program encoding, not a reduced component support.
+    /// Inputs in this counter's scope (whole-program for aggregate counters).
     pub support_size: usize,
     pub distinct_inputs: usize,
     pub emitted_exclusion_literals: usize,
     pub emitted_selector_literals: usize,
 }
-impl ExistenceStats {
+impl CubeStats {
     pub fn mean_inputs(&self) -> Option<f64> {
         (self.cubes != 0).then(|| self.distinct_cube_literals as f64 / self.cubes as f64)
+    }
+}
+
+/// Aggregate counters retain whole-program supportSize. Scope counters report
+/// only that cone's support; repeated upstream work remains visible in totals.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExistenceStats {
+    pub total: CubeStats,
+    pub components_total: usize,
+    pub scopes: Vec<ExistenceScopeStats>,
+    pub fallback: Option<&'static str>,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExistenceScopeStats {
+    /// Residual component ordinal in this prepared program; None is the fallback.
+    pub component: Option<usize>,
+    pub position: usize,
+    pub state: &'static str,
+    pub counters: CubeStats,
+}
+impl std::ops::Deref for ExistenceStats {
+    type Target = CubeStats;
+    fn deref(&self) -> &CubeStats {
+        &self.total
+    }
+}
+impl std::ops::DerefMut for ExistenceStats {
+    fn deref_mut(&mut self) -> &mut CubeStats {
+        &mut self.total
     }
 }
 
@@ -109,7 +140,7 @@ impl Engine {
         &mut self,
         enumeration: &WorldEnumeration,
         cover: &BTreeSet<usize>,
-        values: &[bool],
+        value: impl Fn(usize) -> bool,
         stats: &mut ExistenceStats,
         b: &mut Budget<'_>,
     ) -> Result<()> {
@@ -120,7 +151,7 @@ impl Engine {
             .iter()
             .map(|i| {
                 let lit = self.world_encoding.vars[*i];
-                if values[*i] { !lit } else { lit }
+                if value(*i) { !lit } else { lit }
             })
             .collect();
         self.cnf.gate = Some(enumeration.selector);
@@ -182,78 +213,30 @@ impl Engine {
             Ok(false) => {}
         }
         if options.meaning == MeaningMode::Full {
-            let (existence, stats) = self.existence(options)?;
+            let (existence, stats) = self.existence_using(options, &mut b)?;
             meaning.existence = existence;
             meaning.existence_stats = Some(stats);
         }
         meaning.uniqueness = self.uniqueness()?;
         Ok(meaning)
     }
+    #[cfg(test)]
     fn existence(&mut self, options: &CheckOptions) -> Result<(Existence, ExistenceStats)> {
-        let _progress = self.limits.progress.scope("SAT existence", None, true);
         let limits = self.limits.clone();
-        let mut b = Budget::new(&limits);
+        self.existence_using(options, &mut Budget::new(&limits))
+    }
+    fn existence_using(
+        &mut self,
+        options: &CheckOptions,
+        b: &mut Budget<'_>,
+    ) -> Result<(Existence, ExistenceStats)> {
+        let _progress = self.limits.progress.scope("SAT existence", None, true);
         let mut stats = ExistenceStats::default();
         self.limits.progress.sat_existence(&stats);
         let result: Result<Existence> = (|| {
             b.charge(self.cone.input.len(), "SAT existence support")?;
             stats.support_size = self.cone.input.iter().filter(|v| **v).count();
-            let mut seen = BTreeSet::new();
-            let enumeration = self.start_enumeration(&mut b)?;
-            let mut worlds = 0;
-            loop {
-                let answer = self.enumeration_world(&enumeration, &mut b)?;
-                self.limits.progress.sat_existence(&stats);
-                let world = match answer {
-                    Answer::NoModel => return Ok(Existence::EveryWorld),
-                    Answer::Inconclusive(c) => return Err(c.into()),
-                    Answer::Model(m) => m,
-                };
-                b.room(worlds, options.max_worlds, "SAT existence", "worlds")?;
-                worlds += 1;
-                let observation = world.observation(&mut b)?;
-                let pins = observation
-                    .present
-                    .iter()
-                    .map(|a| (a.clone(), true))
-                    .chain(observation.absent.iter().map(|a| (a.clone(), false)))
-                    .collect();
-                match self.phase_query(
-                    Mode::Program,
-                    &Query {
-                        pins,
-                        exclude: vec![],
-                    },
-                    &mut b,
-                )? {
-                    Answer::NoModel => return Ok(Existence::NoMeaning(observation)),
-                    Answer::Inconclusive(c) => return Err(c.into()),
-                    Answer::Model(m) => {
-                        let values = m.cone_values(&self.cone, &mut b)?;
-                        let cover = existence::cover(&self.cone, &values, &mut b)?;
-                        b.charge(cover.len(), "SAT existence statistics")?;
-                        stats.cubes += 1;
-                        stats.min_inputs =
-                            Some(stats.min_inputs.map_or(cover.len(), |n| n.min(cover.len())));
-                        stats.max_inputs = stats.max_inputs.max(cover.len());
-                        stats.distinct_cube_literals += cover.len();
-                        seen.extend(cover.iter().copied());
-                        stats.distinct_inputs = seen.len();
-                        self.limits.progress.sat_existence(&stats);
-                        // Sufficient cubes preserve producer truth and finite
-                        // support. World queries still independently enforce W.
-                        let appended = self.exclude_world_cube(
-                            &enumeration,
-                            &cover,
-                            &values,
-                            &mut stats,
-                            &mut b,
-                        );
-                        self.limits.progress.sat_existence(&stats);
-                        appended?;
-                    }
-                }
-            }
+            self.decomposed_existence(options, &mut stats, b)
         })();
         match result {
             Ok(v) => Ok((v, stats)),
