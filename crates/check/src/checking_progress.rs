@@ -9,6 +9,7 @@ use std::{
 
 #[derive(Debug, Clone)]
 pub enum CheckingTarget {
+    SatExistence(crate::stable_query::ExistenceStats),
     InputOrder(InputOrderReport),
     Atom(GroundAtom),
     Obligation(ObligationId),
@@ -76,6 +77,15 @@ impl CheckingProgress {
                 failure: None,
                 continues: false,
             });
+        }
+    }
+    pub(crate) fn sat_existence(&self, stats: &crate::stable_query::ExistenceStats) {
+        if let Some(s) = &self.0 {
+            let mut frame = s.current.lock().unwrap();
+            let first = !matches!(frame.target, Some(CheckingTarget::SatExistence(_)));
+            frame.target = Some(CheckingTarget::SatExistence(stats.clone()));
+            drop(frame);
+            self.emit("progress", first);
         }
     }
     pub fn enabled(&self) -> bool {

@@ -10,6 +10,7 @@ pub enum Context {
 }
 #[derive(Debug, Clone)]
 pub struct CheckOptions {
+    pub meaning: MeaningMode,
     pub max_worlds: usize,
     pub max_tuples: usize,
     pub examples: EmptinessExamples,
@@ -20,6 +21,7 @@ pub struct CheckOptions {
 impl Default for CheckOptions {
     fn default() -> Self {
         Self {
+            meaning: MeaningMode::Full,
             max_worlds: 1024,
             max_tuples: 10000,
             examples: Default::default(),
@@ -29,6 +31,7 @@ impl Default for CheckOptions {
 }
 #[derive(Debug)]
 pub struct Report {
+    pub meaning_mode: MeaningMode,
     pub verification: VerificationId,
     pub context: Context,
     pub meaning: Option<Meaning>,
@@ -78,6 +81,7 @@ impl Engine {
     pub fn check(&mut self, keys: &SemanticKeys, options: &CheckOptions) -> Result<Report> {
         self.limits.cancellation.check()?;
         let mut report = Report {
+            meaning_mode: options.meaning,
             verification: self.verification,
             context: Context::Permitted,
             meaning: None,

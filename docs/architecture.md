@@ -438,7 +438,13 @@ program equations and refinements are selector-gated. Immutable-engine query cac
 include mode and the complete pins/exclusions; they never cross verification or
 program boundaries. Its `Engine::check` API combines whole-program existence and
 uniqueness checks with selected emptiness/at-most-one and fixed obligation checks,
-keeping their results separate.
+keeping their results separate. `CheckOptions::meaning` explicitly selects full,
+uniqueness-only or no meaning analysis; skipped phases remain incomplete. An existence
+enumeration owns a mutable, selector-gated exclusion set and bypasses the ordinary
+query-answer cache. New cubes append once. Enumeration state never crosses checks
+or engine instances; its clauses remain isolated from program/property queries and
+later world queries. Numeric statistics are checker-owned, with presentation/CLI
+adapters responsible for JSON and human output.
 Emptiness uses the shared report and presentation structures; finite derivations
 are reconstructed from each example's reduct-validated original interpretation
 under an independent diagnostic allowance. Remaining symbolic obligation kinds and

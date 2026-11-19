@@ -668,6 +668,9 @@ impl AdmissionDetails<'_> {
                     json!({"kind":"component","index":c.index,"atoms":c.atoms,"ruleInstances":c.rules,
                     "atom":atom_text(&c.representative,&*names),"location":c.source.and_then(|s|locations.get(&s).cloned())}),
                 ),
+                Some(denotate_check::CheckingTarget::SatExistence(s)) => {
+                    Some(denotate_presentation::stable_existence_stats(&s))
+                }
                 Some(denotate_check::CheckingTarget::InputOrder(_)) => None,
                 None => None,
             };

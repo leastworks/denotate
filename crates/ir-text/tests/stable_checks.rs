@@ -693,3 +693,71 @@ fn oracle_results_do_not_replace_verification_meaning_or_property_checks() {
         ));
     }
 }
+
+#[test]
+fn meaning_modes_are_explicit_and_do_not_change_property_checks_or_reused_answers() {
+    for rules in [
+        "relation a(); relation b(); a():-!b(); b():-!a();",
+        "relation a(); a():-!a();",
+        "relation a(); a():-a();", // completion truth is not stable truth
+    ] {
+        let p = load_text(&format!(
+            "{rules} relation bad(); bad(); obligation clean:empty(bad); {V}"
+        ));
+        let mut warm = prepare(&p, "v");
+        for mode in [
+            MeaningMode::Full,
+            MeaningMode::None,
+            MeaningMode::Uniqueness,
+            MeaningMode::Full,
+        ] {
+            let options = CheckOptions {
+                meaning: mode,
+                ..Default::default()
+            };
+            let r = warm.check(&p.keys, &options).unwrap();
+            let fresh = prepare(&p, "v").check(&p.keys, &options).unwrap();
+            assert!(r.has_failures());
+            assert!(!r.proved());
+            let summary = denotate_presentation::stable_summary(&p.corpus, &p.keys, &r).unwrap();
+            let fresh_summary =
+                denotate_presentation::stable_summary(&p.corpus, &p.keys, &fresh).unwrap();
+            // Witnesses and accumulated solver work are not goldens.
+            assert_eq!(summary["state"], fresh_summary["state"]);
+            assert_eq!(summary["obligations"], fresh_summary["obligations"]);
+            for phase in ["existence", "uniqueness"] {
+                assert_eq!(
+                    summary["meaning"][phase]["state"],
+                    fresh_summary["meaning"][phase]["state"]
+                );
+            }
+            assert_eq!(summary["meaning"]["mode"], mode.label());
+            if mode != MeaningMode::Full {
+                assert_eq!(summary["state"], "incomplete");
+                assert_eq!(summary["meaning"]["existence"]["state"], "not-analysed");
+                assert_eq!(
+                    summary["meaning"]["existence"]["reason"],
+                    "disabled-by-option"
+                );
+                assert!(r.meaning.as_ref().unwrap().existence_stats.is_none());
+            }
+            if mode == MeaningMode::None {
+                assert_eq!(summary["meaning"]["uniqueness"]["state"], "not-analysed");
+            }
+        }
+    }
+    let p = load_text(&format!(
+        "relation p();p():-p();obligation clean:empty(p);{V}"
+    ));
+    let r = prepare(&p, "v")
+        .check(
+            &p.keys,
+            &CheckOptions {
+                meaning: MeaningMode::None,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(empty(&r).proved());
+    assert!(!r.proved());
+}

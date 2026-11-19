@@ -1451,6 +1451,25 @@ cover many more); emptiness counts at most 10,000 distinct tuples per obligation
 Exhaustion is explicit and keeps previously confirmed failures and lower bounds.
 These are caller-configurable `CheckOptions`, not ordinary checker defaults.
 
+`CheckOptions::meaning` defaults to `Full`; `Uniqueness` skips existence and `None`
+skips both. Explicitly skipped phases remain not analysed even on stratified programs,
+and keep the aggregate incomplete. Property checking and attribution still run.
+
+Existence enumeration appends each sufficient input cube once under a dedicated
+selector. Enumeration searches retain the ordinary per-query caps and shared phase
+budget, but bypass ordinary answer-cache lookup and insertion. Other queries retain
+their exact-key cache. All emitted clauses, including old enumeration selectors and
+full-observation program queries, accumulate under the existing engine CNF limits.
+No cross-check solver compaction or reduced-cone search is introduced.
+
+Existence statistics count produced cubes and their widths, the whole-program encoded
+input support, distinct inputs touched, emitted exclusion payload and selector
+literals. `distinctCubeLiterals` counts a literal once per distinct cube, not once
+globally. The union of touched input indices is bounded by the encoded input universe;
+accounting uses the phase work budget. Numeric progress snapshots use the existing
+250 ms throttle, forcing the initial sample and scope completion/exhaustion. Final
+statistics are also retained in the report; instrumentation does not choose cubes.
+
 The diagnostic sample uses the existing emptiness policy: three examples in semantic
 key order by default, or a caller-selected bound/all examples. Each example's
 derivation and dependency-input annotation have separate fresh diagnostic allowances;

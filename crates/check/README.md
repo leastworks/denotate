@@ -786,9 +786,9 @@ meaning. Pass the semantic keys of the same corpus used for preparation. The rep
 - Context: permitted, empty declared input universe, inconsistent assumptions, or
   inconclusive.
 - Existence: every permitted world has a stable model, a confirmed no-meaning world,
-  or inconclusive.
+  inconclusive, or deliberately not analysed.
 - Uniqueness: at most one model per world, two reduct-validated interpretations of
-  one world, or inconclusive. This does not imply existence.
+  one world, inconclusive, or deliberately not analysed. This does not imply existence.
 - Emptiness: distinct tuples present in at least one stable model, with exact counts
   or lower bounds and bounded examples. Each example retains its own world, full
   replay scope, dependency-cone inputs and separately bounded finite derivation.
@@ -798,9 +798,20 @@ Only the complete report's `proved()` combines context, existence, uniqueness an
 all selected obligation results. In particular, zero violating stable models does
 not hide a no-meaning or multiple-meaning world. Notices remain advisory.
 
-Original ground stratification proves existence and uniqueness without search. For
+`CheckOptions::meaning` selects `MeaningMode::Full` (default), `Uniqueness` or
+`None`. Skipped phases return `NotAnalysed`, not an exhaustion or proof, even for
+stratified programs. Properties and fixed results keep their own scopes and verdicts.
+An explicit skip makes the aggregate report incomplete; switching modes on the same
+immutable engine cannot reuse a whole-check result because those reports are not cached.
+
+Original ground stratification proves the requested meaning phases without search. For
 unstratified programs, existence independently chooses permitted worlds and reuses
-the probe's sufficient model-cover cubes. Uniqueness lazily adds a second program
+the probe's sufficient model-cover cubes. Each search owns a selector and appends each
+cube once; its mutable queries bypass ordinary answer caching. Ordinary world,
+program and property queries keep their separate selectors and immutable cache keys.
+Partial append failure still requires rebuilding the engine. Final `ExistenceStats`
+and throttled progress expose cube widths, distinct inputs, whole-program encoded
+input support and exclusion/selector emission; they do not change cube selection. Uniqueness lazily adds a second program
 encoding sharing inputs and asks for a difference in derived truth; both models must
 pass reduct validation. Its selector and loop clauses cannot constrain later world
 queries. No original rules are rewritten or admitted by these checks.

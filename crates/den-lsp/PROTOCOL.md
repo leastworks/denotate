@@ -1176,3 +1176,12 @@ It reuses property finding identities and evidence. Uniqueness evidence may incl
 back to the obligation, and confirmed failures are unchanged. The field is omitted
 for complete attribution, including ordinary BDD publication. SAT whole-program
 meaning and not-analysed checks live in its CLI summary, not editor region findings.
+The CLI's `meaning.mode` is `full`, `uniqueness` or `none`. A deliberately skipped
+phase has `state: "not-analysed"` and `reason: "disabled-by-option"`; the aggregate
+is incomplete, while `hasFailures` and property results are retained. Existence
+search adds `meaning.existenceStats`: `cubes`, `inputsPerCube` (`min`, `mean`, `max`),
+`supportSize`, `distinctInputs`, `distinctCubeLiterals`, `emittedExclusionLiterals`
+and `emittedSelectorLiterals`. A distinct cube contributes its width once; shared
+inputs can contribute to several cubes. The support is the whole-program encoded
+input universe, not a reduced component cone. Statistics are null when no existence
+search ran. These fields do not change the editor's BDD protocol or finding identities.

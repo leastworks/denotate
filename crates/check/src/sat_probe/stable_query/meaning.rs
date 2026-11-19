@@ -1,12 +1,52 @@
 use super::*;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MeaningMode {
+    #[default]
+    Full,
+    Uniqueness,
+    None,
+}
+impl MeaningMode {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Uniqueness => "uniqueness",
+            Self::None => "none",
+        }
+    }
+}
+/// Invocation-local measurements. Cubes are distinct: each contains the new world
+/// selected outside all previous cubes. Literal counts include neither selectors
+/// nor program-query pins, unless explicitly named selector_literals.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ExistenceStats {
+    pub cubes: usize,
+    pub min_inputs: Option<usize>,
+    pub max_inputs: usize,
+    pub distinct_cube_literals: usize,
+    /// Inputs in the whole-program encoding, not a reduced component support.
+    pub support_size: usize,
+    pub distinct_inputs: usize,
+    pub emitted_exclusion_literals: usize,
+    pub emitted_selector_literals: usize,
+}
+impl ExistenceStats {
+    pub fn mean_inputs(&self) -> Option<f64> {
+        (self.cubes != 0).then(|| self.distinct_cube_literals as f64 / self.cubes as f64)
+    }
+}
+
 #[derive(Debug)]
 pub enum Existence {
+    NotAnalysed,
     EveryWorld,
     NoMeaning(Observation),
     Inconclusive(Inconclusive),
 }
 #[derive(Debug)]
 pub enum Uniqueness {
+    NotAnalysed,
     AtMostOne,
     Multiple {
         observation: Observation,
@@ -17,6 +57,8 @@ pub enum Uniqueness {
 }
 #[derive(Debug)]
 pub struct Meaning {
+    pub mode: MeaningMode,
+    pub existence_stats: Option<ExistenceStats>,
     pub existence: Existence,
     pub uniqueness: Uniqueness,
 }
@@ -26,10 +68,90 @@ impl Meaning {
             && matches!(self.uniqueness, Uniqueness::AtMostOne)
     }
 }
+/// Private to this engine's existence search. No ordinary query/cache key can
+/// name this changing constraint set. A subsequent check starts a fresh selector.
+struct WorldEnumeration {
+    selector: Lit,
+}
+impl Engine {
+    fn start_enumeration(&mut self, b: &mut Budget<'_>) -> Result<WorldEnumeration> {
+        if let Some(e) = &self.append_failed {
+            return Err(e.clone());
+        }
+        let selector = self.append_query(
+            &QueryKey {
+                mode: Mode::World,
+                pins: vec![],
+                exclude: vec![],
+            },
+            b,
+        )?;
+        Ok(WorldEnumeration { selector })
+    }
+    fn enumeration_world(
+        &mut self,
+        enumeration: &WorldEnumeration,
+        b: &mut Budget<'_>,
+    ) -> Result<Answer> {
+        b.check("SAT existence")?;
+        let timeout = self.cnf.solver.cb().timeout;
+        self.cnf.solver.cb_mut().timeout = timeout.min(b.remaining_time());
+        let result = self.query_with_selector(
+            Mode::World,
+            &Query::default(),
+            Some(enumeration.selector),
+            b,
+        );
+        self.cnf.solver.cb_mut().timeout = timeout;
+        result
+    }
+    fn exclude_world_cube(
+        &mut self,
+        enumeration: &WorldEnumeration,
+        cover: &BTreeSet<usize>,
+        values: &[bool],
+        stats: &mut ExistenceStats,
+        b: &mut Budget<'_>,
+    ) -> Result<()> {
+        if let Some(e) = &self.append_failed {
+            return Err(e.clone());
+        }
+        let clause = cover
+            .iter()
+            .map(|i| {
+                let lit = self.world_encoding.vars[*i];
+                if values[*i] { !lit } else { lit }
+            })
+            .collect();
+        self.cnf.gate = Some(enumeration.selector);
+        let before_clauses = self.cnf.clauses;
+        let before_literals = self.cnf.literals;
+        let result = self.cnf.clause(clause, b);
+        // Include charged emission even if the append subsequently exhausts or
+        // is cancelled. A partially appended encoding is never reused.
+        let selectors = self.cnf.clauses - before_clauses;
+        stats.emitted_selector_literals += selectors;
+        stats.emitted_exclusion_literals += self.cnf.literals - before_literals - selectors;
+        if let Err(e) = &result {
+            self.append_failed = Some(e.clone());
+        }
+        result
+    }
+}
+
 impl Engine {
     pub(super) fn meaning(&mut self, options: &CheckOptions) -> Result<Meaning> {
-        // Local stratification of original ground rules is a sufficient theorem,
-        // independent of U/W. It needs no admission or symbolic evaluation.
+        let mut meaning = Meaning {
+            mode: options.meaning,
+            existence: Existence::NotAnalysed,
+            uniqueness: Uniqueness::NotAnalysed,
+            existence_stats: None,
+        };
+        if options.meaning == MeaningMode::None {
+            return Ok(meaning);
+        }
+        // Local stratification proves only the requested phases. Deliberately
+        // skipped phases remain explicit even when the theorem would be cheap.
         let limits = self.limits.clone();
         let mut b = Budget::new(&limits);
         let stratified = (|| {
@@ -43,36 +165,46 @@ impl Engine {
         })();
         match stratified {
             Ok(true) => {
-                return Ok(Meaning {
-                    existence: Existence::EveryWorld,
-                    uniqueness: Uniqueness::AtMostOne,
-                });
+                if options.meaning == MeaningMode::Full {
+                    meaning.existence = Existence::EveryWorld;
+                }
+                meaning.uniqueness = Uniqueness::AtMostOne;
+                return Ok(meaning);
             }
             Err(e) => {
                 let c = query_inconclusive(e)?;
-                return Ok(Meaning {
-                    existence: Existence::Inconclusive(c),
-                    uniqueness: Uniqueness::Inconclusive(c),
-                });
+                if options.meaning == MeaningMode::Full {
+                    meaning.existence = Existence::Inconclusive(c);
+                }
+                meaning.uniqueness = Uniqueness::Inconclusive(c);
+                return Ok(meaning);
             }
             Ok(false) => {}
         }
-        let existence = self.existence(options)?;
-        let uniqueness = self.uniqueness()?;
-        Ok(Meaning {
-            existence,
-            uniqueness,
-        })
+        if options.meaning == MeaningMode::Full {
+            let (existence, stats) = self.existence(options)?;
+            meaning.existence = existence;
+            meaning.existence_stats = Some(stats);
+        }
+        meaning.uniqueness = self.uniqueness()?;
+        Ok(meaning)
     }
-    fn existence(&mut self, options: &CheckOptions) -> Result<Existence> {
+    fn existence(&mut self, options: &CheckOptions) -> Result<(Existence, ExistenceStats)> {
         let _progress = self.limits.progress.scope("SAT existence", None, true);
         let limits = self.limits.clone();
         let mut b = Budget::new(&limits);
+        let mut stats = ExistenceStats::default();
+        self.limits.progress.sat_existence(&stats);
         let result: Result<Existence> = (|| {
-            let mut remaining = Query::default();
+            b.charge(self.cone.input.len(), "SAT existence support")?;
+            stats.support_size = self.cone.input.iter().filter(|v| **v).count();
+            let mut seen = BTreeSet::new();
+            let enumeration = self.start_enumeration(&mut b)?;
             let mut worlds = 0;
             loop {
-                let world = match self.phase_query(Mode::World, &remaining, &mut b)? {
+                let answer = self.enumeration_world(&enumeration, &mut b)?;
+                self.limits.progress.sat_existence(&stats);
+                let world = match answer {
                     Answer::NoModel => return Ok(Existence::EveryWorld),
                     Answer::Inconclusive(c) => return Err(c.into()),
                     Answer::Model(m) => m,
@@ -99,25 +231,38 @@ impl Engine {
                     Answer::Model(m) => {
                         let values = m.cone_values(&self.cone, &mut b)?;
                         let cover = existence::cover(&self.cone, &values, &mut b)?;
-                        // This sufficient cube preserves all producer truth and
-                        // finite support. Subsequent world queries still enforce W.
-                        remaining.exclude.push(
-                            cover
-                                .into_iter()
-                                .map(|i| (self.cone.atoms[i].clone(), values[i]))
-                                .collect(),
+                        b.charge(cover.len(), "SAT existence statistics")?;
+                        stats.cubes += 1;
+                        stats.min_inputs =
+                            Some(stats.min_inputs.map_or(cover.len(), |n| n.min(cover.len())));
+                        stats.max_inputs = stats.max_inputs.max(cover.len());
+                        stats.distinct_cube_literals += cover.len();
+                        seen.extend(cover.iter().copied());
+                        stats.distinct_inputs = seen.len();
+                        self.limits.progress.sat_existence(&stats);
+                        // Sufficient cubes preserve producer truth and finite
+                        // support. World queries still independently enforce W.
+                        let appended = self.exclude_world_cube(
+                            &enumeration,
+                            &cover,
+                            &values,
+                            &mut stats,
+                            &mut b,
                         );
+                        self.limits.progress.sat_existence(&stats);
+                        appended?;
                     }
                 }
             }
         })();
         match result {
-            Ok(v) => Ok(v),
+            Ok(v) => Ok((v, stats)),
             Err(e) => {
                 self.limits.progress.failure(&e);
-                Ok(Existence::Inconclusive(query_inconclusive(
-                    e.in_phase("SAT existence", None),
-                )?))
+                Ok((
+                    Existence::Inconclusive(query_inconclusive(e.in_phase("SAT existence", None))?),
+                    stats,
+                ))
             }
         }
     }
@@ -248,3 +393,6 @@ impl Model {
             .collect())
     }
 }
+
+#[cfg(test)]
+mod tests;

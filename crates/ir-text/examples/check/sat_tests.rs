@@ -102,3 +102,79 @@ fn sat_limits_are_explicit_and_keep_earlier_fixed_failures() {
     assert_eq!(code, 2, "{out}");
     assert!(out.contains("solves"));
 }
+
+#[test]
+fn sat_meaning_modes_keep_exit_incomplete_and_fixed_findings_visible() {
+    for body in [
+        "relation bad();",
+        "relation bad();bad();",
+        "relation bad();bad():-bad();",
+    ] {
+        let f = Fixture::new(&format!(
+            "{body} obligation e:empty(bad);verification v{{assumptions:[];obligations:[e];}}"
+        ));
+        for mode in ["none", "uniqueness"] {
+            for json in [false, true] {
+                let mut flags = vec!["--engine", "sat", "--sat-meaning", mode, "--no-progress"];
+                if json {
+                    flags.push("--json");
+                }
+                let (code, out) = f.run(&flags);
+                assert_eq!(code, 2, "{out}");
+                assert!(out.contains("not-analysed"), "{out}");
+                assert!(out.contains("disabled-by-option"), "{out}");
+                if !json {
+                    let expected = if body.contains("bad();bad();") {
+                        "counterexample"
+                    } else {
+                        "proved"
+                    };
+                    assert!(
+                        out.contains(&format!("Obligation e (empty): {expected} [fixed]")),
+                        "{out}"
+                    );
+                }
+            }
+        }
+        let implicit = f.run(&["--engine", "sat", "--no-progress"]);
+        assert_eq!(
+            implicit,
+            f.run(&["--engine", "sat", "--sat-meaning", "full", "--no-progress"])
+        );
+        for flags in [
+            vec!["--sat-meaning", "none"],
+            vec!["--engine", "sat", "--sat-meaning", "invalid"],
+        ] {
+            assert_eq!(f.run(&flags).0, 2);
+        }
+    }
+}
+
+#[test]
+fn sat_existence_reports_live_cube_statistics_and_skipped_phases_do_not_run() {
+    let f = Fixture::new(
+        "input flag();input unused();relation a();relation b();a():-flag();a():-!b();b():-!a();verification v{assumptions:[];obligations:[];}",
+    );
+    let (code, out, progress) = f.traced(&["--engine", "sat", "--json"]);
+    assert_eq!(code, Ok(1)); // ambiguous, but all worlds have meaning
+    assert!(out.contains("existenceStats"));
+    for field in [
+        "cubes",
+        "inputsPerCube",
+        "supportSize",
+        "distinctInputs",
+        "distinctCubeLiterals",
+        "emittedExclusionLiterals",
+        "emittedSelectorLiterals",
+    ] {
+        assert!(progress.contains(field), "{field}: {progress}");
+    }
+    assert!(progress.contains("SAT existence progress:"), "{progress}");
+    assert!(progress.contains("SAT existence finished:"), "{progress}");
+    let (_, _, progress) = f.traced(&["--engine", "sat", "--sat-meaning", "none"]);
+    assert!(!progress.contains("SAT existence"));
+    assert!(!progress.contains("SAT uniqueness"));
+    let (_, _, progress) = f.traced(&["--engine", "sat", "--sat-meaning", "uniqueness"]);
+    assert!(!progress.contains("SAT existence"));
+    assert!(progress.contains("SAT uniqueness"));
+}

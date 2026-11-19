@@ -52,7 +52,8 @@ pub fn stable_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> Resul
             r.context,
             Context::EmptyUniverse | Context::InconsistentAssumptions
         );
-    let mut incomplete = matches!(r.context, Context::Inconclusive(_))
+    let mut incomplete = r.meaning_mode != MeaningMode::Full
+        || matches!(r.context, Context::Inconclusive(_))
         || (matches!(r.context, Context::Permitted)
             && (!r.not_analysed.is_empty()
                 || !r.incomplete.is_empty()
@@ -66,6 +67,10 @@ pub fn stable_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> Resul
                 })));
     let meaning = if let Some(m) = &r.meaning {
         let existence = match &m.existence {
+            Existence::NotAnalysed => {
+                incomplete = true;
+                json!({"state":"not-analysed", "reason":"disabled-by-option"})
+            }
             Existence::EveryWorld => json!({"state":"every-world"}),
             Existence::NoMeaning(w) => {
                 failure = true;
@@ -77,6 +82,10 @@ pub fn stable_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> Resul
             }
         };
         let uniqueness = match &m.uniqueness {
+            Uniqueness::NotAnalysed => {
+                incomplete = true;
+                json!({"state":"not-analysed", "reason":"disabled-by-option"})
+            }
             Uniqueness::AtMostOne => json!({"state":"at-most-one"}),
             Uniqueness::Inconclusive(c) => {
                 incomplete = true;
@@ -98,7 +107,7 @@ pub fn stable_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> Resul
                 json!({"state":"multiple-meanings","world":world(observation)?,"differences":differences})
             }
         };
-        json!({"scope":"whole-program","existence":existence,"uniqueness":uniqueness})
+        json!({"scope":"whole-program","mode":m.mode.label(),"existence":existence,"uniqueness":uniqueness, "existenceStats":m.existence_stats.as_ref().map(stable_existence_stats)})
     } else {
         json!({"state":"not-analysed"})
     };
@@ -147,4 +156,11 @@ pub fn stable_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> Resul
         "hasFailures":failure,"incomplete":incomplete,"context":context,"meaning":meaning,"obligations":obligations,
         "notices":r.notices_not_analysed.iter().map(|id|json!({"name":corpus.notice(*id).unwrap().name,"state":"not-analysed"})).collect::<Vec<_>>()}),
     )
+}
+
+/// Shared numeric layout for final status and progress observers.
+pub fn stable_existence_stats(s: &ExistenceStats) -> Value {
+    json!({"cubes":s.cubes,"inputsPerCube":{"min":s.min_inputs,"mean":s.mean_inputs(),"max":s.max_inputs},
+        "supportSize":s.support_size,"distinctInputs":s.distinct_inputs,"distinctCubeLiterals":s.distinct_cube_literals,
+        "emittedExclusionLiterals":s.emitted_exclusion_literals,"emittedSelectorLiterals":s.emitted_selector_literals})
 }

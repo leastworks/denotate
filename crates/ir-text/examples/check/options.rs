@@ -97,7 +97,7 @@ pub fn help() -> String {
     for (flag, value) in limit_values(&Limits::default()) {
         writeln!(text, "  {flag} N (default {value})").unwrap();
     }
-    text.push_str("\nExperimental SAT checking (default engine: bdd):\n  --engine bdd|sat\n  --sat-max-worlds N (default 1024)\n  --sat-max-tuples N (default 10000)\n  --sat-max-solves N (default 128)\n  --sat-max-refinements N (default 64)\n  --sat-max-polls N (default 100000)\n  --sat-max-conflicts N (default 100000)\n  --sat-max-propagations N (default 1000000)\nSAT checks empty and at_most_one, all fixed obligations, and whole-program meaning.\nOther symbolic obligations and notices are explicitly not analysed.\n");
+    text.push_str("\nExperimental SAT checking (default engine: bdd):\n  --engine bdd|sat\n  --sat-meaning full|uniqueness|none (default full; skipped meaning keeps exit 2)\n  --sat-max-worlds N (default 1024)\n  --sat-max-tuples N (default 10000)\n  --sat-max-solves N (default 128)\n  --sat-max-refinements N (default 64)\n  --sat-max-polls N (default 100000)\n  --sat-max-conflicts N (default 100000)\n  --sat-max-propagations N (default 1000000)\nSAT checks empty and at_most_one, all fixed obligations, and whole-program meaning.\nOther symbolic obligations and notices are explicitly not analysed.\n");
     text.push_str(
         "\nLimits apply per operation/query, not to the whole command.\n\
         Deadlines are cooperative, not hard timeouts; loading and presentation are outside them.\n\
@@ -154,6 +154,20 @@ impl Options {
                         "sat" => true,
                         _ => return Err((2, "--engine requires bdd or sat".into())),
                     }
+                }
+                "--sat-meaning" => {
+                    use denotate_check::stable_query::MeaningMode;
+                    options.sat_check_options.meaning = match value()?.as_str() {
+                        "full" => MeaningMode::Full,
+                        "uniqueness" => MeaningMode::Uniqueness,
+                        "none" => MeaningMode::None,
+                        _ => {
+                            return Err((
+                                2,
+                                "--sat-meaning requires full, uniqueness or none".into(),
+                            ));
+                        }
+                    };
                 }
                 "--sat-max-worlds"
                 | "--sat-max-tuples"
@@ -365,8 +379,14 @@ impl Options {
                     ));
                 }
             }
-        } else if seen.iter().any(|f| f.starts_with("--sat-max-")) {
-            return Err((2, "--sat-max-* options require --engine sat".into()));
+        } else if seen
+            .iter()
+            .any(|f| f.starts_with("--sat-max-") || f == "--sat-meaning")
+        {
+            return Err((
+                2,
+                "--sat-max-* and --sat-meaning options require --engine sat".into(),
+            ));
         }
         Ok(options)
     }

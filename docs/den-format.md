@@ -658,6 +658,11 @@ all input-independent obligations decided by fixed preparation. Symbolic coverag
 exactly-one and notices are explicitly not analysed. Context consistency,
 whole-program existence and uniqueness are separate from property results; fixed
 structural failures survive unrelated no-meaning cycles. The editor is unchanged.
+`--sat-meaning full|uniqueness|none` can deliberately omit meaning phases; omitted
+phases are explicitly not analysed and keep the aggregate result incomplete (exit 2).
+Individual property results, including fixed structural findings, remain visible.
+The option does not change stable semantics or treat worlds with no stable model
+as invalid input worlds.
 See the [CLI guide](../crates/ir-text/README.md) for SAT limits, result fields and
 option compatibility. Existing partial/incomplete exit-code precedence applies.
 

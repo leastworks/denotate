@@ -44,13 +44,25 @@ pub(super) fn run(
         .collect::<std::collections::BTreeMap<_, _>>();
     let observer = trace.clone();
     limits.progress = denotate_check::CheckingProgress::new(move |e| {
-        let target = match e.target {
+        if let Some(denotate_check::CheckingTarget::SatExistence(ref stats)) = e.target {
+            observer.message(format!(
+                "SAT existence {}: {}",
+                e.state,
+                denotate_presentation::stable_existence_stats(stats)
+            ));
+        }
+        let target = match &e.target {
             Some(denotate_check::CheckingTarget::Obligation(id)) => {
-                names.get(&id).map(String::as_str).unwrap_or("obligation")
+                names.get(id).map(String::as_str).unwrap_or("obligation")
             }
             _ => "",
         };
-        observer.message(format!("{} {}: {}", e.stage, target, e.state));
+        if !matches!(
+            e.target,
+            Some(denotate_check::CheckingTarget::SatExistence(_))
+        ) {
+            observer.message(format!("{} {}: {}", e.stage, target, e.state));
+        }
         if let Some(error) = e.failure {
             observer.message(checker_failure(error).1);
         }
@@ -106,7 +118,10 @@ pub(super) fn run(
                 continue;
             }
         };
-        trace.message("SAT checking: fixed obligations, empty, at_most_one, then whole-program existence and uniqueness");
+        trace.message(format!(
+            "SAT checking: fixed obligations, empty, at_most_one; meaning mode {}",
+            check.meaning.label()
+        ));
         let report = engine.check(&p.keys, &check).map_err(checker_failure)?;
         let presented = presentation::present_stable(p, &report).map_err(|e| (2, e.to_string()))?;
         let s = &presented.status;
@@ -136,6 +151,9 @@ pub(super) fn run(
                         writeln!(output, "  reason: {reason}").unwrap();
                     }
                 }
+            }
+            if let Some(stats) = s["meaning"].get("existenceStats").filter(|v| !v.is_null()) {
+                writeln!(output, "Existence search: {stats}").unwrap();
             }
             print_diagnostics(p, &presented, output, verbose)?;
             for o in s["obligations"].as_array().unwrap() {

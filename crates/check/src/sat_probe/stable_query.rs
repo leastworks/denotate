@@ -11,7 +11,7 @@ mod meaning;
 mod obligations;
 mod oracle;
 pub use checking::*;
-pub use meaning::{Existence, Meaning, Uniqueness};
+pub use meaning::{Existence, ExistenceStats, Meaning, MeaningMode, Uniqueness};
 pub use oracle::*;
 
 #[derive(Debug, Clone)]
@@ -356,6 +356,17 @@ impl Engine {
         self.query_using(mode, query, &mut b)
     }
     fn query_using(&mut self, mode: Mode, query: &Query, b: &mut Budget<'_>) -> Result<Answer> {
+        self.query_with_selector(mode, query, None, b)
+    }
+    // An enumeration selector has mutable exclusions. Its answers must never
+    // consult or populate the immutable ordinary-query cache.
+    fn query_with_selector(
+        &mut self,
+        mode: Mode,
+        query: &Query,
+        selector: Option<Lit>,
+        b: &mut Budget<'_>,
+    ) -> Result<Answer> {
         self.limits.cancellation.check()?;
         self.stats = Stats::default();
         if let Some(error) = &self.append_failed {
@@ -370,16 +381,25 @@ impl Engine {
             max: self.config.max_solver_polls,
         });
         let result: Result<Answer> = (|| {
-            let key = self.key(mode, query, b)?;
-            if let Some(cached) = self.cache.iter().find(|entry| entry.key == key) {
-                b.charge(
-                    key.pins.len() + key.exclude.iter().map(Vec::len).sum::<usize>() + 1,
-                    "SAT cache lookup",
-                )?;
-                self.stats.cache_hit = true;
-                return Ok(cached.answer.clone());
+            let key = if selector.is_none() {
+                Some(self.key(mode, query, b)?)
+            } else {
+                None
+            };
+            if let Some(key) = &key {
+                if let Some(cached) = self.cache.iter().find(|entry| &entry.key == key) {
+                    b.charge(
+                        key.pins.len() + key.exclude.iter().map(Vec::len).sum::<usize>() + 1,
+                        "SAT cache lookup",
+                    )?;
+                    self.stats.cache_hit = true;
+                    return Ok(cached.answer.clone());
+                }
             }
-            let gate = self.append_query(&key, b)?;
+            let gate = match selector {
+                Some(gate) => gate,
+                None => self.append_query(key.as_ref().unwrap(), b)?,
+            };
             let pins = [
                 if mode == Mode::Program {
                     self.active
@@ -389,7 +409,9 @@ impl Engine {
                 gate,
             ];
             let answer = self.search(mode, &pins, start_conflicts, start_propagations, b)?;
-            self.remember(key, &answer, b)?;
+            if let Some(key) = key {
+                self.remember(key, &answer, b)?;
+            }
             Ok(answer)
         })();
         self.stats.variables = self.cnf.solver.num_vars() as usize;

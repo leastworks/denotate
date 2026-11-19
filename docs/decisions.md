@@ -1366,6 +1366,31 @@ still reported separately: unlike ordinary BDD evidence that may certify just a
 cone, these witnesses have whole-program scope. Comparisons between engines must
 use matching scopes. This API is experimental; ordinary checking remains on BDDs.
 
+## Meaning can be skipped explicitly without changing property semantics
+
+The SAT CLI supports `--sat-meaning full|uniqueness|none`, defaulting to full.
+A skipped phase is not analysed, not proved and not resource-exhausted. The aggregate
+remains incomplete (exit 2), including when a property or context failure is already
+confirmed; those findings stay visible. Even stratification does not silently mark
+a deliberately skipped phase as checked. Fixed structural results keep their scope.
+This lets a corpus run inspect properties without paying for totality, while keeping
+the difference explicit: properties still use stable models, not arbitrary completion
+models. In particular, `p :- p` cannot invent a present `p`.
+
+Existence searches now own a selector for their changing exclusion set. Each cube
+is appended once behind that selector; repeated ordinary queries must not re-emit
+all preceding cubes. Enumeration answers bypass the ordinary immutable-query cache,
+so advancing the exclusions cannot reuse an old answer or overwrite an unfiltered
+world answer. World and program query modes, uniqueness and property selectors stay
+independent. A new check gets a new enumeration selector. Existing partial-append
+failure rules apply: the engine must be rebuilt after incomplete emission.
+
+Counters distinguish the sum of distinct cube widths from actual exclusion-literal
+emission, with selector literals separate. A complete append-only run emits exactly
+one payload occurrence per cube literal. This is an encoding-size property, not a
+witness, timing or iteration-count golden. Cube construction and whole-program
+support are unchanged; narrower cubes and component decomposition are separate work.
+
 ## A larger local cone need not prove more under bounded resources
 
 Local BDD proof cones replace unexpanded definitions with free cut points. Enlarging

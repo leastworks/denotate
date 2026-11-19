@@ -184,6 +184,7 @@ Experimental SAT checking is opt-in:
 just check-den <program> --engine sat
 just check-den <program> --engine sat --verification library::checks --json
 just check-den <program> --engine sat --sat-max-worlds 4096 --sat-max-solves 512
+just check-den <program> --engine sat --sat-meaning none
 ```
 
 BDD remains the default. SAT checks original stable semantics without BDD W or
@@ -196,7 +197,24 @@ whole-program existence and uniqueness. JSON identifies `backend: sat`, separate
 worlds and differing truth assignments for multiple meanings. A property with no
 violating stable model never hides a no-meaning or multiple-meaning world.
 
-Exit codes keep the existing precedence: **2** for incomplete/unanalysed obligations,
+`--sat-meaning full|uniqueness|none` selects both meaning checks (default), only
+uniqueness, or neither. Skipped phases say `not-analysed`, with reason
+`disabled-by-option`; both partial modes keep exit **2**, even with confirmed
+property failures. Properties remain visible, and fixed structural results retain
+their wording and scope. Skipping meaning does not change the property's stable
+semantics: `p() :- p();` still cannot supply a present `p` in a stable model.
+It removes totality checking, not the distinction from a completion-only compiler.
+
+Existence progress and final `meaning.existenceStats` report cube count, inputs per
+cube (min/mean/max), whole-program encoded input support size, distinct inputs used
+in cubes, and `distinctCubeLiterals` versus `emittedExclusionLiterals`.
+`distinctCubeLiterals` sums the widths of distinct cubes, counting a repeated input
+once per cube, not once globally. `emittedSelectorLiterals` separately records the
+selector overhead. No world values are needed for these counters. Progress is
+throttled, with an initial sample and a final snapshot, including on exhaustion;
+`--no-progress` silences it but keeps final statistics.
+
+Exit codes keep the existing precedence: **2** for incomplete/unanalysed obligations or deliberately skipped meaning,
 invalid configuration or a filtered `--verification` run; otherwise **1** for failures
 (including empty/inconsistent context or non-unique meaning), **0** for proved,
 **3** for operational errors. Known failures remain in an incomplete report.
