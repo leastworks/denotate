@@ -428,3 +428,12 @@ pre-encoding simplification with local proofs; the `measure_cnf` example
 in `ir-text` owns discovery and JSON output. It encodes declared input cardinality
 but no selected assumptions, retains the original rules, and produces measurements
 only. It does not participate in checker/session/editor verdicts.
+
+The experimental `denotate-check::stable_query` API separately builds queries over
+one original prepared program and selected verification, with no global BDD W or
+admission. It reuses the probe's completion encoder, reduct validation and loop
+refinement. Assumption-only world selection is independent of full-program models:
+program equations and refinements are selector-gated. Immutable-engine query caches
+include mode and the complete pins/exclusions; they never cross verification or
+program boundaries. This is groundwork for semantic queries, not a new path through
+`CheckRequest`, presentation, sessions or editors.

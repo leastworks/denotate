@@ -280,9 +280,13 @@ impl Measurement {
         })
     }
 }
+mod structure;
+pub use structure::{RecursiveComponent, RecursiveReport, RecursiveSizes};
 mod model;
 mod simplify;
-pub use simplify::{Pass, PassStats, SimplificationLimits, Variant};
+pub use simplify::{
+    LocalDifference, Pass, PassStats, ProofObservation, ProofShape, SimplificationLimits, Variant,
+};
 
 fn encode(p: &GroundProgram, b: &mut Budget<'_>) -> Result<(Cnf, Vec<usize>)> {
     model::Model::new(p, b)?.encode(b)

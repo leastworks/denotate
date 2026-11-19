@@ -376,3 +376,27 @@ the work allowance per head. Cut points are free variables, and input-cardinalit
 groups are included whole or omitted conservatively. A local cutoff skips that
 candidate, with a counter in the report. This experiment does not change ordinary
 checking, selected assumptions or input variable identities.
+
+Every report includes `recursive_components` for the original residual graph after
+fixed preparation, before simplification: positive/negative component counts, atom
+and rule-instance totals, largest sizes, exact atom-size histograms and counts above
+100 atoms, plus each component's relation membership. Component indices identify
+this report's graph only. Component reporting and paired-proof comparison have
+separate elapsed fields; their time is excluded from encoding/elimination time.
+
+To diagnose a lost local proof with a larger cone, without changing the defaults:
+
+```sh
+just measure-den-cnf ROOT --compare-local-limits 256,65536,100000
+```
+
+The triple is cone atoms, cumulative created BDD nodes and work per proof. The base
+uses the existing `--local-*` options (or their defaults). `local_proof_comparison`
+reports the first base proof not reproduced with the comparison limits: its head,
+body/premise, cone sizes, cut points, groups, work, created nodes and cutoff reason.
+Both proofs see the same original acyclic snapshot; no rewriting occurs between
+them. A null `first_lost_proof` means this scan found none, not that two sequential
+simplification runs must agree. Larger cones can replace cheap free cut points with
+expensive definitions and exhaust even a larger allowance. The scan has its own
+global measurement budget, and aborts on global exhaustion as other measurements do.
+The report contains program names and values; keep private-program reports local.

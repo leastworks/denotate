@@ -1396,3 +1396,33 @@ cut-off proofs leave the candidate unchanged. Cancellation/deadlines and global
 exhaustion abort measurement. These are experimental measurement allowances, not
 new checker policies. Each variant starts from the same original program; retained
 model/mapping/rewrite vectors and CNF reconstruction are reported separately.
+
+The original residual SCC report is independent of simplification. The optional
+paired-local-proof scan uses the existing local limits and one additional global
+measurement allowance. It holds the snapshot fixed while changing the local limits;
+this diagnoses resource effects without tuning the policy.
+
+## Experimental stable-query allowances
+
+`stable_query::Engine` is an opt-in Rust API over original rules, U and a selected
+verification, outside the ordinary BDD checker. Preparation and each query have
+separate work/deadline allowances. Emitted CNF variables, clauses and literals use
+`max_atoms`, `max_rules` and `max_dependencies`; these counts accumulate across the
+engine, including selectors, exclusions and refinements. A partial clause-emission
+failure makes later queries inconclusive until the engine is rebuilt.
+
+Each query defaults to 64 refinements, 128 solves and 100,000 cooperative solver
+polls. Conflict and propagation allowances default to 100,000 and 1,000,000. Batsat
+exposes counters but no public setters for its internal search budgets, so these
+last two caps are checked after each solve, before accepting the answer. They may
+overshoot within a solve; cancellation, deadline and the poll allowance interrupt
+search cooperatively. Learnt-clause storage is not included in emitted CNF counts.
+No solver counter or chosen model is a golden.
+
+Exact conclusive answers are cached FIFO, at most 32 entries and 8 MiB of owned
+query/model payload by default. Setting either allowance to zero disables retention.
+The prepared program is shared by models and the engine, not charged again per cache
+entry. Inconclusive answers are never cached. Cache insertion is optional and cannot
+turn an obtained answer into a work-limit failure; cancellation still propagates.
+These allowances are provisional for the new experimental API, not changes to the
+existing diagnostic probe or BDD checking defaults.

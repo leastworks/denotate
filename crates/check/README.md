@@ -721,3 +721,47 @@ unchanged. Global budget exhaustion, cancellation and deadlines abort the report
 The report separates model, mapping, rewrite-record and CNF reconstruction vector
 storage; the mapping is included in the model total. These exclude allocator and
 map/set scratch overhead, BDD workspace and the retained original graph.
+
+The measurement report also describes original residual recursive components,
+before simplification: positive/negative SCCs, exact size histograms, counts above
+100 atoms, rule-instance counts and relation membership. A negative component has
+an internal negative edge; a positive component downstream of one stays positive
+in this report.
+
+`Measurement::first_local_difference` compares two local allowances on the same
+original acyclic snapshot and returns the first proof lost under the second one.
+It records expanded definitions, free cut points, included/omitted input groups,
+work, cumulative created BDD nodes and the cutoff. This separates a local resource
+effect from sequential composition; it does not explain every difference between
+two completed simplification runs.
+
+## Experimental stable queries
+
+`stable_query::Engine::prepare` prepares one immutable corpus, resolved domains and
+named verification. It shares fixed preparation and the existing assumption-cone
+validation, then encodes the original residual rules, declared input cardinality U
+and the selected restrictions. It does not invoke admission, compute global BDD W,
+or use the measurement experiment's rewrites/elimination.
+
+`worlds(&Query)` searches permitted inputs using the assumption definitions alone.
+`models(&Query)` searches full-program stable models. Queries contain conjunctive
+atom pins and query-local excluded cubes; world queries accept inputs only. Each
+SAT candidate is checked against its reduct's least model. An unfounded candidate
+adds an external-support loop clause, rejecting that interpretation without
+excluding its input world. Program loop clauses remain behind the program selector
+and cannot remove a permitted world that has no full-program model.
+
+Answers are a confirmed model, `NoModel` (no stable model satisfies this query), or
+`Inconclusive` with its resource/phase. Cancellation and invalid requests are errors.
+Preparation can also fail or exhaust its limits. `NoModel` is not a uniqueness,
+totality, consistency classification or obligation verdict. Those integrations,
+expression extraction and session/editor reuse remain future work; ordinary
+checking still uses BDDs.
+
+Models expose residual values plus lazily resolved fixed values; world answers
+expose inputs only. Exact canonical query keys include the query mode, pins and
+excluded cubes. A bounded FIFO cache and learnt clauses belong to this engine's
+immutable verification only. A new program, domain or assumption selection requires
+a new engine; nothing is reused through arena handles across preparations. Conclusive
+cached answers are independent of later queries, and partial clause-emission failures
+make the engine unusable until rebuilt. See the checker policies for allowances.

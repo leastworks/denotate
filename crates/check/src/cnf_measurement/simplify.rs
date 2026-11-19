@@ -5,7 +5,10 @@ use super::{
 };
 use std::time::{Duration, Instant};
 mod local;
+mod trace;
+pub use local::ProofShape;
 use local::{Answer, Question};
+pub use trace::{LocalDifference, ProofObservation};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Pass {

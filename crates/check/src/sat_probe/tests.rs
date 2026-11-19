@@ -262,6 +262,7 @@ fn solver_polls_cancellation_during_a_real_search() {
         solver: Solver::new(
             Default::default(),
             Stop {
+                polls: None,
                 cancellation: token.clone(),
                 start: Instant::now(),
                 timeout: l.timeout,

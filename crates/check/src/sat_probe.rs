@@ -70,7 +70,12 @@ pub struct SatProbeReport {
     pub existence: Option<SatExistenceReport>,
 }
 
+struct PollLimit {
+    used: std::cell::Cell<usize>,
+    max: usize,
+}
 struct Stop {
+    polls: Option<PollLimit>,
     cancellation: Cancellation,
     start: Instant,
     timeout: Duration,
@@ -80,6 +85,16 @@ struct Stop {
 impl Stop {
     fn check(&self) -> Result<()> {
         self.cancellation.check()?;
+        if let Some(p) = &self.polls {
+            if p.used.get() > p.max {
+                return Err(CheckError::limit(
+                    "SAT stable query",
+                    "solver polls",
+                    p.max,
+                    Some(p.used.get()),
+                ));
+            }
+        }
         if self.start.elapsed() >= self.timeout {
             return Err(CheckError::deadline("SAT probe", self.timeout));
         }
@@ -88,6 +103,9 @@ impl Stop {
 }
 impl Callbacks for Stop {
     fn stop(&self) -> bool {
+        if let Some(p) = &self.polls {
+            p.used.set(p.used.get().saturating_add(1));
+        }
         #[cfg(test)]
         if let Some(hook) = &self.hook {
             hook();
@@ -490,6 +508,7 @@ fn probe_built(
         solver: Solver::new(
             Default::default(),
             Stop {
+                polls: None,
                 cancellation: limits.cancellation.clone(),
                 start,
                 timeout: limits.timeout,
@@ -763,3 +782,5 @@ pub use candidates::{
 
 pub(crate) mod admission;
 pub use admission::{SatProbeEvent, SatProbeObserver};
+
+pub mod stable_query;

@@ -1291,3 +1291,31 @@ heads, including for syntactic subsumption. Recursive rewrites need independent
 support or a before/after least-fixpoint certificate. Exhaustive tiny stable-model
 tests cover composition, no-meaning and multiple-meaning cases. These passes remain
 measurement-only until a later increment adopts them for checking.
+
+## Stable queries keep world selection separate from program meaning
+
+The experimental query foundation encodes original residual rules, U and selected
+assumptions without admission or global BDD W. Fixed preparation and assumption-cone
+validation retain their existing meaning; measurement-only elimination is not yet
+used for queries. A candidate must equal its reduct's least model before it is
+returned. Loop refinements reject unfounded interpretations, not their entire input
+worlds.
+
+Program refinements are gated by the program-model selector. For example, after a
+query for `p :- flag, !p; p :- p` rules out a model with `flag`, assumption-only world
+selection must still return that permitted world. Otherwise a future existence check
+could silently hide a no-meaning world. The two modes share inputs but keep their
+own derived definitions. Exact memoized queries include their mode and all pins and
+excluded cubes, and belong to one immutable verification. No projected-model reuse
+or cross-session cache is introduced. A query's `NoModel` answer alone does not prove
+whole-program totality, uniqueness or an obligation.
+
+## A larger local cone need not prove more under bounded resources
+
+Local BDD proof cones replace unexpanded definitions with free cut points. Enlarging
+a cone can substitute a costly definition for a cheap independent variable, even
+when the target implication did not need that definition. Thus larger node/work caps
+can still lose a proof through resource exhaustion. Sequential simplification can
+also change the later candidate set. The measurement tool offers a paired proof on
+an unchanged snapshot to distinguish the first effect. Existing local limits are
+unchanged; this evidence is not a reason to tune them without a workload benefit.

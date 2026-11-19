@@ -44,7 +44,7 @@ pub struct SatExistenceReport {
 
 /// W alone, plus free inputs from the full cone. No target equations may filter
 /// which worlds are proposed. Assumption definitions retain their stable meaning.
-fn world_cone(c: &Cone, negative_target: bool, b: &mut Budget<'_>) -> Result<Cone> {
+pub(super) fn world_cone(c: &Cone, negative_target: bool, b: &mut Budget<'_>) -> Result<Cone> {
     let mut producers = vec![Vec::new(); c.fixed.len()];
     for (j, r) in c.rules.iter().enumerate() {
         b.tick("SAT existence world cone")?;
@@ -96,11 +96,11 @@ fn world_cone(c: &Cone, negative_target: bool, b: &mut Budget<'_>) -> Result<Con
     })
 }
 
-struct Encoding {
-    vars: Vec<Lit>,
-    bodies: Vec<Lit>,
+pub(super) struct Encoding {
+    pub(super) vars: Vec<Lit>,
+    pub(super) bodies: Vec<Lit>,
 }
-fn encode(
+pub(super) fn encode(
     c: &Cone,
     cnf: &mut Cnf,
     truth: Lit,
@@ -201,21 +201,32 @@ fn stable_model(
                 Some(report.refinements + 1),
             ));
         }
-        let mut external = Vec::new();
-        for (j, r) in c.rules.iter().enumerate() {
-            b.charge(1 + r.body.len(), "SAT existence refinement")?;
-            if unfounded.contains(&r.head)
-                && !r.body.iter().any(|(a, pos)| *pos && unfounded.contains(a))
-            {
-                external.push(e.bodies[j]);
-            }
-        }
-        let support = cnf.or(&external, b)?;
-        for a in unfounded {
-            cnf.clause(vec![!e.vars[a], support], b)?;
-        }
+        refine(c, e, unfounded, cnf, b)?;
         report.refinements += 1;
     }
+}
+
+pub(super) fn refine(
+    c: &Cone,
+    e: &Encoding,
+    unfounded: BTreeSet<usize>,
+    cnf: &mut Cnf,
+    b: &mut Budget<'_>,
+) -> Result<()> {
+    let mut external = Vec::new();
+    for (j, r) in c.rules.iter().enumerate() {
+        b.charge(1 + r.body.len(), "SAT existence refinement")?;
+        if unfounded.contains(&r.head)
+            && !r.body.iter().any(|(a, pos)| *pos && unfounded.contains(a))
+        {
+            external.push(e.bodies[j]);
+        }
+    }
+    let support = cnf.or(&external, b)?;
+    for a in unfounded {
+        cnf.clause(vec![!e.vars[a], support], b)?;
+    }
+    Ok(())
 }
 
 /// Sufficient cube on which the same derived interpretation stays stable.
@@ -294,6 +305,7 @@ pub(super) fn search_built(
         solver: Solver::new(
             Default::default(),
             Stop {
+                polls: None,
                 cancellation: limits.cancellation.clone(),
                 start,
                 timeout: limits.timeout,

@@ -197,6 +197,7 @@ fn probe(
         solver: Solver::new(
             Default::default(),
             Stop {
+                polls: None,
                 cancellation: b.limits.cancellation.clone(),
                 start,
                 timeout: b.limits.timeout,

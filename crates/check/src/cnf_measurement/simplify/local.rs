@@ -19,7 +19,17 @@ pub(super) enum Answer {
 fn cutoff(resource: &'static str, limit: usize) -> CheckError {
     CheckError::limit("CNF local proof", resource, limit, None)
 }
+#[derive(Debug, Default)]
+pub struct ProofShape {
+    pub cone_atoms: usize,
+    pub definitions: usize,
+    pub cut_points: usize,
+    pub groups: usize,
+    pub omitted_groups: usize,
+    pub bdd_nodes_created: usize,
+}
 struct Ops<'a, 'b> {
+    shape: &'a mut ProofShape,
     b: &'a mut Budget<'b>,
     nodes: usize,
     max: usize,
@@ -27,6 +37,7 @@ struct Ops<'a, 'b> {
 impl Ops<'_, '_> {
     fn own(&mut self, x: Bdd) -> Result<Bdd> {
         self.nodes = self.nodes.saturating_add(x.size());
+        self.shape.bdd_nodes_created = self.nodes;
         if self.nodes > self.max {
             return Err(cutoff("BDD nodes created", self.max));
         }
@@ -80,6 +91,15 @@ pub(super) fn prove(
     limits: &SimplificationLimits,
     b: &mut Budget<'_>,
 ) -> Result<Answer> {
+    prove_observed(m, q, limits, b, &mut ProofShape::default())
+}
+pub(super) fn prove_observed(
+    m: &Model,
+    q: Question<'_>,
+    limits: &SimplificationLimits,
+    b: &mut Budget<'_>,
+    shape: &mut ProofShape,
+) -> Result<Answer> {
     b.tick("CNF cone")?;
     let roots: Vec<_> = match q {
         Question::Constant(h) => vec![super::super::model::literal(h)],
@@ -128,6 +148,7 @@ pub(super) fn prove(
         b.tick("CNF local groups")?;
         let (kind, group, _) = &m.groups[index];
         if group.len() > limits.max_cone_atoms {
+            shape.omitted_groups += 1;
             continue;
         }
         b.charge(group.len() + 1, "CNF local groups")?;
@@ -135,17 +156,23 @@ pub(super) fn prove(
         // truncating exactly-one would instead assert an unsound at-least-one.
         let extra = group.iter().filter(|a| !nodes.contains(a)).count();
         if nodes.len() + extra > limits.max_cone_atoms {
+            shape.omitted_groups += 1;
             continue;
         }
         nodes.extend(group);
         terminals.extend(group);
         groups.push((*kind, group));
     }
+    shape.cone_atoms = nodes.len();
+    shape.definitions = definitions.len();
+    shape.cut_points = terminals.len();
+    shape.groups = groups.len();
     if terminals.len() >= u16::MAX as usize - 1 {
         return Err(cutoff("BDD variables", u16::MAX as usize - 2));
     }
     let variables = BddVariableSet::new_anonymous(terminals.len() as u16);
     let mut ops = Ops {
+        shape,
         b,
         nodes: 0,
         max: limits.max_bdd_nodes,

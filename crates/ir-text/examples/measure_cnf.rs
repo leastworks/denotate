@@ -32,9 +32,10 @@ fn report_json(p: &LoadedProgram, report: &Report) -> Result<Value, String> {
 }
 fn measure(args: impl IntoIterator<Item = String>) -> Result<Value, String> {
     let mut args = args.into_iter();
-    let root = args.next().ok_or("usage: just measure-den-cnf ROOT [--eliminate] [--simplify] [--local-cone-atoms N] [--local-bdd-nodes N] [--local-work N] [--max-atoms N] [--max-rules N] [--max-dependencies N] [--max-work N] [--timeout-ms N]")?;
+    let root = args.next().ok_or("usage: just measure-den-cnf ROOT [--eliminate] [--simplify] [--compare-local-limits CONE,NODES,WORK] [--local-cone-atoms N] [--local-bdd-nodes N] [--local-work N] [--max-atoms N] [--max-rules N] [--max-dependencies N] [--max-work N] [--timeout-ms N]")?;
     let mut limits = Limits::default();
     let mut local = SimplificationLimits::default();
+    let mut comparison = None;
     let mut eliminate = false;
     let mut simplify = false;
     while let Some(arg) = args.next() {
@@ -44,6 +45,23 @@ fn measure(args: impl IntoIterator<Item = String>) -> Result<Value, String> {
         }
         if arg == "--simplify" {
             simplify = true;
+            continue;
+        }
+        if arg == "--compare-local-limits" {
+            let values = args.next().ok_or("missing CONE,NODES,WORK")?;
+            let values = values
+                .split(',')
+                .map(str::parse::<usize>)
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|_| "invalid CONE,NODES,WORK")?;
+            if values.len() != 3 {
+                return Err("expected CONE,NODES,WORK".into());
+            }
+            comparison = Some(SimplificationLimits {
+                max_cone_atoms: values[0],
+                max_bdd_nodes: values[1],
+                max_proof_work: values[2],
+            });
             continue;
         }
         let value: usize = args
@@ -99,12 +117,47 @@ fn measure(args: impl IntoIterator<Item = String>) -> Result<Value, String> {
                 .map_err(|e| e.to_string())?,
         )?
     };
+    let encoding = start.elapsed();
+    if let Some(other) = &comparison {
+        let started = Instant::now();
+        let difference = prepared
+            .first_local_difference(&local, other, &limits)
+            .map_err(|e| e.to_string())?;
+        let observation = |v: &denotate_check::cnf_measurement::ProofObservation| json!({"answer":v.answer,"cutoff":v.cutoff.as_ref().map(ToString::to_string),"work":v.work,"cone_atoms":v.shape.cone_atoms,"expanded_definitions":v.shape.definitions,"free_cut_points":v.shape.cut_points,"groups":v.shape.groups,"omitted_groups":v.shape.omitted_groups,"bdd_nodes_created":v.shape.bdd_nodes_created});
+        let atom = |a: &denotate_check::GroundAtom| -> Result<Value, String> {
+            Ok(
+                json!({"relation":format!("{:?}",p.keys.relation(a.relation).map_err(|e|format!("{e:?}"))?),"arguments":a.arguments.iter().map(|c|p.keys.constant(*c).map(|k|format!("{k:?}")).map_err(|e|format!("{e:?}"))).collect::<Result<Vec<_>,_>>()?}),
+            )
+        };
+        let literal = |(a, v): &(denotate_check::GroundAtom, bool)| -> Result<Value, String> {
+            Ok(json!({"atom":atom(a)?,"positive":v}))
+        };
+        let first = match difference {
+            None => Value::Null,
+            Some(d) => {
+                json!({"question":d.question,"head":atom(&d.head)?,"body":d.body.iter().map(literal).collect::<Result<Vec<_>,_>>()?,"premise":d.premise.as_ref().map(literal).transpose()?,"base":observation(&d.base),"comparison":observation(&d.comparison)})
+            }
+        };
+        output["local_proof_comparison"] = json!({"scope":"same original acyclic snapshot; no sequential rewriting","base_limits":{"cone_atoms":local.max_cone_atoms,"bdd_nodes_created":local.max_bdd_nodes,"work_per_proof":local.max_proof_work},"comparison_limits":{"cone_atoms":other.max_cone_atoms,"bdd_nodes_created":other.max_bdd_nodes,"work_per_proof":other.max_proof_work},"first_lost_proof":first});
+        output["local_comparison_ms"] = json!(started.elapsed().as_secs_f64() * 1000.);
+    }
+    let component_start = Instant::now();
+    let recursive = prepared
+        .recursive_components(&limits)
+        .map_err(|e| e.to_string())?;
+    let sizes = |s: &denotate_check::cnf_measurement::RecursiveSizes| json!({"components":s.components,"atoms":s.atoms,"rule_instances":s.rules,"largest_atoms":s.largest_atoms,"largest_rule_instances":s.largest_rules,"above_100_atoms":s.above_100_atoms,"atom_size_histogram":s.histogram});
+    let components=recursive.components.iter().map(|c| {
+        let relations=c.relations.iter().map(|(r,n)|Ok(json!({"relation":format!("{:?}",p.keys.relation(*r).map_err(|e|format!("{e:?}"))?),"atoms":n}))).collect::<Result<Vec<_>,String>>()?;
+        Ok(json!({"index":c.index,"kind":if c.negative {"negative"} else {"positive"},"atoms":c.atoms,"rule_instances":c.rules,"relations":relations}))
+    }).collect::<Result<Vec<_>,String>>()?;
+    output["recursive_components"] = json!({"scope":"original residual graph after fixed preparation, before simplification","positive":sizes(&recursive.positive),"negative":sizes(&recursive.negative),"components":components});
+    output["component_report_ms"] = json!(component_start.elapsed().as_secs_f64() * 1000.);
     output["scope"] =
         json!("whole-program completion plus declared input cardinality; no selected assumptions");
     output["verdict"] = json!("not-checked");
     output["loading_ms"] = json!(loading.as_secs_f64() * 1000.);
     output["preparation_ms"] = json!(preparation.as_secs_f64() * 1000.);
-    output["encoding_and_elimination_ms"] = json!(start.elapsed().as_secs_f64() * 1000.);
+    output["encoding_and_elimination_ms"] = json!(encoding.as_secs_f64() * 1000.);
     output["limits"] = json!({"max_atoms":limits.max_atoms,"max_rules":limits.max_rules,"max_dependencies":limits.max_dependencies,"max_work":limits.max_work,"timeout_ms":limits.timeout.as_millis()});
     Ok(output)
 }
@@ -153,6 +206,20 @@ mod tests {
         fn drop(&mut self) {
             std::fs::remove_dir_all(&self.0).unwrap();
         }
+    }
+    #[test]
+    fn command_reports_original_components_and_paired_proof_scope() {
+        let root = Fixture::new();
+        std::fs::write(root.0.join("program.den"),"input x();relation a();relation b();relation p();a():-x(),!b();b():-!a();p():-x(),p();p():-x();").unwrap();
+        let report = measure(root.args(&["--compare-local-limits", "256,65536,100000"])).unwrap();
+        assert_eq!(report["recursive_components"]["negative"]["atoms"], 2);
+        assert_eq!(report["recursive_components"]["positive"]["atoms"], 1);
+        assert_eq!(
+            report["recursive_components"]["negative"]["atom_size_histogram"]["2"],
+            1
+        );
+        assert!(report["local_proof_comparison"]["first_lost_proof"].is_null());
+        assert!(measure(root.args(&["--compare-local-limits", "256,65536"])).is_err());
     }
     #[test]
     fn command_reports_independent_passes_and_both_elimination_controls() {
