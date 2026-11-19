@@ -1535,3 +1535,19 @@ the target. Models, exact subquery answers and valid loop refinements use the ex
 verification-local retention rules. Supplied-expression mismatch queries are not
 separately memoized; no unsat-core generalization is enabled. No corpus performance
 claim or ordinary BDD/default-limit change accompanies this API increment.
+
+### Plain execution-plan construction
+
+The experimental `denotate-plan` driver leaves checker defaults unchanged. It uses
+whole-program stable meaning, then retains requested-output work. Preparation and
+meaning/oracle operations keep their existing limits. Driver graph/expression work
+has its own `max_work` allowance and elapsed deadline, checked before publishing a
+plan and between oracle calls; one call can overshoot that deadline up to its own
+cooperative bound. Cancellation propagates as cancellation. Default plan bounds are
+100,000 nodes and 256 oracle calls, with the existing per-call expression bounds.
+These are foundation limits, not corpus-tuned policies. No partial plan is published
+on exhaustion. The reference interpreter also requires an explicit work allowance.
+
+Ready-work scans and grounding are retained in this increment. The driver does not
+yet implement lifted plans, branch partitions, incremental plan caches, or a
+corpus-scale performance claim. See [the plan README](../crates/plan/README.md).

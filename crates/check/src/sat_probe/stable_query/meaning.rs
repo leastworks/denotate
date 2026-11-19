@@ -174,7 +174,10 @@ impl Engine {
 }
 
 impl Engine {
-    pub(super) fn meaning(&mut self, options: &CheckOptions) -> Result<Meaning> {
+    /// Whole-program existence and uniqueness, without checking obligations.
+    /// Callers must separately establish that permitted inputs exist; an empty
+    /// context must not be published as an executable/checked success.
+    pub fn meaning(&mut self, options: &CheckOptions) -> Result<Meaning> {
         let mut meaning = Meaning {
             mode: options.meaning,
             existence: Existence::NotAnalysed,

@@ -226,6 +226,7 @@ dependencies = [
  "denotate-check",
  "denotate-check-session",
  "denotate-ir",
+ "denotate-plan",
  "denotate-presentation",
  "libc",
  "salsa",
@@ -265,6 +266,15 @@ dependencies = [
 [[package]]
 name = "denotate-normalize"
 version = "0.0.1"
+
+[[package]]
+name = "denotate-plan"
+version = "0.0.1"
+dependencies = [
+ "denotate-check",
+ "denotate-ir",
+ "serde_json",
+]
 
 [[package]]
 name = "denotate-presentation"

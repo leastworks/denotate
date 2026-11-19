@@ -18,6 +18,10 @@ just check-den editors/den/examples/library-and-app/app   # check a .den program
 The repository root is one Cargo workspace (`Cargo.toml`, `Cargo.lock`, `target/`)
 covering every crate in `crates/`.
 
+Experimental plain Boolean execution plans: `just plan-den ROOT --verification NAME
+--output RELATION`; see [the plan API](crates/plan/README.md). This exports a plan
+under the verification's input contract; it does not run the program.
+
 Editor commands install the pinned npm dependencies when missing or changed; repeat
 runs reuse them. `just setup-den --force` and `just setup-test-dsl --force` reinstall
 an editor's dependencies if needed. No separate npm commands are required.
@@ -115,7 +119,7 @@ and tiny CLI smoke; it is included in `just verify`.
 
 | Path | What |
 | --- | --- |
-| `crates/` | All Rust: IR, normalization, checker, sessions, presentation, editor mechanics and the `.den` library; `den-lsp` (the `.den` language server), `test-dsl` (the example DSL, with its server) and `lsp-tests` (LSP scenarios) |
+| `crates/` | All Rust: IR, normalization, checker, execution plans, sessions, presentation, editor mechanics and the `.den` library; `den-lsp` (the `.den` language server), `test-dsl` (the example DSL, with its server) and `lsp-tests` (LSP scenarios) |
 | `editors/` | VS Code clients: `den` (the `.den` editor, with examples) and `test-dsl` |
 | `grammars/` | Tree-sitter grammars `den` and `test-dsl` (generated parsers committed) |
 | `fixtures/` | Shared `.den` workspaces for editor tests |

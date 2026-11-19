@@ -5,6 +5,7 @@ members = [
     "crates/ir",
     "crates/ir-text",
     "crates/check",
+    "crates/plan",
     "crates/check-session",
     "crates/presentation",
     "crates/editor",

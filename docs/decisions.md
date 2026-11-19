@@ -1520,3 +1520,32 @@ The initial implementation is bounded and deterministic for a fixed value order,
 with no recursive call stack or global BDD. It reuses exact verification-local
 queries rather than introducing unsat-core or cross-context proof reuse. More
 advanced synthesis and memoization need measured workloads, not new defaults here.
+
+## Execution plans separate meaning, availability and scheduling
+
+The first plain Boolean driver lives in `denotate-plan`, above the checker's stable
+oracle. A plan names its verification and explicit output atoms. Construction first
+requires a nonempty permitted context and whole-program existence and uniqueness;
+expression proofs alone cannot justify execution in a world without a stable model.
+Whole-program meaning is conservative for an output-scoped plan and will be relaxed
+only with a separate scope/partition proof. Obligation success is not required.
+
+Entry inputs are available values, not true facts. Straight-line rules read already
+available values; positive relational cycles use a least-fixpoint kernel; bounded
+expression extraction can replace a cyclic dependency with an input expression.
+This can remove the need for a scheduling branch altogether. Branches should solve
+remaining ordering problems, not be mandatory merely because authored rules cycle.
+A positive self-support cycle has its least model, often false, and is not itself an
+execution impossibility.
+
+The plan records value dependencies, leaving order among ready nodes to a separate
+policy. Output priority affects order only. Semantic keys identify values and source
+rules, while source spans and embedded origins are export metadata. An unrelated
+insertion with stable frontend keys should not renumber the plan. Keys alone are not
+cache identities: a changed program/domain/verification needs fresh construction.
+
+The initial interpreter explicitly requires independently validated permitted
+inputs (`execute_permitted`). It is a reference API, not input admission or a
+production runner. Missing values are errors. Scheduling splits/joins, tasks,
+produced inputs, contract validation and run-and-log remain future increments.
+Unknown or exhausted construction yields no partial executable plan.

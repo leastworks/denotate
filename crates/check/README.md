@@ -913,5 +913,10 @@ values. One work/deadline allowance covers the entire operation; primitive solve
 retain the existing SAT limits. Exact context queries reuse the engine's bounded
 cache. Supplied-expression mismatch encodings are selector-isolated and currently
 rebuilt on each call; no separate expression cache or unsat-core generalization is
-introduced. All state belongs to one prepared verification. There is no driver,
-CLI, editor or session integration for these oracle operations yet.
+introduced. All state belongs to one prepared verification. The experimental
+[plan driver](../plan/README.md) now consumes these operations, with `just plan-den`
+for export. There is no editor or session integration for them yet. `Engine::meaning`
+exposes the existing whole-program meaning checks independently of obligation
+checking; callers establish context consistency separately. `program()` and
+`prepared_value()` expose the immutable original graph and input-independent truth,
+without admission or new semantic evaluation.

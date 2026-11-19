@@ -1,0 +1,15 @@
+[package]
+name = "denotate-plan"
+version = "0.0.1"
+edition = "2024"
+rust-version = "1.93"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+denotate-ir = { path = "../ir" }
+denotate-check = { path = "../check" }
+serde_json.workspace = true
+
+[dev-dependencies]
+denotate-check = { path = "../check", features = ["test-support"] }

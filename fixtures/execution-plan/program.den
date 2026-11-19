@@ -1,0 +1,24 @@
+// A plain Boolean plan: positive recursion and a uniquely determined negative cycle.
+sort Item;
+const a, b: Item;
+input selected();
+input seed(item: Item);
+relation reachable(item: Item);
+reachable(a) :- seed(a);
+reachable(b) :- seed(b);
+reachable(a) :- reachable(b), selected();
+reachable(b) :- reachable(a), selected();
+
+relation left();
+relation right();
+left() :- selected(), !right();
+right() :- !selected(), !left();
+
+relation result(item: Item);
+result(a) :- reachable(a), left();
+result(b) :- reachable(b), right();
+
+verification checks {
+    assumptions: [];
+    obligations: [];
+}

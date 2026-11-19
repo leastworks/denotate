@@ -27,6 +27,7 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
 | `denotate-ir` (`crates/ir`) | Typed relational construction (`Corpus`), namespaces, occurrence identities, `Sources`/`Provenance`, semantic keys, recipe installation | Syntax, checking, wording |
 | `denotate-normalize` | Boolean normalization recipes (double-negation cancellation, Lloyd–Topor with linear helpers); no dependencies | Spans, IR handles |
 | `denotate-check` | Finite grounding, admissibility, concrete replay, BDD property checks, contextual condition queries, no-meaning and rewrite findings, limits and cancellation | Editors, sessions, wording |
+| `denotate-plan` | Experimental plain Boolean execution plans, explicit output scope, value availability, dependency order, export and reference interpretation; consumes checker meaning/expression proofs | New truth semantics, input admission, tasks, code generation, filesystem, editors |
 | `denotate-check-session` | Reusable checker sessions: plan, grounding and verdict caches, retention, warm/cold equivalence | Scheduling, LSP |
 | `denotate-presentation` | Frontend-independent interpretation of checked evidence: finding identity, kind, severity, notes, primary/related placement, labeled fallback | LSP types, DSL vocabulary, filesystem |
 | `denotate-editor` | Language-independent LSP mechanics: documents, synchronization, transport, the checking scheduler and server loop, lifecycle, publication, workspace edits, LSP positions | Roots, manifests, ownership, DSL concepts |
@@ -472,7 +473,7 @@ option compatibility and exit-code aggregation. Fixed obligations do not require
 whole-program model; their evidence scope is explicitly the fixed dependency cone.
 
 
-The stable-query expression oracle is checker-owned, separate from the future
+The stable-query expression oracle is checker-owned, separate from the
 execution driver. Its context is a conjunction of pins minus excluded cubes;
 its available-value list is a caller-supplied runtime capability, not an additional
 truth assumption. Constants, supplied equivalences and bounded synthesized Boolean
@@ -482,5 +483,15 @@ uses only available values for branches, sharing identical expression nodes and
 checking every feasible leaf for a constant. It does not establish readiness,
 whole-program totality or uniqueness. Expressions can be evaluated without access to
 the checker; their reachable leaves are their runtime dependencies. Exact context
-memoization remains inside the immutable verification engine; no execution plans or
-cross-session expression reuse are introduced.
+memoization remains inside the immutable verification engine; there is no
+cross-session expression reuse.
+
+The experimental `denotate-plan` driver consumes this oracle and the original
+prepared graph. It owns output selection, availability, the execution partial order,
+and its reference interpreter; the checker owns meaning and expression proofs.
+The first increment requires whole-program existence/uniqueness, then constructs
+only requested output work using expressions and pure positive fixpoint kernels.
+Plans carry semantic keys and defining-rule provenance; the `.den` export adapter
+adds source and embedded origin descriptors. Interpretation requires independently
+validated permitted inputs. No filesystem, editor state or DSL concepts enter the
+driver. See [the plan API and limits](../crates/plan/README.md).

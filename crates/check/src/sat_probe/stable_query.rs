@@ -201,6 +201,19 @@ fn query_inconclusive(error: CheckError) -> Result<Inconclusive> {
     }
 }
 impl Engine {
+    /// Original prepared graph, before admission. The immutable snapshot belongs
+    /// to this engine's program and selected verification.
+    pub fn program(&self) -> &GroundProgram {
+        &self.program
+    }
+    /// Input-independent truth known by preparation, including legal absent
+    /// atoms. None means a residual value, not false.
+    pub fn prepared_value(&self, atom: &GroundAtom) -> Result<Option<bool>> {
+        Ok(match resolve(&self.program, atom)? {
+            Resolved::Fixed(v) => Some(v),
+            Resolved::Atom(_) => None,
+        })
+    }
     pub fn prepare<'a>(
         corpus: &'a Corpus,
         domains: &Domains,

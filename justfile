@@ -137,6 +137,11 @@ edit-test-dsl folder: build-test-dsl
 check-den +args:
     cargo +1.93.0 run --release --locked -p denotate-ir-text --example check -- "$@"
 
+# Experimental plain Boolean plan export: ROOT --verification NAME --output RELATION.
+[positional-arguments]
+plan-den +args:
+    cargo +1.93.0 run --release --locked -p denotate-ir-text --example plan -- "$@"
+
 # Source-linked test DSL findings; also try mixed, requires-c or fixed.
 demo-overlap mode="overlap":
     cargo +1.93.0 run --locked -p denotate-test-dsl --example overlap -- {{mode}}

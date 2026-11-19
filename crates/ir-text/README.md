@@ -160,8 +160,15 @@ just check-den <program> --timeout-ms 60000 --max-work 100000000
 just check-den <program> --json --no-progress
 just check-den <program> --profile-memory /tmp/den-memory.jsonl
 just check-den --help
+just plan-den fixtures/execution-plan --verification checks --output result
 just test-crate denotate-ir-text
 ```
+
+`just plan-den` is an experimental export command for plain Boolean execution
+plans. It requires explicit verification/output selections and whole-program unique
+meaning, then emits a semantic-keyed dependency plan with source origins. The output
+is conditional on validated permitted inputs; this command does not run it. See the
+[plan API, interpreter and limitations](../plan/README.md).
 
 `examples/check.rs` backs `just check-den`, which builds it optimized (`--release`).
 By default it prints shared presented diagnostics grouped by verification: source URI,
