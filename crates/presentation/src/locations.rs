@@ -233,6 +233,12 @@ impl Placement<'_> {
                 if !visited.insert(atom) {
                     continue;
                 }
+                if !steps.contains_key(atom)
+                    && matches!(&finding.evidence, Evidence::Group(g) if matches!(&g.outcome,
+                        VerifiedOutcome::Counterexample(c) if c.incomplete_attribution.contains_key(atom)))
+                {
+                    continue;
+                }
                 let step = steps
                     .get(atom)
                     .ok_or(Error::InvalidFinding("missing retained proof step"))?;

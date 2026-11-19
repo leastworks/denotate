@@ -87,3 +87,12 @@ safe-edit eligibility on top of the shared classification.
 ```sh
 just test-crate denotate-presentation -p denotate-ir-text
 ```
+
+
+The experimental SAT CLI uses `stable_findings` and `stable_summary`. Emptiness,
+uniqueness and fixed coverage call the same property finding helpers as ordinary
+`interpret`; whole-program existence/uniqueness are separate summary fields, not
+fabricated admission regions. Source placement still uses `Placement`. An optional
+`incompleteAttribution` field on uniqueness counterexample evidence lists tuples
+whose finite source derivations exhausted; those tuples fall back to the obligation
+without losing their confirmed failure. BDD output omits that field and is unchanged.

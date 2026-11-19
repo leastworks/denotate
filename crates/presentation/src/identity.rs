@@ -365,7 +365,11 @@ pub fn evidence_data(finding: &crate::Finding<'_>, keys: &SemanticKeys) -> Resul
         }),
         crate::Evidence::Group(g) => match &g.outcome {
             VerifiedOutcome::Counterexample(c) => {
-                json!({"kind":"replayed-counterexample","observation":observation(&c.observation)?,"dependencyInputs":dependency_inputs_data(c.dependency_inputs.as_ref(), keys)?,"tuples":c.tuples.iter().map(|a|Ok(atom_data(&AtomKey::from_atom(keys,a)?))).collect::<Result<Vec<_>>>()?,"scope":match c.replay_scope {ReplayScope::WholeProgram=>"whole-program",ReplayScope::ConeOnly=>"cone-only"},"producers":producers})
+                let mut data = json!({"kind":"replayed-counterexample","observation":observation(&c.observation)?,"dependencyInputs":dependency_inputs_data(c.dependency_inputs.as_ref(), keys)?,"tuples":c.tuples.iter().map(|a|Ok(atom_data(&AtomKey::from_atom(keys,a)?))).collect::<Result<Vec<_>>>()?,"scope":match c.replay_scope {ReplayScope::WholeProgram=>"whole-program",ReplayScope::ConeOnly=>"cone-only"},"producers":producers});
+                if !c.incomplete_attribution.is_empty() {
+                    data["incompleteAttribution"]=json!(c.incomplete_attribution.iter().map(|(a,c)|->Result<Value>{Ok(json!({"tuple":atom_data(&AtomKey::from_atom(keys,a)?),"reason":crate::exhaustion_data(c.phase,c.resource,c.details)}))}).collect::<Result<Vec<_>>>()?);
+                }
+                data
             }
             _ => json!({"kind":"no-witness","producers":producers}),
         },

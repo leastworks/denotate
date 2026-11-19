@@ -380,6 +380,7 @@ fn certified_finding(
         dependency_inputs: None,
         tuples,
         evidence,
+        incomplete_attribution: BTreeMap::new(),
         certification: Some(CertificationOutcome::Certified(certified)),
         confined_to_no_meaning: vec![],
     })

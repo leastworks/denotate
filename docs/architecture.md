@@ -436,9 +436,19 @@ refinement. Assumption-only world selection is independent of full-program model
 program equations and refinements are selector-gated. Immutable-engine query caches
 include mode and the complete pins/exclusions; they never cross verification or
 program boundaries. Its `Engine::check` API combines whole-program existence and
-uniqueness checks with selected emptiness checks, keeping their results separate.
+uniqueness checks with selected emptiness/at-most-one and fixed obligation checks,
+keeping their results separate.
 Emptiness uses the shared report and presentation structures; finite derivations
 are reconstructed from each example's reduct-validated original interpretation
-under an independent diagnostic allowance. Other selected obligation kinds and
-notices are explicitly not analysed. This remains outside `CheckRequest`, sessions,
-CLI and editor publication; no engine setting or protocol change is introduced here.
+under an independent diagnostic allowance. Remaining symbolic obligation kinds and
+notices are explicitly not analysed. The CLI selects it explicitly with
+`--engine sat` and uses the shared property
+presenter. It remains outside `CheckRequest`, sessions and editor publication;
+backend identity and status are explicit in the CLI, without changing editor caches.
+
+
+SAT uniqueness and fixed-coverage reports use the same frontend-independent property
+finding helpers as BDD checking. The shared presenter owns status classification and
+structured meaning evidence; `ir-text` binds source locations, and the CLI owns IO,
+option compatibility and exit-code aggregation. Fixed obligations do not require a
+whole-program model; their evidence scope is explicitly the fixed dependency cone.

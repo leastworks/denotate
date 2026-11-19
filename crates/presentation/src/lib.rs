@@ -7,12 +7,14 @@ mod identity;
 mod limits;
 mod locations;
 mod rewrites;
+mod stable;
 pub use assumptions::*;
 pub use evidence::*;
 pub use identity::*;
 pub use limits::*;
 pub use locations::*;
 pub use rewrites::*;
+pub use stable::*;
 
 #[derive(Debug)]
 pub enum Error {

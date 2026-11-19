@@ -32,9 +32,14 @@ pub struct Report {
     pub verification: VerificationId,
     pub context: Context,
     pub meaning: Option<Meaning>,
-    /// Counts distinct tuples possible in stable models, not worlds. A complete
+    /// Counts distinct tuples established by fixed preparation or possible in
+    /// stable models, not worlds. A complete
     /// zero count alone does NOT establish existence or uniqueness of meaning.
     pub emptiness: BTreeMap<ObligationId, EmptinessReport>,
+    pub groups: Vec<VerifiedGroup>,
+    pub coverage: BTreeMap<ObligationId, CoverageReport>,
+    pub incomplete: BTreeMap<ObligationId, Inconclusive>,
+    pub fixed_obligations: BTreeSet<ObligationId>,
     pub not_analysed: BTreeSet<ObligationId>,
     pub notices_not_analysed: BTreeSet<NoticeId>,
     program: Arc<GroundProgram>,
@@ -42,6 +47,11 @@ pub struct Report {
 impl Report {
     pub fn has_failures(&self) -> bool {
         self.emptiness.values().any(|e| e.present > 0)
+            || self.coverage.values().any(|c| c.missing > 0)
+            || self
+                .groups
+                .iter()
+                .any(|g| matches!(g.outcome, VerifiedOutcome::Counterexample(_)))
     }
     pub fn proved(&self) -> bool {
         self.context == Context::Permitted
@@ -49,6 +59,12 @@ impl Report {
                 .meaning
                 .as_ref()
                 .is_some_and(Meaning::unique_everywhere)
+            && self.incomplete.is_empty()
+            && self.coverage.values().all(CoverageReport::proved)
+            && self
+                .groups
+                .iter()
+                .all(|g| matches!(g.outcome, VerifiedOutcome::Proved))
             && self.not_analysed.is_empty()
             && self.emptiness.values().all(EmptinessReport::proved)
     }
@@ -57,14 +73,18 @@ impl Report {
     }
 }
 impl Engine {
-    /// Check this engine's selected obligations. This increment analyses empty
-    /// only; other kinds and notices are explicitly listed as not analysed.
+    /// Check empty and uniqueness, plus all fixed obligations. Remaining symbolic
+    /// kinds and notices are explicitly listed as not analysed.
     pub fn check(&mut self, keys: &SemanticKeys, options: &CheckOptions) -> Result<Report> {
         self.limits.cancellation.check()?;
         let mut report = Report {
             verification: self.verification,
             context: Context::Permitted,
             meaning: None,
+            groups: vec![],
+            coverage: BTreeMap::new(),
+            incomplete: BTreeMap::new(),
+            fixed_obligations: BTreeSet::new(),
             emptiness: BTreeMap::new(),
             not_analysed: self.selection.iter().map(|s| s.0).collect(),
             notices_not_analysed: self.notices.clone(),
@@ -74,34 +94,91 @@ impl Engine {
             report.context = Context::EmptyUniverse;
             return Ok(report);
         }
-        report.context = match self.worlds(&Query::default())? {
-            Answer::NoModel => Context::InconsistentAssumptions,
-            Answer::Inconclusive(c) => Context::Inconclusive(c),
-            Answer::Model(_) => Context::Permitted,
+        let context_progress = self.limits.progress.scope("SAT context", None, true);
+        let mut world = match self.worlds(&Query::default())? {
+            Answer::Model(m) => m,
+            Answer::NoModel => {
+                report.context = Context::InconsistentAssumptions;
+                return Ok(report);
+            }
+            Answer::Inconclusive(c) => {
+                report.context = Context::Inconclusive(c);
+                return Ok(report);
+            }
         };
-        if report.context != Context::Permitted {
-            return Ok(report);
-        }
-        // Preserve property failures even if the later meaning search exhausts.
+        // This interpretation is read only for fixed relations and their fixed
+        // dependencies. It is never claimed to be a whole-program stable model.
+        drop(context_progress);
+        world.mode = Mode::Program;
         let mut retained = BTreeMap::new();
+        let mut conflicts = Vec::new();
         for (id, kind, relation) in self.selection.clone() {
-            if kind != Cardinality::Empty {
+            let _progress = self.limits.progress.scope(
+                "SAT obligation",
+                Some(CheckingTarget::Obligation(id)),
+                true,
+            );
+            let fixed = self.fixed_relation(relation);
+            if fixed {
+                report.fixed_obligations.insert(id);
+            }
+            if kind == Cardinality::Empty {
+                let (empty, models) =
+                    self.empty(relation, keys, options, fixed.then_some(&world))?;
+                report.emptiness.insert(id, empty);
+                retained.insert(id, models);
+            } else if kind == Cardinality::AtMostOne || fixed {
+                self.check_cardinality(
+                    id,
+                    kind,
+                    relation,
+                    fixed,
+                    &world,
+                    keys,
+                    &mut report,
+                    &mut conflicts,
+                )?;
+            } else {
                 continue;
             }
-            let (empty, models) = self.empty(relation, keys, options)?;
-            report.emptiness.insert(id, empty);
-            retained.insert(id, models);
             report.not_analysed.remove(&id);
         }
         report.meaning = Some(self.meaning(options)?);
         // Diagnostic work is last and has no dependency on the remaining SAT budget.
         let mut attribution = options.attribution.clone();
         attribution.cancellation = self.limits.cancellation.clone();
+        attribution.progress = self.limits.progress.clone();
+        let _progress = self.limits.progress.scope("SAT attribution", None, true);
         for (id, empty) in &mut report.emptiness {
             for example in &mut empty.examples {
                 let model = &retained[id][&example.tuple];
                 model.attribute(example, &attribution)?;
             }
+        }
+        for (index, model) in conflicts {
+            let VerifiedOutcome::Counterexample(c) = &mut report.groups[index].outcome else {
+                unreachable!()
+            };
+            for tuple in &c.tuples {
+                match model.evidence(tuple, &mut Budget::new(&attribution)) {
+                    Ok(evidence) => {
+                        c.evidence.extend(evidence);
+                    }
+                    Err(e) => {
+                        c.incomplete_attribution
+                            .insert(tuple.clone(), query_inconclusive(e)?);
+                    }
+                }
+            }
+            c.dependency_inputs = Some(
+                match self.program.dependency_inputs_with_budget(
+                    c.tuples.iter().cloned(),
+                    &mut Budget::new(&attribution),
+                ) {
+                    Ok(inputs) => Attribution::Complete(inputs),
+                    Err(e) => Attribution::Incomplete(query_inconclusive(e)?),
+                },
+            );
         }
         Ok(report)
     }
@@ -123,6 +200,7 @@ impl Engine {
         relation: RelationId,
         keys: &SemanticKeys,
         options: &CheckOptions,
+        fixed: Option<&Model>,
     ) -> Result<(EmptinessReport, BTreeMap<GroundAtom, Model>)> {
         let limits = self.limits.clone();
         let mut b = Budget::new(&limits);
@@ -158,7 +236,16 @@ impl Engine {
                     remaining.len().saturating_add(self.program.inputs.len()),
                     "SAT emptiness answer",
                 )?;
-                let model = match self.phase_query(Mode::Program, &query, &mut b)? {
+                let answer = if let Some(model) = fixed {
+                    if remaining.iter().any(|a| model.value(a) == Some(true)) {
+                        Answer::Model(model.clone())
+                    } else {
+                        Answer::NoModel
+                    }
+                } else {
+                    self.phase_query(Mode::Program, &query, &mut b)?
+                };
+                let model = match answer {
                     Answer::NoModel => return Ok(()),
                     Answer::Inconclusive(c) => return Err(c.into()),
                     Answer::Model(m) => m,
@@ -181,7 +268,11 @@ impl Engine {
                             &mut report,
                             atom,
                             &observation,
-                            ReplayScope::WholeProgram,
+                            if fixed.is_some() {
+                                ReplayScope::ConeOnly
+                            } else {
+                                ReplayScope::WholeProgram
+                            },
                             Some(keys),
                             options.examples.limit(),
                         )?;
@@ -208,6 +299,7 @@ impl Engine {
             }
         })();
         if let Err(e) = result {
+            self.limits.progress.failure(&e);
             report.inconclusive = Some(query_inconclusive(e.in_phase("SAT emptiness", None))?);
         }
         // The All policy appends during checking, as on the BDD path.
@@ -233,7 +325,7 @@ impl Model {
         b.charge(self.program.inputs.len(), "SAT observation")?;
         Ok(self.observation_precharged())
     }
-    fn observation_precharged(&self) -> Observation {
+    pub(super) fn observation_precharged(&self) -> Observation {
         let mut out = Observation {
             present: BTreeSet::new(),
             absent: BTreeSet::new(),

@@ -1163,3 +1163,14 @@ Notice unknown reasons also allow `empty-input-universe`, without additional
 notice diagnostics. This differs from `inconsistent-assumptions`: U is already
 empty before any assumption is selected. Editor aggregate state treats it as a
 finding, and the CLI returns the existing findings exit code.
+
+
+### Experimental SAT CLI evidence
+
+The editor still uses BDD; `check-den --engine sat` is a separate, explicit CLI mode.
+It reuses property finding identities and evidence. Uniqueness evidence may include
+`incompleteAttribution: [{tuple, reason}]` when optional source attribution exhausts;
+`reason` uses the existing phase/resource/detail shape. Affected tuple locations fall
+back to the obligation, and confirmed failures are unchanged. The field is omitted
+for complete attribution, including ordinary BDD publication. SAT whole-program
+meaning and not-analysed checks live in its CLI summary, not editor region findings.

@@ -178,6 +178,40 @@ incomplete. For an authoring check of every declaration, including without
 verifications, use `--validate-all-assumptions`; this validates their cones without
 activating their constraints.
 
+Experimental SAT checking is opt-in:
+
+```sh
+just check-den <program> --engine sat
+just check-den <program> --engine sat --verification library::checks --json
+just check-den <program> --engine sat --sat-max-worlds 4096 --sat-max-solves 512
+```
+
+BDD remains the default. SAT checks original stable semantics without BDD W or
+admission: symbolic `empty` and `at_most_one`, plus **all fixed obligations** whose
+relations were settled by input-independent preparation. Symbolic `at_least_one`,
+`exactly_one` and notices are explicitly **not analysed**. Notices stay advisory.
+Human output uses shared property diagnostics and separately labels context,
+whole-program existence and uniqueness. JSON identifies `backend: sat`, separates
+`context`, `meaning`, `obligations`, `notices` and `findings`, and retains no-meaning
+worlds and differing truth assignments for multiple meanings. A property with no
+violating stable model never hides a no-meaning or multiple-meaning world.
+
+Exit codes keep the existing precedence: **2** for incomplete/unanalysed obligations,
+invalid configuration or a filtered `--verification` run; otherwise **1** for failures
+(including empty/inconsistent context or non-unique meaning), **0** for proved,
+**3** for operational errors. Known failures remain in an incomplete report.
+`--json` retains the usual headers; it is not a bare JSON document.
+
+General grounding/CNF/work/deadline limits apply. SAT-specific options are
+`--sat-max-worlds`, `--sat-max-tuples`, `--sat-max-solves`, `--sat-max-refinements`,
+`--sat-max-polls`, `--sat-max-conflicts` and `--sat-max-propagations`; see `--help` for
+defaults. `--empty-examples` controls retention, not the tuple-checking allowance.
+BDD/admission options such as `--checking-within-w`, `--input-order`, `--sat-probe`,
+condition profiling and committed-graph export are rejected in SAT mode. No
+measurement-only simplification/elimination is applied. Each selected verification
+gets its own engine; session/editor integration and cross-verification preparation
+reuse are not part of this mode yet.
+
 Detailed progress goes to **stderr** by default, also with `--json`. It reports
 effective limits, source inventory, loading and assumption validation, each selected
 verification's declarations, preparation/admission/checking/presentation, prepared

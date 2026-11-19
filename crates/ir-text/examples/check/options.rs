@@ -5,6 +5,9 @@ use std::{collections::BTreeSet, fmt::Write, time::Duration};
 pub const USAGE: &str = "Usage: check ROOT_FOLDER_OR_DEN.ROOT [OPTIONS]\nRun just check-den --help for options and limit defaults.";
 pub struct Options {
     pub root: String,
+    pub sat: bool,
+    pub sat_query_limits: denotate_check::stable_query::QueryLimits,
+    pub sat_check_options: denotate_check::stable_query::CheckOptions,
     pub selection: Option<String>,
     pub validate_all_assumptions: bool,
     pub json: bool,
@@ -94,6 +97,7 @@ pub fn help() -> String {
     for (flag, value) in limit_values(&Limits::default()) {
         writeln!(text, "  {flag} N (default {value})").unwrap();
     }
+    text.push_str("\nExperimental SAT checking (default engine: bdd):\n  --engine bdd|sat\n  --sat-max-worlds N (default 1024)\n  --sat-max-tuples N (default 10000)\n  --sat-max-solves N (default 128)\n  --sat-max-refinements N (default 64)\n  --sat-max-polls N (default 100000)\n  --sat-max-conflicts N (default 100000)\n  --sat-max-propagations N (default 1000000)\nSAT checks empty and at_most_one, all fixed obligations, and whole-program meaning.\nOther symbolic obligations and notices are explicitly not analysed.\n");
     text.push_str(
         "\nLimits apply per operation/query, not to the whole command.\n\
         Deadlines are cooperative, not hard timeouts; loading and presentation are outside them.\n\
@@ -110,6 +114,9 @@ impl Options {
         let root = args.next().ok_or((2, USAGE.into()))?;
         let mut options = Self {
             root,
+            sat: false,
+            sat_query_limits: Default::default(),
+            sat_check_options: Default::default(),
             selection: None,
             validate_all_assumptions: false,
             json: false,
@@ -141,6 +148,39 @@ impl Options {
             }
             let mut value = || args.next().ok_or((2, format!("{option} requires a value")));
             match option.as_str() {
+                "--engine" => {
+                    options.sat = match value()?.as_str() {
+                        "bdd" => false,
+                        "sat" => true,
+                        _ => return Err((2, "--engine requires bdd or sat".into())),
+                    }
+                }
+                "--sat-max-worlds"
+                | "--sat-max-tuples"
+                | "--sat-max-solves"
+                | "--sat-max-refinements"
+                | "--sat-max-polls" => {
+                    let n = value()?
+                        .parse::<usize>()
+                        .map_err(|_| (2, format!("{option} requires a nonnegative integer")))?;
+                    match option.as_str() {
+                        "--sat-max-worlds" => options.sat_check_options.max_worlds = n,
+                        "--sat-max-tuples" => options.sat_check_options.max_tuples = n,
+                        "--sat-max-solves" => options.sat_query_limits.max_solves = n,
+                        "--sat-max-refinements" => options.sat_query_limits.max_refinements = n,
+                        _ => options.sat_query_limits.max_solver_polls = n,
+                    }
+                }
+                "--sat-max-conflicts" | "--sat-max-propagations" => {
+                    let n = value()?
+                        .parse::<u64>()
+                        .map_err(|_| (2, format!("{option} requires a nonnegative integer")))?;
+                    if option == "--sat-max-conflicts" {
+                        options.sat_query_limits.max_conflicts = n
+                    } else {
+                        options.sat_query_limits.max_propagations = n
+                    }
+                }
                 "--validate-all-assumptions" => options.validate_all_assumptions = true,
                 "--json" => options.json = true,
                 "--checking-within-w" => options.checking_within_w = true,
@@ -300,6 +340,33 @@ impl Options {
         }
         if options.profile_conditions && options.profile_memory.is_none() {
             return Err((2, "--profile-conditions requires --profile-memory".into()));
+        }
+        if options.sat {
+            for flag in &seen {
+                if flag.starts_with("--sat-probe")
+                    || matches!(
+                        flag.as_str(),
+                        "--checking-within-w"
+                            | "--input-order"
+                            | "--profile-conditions"
+                            | "--dump-component"
+                            | "--dump-component-limit"
+                            | "--export-committed"
+                            | "--stop-after-round"
+                            | "--hide-library-rewrites"
+                    )
+                    || flag.starts_with("--export-")
+                {
+                    return Err((
+                        2,
+                        format!(
+                            "{flag} is a BDD/admission option and cannot be used with --engine sat"
+                        ),
+                    ));
+                }
+            }
+        } else if seen.iter().any(|f| f.starts_with("--sat-max-")) {
+            return Err((2, "--sat-max-* options require --engine sat".into()));
         }
         Ok(options)
     }

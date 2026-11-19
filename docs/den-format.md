@@ -647,6 +647,15 @@ the checked obligation and upstream origins. Other related entries collapse to
 messages and notes are unchanged by this option. This is a CLI layout choice;
 the editor keeps all related information.
 
+The default checking engine is BDD. `--engine sat` opts into experimental
+original-program stable-model checking: symbolic `empty` and `at_most_one`, and
+all input-independent obligations decided by fixed preparation. Symbolic coverage,
+exactly-one and notices are explicitly not analysed. Context consistency,
+whole-program existence and uniqueness are separate from property results; fixed
+structural failures survive unrelated no-meaning cycles. The editor is unchanged.
+See the [CLI guide](../crates/ir-text/README.md) for SAT limits, result fields and
+option compatibility. Existing partial/incomplete exit-code precedence applies.
+
 Verifications follow semantic-key order; diagnostics and related locations follow
 source URI and numeric coordinate order, with content
 as a tie-breaker. Notes are sorted by text. Library fallback messages retain their

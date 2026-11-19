@@ -8,6 +8,7 @@ mod attribution;
 mod build;
 mod checking;
 mod meaning;
+mod obligations;
 pub use checking::*;
 pub use meaning::{Existence, Meaning, Uniqueness};
 
@@ -75,6 +76,31 @@ impl Model {
             Resolved::Atom(i) => self.values[i / 64] & (1u64 << (i % 64)) != 0,
         })
     }
+    /// Differing residual values in two full-program interpretations of this prepared program.
+    /// Fixed atoms cannot differ; scan residual bitvectors without domain lookups.
+    pub fn differences<'a>(
+        &'a self,
+        other: &'a Self,
+    ) -> Option<impl Iterator<Item = (&'a GroundAtom, bool, bool)> + 'a> {
+        if self.mode != Mode::Program
+            || other.mode != Mode::Program
+            || !Arc::ptr_eq(&self.program, &other.program)
+        {
+            return None;
+        }
+        Some(
+            self.program
+                .core
+                .atoms
+                .iter()
+                .enumerate()
+                .filter_map(move |(i, a)| {
+                    let x = self.values[i / 64] & (1u64 << (i % 64)) != 0;
+                    let y = other.values[i / 64] & (1u64 << (i % 64)) != 0;
+                    (x != y).then_some((a, x, y))
+                }),
+        )
+    }
     pub fn true_inputs(&self) -> impl Iterator<Item = &GroundAtom> {
         self.program
             .inputs
@@ -118,6 +144,8 @@ pub struct Engine {
     verification: VerificationId,
     selection: Vec<(denotate_ir::ObligationId, Cardinality, RelationId)>,
     notices: BTreeSet<denotate_ir::NoticeId>,
+    columns: BTreeMap<denotate_ir::ObligationId, Vec<usize>>,
+    residual_relations: BTreeSet<RelationId>,
     world_encoding: Encoding,
     active: Lit,
     truth: Lit,
@@ -219,9 +247,28 @@ impl Engine {
                 (*id, r.kind(), r.relation())
             })
             .collect();
+        b.charge(program.core.atoms.len(), "SAT relation inventory")?;
+        let residual_relations = program.core.atoms.iter().map(|a| a.relation).collect();
         let notices = declaration.notices.iter().copied().collect();
+        let columns = declaration
+            .obligations
+            .iter()
+            .map(|id| {
+                (
+                    *id,
+                    corpus
+                        .obligation(*id)
+                        .unwrap()
+                        .requirement
+                        .group_by()
+                        .to_vec(),
+                )
+            })
+            .collect();
         Ok(Self {
             verification,
+            columns,
+            residual_relations,
             selection,
             notices,
             pair_encoding: None,
@@ -384,9 +431,12 @@ impl Engine {
         self.stats.propagations = self.cnf.solver.num_propagations() - start_propagations;
         match result {
             Ok(v) => Ok(v),
-            Err(e) => Ok(Answer::Inconclusive(query_inconclusive(
-                e.in_phase("SAT stable query", None),
-            )?)),
+            Err(e) => {
+                self.limits.progress.failure(&e);
+                Ok(Answer::Inconclusive(query_inconclusive(
+                    e.in_phase("SAT stable query", None),
+                )?))
+            }
         }
     }
     fn search(

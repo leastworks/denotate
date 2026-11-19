@@ -217,3 +217,49 @@ pub fn diagnostic_names(
             .clone()
     }
 }
+
+/// Opt-in CLI adapter. Editors still use the ordinary checked-report path.
+pub fn present_stable(
+    program: &LoadedProgram,
+    report: &denotate_check::stable_query::Report,
+) -> Result<Presentation> {
+    let own = program
+        .documents
+        .iter()
+        .filter(|d| d.ownership == "user")
+        .map(|d| d.uri.clone())
+        .collect();
+    let key = program.keys.verification(report.verification)?;
+    let placement = Placement {
+        program: &program.root,
+        verification: Some(key),
+        user_files: &own,
+        sources: &program.sources,
+        current: &program.provenance,
+        upstream: &program.embedded.provenance,
+    };
+    let names = diagnostic_names(&program.corpus);
+    let findings = denotate_presentation::stable_findings(&program.corpus, report, &names)?;
+    let mut status = denotate_presentation::stable_summary(&program.corpus, &program.keys, report)?;
+    let mut diagnostics = Vec::new();
+    let mut inventory = Vec::new();
+    for f in findings {
+        let evidence = denotate_presentation::evidence_data(&f, &program.keys)?;
+        let mut placed = placement.finding(&f)?;
+        for d in &mut placed {
+            d.evidence = evidence.clone();
+            d.notes.extend(denotate_presentation::generic_details(
+                &program.corpus,
+                &f,
+                &names,
+            )?);
+        }
+        inventory.push(json!({"identity":f.identity.data_in(&program.keys,Some(key))?,"kind":f.kind.code(),"message":f.message,"evidence":evidence}));
+        diagnostics.extend(placed);
+    }
+    status["findings"] = json!(inventory);
+    Ok(Presentation {
+        diagnostics,
+        status,
+    })
+}

@@ -530,7 +530,7 @@ settling other producers. Selected assumptions must be consistent before coverag
 Coverage uses symbolic BDD fixed-point evaluation and searches the resulting absence
 condition, then replays the concrete observation. Sessions reuse preparation but
 recompute coverage evaluation and summaries each check; a separate coverage verdict cache
-is deferred until measurements justify it. BDD is the only backend; the retirement and
+is deferred until measurements justify it. BDD remains the default backend; the retirement and
 reintroduction criteria are in [checker policies](../../docs/checker-policies.md#backend-retirement).
 
 ## Exactly one
@@ -767,8 +767,8 @@ cached answers are independent of later queries, and partial clause-emission fai
 make the engine unusable until rebuilt. See the checker policies for allowances.
 
 `check(&keys, &CheckOptions)` checks the prepared verification's `empty(R)`
-obligations and whole-program stable meaning. Pass the semantic keys of the same
-corpus used for preparation. The report separates:
+and `at_most_one` obligations, all fixed obligations, and whole-program stable
+meaning. Pass the semantic keys of the same corpus used for preparation. The report separates:
 
 - Context: permitted, empty declared input universe, inconsistent assumptions, or
   inconclusive.
@@ -795,5 +795,29 @@ queries. No original rules are rewritten or admitted by these checks.
 `denotate-presentation::emptiness_finding` shares the ordinary emptiness wording,
 identity and derivation placement. A SAT example's negative premises are absences
 in its validated stable interpretation; they do not assert that the interpretation
-is unique. Callers must retain the separate meaning report. CLI/editor publication
-and session reuse of these reports are not connected yet.
+is unique. Callers must retain the separate meaning report. Editor publication
+and session reuse of these reports remain future work. The CLI exposes these reports
+with `--engine sat`; it uses the same property findings and placement as ordinary
+checking.
+
+
+### SAT CLI property checks
+
+The experimental API also checks `at_most_one` with a selector-gated, linear prefix
+encoding of "at least two tuples in this group". Each answer must pass the original
+reduct validation; query exclusions cannot remove worlds from later questions.
+Counts refer to distinct tuples, not their producing rules. Findings retain a world,
+original derivations and the conflicting tuples' input dependency cone.
+
+A relation with no residual ground atoms is fixed: every possible tuple has already
+been settled by fixed preparation, and all other tuples are absent. All obligation
+kinds on such relations are checked directly, including coverage over the resolved
+grouping domains. These results use a permitted input observation and cone-only fixed
+evidence; they survive unrelated no-meaning components. They are not claims that a
+full-program stable interpretation exists. Symbolic coverage/exactly-one and notices
+remain explicitly not analysed. The overall report still requires whole-program
+unique meaning for a proof.
+
+Uniqueness source attribution can exhaust independently of checking. Its
+`Counterexample::incomplete_attribution` records missing tuple derivations, while
+confirmed tuples remain failures. Ordinary BDD constructors leave this map empty.

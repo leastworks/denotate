@@ -378,15 +378,17 @@ fn whole_program_meaning_and_emptiness_agree_with_exhaustive_tiny_worlds() {
             }
             for (id, relation) in obligations {
                 let tuple = atom(relation);
-                let possible = expected.values().flatten().any(|m| m.contains(&tuple));
+                let possible = expected.values().flatten().any(|m| m.contains(&tuple))
+                    || r.program().fixed_value(&tuple) == Some(true);
                 let empty = &r.emptiness[&id];
                 assert!(empty.complete(), "case {case}");
                 assert_eq!(empty.present, usize::from(possible), "case {case}");
                 for example in &empty.examples {
                     assert!(
-                        expected[&example.observation.present]
-                            .iter()
-                            .any(|m| m.contains(&tuple))
+                        r.program().fixed_value(&tuple) == Some(true)
+                            || expected[&example.observation.present]
+                                .iter()
+                                .any(|m| m.contains(&tuple))
                     );
                     assert!(
                         matches!(&example.attribution,Some(Attribution::Complete(e)) if e.contains_key(&tuple)),

@@ -65,6 +65,7 @@ impl Engine {
         })
     }
     fn existence(&mut self, options: &CheckOptions) -> Result<Existence> {
+        let _progress = self.limits.progress.scope("SAT existence", None, true);
         let limits = self.limits.clone();
         let mut b = Budget::new(&limits);
         let result: Result<Existence> = (|| {
@@ -112,12 +113,16 @@ impl Engine {
         })();
         match result {
             Ok(v) => Ok(v),
-            Err(e) => Ok(Existence::Inconclusive(query_inconclusive(
-                e.in_phase("SAT existence", None),
-            )?)),
+            Err(e) => {
+                self.limits.progress.failure(&e);
+                Ok(Existence::Inconclusive(query_inconclusive(
+                    e.in_phase("SAT existence", None),
+                )?))
+            }
         }
     }
     fn uniqueness(&mut self) -> Result<Uniqueness> {
+        let _progress = self.limits.progress.scope("SAT uniqueness", None, true);
         let limits = self.limits.clone();
         let mut b = Budget::new(&limits);
         self.stats = Stats::default();
@@ -226,9 +231,12 @@ impl Engine {
         self.stats.propagations = self.cnf.solver.num_propagations() - propagations;
         match result {
             Ok(v) => Ok(v),
-            Err(e) => Ok(Uniqueness::Inconclusive(query_inconclusive(
-                e.in_phase("SAT uniqueness", None),
-            )?)),
+            Err(e) => {
+                self.limits.progress.failure(&e);
+                Ok(Uniqueness::Inconclusive(query_inconclusive(
+                    e.in_phase("SAT uniqueness", None),
+                )?))
+            }
         }
     }
 }

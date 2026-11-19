@@ -25,7 +25,7 @@ impl Model {
         });
         Ok(())
     }
-    fn evidence(
+    pub(super) fn evidence(
         &self,
         root: &GroundAtom,
         b: &mut Budget<'_>,

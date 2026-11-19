@@ -978,7 +978,7 @@ The file intentionally retains program names and is not an anonymized export.
   constrain witnesses, and an unresolved outcome stays unresolved. This removes
   repeated attempts across irrelevant inputs without changing admission or limits
   ([policy](checker-policies.md#certification-search)).
-- **BDD is the only backend.** The SAT experiment had synthetic/test-DSL performance
+- **BDD-only retirement (historical; the opt-in CLI below is a later decision).** The SAT experiment had synthetic/test-DSL performance
   wins but no demonstrated need on real programs. It increased implementation and test
   work for every obligation kind and made diagnostics depend on a setting. We retired
   it before extending the vocabulary further. Reintroduce an alternative only for a
@@ -987,7 +987,7 @@ The file intentionally retains program names and is not an anonymized export.
   outcomes under comparable limits and agreement with the independent semantic oracles.
   The existing protocol backend/configuration identity remains fixed BDD metadata for
   result validation and compatibility; it is not a user-selectable option.
-- **SAT returns only as an opt-in diagnostic probe.** A real program exhausted
+- **SAT initially returned only as an opt-in diagnostic probe.** A real program exhausted
   BDD admission after several optimizations, leaving ambiguity versus proof cost
   unresolved. A two-completion SAT query separates those questions without changing
   checking behavior. The initial pre-admission whole-cone query remains available
@@ -1346,3 +1346,27 @@ can still lose a proof through resource exhaustion. Sequential simplification ca
 also change the later candidate set. The measurement tool offers a paired proof on
 an unchanged snapshot to distinguish the first effect. Existing local limits are
 unchanged; this evidence is not a reason to tune them without a workload benefit.
+
+
+## An explicit SAT CLI mode for corpus validation
+
+Real-program BDD exhaustion motivated the separate original-rule stable-query engine.
+`check-den --engine sat` now makes that engine available for validation runs; BDD
+remains the default and editor engine. The mode checks emptiness and uniqueness,
+plus every input-independent obligation already decided by fixed preparation.
+Symbolic coverage/exactly-one and notices are explicitly not analysed; there is no
+silent fallback to BDD or assumption-based admission. This does not reinstate the
+retired SAT backend or make it a standing feature-parity requirement.
+
+A fixed structural error remains a failure even if an unrelated cycle has no stable
+meaning. Its evidence is a fixed cone under a permitted input observation, not a
+fabricated whole-program interpretation. Symbolic counterexamples are still checked
+against the whole original program. Existence and uniqueness remain separate, and
+incomplete work retains earlier failures. Shared property presentation preserves
+wording, finding identities, ownership-frontier placement and library fallback.
+
+Backend identity is explicit in CLI output. BDD-only options are rejected in SAT
+mode. Sessions and editors are not switched; their cache/protocol integration is a
+later increment. The ordinary exit-code precedence and advisory treatment of notices
+stay unchanged. Private-corpus comparisons remain reviewer follow-up, not a claimed
+performance result of the in-repo tests.

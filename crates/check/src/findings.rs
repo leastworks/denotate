@@ -37,6 +37,8 @@ pub struct Counterexample {
     /// derivations of one tuple. At least two, confirmed by concrete replay.
     pub tuples: BTreeSet<GroundAtom>,
     pub evidence: BTreeMap<GroundAtom, EvidenceStep>,
+    /// Optional source derivation failures, independent of confirmed tuple truth.
+    pub incomplete_attribution: BTreeMap<GroundAtom, Inconclusive>,
     /// None when the original globally admitted program already replayed fully.
     pub certification: Option<CertificationOutcome>,
     /// Proven implications from this group's full violation condition to a
@@ -277,6 +279,7 @@ impl<'p, const WITHIN_W: bool> SymbolicMeaning<'p, WITHIN_W> {
                             dependency_inputs: None,
                             tuples,
                             evidence,
+                            incomplete_attribution: BTreeMap::new(),
                             certification: None,
                             confined_to_no_meaning: vec![],
                         })

@@ -292,7 +292,7 @@ fn empty_universe_inconsistent_selection_and_unanalysed_checks_are_distinct() {
         .unwrap();
     assert!(empty(&r).proved());
     assert!(!r.proved());
-    assert_eq!(r.not_analysed.len(), 3);
+    assert_eq!(r.not_analysed.len(), 2);
     assert_eq!(r.notices_not_analysed.len(), 1);
 }
 
@@ -464,4 +464,152 @@ fn existence_covers_irrelevant_inputs_and_stratification_needs_no_world_search()
         )
         .unwrap();
     assert!(r.proved());
+}
+
+#[test]
+fn uniqueness_groups_respect_assumptions_and_do_not_leak_between_queries() {
+    let p=load_text("sort K;const a,b:K;sort V;const x,y:V;input i(k:K,v:V);
+        relation r(k:K,v:V);r(K,V):-i(K,V);assumption single:at_most_one(i,group_by:(k));
+        obligation one:at_most_one(r,group_by:(k));
+        verification yes{assumptions:[single];obligations:[one];}verification free{assumptions:[];obligations:[one];}");
+    for name in ["yes", "free", "yes"] {
+        let mut e = prepare(&p, name);
+        for _ in 0..2 {
+            let r = e.check(&p.keys, &CheckOptions::default()).unwrap();
+            assert_eq!(r.proved(), name == "yes");
+            assert_eq!(r.groups.len(), 2);
+            for g in &r.groups {
+                match &g.outcome {
+                    VerifiedOutcome::Proved => assert_eq!(name, "yes"),
+                    VerifiedOutcome::Counterexample(c) => {
+                        assert_eq!(name, "free");
+                        assert_eq!(c.tuples.len(), 2);
+                        for a in &c.tuples {
+                            assert_eq!(&a.arguments[..1], g.group.key.as_slice());
+                            assert!(c.evidence.contains_key(a));
+                        }
+                    }
+                    other => panic!("{other:?}"),
+                }
+            }
+            let output = presentation::present_stable(&p, &r).unwrap();
+            assert_eq!(
+                output.status["state"],
+                if name == "yes" { "proved" } else { "findings" }
+            );
+        }
+    }
+}
+#[test]
+fn structural_cardinalities_use_resolved_domains_and_survive_unrelated_no_meaning() {
+    let p=load_text("sort S;const a,b:S;domain S=[a];relation r(x:S);r(a);
+        relation bad();bad():-!bad();obligation e:empty(r);obligation u:at_most_one(r,group_by:());obligation c:at_least_one(r,group_by:(x));obligation x:exactly_one(r,group_by:());
+        verification v{assumptions:[];obligations:[e,u,c,x];}");
+    let r = prepare(&p, "v")
+        .check(&p.keys, &CheckOptions::default())
+        .unwrap();
+    assert!(r.not_analysed.is_empty());
+    assert_eq!(r.fixed_obligations.len(), 4);
+    assert!(r.has_failures());
+    assert!(r.coverage.values().all(CoverageReport::proved));
+    assert!(matches!(
+        r.meaning.as_ref().unwrap().existence,
+        Existence::NoMeaning(_)
+    ));
+    for source in [
+        "sort S;relation r(x:S);obligation c:at_least_one(r,group_by:(x));verification v{assumptions:[];obligations:[c];}",
+        "sort S;relation r(x:S);obligation c:at_least_one(r,group_by:());verification v{assumptions:[];obligations:[c];}",
+    ] {
+        let p = load_text(source);
+        let r = prepare(&p, "v")
+            .check(&p.keys, &CheckOptions::default())
+            .unwrap();
+        let c = r.coverage.values().next().unwrap();
+        assert_eq!(c.no_groups, c.missing == 0);
+        assert!(presentation::present_stable(&p, &r).is_ok());
+    }
+}
+#[test]
+fn uniqueness_attribution_exhaustion_keeps_failure_and_falls_back() {
+    let p = load_text(
+        "sort S;const a,b:S;input i(x:S);relation r(x:S);r(X):-i(X);obligation u:at_most_one(r,group_by:());verification v{assumptions:[];obligations:[u];}",
+    );
+    let r = prepare(&p, "v")
+        .check(
+            &p.keys,
+            &CheckOptions {
+                attribution: Limits {
+                    max_work: 0,
+                    ..Limits::default()
+                },
+                ..CheckOptions::default()
+            },
+        )
+        .unwrap();
+    let output = presentation::present_stable(&p, &r).unwrap();
+    assert!(r.has_failures());
+    assert_eq!(output.status["state"], "findings");
+    assert!(
+        output
+            .diagnostics
+            .iter()
+            .any(|d| d.notes.iter().any(|n| n.contains("Source attribution")))
+    );
+    assert!(
+        output.status["findings"][0]["evidence"]["incompleteAttribution"]
+            .as_array()
+            .unwrap()
+            .len()
+            >= 2
+    );
+}
+
+#[test]
+fn uniqueness_queries_and_shared_evidence_agree_with_bdd_on_unique_meanings() {
+    for rules in [
+        "r(a);r(b);r(c);",
+        "r(X):-i(X);",
+        "r(a):-i(a);r(b):-r(a);r(a):-r(b);r(c):-i(c);",
+    ] {
+        let p = load_text(&format!(
+            "sort S;const a,b,c:S;input i(x:S);relation r(x:S);{rules} obligation u:at_most_one(r,group_by:());verification v{{assumptions:[];obligations:[u];}}"
+        ));
+        let sat = prepare(&p, "v")
+            .check(&p.keys, &CheckOptions::default())
+            .unwrap();
+        assert!(sat.has_failures());
+        for g in &sat.groups {
+            if let VerifiedOutcome::Counterexample(c) = &g.outcome {
+                for step in c.evidence.values() {
+                    if let GroundEvidence::Derived { premises, .. } = &step.evidence {
+                        for premise in premises {
+                            if let PremiseEvidence::Positive { fact, .. } = premise {
+                                assert!(c.evidence[fact].order < step.order);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let l = Limits::default();
+        let ops = OperationalLimits::from(&l);
+        let req = p.verification_requests(&l).unwrap().remove(0).1;
+        let RequestPreparation::Complete(prepared) = req.prepare(&p.corpus, &p.keys, &ops).unwrap()
+        else {
+            panic!()
+        };
+        let admitted = prepared.admit(&ops).unwrap();
+        let CheckOutcome::Complete(bdd) = admitted.verify(&ops).unwrap() else {
+            panic!()
+        };
+        let names = presentation::diagnostic_names(&p.corpus);
+        let sf = denotate_presentation::stable_findings(&p.corpus, &sat, &names).unwrap();
+        let bf = denotate_presentation::interpret(&p.corpus, &bdd.verification, &names).unwrap();
+        assert_eq!(sf.len(), bf.len());
+        assert_eq!(sf[0].identity, bf[0].identity);
+        assert_eq!(sf[0].kind, bf[0].kind);
+        if !rules.contains("i(") {
+            assert_eq!(sf[0].message, bf[0].message);
+        }
+    }
 }

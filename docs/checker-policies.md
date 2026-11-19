@@ -6,7 +6,7 @@ it when real programs exist, and change it on evidence.
 
 | Path / policy | Decision | Why |
 | --- | --- | --- |
-| Checker backend | BDD only; cached coarse BDD in editors | Predictable, canonical conditions; good warm reuse |
+| Checker backend | BDD by default and in editors; experimental SAT CLI opt-in | Predictable, canonical conditions; good warm reuse |
 | BDD input order | Semantic-key order; opt-in reverse and structural orders for diagnosis | Structural order helped only synthetic name-separated shapes; under 0.5% on a production-scale program |
 | Relation-SCC grounding | Kept opt-in | Warm-run wins; not yet worth the complexity by default |
 | Fixed-fact evaluation | Shared across verifications; one retained keyed fold per session, without a byte cap | Checker limits bound the fold; retain completed work for reuse across edits and report its accounted bytes |
@@ -132,12 +132,14 @@ comparisons. Compact U alone does not guarantee affordable later conditions.
 
 ## Backend retirement
 
-BDD is the only supported backend. The SAT experiment showed wins on synthetic and
+BDD remains the default and editor backend. The earlier SAT experiment showed wins on synthetic and
 test-DSL workloads, but no demonstrated need on real programs. Maintaining it multiplied
 implementation and validation work for each obligation kind and made diagnostics depend
 on a setting. Its coverage path still depended on BDD evaluation, so it could not help
 when that evaluation exhausted. Its backend implementation and selectors remain retired;
-Git history retains the experiment. The diagnostic probe below separately uses batsat.
+Git history retains the experiment. The diagnostic probe below and the new
+experimental stable-query CLI separately use batsat; they do not restore that
+retired implementation.
 
 Revisit only for a real program that exhausts BDD evaluation within reasonable limits,
 re-scored with the `.den` scorecard below. An alternative must demonstrate better
@@ -1444,3 +1446,14 @@ inspection is charged before a violation query so materialising a confirmed fail
 cannot erase it through work exhaustion. Retained models share their prepared graph;
 each retained world still costs a bitvector over the program. Whole-check reports
 are not cached, and the lazy uniqueness encoding can roughly double program CNF.
+
+
+The stable-query CLI is selected with `--engine sat`; it has no session cache or
+editor setting. `at_most_one` groups share their obligation's work/deadline allowance,
+with the existing per-query SAT caps. A linear prefix encoding asks for at least two
+true tuples; it does not allocate a quadratic set of pair queries. Group enumeration
+and fixed coverage enumeration remain bounded. Fixed relations are classified once
+from residual membership, independent of selected assumptions. All fixed obligations
+are evaluated directly, including coverage/exactly-one; symbolic coverage and notices
+remain deferred. Optional uniqueness attribution uses separate per-tuple allowances.
+This is a corpus-validation mode, not a feature-parity or performance claim.

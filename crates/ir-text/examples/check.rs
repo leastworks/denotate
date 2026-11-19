@@ -22,6 +22,11 @@ mod condition_profile;
 mod options;
 #[path = "check/profile_writer.rs"]
 mod profile_writer;
+#[path = "check/sat.rs"]
+mod sat;
+#[cfg(test)]
+#[path = "check/sat_tests.rs"]
+mod sat_tests;
 use profile_writer::record as profile_record;
 #[cfg(test)]
 #[allow(dead_code)]
@@ -333,6 +338,9 @@ fn check_program(
 ) -> Result<u8, Failure> {
     let options::Options {
         root,
+        sat,
+        sat_query_limits,
+        mut sat_check_options,
         selection,
         validate_all_assumptions,
         json,
@@ -398,7 +406,7 @@ fn check_program(
         output,
         "Root: {}. Backend: {}. Files: {}.",
         p.root,
-        backend.backend,
+        if sat { "sat" } else { &backend.backend },
         p.documents.len()
     )
     .unwrap();
@@ -472,6 +480,26 @@ fn check_program(
             "Partial run: selected verification {raw}; other verifications were not run."
         )
         .unwrap();
+    }
+    if sat {
+        if let Some(examples) = empty_examples {
+            sat_check_options.examples = examples;
+        }
+        return sat::run(
+            &p,
+            &limits,
+            &requests,
+            sat_query_limits,
+            sat_check_options,
+            partial,
+            unchecked,
+            validate_all_assumptions,
+            json,
+            verbose,
+            output,
+            trace,
+            flush,
+        );
     }
     if export_committed.is_some() && requests.len() != 1 {
         return Err((2, "--export-committed requires exactly one verification; use --verification when several exist".into()));

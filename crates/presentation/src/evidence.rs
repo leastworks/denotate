@@ -235,135 +235,9 @@ pub fn interpret<'a>(
 ) -> Result<Vec<Finding<'a>>> {
     let mut findings = Vec::new();
     for group in &report.groups {
-        let obligation = corpus
-            .obligation(group.group.obligation)
-            .ok_or(Error::InvalidFinding("foreign obligation"))?;
-        let combined = obligation.requirement.kind() == denotate_ir::Cardinality::ExactlyOne;
-        let identity = if combined {
-            Identity::Uniqueness {
-                obligation: group.group.obligation,
-                tuple: group.group.key.clone(),
-            }
-        } else {
-            Identity::Group {
-                obligation: group.group.obligation,
-                tuple: group.group.key.clone(),
-            }
-        };
-        let subject = format!(
-            "Obligation {}{}",
-            obligation.name,
-            if combined { " (uniqueness)" } else { "" }
-        );
-        let mut contributions = vec![Contribution {
-            occurrence: obligation.id.into(),
-            role: Role::Obligation,
-        }];
-        let mut notes = Vec::new();
-        let mut cycle_rules = BTreeSet::new();
-        let (kind, message) = match &group.outcome {
-            VerifiedOutcome::Proved => continue,
-            VerifiedOutcome::Counterexample(example) => {
-                if example.tuples.len() < 2
-                    || !example
-                        .tuples
-                        .iter()
-                        .all(|t| group.group.tuples.contains(t) && example.evidence.contains_key(t))
-                {
-                    return Err(Error::InvalidFinding("invalid replayed tuples"));
-                }
-                derivation_contributions(&example.evidence, &mut contributions);
-                notes.push(match example.replay_scope {
-                    ReplayScope::WholeProgram if !report.whole_program_admitted() => "Counterexample replayed on the whole program for this observation only; whole-program admissibility across all inputs remains incomplete.",
-                    ReplayScope::WholeProgram => "Counterexample replayed on the whole program.",
-                    ReplayScope::ConeOnly => "Counterexample replayed on this obligation's dependency cone only; whole-program admissibility is incomplete.",
-                }.into());
-                match &example.certification {
-                    Some(CertificationOutcome::NotCertified) => notes.push("Whole-program replay was not certified for the attempted observations. Failure to certify alone is not proof of no meaning.".into()),
-                    Some(CertificationOutcome::Inconclusive(c)) => notes.push(format!("Whole-program replay certification is inconclusive: {}. The cone counterexample is unchanged.", exhaustion_text(c.phase, c.resource, c.details))),
-                    _ => {}
-                }
-                for id in &example.confined_to_no_meaning {
-                    let region = linked_region(report, *id)?;
-                    if !matches!(region.completion, CompletionOutcome::NoMeaning(_)) {
-                        return Err(Error::InvalidFinding("unproved no-meaning implication"));
-                    }
-                    region_contributions(region, &mut contributions);
-                }
-                if !example.confined_to_no_meaning.is_empty() {
-                    notes.push("This conflict only occurs in observations where the rules at the related no-meaning locations have no consistent result. It remains a cone-only conflict, not a whole-program execution.".into());
-                }
-                notes.push(
-                    "Locations follow the retained grounded derivation for each conflicting tuple."
-                        .into(),
-                );
-                (
-                    Kind::Counterexample,
-                    format!(
-                        "{subject} is violated: {} distinct tuples hold in the replayed observation.",
-                        example.tuples.len()
-                    ),
-                )
-            }
-            VerifiedOutcome::Unsupported | VerifiedOutcome::Inconclusive(_) => {
-                // Potential producers in the checked dependency cone, not arbitrary
-                // rules sharing the same source file or namespace.
-                let atoms: BTreeSet<_> = group
-                    .cone
-                    .components
-                    .iter()
-                    .filter_map(|id| report.program().component(*id))
-                    .flat_map(|c| c.atoms.iter())
-                    .collect();
-                for rule in report
-                    .program()
-                    .original_rules()
-                    .filter(|r| atoms.contains(&r.head.atom))
-                {
-                    rule_contributions(rule, &mut contributions);
-                }
-                for tuple in &group.group.tuples {
-                    atom_contributions(tuple, &mut contributions);
-                }
-                for id in &group.cone.blocked_by {
-                    let region = linked_region(report, *id)?;
-                    region_contributions(region, &mut contributions);
-                    cycle_rules.extend(region.rules.iter().map(|r| r.source));
-                }
-                notes.push("No proof or counterexample is available for this group.".into());
-                notes.extend(unknown_notes(
-                    corpus,
-                    names,
-                    report,
-                    group.group.tuples.iter(),
-                )?);
-                match &group.outcome {
-                    VerifiedOutcome::Inconclusive(c) => (
-                        Kind::Inconclusive,
-                        format!(
-                            "{subject} is inconclusive: {}.",
-                            exhaustion_text(c.phase, c.resource, c.details)
-                        ),
-                    ),
-                    _ => (
-                        Kind::UnsupportedGroup,
-                        format!(
-                            "{subject} is unsupported by the selected checker or depends on unsettled regions."
-                        ),
-                    ),
-                }
-            }
-        };
-        findings.push(Finding {
-            identity,
-            kind,
-            message,
-            notes,
-            contributions,
-            placement_groups: vec![],
-            cycle_rules: cycle_rules.into_iter().collect(),
-            evidence: Evidence::Group(group),
-        });
+        if let Some(finding) = uniqueness_finding(corpus, group, names, Some(report))? {
+            findings.push(finding);
+        }
     }
     for (id, emptiness) in &report.emptiness {
         if let Some(mut finding) = emptiness_finding(corpus, *id, emptiness, names)? {
@@ -386,101 +260,9 @@ pub fn interpret<'a>(
         }
     }
     for (id, coverage) in &report.coverage {
-        let obligation = corpus
-            .obligation(*id)
-            .ok_or(Error::InvalidFinding("foreign coverage obligation"))?;
-        let subject = format!(
-            "Obligation {}{}",
-            obligation.name,
-            if obligation.requirement.kind() == denotate_ir::Cardinality::ExactlyOne {
-                " (coverage)"
-            } else {
-                ""
-            }
-        );
-        let (kind, message) = if coverage.missing > 0 {
-            (
-                Kind::Counterexample,
-                format!(
-                    "{subject}: {}{} {} coverage{}",
-                    if coverage.complete() { "" } else { "at least " },
-                    coverage.missing,
-                    if coverage.missing == 1 {
-                        "group fails"
-                    } else {
-                        "groups fail"
-                    },
-                    if coverage.complete() {
-                        "."
-                    } else {
-                        "; checking incomplete."
-                    }
-                ),
-            )
-        } else if coverage.no_groups {
-            (
-                Kind::EmptyGroupingDomain,
-                format!("{subject}: no groups: the grouping domain is empty"),
-            )
-        } else if let Some(cause) = coverage.inconclusive {
-            (
-                Kind::Inconclusive,
-                format!(
-                    "{subject}: coverage checking incomplete ({}).",
-                    exhaustion_text(cause.phase, cause.resource, cause.details)
-                ),
-            )
-        } else if coverage.unsupported > 0 {
-            (
-                Kind::UnsupportedGroup,
-                format!("{subject}: coverage is unsupported in some permitted worlds."),
-            )
-        } else {
-            continue;
-        };
-        let obligation_contribution = Contribution {
-            occurrence: (*id).into(),
-            role: Role::Obligation,
-        };
-        let mut contributions = vec![obligation_contribution];
-        let mut placement_groups = Vec::new();
-        for example in &coverage.examples {
-            let mut group = PlacementGroup {
-                derivation: None,
-                contributions: vec![obligation_contribution],
-                notes: vec![coverage_note(corpus, names, example)?],
-            };
-            group
-                .contributions
-                .extend(example.group.iter().map(|id| Contribution {
-                    occurrence: (*id).into(),
-                    role: Role::Declaration,
-                }));
-            contributions.extend(group.contributions.iter().copied());
-            placement_groups.push(group);
+        if let Some(finding) = coverage_finding(corpus, *id, coverage, names, Some(report))? {
+            findings.push(finding);
         }
-        findings.push(Finding {
-            identity: Identity::Coverage(*id),
-            kind,
-            message,
-            notes: if coverage.inconclusive.is_some() {
-                unknown_notes(
-                    corpus,
-                    names,
-                    report,
-                    report
-                        .unknown_atoms
-                        .keys()
-                        .filter(|a| a.relation == obligation.requirement.relation()),
-                )?
-            } else {
-                vec![]
-            },
-            contributions,
-            placement_groups,
-            cycle_rules: vec![],
-            evidence: Evidence::Coverage(coverage),
-        });
     }
     for region in &report.unresolved {
         let component = report
@@ -993,5 +775,259 @@ pub fn emptiness_finding<'a>(
         placement_groups,
         cycle_rules: vec![],
         evidence: Evidence::Emptiness(emptiness),
+    }))
+}
+
+/// Shared uniqueness presentation. The optional BDD report supplies admission details.
+pub fn uniqueness_finding<'a>(
+    corpus: &Corpus,
+    group: &'a VerifiedGroup,
+    names: &dyn Fn(OccurrenceId) -> String,
+    report: Option<&Verification<'_>>,
+) -> Result<Option<Finding<'a>>> {
+    let obligation = corpus
+        .obligation(group.group.obligation)
+        .ok_or(Error::InvalidFinding("foreign obligation"))?;
+    let combined = obligation.requirement.kind() == denotate_ir::Cardinality::ExactlyOne;
+    let identity = if combined {
+        Identity::Uniqueness {
+            obligation: group.group.obligation,
+            tuple: group.group.key.clone(),
+        }
+    } else {
+        Identity::Group {
+            obligation: group.group.obligation,
+            tuple: group.group.key.clone(),
+        }
+    };
+    let subject = format!(
+        "Obligation {}{}",
+        obligation.name,
+        if combined { " (uniqueness)" } else { "" }
+    );
+    let mut contributions = vec![Contribution {
+        occurrence: obligation.id.into(),
+        role: Role::Obligation,
+    }];
+    let mut notes = Vec::new();
+    let mut cycle_rules = BTreeSet::new();
+    let (kind, message) = match &group.outcome {
+        VerifiedOutcome::Proved => return Ok(None),
+        VerifiedOutcome::Counterexample(example) => {
+            if example.tuples.len() < 2
+                || !example.tuples.iter().all(|t| {
+                    group.group.tuples.contains(t)
+                        && (example.evidence.contains_key(t)
+                            || example.incomplete_attribution.contains_key(t))
+                })
+            {
+                return Err(Error::InvalidFinding("invalid replayed tuples"));
+            }
+            derivation_contributions(&example.evidence, &mut contributions);
+            for (tuple, cause) in &example.incomplete_attribution {
+                notes.push(format!("Source attribution for {} is incomplete ({}); its counterexample is unchanged. Locations fall back to the obligation.", atom_name(corpus, names, tuple)?, exhaustion_text(cause.phase,cause.resource,cause.details)));
+            }
+            notes.push(match example.replay_scope {
+                    ReplayScope::WholeProgram if report.is_none() => "Counterexample replayed on the whole program. Whole-program meaning is reported separately.",
+                    ReplayScope::ConeOnly if report.is_none() => "Counterexample replayed on its fixed, input-independent dependency cone.",
+                    ReplayScope::WholeProgram if !report.is_some_and(Verification::whole_program_admitted) => "Counterexample replayed on the whole program for this observation only; whole-program admissibility across all inputs remains incomplete.",
+                    ReplayScope::WholeProgram => "Counterexample replayed on the whole program.",
+                    ReplayScope::ConeOnly => "Counterexample replayed on this obligation's dependency cone only; whole-program admissibility is incomplete.",
+                }.into());
+            match &example.certification {
+                    Some(CertificationOutcome::NotCertified) => notes.push("Whole-program replay was not certified for the attempted observations. Failure to certify alone is not proof of no meaning.".into()),
+                    Some(CertificationOutcome::Inconclusive(c)) => notes.push(format!("Whole-program replay certification is inconclusive: {}. The cone counterexample is unchanged.", exhaustion_text(c.phase, c.resource, c.details))),
+                    _ => {}
+                }
+            for id in &example.confined_to_no_meaning {
+                let region = linked_region(
+                    report.ok_or(Error::InvalidFinding("missing BDD region report"))?,
+                    *id,
+                )?;
+                if !matches!(region.completion, CompletionOutcome::NoMeaning(_)) {
+                    return Err(Error::InvalidFinding("unproved no-meaning implication"));
+                }
+                region_contributions(region, &mut contributions);
+            }
+            if !example.confined_to_no_meaning.is_empty() {
+                notes.push("This conflict only occurs in observations where the rules at the related no-meaning locations have no consistent result. It remains a cone-only conflict, not a whole-program execution.".into());
+            }
+            notes.push(
+                "Locations follow the retained grounded derivation for each conflicting tuple."
+                    .into(),
+            );
+            (
+                Kind::Counterexample,
+                format!(
+                    "{subject} is violated: {} distinct tuples hold in the replayed observation.",
+                    example.tuples.len()
+                ),
+            )
+        }
+        VerifiedOutcome::Unsupported | VerifiedOutcome::Inconclusive(_) => {
+            if let Some(report) = report {
+                // Potential producers in the checked dependency cone, not arbitrary
+                // rules sharing the same source file or namespace.
+                let atoms: BTreeSet<_> = group
+                    .cone
+                    .components
+                    .iter()
+                    .filter_map(|id| report.program().component(*id))
+                    .flat_map(|c| c.atoms.iter())
+                    .collect();
+                for rule in report
+                    .program()
+                    .original_rules()
+                    .filter(|r| atoms.contains(&r.head.atom))
+                {
+                    rule_contributions(rule, &mut contributions);
+                }
+                for tuple in &group.group.tuples {
+                    atom_contributions(tuple, &mut contributions);
+                }
+                for id in &group.cone.blocked_by {
+                    let region = linked_region(report, *id)?;
+                    region_contributions(region, &mut contributions);
+                    cycle_rules.extend(region.rules.iter().map(|r| r.source));
+                }
+                notes.push("No proof or counterexample is available for this group.".into());
+                notes.extend(unknown_notes(
+                    corpus,
+                    names,
+                    report,
+                    group.group.tuples.iter(),
+                )?);
+            }
+            match &group.outcome {
+                VerifiedOutcome::Inconclusive(c) => (
+                    Kind::Inconclusive,
+                    format!(
+                        "{subject} is inconclusive: {}.",
+                        exhaustion_text(c.phase, c.resource, c.details)
+                    ),
+                ),
+                _ => (
+                    Kind::UnsupportedGroup,
+                    format!(
+                        "{subject} is unsupported by the selected checker or depends on unsettled regions."
+                    ),
+                ),
+            }
+        }
+    };
+    Ok(Some(Finding {
+        identity,
+        kind,
+        message,
+        notes,
+        contributions,
+        placement_groups: vec![],
+        cycle_rules: cycle_rules.into_iter().collect(),
+        evidence: Evidence::Group(group),
+    }))
+}
+
+/// Shared coverage presentation; fixed SAT coverage uses the same group placement.
+pub fn coverage_finding<'a>(
+    corpus: &Corpus,
+    id: ObligationId,
+    coverage: &'a CoverageReport,
+    names: &dyn Fn(OccurrenceId) -> String,
+    report: Option<&Verification<'_>>,
+) -> Result<Option<Finding<'a>>> {
+    let obligation = corpus
+        .obligation(id)
+        .ok_or(Error::InvalidFinding("foreign coverage obligation"))?;
+    let subject = format!(
+        "Obligation {}{}",
+        obligation.name,
+        if obligation.requirement.kind() == denotate_ir::Cardinality::ExactlyOne {
+            " (coverage)"
+        } else {
+            ""
+        }
+    );
+    let (kind, message) = if coverage.missing > 0 {
+        (
+            Kind::Counterexample,
+            format!(
+                "{subject}: {}{} {} coverage{}",
+                if coverage.complete() { "" } else { "at least " },
+                coverage.missing,
+                if coverage.missing == 1 {
+                    "group fails"
+                } else {
+                    "groups fail"
+                },
+                if coverage.complete() {
+                    "."
+                } else {
+                    "; checking incomplete."
+                }
+            ),
+        )
+    } else if coverage.no_groups {
+        (
+            Kind::EmptyGroupingDomain,
+            format!("{subject}: no groups: the grouping domain is empty"),
+        )
+    } else if let Some(cause) = coverage.inconclusive {
+        (
+            Kind::Inconclusive,
+            format!(
+                "{subject}: coverage checking incomplete ({}).",
+                exhaustion_text(cause.phase, cause.resource, cause.details)
+            ),
+        )
+    } else if coverage.unsupported > 0 {
+        (
+            Kind::UnsupportedGroup,
+            format!("{subject}: coverage is unsupported in some permitted worlds."),
+        )
+    } else {
+        return Ok(None);
+    };
+    let obligation_contribution = Contribution {
+        occurrence: (id).into(),
+        role: Role::Obligation,
+    };
+    let mut contributions = vec![obligation_contribution];
+    let mut placement_groups = Vec::new();
+    for example in &coverage.examples {
+        let mut group = PlacementGroup {
+            derivation: None,
+            contributions: vec![obligation_contribution],
+            notes: vec![coverage_note(corpus, names, example)?],
+        };
+        group
+            .contributions
+            .extend(example.group.iter().map(|id| Contribution {
+                occurrence: (*id).into(),
+                role: Role::Declaration,
+            }));
+        contributions.extend(group.contributions.iter().copied());
+        placement_groups.push(group);
+    }
+    Ok(Some(Finding {
+        identity: Identity::Coverage(id),
+        kind,
+        message,
+        notes: if let Some(report) = report.filter(|_| coverage.inconclusive.is_some()) {
+            unknown_notes(
+                corpus,
+                names,
+                report,
+                report
+                    .unknown_atoms
+                    .keys()
+                    .filter(|a| a.relation == obligation.requirement.relation()),
+            )?
+        } else {
+            vec![]
+        },
+        contributions,
+        placement_groups,
+        cycle_rules: vec![],
+        evidence: Evidence::Coverage(coverage),
     }))
 }
