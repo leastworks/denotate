@@ -1544,10 +1544,18 @@ meaning/oracle operations keep their existing limits. Driver graph/expression wo
 has its own `max_work` allowance and elapsed deadline, checked before publishing a
 plan and between oracle calls; one call can overshoot that deadline up to its own
 cooperative bound. Cancellation propagates as cancellation. Default plan bounds are
-100,000 nodes and 256 oracle calls, with the existing per-call expression bounds.
-These are foundation limits, not corpus-tuned policies. No partial plan is published
-on exhaustion. The reference interpreter also requires an explicit work allowance.
+100,000 operations and 256 oracle calls, with the existing per-call expression
+bounds. Split defaults are depth 16 (hard ceiling 64), 128 attempts and 256
+candidate guard/component pairs per ranking step; support reduction gets 64 trials
+per build. Candidate retention is bounded before insertion. Ranking prefers balanced
+edge removal, then total removal, then semantic keys. Only the best candidate is
+tried; no backtracking. Both arms consume the shared construction allowances;
+optional support reduction also consumes oracle calls. Reported plan size counts
+implicit joins separately from the operation cap. These are foundation limits,
+not corpus-tuned policies. No partial plan is published on exhaustion. The reference interpreter also requires an explicit work allowance.
 
 Ready-work scans and grounding are retained in this increment. The driver does not
-yet implement lifted plans, branch partitions, incremental plan caches, or a
-corpus-scale performance claim. See [the plan README](../crates/plan/README.md).
+yet implement lifted plans, a partition shared with meaning/checking, incremental
+plan caches, or a corpus-scale performance claim. Each child specializes its output
+cone; sibling joins share a continuation, but unrelated branch states are not merged.
+See [the plan README](../crates/plan/README.md).

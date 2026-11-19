@@ -489,8 +489,16 @@ cross-session expression reuse.
 The experimental `denotate-plan` driver consumes this oracle and the original
 prepared graph. It owns output selection, availability, the execution partial order,
 and its reference interpreter; the checker owns meaning and expression proofs.
-The first increment requires whole-program existence/uniqueness, then constructs
-only requested output work using expressions and pure positive fixpoint kernels.
+Construction requires whole-program existence/uniqueness, then constructs only
+requested output work using expressions, pure positive fixpoint kernels and
+bounded splits. Expression support comes from available values in the target's
+producer cone; support reduction needs another oracle proof. A split pins an
+already available guard and recomputes the residual ground components. Each
+feasible child supplies the same declared bindings; their values may differ.
+Sibling joins share a continuation under the parent context, without importing
+child-only pins or temporaries. Branch feasibility and equivalence remain checker
+queries on the original program. The branch partition does not yet replace
+whole-program meaning checking.
 Plans carry semantic keys and defining-rule provenance; the `.den` export adapter
 adds source and embedded origin descriptors. Interpretation requires independently
 validated permitted inputs. No filesystem, editor state or DSL concepts enter the

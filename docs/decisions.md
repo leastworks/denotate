@@ -1546,6 +1546,37 @@ cache identities: a changed program/domain/verification needs fresh construction
 
 The initial interpreter explicitly requires independently validated permitted
 inputs (`execute_permitted`). It is a reference API, not input admission or a
-production runner. Missing values are errors. Scheduling splits/joins, tasks,
-produced inputs, contract validation and run-and-log remain future increments.
+production runner. Missing values are errors. Tasks, produced inputs, contract
+validation and run-and-log remain future increments.
 Unknown or exhausted construction yields no partial executable plan.
+
+
+## Execution-plan splits preserve availability without leaking path facts
+
+The driver first tries positive kernels and bounded expressions, with support
+restricted to the target's transitive producer cone. An unrelated available value
+must not become an artificial execution dependency. Removing a relevant support
+value still requires an oracle proof under the selected verification and current
+path; availability alone never implies truth. Greedy reduction is bounded, and an
+unknown reduction retains the previous proven expression.
+
+Remaining cyclic work can split on an already available guard. Both paths are
+validated against the original program and selected assumptions, then their ground
+components are recomputed after specialization. Whole-program existence/uniqueness
+was established first, so a conclusive absence of models makes an arm infeasible;
+unknown never does. With only one feasible arm, its pin is implied by the parent
+context and its work can be inlined.
+
+With two arms, both supply the chosen component's result bindings. A join shares
+availability, not truth: true on one arm and false on the other is valid. Only these
+bindings escape child scope, and the shared continuation is planned under the
+parent context. This preserves soundness when child-specific rules or equivalences
+would be wrong outside their branch. The current implementation uses structured
+sibling joins and the first ranked split, with no arbitrary state merging or
+backtracking. Failure is a bounded construction result, not an impossibility proof.
+
+The plan export uses nested regions (version 2); semantic node IDs are local to
+those regions. The `.den` adapter renders its constant keys as qualified names,
+while the generic driver keeps frontend keys opaque. The partition's later use for
+meaning and checking needs a separate proof; this increment does not weaken the
+whole-program meaning prerequisite or change checking behavior.

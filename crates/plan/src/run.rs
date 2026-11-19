@@ -12,11 +12,13 @@ pub enum ExecutionError {
     MissingInput(AtomKey),
     WorkLimit,
     InvalidPlan,
+    InfeasiblePath,
 }
 #[derive(Debug)]
 pub struct Execution {
     pub outputs: BTreeMap<AtomKey, bool>,
     pub trace: Vec<AtomKey>,
+    pub branches: Vec<(AtomKey, bool)>,
 }
 struct Work {
     left: usize,
@@ -49,67 +51,17 @@ impl Plan {
                     .ok_or_else(|| ExecutionError::MissingInput(k.clone()))?,
             );
         }
-        let mut remaining: BTreeMap<_, _> = self.nodes.iter().collect();
-        let priorities = self.priorities(&mut work)?;
         let mut trace = Vec::new();
-        while !remaining.is_empty() {
-            let mut ready = Vec::new();
-            for (id, n) in &remaining {
-                work.tick()?;
-                let mut available = true;
-                for k in &n.inputs {
-                    work.tick()?;
-                    available &= values.contains_key(k);
-                }
-                if available {
-                    ready.push((*id).clone());
-                }
-            }
-            match order {
-                Order::Semantic => {}
-                Order::ReverseSemantic => ready.reverse(),
-                Order::OutputPriority => ready.sort_by_key(|id| {
-                    (priorities.get(id).copied().unwrap_or(u32::MAX), id.clone())
-                }),
-            }
-            let id = ready
-                .into_iter()
-                .next()
-                .ok_or(ExecutionError::InvalidPlan)?;
-            let node = remaining.remove(&id).unwrap();
-            match &node.operation {
-                Operation::Compute { output, expression } => {
-                    let value = evaluate(&expression, &values, &mut work)?;
-                    values.insert(output.clone(), value);
-                }
-                Operation::Fixpoint { outputs, rules } => {
-                    for k in outputs {
-                        work.tick()?;
-                        values.insert(k.clone(), false);
-                    }
-                    loop {
-                        let mut changed = false;
-                        for r in rules {
-                            work.tick()?;
-                            let mut holds = true;
-                            for (k, positive) in &r.body {
-                                work.tick()?;
-                                holds &=
-                                    values.get(k).ok_or(ExecutionError::InvalidPlan)? == positive;
-                            }
-                            if holds && !values[&r.head] {
-                                values.insert(r.head.clone(), true);
-                                changed = true;
-                            }
-                        }
-                        if !changed {
-                            break;
-                        }
-                    }
-                }
-            }
-            trace.push(id);
-        }
+        let mut branches = Vec::new();
+        execute_region(
+            &self.nodes,
+            &self.outputs,
+            &mut values,
+            order,
+            &mut work,
+            &mut trace,
+            &mut branches,
+        )?;
         let outputs = self
             .outputs
             .keys()
@@ -120,28 +72,14 @@ impl Plan {
                 ))
             })
             .collect::<Result<_, _>>()?;
-        Ok(Execution { outputs, trace })
-    }
-    fn priorities(&self, work: &mut Work) -> Result<BTreeMap<AtomKey, u32>, ExecutionError> {
-        let providers: BTreeMap<_, _> = self
-            .nodes
-            .iter()
-            .flat_map(|(id, n)| n.outputs().into_iter().map(move |k| (k, id.clone())))
-            .collect();
-        let mut result = BTreeMap::new();
-        let mut pending: Vec<_> = self.outputs.iter().map(|(k, p)| (k.clone(), *p)).collect();
-        while let Some((k, p)) = pending.pop() {
-            work.tick()?;
-            if let Some(id) = providers.get(&k) {
-                if result.get(id).is_none_or(|old| p < *old) {
-                    result.insert(id.clone(), p);
-                    pending.extend(self.nodes[id].inputs.iter().cloned().map(|k| (k, p)));
-                }
-            }
-        }
-        Ok(result)
+        Ok(Execution {
+            outputs,
+            trace,
+            branches,
+        })
     }
 }
+
 fn evaluate(
     expr: &Expression,
     values: &BTreeMap<AtomKey, bool>,
@@ -188,4 +126,126 @@ fn evaluate(
         .get(expr.root)
         .copied()
         .ok_or(ExecutionError::InvalidPlan)
+}
+
+fn priorities(
+    nodes: &BTreeMap<AtomKey, Node>,
+    outputs: &BTreeMap<AtomKey, u32>,
+    work: &mut Work,
+) -> Result<BTreeMap<AtomKey, u32>, ExecutionError> {
+    let providers: BTreeMap<_, _> = nodes
+        .iter()
+        .flat_map(|(id, n)| n.outputs().into_iter().map(move |k| (k, id.clone())))
+        .collect();
+    let mut result = BTreeMap::new();
+    let mut pending: Vec<_> = outputs.iter().map(|(k, p)| (k.clone(), *p)).collect();
+    while let Some((k, p)) = pending.pop() {
+        work.tick()?;
+        if let Some(id) = providers.get(&k) {
+            if result.get(id).is_none_or(|old| p < *old) {
+                result.insert(id.clone(), p);
+                pending.extend(nodes[id].inputs.iter().cloned().map(|k| (k, p)));
+            }
+        }
+    }
+    Ok(result)
+}
+
+fn execute_region(
+    nodes: &BTreeMap<AtomKey, Node>,
+    outputs: &BTreeMap<AtomKey, u32>,
+    values: &mut BTreeMap<AtomKey, bool>,
+    order: Order,
+    work: &mut Work,
+    trace: &mut Vec<AtomKey>,
+    branches: &mut Vec<(AtomKey, bool)>,
+) -> Result<(), ExecutionError> {
+    let mut remaining: BTreeMap<_, _> = nodes.iter().collect();
+    let priorities = priorities(nodes, outputs, work)?;
+
+    while !remaining.is_empty() {
+        let mut ready = Vec::new();
+        for (id, n) in &remaining {
+            work.tick()?;
+            let mut available = true;
+            for k in &n.inputs {
+                work.tick()?;
+                available &= values.contains_key(k);
+            }
+            if available {
+                ready.push((*id).clone());
+            }
+        }
+        match order {
+            Order::Semantic => {}
+            Order::ReverseSemantic => ready.reverse(),
+            Order::OutputPriority => ready
+                .sort_by_key(|id| (priorities.get(id).copied().unwrap_or(u32::MAX), id.clone())),
+        }
+        let id = ready
+            .into_iter()
+            .next()
+            .ok_or(ExecutionError::InvalidPlan)?;
+        let node = remaining.remove(&id).unwrap();
+        match &node.operation {
+            Operation::Compute { output, expression } => {
+                let value = evaluate(expression, values, work)?;
+                values.insert(output.clone(), value);
+            }
+            Operation::Split {
+                on,
+                outputs: joined,
+                when_true,
+                when_false,
+            } => {
+                let choice = *values.get(on).ok_or(ExecutionError::InvalidPlan)?;
+                branches.push((on.clone(), choice));
+                let arm = if choice { when_true } else { when_false };
+                let arm = arm.as_ref().ok_or(ExecutionError::InfeasiblePath)?;
+                let mut local = BTreeMap::new();
+                for (k, v) in values.iter() {
+                    work.tick()?;
+                    local.insert(k.clone(), *v);
+                }
+                let targets = joined
+                    .iter()
+                    .map(|k| (k.clone(), priorities.get(&id).copied().unwrap_or(u32::MAX)))
+                    .collect();
+                execute_region(
+                    &arm.nodes, &targets, &mut local, order, work, trace, branches,
+                )?;
+                for k in joined {
+                    work.tick()?;
+                    values.insert(k.clone(), *local.get(k).ok_or(ExecutionError::InvalidPlan)?);
+                }
+            }
+            Operation::Fixpoint { outputs, rules } => {
+                for k in outputs {
+                    work.tick()?;
+                    values.insert(k.clone(), false);
+                }
+                loop {
+                    let mut changed = false;
+                    for r in rules {
+                        work.tick()?;
+                        let mut holds = true;
+                        for (k, positive) in &r.body {
+                            work.tick()?;
+                            holds &= values.get(k).ok_or(ExecutionError::InvalidPlan)? == positive;
+                        }
+                        if holds && !values[&r.head] {
+                            values.insert(r.head.clone(), true);
+                            changed = true;
+                        }
+                    }
+                    if !changed {
+                        break;
+                    }
+                }
+            }
+        }
+        trace.push(id);
+    }
+
+    Ok(())
 }

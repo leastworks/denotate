@@ -166,8 +166,12 @@ just test-crate denotate-ir-text
 
 `just plan-den` is an experimental export command for plain Boolean execution
 plans. It requires explicit verification/output selections and whole-program unique
-meaning, then emits a semantic-keyed dependency plan with source origins. The output
-is conditional on validated permitted inputs; this command does not run it. See the
+meaning, then emits a semantic-keyed dependency plan with source origins. Version 2
+includes nested scheduling branches and their joined result bindings; constant
+names are `{namespace, name}` objects. `fixtures/execution-plan-branches` demonstrates
+a split with default limits. Construction bounds include `--max-split-depth`,
+`--max-splits`, `--max-split-candidates` and `--max-support-trials`.
+The output is conditional on validated permitted inputs; this command does not run it. See the
 [plan API, interpreter and limitations](../plan/README.md).
 
 `examples/check.rs` backs `just check-den`, which builds it optimized (`--release`).

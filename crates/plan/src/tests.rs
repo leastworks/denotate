@@ -178,10 +178,9 @@ fn unique_negative_cycle_extracts_values_without_unnecessary_plan_branches() {
     ));
     let mut opts = Options::default();
     opts.oracle.max_queries = 0;
-    assert!(matches!(
-        p.build(&outputs(&[a, b]), &opts).unwrap(),
-        Build::OracleInconclusive(_)
-    ));
+    let split = ready(p.build(&outputs(&[a, b]), &opts).unwrap());
+    compare_worlds(&c, &k, &split, &[atom(a), atom(b)]);
+    assert_eq!(split.to_json()["size"]["branches"], 1);
 }
 #[test]
 fn no_meaning_and_ambiguity_never_become_executable_plans() {
@@ -401,16 +400,18 @@ fn tiny_mixed_program_family_agrees_with_exhaustive_stable_oracle() {
         let unique = subsets(&inputs.iter().cloned().collect::<Vec<_>>())
             .iter()
             .all(|w| stable_models(&atoms, &inputs, &rules, w).len() == 1);
-        let result = planner(&c, &k, v)
-            .build(&outputs(&[a, b]), &Options::default())
-            .unwrap();
-        match result {
-            Build::Ready(plan) => {
-                assert!(unique, "shape {shape}");
-                compare_worlds(&c, &k, &plan, &[atom(a), atom(b)]);
+        for options in [Options::default(), split_options()] {
+            let result = planner(&c, &k, v)
+                .build(&outputs(&[a, b]), &options)
+                .unwrap();
+            match result {
+                Build::Ready(plan) => {
+                    assert!(unique, "shape {shape}");
+                    compare_worlds(&c, &k, &plan, &[atom(a), atom(b)]);
+                }
+                Build::Problem(Problem::Meaning(_)) => assert!(!unique, "shape {shape}"),
+                other => panic!("tiny shape {shape} should be conclusive: {other:?}"),
             }
-            Build::Problem(Problem::Meaning(_)) => assert!(!unique, "shape {shape}"),
-            other => panic!("tiny shape {shape} should be conclusive: {other:?}"),
         }
     }
 }
@@ -431,4 +432,363 @@ fn output_scope_omits_unrelated_work_but_requires_whole_program_meaning() {
             .unwrap(),
         Build::Problem(Problem::Meaning(_))
     ));
+}
+
+fn split_options() -> Options {
+    let mut o = Options::default();
+    o.oracle.max_queries = 0;
+    o
+}
+#[test]
+fn split_joins_different_values_before_one_shared_continuation() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let j = rel(&mut c, "j", true);
+    let a = rel(&mut c, "a", false);
+    let b = rel(&mut c, "b", false);
+    let out = rel(&mut c, "out", false);
+    rule(&mut c, a, &[(i, false), (b, true)]);
+    rule(&mut c, b, &[(i, true), (a, true)]);
+    rule(&mut c, out, &[(a, false), (j, false)]);
+    rule(&mut c, out, &[(b, false), (j, true)]);
+    let v = verification(&mut c, &[]);
+    let k = keys(&c);
+    let mut p = planner(&c, &k, v);
+    let options = split_options();
+    let plan = ready(p.build(&outputs(&[out]), &options).unwrap());
+    assert_eq!(plan.to_json()["size"]["branches"], 1);
+    assert_eq!(plan.to_json()["size"]["joins"], 1);
+    assert!(matches!(
+        plan.nodes[&AtomKey::from_atom(&k, &atom(out)).unwrap()].operation,
+        Operation::Compute { .. }
+    ));
+    compare_worlds(&c, &k, &plan, &[atom(out)]);
+    assert_eq!(plan, ready(p.build(&outputs(&[out]), &options).unwrap()));
+    assert_eq!(
+        plan,
+        ready(
+            planner(&c, &k, v)
+                .build(&outputs(&[out]), &options)
+                .unwrap()
+        )
+    );
+    for value in [false, true] {
+        let values = BTreeMap::from([
+            (AtomKey::from_atom(&k, &atom(i)).unwrap(), value),
+            (AtomKey::from_atom(&k, &atom(j)).unwrap(), true),
+        ]);
+        let run = plan
+            .execute_permitted(&values, Order::ReverseSemantic, 10000)
+            .unwrap();
+        assert_eq!(
+            run.outputs[&AtomKey::from_atom(&k, &atom(out)).unwrap()],
+            value
+        );
+        assert_eq!(
+            run.branches,
+            vec![(AtomKey::from_atom(&k, &atom(i)).unwrap(), value)]
+        );
+        assert_eq!(
+            run.trace
+                .iter()
+                .filter(|a| **a == AtomKey::from_atom(&k, &atom(out)).unwrap())
+                .count(),
+            1
+        );
+    }
+}
+#[test]
+fn extracted_support_excludes_an_unrelated_positive_kernel() {
+    let mut c = Corpus::new();
+    let selected = rel(&mut c, "selected", true);
+    let seed = rel(&mut c, "seed", true);
+    let reach = rel(&mut c, "aaa_reachable", false);
+    let left = rel(&mut c, "left", false);
+    let right = rel(&mut c, "right", false);
+    rule(&mut c, reach, &[(seed, false)]);
+    rule(&mut c, reach, &[(reach, false)]);
+    rule(&mut c, left, &[(selected, false), (right, true)]);
+    rule(&mut c, right, &[(selected, true), (left, true)]);
+    let v = verification(&mut c, &[]);
+    let k = keys(&c);
+    let plan = ready(
+        planner(&c, &k, v)
+            .build(&outputs(&[left, reach]), &Options::default())
+            .unwrap(),
+    );
+    let node = &plan.nodes[&AtomKey::from_atom(&k, &atom(left)).unwrap()];
+    let selected = AtomKey::from_atom(&k, &atom(selected)).unwrap();
+    assert_eq!(node.inputs, BTreeSet::from([selected.clone()]));
+    let Operation::Compute { expression, .. } = &node.operation else {
+        panic!()
+    };
+    assert_eq!(expression.nodes, vec![super::Term::Read(selected)]);
+    compare_worlds(&c, &k, &plan, &[atom(left), atom(reach)]);
+}
+#[test]
+fn infeasible_arm_is_omitted_only_after_a_conclusive_query() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let a = rel(&mut c, "a", false);
+    let b = rel(&mut c, "b", false);
+    rule(&mut c, a, &[(i, false), (b, true)]);
+    rule(&mut c, b, &[(i, true), (a, true)]);
+    let yes = c
+        .assume_at_least_one_in(Namespace::new(["test"]).unwrap(), "yes", i, [])
+        .unwrap();
+    let v = verification(&mut c, &[yes]);
+    let k = keys(&c);
+    let plan = ready(
+        planner(&c, &k, v)
+            .build(&outputs(&[a, b]), &split_options())
+            .unwrap(),
+    );
+    assert_eq!(plan.to_json()["size"]["branches"], 0);
+    let values = BTreeMap::from([(AtomKey::from_atom(&k, &atom(i)).unwrap(), true)]);
+    assert!(
+        plan.execute_permitted(&values, Order::Semantic, 1000)
+            .unwrap()
+            .outputs[&AtomKey::from_atom(&k, &atom(a)).unwrap()]
+    );
+}
+#[test]
+fn split_bounds_never_publish_a_partial_plan() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let a = rel(&mut c, "a", false);
+    let b = rel(&mut c, "b", false);
+    rule(&mut c, a, &[(i, false), (b, true)]);
+    rule(&mut c, b, &[(i, true), (a, true)]);
+    let v = verification(&mut c, &[]);
+    let k = keys(&c);
+    for which in 0..4 {
+        let mut o = split_options();
+        match which {
+            0 => o.max_split_depth = 0,
+            1 => o.max_splits = 0,
+            2 => o.max_split_candidates = 0,
+            _ => o.max_nodes = 1,
+        };
+        assert!(matches!(
+            planner(&c, &k, v).build(&outputs(&[a, b]), &o).unwrap(),
+            Build::Inconclusive(_)
+        ));
+    }
+}
+#[test]
+fn split_on_a_derived_available_value_keeps_its_producer_before_the_branch() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let guard = rel(&mut c, "guard", false);
+    let a = rel(&mut c, "a", false);
+    let b = rel(&mut c, "b", false);
+    rule(&mut c, guard, &[(i, false)]);
+    rule(&mut c, a, &[(guard, false), (b, true)]);
+    rule(&mut c, b, &[(guard, true), (a, true)]);
+    let v = verification(&mut c, &[]);
+    let k = keys(&c);
+    let plan = ready(
+        planner(&c, &k, v)
+            .build(&outputs(&[a, b]), &split_options())
+            .unwrap(),
+    );
+    let split = plan
+        .nodes
+        .values()
+        .find(|n| matches!(n.operation, Operation::Split { .. }))
+        .unwrap();
+    assert!(
+        split
+            .inputs
+            .contains(&AtomKey::from_atom(&k, &atom(guard)).unwrap())
+    );
+    compare_worlds(&c, &k, &plan, &[atom(a), atom(b)]);
+}
+
+#[test]
+fn nested_splits_recompute_residual_components_and_obey_depth_limits() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let j = rel(&mut c, "j", true);
+    let a = rel(&mut c, "a", false);
+    let b = rel(&mut c, "b", false);
+    let x = rel(&mut c, "x", false);
+    let y = rel(&mut c, "y", false);
+    rule(&mut c, a, &[(i, false), (b, true)]);
+    rule(&mut c, b, &[(i, true), (a, true)]);
+    rule(&mut c, x, &[(j, false), (y, true)]);
+    rule(&mut c, y, &[(j, true), (x, true)]);
+    rule(&mut c, a, &[(i, false), (x, false), (b, true)]);
+    rule(&mut c, x, &[(j, false), (a, false), (y, true)]);
+    let v = verification(&mut c, &[]);
+    let k = keys(&c);
+    let o = split_options();
+    let mut p = planner(&c, &k, v);
+    let plan = ready(p.build(&outputs(&[a, b, x, y]), &o).unwrap());
+    compare_worlds(&c, &k, &plan, &[atom(a), atom(b), atom(x), atom(y)]);
+    assert!(plan.to_json()["size"]["branches"].as_u64().unwrap() > 1);
+    assert_eq!(plan, ready(p.build(&outputs(&[a, b, x, y]), &o).unwrap()));
+    let shallow = Options {
+        max_split_depth: 1,
+        ..o
+    };
+    assert!(matches!(
+        planner(&c, &k, v)
+            .build(&outputs(&[a, b, x, y]), &shallow)
+            .unwrap(),
+        Build::Inconclusive(_)
+    ));
+}
+
+#[test]
+fn support_reduction_uses_selected_assumptions_without_assuming_available_values_true() {
+    let mut c = Corpus::new();
+    let extra = rel(&mut c, "extra", true);
+    let i = rel(&mut c, "i", true);
+    let left = rel(&mut c, "left", false);
+    let right = rel(&mut c, "right", false);
+    let bad = rel(&mut c, "bad", false);
+    rule(&mut c, left, &[(i, false), (extra, false), (right, true)]);
+    rule(&mut c, right, &[(i, true), (left, true)]);
+    rule(&mut c, right, &[(extra, true), (left, true)]);
+    rule(&mut c, bad, &[(i, false), (extra, true)]);
+    let a = c
+        .assume_empty_in(Namespace::new(["test"]).unwrap(), "i_requires_extra", bad)
+        .unwrap();
+    let v = verification(&mut c, &[a]);
+    let k = keys(&c);
+    let plan = ready(
+        planner(&c, &k, v)
+            .build(&outputs(&[left]), &Options::default())
+            .unwrap(),
+    );
+    let node = &plan.nodes[&AtomKey::from_atom(&k, &atom(left)).unwrap()];
+    assert_eq!(
+        node.inputs,
+        BTreeSet::from([AtomKey::from_atom(&k, &atom(i)).unwrap()])
+    );
+    for (iv, ev) in [(false, false), (false, true), (true, true)] {
+        let values = BTreeMap::from([
+            (AtomKey::from_atom(&k, &atom(i)).unwrap(), iv),
+            (AtomKey::from_atom(&k, &atom(extra)).unwrap(), ev),
+        ]);
+        assert_eq!(
+            plan.execute_permitted(&values, Order::Semantic, 10000)
+                .unwrap()
+                .outputs[&AtomKey::from_atom(&k, &atom(left)).unwrap()],
+            iv
+        );
+    }
+}
+#[test]
+fn branch_keys_and_join_shape_survive_unrelated_insertions() {
+    let make = |extra| {
+        let mut c = Corpus::new();
+        if extra {
+            let z = rel(&mut c, "aaa_unrelated", false);
+            rule(&mut c, z, &[]);
+        }
+        let i = rel(&mut c, "i", true);
+        let a = rel(&mut c, "a", false);
+        let b = rel(&mut c, "b", false);
+        rule(&mut c, a, &[(i, false), (b, true)]);
+        rule(&mut c, b, &[(i, true), (a, true)]);
+        let v = verification(&mut c, &[]);
+        let k = keys(&c);
+        ready(
+            planner(&c, &k, v)
+                .build(&outputs(&[a, b]), &split_options())
+                .unwrap(),
+        )
+        .to_json()
+    };
+    assert_eq!(make(false), make(true));
+}
+
+#[test]
+fn default_limits_split_a_wide_support_instead_of_building_a_global_expression() {
+    let mut c = Corpus::new();
+    let guard = rel(&mut c, "guard", true);
+    let xs = (0..65)
+        .map(|i| rel(&mut c, &format!("x{i}"), true))
+        .collect::<Vec<_>>();
+    let a = rel(&mut c, "a", false);
+    let b = rel(&mut c, "b", false);
+    let mut body = vec![(guard, false), (b, true)];
+    body.extend(xs.iter().map(|r| (*r, false)));
+    rule(&mut c, a, &body);
+    rule(&mut c, b, &[(guard, true), (a, true)]);
+    let v = verification(&mut c, &[]);
+    let k = keys(&c);
+    let plan = ready(
+        planner(&c, &k, v)
+            .build(&outputs(&[a, b]), &Options::default())
+            .unwrap(),
+    );
+    assert!(plan.to_json()["size"]["branches"].as_u64().unwrap() > 0);
+    for gv in [false, true] {
+        for off in [None, Some(0), Some(32), Some(64)] {
+            let mut values = xs
+                .iter()
+                .enumerate()
+                .map(|(i, r)| (AtomKey::from_atom(&k, &atom(*r)).unwrap(), off != Some(i)))
+                .collect::<BTreeMap<_, _>>();
+            values.insert(AtomKey::from_atom(&k, &atom(guard)).unwrap(), gv);
+            for order in [
+                Order::Semantic,
+                Order::ReverseSemantic,
+                Order::OutputPriority,
+            ] {
+                let result = plan.execute_permitted(&values, order, 100_000).unwrap();
+                assert_eq!(
+                    result.outputs[&AtomKey::from_atom(&k, &atom(a)).unwrap()],
+                    gv && off.is_none()
+                );
+                assert_eq!(
+                    result.outputs[&AtomKey::from_atom(&k, &atom(b)).unwrap()],
+                    !gv
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn unresolved_cone_reports_dependencies_and_a_world_without_claiming_impossibility() {
+    // A downstream contradiction selects between upstream meanings. Whole-program
+    // meaning is unique, but p is outside a/b's producer cone. The cone-only
+    // strategy must report its limitation rather than importing hidden support.
+    let mut c = Corpus::new();
+    let p = rel(&mut c, "p", true);
+    let a = rel(&mut c, "a", false);
+    let b = rel(&mut c, "b", false);
+    let reject = rel(&mut c, "reject", false);
+    rule(&mut c, a, &[(b, true)]);
+    rule(&mut c, b, &[(a, true)]);
+    rule(&mut c, reject, &[(a, false), (p, true), (reject, true)]);
+    rule(&mut c, reject, &[(b, false), (p, false), (reject, true)]);
+    let v = verification(&mut c, &[]);
+    let k = keys(&c);
+    let result = planner(&c, &k, v)
+        .build(&outputs(&[a]), &Options::default())
+        .unwrap();
+    let Build::Problem(Problem::Unresolved {
+        path,
+        dependencies,
+        world,
+        ..
+    }) = result
+    else {
+        panic!("expected bounded unresolved problem: {result:?}")
+    };
+    assert!(path.is_empty());
+    assert!(!dependencies.is_empty());
+    assert!(world.is_some());
+    let g = GroundProgram::prepare(&c, &Domains::new(), &Limits::default()).unwrap();
+    let atoms = g.atoms().cloned().collect::<Vec<_>>();
+    let inputs = g.input_atoms().cloned().collect::<BTreeSet<_>>();
+    let rules = g.rules().cloned().collect::<Vec<_>>();
+    for w in subsets(&inputs.iter().cloned().collect::<Vec<_>>()) {
+        assert_eq!(stable_models(&atoms, &inputs, &rules, &w).len(), 1);
+    }
 }

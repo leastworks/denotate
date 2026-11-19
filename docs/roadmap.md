@@ -30,10 +30,11 @@ direction for such programs separates meaning from schedule:
   per-branch meaning (stratified residual programs) and per-branch checking. Loops are
   handled by propagation, expression extraction, local fixpoints and, last, splits
   ranked from the dependency structure. Code generation consumes the plan later.
-  The first [plain Boolean foundation](../crates/plan/README.md) now constructs,
-  exports and interprets straight-line/fixpoint plans with explicit outputs and
-  bounded expression extraction. Scheduling branches, joins and the shared
-  partition remain next; tasks and produced inputs follow.
+  The [plain Boolean driver](../crates/plan/README.md) now constructs, exports and
+  interprets plans with explicit outputs, bounded expression extraction, positive
+  fixpoint kernels, nested scheduling branches and sibling joins. Whole-program
+  meaning remains a prerequisite. Local BDD strategies, tasks and produced inputs,
+  and sharing the partition with meaning/checking remain next.
 - **Smaller encodings generically.** Structural sharing of identical definitions,
   constant folding, dead-premise removal and syntactic subsumption over acyclic parts
   shrank the program's CNF about threefold; SAT-based sweeping (simulation, then

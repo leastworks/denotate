@@ -8,6 +8,7 @@ use std::{path::PathBuf, process::ExitCode};
 const USAGE: &str = "just plan-den ROOT --verification NAME --output RELATION [--output RELATION ...]\n\
   --max-atoms N --max-rules N --max-work N --timeout-ms N\n\
   --max-nodes N --max-oracle-calls N --max-available N\n\
+  --max-split-depth N --max-splits N --max-split-candidates N --max-support-trials N\n\
 Exports a conditional plan for permitted inputs, not executable code or input validation.";
 struct Args {
     root: PathBuf,
@@ -47,6 +48,10 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Args, String> {
             }
             "--max-nodes" => result.options.max_nodes = number(&value)?,
             "--max-oracle-calls" => result.options.max_oracle_calls = number(&value)?,
+            "--max-split-depth" => result.options.max_split_depth = number(&value)?,
+            "--max-splits" => result.options.max_splits = number(&value)?,
+            "--max-split-candidates" => result.options.max_split_candidates = number(&value)?,
+            "--max-support-trials" => result.options.max_support_trials = number(&value)?,
             "--max-available" => result.options.oracle.max_available = number(&value)?,
             _ => return Err(format!("Unknown option {arg}\n{USAGE}")),
         }
@@ -123,45 +128,8 @@ fn export(p: &LoadedProgram, args: &Args) -> Result<(u8, Value), String> {
             // Source metadata is separate from plan identity. Keep embedded loc
             // descriptors even when upstream documents cannot be opened here.
             let mut source_index = denotate_ir_text::origins::SourceIndex::new(&p.sources);
-            let mut metadata = Vec::new();
-            for node in plan.nodes().values() {
-                let mut origins = std::collections::BTreeSet::new();
-                for key in &node.sources {
-                    let id = p
-                        .keys
-                        .bindings()
-                        .resolve(&denotate_ir::OccurrenceKey::Rule(key.clone()))
-                        .map_err(|e| e.to_string())?;
-                    for origin in p.provenance.origins(id) {
-                        origins.insert(source_index.descriptor(origin).map_err(|e| e.to_string())?);
-                    }
-                    if let Some(upstream) = p
-                        .embedded
-                        .associations
-                        .get(&denotate_ir_text::origins::OriginTarget::Occurrence(id))
-                    {
-                        origins.extend(upstream.iter().cloned());
-                    }
-                }
-                metadata.push(json!(
-                    origins
-                        .into_iter()
-                        .map(|o| json!({
-                            "uri": o.source.uri, "view": o.source.view, "hash": o.source.hash,
-                            "start": {"line": o.start.line, "column": o.start.column},
-                            "end": {"line": o.end.line, "column": o.end.column}
-                        }))
-                        .collect::<Vec<_>>()
-                ));
-            }
-            for (node, origins) in output["nodes"]
-                .as_array_mut()
-                .unwrap()
-                .iter_mut()
-                .zip(metadata)
-            {
-                node["origins"] = origins;
-            }
+            attach_origins(p, &mut source_index, plan.nodes(), &mut output["nodes"])?;
+            qualify_constants(p, &mut output);
             Ok((0, output))
         }
         Build::NoPermittedWorlds => Ok((2, json!({"state":"no-permitted-worlds"}))),
@@ -172,6 +140,106 @@ fn export(p: &LoadedProgram, args: &Args) -> Result<(u8, Value), String> {
         )),
         Build::Problem(problem) => Ok((2, problem_json(p, problem))),
     }
+}
+fn attach_origins(
+    p: &LoadedProgram,
+    source_index: &mut denotate_ir_text::origins::SourceIndex<'_>,
+    nodes: &std::collections::BTreeMap<denotate_check::AtomKey, denotate_plan::Node>,
+    json_nodes: &mut Value,
+) -> Result<(), String> {
+    let mut metadata = Vec::new();
+    for node in nodes.values() {
+        let mut origins = std::collections::BTreeSet::new();
+        for key in &node.sources {
+            let id = p
+                .keys
+                .bindings()
+                .resolve(&denotate_ir::OccurrenceKey::Rule(key.clone()))
+                .map_err(|e| e.to_string())?;
+            for origin in p.provenance.origins(id) {
+                origins.insert(source_index.descriptor(origin).map_err(|e| e.to_string())?);
+            }
+            if let Some(upstream) = p
+                .embedded
+                .associations
+                .get(&denotate_ir_text::origins::OriginTarget::Occurrence(id))
+            {
+                origins.extend(upstream.iter().cloned());
+            }
+        }
+        metadata.push(json!(
+            origins
+                .into_iter()
+                .map(|o| json!({
+                    "uri": o.source.uri, "view": o.source.view, "hash": o.source.hash,
+                    "start": {"line": o.start.line, "column": o.start.column},
+                    "end": {"line": o.end.line, "column": o.end.column}
+                }))
+                .collect::<Vec<_>>()
+        ));
+    }
+    for (node, origins) in json_nodes.as_array_mut().unwrap().iter_mut().zip(metadata) {
+        node["origins"] = origins;
+    }
+
+    for (n, j) in nodes.values().zip(json_nodes.as_array_mut().unwrap()) {
+        if let denotate_plan::Operation::Split {
+            when_true,
+            when_false,
+            ..
+        } = &n.operation
+        {
+            for (arm, name) in [(when_true, "then"), (when_false, "else")] {
+                if let Some(r) = arm {
+                    attach_origins(p, source_index, &r.nodes, &mut j["operation"][name])?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+// The .den loader owns this encoding. Generic API callers' opaque constant keys
+// must not be guessed/decoded by denotate-plan.
+fn qualify_constants(p: &LoadedProgram, value: &mut Value) {
+    let names = p
+        .corpus
+        .constants()
+        .map(|c| {
+            let key = p.keys.constant(c.id).unwrap();
+            let (namespace, name): (String, String) =
+                serde_json::from_str(&key.name).expect(".den constant key");
+            (
+                key.name.to_string(),
+                json!({"namespace":namespace,"name":name}),
+            )
+        })
+        .collect::<std::collections::BTreeMap<_, _>>();
+    fn visit(v: &mut Value, names: &std::collections::BTreeMap<String, Value>) {
+        match v {
+            Value::Object(o) => {
+                if o.contains_key("sort") {
+                    if let Some(name) = o
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .and_then(|s| names.get(s))
+                        .cloned()
+                    {
+                        o.insert("name".into(), name);
+                    }
+                }
+                for v in o.values_mut() {
+                    visit(v, names);
+                }
+            }
+            Value::Array(xs) => {
+                for x in xs {
+                    visit(x, names);
+                }
+            }
+            _ => {}
+        }
+    }
+    visit(value, &names);
 }
 fn problem_json(p: &LoadedProgram, problem: Problem) -> Value {
     use denotate_check::stable_query::{Existence, Uniqueness};
@@ -203,7 +271,22 @@ fn problem_json(p: &LoadedProgram, problem: Problem) -> Value {
                 });
             }
         }
-        Problem::Unresolved { atoms, .. } => {
+        Problem::Unresolved {
+            atoms,
+            path,
+            dependencies,
+            world,
+            ..
+        } => {
+            result["path"] = json!(
+                path.iter()
+                    .map(|(a, v)| json!({"atom":denotate_plan::atom_json(a),"value":v}))
+                    .collect::<Vec<_>>()
+            );
+            result["dependencies"]=json!(dependencies.iter().map(|(a,b,p)|json!({"consumer":denotate_plan::atom_json(a),"provider":denotate_plan::atom_json(b),"positive":p})).collect::<Vec<_>>());
+            if let Some(w) = world {
+                result["world"] = json!({"present":w.true_inputs().map(|a|denotate_plan::atom_json(&denotate_check::AtomKey::from_atom(&p.keys,a).unwrap())).collect::<Vec<_>>(),"otherInputs":"absent"});
+            }
             result["reason"] = json!("bounded-strategies-unresolved");
             result["atoms"] = json!(
                 atoms
@@ -213,6 +296,7 @@ fn problem_json(p: &LoadedProgram, problem: Problem) -> Value {
             );
         }
     }
+    qualify_constants(p, &mut result);
     result
 }
 fn main() -> ExitCode {
@@ -290,7 +374,7 @@ mod tests {
         let b = p.corpus.constants().find(|c| c.name == "b").unwrap();
         assert_eq!(
             j["outputs"][0]["atom"]["arguments"][0]["name"],
-            p.keys.constant(b.id).unwrap().name.as_ref()
+            json!({"namespace":"","name":b.name})
         );
     }
 
@@ -338,5 +422,110 @@ mod tests {
                 );
             }
         }
+    }
+    #[test]
+    fn branch_export_has_join_bindings_nested_origins_and_new_limit_flags() {
+        let p = program(include_str!(
+            "../../../fixtures/execution-plan-branches/program.den"
+        ));
+        let mut a = args();
+        a.outputs = vec!["result".into()];
+        let (code, j) = export(&p, &a).unwrap();
+        assert_eq!(code, 0);
+        assert_eq!(j["version"], 2);
+        assert_eq!(j["size"]["branches"], 1);
+        assert_eq!(j["size"]["joins"], 1);
+        let split = j["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["operation"]["kind"] == "split")
+            .unwrap();
+        for arm in ["then", "else"] {
+            for node in split["operation"][arm].as_array().unwrap() {
+                assert!(!node["origins"].as_array().unwrap().is_empty());
+            }
+        }
+        assert_eq!(
+            split["operation"]["join"]["outputs"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        let a = parse(
+            [
+                "root",
+                "--verification",
+                "checks",
+                "--output",
+                "result",
+                "--max-split-depth",
+                "0",
+                "--max-splits",
+                "2",
+                "--max-split-candidates",
+                "10",
+                "--max-support-trials",
+                "0",
+            ]
+            .map(str::to_owned),
+        )
+        .unwrap();
+        let (code, j) = export(&p, &a).unwrap();
+        assert_eq!(code, 2);
+        assert_eq!(j["state"], "inconclusive");
+        assert!(j.get("nodes").is_none());
+    }
+    #[test]
+    fn reviewer_example_exports_a_direct_read_without_unrelated_support() {
+        let p = program(include_str!("../../../fixtures/execution-plan/program.den"));
+        let mut a = args();
+        a.outputs = vec!["result".into()];
+        let (_, j) = export(&p, &a).unwrap();
+        let left = j["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["id"]["relation"]["named"]["name"] == "left")
+            .unwrap();
+        assert_eq!(left["inputs"].as_array().unwrap().len(), 1);
+        assert_eq!(
+            left["operation"]["expression"]["nodes"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            left["operation"]["expression"]["nodes"][0]["read"]["relation"]["named"]["name"],
+            "selected"
+        );
+    }
+    #[test]
+    fn qualified_constant_names_are_structured_and_preserve_quoted_names() {
+        let p = program(
+            "sort S; namespace vals {const 'odd value': S;} relation out(x:S); out(vals::'odd value'); verification checks {assumptions: []; obligations: [];}",
+        );
+        let (_, j) = export(&p, &args()).unwrap();
+        assert_eq!(
+            j["outputs"][0]["atom"]["arguments"][0]["name"],
+            json!({"namespace":"vals","name":"odd value"})
+        );
+    }
+    #[test]
+    fn unresolved_export_keeps_the_residual_and_replaying_world() {
+        let p = program(
+            "input p(); relation a(); relation b(); relation reject(); a() :- !b(); b() :- !a(); reject() :- a(), !p(), !reject(); reject() :- b(), p(), !reject(); verification checks {assumptions: []; obligations: [];}",
+        );
+        let mut a = args();
+        a.outputs = vec!["a".into()];
+        let (code, j) = export(&p, &a).unwrap();
+        assert_eq!(code, 2);
+        assert_eq!(j["state"], "unresolved");
+        assert!(j["path"].is_array());
+        assert!(!j["dependencies"].as_array().unwrap().is_empty());
+        assert!(j["world"].is_object());
+        assert!(j.get("nodes").is_none());
     }
 }

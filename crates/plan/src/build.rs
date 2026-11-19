@@ -17,6 +17,10 @@ pub struct Output {
 pub struct Options {
     pub max_nodes: usize,
     pub max_oracle_calls: usize,
+    pub max_split_depth: usize,
+    pub max_splits: usize,
+    pub max_split_candidates: usize,
+    pub max_support_trials: usize,
     pub oracle: OracleLimits,
     pub meaning: CheckOptions,
 }
@@ -25,6 +29,10 @@ impl Default for Options {
         Self {
             max_nodes: 100_000,
             max_oracle_calls: 256,
+            max_split_depth: 16,
+            max_splits: 128,
+            max_split_candidates: 256,
+            max_support_trials: 64,
             oracle: OracleLimits::default(),
             meaning: CheckOptions::default(),
         }
@@ -37,7 +45,10 @@ pub enum Problem {
     /// Only bounded strategies were tried. This is not an impossibility proof.
     Unresolved {
         atoms: Vec<AtomKey>,
-        answer: SynthesisAnswer,
+        answer: Option<SynthesisAnswer>,
+        path: BTreeMap<AtomKey, bool>,
+        dependencies: Vec<(AtomKey, AtomKey, bool)>,
+        world: Option<stable_query::Model>,
     },
 }
 #[derive(Debug)]
@@ -214,211 +225,65 @@ impl<'a> Planner<'a> {
             }
             atoms.insert(key, atom);
         }
-        let mut available = BTreeSet::new();
-        let mut nodes = BTreeMap::new();
+        let mut rules = BTreeMap::new();
+        let mut fixed = BTreeMap::new();
+        let mut inputs = BTreeSet::new();
         for (key, atom) in &atoms {
             if input_atoms.contains(atom) {
-                available.insert(key.clone());
+                inputs.insert(key.clone());
             }
-        }
-        let inputs = available.clone();
-        let needed_atoms: BTreeSet<_> = atoms.values().collect();
-        let mut oracle_calls = 0usize;
-        while requested.keys().any(|k| !available.contains(k)) {
-            let mut progress = false;
-            for (key, atom) in &atoms {
-                budget.tick(1)?;
-                if available.contains(key) {
-                    continue;
-                }
-                let source_rules = producers.get(atom).map(Vec::as_slice).unwrap_or(&[]);
-                let sources = source_rules
+            if let Some(v) = self.engine.prepared_value(atom)? {
+                fixed.insert(key.clone(), v);
+            }
+            let mut rs = Vec::new();
+            for r in producers.get(atom).into_iter().flatten() {
+                budget.tick(r.body.len() + 1)?;
+                let mut body = r
+                    .body
                     .iter()
-                    .map(|r| self.keys.rule(r.source).cloned())
-                    .collect::<std::result::Result<_, _>>()?;
-                let expr = if let Some(value) = self.engine.prepared_value(atom)? {
-                    Some(Expression {
-                        nodes: vec![Term::Constant(value)],
-                        root: 0,
+                    .map(|l| {
+                        Ok((
+                            AtomKey::from_atom(self.keys, &l.term.atom)?,
+                            l.polarity == Polarity::Positive,
+                        ))
                     })
-                } else {
-                    rule_expression(source_rules, self.keys, &available, &mut budget)?
-                };
-                if let Some(expr) = expr {
-                    insert_compute(
-                        &mut nodes,
-                        &mut available,
-                        key,
-                        expr,
-                        sources,
-                        options,
-                        &mut budget,
-                    )?;
-                    progress = true;
-                }
+                    .collect::<Result<Vec<_>>>()?;
+                body.sort();
+                body.dedup();
+                rs.push(Rule {
+                    head: key.clone(),
+                    body,
+                    source: self.keys.rule(r.source)?.clone(),
+                });
             }
-            if progress {
-                continue;
-            }
-            // A pure positive SCC with settled external premises is directly
-            // executable; it does not need an input formula or SAT proof.
-            for component in graph.components() {
-                budget.tick(component.atoms.len() + 1)?;
-                if !component.recursive || component.cycle.is_some() {
-                    continue;
-                }
-                if component.atoms.iter().all(|a| !needed_atoms.contains(a)) {
-                    continue;
-                }
-                let members: BTreeSet<_> = component
-                    .atoms
-                    .iter()
-                    .map(|a| AtomKey::from_atom(self.keys, a))
-                    .collect::<std::result::Result<_, _>>()?;
-                if members
-                    .iter()
-                    .all(|k| !atoms.contains_key(k) || available.contains(k))
-                {
-                    continue;
-                }
-                if members.iter().any(|k| available.contains(k)) {
-                    continue;
-                }
-                let mut rules = Vec::new();
-                let mut external = BTreeSet::new();
-                let mut ready = true;
-                for a in &component.atoms {
-                    for r in producers.get(a).into_iter().flatten() {
-                        budget.tick(r.body.len() + 1)?;
-                        let mut body = Vec::new();
-                        for l in &r.body {
-                            let k = AtomKey::from_atom(self.keys, &l.term.atom)?;
-                            let positive = l.polarity == Polarity::Positive;
-                            if members.contains(&k) {
-                                ready &= positive;
-                            } else {
-                                ready &= available.contains(&k);
-                                external.insert(k.clone());
-                            }
-                            body.push((k, positive));
-                        }
-                        body.sort();
-                        body.dedup();
-                        rules.push(Rule {
-                            head: AtomKey::from_atom(self.keys, a)?,
-                            body,
-                            source: self.keys.rule(r.source)?.clone(),
-                        });
-                    }
-                }
-                if ready {
-                    room(nodes.len(), options.max_nodes, "plan nodes")?;
-                    rules.sort_by(|a, b| {
-                        (&a.head, &a.source, &a.body).cmp(&(&b.head, &b.source, &b.body))
-                    });
-                    let id = members.first().unwrap().clone();
-                    let sources = rules.iter().map(|r| r.source.clone()).collect();
-                    nodes.insert(
-                        id.clone(),
-                        Node {
-                            id,
-                            inputs: external,
-                            sources,
-                            operation: Operation::Fixpoint {
-                                outputs: members.clone(),
-                                rules,
-                            },
-                        },
-                    );
-                    available.extend(members);
-                    progress = true;
-                }
-            }
-            if progress {
-                continue;
-            }
-            // Only still-needed values are queried. Availability supplies values,
-            // never truth pins. Semantic-key order makes synthesis reproducible.
-            let values: Vec<_> = available
-                .iter()
-                .filter_map(|k| atoms.get(k).cloned())
-                .collect();
-            let remaining: Vec<_> = atoms
-                .keys()
-                .filter(|k| !available.contains(*k))
-                .cloned()
-                .collect();
-            let mut last = None;
-            let mut exhausted = None;
-            for key in &remaining {
-                room(oracle_calls, options.max_oracle_calls, "oracle calls")?;
-                oracle_calls += 1;
-                let answer = self.engine.synthesize(
-                    &Query::default(),
-                    &atoms[key],
-                    &values,
-                    &options.oracle,
-                )?;
-                budget.tick(1)?;
-                if let SynthesisAnswer::Expression(expr) = answer {
-                    let expr = convert(expr, self.keys)?;
-                    let sources = producers
-                        .get(&atoms[key])
-                        .into_iter()
-                        .flatten()
-                        .map(|r| self.keys.rule(r.source).cloned())
-                        .collect::<std::result::Result<_, _>>()?;
-                    insert_compute(
-                        &mut nodes,
-                        &mut available,
-                        key,
-                        expr,
-                        sources,
-                        options,
-                        &mut budget,
-                    )?;
-                    progress = true;
-                    break;
-                }
-                match answer {
-                    SynthesisAnswer::Inconclusive(e) => exhausted = Some(e),
-                    SynthesisAnswer::Infeasible => {
-                        return Err(CheckError::Internal(
-                            "meaning proved but synthesis context infeasible",
-                        ));
-                    }
-                    other => last = Some(other),
-                }
-            }
-            if !progress {
-                if let Some(e) = exhausted {
-                    return Ok(Build::OracleInconclusive(e));
-                }
-                return Ok(Build::Problem(Problem::Unresolved {
-                    atoms: remaining,
-                    answer: last.unwrap(),
-                }));
-            }
+            rs.sort_by(|a, b| (&a.source, &a.body).cmp(&(&b.source, &b.body)));
+            rules.insert(key.clone(), rs);
         }
-        // Expressions can bypass producers. Remove work no requested output uses.
-        let providers: BTreeMap<_, _> = nodes
-            .iter()
-            .flat_map(|(id, n)| n.outputs().into_iter().map(move |k| (k, id.clone())))
-            .collect();
-        let mut retained = BTreeSet::new();
-        let mut required_inputs = BTreeSet::new();
-        let mut pending: Vec<_> = requested.keys().cloned().collect();
-        while let Some(key) = pending.pop() {
-            budget.tick(1)?;
-            if inputs.contains(&key) {
-                required_inputs.insert(key);
-            } else if let Some(id) = providers.get(&key) {
-                if retained.insert(id.clone()) {
-                    pending.extend(nodes[id].inputs.iter().cloned());
-                }
-            }
+        let mut search = crate::search::Search::new(
+            &mut self.engine,
+            self.keys,
+            &atoms,
+            &rules,
+            &fixed,
+            options,
+            &mut budget,
+        );
+        let region = match search.region(
+            &requested.keys().cloned().collect(),
+            &inputs,
+            &BTreeMap::new(),
+            0,
+        ) {
+            Ok(r) => r,
+            Err(crate::search::Failure::Check(e)) => return Err(e),
+            Err(crate::search::Failure::Oracle(e)) => return Ok(Build::OracleInconclusive(e)),
+            Err(crate::search::Failure::Problem(p)) => return Ok(Build::Problem(p)),
+        };
+        let nodes = region.nodes;
+        let required_inputs = crate::search::external(&nodes, &requested.keys().cloned().collect());
+        if !required_inputs.is_subset(&inputs) {
+            return Err(CheckError::Internal("plan has unscheduled inputs"));
         }
-        nodes.retain(|k, _| retained.contains(k));
         budget.tick(nodes.len() + requested.len())?;
         let declaration = self.corpus.verification(self.verification).unwrap();
         Ok(Build::Ready(Plan {
@@ -434,13 +299,13 @@ impl<'a> Planner<'a> {
         }))
     }
 }
-struct Work<'a> {
+pub(super) struct Work<'a> {
     limits: &'a Limits,
     start: Instant,
     work: usize,
 }
 impl Work<'_> {
-    fn tick(&mut self, n: usize) -> Result<()> {
+    pub(super) fn tick(&mut self, n: usize) -> Result<()> {
         self.limits.cancellation.check()?;
         self.work = self.work.saturating_add(n);
         if self.work > self.limits.max_work {
@@ -460,7 +325,7 @@ impl Work<'_> {
         Ok(())
     }
 }
-fn room(n: usize, max: usize, resource: &'static str) -> Result<()> {
+pub(super) fn room(n: usize, max: usize, resource: &'static str) -> Result<()> {
     if n >= max {
         Err(CheckError::limit(
             "plan construction",
@@ -472,50 +337,7 @@ fn room(n: usize, max: usize, resource: &'static str) -> Result<()> {
         Ok(())
     }
 }
-fn rule_expression(
-    rules: &[&GroundRule],
-    keys: &SemanticKeys,
-    available: &BTreeSet<AtomKey>,
-    budget: &mut Work<'_>,
-) -> Result<Option<Expression>> {
-    let mut bodies = Vec::new();
-    for r in rules {
-        let mut body = Vec::new();
-        for l in &r.body {
-            budget.tick(1)?;
-            let k = AtomKey::from_atom(keys, &l.term.atom)?;
-            if !available.contains(&k) {
-                return Ok(None);
-            }
-            body.push((k, l.polarity == Polarity::Positive));
-        }
-        body.sort();
-        body.dedup();
-        bodies.push(body);
-    }
-    bodies.sort();
-    bodies.dedup();
-    let mut nodes = Vec::new();
-    let mut alternatives = Vec::new();
-    for body in bodies {
-        let mut terms = Vec::new();
-        for (k, positive) in body {
-            nodes.push(Term::Read(k));
-            if !positive {
-                nodes.push(Term::Not(nodes.len() - 1));
-            }
-            terms.push(nodes.len() - 1);
-        }
-        nodes.push(Term::And(terms));
-        alternatives.push(nodes.len() - 1);
-    }
-    nodes.push(Term::Or(alternatives));
-    Ok(Some(Expression {
-        root: nodes.len() - 1,
-        nodes,
-    }))
-}
-fn dependencies(expr: &Expression) -> BTreeSet<AtomKey> {
+pub(super) fn dependencies(expr: &Expression) -> BTreeSet<AtomKey> {
     expr.nodes
         .iter()
         .filter_map(|n| match n {
@@ -524,39 +346,7 @@ fn dependencies(expr: &Expression) -> BTreeSet<AtomKey> {
         })
         .collect()
 }
-fn insert_compute(
-    nodes: &mut BTreeMap<AtomKey, Node>,
-    available: &mut BTreeSet<AtomKey>,
-    key: &AtomKey,
-    expr: Expression,
-    sources: BTreeSet<RuleKey>,
-    options: &Options,
-    budget: &mut Work<'_>,
-) -> Result<()> {
-    budget.tick(expr.nodes.len() + 1)?;
-    room(nodes.len(), options.max_nodes, "plan nodes")?;
-    let inputs = dependencies(&expr);
-    if !inputs.is_subset(available) {
-        return Err(CheckError::Internal(
-            "plan expression reads unavailable value",
-        ));
-    }
-    nodes.insert(
-        key.clone(),
-        Node {
-            id: key.clone(),
-            inputs,
-            sources,
-            operation: Operation::Compute {
-                output: key.clone(),
-                expression: expr,
-            },
-        },
-    );
-    available.insert(key.clone());
-    Ok(())
-}
-fn convert(expr: stable_query::Expression, keys: &SemanticKeys) -> Result<Expression> {
+pub(super) fn convert(expr: stable_query::Expression, keys: &SemanticKeys) -> Result<Expression> {
     use stable_query::ExpressionNode as N;
     Ok(Expression {
         root: expr.root,

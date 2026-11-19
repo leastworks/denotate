@@ -4,6 +4,7 @@
 mod build;
 mod export;
 mod run;
+mod search;
 pub use build::{Build, Options, Output, Planner, Problem};
 use denotate_check::{AtomKey, stable_query};
 use denotate_ir::{AssumptionKey, RuleKey, VerificationKey};
@@ -47,6 +48,18 @@ pub enum Operation {
         outputs: BTreeSet<AtomKey>,
         rules: Vec<Rule>,
     },
+    /// Both feasible arms deliver these bindings. The outer dependency graph is
+    /// the shared continuation; no arm's truth pins escape this join.
+    Split {
+        on: AtomKey,
+        outputs: BTreeSet<AtomKey>,
+        when_true: Option<Box<Region>>,
+        when_false: Option<Box<Region>>,
+    },
+}
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Region {
+    pub nodes: BTreeMap<AtomKey, Node>,
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Node {
@@ -62,7 +75,9 @@ impl Node {
     pub fn outputs(&self) -> BTreeSet<AtomKey> {
         match &self.operation {
             Operation::Compute { output, .. } => BTreeSet::from([output.clone()]),
-            Operation::Fixpoint { outputs, .. } => outputs.clone(),
+            Operation::Fixpoint { outputs, .. } | Operation::Split { outputs, .. } => {
+                outputs.clone()
+            }
         }
     }
 }
