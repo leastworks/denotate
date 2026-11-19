@@ -3,6 +3,36 @@
 Ordered roughly by priority. The first real programs are expected to be written
 directly in `.den`.
 
+## Large programs: SAT checking and staged execution plans
+
+A production-scale lowered program (hundreds of thousands of rule instances, one
+recursive component of a few thousand atoms) exhausted BDD evaluation: per-atom
+conditions over all worlds re-encode the same branch structure many times. The
+direction for such programs separates meaning from schedule:
+
+- **Meaning by SAT on the value-level program.** The original ground rules, the
+  declared input universe and the selected assumptions are encoded as completion
+  clauses; every model is confirmed against its reduct, so answers are stable-model
+  answers. Implemented as an explicit CLI engine (`check-den --engine sat`):
+  emptiness and at-most-one obligations, input-independent obligations from fixed
+  preparation, and separate context, existence and uniqueness results, plus an oracle
+  for feasibility, constants, equivalence checks and bounded expression synthesis.
+  Next: affordable whole-program meaning (per-component existence with covering
+  cubes projected onto each component's support), the remaining obligation kinds and
+  notices as needed, then session and editor integration. BDDs stay the default and
+  remain the tool for small programs, editor caching and full failing conditions.
+- **Staged execution plans.** A generic driver builds what a DSL compiler's dataflow
+  phase builds: a DAG of branches on facts settled earlier, nodes that compute values
+  (readiness is value determination), joins, and a case partition whose branches make
+  every recursive component stratified. The same partition serves the execution plan,
+  per-branch meaning (stratified residual programs) and per-branch checking. Loops are
+  handled by propagation, expression extraction, local fixpoints and, last, splits
+  ranked from the dependency structure. Code generation consumes the plan later.
+- **Smaller encodings generically.** Structural sharing of identical definitions,
+  constant folding, dead-premise removal and syntactic subsumption over acyclic parts
+  shrank the program's CNF about threefold; SAT-based sweeping (simulation, then
+  incremental SAT) replaces bounded local BDD proofs when size matters.
+
 ## Admission of negation cycles
 
 Admission decides whether every permitted world has exactly one meaning. Implemented:
