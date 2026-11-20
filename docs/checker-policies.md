@@ -1566,10 +1566,25 @@ cone; sibling joins share a continuation, but unrelated branch states are not me
 See [the plan README](../crates/plan/README.md).
 
 
-SAT subsumed-producer notices run under an independent diagnostic allowance. Their
+SAT subsumed-producer notices run under an independent diagnostic allowance. Their settlement
 support walk must exclude the entire source rule being reported, so a proof cannot
 justify deleting its own support. Exhaustion is exposed as `subsumptionIncomplete`
 and never alters semantic completeness or exit status. Presentation shows at most
 eight distinct head tuples and sixteen supporting locations per source notice,
 with omitted counts. Full affected instances remain in the checker report. No
 corpus-scale timing or memory claim accompanies this propagation increment.
+
+Syntactic subsumption is part of the independently charged settlement preparation.
+It compares same-head signed body sets after propagation, shortest first, with
+semantic-key tie breaking. An aggregate cap of 100,000 pair comparisons bounds the
+optional optimization: unvisited producers survive, with no claim of exhaustive
+redundancy reporting. Heads lacking semantic ordering keys are also left intact
+(for the existing partially keyed query API). Indexing, keys and comparisons also consume preparation work;
+ordinary preparation exhaustion remains explicit. No SAT/BDD query is involved.
+
+The SAT CLI's component inventory gets its own 1,000,000-work, two-second allowance,
+independent of meaning limits. Each sample retains at most twelve cycle edges and
+reports the exact omitted edge count. A search cutoff marks the inventory incomplete;
+completed components remain visible. `--dump-component` reuses the existing bounded
+JSONL writer for SAT's prepared graph, including full component atoms and surviving
+rules with original identities. These reporting bounds never alter verdicts.

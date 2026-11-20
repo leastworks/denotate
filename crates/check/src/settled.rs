@@ -22,7 +22,8 @@ pub struct SettledAtom {
 pub struct SubsumedProducer {
     pub rule: denotate_ir::RuleId,
     pub total_instances: usize,
-    /// Original instance and its independently settling producer.
+    pub syntactic: bool,
+    /// Original instance and its settling or syntactically subsuming producer.
     pub instances: Vec<(GroundRuleId, GroundRuleId)>,
 }
 #[derive(Debug, Clone)]
@@ -31,20 +32,22 @@ pub(crate) struct SettledView {
     pub values: BTreeMap<GroundAtom, SettledAtom>,
     pub origins: Vec<GroundRuleId>,
     pub receipt: WorkReceipt,
+    pub syntactic: Vec<(GroundRuleId, GroundRuleId)>,
 }
 impl GroundProgram {
     #[cfg(test)]
     pub(crate) fn settle_atoms(&self, limits: &Limits) -> Result<SettledView> {
-        self.settle_atoms_accounted(limits).0
+        self.settle_atoms_accounted(None, limits).0
     }
     pub(crate) fn settle_atoms_accounted(
         &self,
+        keys: Option<&denotate_ir::SemanticKeys>,
         limits: &Limits,
     ) -> (Result<SettledView>, WorkReceipt) {
         let mut b = Budget::tracked(limits);
         let _span = limits.profile.span("settled-atoms", None);
         let result = self
-            .settle_atoms_inner(&mut b)
+            .settle_atoms_inner(keys, &mut b)
             .map_err(|e| e.in_phase("settled atoms", None));
         if let Err(e) = &result {
             b.failure(e);
@@ -55,7 +58,8 @@ impl GroundProgram {
             dependencies: BTreeSet::from([QueryKey::ResidualPreparation]),
         };
         (
-            result.map(|(program, values, origins)| SettledView {
+            result.map(|(program, values, origins, syntactic)| SettledView {
+                syntactic,
                 program,
                 values,
                 origins,
@@ -66,11 +70,13 @@ impl GroundProgram {
     }
     fn settle_atoms_inner(
         &self,
+        keys: Option<&denotate_ir::SemanticKeys>,
         b: &mut Budget<'_>,
     ) -> Result<(
         GroundProgram,
         BTreeMap<GroundAtom, SettledAtom>,
         Vec<GroundRuleId>,
+        Vec<(GroundRuleId, GroundRuleId)>,
     )> {
         b.charge(
             self.core.atoms.len() + self.core.rules.len(),
@@ -212,12 +218,134 @@ impl GroundProgram {
             r.id.index = view.rules.len();
             view.rules.push(r);
         }
+        let syntactic = subsume(&mut view, &mut origins, self, keys, b)?;
         // Keep atoms, including settled false atoms, in the same order. Original
         // interpretations and query pins keep their indices; no truth is lost by deletion.
         graph::analyze(&mut view, b)?;
         b.check("settled view")?;
-        Ok((view, values, origins))
+        Ok((view, values, origins, syntactic))
     }
+}
+
+/// Subset elimination on the propagated bodies. Shortest bodies first means a
+/// retained survivor cannot itself be removed later. Equal bodies keep the first
+/// semantic source/grounding key. No correlation or selected assumptions enter.
+fn subsume(
+    view: &mut GroundProgram,
+    origins: &mut Vec<GroundRuleId>,
+    original: &GroundProgram,
+    keys: Option<&denotate_ir::SemanticKeys>,
+    b: &mut Budget<'_>,
+) -> Result<Vec<(GroundRuleId, GroundRuleId)>> {
+    let mut heads = BTreeMap::<_, Vec<_>>::new();
+    for (i, r) in view.rules.iter().enumerate() {
+        b.tick("syntactic subsumption index")?;
+        heads.entry(r.head.atom.clone()).or_default().push(i);
+    }
+    let mut dropped = BTreeMap::new();
+    // Optional optimization: stop comparing after this aggregate pair allowance.
+    // Already established subset removals remain sound; unvisited rules survive.
+    let mut pairs = 100_000usize;
+    let mut ordered = Vec::new();
+    for (a, candidates) in heads {
+        if candidates.len() < 2 {
+            continue;
+        }
+        // Bare stable queries historically accept partially keyed corpora. This
+        // optional optimization cannot turn missing presentation keys into a
+        // preparation error or choose an arena-order duplicate survivor.
+        let key = match keys.map(|keys| AtomKey::from_atom(keys, &a)).transpose() {
+            Ok(key) => key,
+            Err(denotate_ir::KeyError::MissingBinding(_)) => continue,
+            Err(e) => return Err(e.into()),
+        };
+        ordered.push((key, a, candidates));
+    }
+    ordered.sort_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+    'heads: for (_, _, indices) in ordered {
+        if pairs == 0 {
+            break;
+        }
+        // Only one head's body sets and grounding keys are live at a time.
+        let mut candidates = Vec::new();
+        for i in indices {
+            let r = &view.rules[i];
+            b.charge(r.body.len() + 1, "syntactic subsumption bodies")?;
+            let body = r
+                .body
+                .iter()
+                .map(|l| (l.term.atom.clone(), l.polarity == Polarity::Positive))
+                .collect::<BTreeSet<_>>();
+            candidates.push((i, body));
+        }
+        let mut order = BTreeMap::new();
+        for (i, _) in candidates.iter() {
+            let r = original.original_rule(origins[*i]).unwrap();
+            b.charge(r.body.len() + 1, "syntactic subsumption keys")?;
+            let key = keys
+                .map(|keys| -> Result<_> {
+                    Ok((
+                        keys.rule(r.source)?.clone(),
+                        std::iter::once(&r.head.atom)
+                            .chain(r.body.iter().map(|l| &l.term.atom))
+                            .map(|a| AtomKey::from_atom(keys, a).map_err(CheckError::from))
+                            .collect::<Result<Vec<_>>>()?,
+                    ))
+                })
+                .transpose();
+            let key = match key {
+                Ok(key) => key,
+                Err(CheckError::Keys(denotate_ir::KeyError::MissingBinding(_))) => continue 'heads,
+                Err(e) => return Err(e),
+            };
+            order.insert(*i, key);
+        }
+        candidates.sort_by(|(i, a), (j, c)| {
+            a.len()
+                .cmp(&c.len())
+                .then_with(|| order[i].cmp(&order[j]))
+                .then(i.cmp(j))
+        });
+        let mut survivors: Vec<usize> = Vec::new();
+        for n in 0..candidates.len() {
+            let (i, body) = &candidates[n];
+            let mut support = None;
+            for &s in &survivors {
+                if pairs == 0 {
+                    break;
+                }
+                pairs -= 1;
+                let (j, other) = &candidates[s];
+                b.charge(other.len() + 1, "syntactic subsumption")?;
+                if other.is_subset(body) {
+                    support = Some(*j);
+                    break;
+                }
+            }
+            if let Some(j) = support {
+                dropped.insert(*i, j);
+            } else {
+                survivors.push(n);
+            }
+        }
+    }
+    let evidence = dropped
+        .iter()
+        .map(|(i, j)| (origins[*i], origins[*j]))
+        .collect();
+    if !dropped.is_empty() {
+        let old = std::mem::take(&mut view.rules);
+        let old_origins = std::mem::take(origins);
+        for (i, mut r) in old.into_iter().enumerate() {
+            if dropped.contains_key(&i) {
+                continue;
+            }
+            r.id.index = view.rules.len();
+            view.rules.push(r);
+            origins.push(old_origins[i]);
+        }
+    }
+    Ok(evidence)
 }
 
 impl SettledView {
@@ -230,10 +358,20 @@ impl SettledView {
         let mut b = Budget::new(limits);
         let mut totals = BTreeMap::new();
         let mut found = BTreeMap::<_, Vec<_>>::new();
+        let mut syntactic_sources = BTreeSet::new();
         let result = (|| {
             for r in &original.core.rules {
                 b.tick("subsumed producers")?;
                 *totals.entry(r.source).or_insert(0) += 1;
+            }
+            for (candidate, survivor) in &self.syntactic {
+                b.tick("subsumed producers")?;
+                let r = original.original_rule(*candidate).unwrap();
+                syntactic_sources.insert(r.source);
+                found
+                    .entry(r.source)
+                    .or_default()
+                    .push((*candidate, *survivor));
             }
             for r in &original.core.rules {
                 b.tick("subsumed producers")?;
@@ -309,6 +447,7 @@ impl SettledView {
                 .map(|(rule, instances)| SubsumedProducer {
                     rule,
                     total_instances: totals[&rule],
+                    syntactic: syntactic_sources.contains(&rule),
                     instances,
                 })
                 .collect(),
@@ -359,6 +498,45 @@ mod tests {
                     }
                 }
             }
+        }
+    }
+    #[test]
+    fn subset_removal_preserves_stable_models_including_recursive_survivors() {
+        for shape in 0..256 {
+            let mut c = Corpus::new();
+            let x = rel(&mut c, "x", true);
+            let p = rel(&mut c, "p", false);
+            let q = rel(&mut c, "q", false);
+            let candidates = [
+                (p, vec![(x, false), (q, true)]),
+                (p, vec![(x, false)]),
+                (p, vec![(x, false)]), // duplicate producer
+                (q, vec![(p, true)]),
+                (p, vec![(x, false), (q, false)]),
+                (p, vec![(q, false)]), // recursive survivor
+                (q, vec![(p, false)]),
+                (q, vec![(x, true), (p, false)]),
+            ];
+            for (i, (head, body)) in candidates.iter().enumerate() {
+                if shape & (1 << i) != 0 {
+                    rule(&mut c, *head, body);
+                }
+            }
+            let original = GroundProgram::prepare(&c, &Domains::new(), &Limits::default()).unwrap();
+            let view = original.settle_atoms(&Limits::default()).unwrap();
+            let atoms: Vec<_> = original.atoms().cloned().collect();
+            let inputs: BTreeSet<_> = original.input_atoms().cloned().collect();
+            let before: Vec<_> = original.rules().cloned().collect();
+            let after: Vec<_> = view.program.rules().cloned().collect();
+            for world in subsets(&[atom(x)]) {
+                assert_eq!(
+                    stable_models(&atoms, &inputs, &before, &world),
+                    stable_models(&atoms, &inputs, &after, &world),
+                    "shape {shape}, world {world:?}"
+                );
+            }
+            let dropped: BTreeSet<_> = view.syntactic.iter().map(|(i, _)| *i).collect();
+            assert!(view.syntactic.iter().all(|(_, s)| !dropped.contains(s)));
         }
     }
     #[test]

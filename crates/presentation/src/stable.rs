@@ -236,7 +236,12 @@ pub fn stable_producer_notices(
             ));
         }
         result.push(ContextFinding {identity:Identity::SubsumedProducer(notice.rule),kind:Kind::SubsumedProducer,
-            message:if notice.instances.len()==notice.total_instances {"This rule is subsumed by independently settled producers of the same tuples."} else {"Some instances of this rule are subsumed by independently settled producers of the same tuples."}.into(),
+            message: match (notice.syntactic, notice.instances.len()==notice.total_instances) {
+                (false, true) => "This rule is subsumed by independently settled producers of the same tuples.",
+                (false, false) => "Some instances of this rule are subsumed by independently settled producers of the same tuples.",
+                (true, true) => "This rule is subsumed by other producers with sufficient premises for the same tuples.",
+                (true, false) => "Some instances of this rule are subsumed by other producers with sufficient premises for the same tuples.",
+            }.into(),
             notes:vec![note], contributions});
     }
     Ok(result)

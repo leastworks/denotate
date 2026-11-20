@@ -8,6 +8,7 @@ pub(super) fn run(
     requests: &[(denotate_ir::VerificationKey, denotate_check::CheckRequest)],
     query: QueryLimits,
     mut check: CheckOptions,
+    dump: &mut Option<component_dump::Dump>,
     partial: bool,
     unchecked: bool,
     validate_all: bool,
@@ -128,6 +129,16 @@ pub(super) fn run(
                 continue;
             }
         };
+        let inventory = inventory(&engine, p, &limits)?;
+        if json {
+            writeln!(output, "Negative components: {inventory:#}").unwrap();
+        } else {
+            print_inventory(&inventory, output);
+        }
+        if let Some(dump) = dump {
+            dump.capture_sat(p, v, &engine);
+        }
+        flush(output)?;
         trace.message(format!(
             "SAT checking: fixed obligations, empty, at_most_one; meaning mode {}",
             check.meaning.label()
@@ -211,4 +222,144 @@ pub(super) fn run(
     } else {
         0
     })
+}
+
+fn inventory(
+    engine: &Engine,
+    p: &LoadedProgram,
+    limits: &Limits,
+) -> Result<serde_json::Value, Failure> {
+    let allowance = Limits {
+        max_work: 1_000_000,
+        timeout: std::time::Duration::from_secs(2),
+        cancellation: limits.cancellation.clone(),
+        ..Limits::default()
+    };
+    let inventory = engine
+        .negative_components(&p.keys, &allowance)
+        .map_err(checker_failure)?;
+    let qualified = |id: denotate_ir::OccurrenceId, raw: &str, kind| {
+        let text = denotate_ir_text::spelling(raw, kind);
+        let ns = p.corpus.namespace(id).unwrap();
+        let prefix = ns
+            .segments()
+            .iter()
+            .map(|s| denotate_ir_text::spelling(s, denotate_ir_text::NameKind::Identifier))
+            .collect::<Vec<_>>()
+            .join("::");
+        if prefix.is_empty() {
+            text
+        } else {
+            format!("{prefix}::{text}")
+        }
+    };
+    let atom = |a: &denotate_check::GroundAtom| {
+        let r = p.corpus.relation(a.relation).unwrap();
+        let relation = index::Name {
+            namespace: Some(p.corpus.namespace(r.id).unwrap().clone()),
+            text: r.name.clone(),
+            generated: p.corpus.is_generated_relation(r.id),
+        }
+        .spelling();
+        let values = a
+            .arguments
+            .iter()
+            .map(|c| {
+                let c = p.corpus.constant(*c).unwrap();
+                qualified(c.id.into(), &c.name, denotate_ir_text::NameKind::Constant)
+            })
+            .collect::<Vec<_>>();
+        format!("{relation}({})", values.join(", "))
+    };
+    let mut index = origins::SourceIndex::new(&p.sources);
+    let mut components = Vec::new();
+    for c in inventory.components {
+        let mut cycle = Vec::new();
+        for e in c.cycle {
+            let r = engine.original_instance(e.rule).unwrap();
+            let source = p.provenance.origins(r.source).first().and_then(|o| {
+                let source = p.sources.snapshot(o.span.snapshot()).ok()?;
+                let coordinate = index
+                    .coordinate(o.span.snapshot(), o.span.byte_range().start)
+                    .ok()??;
+                Some(json!({"uri":source.uri,"line":coordinate.line,"column":coordinate.column}))
+            });
+            cycle.push(json!({"consumer":atom(&e.consumer),"provider":atom(&e.provider),
+                "polarity":if e.polarity == denotate_check::Polarity::Negative {"negative"} else {"positive"},
+                "source":source}));
+        }
+        let relations = c.relations.iter().map(|(id, count)| {
+            let r = p.corpus.relation(*id).unwrap();
+            json!({"name":index::Name {namespace:Some(p.corpus.namespace(*id).unwrap().clone()), text:r.name.clone(),generated:p.corpus.is_generated_relation(*id)}.spelling(),"atoms":count})
+        }).collect::<Vec<_>>();
+        components.push(json!({"atoms":c.atoms,"relations":relations,"cycle":cycle,"omittedEdges":c.omitted_edges,"cycleSearchComplete":c.cycle_search_complete}));
+    }
+    Ok(
+        json!({"total":inventory.total,"components":components,"complete":inventory.incomplete.is_none(),
+        "reason":inventory.incomplete.map(|c| denotate_presentation::exhaustion_text(c.phase,c.resource,c.details))}),
+    )
+}
+fn print_inventory(inventory: &serde_json::Value, output: &mut String) {
+    writeln!(output, "Negative components: {}", inventory["total"]).unwrap();
+    for (i, c) in inventory["components"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+    {
+        writeln!(output, "  Component {}: {} atoms", i + 1, c["atoms"]).unwrap();
+        for r in c["relations"].as_array().unwrap() {
+            writeln!(
+                output,
+                "    {}: {} atoms",
+                r["name"].as_str().unwrap(),
+                r["atoms"]
+            )
+            .unwrap();
+        }
+        for e in c["cycle"].as_array().unwrap() {
+            let source = &e["source"];
+            let location = if source.is_null() {
+                "source unavailable".into()
+            } else {
+                format!(
+                    "{}:{}:{}",
+                    source["uri"].as_str().unwrap(),
+                    source["line"],
+                    source["column"]
+                )
+            };
+            writeln!(
+                output,
+                "    {} -[{}, {}]-> {}",
+                e["consumer"].as_str().unwrap(),
+                location,
+                if e["polarity"] == "negative" {
+                    "-"
+                } else {
+                    "+"
+                },
+                e["provider"].as_str().unwrap()
+            )
+            .unwrap();
+        }
+        if c["cycleSearchComplete"] == false {
+            writeln!(
+                output,
+                "    Cycle sample unavailable: reporting allowance exhausted"
+            )
+            .unwrap();
+        }
+        if c["omittedEdges"].as_u64().unwrap() > 0 {
+            writeln!(output, "    +{} cycle edges omitted", c["omittedEdges"]).unwrap();
+        }
+    }
+    if inventory["complete"] == false {
+        writeln!(
+            output,
+            "  Inventory truncated: {}",
+            inventory["reason"].as_str().unwrap()
+        )
+        .unwrap();
+    }
 }

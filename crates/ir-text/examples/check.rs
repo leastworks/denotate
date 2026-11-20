@@ -491,6 +491,7 @@ fn check_program(
             &requests,
             sat_query_limits,
             sat_check_options,
+            &mut dump.borrow_mut(),
             partial,
             unchecked,
             validate_all_assumptions,

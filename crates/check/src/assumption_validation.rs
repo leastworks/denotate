@@ -311,7 +311,7 @@ impl AssumptionPreparation {
             };
             let ground = {
                 let _profile = limits.profile.span("assumption-specialization", None);
-                let (result, receipt) = base.settle_atoms_accounted(limits);
+                let (result, receipt) = base.settle_atoms_accounted(Some(keys), limits);
                 settled_receipt = Some(receipt);
                 std::sync::Arc::new(result?)
             };

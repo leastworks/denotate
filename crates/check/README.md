@@ -943,8 +943,22 @@ fold is reused. Ordinary BDD admission retains its original graph and warnings.
 Previously invalid assumption cones can now become valid through propagation.
 
 SAT reports also carry advisory `subsumed_producers`, grouped per source rule.
-A producer is reported only when its head has an independently settled true
-producer whose supporting proof uses no instance of that source rule. Partial
-coverage lists the affected instances. No removal edit is offered. Advisory work
+A producer is reported when its head has an independently settled true
+producer whose supporting proof uses no instance of that source rule, or when a
+surviving producer's signed body is a subset of its body after propagation.
+Syntactic subsumption also applies to recursive heads: it preserves each reduct's
+least model. Equal bodies keep a survivor in semantic source/grounding key order.
+Bare query callers may supply partial keys: heads lacking the necessary ordering
+keys keep their producers, preserving the existing keyless query API.
+The shared view drops subsumed rules before component analysis; original instances
+remain available for evidence. Partial coverage lists the affected instances.
+No removal edit is offered. Advisory work
 has its own allowance, and `subsumption_incomplete` reports truncation without
 changing any verdict. Default BDD/editor publication is deferred.
+
+`Engine::negative_components` reports the specialized graph without any SAT query,
+including when meaning is disabled. Components and relation counts use semantic
+key order. Each sample cycle starts at a deterministic negative edge and follows
+a shortest return path; at most twelve edges are retained. Reporting has a separate
+caller-supplied allowance and marks incomplete output without changing verdicts.
+View-local cycle rules map back through `original_instance`.

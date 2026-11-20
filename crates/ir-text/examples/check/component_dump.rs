@@ -110,6 +110,36 @@ impl Dump {
         verification: &VerificationDeclaration,
         event: AdmissionDump<'_>,
     ) {
+        self.capture_view(p, verification, event, None);
+    }
+    pub fn capture_sat(
+        &mut self,
+        p: &LoadedProgram,
+        verification: &VerificationDeclaration,
+        engine: &stable_query::Engine,
+    ) {
+        self.capture_view(
+            p,
+            verification,
+            AdmissionDump {
+                snapshot: self.snapshots.len() as u64 + 1,
+                program: engine.program(),
+                event: AdmissionDumpEvent::Graph {
+                    state: "sat-prepared",
+                    round: 0,
+                    error: None,
+                },
+            },
+            Some(engine),
+        );
+    }
+    fn capture_view(
+        &mut self,
+        p: &LoadedProgram,
+        verification: &VerificationDeclaration,
+        event: AdmissionDump<'_>,
+        sat: Option<&stable_query::Engine>,
+    ) {
         if self.failed.is_some() {
             return;
         }
@@ -136,6 +166,7 @@ impl Dump {
         let mut formatter = Formatter {
             p,
             program: event.program,
+            sat,
             allowance,
             start,
             output: &mut self.output,
@@ -214,6 +245,7 @@ macro_rules! emit {
 struct Formatter<'a> {
     p: &'a LoadedProgram,
     program: &'a GroundProgram,
+    sat: Option<&'a stable_query::Engine>,
     allowance: &'a mut Allowance,
     start: Instant,
     output: &'a mut BufWriter<Box<dyn Write>>,
@@ -303,10 +335,11 @@ impl Formatter<'_> {
         Ok(json!({"id":identity(&key),"name":format!("{relation_name}({})",values.join(", "))}))
     }
     fn instance(&mut self, id: GroundRuleId) -> Result<InstanceKey, String> {
-        let rule = self
-            .program
-            .original_rule(id)
-            .ok_or("missing original instance")?;
+        let rule = match self.sat {
+            Some(engine) => engine.original_instance(id),
+            None => self.program.original_rule(id),
+        }
+        .ok_or("missing original instance")?;
         self.charge(
             1 + rule
                 .body
@@ -422,7 +455,7 @@ impl Formatter<'_> {
     ) -> Result<(), String> {
         emit!(
             self,
-            json!({"record":"graph-begin","state":state,"error":error.map(ToString::to_string),"lastCommitted":true})
+            json!({"record":"graph-begin","state":state,"error":error.map(ToString::to_string),"lastCommitted":self.sat.is_none()})
         )?;
         let mut components = Vec::new();
         let mut ordered_atoms = 0usize;

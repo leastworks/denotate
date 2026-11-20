@@ -75,7 +75,7 @@ pub(super) fn prepare<'a>(
         crate::QueryKey::ResidualPreparation,
         [crate::QueryKey::FixedFacts],
     )?;
-    let (view, receipt) = base.settle_atoms_accounted(limits);
+    let (view, receipt) = base.settle_atoms_accounted(Some(keys), limits);
     receipts
         .record(crate::QueryKey::SettledAtoms, receipt)
         .map_err(CheckError::Receipts)?;

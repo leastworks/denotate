@@ -21,7 +21,9 @@ direction for such programs separates meaning from schedule:
   certified cubes over each component's support, and global uniqueness is proved
   from local proofs or a pair query on the ambiguous components' downstream closure;
   meaning can also be skipped explicitly. Independent ground-atom propagation now
-  removes constant-dead cycles before SAT meaning, with advisory subsumed-producer
+  removes constant-dead cycles before SAT meaning; syntactic same-head subsumption
+  removes redundant producers, and the CLI lists remaining negative components
+  without meaning search. Both reductions have advisory subsumed-producer
   findings. Next: the remaining obligation kinds and
   notices as needed, then session and editor integration. BDDs stay the default and
   remain the tool for small programs, editor caching and full failing conditions.

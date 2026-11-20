@@ -1176,3 +1176,243 @@ fn constant_producer_breaks_a_readability_cycle_and_names_the_other_producer() {
             .contains("supplied():-term()")
     );
 }
+
+#[test]
+fn syntactic_subsumption_cuts_cycles_and_reports_original_support() {
+    let p = load_text(
+        "input seed(); relation p(); relation q();\np():-seed(),!q();\np():-seed();\nq():-!p();\nverification v{assumptions:[];obligations:[];}",
+    );
+    let mut e = prepare(&p, "v");
+    assert!(e.original_program().components().any(|c| c.cycle.is_some()));
+    assert_eq!(
+        e.negative_components(&p.keys, &Limits::default())
+            .unwrap()
+            .total,
+        0
+    );
+    let options = CheckOptions {
+        max_worlds: 0,
+        ..CheckOptions::default()
+    };
+    for _ in 0..2 {
+        let r = e.check(&p.keys, &options).unwrap();
+        assert!(r.proved());
+        assert_eq!(r.subsumed_producers.len(), 1);
+        let n = &r.subsumed_producers[0];
+        assert!(n.syntactic);
+        assert_eq!(n.instances.len(), 1);
+        let original = e.original_program();
+        assert_eq!(
+            original.original_rule(n.instances[0].0).unwrap().body.len(),
+            2
+        );
+        assert_eq!(
+            original.original_rule(n.instances[0].1).unwrap().body.len(),
+            1
+        );
+        let presented = presentation::present_stable(&p, &r).unwrap();
+        let d = presented
+            .diagnostics
+            .iter()
+            .find(|d| d.kind == Kind::SubsumedProducer)
+            .unwrap();
+        assert!(d.message.contains("sufficient premises"));
+        assert!(
+            d.primary.byte_range().start
+                < p.sources
+                    .snapshot(d.primary.snapshot())
+                    .unwrap()
+                    .text
+                    .find("p():-seed();")
+                    .unwrap()
+        );
+        assert!(!d.related.is_empty());
+    }
+}
+
+#[test]
+fn negative_inventory_is_separate_deterministic_and_includes_self_loops() {
+    let p = load_text(
+        "relation a();relation b();relation c();a():-!b();b():-!a();c():-a(),!c();verification v{assumptions:[];obligations:[];}",
+    );
+    let mut e = prepare(&p, "v");
+    let signature = |e: &Engine| {
+        let listing = e.negative_components(&p.keys, &Limits::default()).unwrap();
+        assert!(listing.incomplete.is_none());
+        assert_eq!(listing.total, 2);
+        listing
+            .components
+            .iter()
+            .map(|c| {
+                (
+                    c.representative.clone(),
+                    c.atoms,
+                    c.cycle
+                        .iter()
+                        .map(|edge| {
+                            (
+                                AtomKey::from_atom(&p.keys, &edge.consumer).unwrap(),
+                                AtomKey::from_atom(&p.keys, &edge.provider).unwrap(),
+                                edge.polarity == Polarity::Negative,
+                            )
+                        })
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect::<Vec<_>>()
+    };
+    let first = signature(&e);
+    assert_eq!(first.iter().map(|c| c.1).collect::<Vec<_>>(), [2, 1]);
+    assert_eq!(first.iter().map(|c| c.2.len()).collect::<Vec<_>>(), [2, 1]);
+    let short = e
+        .negative_components(
+            &p.keys,
+            &Limits {
+                max_work: 0,
+                ..Limits::default()
+            },
+        )
+        .unwrap();
+    assert!(short.incomplete.is_some());
+    assert_eq!(short.total, 2);
+    // Find a cutoff during cycle sampling, without pinning an operation count.
+    assert!((1..100).any(|work| {
+        let partial = e
+            .negative_components(
+                &p.keys,
+                &Limits {
+                    max_work: work,
+                    ..Limits::default()
+                },
+            )
+            .unwrap();
+        partial.incomplete.is_some()
+            && partial
+                .components
+                .iter()
+                .any(|c| c.atoms > 0 && !c.cycle_search_complete)
+    }));
+    let result = e.check(&p.keys, &CheckOptions::default()).unwrap();
+    let fresh = prepare(&p, "v")
+        .check(&p.keys, &CheckOptions::default())
+        .unwrap();
+    assert_eq!(result.has_failures(), fresh.has_failures());
+    assert_eq!(signature(&e), first);
+    assert_eq!(signature(&prepare(&p, "v")), first);
+}
+
+#[test]
+fn duplicate_survivor_and_edit_restoration_keep_models_and_locations() {
+    for tail in ["p():-seed();p():-seed();", "", "p():-seed();p():-seed();"] {
+        let p = load_text(&format!(
+            "input seed();relation p();relation q();p():-seed(),!q();q():-!p();{tail}verification v{{assumptions:[];obligations:[];}}"
+        ));
+        let mut warm = prepare(&p, "v");
+        for _ in 0..2 {
+            let r = warm.check(&p.keys, &CheckOptions::default()).unwrap();
+            let mut fresh = prepare(&p, "v");
+            assert_eq!(
+                r.proved(),
+                fresh
+                    .check(&p.keys, &CheckOptions::default())
+                    .unwrap()
+                    .proved()
+            );
+            assert_eq!(
+                warm.negative_components(&p.keys, &Limits::default())
+                    .unwrap()
+                    .total,
+                if tail.is_empty() { 1 } else { 0 }
+            );
+            if !tail.is_empty() {
+                assert_eq!(r.subsumed_producers.len(), 2);
+                let supports = r
+                    .subsumed_producers
+                    .iter()
+                    .flat_map(|n| {
+                        n.instances
+                            .iter()
+                            .map(|(_, s)| warm.original_program().original_rule(*s).unwrap().source)
+                    })
+                    .collect::<std::collections::BTreeSet<_>>();
+                assert_eq!(supports.len(), 1);
+                assert!(
+                    r.subsumed_producers
+                        .iter()
+                        .all(|n| !supports.contains(&n.rule))
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn recursive_survivor_is_safe_and_inventory_bounds_long_cycle_examples() {
+    let p = load_text(
+        "input seed();relation p();relation q();p():-seed(),q();p():-q();q():-p();q():-seed();verification v{assumptions:[];obligations:[];}",
+    );
+    let mut e = prepare(&p, "v");
+    let r = e.check(&p.keys, &CheckOptions::default()).unwrap();
+    assert!(r.proved());
+    assert!(r.subsumed_producers.iter().any(|n| n.syntactic));
+    for flag in [false, true] {
+        let Answer::Model(m) = e
+            .models(&Query {
+                pins: vec![(atom(&p, "seed", &[]), flag)],
+                ..Query::default()
+            })
+            .unwrap()
+        else {
+            panic!()
+        };
+        assert_eq!(m.value(&atom(&p, "p", &[])), Some(flag));
+    }
+    let mut text = String::new();
+    for i in 0..14 {
+        text.push_str(&format!("relation r{i}();"));
+    }
+    for i in 0..14 {
+        text.push_str(&format!("r{i}():-!r{}();", (i + 1) % 14));
+    }
+    text.push_str("verification v{assumptions:[];obligations:[];}");
+    let p = load_text(&text);
+    let e = prepare(&p, "v");
+    let inventory = e.negative_components(&p.keys, &Limits::default()).unwrap();
+    assert_eq!(inventory.total, 1);
+    assert_eq!(inventory.components[0].cycle.len(), 12);
+    assert_eq!(inventory.components[0].omitted_edges, 2);
+}
+
+#[test]
+fn keyless_query_api_keeps_producers_without_inventing_an_arena_order() {
+    let p = load_text(
+        "input seed();relation p();relation q();p():-seed(),!q();p():-seed();q():-!p();verification v{assumptions:[];obligations:[];}",
+    );
+    let v = p.corpus.verifications().next().unwrap().id;
+    let mut keyless = Engine::prepare(
+        &p.corpus,
+        &p.domains,
+        &denotate_ir::SemanticKeys::default(),
+        v,
+        &Limits::default(),
+        QueryLimits::default(),
+    )
+    .unwrap();
+    let mut keyed = prepare(&p, "v");
+    assert!(keyless.program().rules().count() > keyed.program().rules().count());
+    for present in [false, true] {
+        let query = Query {
+            pins: vec![(atom(&p, "seed", &[]), present)],
+            ..Query::default()
+        };
+        let Answer::Model(a) = keyless.models(&query).unwrap() else {
+            panic!()
+        };
+        let Answer::Model(b) = keyed.models(&query).unwrap() else {
+            panic!()
+        };
+        for name in ["p", "q"] {
+            assert_eq!(a.value(&atom(&p, name, &[])), b.value(&atom(&p, name, &[])));
+        }
+    }
+}

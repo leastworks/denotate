@@ -84,7 +84,7 @@ pub fn help() -> String {
         --no-progress             Silence progress on stderr\n\
         --profile-conditions      Include condition sizes, assumption steps and failed BDD operations\n\
         --profile-memory FILE     Stream detailed memory/BDD JSON lines to a new file\n\
-        --dump-component FILE     Stream bounded admission component diagnostics (local JSONL)\n\
+        --dump-component FILE     Stream bounded BDD/SAT component diagnostics (local JSONL)\n\
         --dump-component-limit N  Aggregate data record cap (default 100000)\n\
         --export-committed FILE   Atomically write one verification's committed graph to a new .den file\n\
         --stop-after-round N      Stop after a whole admission round; requires --export-committed (exit 2)\n\
@@ -363,8 +363,6 @@ impl Options {
                         "--checking-within-w"
                             | "--input-order"
                             | "--profile-conditions"
-                            | "--dump-component"
-                            | "--dump-component-limit"
                             | "--export-committed"
                             | "--stop-after-round"
                             | "--hide-library-rewrites"

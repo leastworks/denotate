@@ -257,6 +257,12 @@ pub fn present_stable(
         inventory.push(json!({"identity":f.identity.data_in(&program.keys,Some(key))?,"kind":f.kind.code(),"message":f.message,"evidence":evidence}));
         diagnostics.extend(placed);
     }
+    let syntactic_notices = report
+        .subsumed_producers
+        .iter()
+        .filter(|n| n.syntactic)
+        .map(|n| n.rule)
+        .collect::<std::collections::BTreeSet<_>>();
     for finding in denotate_presentation::stable_producer_notices(report, &program.corpus, &names)?
     {
         let mut placed = placement.place(
@@ -267,7 +273,9 @@ pub fn present_stable(
             &finding.contributions,
         )?;
         for d in &mut placed {
-            d.evidence = json!({"kind":"settled-producer"});
+            let syntactic = matches!(finding.identity, denotate_presentation::Identity::SubsumedProducer(rule) if syntactic_notices.contains(&rule));
+            d.evidence =
+                json!({"kind":if syntactic {"syntactic-subsumption"} else {"settled-producer"}});
         }
         inventory.push(json!({"identity":finding.identity.data_in(&program.keys,Some(key))?,"kind":finding.kind.code(),"message":finding.message}));
         diagnostics.extend(placed);

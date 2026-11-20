@@ -549,3 +549,16 @@ fn input_dependent_unconditional_producer_edits_revalidate_shared_warm_preparati
         &[false, true, false],
     );
 }
+
+#[test]
+fn syntactic_survivor_edits_revalidate_shared_warm_preparation() {
+    let source = |survivor: &str| {
+        format!(
+            "input x();relation p();relation q();p():-x(),!q();q():-!p();{survivor}assumption selected:empty(q);verification v{{assumptions:[selected];obligations:[];}}"
+        )
+    };
+    edit_sequence(
+        &[source("p():-x();"), source(""), source("p():-x();")],
+        &[true, false, true],
+    );
+}

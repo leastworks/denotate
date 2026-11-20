@@ -606,7 +606,7 @@ fn split_on_a_derived_available_value_keeps_its_producer_before_the_branch() {
 }
 
 #[test]
-fn nested_splits_recompute_residual_components_and_obey_depth_limits() {
+fn subsumed_connectors_allow_sequential_splits_at_depth_one() {
     let mut c = Corpus::new();
     let i = rel(&mut c, "i", true);
     let j = rel(&mut c, "j", true);
@@ -627,6 +627,49 @@ fn nested_splits_recompute_residual_components_and_obey_depth_limits() {
     let plan = ready(p.build(&outputs(&[a, b, x, y]), &o).unwrap());
     compare_worlds(&c, &k, &plan, &[atom(a), atom(b), atom(x), atom(y)]);
     assert!(plan.to_json()["size"]["branches"].as_u64().unwrap() > 1);
+    assert_eq!(plan, ready(p.build(&outputs(&[a, b, x, y]), &o).unwrap()));
+    let shallow = Options {
+        max_split_depth: 1,
+        ..o
+    };
+    // Preparation removes the two syntactically subsumed connectors. The two
+    // SCCs now split sequentially, so each needs only one level of nesting.
+    let shallow_plan = ready(
+        planner(&c, &k, v)
+            .build(&outputs(&[a, b, x, y]), &shallow)
+            .unwrap(),
+    );
+    compare_worlds(&c, &k, &shallow_plan, &[atom(a), atom(b), atom(x), atom(y)]);
+}
+
+#[test]
+fn nested_splits_recompute_residual_components_and_obey_depth_limits() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let j = rel(&mut c, "j", true);
+    let gi = rel(&mut c, "guard_i", false);
+    let gj = rel(&mut c, "guard_j", false);
+    let a = rel(&mut c, "a", false);
+    let b = rel(&mut c, "b", false);
+    let x = rel(&mut c, "x", false);
+    let y = rel(&mut c, "y", false);
+    rule(&mut c, gi, &[(i, false)]);
+    rule(&mut c, gj, &[(j, false)]);
+    // Equivalent upstream guards keep the connectors semantically redundant but
+    // prevent a literal-subset proof. This fixture still needs nested splitting
+    // when the expression oracle is disabled.
+    rule(&mut c, a, &[(gi, false), (b, true)]);
+    rule(&mut c, b, &[(i, true), (a, true)]);
+    rule(&mut c, x, &[(gj, false), (y, true)]);
+    rule(&mut c, y, &[(j, true), (x, true)]);
+    rule(&mut c, a, &[(i, false), (x, false), (b, true)]);
+    rule(&mut c, x, &[(j, false), (a, false), (y, true)]);
+    let v = verification(&mut c, &[]);
+    let k = keys(&c);
+    let o = split_options();
+    let mut p = planner(&c, &k, v);
+    let plan = ready(p.build(&outputs(&[a, b, x, y]), &o).unwrap());
+    compare_worlds(&c, &k, &plan, &[atom(a), atom(b), atom(x), atom(y)]);
     assert_eq!(plan, ready(p.build(&outputs(&[a, b, x, y]), &o).unwrap()));
     let shallow = Options {
         max_split_depth: 1,

@@ -485,3 +485,18 @@ notice placement path, preserve original provenance, and never change exit codes
 They are distinct from declared condition notices, which SAT still does not analyse.
 JSON exposes diagnostic-work exhaustion as `subsumptionIncomplete`; the default BDD
 and editor paths do not yet publish these automatic notices.
+
+SAT preparation also drops syntactically subsumed same-head producers, including
+duplicates, and reports their original supporting rule through the same Information
+notice. No selected assumptions or semantic implication queries justify this pass.
+
+Before checking, SAT output lists the remaining negative components, their atom and
+relation counts, and signed sample cycles with rule source locations. This also
+works with `--sat-meaning none`. JSON has a `Negative components:` inventory with
+`total`, `components`, `complete` and a truncation `reason`; each component carries
+`atoms`, `relations`, `cycle`, `cycleSearchComplete` and `omittedEdges`. A cycle edge carries `consumer`,
+`provider`, `polarity`, and its original rule's `source` (URI and one-based scalar
+line/column, or null). The inventory is structural, not a no-meaning finding.
+`--dump-component FILE` additionally writes bounded JSONL atoms and rules for this
+SAT view (`state: sat-prepared`). Dump or inventory truncation never changes exit
+status. BDD's existing dump behavior is unchanged.

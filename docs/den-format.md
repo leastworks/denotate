@@ -665,8 +665,8 @@ Individual property results, including fixed structural findings, remain visible
 The option does not change stable semantics or treat worlds with no stable model
 as invalid input worlds. SAT preparation propagates independently settled atoms
 before its stratification and meaning checks. It also reports Information notices
-for source rules subsumed by independently settled producers, listing affected
-head tuples when only some instances are covered and linking supporting rules.
+for source rules subsumed by independently settled producers or surviving
+same-head producers with subset bodies, listing affected head tuples when only some instances are covered and linking supporting rules.
 These automatic notices are separate from declared `notice varies` checks;
 they do not change verdicts or exit codes, and are not yet published by the editor.
 See the [CLI guide](../crates/ir-text/README.md) for SAT limits, result fields and

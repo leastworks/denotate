@@ -195,3 +195,89 @@ fn sat_existence_reports_live_cube_statistics_and_skipped_phases_do_not_run() {
     assert!(!progress.contains("SAT existence"));
     assert!(progress.contains("SAT uniqueness"));
 }
+
+#[test]
+fn sat_component_inventory_without_meaning_and_bounded_dump() {
+    let f = Fixture::new(
+        "relation a();relation b();relation c();a():-!b();b():-!a();c():-a(),!c();verification v{assumptions:[];obligations:[];}",
+    );
+    let args = ["--engine", "sat", "--sat-meaning", "none", "--no-progress"];
+    let (code, out) = f.run(&args);
+    assert_eq!(code, 2);
+    assert!(out.contains("Negative components: 2"), "{out}");
+    assert!(out.contains("Component 1: 2 atoms"));
+    assert!(out.contains("Component 2: 1 atoms"));
+    assert!(out.contains("a() -["));
+    assert!(out.contains(", -]-> ::b()"), "{out}");
+    assert!(out.contains("program.den:1:"));
+    assert_eq!(f.run(&args), (code, out.clone()));
+    let (_, json) = f.run(&[
+        "--engine",
+        "sat",
+        "--sat-meaning",
+        "none",
+        "--json",
+        "--no-progress",
+    ]);
+    let inventory: serde_json::Value =
+        serde_json::Deserializer::from_str(json.split_once("Negative components: ").unwrap().1)
+            .into_iter()
+            .next()
+            .unwrap()
+            .unwrap();
+    assert_eq!(inventory["total"], 2);
+    assert_eq!(
+        inventory["components"][1]["cycle"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    for (file, cap, complete) in [("full.jsonl", "10000", true), ("short.jsonl", "2", false)] {
+        let path = f.0.join(file);
+        let mut options = args.to_vec();
+        options.extend([
+            "--dump-component",
+            path.to_str().unwrap(),
+            "--dump-component-limit",
+            cap,
+        ]);
+        assert_eq!(f.run(&options), (code, out.clone()));
+        let rows: Vec<serde_json::Value> = std::fs::read_to_string(path)
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect();
+        if complete {
+            assert!(
+                rows.iter()
+                    .any(|r| r["record"] == "graph-end" && r["complete"] == true)
+            );
+            assert_eq!(rows.iter().filter(|r| r["record"] == "atom").count(), 3);
+            assert!(
+                rows.iter()
+                    .any(|r| r["record"] == "rule" && r["rule"]["source"]["uri"].is_string())
+            );
+        } else {
+            assert!(rows.iter().any(|r| r["record"] == "truncated"));
+        }
+    }
+}
+
+#[test]
+fn sat_subsumption_removes_listed_cycle_and_positive_cycles_are_not_listed() {
+    for rules in [
+        "input x();relation p();relation q();p():-x(),!q();p():-x();q():-!p();",
+        "input x();relation p();relation q();p():-x();p():-q();q():-p();",
+    ] {
+        let f = Fixture::new(&format!(
+            "{rules}verification v{{assumptions:[];obligations:[];}}"
+        ));
+        let (code, out) = f.run(&["--engine", "sat", "--sat-max-worlds", "0", "--no-progress"]);
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains("Negative components: 0"));
+        if rules.contains("!q") {
+            assert!(out.contains("subsumed-producer"));
+        }
+    }
+}

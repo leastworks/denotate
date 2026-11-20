@@ -1,8 +1,10 @@
 //! Experimental stable queries for one immutable program and named verification.
 //! No BDD conditions, admission, or cross-session cache reuse.
+mod inventory;
 use super::*;
 use denotate_ir::{Corpus, SemanticKeys, VerificationId};
 use existence::{Encoding, encode, refine, world_cone};
+pub use inventory::{NegativeComponent, NegativeComponents};
 use std::{collections::VecDeque, sync::Arc};
 mod attribution;
 mod build;

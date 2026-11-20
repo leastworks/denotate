@@ -1607,7 +1607,27 @@ receipt is a dependency of validation/encoding preparation. Exhaustion is explic
 cancellation and deadlines install no reusable partial view.
 
 SAT checking also exposes advisory subsumed-producer notices, one per source rule.
-A proof must not use any instance of the reported source rule. This guards against
+A settlement proof must not use any instance of the reported source rule. This guards against
 circular simplifications; partial instance coverage is stated explicitly. Notice
 work and presentation are separately bounded, and neither changes semantic status.
 The user selected SAT-first publication; BDD/editor integration remains separate.
+
+
+### Syntactic subsumption and SAT component reporting (2026-11-19)
+
+After independent propagation, a same-head producer with signed body B1 is removed
+when a retained producer has body B2 contained in B1. This does not need head
+independence: for any candidate interpretation, if the B1 rule survives the reduct,
+the B2 rule survives too and has a subset of its positive premises. The extra rule
+cannot change the reduct's least model. Thus stable models are preserved in both
+directions, including recursive heads. Shorter bodies are considered first; equal
+bodies keep a semantic-key-ordered survivor. A supporting survivor is never removed
+later in this pass. Source notices identify original rules and partial instance
+coverage; no source edit is offered. SAT-proved implication remains separate work.
+
+SAT's negative-component inventory observes the resulting view before meaning
+search, even when that search is disabled. Signed cycle edges cite original rules.
+The representative cycle uses a deterministically chosen negative edge and a
+shortest return path; it is not claimed to be the globally shortest cycle.
+Reporting and optional dumps have independent bounds. Truncation and IO failures
+are diagnostic limitations, not inconclusive checking results.

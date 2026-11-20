@@ -290,7 +290,11 @@ reasoning or admission proofs. Structural blocking is not a truth value. The sam
 implementation supplies the SAT engine's stratification, components, encoding and
 plan view. It retains original atom indices and maps view rules to original
 instances; original graphs still provide diagnostic derivations. Ordinary BDD
-admission uses the original graph. No new unfounded-set detection is included.
+admission uses the original graph. Syntactic same-head subsumption then removes
+producers whose signed bodies contain a surviving producer's entire body. Duplicate
+bodies retain one semantic-key-ordered survivor. This is reduct-preserving even
+for recursive heads and uses no assumption or implication oracle. No new
+unfounded-set detection is included. Original instance mappings survive both passes.
 Validation follows dependencies from each assumption relation's atoms in that view;
 computing W uses the same view. A cycle disconnected from an assumption is still
 subject to ordinary admission and reporting.
