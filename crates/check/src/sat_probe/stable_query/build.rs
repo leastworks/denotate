@@ -7,7 +7,11 @@ pub(super) fn prepare<'a>(
     keys: &'a SemanticKeys,
     verification: VerificationId,
     limits: &Limits,
-) -> Result<GroundProgram> {
+) -> Result<(
+    GroundProgram,
+    Arc<crate::settled::SettledView>,
+    WorkReceipts,
+)> {
     let declaration = corpus
         .verification(verification)
         .ok_or(CheckError::InvalidRequest("unknown SAT verification"))?;
@@ -16,10 +20,14 @@ pub(super) fn prepare<'a>(
         .iter()
         .map(|a| corpus.assumption(*a).unwrap().restriction.relation())
         .collect::<Vec<_>>();
-    let mut b = Budget::new(limits);
+    let mut b = Budget::tracked(limits);
     let classification = corpus
         .validate_assumption_relations_with(selected, || b.tick("SAT assumption validation"))?;
     let fixed = FixedPreparation::prepare(corpus, domains, limits)?;
+    let mut receipts = WorkReceipts::default();
+    receipts
+        .record(crate::QueryKey::FixedFacts, fixed.receipt.clone())
+        .map_err(CheckError::Receipts)?;
     if classification
         .values()
         .any(|v| *v == AssumptionCone::NeedsGrounding)
@@ -31,10 +39,29 @@ pub(super) fn prepare<'a>(
             }
         }
         if let Some((base, _)) = validation.programs() {
-            return Ok(base.clone());
+            for (key, receipt) in [
+                (
+                    crate::QueryKey::ResidualPreparation,
+                    validation.residual_receipt.as_ref().unwrap(),
+                ),
+                (
+                    crate::QueryKey::SettledAtoms,
+                    validation.settled_receipt.as_ref().unwrap(),
+                ),
+                (crate::QueryKey::AssumptionValidation, &validation.receipt),
+            ] {
+                receipts
+                    .record(key, receipt.clone())
+                    .map_err(CheckError::Receipts)?;
+            }
+            return Ok((
+                base.clone(),
+                validation.settled().unwrap().clone(),
+                receipts,
+            ));
         }
     }
-    GroundProgram::prepare_using_fixed(
+    let base = GroundProgram::prepare_using_fixed(
         corpus,
         domains,
         &[],
@@ -42,7 +69,17 @@ pub(super) fn prepare<'a>(
         &mut b,
         None,
         Some(&fixed),
-    )
+    )?;
+    b.record(
+        &mut receipts,
+        crate::QueryKey::ResidualPreparation,
+        [crate::QueryKey::FixedFacts],
+    )?;
+    let (view, receipt) = base.settle_atoms_accounted(limits);
+    receipts
+        .record(crate::QueryKey::SettledAtoms, receipt)
+        .map_err(CheckError::Receipts)?;
+    Ok((base, Arc::new(view?), receipts))
 }
 
 // Full residual rules with fixed truth as two anonymous constants. Fixed evidence

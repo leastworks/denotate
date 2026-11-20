@@ -536,3 +536,16 @@ fn fixed_truth_rule_and_fact_edits_revalidate_shared_warm_preparation() {
         &[true, false, true],
     );
 }
+
+#[test]
+fn input_dependent_unconditional_producer_edits_revalidate_shared_warm_preparation() {
+    let source = |fact: &str| {
+        format!(
+            "input x();relation p();relation q();p():-x(),!q();q():-!p();{fact}assumption selected:empty(q);verification v{{assumptions:[selected];obligations:[];}}"
+        )
+    };
+    edit_sequence(
+        &[source(""), source("p();"), source("")],
+        &[false, true, false],
+    );
+}

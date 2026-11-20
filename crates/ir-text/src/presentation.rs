@@ -257,6 +257,21 @@ pub fn present_stable(
         inventory.push(json!({"identity":f.identity.data_in(&program.keys,Some(key))?,"kind":f.kind.code(),"message":f.message,"evidence":evidence}));
         diagnostics.extend(placed);
     }
+    for finding in denotate_presentation::stable_producer_notices(report, &program.corpus, &names)?
+    {
+        let mut placed = placement.place(
+            &finding.identity,
+            finding.kind,
+            &finding.message,
+            &finding.notes,
+            &finding.contributions,
+        )?;
+        for d in &mut placed {
+            d.evidence = json!({"kind":"settled-producer"});
+        }
+        inventory.push(json!({"identity":finding.identity.data_in(&program.keys,Some(key))?,"kind":finding.kind.code(),"message":finding.message}));
+        diagnostics.extend(placed);
+    }
     status["findings"] = json!(inventory);
     Ok(Presentation {
         diagnostics,

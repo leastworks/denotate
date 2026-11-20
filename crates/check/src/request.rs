@@ -481,6 +481,16 @@ impl CheckRequest {
             if let Some(fixed) = fixed {
                 if needs_grounding || fixed.validation.get().is_some() {
                     let checked = fixed.assumption_preparation(keys, &limits)?;
+                    if let Some(receipt) = &checked.residual_receipt {
+                        receipts
+                            .record(QueryKey::ResidualPreparation, receipt.clone())
+                            .map_err(CheckError::Receipts)?;
+                    }
+                    if let Some(receipt) = &checked.settled_receipt {
+                        receipts
+                            .record(QueryKey::SettledAtoms, receipt.clone())
+                            .map_err(CheckError::Receipts)?;
+                    }
                     if needs_grounding {
                         receipts
                             .record(QueryKey::AssumptionValidation, checked.receipt.clone())

@@ -792,3 +792,32 @@ fn unresolved_cone_reports_dependencies_and_a_world_without_claiming_impossibili
         assert_eq!(stable_models(&atoms, &inputs, &rules, &w).len(), 1);
     }
 }
+
+#[test]
+fn preparation_settles_an_output_in_a_dead_cycle_before_planning() {
+    let mut c = Corpus::new();
+    let x = rel(&mut c, "x", true);
+    let p = rel(&mut c, "p", false);
+    let q = rel(&mut c, "q", false);
+    rule(&mut c, p, &[(x, false), (q, true)]);
+    rule(&mut c, p, &[]);
+    rule(&mut c, q, &[(p, true)]);
+    let v = verification(&mut c, &[]);
+    let k = keys(&c);
+    let mut options = Options::default();
+    options.meaning.max_worlds = 0;
+    options.max_oracle_calls = 0;
+    let mut planner = planner(&c, &k, v);
+    let plan = ready(planner.build(&outputs(&[p, q]), &options).unwrap());
+    assert!(
+        plan.nodes()
+            .values()
+            .all(|n| matches!(n.operation, Operation::Compute { .. }))
+    );
+    assert_eq!(plan.to_json()["size"]["branches"], 0);
+    compare_worlds(&c, &k, &plan, &[atom(p), atom(q)]);
+    assert_eq!(
+        plan,
+        ready(planner.build(&outputs(&[p, q]), &options).unwrap())
+    );
+}

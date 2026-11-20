@@ -690,6 +690,9 @@ fn finding_identity(
 ) -> FindingIdentity {
     use denotate_presentation::Identity;
     match id {
+        Identity::SubsumedProducer(_) => {
+            panic!("SAT-only producer notices must not appear in BDD round-trip findings")
+        }
         Identity::DownstreamWork => panic!("corpus must complete downstream rewrite work"),
         Identity::Assumption(_)
         | Identity::InconsistentAssumptions

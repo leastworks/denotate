@@ -1024,3 +1024,155 @@ fn completed_cone_proofs_establish_global_uniqueness_without_another_pair_query(
         }
     }
 }
+
+#[test]
+fn settled_atoms_remove_dead_cycles_before_meaning_and_keep_original_evidence() {
+    let p = load_text(
+        "relation f(); f(); input x(); relation p(); p():-f(); p():-x(); relation q(); relation r(); q():-!p(),!r(); r():-!q(); obligation clean:empty(p); verification v{assumptions:[];obligations:[clean];}",
+    );
+    let mut engine = prepare(&p, "v");
+    let target = atom(&p, "p", &[]);
+    assert_eq!(engine.prepared_value(&target).unwrap(), Some(true));
+    assert!(engine.program().components().all(|c| c.cycle.is_none()));
+    assert!(
+        engine
+            .original_program()
+            .components()
+            .any(|c| c.cycle.is_some())
+    );
+    engine.preparation_receipts().total().unwrap();
+    for _ in 0..2 {
+        // No world enumeration is available: stratification must establish meaning.
+        let report = engine
+            .check(
+                &p.keys,
+                &CheckOptions {
+                    max_worlds: 0,
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(report.meaning.as_ref().unwrap().unique_everywhere());
+        assert_eq!(empty(&report).present, 1);
+        let example = &empty(&report).examples[0];
+        let Some(Attribution::Complete(steps)) = &example.attribution else {
+            panic!("missing original evidence")
+        };
+        let GroundEvidence::Derived { rule, .. } = &steps[&target].evidence else {
+            panic!()
+        };
+        assert!(!rule.body.is_empty(), "must keep original f premise");
+        assert!(steps.contains_key(&atom(&p, "f", &[])));
+    }
+    assert!(matches!(
+        engine
+            .models(&Query {
+                pins: vec![(target.clone(), false)],
+                ..Default::default()
+            })
+            .unwrap(),
+        Answer::NoModel
+    ));
+    let Answer::Model(m) = engine
+        .models(&Query {
+            pins: vec![(target.clone(), true)],
+            ..Default::default()
+        })
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(m.value(&target), Some(true));
+}
+
+#[test]
+fn subsumption_notices_are_located_advisory_and_report_partial_instances() {
+    for (fixed, partial) in [("p(a);", true), ("p(a);p(b);", false)] {
+        let p = load_text(&format!(
+            "sort S;const a,b:S;input x(s:S);relation p(s:S);{fixed}\np(X):-x(X);\nverification v{{assumptions:[];obligations:[];}}"
+        ));
+        let mut e = prepare(&p, "v");
+        let report = e.check(&p.keys, &CheckOptions::default()).unwrap();
+        assert!(report.proved());
+        assert_eq!(report.subsumed_producers.len(), 1);
+        let notice = &report.subsumed_producers[0];
+        assert_eq!(notice.instances.len(), if partial { 1 } else { 2 });
+        let shown = presentation::present_stable(&p, &report).unwrap();
+        let notices: Vec<_> = shown
+            .diagnostics
+            .iter()
+            .filter(|d| d.kind == Kind::SubsumedProducer)
+            .collect();
+        assert_eq!(notices.len(), 1);
+        assert_eq!(
+            notices[0].kind.severity(),
+            denotate_presentation::Severity::Information
+        );
+        assert_eq!(notices[0].message.starts_with("Some instances"), partial);
+        assert!(!notices[0].related.is_empty());
+        assert!(notices[0].notes.iter().any(|n| n.contains("p(a)")));
+        assert_eq!(shown.status["state"], "proved");
+        let source = p.sources.text(notices[0].primary).unwrap();
+        assert!(source.contains("p(X)"));
+    }
+}
+
+#[test]
+fn propagated_settlement_notices_do_not_claim_their_own_support_is_redundant() {
+    let p = load_text(
+        "relation f();f();input x();relation p();relation q();p():-f();p():-x();q():-p();p():-q();verification v{assumptions:[];obligations:[];}",
+    );
+    let report = prepare(&p, "v")
+        .check(&p.keys, &CheckOptions::default())
+        .unwrap();
+    assert!(report.proved());
+    for notice in &report.subsumed_producers {
+        for (candidate, producer) in &notice.instances {
+            assert_ne!(candidate, producer);
+        }
+    }
+    let shown = presentation::present_stable(&p, &report).unwrap();
+    let notices: Vec<_> = shown
+        .diagnostics
+        .iter()
+        .filter(|d| d.kind == Kind::SubsumedProducer)
+        .collect();
+    assert_eq!(notices.len(), 2);
+    for d in notices {
+        let text = p.sources.text(d.primary).unwrap();
+        assert!(!text.contains("p():-f()") && !text.contains("q():-p()"));
+    }
+}
+
+#[test]
+fn constant_producer_breaks_a_readability_cycle_and_names_the_other_producer() {
+    let p = load_text(
+        "input raw();input gate();relation supplied();relation readable();relation term();relation seen();supplied():-term();supplied();readable():-supplied();term():-gate(),!seen();seen():-readable(),raw();verification v{assumptions:[];obligations:[];}",
+    );
+    let mut e = prepare(&p, "v");
+    for name in ["supplied", "readable"] {
+        assert_eq!(e.prepared_value(&atom(&p, name, &[])).unwrap(), Some(true));
+    }
+    let report = e
+        .check(
+            &p.keys,
+            &CheckOptions {
+                max_worlds: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(report.proved());
+    let shown = presentation::present_stable(&p, &report).unwrap();
+    let notice = shown
+        .diagnostics
+        .iter()
+        .find(|d| d.kind == Kind::SubsumedProducer)
+        .unwrap();
+    assert!(
+        p.sources
+            .text(notice.primary)
+            .unwrap()
+            .contains("supplied():-term()")
+    );
+}

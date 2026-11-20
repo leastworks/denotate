@@ -284,8 +284,13 @@ Assumption declaration validity is a program-level query with an explicit run se
 relation-stratified cones and those requiring grounding. For the latter, the checker
 prepares assumption-independent fixed truth, grounds the residual once and builds
 a specialized view: a fixed-false positive or fixed-true negative premise kills its
-instance; other fixed premises drop out. This is one specialization, with no repeated
-folding, selected assumptions or admission proofs. Blocked fixed atoms remain unknown.
+instance; other settled premises drop out. A ground-atom worklist propagates newly
+proved true or false values to a fixpoint, without selected assumptions, input-group
+reasoning or admission proofs. Structural blocking is not a truth value. The same
+implementation supplies the SAT engine's stratification, components, encoding and
+plan view. It retains original atom indices and maps view rules to original
+instances; original graphs still provide diagnostic derivations. Ordinary BDD
+admission uses the original graph. No new unfounded-set detection is included.
 Validation follows dependencies from each assumption relation's atoms in that view;
 computing W uses the same view. A cycle disconnected from an assumption is still
 subject to ordinary admission and reporting.
@@ -311,8 +316,11 @@ Without that artifact, a request needing ground validation initializes the same
 preparation lazily, including unnamed restrictions and the optional grounding-cache
 entry point. Corpus, domains, keys and deterministic limits bind reuse. Validation
 and the specialized view recompute each run that needs them, even when the session reuses the fixed
-fold across input-dependent edits. Logical exhaustion remains inconclusive;
-cancellation/deadlines never install partial reusable preparation.
+fold across input-dependent edits. Residual preparation, atom settlement and cycle indexing have separate receipts
+and allowances. The propagated view depends on the full residual, including
+input-dependent producers; it never inherits the fixed projection's narrower cache
+identity. Logical exhaustion remains inconclusive; cancellation/deadlines never
+install partial reusable preparation.
 
 Selected general assumptions are another preparation boundary: once their meaning
 is independently established, the checker computes W before admission. Independent

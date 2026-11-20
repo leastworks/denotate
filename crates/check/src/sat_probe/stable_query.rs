@@ -140,6 +140,9 @@ struct Cached {
 /// A different selection, program, or domain requires a new engine.
 pub struct Engine {
     program: Arc<GroundProgram>,
+    original: Arc<GroundProgram>,
+    settled: Arc<crate::settled::SettledView>,
+    preparation_receipts: WorkReceipts,
     input_relations: Arc<BTreeSet<RelationId>>,
     cone: Cone,
     world_cone: Cone,
@@ -201,14 +204,18 @@ fn query_inconclusive(error: CheckError) -> Result<Inconclusive> {
     }
 }
 impl Engine {
-    /// Original prepared graph, before admission. The immutable snapshot belongs
-    /// to this engine's program and selected verification.
+    /// Independently propagated view, before admission. Atoms retain original
+    /// indices; rule instances are local to this view. Use original_instance for
+    /// original bodies and original_program for evidence.
     pub fn program(&self) -> &GroundProgram {
         &self.program
     }
     /// Input-independent truth known by preparation, including legal absent
     /// atoms. None means a residual value, not false.
     pub fn prepared_value(&self, atom: &GroundAtom) -> Result<Option<bool>> {
+        if let Some(value) = self.settled.values.get(atom) {
+            return Ok(Some(value.value));
+        }
         Ok(match resolve(&self.program, atom)? {
             Resolved::Fixed(v) => Some(v),
             Resolved::Atom(_) => None,
@@ -222,8 +229,11 @@ impl Engine {
         limits: &Limits,
         config: QueryLimits,
     ) -> Result<Self> {
-        let program = Arc::new(build::prepare(corpus, domains, keys, verification, limits)?);
-        let mut b = Budget::new(limits);
+        let (original, settled, mut preparation_receipts) =
+            build::prepare(corpus, domains, keys, verification, limits)?;
+        let original = Arc::new(original);
+        let program = Arc::new(settled.program.clone());
+        let mut b = Budget::tracked(limits);
         let cone = build::cone(&program, corpus, verification, &mut b)?;
         let world_cone = world_cone(&cone, false, &mut b)?;
         let mut cnf = Cnf {
@@ -283,6 +293,19 @@ impl Engine {
                 )
             })
             .collect();
+        let dependency = if preparation_receipts
+            .get(&crate::QueryKey::AssumptionValidation)
+            .is_some()
+        {
+            crate::QueryKey::AssumptionValidation
+        } else {
+            crate::QueryKey::SettledAtoms
+        };
+        b.record(
+            &mut preparation_receipts,
+            crate::QueryKey::Preparation,
+            [dependency],
+        )?;
         Ok(Self {
             verification,
             columns,
@@ -291,6 +314,9 @@ impl Engine {
             notices,
             pair_encoding: None,
             program,
+            original,
+            settled,
+            preparation_receipts,
             input_relations,
             cone,
             world_cone,
@@ -306,6 +332,27 @@ impl Engine {
             stats: Stats::default(),
             append_failed: None,
         })
+    }
+    pub fn original_instance(&self, id: GroundRuleId) -> Option<&GroundRule> {
+        if id.preparation != self.program.preparation {
+            return None;
+        }
+        self.settled
+            .origins
+            .get(id.index)
+            .and_then(|id| self.original.original_rule(*id))
+    }
+    pub fn preparation_receipts(&self) -> &WorkReceipts {
+        &self.preparation_receipts
+    }
+    pub fn settlement_receipt(&self) -> &WorkReceipt {
+        &self.settled.receipt
+    }
+    pub fn settled_atoms(&self) -> &BTreeMap<GroundAtom, SettledAtom> {
+        &self.settled.values
+    }
+    pub fn original_program(&self) -> &GroundProgram {
+        &self.original
     }
     pub fn stats(&self) -> &Stats {
         &self.stats
@@ -588,7 +635,7 @@ impl Engine {
             }
         }
         Model {
-            program: self.program.clone(),
+            program: self.original.clone(),
             input_relations: self.input_relations.clone(),
             values: bits.into(),
             mode,

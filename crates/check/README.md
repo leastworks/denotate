@@ -341,8 +341,7 @@ an exhausted computation remains inconclusive.
 
 An empty U reports `empty_input_universe`; otherwise an empty W reports `inconsistent_assumptions` with no obligation results. Unknown W
 is inconclusive. The IR classifies constraint cones before this evaluation; selected
-cones requiring grounding must have no reachable negative cycle after one
-specialization by independently settled fixed truth.
+cones requiring grounding must have no reachable negative cycle after independent ground-atom propagation to a fixpoint.
 
 `validate_selected_assumption_cones_using(corpus, domains, keys, requests, limits, factory)`
 is the run-level declaration query. It takes the executed requests before their
@@ -352,10 +351,11 @@ neither call the factory nor make the run incomplete. `is_valid()` still means e
 declaration was validated; `has_failures()` tests for invalid/inconclusive results
 that affect the run. `selected_failure` rejects an attempt to use a deferred result
 for a newly selected request. Selected cones needing grounding prepare the fixed fold and one
-residual graph with no obligation groups. A separate view removes dead instances
-and satisfied fixed premises, then supplies `blocked_by` and cycle evidence.
-Blocked fixed atoms never become false, and newly exposed truth does not trigger
-another fold. W uses that same specialized meaning. Results identify assumptions and cycle edges with semantic keys. It never
+residual graph with no obligation groups. A separate view propagates independently settled ground atoms: one satisfied
+producer proves true; all producers independently dead (or none) proves false.
+New truth triggers further propagation before rebuilding `blocked_by` and cycle
+evidence. Structural blocking alone proves neither value. No new unfounded-set
+analysis is performed. W uses that same specialized meaning. Results identify assumptions and cycle edges with semantic keys. It never
 uses selected assumptions or admission, and never rejects an unrelated ground cycle.
 An exhausted query retains established results and marks remaining selected declarations
 inconclusive; unselected ones stay deferred and cancellation aborts. The query recomputes per run, so facts, domains
@@ -421,8 +421,9 @@ the same query, including unnamed restrictions and optional grounding-cache call
 These requests use fixed preparation rather than relation-SCC cache assembly. Other
 direct requests retain their existing unfolded path. A changed corpus, domain,
 key table or deterministic limit cannot reuse the artifact. Residual preparation,
-specialization and cycle indexing have one bounded allowance and
-`AssumptionValidation` receipt, depending on the separately charged `FixedFacts`.
+propagation and cycle indexing have separate bounded allowances and receipts:
+`ResidualPreparation` depends on `FixedFacts`, `SettledAtoms` on the residual, and
+`AssumptionValidation` on settlement.
 Request attachment and W have the preparation allowance. Logical exhaustion is
 shared as inconclusive within the run; cancellation and deadlines install no partial
 reusable preparation. Relation-stratified validation needs no fold or residual query.
@@ -751,8 +752,9 @@ two completed simplification runs.
 
 `stable_query::Engine::prepare` prepares one immutable corpus, resolved domains and
 named verification. It shares fixed preparation and the existing assumption-cone
-validation, then encodes the original residual rules, declared input cardinality U
-and the selected restrictions. It does not invoke admission, compute global BDD W,
+validation, then encodes the independently propagated residual rules, declared input cardinality
+U and the selected restrictions. Propagation preserves the original stable-model
+sets in every world and uses no input-group or selected-assumption reasoning. It does not invoke admission, compute global BDD W,
 or use the measurement experiment's rewrites/elimination.
 
 `worlds(&Query)` searches permitted inputs using the assumption definitions alone.
@@ -804,7 +806,7 @@ stratified programs. Properties and fixed results keep their own scopes and verd
 An explicit skip makes the aggregate report incomplete; switching modes on the same
 immutable engine cannot reuse a whole-check result because those reports are not cached.
 
-Original ground stratification proves the requested meaning phases without search. For
+Ground stratification after independent propagation proves the requested meaning phases without search. For
 unstratified programs, existence independently chooses permitted worlds. Its cubes
 preserve one finite positive derivation per true atom and one false premise per
 producer of a false atom, rather than every alternative producer's truth. Only the
@@ -920,3 +922,29 @@ exposes the existing whole-program meaning checks independently of obligation
 checking; callers establish context consistency separately. `program()` and
 `prepared_value()` expose the immutable original graph and input-independent truth,
 without admission or new semantic evaluation.
+
+
+### Settled atoms in input-dependent relations
+
+The SAT engine and assumption/W preparation share ground-atom propagation. It can
+settle one tuple even when other tuples of the same relation depend on inputs.
+A worklist follows satisfied or violated premises; negative cycles without an
+independent proof stay unresolved. This is not SAT sweeping or admission.
+The original graph is retained for findings and finite reduct derivations. The
+view keeps all atom indices, including false atoms, and represents true heads by
+one unconditional producer. `Engine::prepared_value` exposes the proved values;
+`original_program` and `original_instance` expose original evidence. Query models
+retain original atoms, so folded true outputs never become absence.
+
+`Engine::preparation_receipts` includes the independently bounded settlement pass.
+The specialization is tied to the full immutable program, domains and limits;
+it is rebuilt on input-dependent edits even if the older relation-level fixed
+fold is reused. Ordinary BDD admission retains its original graph and warnings.
+Previously invalid assumption cones can now become valid through propagation.
+
+SAT reports also carry advisory `subsumed_producers`, grouped per source rule.
+A producer is reported only when its head has an independently settled true
+producer whose supporting proof uses no instance of that source rule. Partial
+coverage lists the affected instances. No removal edit is offered. Advisory work
+has its own allowance, and `subsumption_incomplete` reports truncation without
+changing any verdict. Default BDD/editor publication is deferred.

@@ -10,6 +10,8 @@ use std::{
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum QueryKey {
     AssumptionValidation,
+    SettledAtoms,
+    ResidualPreparation,
     FixedFacts,
     FixedRuntime,
     FixedBinding,

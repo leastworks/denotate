@@ -153,7 +153,7 @@ pub fn stable_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> Resul
         json!({"backend":{"backend":"sat","configuration":"original-stable-v1"},"state":if incomplete{"incomplete"}else if failure{"findings"}else{"proved"},
         "verification":[keys.verification(v.id)?.0.namespace.as_ref(),keys.verification(v.id)?.0.name.as_ref()],
         "activeAssumptions":v.assumptions.iter().map(|id|corpus.assumption(*id).unwrap().name.clone()).collect::<Vec<_>>(),
-        "hasFailures":failure,"incomplete":incomplete,"context":context,"meaning":meaning,"obligations":obligations,
+        "hasFailures":failure,"incomplete":incomplete,"context":context,"subsumptionIncomplete":r.subsumption_incomplete.as_ref().map(reason),"meaning":meaning,"obligations":obligations,
         "notices":r.notices_not_analysed.iter().map(|id|json!({"name":corpus.notice(*id).unwrap().name,"state":"not-analysed"})).collect::<Vec<_>>()}),
     )
 }
@@ -180,4 +180,64 @@ fn stable_cube_stats(s: &denotate_check::stable_query::CubeStats) -> Value {
 pub fn stable_uniqueness_stats(s: &denotate_check::stable_query::UniquenessStats) -> Value {
     json!({"scope":s.scope,"components":s.components,"atoms":s.atoms,"inputs":s.inputs,
         "pairQueries":s.pair_queries,"extensionQueries":s.extension_queries,"fallbackReason":s.fallback_reason})
+}
+
+/// Advisory preparation findings use the same placement path as named notices.
+/// No rewrite is installed and no removal edit is offered.
+pub fn stable_producer_notices(
+    r: &Report,
+    corpus: &Corpus,
+    names: &dyn Fn(denotate_ir::OccurrenceId) -> String,
+) -> Result<Vec<ContextFinding>> {
+    let mut result = Vec::new();
+    for notice in &r.subsumed_producers {
+        let mut instances = Vec::new();
+        let mut contributions = vec![Contribution {
+            occurrence: notice.rule.into(),
+            role: Role::Producer,
+        }];
+        for (id, producer) in &notice.instances {
+            let rule = r
+                .program()
+                .original_rule(*id)
+                .ok_or(Error::InvalidFinding("missing subsumed instance"))?;
+            let producer = r
+                .program()
+                .original_rule(*producer)
+                .ok_or(Error::InvalidFinding("missing settling producer"))?;
+            instances.push(crate::evidence::atom_name(corpus, names, &rule.head.atom)?);
+            contributions.push(Contribution {
+                occurrence: producer.source.into(),
+                role: Role::DirectRewriteProof,
+            });
+        }
+        instances.sort();
+        instances.dedup();
+        contributions.sort_by_key(|c| (c.role, c.occurrence));
+        contributions.dedup_by_key(|c| (c.role, c.occurrence));
+        let omitted = instances.len().saturating_sub(8);
+        let mut note = format!(
+            "Subsumed instances: {}.",
+            instances
+                .iter()
+                .take(8)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        if omitted > 0 {
+            note.push_str(&format!(" {omitted} more tuples omitted."));
+        }
+        let related_omitted = contributions.len().saturating_sub(17);
+        contributions.truncate(17);
+        if related_omitted > 0 {
+            note.push_str(&format!(
+                " {related_omitted} more supporting locations omitted."
+            ));
+        }
+        result.push(ContextFinding {identity:Identity::SubsumedProducer(notice.rule),kind:Kind::SubsumedProducer,
+            message:if notice.instances.len()==notice.total_instances {"This rule is subsumed by independently settled producers of the same tuples."} else {"Some instances of this rule are subsumed by independently settled producers of the same tuples."}.into(),
+            notes:vec![note], contributions});
+    }
+    Ok(result)
 }

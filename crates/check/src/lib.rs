@@ -107,3 +107,6 @@ pub use input_order::{EffectiveInputOrder, InputOrder, InputOrderReport};
 
 mod implied_guard;
 pub use implied_guard::{ImpliedGuardPremise, ImpliedGuardProof};
+
+mod settled;
+pub use settled::{SettledAtom, SettledReason, SubsumedProducer};

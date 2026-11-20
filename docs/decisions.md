@@ -909,10 +909,9 @@ The file intentionally retains program names and is not an anonymized export.
   entire original program for validation duplicated millions of fixed atoms already
   evaluated by the fold. Reusing the residual graph alone was insufficient: it keeps
   dead instances for evidence, so a false guard still connects a syntactic cycle.
-  Validation now performs one specialization using exact assumption-independent
-  fixed truth. False positive or true negative premises kill an instance; satisfied
-  fixed premises disappear. Blocked atoms are never interpreted as false, and no
-  newly exposed truth triggers another fold. This is sound independently of W:
+  Validation initially performed one specialization using exact assumption-independent
+  fixed truth. Ground-atom propagation below extends it to a fixpoint. False positive or true negative premises kill an instance; satisfied
+  fixed premises disappear. Structural blocking alone never establishes falsity. This is sound independently of W:
   removing an impossible producer and substituting known constants preserves the
   rules' meaning in every input world. Assumptions cannot justify themselves or
   one another. A genuinely residual negative cycle still invalidates its cone.
@@ -1580,3 +1579,35 @@ those regions. The `.den` adapter renders its constant keys as qualified names,
 while the generic driver keeps frontend keys opaque. The partition's later use for
 meaning and checking needs a separate proof; this increment does not weaken the
 whole-program meaning prerequisite or change checking behavior.
+
+
+## Independent ground-atom propagation precedes SAT meaning and assumption evaluation
+
+Relation-level fixed folding misses a constant tuple inside an input-dependent
+relation. A separate residual view therefore propagates true from any independently
+satisfied producer and false when all producers are independently dead (or absent).
+Each value has a finite reason rooted in fixed truth or prior settlements. No
+selected assumption, cardinality correlation or unknown value justifies a fold.
+Structural blocking does not prevent such a proof, and does not establish one.
+New unfounded-set detection is deferred.
+
+Substitution preserves stable models in both directions, world by world: every
+propagated value follows in the original reduct; removing dead producers and
+substituting these already-supported constants preserves its least model. Settled
+true heads retain one unconditional producer in the view, false heads retain no
+producer, and all atom indices remain. Original rules and reasons are retained for
+finite evidence and query/output reconstruction. The view is shared by SAT meaning,
+encoding, planning and assumption/W evaluation. Ordinary BDD admission and its
+rewrite warnings keep the original graph. A newly valid assumption cone is an
+intended improvement.
+
+The view depends on input-dependent producers too and is recomputed on full residual
+edits, even when the relation-level fixed fold is reused. Its separately bounded
+receipt is a dependency of validation/encoding preparation. Exhaustion is explicit;
+cancellation and deadlines install no reusable partial view.
+
+SAT checking also exposes advisory subsumed-producer notices, one per source rule.
+A proof must not use any instance of the reported source rule. This guards against
+circular simplifications; partial instance coverage is stated explicitly. Notice
+work and presentation are separately bounded, and neither changes semantic status.
+The user selected SAT-first publication; BDD/editor integration remains separate.

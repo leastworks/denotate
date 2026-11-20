@@ -476,3 +476,12 @@ simplification runs must agree. Larger cones can replace cheap free cut points w
 expensive definitions and exhaust even a larger allowance. The scan has its own
 global measurement budget, and aborts on global exhaustion as other measurements do.
 The report contains program names and values; keep private-program reports local.
+
+
+SAT preparation propagates independently settled ground atoms before meaning checks.
+Its automatic `subsumed-producer` Information diagnostics identify redundant source
+rules, with affected tuples and supporting rule locations. They use the shared
+notice placement path, preserve original provenance, and never change exit codes.
+They are distinct from declared condition notices, which SAT still does not analyse.
+JSON exposes diagnostic-work exhaustion as `subsumptionIncomplete`; the default BDD
+and editor paths do not yet publish these automatic notices.

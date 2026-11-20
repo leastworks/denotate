@@ -1184,9 +1184,14 @@ and overall peak footprint, not validation time alone or sums of nested spans.
 Validation and W share one view specialized by exact fixed truth. The original
 residual remains for admission/evidence; the specialized view retains its own residual
 rules and dependency graph, sharing fixed evidence. Both are run-scoped. The fold
-has its own allowance; residual grounding, specialization and the cycle index share
-an independently bounded validation allowance and `AssumptionValidation` receipt
-which depends on `FixedFacts`. Request attachment and W remain charged to preparation.
+has its own allowance. Residual grounding, ground-atom propagation and cycle indexing
+now have separate allowances (`Limits` for each) and receipts:
+`ResidualPreparation` depends on `FixedFacts`, `SettledAtoms` on the residual,
+and `AssumptionValidation` on settlement. SAT encoding preparation depends on
+settlement and, when needed, validation. The propagation worklist charges atoms,
+producers, premise visits and graph reconstruction; no repeated full rule scan is
+needed for each new value. Supporting reasons use original instance IDs and premise
+positions, not expanded transitive proof copies. Request attachment and W remain charged to preparation.
 Default ceilings are unchanged. Exhaustion is inconclusive and interruption does not
 install partial preparation. Direct and optional relation-cache requests requiring
 ground validation use this same fold; other direct requests remain unfolded controls.
@@ -1559,3 +1564,12 @@ yet implement lifted plans, a partition shared with meaning/checking, incrementa
 plan caches, or a corpus-scale performance claim. Each child specializes its output
 cone; sibling joins share a continuation, but unrelated branch states are not merged.
 See [the plan README](../crates/plan/README.md).
+
+
+SAT subsumed-producer notices run under an independent diagnostic allowance. Their
+support walk must exclude the entire source rule being reported, so a proof cannot
+justify deleting its own support. Exhaustion is exposed as `subsumptionIncomplete`
+and never alters semantic completeness or exit status. Presentation shows at most
+eight distinct head tuples and sixteen supporting locations per source notice,
+with omitted counts. Full affected instances remain in the checker report. No
+corpus-scale timing or memory claim accompanies this propagation increment.

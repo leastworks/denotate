@@ -13,6 +13,7 @@ pub enum Identity {
     EmptyInputUniverse,
     DownstreamWork,
     Notice(NoticeId),
+    SubsumedProducer(RuleId),
     AssumedConclusion(AssumptionId, ObligationId),
     Coverage(ObligationId),
     Emptiness(ObligationId),
@@ -97,6 +98,9 @@ impl Identity {
         Ok(match self {
             Self::Assumption(id) => {
                 json!({"assumption":qualified(&keys.assumption(*id)?.0),"check":"ground-cone"})
+            }
+            Self::SubsumedProducer(id) => {
+                json!({"rule":rule(keys.rule(*id)?),"notice":"subsumed-producer"})
             }
             Self::Notice(id) => json!({"notice":qualified(&keys.notice(*id)?.0)}),
             Self::DownstreamWork => json!({"context":"downstream-work"}),

@@ -45,6 +45,8 @@ pub struct Report {
     pub fixed_obligations: BTreeSet<ObligationId>,
     pub not_analysed: BTreeSet<ObligationId>,
     pub notices_not_analysed: BTreeSet<NoticeId>,
+    pub subsumed_producers: Vec<SubsumedProducer>,
+    pub subsumption_incomplete: Option<Inconclusive>,
     program: Arc<GroundProgram>,
 }
 impl Report {
@@ -92,8 +94,12 @@ impl Engine {
             emptiness: BTreeMap::new(),
             not_analysed: self.selection.iter().map(|s| s.0).collect(),
             notices_not_analysed: self.notices.clone(),
-            program: self.program.clone(),
+            program: self.original.clone(),
+            subsumed_producers: vec![],
+            subsumption_incomplete: None,
         };
+        (report.subsumed_producers, report.subsumption_incomplete) =
+            self.settled.subsumed(&self.original, &self.limits)?;
         if self.program.input_universe_is_empty() {
             report.context = Context::EmptyUniverse;
             return Ok(report);

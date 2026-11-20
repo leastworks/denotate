@@ -455,11 +455,12 @@ verification check_presence { assumptions: [required]; obligations: []; }
 An assumption's dependency cone must be stratified independently of assumptions.
 Positive recursion and layered negation are allowed. A cycle between relation names
 is accepted when no negative cycle is reachable from the assumption relation's
-ground atoms after one specialization by independently evaluated fixed truth.
-A fixed-false positive or fixed-true negative premise makes its rule instance dead;
-other fixed premises drop out. Blocked fixed atoms never count as false. This happens
-before admission, without selected assumptions or rewrite proofs, and is not repeated
-folding. Validation and evaluation of the assumptions use the same specialized view;
+ground atoms after independently propagating settled truth to a fixpoint.
+One producer with all premises satisfied proves its head true. A non-input atom
+with every producer independently dead (or no producer) is false. Each new value
+can settle more premises. Structural blocking alone proves neither truth nor
+falsity; an unresolved negative cycle stays residual. This happens before admission,
+without selected assumptions, input-cardinality reasoning or rewrite proofs. Validation and evaluation of the assumptions use the same specialized view;
 original rules remain available for diagnostics and ordinary admission. A cycle outside
 that cone remains subject to ordinary admission and reporting. Edits to facts, rules,
 resolved domains or `within` eligibility can therefore introduce or remove an invalid
@@ -662,7 +663,12 @@ structural failures survive unrelated no-meaning cycles. The editor is unchanged
 phases are explicitly not analysed and keep the aggregate result incomplete (exit 2).
 Individual property results, including fixed structural findings, remain visible.
 The option does not change stable semantics or treat worlds with no stable model
-as invalid input worlds.
+as invalid input worlds. SAT preparation propagates independently settled atoms
+before its stratification and meaning checks. It also reports Information notices
+for source rules subsumed by independently settled producers, listing affected
+head tuples when only some instances are covered and linking supporting rules.
+These automatic notices are separate from declared `notice varies` checks;
+they do not change verdicts or exit codes, and are not yet published by the editor.
 See the [CLI guide](../crates/ir-text/README.md) for SAT limits, result fields and
 option compatibility. Existing partial/incomplete exit-code precedence applies.
 

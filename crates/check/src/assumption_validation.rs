@@ -261,11 +261,11 @@ fn validate_assumption_selection_using<'a>(
 
 /// One assumption-independent residual preparation answers every relation,
 /// including later unnamed restrictions. Original instances remain available to
-/// admission; only validation and W read the fixed-truth specialization.
+/// admission; validation, W and the SAT engine read the propagated view.
 #[derive(Debug)]
 struct AssumptionCones {
     base: GroundProgram,
-    view: GroundProgram,
+    settled: std::sync::Arc<crate::settled::SettledView>,
     blocked: BTreeMap<RelationId, BTreeSet<ComponentId>>,
     cycles: BTreeMap<ComponentId, AssumptionCycle>,
 }
@@ -273,6 +273,8 @@ struct AssumptionCones {
 pub(crate) struct AssumptionPreparation {
     outcome: AnalysisOutcome<AssumptionCones>,
     pub receipt: WorkReceipt,
+    pub settled_receipt: Option<WorkReceipt>,
+    pub residual_receipt: Option<WorkReceipt>,
 }
 impl AssumptionPreparation {
     pub fn prepare(
@@ -281,40 +283,54 @@ impl AssumptionPreparation {
         limits: &Limits,
     ) -> Result<Self> {
         let mut budget = Budget::tracked(limits);
+        let mut settled_receipt = None;
+        let mut residual_receipt = None;
         let result = (|| {
             let base = {
                 let _profile = limits.profile.span("residual-preparation", None);
-                GroundProgram::prepare_using_fixed(
+                let mut grounding = Budget::tracked(limits);
+                let result = GroundProgram::prepare_using_fixed(
                     fixed.corpus,
                     &fixed.domains,
                     &[],
                     &BTreeSet::new(),
-                    &mut budget,
+                    &mut grounding,
                     None,
                     Some(fixed),
-                )?
-                .with_atom_key_order(keys)?
+                )
+                .and_then(|p| p.with_atom_key_order(keys));
+                if let Err(e) = &result {
+                    grounding.failure(e);
+                }
+                residual_receipt = Some(WorkReceipt {
+                    allowance: limits.into(),
+                    own: grounding.snapshot(),
+                    dependencies: BTreeSet::from([QueryKey::FixedFacts]),
+                });
+                result?
             };
             let ground = {
                 let _profile = limits.profile.span("assumption-specialization", None);
-                base.specialize_fixed(&mut budget)?
+                let (result, receipt) = base.settle_atoms_accounted(limits);
+                settled_receipt = Some(receipt);
+                std::sync::Arc::new(result?)
             };
             let mut blocked = BTreeMap::<_, BTreeSet<_>>::new();
             let mut cycles = BTreeMap::new();
-            for atom in &ground.atoms {
+            for atom in &ground.program.atoms {
                 budget.tick("assumption validation")?;
-                for root in &ground.component_for(atom)?.blocked_by {
+                for root in &ground.program.component_for(atom)?.blocked_by {
                     budget.tick("assumption validation")?;
                     blocked.entry(atom.relation).or_default().insert(*root);
                     if let std::collections::btree_map::Entry::Vacant(entry) = cycles.entry(*root) {
-                        entry.insert(ground.assumption_cycle(*root, keys, &mut budget)?);
+                        entry.insert(ground.program.assumption_cycle(*root, keys, &mut budget)?);
                     }
                 }
             }
             budget.check("assumption validation")?;
             Ok(AssumptionCones {
                 base,
-                view: ground,
+                settled: ground,
                 blocked,
                 cycles,
             })
@@ -331,14 +347,26 @@ impl AssumptionPreparation {
             receipt: WorkReceipt {
                 allowance: limits.into(),
                 own: budget.snapshot(),
-                dependencies: BTreeSet::from([QueryKey::FixedFacts]),
+                dependencies: BTreeSet::from([if settled_receipt.is_some() {
+                    QueryKey::SettledAtoms
+                } else {
+                    QueryKey::ResidualPreparation
+                }]),
             },
+            settled_receipt,
+            residual_receipt,
         })
     }
     pub(crate) fn programs(&self) -> Option<(&GroundProgram, &GroundProgram)> {
         match &self.outcome {
-            AnalysisOutcome::Complete(index) => Some((&index.base, &index.view)),
+            AnalysisOutcome::Complete(index) => Some((&index.base, &index.settled.program)),
             AnalysisOutcome::Inconclusive(_) => None,
+        }
+    }
+    pub(crate) fn settled(&self) -> Option<&std::sync::Arc<crate::settled::SettledView>> {
+        match &self.outcome {
+            AnalysisOutcome::Complete(index) => Some(&index.settled),
+            _ => None,
         }
     }
     fn validity(
@@ -403,42 +431,6 @@ impl AssumptionPreparation {
 }
 
 impl GroundProgram {
-    /// A private evaluation view, never installed as an admission rewrite. Keep
-    /// original instances in `base`; the view's rule IDs belong only to this view.
-    fn specialize_fixed(&self, budget: &mut Budget<'_>) -> Result<Self> {
-        budget.check("assumption specialization")?;
-        if self.fixed.is_none() {
-            return Ok(self.clone());
-        }
-        let mut view = self.clone();
-        // Take the view's owned rules after its one copy-on-write detachment;
-        // do not build a third copy of the residual rules before detaching.
-        let originals = std::mem::take(&mut view.rules);
-        for mut rule in originals {
-            budget.tick("assumption specialization")?;
-            let mut body = Vec::new();
-            let mut dead = false;
-            for literal in std::mem::take(&mut rule.body) {
-                budget.tick("assumption specialization")?;
-                match self.fixed_value(&literal.term.atom) {
-                    Some(value) => {
-                        if value != (literal.polarity == Polarity::Positive) {
-                            dead = true;
-                            break;
-                        }
-                    }
-                    None => body.push(literal),
-                }
-            }
-            if !dead {
-                rule.id.index = view.rules.len();
-                rule.body = body;
-                view.rules.push(rule);
-            }
-        }
-        graph::analyze(&mut view, budget)?;
-        Ok(view)
-    }
     fn assumption_cycle(
         &self,
         component: ComponentId,

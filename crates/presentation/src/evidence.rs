@@ -23,6 +23,7 @@ pub enum Kind {
     IncompleteDownstreamWork,
     Rewrite,
     GuardedSettlement,
+    SubsumedProducer,
 }
 impl Kind {
     pub fn code(self) -> &'static str {
@@ -44,6 +45,7 @@ impl Kind {
             Self::IncompleteDownstreamWork => "incomplete-downstream-work",
             Self::Rewrite => "redundant",
             Self::GuardedSettlement => "guarded-settlement",
+            Self::SubsumedProducer => "subsumed-producer",
         }
     }
     pub fn severity(self) -> Severity {
@@ -64,7 +66,8 @@ impl Kind {
             | Self::IncompleteDownstreamWork
             | Self::EmptyGroupingDomain
             | Self::AlwaysTrueCondition
-            | Self::UnanalysedCondition => Severity::Information,
+            | Self::UnanalysedCondition
+            | Self::SubsumedProducer => Severity::Information,
         }
     }
 }
