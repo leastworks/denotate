@@ -1588,3 +1588,14 @@ reports the exact omitted edge count. A search cutoff marks the inventory incomp
 completed components remain visible. `--dump-component` reuses the existing bounded
 JSONL writer for SAT's prepared graph, including full component atoms and surviving
 rules with original identities. These reporting bounds never alter verdicts.
+
+### Obligation-scoped SAT meaning
+
+Opt-in `--sat-meaning cone` uses the same limits, reduct checks and decomposed
+existence search as full SAT checking, inside the selected obligations' upstream
+union. Fallback searches that union only. W and its full input universe stay
+independent. Uniqueness is omitted; universal properties do not need it. Exhaustion
+remains explicit and cannot become scoped success. Scope construction and graph
+rebuilding are charged to preparation; there is no new allowance or default change.
+The scope does not reduce full grounding or retained evidence memory, and residual
+atom slots are preserved. No performance improvement is promised by this increment.

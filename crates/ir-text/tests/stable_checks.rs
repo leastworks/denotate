@@ -1416,3 +1416,337 @@ fn keyless_query_api_keeps_producers_without_inventing_an_arena_order() {
         }
     }
 }
+
+fn cone_prepare(p: &LoadedProgram) -> Engine {
+    let v = p.corpus.verifications().find(|v| v.name == "v").unwrap();
+    Engine::prepare_scoped(
+        &p.corpus,
+        &p.domains,
+        &p.keys,
+        v.id,
+        &Limits::default(),
+        QueryLimits::default(),
+        PreparationScope::ObligationCones,
+    )
+    .unwrap()
+}
+fn cone_options() -> CheckOptions {
+    CheckOptions {
+        meaning: MeaningMode::Cone,
+        ..Default::default()
+    }
+}
+
+#[test]
+fn obligation_cones_isolate_both_meaning_and_counterexamples() {
+    for (text, exists, violation) in [
+        ("relation r(); relation p(); p():-!p();", true, false),
+        (
+            "relation a(); relation b(); a():-!b(); b():-!a(); relation r(); r():-a(); relation c(); c():-r(),!c();",
+            true,
+            true,
+        ),
+        (
+            "input flag(); relation r(); r():-flag(),!r();",
+            false,
+            false,
+        ),
+    ] {
+        let p = load_text(&format!("{text} obligation clean:empty(r); {V}"));
+        let mut warm = cone_prepare(&p);
+        for engine in [&mut warm, &mut cone_prepare(&p)] {
+            for _ in 0..2 {
+                let r = engine.check(&p.keys, &cone_options()).unwrap();
+                let m = r.meaning.as_ref().unwrap();
+                assert_eq!(matches!(m.existence, Existence::EveryWorld), exists);
+                assert_eq!(r.has_failures(), violation);
+                assert_eq!(r.proved(), exists && !violation);
+                assert!(matches!(m.uniqueness, Uniqueness::NotAnalysed));
+                assert_eq!(r.scope.label, "obligation-cones");
+                let summary =
+                    denotate_presentation::stable_summary(&p.corpus, &p.keys, &r).unwrap();
+                assert_eq!(
+                    summary["state"],
+                    if !exists || violation {
+                        "findings"
+                    } else {
+                        "proved"
+                    }
+                );
+                assert_eq!(summary["meaning"]["outsideAnalysed"], false);
+                if exists {
+                    let root = atom(&p, "r", &[]);
+                    let Answer::Model(model) = engine.models(&Query::default()).unwrap() else {
+                        panic!()
+                    };
+                    assert!(
+                        model.value(&root).is_some(),
+                        "selected absent roots remain in scope"
+                    );
+                    if !violation {
+                        assert!(matches!(
+                            engine
+                                .models(&Query {
+                                    pins: vec![(root, true)],
+                                    exclude: vec![]
+                                })
+                                .unwrap(),
+                            Answer::NoModel
+                        ));
+                    }
+                }
+                if violation {
+                    let example = &empty(&r).examples[0];
+                    assert_eq!(example.replay_scope, ReplayScope::ConeOnly);
+                    assert!(matches!(
+                        example.attribution,
+                        Some(Attribution::Complete(_))
+                    ));
+                }
+                if let Existence::NoMeaning(w) = &m.existence {
+                    assert!(w.present.contains(&atom(&p, "flag", &[])));
+                }
+            }
+        }
+        let full = prepare(&p, "v")
+            .check(&p.keys, &CheckOptions::default())
+            .unwrap();
+        assert_eq!(full.proved(), violation);
+        if violation {
+            assert!(empty(&full).proved());
+        }
+    }
+}
+
+#[test]
+fn cone_world_contract_is_independent_and_scoped_models_do_not_invent_absence() {
+    let p = load_text(
+        "input flag(); relation restriction(); restriction():-flag();
+        assumption exclude:empty(restriction); relation r(); r():-flag();
+        relation outside(); outside():-!outside(); obligation clean:empty(r);
+        verification v { assumptions:[exclude]; obligations:[clean]; }",
+    );
+    let mut e = cone_prepare(&p);
+    assert!(e.check(&p.keys, &cone_options()).unwrap().proved());
+    assert!(matches!(
+        e.worlds(&Query {
+            pins: vec![(atom(&p, "flag", &[]), true)],
+            exclude: vec![]
+        })
+        .unwrap(),
+        Answer::NoModel
+    ));
+    let Answer::Model(m) = e.models(&Query::default()).unwrap() else {
+        panic!()
+    };
+    assert_eq!(m.value(&atom(&p, "outside", &[])), None);
+    assert_eq!(m.value(&atom(&p, "restriction", &[])), None);
+    assert_eq!(m.value(&atom(&p, "r", &[])), Some(false));
+    assert!(
+        e.models(&Query {
+            pins: vec![(atom(&p, "outside", &[]), false)],
+            exclude: vec![]
+        })
+        .is_err()
+    );
+    assert!(prepare(&p, "v").check(&p.keys, &cone_options()).is_err());
+}
+
+#[test]
+fn cone_union_checks_uniqueness_conflicts_and_keeps_fixed_evidence() {
+    let p = load_text("sort S; const a,b:S; input flag(); relation r(s:S);
+        r(a):-flag(); r(b):-flag(); relation c(); c():-flag(),!c();
+        relation fixed(); fixed(); obligation unique:at_most_one(r,group_by:());
+        obligation clean:empty(fixed); verification v { assumptions:[]; obligations:[unique,clean]; }");
+    let r = cone_prepare(&p).check(&p.keys, &cone_options()).unwrap();
+    assert!(matches!(
+        r.meaning.as_ref().unwrap().existence,
+        Existence::EveryWorld
+    ));
+    assert!(
+        r.groups
+            .iter()
+            .any(|g| matches!(g.outcome, VerifiedOutcome::Counterexample(_)))
+    );
+    assert_eq!(empty(&r).present, 1);
+    assert!(matches!(
+        empty(&r).examples[0].attribution,
+        Some(Attribution::Complete(_))
+    ));
+    let full = prepare(&p, "v")
+        .check(&p.keys, &CheckOptions::default())
+        .unwrap();
+    assert!(
+        full.groups
+            .iter()
+            .all(|g| matches!(g.outcome, VerifiedOutcome::Proved))
+    );
+}
+
+#[test]
+fn cone_empty_selection_is_consistency_only_and_optional_uniqueness_is_separate() {
+    let p =
+        load_text("relation p(); p():-!p(); verification v { assumptions:[]; obligations:[]; }");
+    let r = cone_prepare(&p).check(&p.keys, &cone_options()).unwrap();
+    assert!(r.proved());
+    assert_eq!(r.scope.atoms, 0);
+    let p = load_text(&format!(
+        "relation a(); relation b(); a():-!b(); b():-!a(); relation r(); r():-a(),b(); obligation clean:empty(r); {V}"
+    ));
+    let mut e = cone_prepare(&p);
+    assert!(e.check(&p.keys, &cone_options()).unwrap().proved());
+    let m = e.meaning(&CheckOptions::default()).unwrap();
+    assert!(matches!(m.existence, Existence::EveryWorld));
+    assert!(matches!(m.uniqueness, Uniqueness::Multiple { .. }));
+    assert!(e.check(&p.keys, &cone_options()).unwrap().proved());
+}
+
+#[test]
+fn obligation_cones_match_exhaustive_reduct_oracle() {
+    // Original rules, independent of the checker's graph, simplification and SAT.
+    // a=0,b=1,r=2,c=3,input i=4; bool is positive polarity.
+    let templates = vec![
+        (0, vec![(1, false)]),
+        (1, vec![(0, false)]),
+        (0, vec![(4, true)]),
+        (1, vec![(4, false)]),
+        (2, vec![(0, true)]),
+        (2, vec![(1, true)]),
+        (3, vec![(2, true), (3, false)]),
+        (2, vec![(3, true)]),
+    ];
+    let names = ["a", "b", "r", "c", "i"];
+    for chosen in 0..256 {
+        let rules: Vec<_> = templates
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| chosen & (1 << i) != 0)
+            .map(|(_, r)| r)
+            .collect();
+        let mut scope = 1usize << 2;
+        loop {
+            let before = scope;
+            for (head, body) in &rules {
+                if scope & (1 << head) != 0 {
+                    for (a, _) in body {
+                        scope |= 1 << a;
+                    }
+                }
+            }
+            if scope == before {
+                break;
+            }
+        }
+        let mut every = true;
+        let mut present = false;
+        for input in [false, true] {
+            let mut exists = false;
+            for interpretation in 0usize..16 {
+                if interpretation & !(scope & 15) != 0 {
+                    continue;
+                }
+                let candidate = interpretation | if input { 16 } else { 0 };
+                let mut least = if input { 16 } else { 0 };
+                loop {
+                    let before = least;
+                    for (head, body) in &rules {
+                        if scope & (1 << head) == 0 {
+                            continue;
+                        }
+                        if body.iter().all(|(a, pos)| {
+                            if *pos {
+                                least & (1 << a) != 0
+                            } else {
+                                candidate & (1 << a) == 0
+                            }
+                        }) {
+                            least |= 1 << head;
+                        }
+                    }
+                    if before == least {
+                        break;
+                    }
+                }
+                if least == candidate {
+                    exists = true;
+                    present |= candidate & 4 != 0;
+                }
+            }
+            every &= exists;
+        }
+        let mut text =
+            "input i(); relation a(); relation b(); relation r(); relation c();".to_string();
+        for (head, body) in &rules {
+            text.push_str(&format!(
+                "{}():-{};",
+                names[*head],
+                body.iter()
+                    .map(|(a, pos)| format!("{}{}()", if *pos { "" } else { "!" }, names[*a]))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ));
+        }
+        text.push_str(&format!("obligation clean:empty(r); {V}"));
+        let p = load_text(&text);
+        let r = cone_prepare(&p).check(&p.keys, &cone_options()).unwrap();
+        assert_eq!(
+            matches!(r.meaning.as_ref().unwrap().existence, Existence::EveryWorld),
+            every,
+            "{text}"
+        );
+        assert_eq!(empty(&r).present > 0, present, "{text}");
+    }
+}
+
+#[test]
+fn explicit_root_scope_reuses_the_same_isolation_for_future_plan_consumers() {
+    let p = load_text(
+        "input flag(); relation out(); out():-flag(); relation bad();bad():-!bad();
+        verification v { assumptions:[]; obligations:[]; }",
+    );
+    let v = p.corpus.verifications().next().unwrap().id;
+    let mut e = Engine::prepare_scoped(
+        &p.corpus,
+        &p.domains,
+        &p.keys,
+        v,
+        &Limits::default(),
+        QueryLimits::default(),
+        PreparationScope::Roots(vec![atom(&p, "out", &[])]),
+    )
+    .unwrap();
+    assert!(
+        e.meaning(&CheckOptions::default())
+            .unwrap()
+            .unique_everywhere()
+    );
+    assert_eq!(e.scope().label, "root-cones");
+    assert!(e.prepared_value(&atom(&p, "bad", &[])).is_err());
+    let Answer::Model(m) = e
+        .models(&Query {
+            pins: vec![(atom(&p, "flag", &[]), true)],
+            exclude: vec![],
+        })
+        .unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(m.value(&atom(&p, "out", &[])), Some(true));
+    assert_eq!(m.value(&atom(&p, "bad", &[])), None);
+}
+
+#[test]
+fn cone_boundary_precedes_subsumption_of_an_original_dependency() {
+    let p = load_text(&format!(
+        "input flag(); relation p();p():-!p();
+        relation r();r():-flag();r():-flag(),p(); obligation clean:empty(r); {V}"
+    ));
+    let mut e = cone_prepare(&p);
+    assert_eq!(e.scope().atoms, 3);
+    let r = e.check(&p.keys, &cone_options()).unwrap();
+    assert!(matches!(
+        r.meaning.as_ref().unwrap().existence,
+        Existence::NoMeaning(_)
+    ));
+    assert!(!r.proved());
+}

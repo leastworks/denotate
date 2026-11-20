@@ -9,6 +9,8 @@ pub enum MeaningMode {
     #[default]
     Full,
     Uniqueness,
+    /// Existence in the selected obligations' upstream cone; uniqueness is optional.
+    Cone,
     None,
 }
 impl MeaningMode {
@@ -17,6 +19,7 @@ impl MeaningMode {
             Self::Full => "full",
             Self::Uniqueness => "uniqueness",
             Self::None => "none",
+            Self::Cone => "cone",
         }
     }
 }
@@ -174,10 +177,11 @@ impl Engine {
 }
 
 impl Engine {
-    /// Whole-program existence and uniqueness, without checking obligations.
+    /// Existence and uniqueness in this engine's prepared scope, without checking obligations.
     /// Callers must separately establish that permitted inputs exist; an empty
     /// context must not be published as an executable/checked success.
     pub fn meaning(&mut self, options: &CheckOptions) -> Result<Meaning> {
+        self.validate_meaning_scope(options.meaning)?;
         let mut meaning = Meaning {
             mode: options.meaning,
             existence: Existence::NotAnalysed,
@@ -203,27 +207,34 @@ impl Engine {
         })();
         match stratified {
             Ok(true) => {
-                if options.meaning == MeaningMode::Full {
+                if matches!(options.meaning, MeaningMode::Full | MeaningMode::Cone) {
                     meaning.existence = Existence::EveryWorld;
                 }
-                meaning.uniqueness = Uniqueness::AtMostOne;
+                if options.meaning != MeaningMode::Cone {
+                    meaning.uniqueness = Uniqueness::AtMostOne;
+                }
                 return Ok(meaning);
             }
             Err(e) => {
                 let c = query_inconclusive(e)?;
-                if options.meaning == MeaningMode::Full {
+                if matches!(options.meaning, MeaningMode::Full | MeaningMode::Cone) {
                     meaning.existence = Existence::Inconclusive(c);
                 }
-                meaning.uniqueness = Uniqueness::Inconclusive(c);
+                if options.meaning != MeaningMode::Cone {
+                    meaning.uniqueness = Uniqueness::Inconclusive(c);
+                }
                 return Ok(meaning);
             }
             Ok(false) => {}
         }
         let mut unique_cones = BTreeSet::new();
-        if options.meaning == MeaningMode::Full {
+        if matches!(options.meaning, MeaningMode::Full | MeaningMode::Cone) {
             let (existence, stats) = self.existence_using(options, &mut unique_cones, &mut b)?;
             meaning.existence = existence;
             meaning.existence_stats = Some(stats);
+        }
+        if options.meaning == MeaningMode::Cone {
+            return Ok(meaning);
         }
         let (uniqueness, stats) = self.scoped_uniqueness(&unique_cones)?;
         meaning.uniqueness = uniqueness;

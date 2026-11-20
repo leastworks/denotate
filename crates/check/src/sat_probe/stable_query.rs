@@ -1,10 +1,12 @@
 //! Experimental stable queries for one immutable program and named verification.
 //! No BDD conditions, admission, or cross-session cache reuse.
 mod inventory;
+mod scope;
 use super::*;
 use denotate_ir::{Corpus, SemanticKeys, VerificationId};
 use existence::{Encoding, encode, refine, world_cone};
 pub use inventory::{NegativeComponent, NegativeComponents};
+pub use scope::{PreparationScope, ScopeSummary};
 use std::{collections::VecDeque, sync::Arc};
 mod attribution;
 mod build;
@@ -69,6 +71,7 @@ pub struct Model {
     program: Arc<GroundProgram>,
     input_relations: Arc<BTreeSet<RelationId>>,
     values: Arc<[u64]>,
+    scope_atoms: Option<Arc<scope::Members>>,
     mode: Mode,
 }
 impl Model {
@@ -77,13 +80,18 @@ impl Model {
         if self.mode == Mode::World && !self.input_relations.contains(&atom.relation) {
             return None;
         }
+        if !self.input_relations.contains(&atom.relation)
+            && self.scope_atoms.as_ref().is_some_and(|s| !s.contains(atom))
+        {
+            return None;
+        }
         let resolved = resolve(&self.program, atom).ok()?;
         Some(match resolved {
             Resolved::Fixed(v) => v,
             Resolved::Atom(i) => self.values[i / 64] & (1u64 << (i % 64)) != 0,
         })
     }
-    /// Differing residual values in two full-program interpretations of this prepared program.
+    /// Differing residual values in two interpretations of the same prepared scope.
     /// Fixed atoms cannot differ; scan residual bitvectors without domain lookups.
     pub fn differences<'a>(
         &'a self,
@@ -92,6 +100,7 @@ impl Model {
         if self.mode != Mode::Program
             || other.mode != Mode::Program
             || !Arc::ptr_eq(&self.program, &other.program)
+            || self.scope_atoms != other.scope_atoms
         {
             return None;
         }
@@ -104,7 +113,8 @@ impl Model {
                 .filter_map(move |(i, a)| {
                     let x = self.values[i / 64] & (1u64 << (i % 64)) != 0;
                     let y = other.values[i / 64] & (1u64 << (i % 64)) != 0;
-                    (x != y).then_some((a, x, y))
+                    (x != y && self.scope_atoms.as_ref().is_none_or(|s| s.contains(a)))
+                        .then_some((a, x, y))
                 }),
         )
     }
@@ -139,12 +149,15 @@ struct Cached {
     bytes: usize,
 }
 /// All learnt clauses and cached answers belong to this immutable verification.
-/// A different selection, program, or domain requires a new engine.
+/// A different selection, program, domain, or program scope requires a new engine.
 pub struct Engine {
     program: Arc<GroundProgram>,
     original: Arc<GroundProgram>,
     settled: Arc<crate::settled::SettledView>,
     preparation_receipts: WorkReceipts,
+    scope: ScopeSummary,
+    scope_atoms: Option<Arc<scope::Members>>,
+    origins: Option<Vec<GroundRuleId>>,
     input_relations: Arc<BTreeSet<RelationId>>,
     cone: Cone,
     world_cone: Cone,
@@ -215,10 +228,11 @@ impl Engine {
     /// Input-independent truth known by preparation, including legal absent
     /// atoms. None means a residual value, not false.
     pub fn prepared_value(&self, atom: &GroundAtom) -> Result<Option<bool>> {
+        let resolved = self.resolve_scoped(atom)?;
         if let Some(value) = self.settled.values.get(atom) {
             return Ok(Some(value.value));
         }
-        Ok(match resolve(&self.program, atom)? {
+        Ok(match resolved {
             Resolved::Fixed(v) => Some(v),
             Resolved::Atom(_) => None,
         })
@@ -231,13 +245,45 @@ impl Engine {
         limits: &Limits,
         config: QueryLimits,
     ) -> Result<Self> {
+        Self::prepare_scoped(
+            corpus,
+            domains,
+            keys,
+            verification,
+            limits,
+            config,
+            PreparationScope::WholeProgram,
+        )
+    }
+    /// Prepare an isolated stable-model query engine. W retains all input and
+    /// selected-assumption restrictions, independently of the chosen program scope.
+    pub fn prepare_scoped(
+        corpus: &Corpus,
+        domains: &Domains,
+        keys: &SemanticKeys,
+        verification: VerificationId,
+        limits: &Limits,
+        config: QueryLimits,
+        scope: PreparationScope,
+    ) -> Result<Self> {
         let (original, settled, mut preparation_receipts) =
             build::prepare(corpus, domains, keys, verification, limits)?;
         let original = Arc::new(original);
-        let program = Arc::new(settled.program.clone());
+        let mut program = settled.program.clone();
         let mut b = Budget::tracked(limits);
-        let cone = build::cone(&program, corpus, verification, &mut b)?;
+        let mut cone = build::cone(&program, corpus, verification, &mut b)?;
         let world_cone = world_cone(&cone, false, &mut b)?;
+        let (scope, scope_atoms, origins) = scope::restrict(
+            scope,
+            &original,
+            &mut program,
+            &mut cone,
+            &settled.origins,
+            corpus,
+            verification,
+            &mut b,
+        )?;
+        let program = Arc::new(program);
         let mut cnf = Cnf {
             solver: Solver::new(
                 Default::default(),
@@ -310,6 +356,9 @@ impl Engine {
         )?;
         Ok(Self {
             verification,
+            scope,
+            scope_atoms,
+            origins,
             columns,
             residual_relations,
             selection,
@@ -339,8 +388,9 @@ impl Engine {
         if id.preparation != self.program.preparation {
             return None;
         }
-        self.settled
-            .origins
+        self.origins
+            .as_deref()
+            .unwrap_or(&self.settled.origins)
             .get(id.index)
             .and_then(|id| self.original.original_rule(*id))
     }
@@ -377,7 +427,7 @@ impl Engine {
                     "world queries accept input atoms only",
                 ));
             }
-            let l = match resolve(&self.program, a)? {
+            let l = match self.resolve_scoped(a)? {
                 Resolved::Fixed(x) => {
                     if x {
                         (self.cone.atoms.len() + 1) as i32
@@ -640,6 +690,7 @@ impl Engine {
             program: self.original.clone(),
             input_relations: self.input_relations.clone(),
             values: bits.into(),
+            scope_atoms: self.scope_atoms.clone(),
             mode,
         }
     }

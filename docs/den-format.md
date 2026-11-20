@@ -662,6 +662,15 @@ structural failures survive unrelated no-meaning cycles. The editor is unchanged
 `--sat-meaning full|uniqueness|none` can deliberately omit meaning phases; omitted
 phases are explicitly not analysed and keep the aggregate result incomplete (exit 2).
 Individual property results, including fixed structural findings, remain visible.
+`--sat-meaning cone` instead checks the union of the selected obligations' upstream
+cones. Every permitted input world must have a stable model of that cone, and the
+selected obligations are checked over **all cone models**, including ones that
+cannot extend through downstream rules. Uniqueness is not required or analysed in
+this mode. Exit 0 means cone existence and all selected obligations proved, not
+whole-program meaning; human and JSON output name the scope, its atom/rule-instance
+sizes, and the unanalysed outside. W still includes every selected assumption and
+input restriction. A declaration with no selected obligations checks consistency
+and the empty cone. Symbolic coverage/exactly-one remain unanalysed as above.
 The option does not change stable semantics or treat worlds with no stable model
 as invalid input worlds. SAT preparation propagates independently settled atoms
 before its stratification and meaning checks. It also reports Information notices

@@ -159,7 +159,7 @@ impl Engine {
                         retained.push((report.groups.len(), m.clone()));
                         VerifiedOutcome::Counterexample(Counterexample {
                             observation: m.observation_precharged(),
-                            replay_scope: if fixed {
+                            replay_scope: if fixed || self.scope_atoms.is_some() {
                                 ReplayScope::ConeOnly
                             } else {
                                 ReplayScope::WholeProgram

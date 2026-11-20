@@ -134,10 +134,17 @@ impl Engine {
                 Answer::Model(m) => extended.push(m), // full reduct validation
                 answer => {
                     stats.fallback_reason = Some(match answer {
+                        Answer::NoModel if self.scope_atoms.is_some() => {
+                            "scoped pair has no prepared-cone extension"
+                        }
                         Answer::NoModel => "scoped pair has no whole-program extension",
                         _ => "scoped pair extension was inconclusive",
                     });
-                    stats.scope = "whole-program";
+                    stats.scope = if self.scope_atoms.is_some() {
+                        "prepared-cone"
+                    } else {
+                        "whole-program"
+                    };
                     stats.pair_queries += 1;
                     self.limits.progress.sat_uniqueness(stats);
                     // No fresh phase allowance: extension and fallback retain

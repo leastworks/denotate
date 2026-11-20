@@ -52,7 +52,7 @@ pub fn stable_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> Resul
             r.context,
             Context::EmptyUniverse | Context::InconsistentAssumptions
         );
-    let mut incomplete = r.meaning_mode != MeaningMode::Full
+    let mut incomplete = !matches!(r.meaning_mode, MeaningMode::Full | MeaningMode::Cone)
         || matches!(r.context, Context::Inconclusive(_))
         || (matches!(r.context, Context::Permitted)
             && (!r.not_analysed.is_empty()
@@ -65,6 +65,8 @@ pub fn stable_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> Resul
                         VerifiedOutcome::Inconclusive(_) | VerifiedOutcome::Unsupported
                     )
                 })));
+    let cone_size = (!r.scope.outside_analysed)
+        .then(|| json!({"atoms":r.scope.atoms,"ruleInstances":r.scope.rule_instances}));
     let meaning = if let Some(m) = &r.meaning {
         let existence = match &m.existence {
             Existence::NotAnalysed => {
@@ -83,8 +85,8 @@ pub fn stable_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> Resul
         };
         let uniqueness = match &m.uniqueness {
             Uniqueness::NotAnalysed => {
-                incomplete = true;
-                json!({"state":"not-analysed", "reason":"disabled-by-option"})
+                incomplete |= r.meaning_mode != MeaningMode::Cone;
+                json!({"state":"not-analysed", "reason":if r.meaning_mode == MeaningMode::Cone {"not-required-for-universal-obligations"} else {"disabled-by-option"}})
             }
             Uniqueness::AtMostOne => json!({"state":"at-most-one"}),
             Uniqueness::Inconclusive(c) => {
@@ -107,9 +109,9 @@ pub fn stable_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> Resul
                 json!({"state":"multiple-meanings","world":world(observation)?,"differences":differences})
             }
         };
-        json!({"scope":"whole-program","mode":m.mode.label(),"existence":existence,"uniqueness":uniqueness, "existenceStats":m.existence_stats.as_ref().map(stable_existence_stats), "uniquenessStats":m.uniqueness_stats.as_ref().map(stable_uniqueness_stats)})
+        json!({"scope":r.scope.label,"mode":m.mode.label(),"outsideAnalysed":r.scope.outside_analysed,"coneSize":cone_size,"existence":existence,"uniqueness":uniqueness, "existenceStats":m.existence_stats.as_ref().map(stable_existence_stats), "uniquenessStats":m.uniqueness_stats.as_ref().map(stable_uniqueness_stats)})
     } else {
-        json!({"state":"not-analysed"})
+        json!({"state":"not-analysed","scope":r.scope.label,"outsideAnalysed":r.scope.outside_analysed,"coneSize":cone_size})
     };
     let v = corpus
         .verification(r.verification)

@@ -32,6 +32,7 @@ impl Default for CheckOptions {
 #[derive(Debug)]
 pub struct Report {
     pub meaning_mode: MeaningMode,
+    pub scope: ScopeSummary,
     pub verification: VerificationId,
     pub context: Context,
     pub meaning: Option<Meaning>,
@@ -60,10 +61,13 @@ impl Report {
     }
     pub fn proved(&self) -> bool {
         self.context == Context::Permitted
-            && self
-                .meaning
-                .as_ref()
-                .is_some_and(Meaning::unique_everywhere)
+            && self.meaning.as_ref().is_some_and(|m| {
+                if self.meaning_mode == MeaningMode::Cone {
+                    matches!(m.existence, Existence::EveryWorld)
+                } else {
+                    m.unique_everywhere()
+                }
+            })
             && self.incomplete.is_empty()
             && self.coverage.values().all(CoverageReport::proved)
             && self
@@ -82,8 +86,24 @@ impl Engine {
     /// kinds and notices are explicitly listed as not analysed.
     pub fn check(&mut self, keys: &SemanticKeys, options: &CheckOptions) -> Result<Report> {
         self.limits.cancellation.check()?;
+        self.validate_meaning_scope(options.meaning)?;
+        // Explicit-root engines can check only declarations entirely in their scope.
+        if let Some(members) = &self.scope_atoms
+            && self.scope.label == "root-cones"
+        {
+            let mut budget = Budget::new(&self.limits);
+            for atom in self.original.atoms() {
+                budget.tick("SAT scope selection")?;
+                if self.selection.iter().any(|s| s.2 == atom.relation) && !members.contains(atom) {
+                    return Err(CheckError::InvalidRequest(
+                        "obligation outside SAT program scope",
+                    ));
+                }
+            }
+        }
         let mut report = Report {
             meaning_mode: options.meaning,
+            scope: self.scope.clone(),
             verification: self.verification,
             context: Context::Permitted,
             meaning: None,
@@ -100,6 +120,15 @@ impl Engine {
         };
         (report.subsumed_producers, report.subsumption_incomplete) =
             self.settled.subsumed(&self.original, &self.limits)?;
+        if let Some(members) = &self.scope_atoms {
+            report.subsumed_producers.retain(|notice| {
+                notice.instances.iter().all(|(id, _)| {
+                    self.original
+                        .original_rule(*id)
+                        .is_some_and(|r| members.contains(&r.head.atom))
+                })
+            });
+        }
         if self.program.input_universe_is_empty() {
             report.context = Context::EmptyUniverse;
             return Ok(report);
@@ -278,7 +307,7 @@ impl Engine {
                             &mut report,
                             atom,
                             &observation,
-                            if fixed.is_some() {
+                            if fixed.is_some() || self.scope_atoms.is_some() {
                                 ReplayScope::ConeOnly
                             } else {
                                 ReplayScope::WholeProgram

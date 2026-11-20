@@ -20,7 +20,9 @@ direction for such programs separates meaning from schedule:
   Whole-program meaning is searched per negative component in isolated scopes, with
   certified cubes over each component's support, and global uniqueness is proved
   from local proofs or a pair query on the ambiguous components' downstream closure;
-  meaning can also be skipped explicitly. Independent ground-atom propagation now
+  meaning can also be skipped explicitly. Opt-in obligation-cone checking now proves
+  existence and selected obligations within their upstream union, independently of
+  downstream failures; whole-program checking remains the default. Independent ground-atom propagation now
   removes constant-dead cycles before SAT meaning; syntactic same-head subsumption
   removes redundant producers, and the CLI lists remaining negative components
   without meaning search. Both reductions have advisory subsumed-producer

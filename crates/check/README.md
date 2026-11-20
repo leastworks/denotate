@@ -806,6 +806,36 @@ stratified programs. Properties and fixed results keep their own scopes and verd
 An explicit skip makes the aggregate report incomplete; switching modes on the same
 immutable engine cannot reuse a whole-check result because those reports are not cached.
 
+`Engine::prepare_scoped(..., PreparationScope::ObligationCones)` isolates the union
+of the selected obligations' original grounded dependency cones. Use
+`CheckOptions { meaning: MeaningMode::Cone, ..Default::default() }` for existence
+plus universal property checks, without requiring uniqueness. `proved()` then
+requires existence and all selected obligations, and the report names its scope.
+Asking for cone mode on a whole-program engine is an invalid request: scope is
+immutable and must be chosen at preparation. `Full` on a scoped engine also checks
+uniqueness **within that scope**; the CLI only exposes existence-only cone checking.
+`PreparationScope::Roots(Vec<GroundAtom>)` provides the same mechanism for explicit
+outputs. The execution planner continues to prepare whole-program engines; changing
+its meaning prerequisite is separate work.
+
+The cone follows original ground dependencies, including fixed evidence, before
+independent propagation and producer removal. W is encoded from the unrestricted
+program first; cone completion drops out-of-scope rules and does not reimpose
+assumption restrictions on omitted derived atoms. Both obligation queries and
+meaning fallbacks use the resulting isolated program, never whole-program equations.
+A cone model need not extend to the whole program. Models return `None` for derived
+atoms outside scope, and queries/oracles reject them. All inputs remain available.
+Scope-specific clauses and cached answers belong to their own engine. Legal absent
+tuples of selected relations remain in scope and read false; they add no ground
+dependencies or inventory entries.
+
+This increment still grounds the full program and retains the original atom slots
+and evidence graph; cone mode limits semantic search, not preparation memory.
+Scope construction is charged and may exhaust. Cone examples use `ConeOnly` replay
+scope and original derivations. Advisory producer notices are included only when
+all their represented instances lie inside the cone. An empty selection has an
+empty cone but still requires a consistent W.
+
 Ground stratification after independent propagation proves the requested meaning phases without search. For
 unstratified programs, existence independently chooses permitted worlds. Its cubes
 preserve one finite positive derivation per true atom and one false premise per

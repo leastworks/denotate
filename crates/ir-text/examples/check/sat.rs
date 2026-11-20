@@ -1,6 +1,8 @@
 //! Explicit CLI engine selection. No BDD admission or W construction on this path.
 use super::*;
-use denotate_check::stable_query::{CheckOptions, Engine, QueryLimits};
+use denotate_check::stable_query::{
+    CheckOptions, Engine, MeaningMode, PreparationScope, QueryLimits,
+};
 
 pub(super) fn run(
     p: &LoadedProgram,
@@ -107,8 +109,19 @@ pub(super) fn run(
             requests.len()
         ));
         flush(output)?;
-        let prepared =
-            Engine::prepare(&p.corpus, &p.domains, &p.keys, v.id, &limits, query.clone());
+        let prepared = Engine::prepare_scoped(
+            &p.corpus,
+            &p.domains,
+            &p.keys,
+            v.id,
+            &limits,
+            query.clone(),
+            if check.meaning == MeaningMode::Cone {
+                PreparationScope::ObligationCones
+            } else {
+                PreparationScope::WholeProgram
+            },
+        );
         let mut engine = match prepared {
             Ok(e) => e,
             Err(e) => {
@@ -118,11 +131,18 @@ pub(super) fn run(
                     writeln!(
                         output,
                         "Results: {}",
-                        json!({"backend":{"backend":"sat"},"state":"incomplete","reason":text})
+                        json!({"backend":{"backend":"sat"},"state":"incomplete","reason":text,"meaning":{"state":"not-analysed","scope":if check.meaning == MeaningMode::Cone {"obligation-cones"} else {"whole-program"}}})
                     )
                     .unwrap();
                 } else {
                     writeln!(output, "{text}").unwrap();
+                    if check.meaning == MeaningMode::Cone {
+                        writeln!(
+                            output,
+                            "Obligation cones: preparation incomplete; outside not analysed"
+                        )
+                        .unwrap();
+                    }
                 }
                 trace.message(text);
                 flush(output)?;
@@ -164,7 +184,11 @@ pub(super) fn run(
                 if let Some(m) = s["meaning"].get(phase) {
                     writeln!(
                         output,
-                        "Meaning {phase} (whole program): {}",
+                        "Meaning {phase} ({}): {}",
+                        s["meaning"]["scope"]
+                            .as_str()
+                            .unwrap_or("not analysed")
+                            .replace('-', " "),
                         m["state"].as_str().unwrap()
                     )
                     .unwrap();
@@ -172,6 +196,14 @@ pub(super) fn run(
                         writeln!(output, "  reason: {reason}").unwrap();
                     }
                 }
+            }
+            if let Some(size) = s["meaning"].get("coneSize").filter(|v| !v.is_null()) {
+                writeln!(
+                    output,
+                    "Obligation cones: {} atoms, {} rule instances; outside not analysed",
+                    size["atoms"], size["ruleInstances"]
+                )
+                .unwrap();
             }
             if let Some(stats) = s["meaning"].get("existenceStats").filter(|v| !v.is_null()) {
                 writeln!(output, "Existence search: {stats}").unwrap();

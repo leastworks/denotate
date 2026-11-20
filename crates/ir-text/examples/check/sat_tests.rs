@@ -281,3 +281,73 @@ fn sat_subsumption_removes_listed_cycle_and_positive_cycles_are_not_listed() {
         }
     }
 }
+
+#[test]
+fn sat_obligation_cones_report_scope_sizes_and_keep_exit_contract() {
+    for (rules, code) in [
+        ("relation r(); relation p(); p():-!p();", 0),
+        (
+            "relation a();relation b();a():-!b();b():-!a();relation r();r():-a();relation c();c():-r(),!c();",
+            1,
+        ),
+        ("relation r();r():-!r();", 1),
+    ] {
+        let f = Fixture::new(&format!(
+            "{rules} obligation o:empty(r); verification v{{assumptions:[];obligations:[o];}}"
+        ));
+        for json in [false, true] {
+            let mut flags = vec!["--engine", "sat", "--sat-meaning", "cone", "--no-progress"];
+            if json {
+                flags.push("--json");
+            }
+            let (c, out) = f.run(&flags);
+            assert_eq!(c, code, "{out}");
+            if json {
+                let summary: serde_json::Value =
+                    serde_json::Deserializer::from_str(out.split_once("Results: ").unwrap().1)
+                        .into_iter()
+                        .next()
+                        .unwrap()
+                        .unwrap();
+                assert_eq!(summary["meaning"]["scope"], "obligation-cones");
+                assert_eq!(summary["meaning"]["outsideAnalysed"], false);
+                assert!(summary["meaning"]["coneSize"]["atoms"].is_number());
+            } else {
+                assert!(
+                    out.contains("Meaning existence (obligation cones):"),
+                    "{out}"
+                );
+                assert!(out.contains("outside not analysed"), "{out}");
+            }
+        }
+        assert_eq!(
+            f.run(&[
+                "--engine",
+                "sat",
+                "--sat-meaning",
+                "cone",
+                "--sat-max-solves",
+                "0",
+                "--no-progress"
+            ])
+            .0,
+            2
+        );
+    }
+    let f = Fixture::new(
+        "relation a();relation b();a():-!b();b():-!a();relation r();r():-a(),b();obligation o:empty(r);verification v{assumptions:[];obligations:[o];}",
+    );
+    assert_eq!(
+        f.run(&[
+            "--engine",
+            "sat",
+            "--sat-meaning",
+            "cone",
+            "--sat-max-worlds",
+            "0",
+            "--no-progress"
+        ])
+        .0,
+        2
+    );
+}

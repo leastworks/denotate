@@ -1631,3 +1631,28 @@ The representative cycle uses a deterministically chosen negative edge and a
 shortest return path; it is not claimed to be the globally shortest cycle.
 Reporting and optional dumps have independent bounds. Truncation and IO failures
 are diagnostic limitations, not inconclusive checking results.
+
+## Obligation-cone SAT checking is a distinct scoped claim
+
+`--sat-meaning cone` checks existence in every permitted world and the selected
+obligations over the upstream-closed union of their original grounded dependencies.
+Scope is chosen before independent producer simplification; fixed evidence belongs
+to it. Splitting-set restriction maps every whole-program stable model to a cone
+model, but not conversely: downstream rules can eliminate cone models. Therefore
+both meaning and obligations must use isolated cone equations. Filtering a
+whole-program meaning report alone would miss violations. W retains all selected
+assumptions and input restrictions, with a separate encoding sharing only inputs.
+
+Universal obligations (`empty`, `at_most_one`) do not require a unique cone model.
+Cone-mode success requires consistent W, existence and every selected obligation
+proved; it does not require global or cone uniqueness. Human and JSON output state
+the scope, size and unanalysed outside. Other modes and exit-code precedence are
+unchanged. API callers can request uniqueness on an explicitly scoped engine;
+there is no additional CLI switch yet. Empty obligation selections still check W.
+
+Each engine owns one immutable scope. Models leave out-of-scope derived atoms
+unreported and queries/oracles reject them; program clauses, refinements and caches
+cannot cross scopes. The existing cone walker and meaning search are shared with an
+explicit-root preparation API for future output-scoped planning. The planner's
+whole-program meaning prerequisite remains unchanged. Full grounding, atom slots
+and evidence remain retained; this increment makes no preparation-memory claim.

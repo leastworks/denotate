@@ -111,7 +111,7 @@ impl Engine {
         w: &mut Work<'_>,
     ) -> Result<ConstantAnswer> {
         w.b.charge(target.arguments.len() + 1, "SAT oracle target")?;
-        resolve(&self.program, target)?;
+        self.resolve_scoped(target)?;
         w.query()?;
         let first = match self.phase_query(Mode::Program, context, &mut w.b)? {
             Answer::Model(m) => m,
@@ -145,7 +145,7 @@ impl Engine {
         let mut ordered = Vec::new();
         for a in atoms {
             w.b.charge(a.arguments.len() + 1, "SAT oracle available values")?;
-            resolve(&self.program, a)?;
+            self.resolve_scoped(a)?;
             if !seen.contains(a) {
                 w.b.room(
                     ordered.len(),
@@ -182,7 +182,7 @@ impl Engine {
                 .into_iter()
                 .collect::<BTreeSet<_>>();
             w.b.charge(target.arguments.len() + 1, "SAT oracle target")?;
-            resolve(&self.program, target)?;
+            self.resolve_scoped(target)?;
             self.validate_expression(expression, &available, &mut w)?;
             w.query()?;
             match self.phase_query(Mode::Program, context, &mut w.b)? {

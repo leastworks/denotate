@@ -216,6 +216,22 @@ their wording and scope. Skipping meaning does not change the property's stable
 semantics: `p() :- p();` still cannot supply a present `p` in a stable model.
 It removes totality checking, not the distinction from a completion-only compiler.
 
+`--sat-meaning cone` selects obligation-scoped checking. It requires a nonempty
+permitted context, existence in every permitted world, and all selected obligations
+proved. Uniqueness is deliberately not analysed and does not prevent exit **0**.
+A counterexample or no-meaning world retains exit **1**; exhaustion or an unsupported
+obligation kind retains exit **2**. Partial verification selection still keeps exit 2.
+The human output names "obligation cones", gives their size, and says "outside not
+analysed". JSON `meaning.scope` is `obligation-cones`, `coneSize` contains `atoms`
+and `ruleInstances`, and `outsideAnalysed` is false. The sizes include the original
+grounded dependency cone's fixed evidence, before SAT simplification.
+
+Both meaning and property queries use isolated cone equations. Downstream rules
+cannot eliminate a violating cone model. Selected assumptions outside the cone
+still restrict W, through their separate encoding. `full` retains whole-program
+semantics; `cone` does not claim that the rest of the program has meaning. There is
+no CLI cone-uniqueness switch in this increment.
+
 Existence progress and final `meaning.existenceStats` report cube count, inputs per
 cube (min/mean/max), whole-program encoded input support size, distinct inputs used
 in cubes, and `distinctCubeLiterals` versus `emittedExclusionLiterals`.

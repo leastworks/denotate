@@ -478,6 +478,17 @@ presenter. It remains outside `CheckRequest`, sessions and editor publication;
 backend identity and status are explicit in the CLI, without changing editor caches.
 
 
+Stable-query preparation can also isolate the upstream union of selected obligation
+relations or explicit atom roots. It uses the existing ground dependency-cone walker
+on the original graph, then filters the independently propagated executable rules.
+The full W encoding is built first and shares only input variables with the scoped
+program encoding. Thus restrictions outside the scope still constrain inputs, while
+downstream equations cannot erase a cone model. Existence decomposition and fallback
+operate inside the prepared scope. Public models and oracle queries respect the
+scope boundary; caches never cross it. Full grounding and original evidence remain
+retained, so this is not cone-only preparation. The explicit-root API is reusable
+by planning, whose whole-program prerequisite remains unchanged for now.
+
 SAT uniqueness and fixed-coverage reports use the same frontend-independent property
 finding helpers as BDD checking. The shared presenter owns status classification and
 structured meaning evidence; `ir-text` binds source locations, and the CLI owns IO,
