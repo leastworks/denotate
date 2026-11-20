@@ -1524,10 +1524,10 @@ advanced synthesis and memoization need measured workloads, not new defaults her
 
 The first plain Boolean driver lives in `denotate-plan`, above the checker's stable
 oracle. A plan names its verification and explicit output atoms. Construction first
-requires a nonempty permitted context and whole-program existence and uniqueness;
-expression proofs alone cannot justify execution in a world without a stable model.
-Whole-program meaning is conservative for an output-scoped plan and will be relaxed
-only with a separate scope/partition proof. Obligation success is not required.
+required a nonempty permitted context and whole-program existence and uniqueness.
+The output-cone decision below narrows that scope while retaining both meaning
+requirements; expression proofs alone cannot justify a world without a stable
+model in the claimed scope. Obligation success is not required.
 
 Entry inputs are available values, not true facts. Straight-line rules read already
 available values; positive relational cycles use a least-fixpoint kernel; bounded
@@ -1561,8 +1561,8 @@ unknown reduction retains the previous proven expression.
 
 Remaining cyclic work can split on an already available guard. Both paths are
 validated against the original program and selected assumptions, then their ground
-components are recomputed after specialization. Whole-program existence/uniqueness
-was established first, so a conclusive absence of models makes an arm infeasible;
+components are recomputed after specialization. Existence/uniqueness within the
+prepared scope is established first, so a conclusive absence of models makes an arm infeasible;
 unknown never does. With only one feasible arm, its pin is implied by the parent
 context and its work can be inlined.
 
@@ -1574,11 +1574,11 @@ would be wrong outside their branch. The current implementation uses structured
 sibling joins and the first ranked split, with no arbitrary state merging or
 backtracking. Failure is a bounded construction result, not an impossibility proof.
 
-The plan export uses nested regions (version 2); semantic node IDs are local to
+The plan export introduced nested regions in version 2; semantic node IDs are local to
 those regions. The `.den` adapter renders its constant keys as qualified names,
 while the generic driver keeps frontend keys opaque. The partition's later use for
-meaning and checking needs a separate proof; this increment does not weaken the
-whole-program meaning prerequisite or change checking behavior.
+meaning and checking needs a separate proof. The output-cone prerequisite below
+is independent of that future partition sharing; checking behavior is unchanged.
 
 
 ## Independent ground-atom propagation precedes SAT meaning and assumption evaluation
@@ -1654,7 +1654,8 @@ Each engine owns one immutable scope. Models leave out-of-scope derived atoms
 unreported and queries/oracles reject them; program clauses, refinements and caches
 cannot cross scopes. The existing cone walker and meaning search are shared with an
 explicit-root preparation API for future output-scoped planning. The planner's
-whole-program meaning prerequisite remains unchanged. Full grounding, atom slots
+whole-program meaning prerequisite was retained in that increment; the output-cone
+plan decision below supersedes it. Full grounding, atom slots
 and evidence remain retained; this increment makes no preparation-memory claim.
 
 ## Verification-local SAT pins and exactly-one meaning splits
@@ -1687,3 +1688,30 @@ experiments without adding language syntax. Derived families, nested partitions 
 input-correlation rewrite notices remain separate work. The generic checker service
 is used by the planner's meaning prerequisite; executable plan scheduling retains its
 own availability-aware partition, because truth and availability are different.
+
+
+## Plans require unique meaning of their output cone
+
+A plan computes explicit outputs, so its meaning prerequisite is existence and
+uniqueness of the original grounded upstream union of those atoms, in every world
+permitted by the full input contract and selected assumptions. Use the existing
+checker `PreparationScope::Roots`; no separate planning resolver or meaning engine.
+An unrelated `p :- !p` does not stop an output plan. Conversely, downstream rules
+cannot eliminate a cone alternative and make an ambiguous output appear unique.
+For `r :- x; c :- r, !c`, planning r yields x, including the world x=true where the
+whole program has no model. This is a scoped guarantee, not whole-program success.
+
+Scope follows original dependencies, including fixed evidence and producers later
+removed by propagation/subsumption. Arm feasibility, extraction and support removal
+all use that same scoped engine. W keeps all selected restrictions, including those
+whose relations lie outside the outputs' cone. Interpretation still requires an
+independently validated permitted input snapshot; no execution permission is added.
+
+The planner waits until build supplies the outputs before grounding/encoding.
+Repeated builds with the same semantic atom set reuse one immutable engine; changing
+roots discards it and its caches before fallible preparation. Priority changes do
+not change scope. Full grounding and evidence remain, and no memory saving is claimed.
+Plan JSON version 3 states the narrower guarantee, cone sizes, required meaning
+phases and the unanalysed outside. Failed builds carry scope metadata too; unknown
+sizes after failed preparation are null, not an empty cone. No partial plan is
+published on failure, and CLI success/error exit codes are unchanged.

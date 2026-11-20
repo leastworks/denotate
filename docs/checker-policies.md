@@ -1544,8 +1544,14 @@ claim or ordinary BDD/default-limit change accompanies this API increment.
 ### Plain execution-plan construction
 
 The experimental `denotate-plan` driver leaves checker defaults unchanged. It uses
-whole-program stable meaning, then retains requested-output work. Preparation and
-meaning/oracle operations keep their existing limits. Driver graph/expression work
+stable meaning of the original requested-output cone. The same scoped engine owns
+meaning, branch feasibility, extraction and support reduction. Preparation waits
+until outputs are supplied; changing the output set prepares a fresh engine rather
+than retaining multiple scopes. Full grounding/evidence remain retained. Preparation
+and meaning/oracle operations keep their existing limits. Scope construction and
+output expansion are charged, with no new allowance or performance claim.
+Preparation keeps its own checker deadlines and is excluded from the driver's
+construction clock. Driver graph/expression work
 has its own `max_work` allowance and elapsed deadline, checked before publishing a
 plan and between oracle calls; one call can overshoot that deadline up to its own
 cooperative bound. Cancellation propagates as cancellation. Default plan bounds are

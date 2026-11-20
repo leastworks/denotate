@@ -119,10 +119,10 @@ fn export(p: &LoadedProgram, args: &Args) -> Result<(u8, Value), String> {
             return Err("Output expansion exceeds max-atoms".into());
         }
     }
-    match planner
+    let built = planner
         .build(&outputs, &args.options)
-        .map_err(|e| e.to_string())?
-    {
+        .map_err(|e| e.to_string())?;
+    let result: Result<(u8, Value), String> = match built {
         Build::Ready(plan) => {
             let mut output = plan.to_json();
             // Source metadata is separate from plan identity. Keep embedded loc
@@ -139,7 +139,10 @@ fn export(p: &LoadedProgram, args: &Args) -> Result<(u8, Value), String> {
             json!({"state":"inconclusive","phase":e.phase,"resource":e.resource}),
         )),
         Build::Problem(problem) => Ok((2, problem_json(p, problem))),
-    }
+    };
+    let (code, mut result) = result?;
+    result["meaningScope"] = denotate_plan::scope_json(planner.scope());
+    Ok((code, result))
 }
 fn attach_origins(
     p: &LoadedProgram,
@@ -432,7 +435,7 @@ mod tests {
         a.outputs = vec!["result".into()];
         let (code, j) = export(&p, &a).unwrap();
         assert_eq!(code, 0);
-        assert_eq!(j["version"], 2);
+        assert_eq!(j["version"], 3);
         assert_eq!(j["size"]["branches"], 1);
         assert_eq!(j["size"]["joins"], 1);
         let split = j["nodes"]
@@ -514,7 +517,7 @@ mod tests {
         );
     }
     #[test]
-    fn unresolved_export_keeps_the_residual_and_replaying_world() {
+    fn ambiguous_output_cone_is_not_hidden_by_downstream_filters() {
         let p = program(
             "input p(); relation a(); relation b(); relation reject(); a() :- !b(); b() :- !a(); reject() :- a(), !p(), !reject(); reject() :- b(), p(), !reject(); verification checks {assumptions: []; obligations: [];}",
         );
@@ -523,9 +526,130 @@ mod tests {
         let (code, j) = export(&p, &a).unwrap();
         assert_eq!(code, 2);
         assert_eq!(j["state"], "unresolved");
-        assert!(j["path"].is_array());
-        assert!(!j["dependencies"].as_array().unwrap().is_empty());
+        assert_eq!(j["reason"], "multiple-meanings");
+        assert_eq!(j["meaningScope"]["kind"], "output-cones");
+        assert_eq!(j["meaningScope"]["outsideAnalysed"], false);
         assert!(j["world"].is_object());
         assert!(j.get("nodes").is_none());
+    }
+    #[test]
+    fn output_scope_exports_boundary_for_success_and_cutoffs() {
+        let p = program(
+            "input x(); relation out(); out():-x(); relation bad(); bad():-out(),!bad(); verification checks{assumptions:[];obligations:[];}",
+        );
+        let (code, j) = export(&p, &args()).unwrap();
+        assert_eq!(code, 0, "{j}");
+        assert_eq!(
+            j["meaningScope"]["coneSize"],
+            json!({"atoms":2,"ruleInstances":1})
+        );
+        assert_eq!(j["meaningScope"]["outsideAnalysed"], false);
+        assert!(
+            j["contract"]
+                .as_str()
+                .unwrap()
+                .contains("outside not analysed")
+        );
+        let mut a = args();
+        a.limits.max_work = 0;
+        let (code, j) = export(&p, &a).unwrap();
+        assert_eq!(code, 2);
+        assert_eq!(j["state"], "inconclusive");
+        assert!(j["meaningScope"]["coneSize"].is_null());
+        assert_eq!(j["meaningScope"]["outsideAnalysed"], false);
+    }
+    #[test]
+    fn outside_assumptions_still_restrict_the_plans_input_contract() {
+        let p = program(
+            "input x();relation guard();guard():-x();relation out();out():-!x();assumption yes:at_least_one(guard,group_by:());verification checks{assumptions:[yes];obligations:[];}",
+        );
+        let (code, j) = export(&p, &args()).unwrap();
+        assert_eq!(code, 0, "{j}");
+        assert_eq!(
+            j["nodes"][0]["operation"]["expression"]["nodes"][0],
+            json!({"constant":false})
+        );
+        let p = program(
+            "input x();relation guard();guard():-x();relation out();out():-x();assumption yes:at_least_one(guard,group_by:());assumption no:empty(guard);verification checks{assumptions:[yes,no];obligations:[];}",
+        );
+        let (code, j) = export(&p, &args()).unwrap();
+        assert_eq!(code, 2);
+        assert_eq!(j["state"], "no-permitted-worlds");
+        assert_eq!(j["meaningScope"]["outsideAnalysed"], false);
+    }
+    #[test]
+    fn explicit_atom_roots_exclude_sibling_tuples_and_include_legal_absences() {
+        use denotate_check::{AtomKey, GroundAtom};
+        let p = program(
+            "sort S;const a,b,c:S;relation out(s:S);out(a);out(b):-!out(b);verification checks{assumptions:[];obligations:[];}",
+        );
+        let r = p.corpus.relations().find(|r| r.name == "out").unwrap().id;
+        let v = p.corpus.verifications().next().unwrap().id;
+        let mut planner = Planner::prepare(
+            &p.corpus,
+            &p.domains,
+            &p.keys,
+            v,
+            &Limits::default(),
+            QueryLimits::default(),
+        )
+        .unwrap();
+        for (name, expected) in [
+            ("a", Some(true)),
+            ("b", None),
+            ("c", Some(false)),
+            ("a", Some(true)),
+        ] {
+            let c = p.corpus.constants().find(|c| c.name == name).unwrap().id;
+            let a = GroundAtom::new(r, [c]);
+            let result = planner
+                .build(
+                    &[denotate_plan::Output {
+                        atom: a.clone(),
+                        priority: 0,
+                    }],
+                    &Options::default(),
+                )
+                .unwrap();
+            if let Some(expected) = expected {
+                let Build::Ready(plan) = result else {
+                    panic!("{result:?}")
+                };
+                let run = plan
+                    .execute_permitted(&Default::default(), denotate_plan::Order::Semantic, 1000)
+                    .unwrap();
+                assert_eq!(
+                    run.outputs[&AtomKey::from_atom(&p.keys, &a).unwrap()],
+                    expected
+                );
+            } else {
+                assert!(matches!(result, Build::Problem(Problem::Meaning(_))));
+            }
+        }
+        // Relation expansion intentionally selects all three tuples, including b.
+        let (code, j) = export(&p, &args()).unwrap();
+        assert_eq!(code, 2);
+        assert_eq!(j["reason"], "no-meaning");
+    }
+    #[test]
+    fn scheduling_branch_queries_do_not_see_an_outside_paradox() {
+        let p = program(&format!(
+            "{} relation outside(); outside():-!outside();",
+            include_str!("../../../fixtures/execution-plan-branches/program.den")
+        ));
+        let mut a = args();
+        a.outputs = vec!["result".into()];
+        let (code, j) = export(&p, &a).unwrap();
+        assert_eq!(code, 0, "{j}");
+        assert_eq!(j["size"]["branches"], 1);
+        let split = j["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|n| n["operation"]["kind"] == "split")
+            .unwrap();
+        assert!(split["operation"]["then"].is_array());
+        assert!(split["operation"]["else"].is_array());
+        assert_eq!(j["meaningScope"]["outsideAnalysed"], false);
     }
 }

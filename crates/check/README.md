@@ -815,8 +815,9 @@ Asking for cone mode on a whole-program engine is an invalid request: scope is
 immutable and must be chosen at preparation. `Full` on a scoped engine also checks
 uniqueness **within that scope**; the CLI only exposes existence-only cone checking.
 `PreparationScope::Roots(Vec<GroundAtom>)` provides the same mechanism for explicit
-outputs. The execution planner continues to prepare whole-program engines; changing
-its meaning prerequisite is separate work.
+outputs. The execution planner uses this scope with `Full`: both existence and
+uniqueness are required within the output cone, and all planning oracle queries
+use the same engine. Outside rules are explicitly unanalysed.
 
 The cone follows original ground dependencies, including fixed evidence, before
 independent propagation and producer removal. W is encoded from the unrestricted

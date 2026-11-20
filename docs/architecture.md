@@ -487,7 +487,9 @@ downstream equations cannot erase a cone model. Existence decomposition and fall
 operate inside the prepared scope. Public models and oracle queries respect the
 scope boundary; caches never cross it. Full grounding and original evidence remain
 retained, so this is not cone-only preparation. The explicit-root API is reusable
-by planning, whose whole-program prerequisite remains unchanged for now.
+by planning, which requires existence and uniqueness within the explicit outputs'
+upstream cone. The scoped engine also serves every planning feasibility and
+equivalence query, so downstream filters cannot erase an output-cone alternative.
 
 The SAT engine may further specialize its executable view with input literals
 proved by W-only queries. W and assumption validation remain unrestricted; the same
@@ -515,7 +517,7 @@ The stable-query expression oracle is checker-owned, separate from the
 execution driver. Its context is a conjunction of pins minus excluded cubes;
 its available-value list is a caller-supplied runtime capability, not an additional
 truth assumption. Constants, supplied equivalences and bounded synthesized Boolean
-DAGs are justified against full-program stable interpretations. SAT mismatch queries
+DAGs are justified against stable interpretations in the engine's prepared scope. SAT mismatch queries
 use isolated selectors and the existing reduct verifier. Iterative Shannon synthesis
 uses only available values for branches, sharing identical expression nodes and
 checking every feasible leaf for a constant. It does not establish readiness,
@@ -527,16 +529,19 @@ cross-session expression reuse.
 The experimental `denotate-plan` driver consumes this oracle and the original
 prepared graph. It owns output selection, availability, the execution partial order,
 and its reference interpreter; the checker owns meaning and expression proofs.
-Construction requires whole-program existence/uniqueness, then constructs only
-requested output work using expressions, pure positive fixpoint kernels and
+Construction requires existence/uniqueness in the original output cone, then
+constructs requested output work using expressions, pure positive fixpoint kernels and
 bounded splits. Expression support comes from available values in the target's
 producer cone; support reduction needs another oracle proof. A split pins an
 already available guard and recomputes the residual ground components. Each
 feasible child supplies the same declared bindings; their values may differ.
 Sibling joins share a continuation under the parent context, without importing
 child-only pins or temporaries. Branch feasibility and equivalence remain checker
-queries on the original program. The branch partition does not yet replace
-whole-program meaning checking.
+queries within that same prepared cone. The scheduling partition does not yet
+replace the upfront cone-meaning check. Planner configuration retains immutable
+program/domains; preparation waits until build supplies outputs. Equal semantic
+root sets reuse the latest engine; changed roots discard it and all its query
+state before preparing a replacement. Full grounding/evidence remain retained.
 Plans carry semantic keys and defining-rule provenance; the `.den` export adapter
 adds source and embedded origin descriptors. Interpretation requires independently
 validated permitted inputs. No filesystem, editor state or DSL concepts enter the

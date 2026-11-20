@@ -8,7 +8,7 @@ mod search;
 pub use build::{Build, Options, Output, Planner, Problem};
 use denotate_check::{AtomKey, stable_query};
 use denotate_ir::{AssumptionKey, RuleKey, VerificationKey};
-pub use export::atom as atom_json;
+pub use export::{atom as atom_json, scope_json};
 pub use run::{Execution, ExecutionError, Order};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -85,6 +85,7 @@ impl Node {
 /// Edges are value dependencies, not a baked-in execution order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Plan {
+    scope: stable_query::ScopeSummary,
     verification: VerificationKey,
     assumptions: BTreeSet<AssumptionKey>,
     inputs: BTreeSet<AtomKey>,
@@ -92,6 +93,9 @@ pub struct Plan {
     nodes: BTreeMap<AtomKey, Node>,
 }
 impl Plan {
+    pub fn scope(&self) -> &stable_query::ScopeSummary {
+        &self.scope
+    }
     pub fn verification(&self) -> &VerificationKey {
         &self.verification
     }

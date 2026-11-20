@@ -60,14 +60,19 @@ pub enum Build {
     OracleInconclusive(denotate_check::Inconclusive),
 }
 
-/// Owns one immutable verification engine. Repeated builds may reuse its query
-/// cache; program/domain/selection edits require a new Planner.
+/// Owns one immutable program/verification and the latest output-scoped engine.
+/// Equal output sets reuse its query cache; changed outputs prepare a fresh engine.
+/// Program/domain/selection edits require a new Planner.
 pub struct Planner<'a> {
     corpus: &'a Corpus,
     keys: &'a SemanticKeys,
     verification: VerificationId,
     limits: Limits,
-    engine: stable_query::Engine,
+    domains: Domains,
+    queries: QueryLimits,
+    roots: BTreeSet<AtomKey>,
+    engine: Option<stable_query::Engine>,
+    reported_scope: Option<stable_query::ScopeSummary>,
 }
 impl<'a> Planner<'a> {
     /// Expand a declared output relation over the resolved finite domains,
@@ -89,9 +94,8 @@ impl<'a> Planner<'a> {
         let mut tuples = vec![vec![]];
         for parameter in &r.parameters {
             let domain = self
-                .engine
-                .program()
-                .domain(parameter.sort)
+                .domains
+                .get(&parameter.sort)
                 .ok_or(CheckError::InvalidRequest("missing output domain"))?;
             let mut next = Vec::new();
             for tuple in &tuples {
@@ -121,22 +125,32 @@ impl<'a> Planner<'a> {
         limits: &Limits,
         queries: QueryLimits,
     ) -> Result<Self> {
+        limits.cancellation.check()?;
+        if corpus.verification(verification).is_none() {
+            return Err(CheckError::InvalidRequest("unknown plan verification"));
+        }
+        // Outputs are supplied to build. Do not first encode a whole program
+        // whose meaning and query cache would have the wrong scope.
         Ok(Self {
             corpus,
             keys,
             verification,
             limits: limits.clone(),
-            engine: stable_query::Engine::prepare(
-                corpus,
-                domains,
-                keys,
-                verification,
-                limits,
-                queries,
-            )?,
+            domains: domains.clone(),
+            queries,
+            roots: BTreeSet::new(),
+            engine: None,
+            reported_scope: None,
         })
     }
+    /// Scope prepared for the latest build attempt, if any. The checker calls
+    /// explicit output atom scopes "root-cones". Failures before preparation have
+    /// no measured scope, even if a previous engine remains cached.
+    pub fn scope(&self) -> Option<&stable_query::ScopeSummary> {
+        self.reported_scope.as_ref()
+    }
     pub fn build(&mut self, outputs: &[Output], options: &Options) -> Result<Build> {
+        self.reported_scope = None;
         match self.build_inner(outputs, options) {
             Err(e @ (CheckError::LimitExceeded { .. } | CheckError::Deadline { .. })) => {
                 Ok(Build::Inconclusive(e))
@@ -150,7 +164,7 @@ impl<'a> Planner<'a> {
         }
         if options.meaning.meaning != stable_query::MeaningMode::Full {
             return Err(CheckError::InvalidRequest(
-                "plan requires full existence and uniqueness checking",
+                "plan requires both existence and uniqueness in its output cone",
             ));
         }
         let limits = self.limits.clone();
@@ -160,25 +174,52 @@ impl<'a> Planner<'a> {
             work: 0,
         };
         let mut requested = BTreeMap::new();
+        let mut roots = BTreeMap::new();
         for output in outputs {
             budget.tick(1)?;
-            self.engine.prepared_value(&output.atom)?; // validate even with an empty context
             let key = AtomKey::from_atom(self.keys, &output.atom)?;
+            roots.insert(key.clone(), output.atom.clone());
             requested
                 .entry(key)
                 .and_modify(|p: &mut u32| *p = (*p).min(output.priority))
                 .or_insert(output.priority);
         }
-        if self.engine.program().input_universe_is_empty() {
+        let root_keys = roots.keys().cloned().collect::<BTreeSet<_>>();
+        if self.engine.is_none() || self.roots != root_keys {
+            self.engine = None; // Drop old clauses before a fallible scope switch.
+            self.roots.clear();
+            let preparation_start = Instant::now();
+            let engine = stable_query::Engine::prepare_scoped(
+                self.corpus,
+                &self.domains,
+                self.keys,
+                self.verification,
+                &self.limits,
+                self.queries.clone(),
+                stable_query::PreparationScope::Roots(roots.into_values().collect()),
+            )?;
+            // Preparation retains its own checker phase deadlines, as when it
+            // happened in prepare(). Do not also charge it to driver elapsed time.
+            budget.start += preparation_start.elapsed();
+            self.engine = Some(engine);
+            self.roots = root_keys;
+        }
+        let engine = self.engine.as_mut().unwrap();
+        for output in outputs {
+            engine.prepared_value(&output.atom)?; // Also validate before empty-context results.
+        }
+        self.reported_scope = Some(engine.scope().clone());
+        budget.tick(1)?;
+        if engine.program().input_universe_is_empty() {
             return Ok(Build::NoPermittedWorlds);
         }
-        match self.engine.worlds(&Query::default())? {
+        match engine.worlds(&Query::default())? {
             Answer::NoModel => return Ok(Build::NoPermittedWorlds),
             Answer::Inconclusive(e) => return Ok(Build::OracleInconclusive(e)),
             Answer::Model(_) => {}
         }
         budget.tick(1)?;
-        let meaning = self.engine.meaning(&options.meaning)?;
+        let meaning = engine.meaning(&options.meaning)?;
         budget.tick(1)?;
         if !meaning.unique_everywhere() {
             use stable_query::{Existence, Uniqueness};
@@ -199,7 +240,7 @@ impl<'a> Planner<'a> {
 
         // Index the existing grounded graph once. Do not copy its rules or build
         // whole-program structural semantic keys just to plan a small output cone.
-        let graph = self.engine.program().clone();
+        let graph = engine.program().clone();
         let mut producers = BTreeMap::<GroundAtom, Vec<&GroundRule>>::new();
         for rule in graph.rules() {
             budget.tick(rule.body.len() + 1)?;
@@ -217,7 +258,7 @@ impl<'a> Planner<'a> {
             if atoms.contains_key(&key) {
                 continue;
             }
-            if !input_atoms.contains(&atom) && self.engine.prepared_value(&atom)?.is_none() {
+            if !input_atoms.contains(&atom) && engine.prepared_value(&atom)?.is_none() {
                 for rule in producers.get(&atom).into_iter().flatten() {
                     budget.tick(rule.body.len())?;
                     pending.extend(rule.body.iter().map(|l| l.term.atom.clone()));
@@ -232,7 +273,7 @@ impl<'a> Planner<'a> {
             if input_atoms.contains(atom) {
                 inputs.insert(key.clone());
             }
-            if let Some(v) = self.engine.prepared_value(atom)? {
+            if let Some(v) = engine.prepared_value(atom)? {
                 fixed.insert(key.clone(), v);
             }
             let mut rs = Vec::new();
@@ -260,7 +301,7 @@ impl<'a> Planner<'a> {
             rules.insert(key.clone(), rs);
         }
         let mut search = crate::search::Search::new(
-            &mut self.engine,
+            engine,
             self.keys,
             &atoms,
             &rules,
@@ -287,6 +328,7 @@ impl<'a> Planner<'a> {
         budget.tick(nodes.len() + requested.len())?;
         let declaration = self.corpus.verification(self.verification).unwrap();
         Ok(Build::Ready(Plan {
+            scope: engine.scope().clone(),
             verification: self.keys.verification(self.verification)?.clone(),
             assumptions: declaration
                 .assumptions

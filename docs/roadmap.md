@@ -147,11 +147,12 @@ reading unsupported or inconclusive results.
 ## Schedules from admitted programs
 
 The [experimental plan driver](../crates/plan/README.md) now exports and interprets
-plain Boolean output plans under one verification. It uses whole-program stable
-meaning checks, straight-line expressions, positive fixpoint kernels and bounded
-expression extraction. Value dependencies define a partial order; scheduling policy
-is separate. Next: branch-specific residual work and joins, then tasks/produced
-inputs and shared branch partitions for meaning/checking. The existing admission
+plain Boolean output plans under one verification. It requires existence and
+uniqueness of the original output cone, with outside rules explicitly unanalysed.
+The same scoped engine supports expressions, positive fixpoint kernels, bounded
+extraction, scheduling splits and sibling joins. Value dependencies define a
+partial order; scheduling policy is separate. Next: tasks/produced inputs and
+shared branch partitions for meaning/checking. The existing admission
 schedule below remains a useful strategy, not a prerequisite for this new driver.
 
 An admitted program's dependency order is an evaluation order valid in every

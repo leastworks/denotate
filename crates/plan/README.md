@@ -20,10 +20,15 @@ exports plans; it does not execute a user program.
 
 ## Construction and guarantee
 
-`Planner::prepare` owns an immutable program/verification engine. `build` first
-requires a permitted input world and **whole-program existence and uniqueness**.
-This is deliberately stronger than eventual output-scope meaning: an unrelated
-ambiguous or meaningless region can prevent a plan. Successful obligation checks
+`Planner::prepare` retains immutable program, domain and verification inputs.
+Grounding, domain/assumption validation and SAT preparation happen at the first
+`build`, when the explicit output atoms are known. `relation_outputs` expands the
+supplied finite domains before that build. The engine uses the original grounded
+upstream union of those atoms, including dependencies removed by later propagation
+or subsumption. Every permitted world must have **existence and uniqueness in this
+output cone**. Outside rules are not analysed: an unrelated paradox cannot block
+a plan, and downstream filters cannot hide ambiguity inside the cone. All selected
+assumptions and the full input contract still define W. Successful obligation checks
 are not a prerequisite, and building a plan does not prove the obligations.
 
 The underlying checker prepares a verification-local view using input pins proved
@@ -56,13 +61,13 @@ inheriting either arm's pins or private temporary values. Splits can nest.
 There is no global BDD construction or admission rewrite pass.
 
 The correctness argument is induction over availability: input and fixed values
-agree with the unique stable model; a rule expression preserves that agreement;
+agree with the unique stable model of the output cone; a rule expression preserves that agreement;
 a positive component computes its least model under the already-agreeing external
 values; an extracted expression has a checked equivalence over those values.
 A split reads an already-agreeing value; its feasible arms partition the parent
 context, and specialization preserves the original rules' meaning on each arm.
 Induction applies within each arm. Each joined binding therefore agrees with the
-unique model on whichever arm ran, which justifies the shared continuation without
+unique cone model on whichever arm ran, which justifies the shared continuation without
 assuming any joined value true. Thus each newly available value agrees too.
 Independent ready nodes commute, so changing their schedule preserves the requested
 outputs.
@@ -72,7 +77,8 @@ keys and declare value dependencies. Direct source rule keys retain provenance;
 the `.den` command adds source spans and embedded `loc(...)` descriptors separately.
 An extracted expression's sources identify its defining rules, not every rule used
 in its SAT proof. A constant with no producer refers to its declaration through its
-output key. JSON version 2 nests `then`/`else` regions under a `split` and declares
+output key. JSON version 3 explicitly reports `meaningScope` (original cone sizes,
+existence-and-uniqueness requirement, and `outsideAnalysed: false`) and nests `then`/`else` regions under a `split` and declares
 its `join.outputs`. Node IDs are local to a region: a complete address includes its
 semantic branch path. Size reports count branches and joins separately, including
 both arms; depth includes the longest arm. The `.den` command renders constant
@@ -96,7 +102,9 @@ records the guards and choices of branches taken.
 ## Bounds and remaining work
 
 The existing checker limits bound preparation and each meaning/oracle operation.
-Construction separately charges its graph/expression work to `Limits::max_work`
+Preparation keeps its own checker deadlines and is excluded from the driver's
+elapsed construction time. Construction separately charges its graph/expression
+work to `Limits::max_work`
 and checks cancellation/deadline between operations; a solver operation has its
 own cooperative timeout and can finish after the driver deadline, which is then
 reported as inconclusive. `Options` caps plan nodes (100,000) and oracle calls (256),
@@ -112,16 +120,21 @@ The CLI exposes atom/rule/work/time, plan-node/oracle-call and available-value c
 plus `--max-split-depth`, `--max-splits`, `--max-split-candidates` and
 `--max-support-trials`; the Rust API exposes all checker and oracle settings.
 
-Repeated builds reuse only the immutable engine's existing query cache. Edits need
-a fresh planner. There is no session integration or reusable plan cache. Semantic
+Repeated builds with the same output atom set reuse the scoped engine's query
+cache. Reordering outputs or changing priorities does not change that scope. A new
+output set drops the old engine before preparing a replacement; failures cannot
+publish its stale scope. `Planner::scope()` is available after successful scope
+preparation for the latest build attempt, and complete plans retain `Plan::scope()`.
+Edits need a fresh planner. There is no session integration or reusable plan cache. Semantic
 keys identify nodes, not sufficient cache invalidation inputs.
 
 Joins currently share only the continuation of sibling arms that supply the same
 chosen component's bindings. The driver does not memoize or merge unrelated branch
-states, or backtrack to a lower-ranked split after failure. Restricting extraction
-to the producer cone is conservative: a downstream constraint may uniquely select
-an upstream value using an input outside that cone. Such a case can remain
-unresolved despite having a unique model.
+states, or backtrack to a lower-ranked split after failure. A downstream rule may
+eliminate an upstream alternative in whole-program models,
+but that is not a proof of unique output-cone meaning. Such a cone is refused with
+its ambiguity witness. Full grounding and retained evidence still cover the program;
+this scope change makes no preparation-memory claim.
 
 Local BDD strategies, tasks, produced inputs and sharing the partition with meaning
 checks are subsequent increments. No failed bounded strategy establishes that no

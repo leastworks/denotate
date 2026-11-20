@@ -103,12 +103,20 @@ fn size(nodes: &BTreeMap<AtomKey, Node>) -> Size {
     out
 }
 impl Plan {
-    /// Version 2 uses nested control regions. An ID is local to its containing
+    /// Version 3 states the output-cone guarantee. An ID is local to its containing
     /// region; its complete address is the semantic branch path plus that ID.
     pub fn to_json(&self) -> Value {
         let s = size(&self.nodes);
-        json!({"version":2,"state":"ready","verification":qualified(&self.verification.0),"contract":"permitted-inputs; whole-program unique meaning checked",
-            "assumptions":self.assumptions.iter().map(|k|qualified(&k.0)).collect::<Vec<_>>(),"inputs":self.inputs.iter().map(atom).collect::<Vec<_>>(),"outputs":self.outputs.iter().map(|(k,p)|json!({"atom":atom(k),"priority":p})).collect::<Vec<_>>(),
+        json!({"version":3,"state":"ready","verification":qualified(&self.verification.0),"contract":"permitted-inputs; unique output-cone meaning checked; outside not analysed",
+            "meaningScope":scope_json(Some(&self.scope)),"assumptions":self.assumptions.iter().map(|k|qualified(&k.0)).collect::<Vec<_>>(),"inputs":self.inputs.iter().map(atom).collect::<Vec<_>>(),"outputs":self.outputs.iter().map(|(k,p)|json!({"atom":atom(k),"priority":p})).collect::<Vec<_>>(),
             "nodes":nodes_json(&self.nodes),"size":{"nodes":s.nodes,"branches":s.branches,"joins":s.joins,"depth":s.depth}})
     }
+}
+
+/// Scope metadata for successful and unsuccessful planning attempts. An absent
+/// summary means scope preparation did not finish, not an empty cone.
+pub fn scope_json(scope: Option<&stable_query::ScopeSummary>) -> Value {
+    json!({"kind":"output-cones","outsideAnalysed":false,
+        "requirement":"existence-and-uniqueness",
+        "coneSize":scope.map(|s|json!({"atoms":s.atoms,"ruleInstances":s.rule_instances}))})
 }

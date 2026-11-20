@@ -362,7 +362,9 @@ fn bounds_invalid_requests_and_cancellation_cannot_publish_a_plan() {
         .unwrap(),
         Build::Inconclusive(_)
     ));
+    assert!(p.scope().is_some());
     assert!(p.build(&[], &Options::default()).is_err());
+    assert!(p.scope().is_none()); // Never label this attempt with a cached scope.
     let mut options = Options::default();
     options.meaning.meaning = stable_query::MeaningMode::None;
     assert!(p.build(&outputs(&[a]), &options).is_err());
@@ -417,7 +419,7 @@ fn tiny_mixed_program_family_agrees_with_exhaustive_stable_oracle() {
 }
 
 #[test]
-fn output_scope_omits_unrelated_work_but_requires_whole_program_meaning() {
+fn output_scope_omits_unrelated_no_meaning_and_reports_its_boundary() {
     let mut c = Corpus::new();
     let input = rel(&mut c, "input", true);
     let out = rel(&mut c, "out", false);
@@ -426,12 +428,25 @@ fn output_scope_omits_unrelated_work_but_requires_whole_program_meaning() {
     rule(&mut c, bad, &[(bad, true)]);
     let v = verification(&mut c, &[]);
     let k = keys(&c);
-    assert!(matches!(
+    let plan = ready(
         planner(&c, &k, v)
             .build(&outputs(&[out]), &Options::default())
             .unwrap(),
-        Build::Problem(Problem::Meaning(_))
-    ));
+    );
+    assert!(!plan.scope().outside_analysed);
+    assert_eq!(plan.scope().atoms, 2);
+    assert_eq!(plan.scope().rule_instances, 1);
+    assert_eq!(plan.to_json()["meaningScope"]["outsideAnalysed"], false);
+    for value in [false, true] {
+        let inputs = BTreeMap::from([(AtomKey::from_atom(&k, &atom(input)).unwrap(), value)]);
+        let run = plan
+            .execute_permitted(&inputs, Order::Semantic, 1000)
+            .unwrap();
+        assert_eq!(
+            run.outputs[&AtomKey::from_atom(&k, &atom(out)).unwrap()],
+            value
+        );
+    }
 }
 
 fn split_options() -> Options {
@@ -797,10 +812,10 @@ fn default_limits_split_a_wide_support_instead_of_building_a_global_expression()
 }
 
 #[test]
-fn unresolved_cone_reports_dependencies_and_a_world_without_claiming_impossibility() {
+fn downstream_filters_cannot_hide_ambiguity_in_the_output_cone() {
     // A downstream contradiction selects between upstream meanings. Whole-program
-    // meaning is unique, but p is outside a/b's producer cone. The cone-only
-    // strategy must report its limitation rather than importing hidden support.
+    // meaning is unique, but p is outside a/b's producer cone. Scoped meaning
+    // must report actual ambiguity instead of borrowing the downstream filter.
     let mut c = Corpus::new();
     let p = rel(&mut c, "p", true);
     let a = rel(&mut c, "a", false);
@@ -815,18 +830,14 @@ fn unresolved_cone_reports_dependencies_and_a_world_without_claiming_impossibili
     let result = planner(&c, &k, v)
         .build(&outputs(&[a]), &Options::default())
         .unwrap();
-    let Build::Problem(Problem::Unresolved {
-        path,
-        dependencies,
-        world,
-        ..
-    }) = result
-    else {
-        panic!("expected bounded unresolved problem: {result:?}")
+    let Build::Problem(Problem::Meaning(m)) = result else {
+        panic!("expected ambiguous cone: {result:?}")
     };
-    assert!(path.is_empty());
-    assert!(!dependencies.is_empty());
-    assert!(world.is_some());
+    assert!(matches!(m.existence, Existence::EveryWorld));
+    let Uniqueness::Multiple { observation, .. } = m.uniqueness else {
+        panic!("{m:?}")
+    };
+    assert!(observation.present.contains(&atom(p)) || observation.absent.contains(&atom(p)));
     let g = GroundProgram::prepare(&c, &Domains::new(), &Limits::default()).unwrap();
     let atoms = g.atoms().cloned().collect::<Vec<_>>();
     let inputs = g.input_atoms().cloned().collect::<BTreeSet<_>>();
@@ -862,5 +873,202 @@ fn preparation_settles_an_output_in_a_dead_cycle_before_planning() {
     assert_eq!(
         plan,
         ready(planner.build(&outputs(&[p, q]), &options).unwrap())
+    );
+}
+
+#[test]
+fn output_changes_replace_scope_and_fresh_warm_plans_agree() {
+    let mut c = Corpus::new();
+    let x = rel(&mut c, "x", true);
+    let r = rel(&mut c, "r", false);
+    let bad = rel(&mut c, "bad", false);
+    let a = rel(&mut c, "a", false);
+    let b = rel(&mut c, "b", false);
+    rule(&mut c, r, &[(x, false)]);
+    rule(&mut c, bad, &[(r, false), (bad, true)]);
+    rule(&mut c, a, &[(b, true)]);
+    rule(&mut c, b, &[(a, true)]);
+    let v = verification(&mut c, &[]);
+    let k = keys(&c);
+    let mut warm = planner(&c, &k, v);
+    assert!(warm.scope().is_none());
+    for roots in [vec![r], vec![bad], vec![r, a], vec![r], vec![x], vec![r]] {
+        let o = outputs(&roots);
+        let first = warm.build(&o, &Options::default()).unwrap();
+        let fresh = planner(&c, &k, v).build(&o, &Options::default()).unwrap();
+        if roots.contains(&bad) {
+            for result in [first, fresh] {
+                let Build::Problem(Problem::Meaning(m)) = result else {
+                    panic!("{result:?}")
+                };
+                assert!(
+                    matches!(m.existence, Existence::NoMeaning(ref w) if w.present.contains(&atom(x)))
+                );
+            }
+        } else if roots.contains(&a) {
+            for result in [first, fresh] {
+                assert!(
+                    matches!(result, Build::Problem(Problem::Meaning(m)) if matches!(m.uniqueness, Uniqueness::Multiple {..}))
+                );
+            }
+        } else {
+            let first = ready(first);
+            assert_eq!(first, ready(fresh));
+            assert_eq!(first, ready(warm.build(&o, &Options::default()).unwrap()));
+            for value in [false, true] {
+                let run = first
+                    .execute_permitted(
+                        &BTreeMap::from([(AtomKey::from_atom(&k, &atom(x)).unwrap(), value)]),
+                        Order::Semantic,
+                        1000,
+                    )
+                    .unwrap();
+                for result in run.outputs.values() {
+                    assert_eq!(*result, value);
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn output_cone_preserves_original_dependencies_even_when_a_rule_is_subsumed() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let out = rel(&mut c, "out", false);
+    let bad = rel(&mut c, "bad", false);
+    rule(&mut c, out, &[(i, false)]);
+    rule(&mut c, out, &[(i, false), (bad, false)]);
+    rule(&mut c, bad, &[(bad, true)]);
+    let v = verification(&mut c, &[]);
+    let k = keys(&c);
+    let result = planner(&c, &k, v)
+        .build(&outputs(&[out]), &Options::default())
+        .unwrap();
+    assert!(
+        matches!(result,Build::Problem(Problem::Meaning(m)) if matches!(m.existence,Existence::NoMeaning(_)))
+    );
+}
+
+#[test]
+fn tiny_output_cones_match_an_independent_exhaustive_oracle() {
+    for shape in 0..64 {
+        let mut c = Corpus::new();
+        let x = rel(&mut c, "x", true);
+        let a = rel(&mut c, "a", false);
+        let b = rel(&mut c, "b", false);
+        let outside = rel(&mut c, "outside", false);
+        let templates = [
+            (a, vec![(x, false)]),
+            (a, vec![(b, true)]),
+            (b, vec![(a, true)]),
+            (b, vec![(x, false)]),
+            (outside, vec![(a, false), (outside, true)]),
+            (a, vec![(outside, false)]),
+        ];
+        for (i, (h, body)) in templates.iter().enumerate() {
+            if shape & (1 << i) != 0 {
+                rule(&mut c, *h, body);
+            }
+        }
+        let v = verification(&mut c, &[]);
+        let k = keys(&c);
+        let g = GroundProgram::prepare(&c, &Domains::new(), &Limits::default()).unwrap();
+        let cone = g.dependency_cone([atom(a)], &Limits::default()).unwrap();
+        let inputs = g.input_atoms().cloned().collect::<BTreeSet<_>>();
+        let atoms = cone.facts.union(&inputs).cloned().collect::<Vec<_>>();
+        let rules = g
+            .rules()
+            .filter(|r| cone.rules.contains(&r.id))
+            .cloned()
+            .collect::<Vec<_>>();
+        let expected = subsets(&inputs.iter().cloned().collect::<Vec<_>>())
+            .into_iter()
+            .map(|w| {
+                let models = stable_models(&atoms, &inputs, &rules, &w);
+                (w, models)
+            })
+            .collect::<Vec<_>>();
+        let mut warm = planner(&c, &k, v);
+        for _ in 0..2 {
+            let result = warm.build(&outputs(&[a]), &Options::default()).unwrap();
+            match result {
+                Build::Ready(plan) => {
+                    assert!(expected.iter().all(|(_, m)| m.len() == 1), "shape {shape}");
+                    for (w, m) in &expected {
+                        let values = inputs
+                            .iter()
+                            .map(|i| (AtomKey::from_atom(&k, i).unwrap(), w.contains(i)))
+                            .collect();
+                        for order in [
+                            Order::Semantic,
+                            Order::ReverseSemantic,
+                            Order::OutputPriority,
+                        ] {
+                            let actual = plan.execute_permitted(&values, order, 10000).unwrap();
+                            assert_eq!(
+                                actual.outputs[&AtomKey::from_atom(&k, &atom(a)).unwrap()],
+                                m.first().unwrap().contains(&atom(a)),
+                                "shape {shape}"
+                            );
+                        }
+                    }
+                }
+                Build::Problem(Problem::Meaning(m)) => {
+                    if let Existence::NoMeaning(w) = &m.existence {
+                        let models = &expected
+                            .iter()
+                            .find(|(input, _)| input == &w.present)
+                            .unwrap()
+                            .1;
+                        assert!(models.is_empty(), "shape {shape}");
+                    } else {
+                        assert!(
+                            matches!(m.uniqueness, Uniqueness::Multiple { .. }),
+                            "shape {shape}: {m:?}"
+                        );
+                        assert!(expected.iter().any(|(_, m)| m.len() > 1), "shape {shape}");
+                    }
+                }
+                other => panic!("shape {shape}: {other:?}"),
+            }
+        }
+    }
+}
+
+#[test]
+fn output_order_and_priorities_reuse_scope_without_leaking_old_metadata() {
+    let mut c = Corpus::new();
+    let x = rel(&mut c, "x", true);
+    let a = rel(&mut c, "a", false);
+    let b = rel(&mut c, "b", false);
+    rule(&mut c, a, &[(x, false)]);
+    rule(&mut c, b, &[(x, true)]);
+    let v = verification(&mut c, &[]);
+    let k = keys(&c);
+    let mut warm = planner(&c, &k, v);
+    let original = ready(warm.build(&outputs(&[a, b]), &Options::default()).unwrap());
+    let mut changed = outputs(&[b, a]);
+    changed[0].priority = 7;
+    let updated = ready(warm.build(&changed, &Options::default()).unwrap());
+    assert_eq!(updated.scope(), original.scope());
+    assert_eq!(updated.nodes(), original.nodes());
+    assert_eq!(
+        updated,
+        ready(
+            planner(&c, &k, v)
+                .build(&changed, &Options::default())
+                .unwrap()
+        )
+    );
+    assert_eq!(
+        updated.outputs()[&AtomKey::from_atom(&k, &atom(b)).unwrap()],
+        7
+    );
+    assert!(warm.build(&[], &Options::default()).is_err());
+    assert!(warm.scope().is_none());
+    assert_eq!(
+        original,
+        ready(warm.build(&outputs(&[a, b]), &Options::default()).unwrap())
     );
 }
