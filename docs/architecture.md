@@ -489,6 +489,21 @@ scope boundary; caches never cross it. Full grounding and original evidence rema
 retained, so this is not cone-only preparation. The explicit-root API is reusable
 by planning, whose whole-program prerequisite remains unchanged for now.
 
+The SAT engine may further specialize its executable view with input literals
+proved by W-only queries. W and assumption validation remain unrestricted; the same
+ground propagator is reused with explicit input seeds. Every engine's immutable
+identity includes its verification, scope and pins. Conditional settled values are
+kept separately from assumption-independent reasons/notices. Original producers
+remain available for evidence. The plan driver reads this verification-local view.
+
+For meaning, the checker can rank exactly-one input groups by propagation on negative
+cones, then check each member's pinned context in an isolated engine. Those contexts
+partition W, so meaning is the conjunction of arm results. Empty arms require a
+W-only proof; unknown arms cannot be skipped. One level is supported, with bounded
+ranking and arm counts. Arm-local solvers, refinements and query caches never enter
+the parent engine. Property queries remain on the parent; the same meaning service
+supports the planner without introducing a second proof path there.
+
 SAT uniqueness and fixed-coverage reports use the same frontend-independent property
 finding helpers as BDD checking. The shared presenter owns status classification and
 structured meaning evidence; `ir-text` binds source locations, and the CLI owns IO,

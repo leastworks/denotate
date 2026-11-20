@@ -351,3 +351,86 @@ fn sat_obligation_cones_report_scope_sizes_and_keep_exit_contract() {
         2
     );
 }
+
+#[test]
+fn sat_pins_and_meaning_splits_have_cli_controls_and_explicit_output() {
+    let source = "sort M;const a,b:M;input phase(m:M) exactly_one(group_by:());
+        relation p();relation q();p():-phase(a),!q();q():-phase(b),p();
+        relation chosen();chosen():-phase(a);assumption selected:at_least_one(chosen,group_by:());
+        obligation clean:empty(q);verification v{assumptions:[];obligations:[clean];}";
+    let f = Fixture::new(source);
+    let (code, out) = f.run(&["--engine", "sat", "--sat-max-worlds", "0", "--no-progress"]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("Meaning split:"));
+    assert_eq!(
+        f.run(&[
+            "--engine",
+            "sat",
+            "--sat-max-split-candidates",
+            "0",
+            "--sat-max-worlds",
+            "0",
+            "--no-progress"
+        ])
+        .0,
+        2
+    );
+    assert_eq!(
+        f.run(&["--engine", "sat", "--sat-split", "phase", "--no-progress"])
+            .0,
+        0
+    );
+    for args in [
+        vec!["--sat-split", "phase"],
+        vec!["--engine", "sat", "--sat-split", "p"],
+        vec!["--engine", "sat", "--sat-split", "missing"],
+    ] {
+        assert_eq!(f.run(&args).0, 2);
+    }
+    // A quoted input and a generated helper may share their display text.
+    let named = Fixture::new(&format!(
+        "namespace n {{ {} relation $phase(); }}",
+        source.replace("phase", "'$phase'")
+    ));
+    let (code, out) = named.run(&[
+        "--engine",
+        "sat",
+        "--sat-split",
+        "n::'$phase'",
+        "--no-progress",
+    ]);
+    assert_eq!(code, 0, "{out}");
+    assert_eq!(
+        named
+            .run(&["--engine", "sat", "--sat-split", "n::$phase"])
+            .0,
+        2
+    );
+    let f = Fixture::new(&source.replace("assumptions:[]", "assumptions:[selected]"));
+    let (code, out) = f.run(&[
+        "--engine",
+        "sat",
+        "--sat-max-split-candidates",
+        "0",
+        "--sat-max-worlds",
+        "0",
+        "--no-progress",
+    ]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("Input pins: 2 proved"));
+    assert_eq!(
+        f.run(&[
+            "--engine",
+            "sat",
+            "--sat-max-pin-candidates",
+            "0",
+            "--sat-max-split-candidates",
+            "0",
+            "--sat-max-worlds",
+            "0",
+            "--no-progress"
+        ])
+        .0,
+        2
+    );
+}

@@ -67,6 +67,14 @@ pub fn stable_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> Resul
                 })));
     let cone_size = (!r.scope.outside_analysed)
         .then(|| json!({"atoms":r.scope.atoms,"ruleInstances":r.scope.rule_instances}));
+    let split_data = |s: &SplitStats| -> Result<Value> {
+        let atom =
+            |a: &GroundAtom| -> Result<Value> { Ok(atom_data(&AtomKey::from_atom(keys, a)?)) };
+        Ok(
+            json!({"group":s.group.iter().map(atom).collect::<Result<Vec<_>>>()?,"candidates":s.candidates,"rankingIncomplete":s.ranking_incomplete,
+            "branches":s.branches.iter().map(|b|Ok(json!({"member":atom(&b.member)?,"existence":b.existence,"uniqueness":b.uniqueness,"stratified":b.stratified}))).collect::<Result<Vec<Value>>>()?}),
+        )
+    };
     let meaning = if let Some(m) = &r.meaning {
         let existence = match &m.existence {
             Existence::NotAnalysed => {
@@ -109,7 +117,7 @@ pub fn stable_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> Resul
                 json!({"state":"multiple-meanings","world":world(observation)?,"differences":differences})
             }
         };
-        json!({"scope":r.scope.label,"mode":m.mode.label(),"outsideAnalysed":r.scope.outside_analysed,"coneSize":cone_size,"existence":existence,"uniqueness":uniqueness, "existenceStats":m.existence_stats.as_ref().map(stable_existence_stats), "uniquenessStats":m.uniqueness_stats.as_ref().map(stable_uniqueness_stats)})
+        json!({"scope":r.scope.label,"mode":m.mode.label(),"split":m.split.as_ref().map(split_data).transpose()?,"outsideAnalysed":r.scope.outside_analysed,"coneSize":cone_size,"existence":existence,"uniqueness":uniqueness, "existenceStats":m.existence_stats.as_ref().map(stable_existence_stats), "uniquenessStats":m.uniqueness_stats.as_ref().map(stable_uniqueness_stats)})
     } else {
         json!({"state":"not-analysed","scope":r.scope.label,"outsideAnalysed":r.scope.outside_analysed,"coneSize":cone_size})
     };
@@ -155,7 +163,7 @@ pub fn stable_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> Resul
         json!({"backend":{"backend":"sat","configuration":"original-stable-v1"},"state":if incomplete{"incomplete"}else if failure{"findings"}else{"proved"},
         "verification":[keys.verification(v.id)?.0.namespace.as_ref(),keys.verification(v.id)?.0.name.as_ref()],
         "activeAssumptions":v.assumptions.iter().map(|id|corpus.assumption(*id).unwrap().name.clone()).collect::<Vec<_>>(),
-        "hasFailures":failure,"incomplete":incomplete,"context":context,"subsumptionIncomplete":r.subsumption_incomplete.as_ref().map(reason),"meaning":meaning,"obligations":obligations,
+        "hasFailures":failure,"incomplete":incomplete,"context":context,"subsumptionIncomplete":r.subsumption_incomplete.as_ref().map(reason),"inputPins":{"attempted":r.pins.attempted,"proved":r.pins.proved,"unknown":r.pins.unknown,"truncated":r.pins.truncated},"meaning":meaning,"obligations":obligations,
         "notices":r.notices_not_analysed.iter().map(|id|json!({"name":corpus.notice(*id).unwrap().name,"state":"not-analysed"})).collect::<Vec<_>>()}),
     )
 }

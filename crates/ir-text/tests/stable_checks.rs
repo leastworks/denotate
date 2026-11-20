@@ -8,6 +8,9 @@ fn load_text(text: &str) -> LoadedProgram {
     load(&ProgramMembership::single("root", [f.uri.clone()]), &[f]).unwrap()
 }
 fn prepare(p: &LoadedProgram, name: &str) -> Engine {
+    prepare_queries(p, name, QueryLimits::default())
+}
+fn prepare_queries(p: &LoadedProgram, name: &str, query: QueryLimits) -> Engine {
     let v = p.corpus.verifications().find(|v| v.name == name).unwrap();
     let limits = Limits {
         max_bdd_variables: 0,
@@ -15,15 +18,7 @@ fn prepare(p: &LoadedProgram, name: &str) -> Engine {
         max_bdd_tasks: 0,
         ..Limits::default()
     };
-    Engine::prepare(
-        &p.corpus,
-        &p.domains,
-        &p.keys,
-        v.id,
-        &limits,
-        QueryLimits::default(),
-    )
-    .unwrap()
+    Engine::prepare(&p.corpus, &p.domains, &p.keys, v.id, &limits, query).unwrap()
 }
 fn atom(p: &LoadedProgram, name: &str, args: &[&str]) -> GroundAtom {
     GroundAtom::new(
@@ -858,7 +853,16 @@ fn cone_support_excludes_unrelated_inputs_but_worlds_keep_cross_boundary_groups(
     let mut e = prepare(&p, "v");
     for _ in 0..2 {
         let m = e
-            .check(&p.keys, &CheckOptions::default())
+            .check(
+                &p.keys,
+                &CheckOptions {
+                    splits: SplitOptions {
+                        max_candidates: 0,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            )
             .unwrap()
             .meaning
             .unwrap();
@@ -882,7 +886,14 @@ fn scoped_queries_validate_positive_recursive_assumption_definitions() {
         relation a(); relation b(); a():-flag(); a():-!b(); b():-!a();
         verification v { assumptions: [selected]; obligations: []; }",
     );
-    let mut e = prepare(&p, "v");
+    let mut e = prepare_queries(
+        &p,
+        "v",
+        QueryLimits {
+            max_pin_candidates: 0,
+            ..Default::default()
+        },
+    );
     for _ in 0..2 {
         let m = e
             .check(&p.keys, &CheckOptions::default())

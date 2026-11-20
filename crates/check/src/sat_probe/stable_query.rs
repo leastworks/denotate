@@ -1,12 +1,16 @@
 //! Experimental stable queries for one immutable program and named verification.
 //! No BDD conditions, admission, or cross-session cache reuse.
 mod inventory;
+mod pins;
 mod scope;
+mod splits;
 use super::*;
 use denotate_ir::{Corpus, SemanticKeys, VerificationId};
 use existence::{Encoding, encode, refine, world_cone};
 pub use inventory::{NegativeComponent, NegativeComponents};
+pub use pins::PinStats;
 pub use scope::{PreparationScope, ScopeSummary};
+pub use splits::{SplitBranch, SplitOptions, SplitStats};
 use std::{collections::VecDeque, sync::Arc};
 mod attribution;
 mod build;
@@ -33,6 +37,10 @@ pub struct QueryLimits {
     pub max_propagations: u64,
     pub cache_entries: usize,
     pub cache_bytes: usize,
+    /// Optional W-only pin discovery. Zero disables it.
+    pub max_pin_candidates: usize,
+    /// Further cap on the supplied checker max_work; default inherits it.
+    pub max_pin_work: usize,
 }
 impl Default for QueryLimits {
     fn default() -> Self {
@@ -44,6 +52,8 @@ impl Default for QueryLimits {
             max_propagations: 1_000_000,
             cache_entries: 32,
             cache_bytes: 8 * 1024 * 1024,
+            max_pin_candidates: 256,
+            max_pin_work: usize::MAX,
         }
     }
 }
@@ -152,6 +162,11 @@ struct Cached {
 /// A different selection, program, domain, or program scope requires a new engine.
 pub struct Engine {
     program: Arc<GroundProgram>,
+    input_pins: BTreeMap<GroundAtom, bool>,
+    pinned_values: BTreeMap<GroundAtom, bool>,
+    pin_stats: PinStats,
+    split_groups: Vec<Vec<GroundAtom>>,
+    ordered_inputs: Vec<GroundAtom>,
     original: Arc<GroundProgram>,
     settled: Arc<crate::settled::SettledView>,
     preparation_receipts: WorkReceipts,
@@ -219,16 +234,19 @@ fn query_inconclusive(error: CheckError) -> Result<Inconclusive> {
     }
 }
 impl Engine {
-    /// Independently propagated view, before admission. Atoms retain original
+    /// Verification-local propagated view, before admission. Atoms retain original
     /// indices; rule instances are local to this view. Use original_instance for
     /// original bodies and original_program for evidence.
     pub fn program(&self) -> &GroundProgram {
         &self.program
     }
-    /// Input-independent truth known by preparation, including legal absent
+    /// Truth known under this verification's W, including legal absent
     /// atoms. None means a residual value, not false.
     pub fn prepared_value(&self, atom: &GroundAtom) -> Result<Option<bool>> {
         let resolved = self.resolve_scoped(atom)?;
+        if let Some(value) = self.pinned_values.get(atom) {
+            return Ok(Some(*value));
+        }
         if let Some(value) = self.settled.values.get(atom) {
             return Ok(Some(value.value));
         }
@@ -266,12 +284,13 @@ impl Engine {
         config: QueryLimits,
         scope: PreparationScope,
     ) -> Result<Self> {
-        let (original, settled, mut preparation_receipts) =
+        let (original, settled, preparation_receipts) =
             build::prepare(corpus, domains, keys, verification, limits)?;
         let original = Arc::new(original);
         let mut program = settled.program.clone();
         let mut b = Budget::tracked(limits);
         let mut cone = build::cone(&program, corpus, verification, &mut b)?;
+        let (ordered_inputs, split_groups) = pins::inventory(&program, &cone, keys, &mut b)?;
         let world_cone = world_cone(&cone, false, &mut b)?;
         let (scope, scope_atoms, origins) = scope::restrict(
             scope,
@@ -304,8 +323,11 @@ impl Engine {
         cnf.clause(vec![truth], &mut b)?;
         let active = cnf.var(&mut b)?;
         let world_encoding = encode(&world_cone, &mut cnf, truth, None, &mut b)?;
-        cnf.gate = Some(active);
-        let program_encoding = encode(&cone, &mut cnf, truth, Some(&world_encoding.vars), &mut b)?;
+        // No program equations exist while W-only pins are proved.
+        let program_encoding = Encoding {
+            vars: vec![],
+            bodies: vec![],
+        };
         b.check("SAT stable preparation")?;
         let input_relations = Arc::new(
             corpus
@@ -349,12 +371,12 @@ impl Engine {
         } else {
             crate::QueryKey::SettledAtoms
         };
-        b.record(
-            &mut preparation_receipts,
-            crate::QueryKey::Preparation,
-            [dependency],
-        )?;
-        Ok(Self {
+        let mut engine = Self {
+            input_pins: BTreeMap::new(),
+            pinned_values: BTreeMap::new(),
+            pin_stats: PinStats::default(),
+            split_groups,
+            ordered_inputs,
             verification,
             scope,
             scope_atoms,
@@ -382,7 +404,16 @@ impl Engine {
             cache_bytes: 0,
             stats: Stats::default(),
             append_failed: None,
-        })
+        };
+        engine.discover_pins(&mut b)?;
+        engine.encode_program(&mut b)?;
+        b.check("SAT stable preparation")?;
+        b.record(
+            &mut engine.preparation_receipts,
+            crate::QueryKey::Preparation,
+            [dependency, crate::QueryKey::SatInputPins],
+        )?;
+        Ok(engine)
     }
     pub fn original_instance(&self, id: GroundRuleId) -> Option<&GroundRule> {
         if id.preparation != self.program.preparation {

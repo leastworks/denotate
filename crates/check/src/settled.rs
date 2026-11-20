@@ -9,6 +9,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[derive(Debug, Clone)]
 pub enum SettledReason {
+    /// Valid only under the explicit input context used for this view.
+    InputPin,
     Producer(GroundRuleId),
     /// One independently violated premise for every original producer.
     DeadProducers(Vec<(GroundRuleId, usize)>),
@@ -78,6 +80,27 @@ impl GroundProgram {
         Vec<GroundRuleId>,
         Vec<(GroundRuleId, GroundRuleId)>,
     )> {
+        self.settle_atoms_with_inputs(keys, &BTreeMap::new(), b)
+    }
+    pub(crate) fn settle_atoms_with_inputs(
+        &self,
+        keys: Option<&denotate_ir::SemanticKeys>,
+        pins: &BTreeMap<GroundAtom, bool>,
+        b: &mut Budget<'_>,
+    ) -> Result<(
+        GroundProgram,
+        BTreeMap<GroundAtom, SettledAtom>,
+        Vec<GroundRuleId>,
+        Vec<(GroundRuleId, GroundRuleId)>,
+    )> {
+        for atom in pins.keys() {
+            b.tick("settled input pins")?;
+            if !self.inputs.contains(atom) {
+                return Err(CheckError::InvalidRequest(
+                    "settlement pins must be represented inputs",
+                ));
+            }
+        }
         b.charge(
             self.core.atoms.len() + self.core.rules.len(),
             "settled index",
@@ -116,6 +139,13 @@ impl GroundProgram {
         for i in 0..n {
             b.tick("settled seeds")?;
             if self.inputs.contains(&self.core.atoms[i]) {
+                if let Some(value) = pins.get(&self.core.atoms[i]) {
+                    values[i] = Some(SettledAtom {
+                        value: *value,
+                        reason: SettledReason::InputPin,
+                    });
+                    queue.push_back(i);
+                }
                 continue;
             }
             if let Some(r) = producers[i]
@@ -397,6 +427,10 @@ impl SettledView {
                         continue;
                     }; // independent fixed cone
                     match &value.reason {
+                        SettledReason::InputPin => {
+                            independent = false;
+                            break;
+                        }
                         SettledReason::Producer(id) => {
                             let support = original
                                 .original_rule(*id)

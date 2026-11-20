@@ -410,6 +410,7 @@ impl Retained for QueryKey {
             | Self::FixedRuntime
             | Self::FixedBinding
             | Self::AssumptionValidation
+            | Self::SatInputPins
             | Self::SettledAtoms
             | Self::ResidualPreparation
             | Self::Preparation

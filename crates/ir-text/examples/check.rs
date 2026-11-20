@@ -340,6 +340,7 @@ fn check_program(
         root,
         sat,
         sat_query_limits,
+        sat_split,
         mut sat_check_options,
         selection,
         validate_all_assumptions,
@@ -482,6 +483,33 @@ fn check_program(
         .unwrap();
     }
     if sat {
+        if let Some(raw) = sat_split {
+            let selected = index::parse_name(&raw).map_err(|e| (2, e))?;
+            let matches = p
+                .corpus
+                .relations()
+                .filter(|r| {
+                    p.corpus.is_generated_relation(r.id) == selected.generated
+                        && r.name == selected.text
+                        && selected
+                            .namespace
+                            .as_ref()
+                            .is_none_or(|ns| p.corpus.namespace(r.id) == Some(ns))
+                })
+                .collect::<Vec<_>>();
+            let relation = match matches.as_slice() {
+                [r] if r.role == denotate_ir::RelationRole::Input => r.id,
+                [_] => return Err((2, "--sat-split requires an input relation".into())),
+                [] => return Err((2, format!("Unknown split relation {raw:?}"))),
+                _ => {
+                    return Err((
+                        2,
+                        format!("Ambiguous split relation {raw:?}; qualify it with its namespace"),
+                    ));
+                }
+            };
+            sat_check_options.splits.relation = Some(relation);
+        }
         if let Some(examples) = empty_examples {
             sat_check_options.examples = examples;
         }

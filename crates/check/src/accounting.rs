@@ -11,6 +11,7 @@ use std::{
 pub enum QueryKey {
     AssumptionValidation,
     SettledAtoms,
+    SatInputPins,
     ResidualPreparation,
     FixedFacts,
     FixedRuntime,

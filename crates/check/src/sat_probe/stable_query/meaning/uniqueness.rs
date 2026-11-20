@@ -17,9 +17,13 @@ impl Engine {
     pub(super) fn scoped_uniqueness(
         &mut self,
         unique_cones: &BTreeSet<usize>,
+        remaining: Option<Duration>,
     ) -> Result<(Uniqueness, UniquenessStats)> {
         let _progress = self.limits.progress.scope("SAT uniqueness", None, true);
-        let limits = self.limits.clone();
+        let mut limits = self.limits.clone();
+        if let Some(remaining) = remaining {
+            limits.timeout = limits.timeout.min(remaining);
+        }
         let mut b = Budget::new(&limits);
         let mut stats = UniquenessStats {
             scope: "preparing",

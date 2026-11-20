@@ -29,6 +29,30 @@ fn prepared(n: usize, cached: bool) -> Engine {
 }
 
 #[test]
+fn split_branch_deadline_applies_to_both_meaning_phases_without_poisoning_queries() {
+    let mut e = prepared(1, false);
+    let options = CheckOptions::default();
+    let limits = Limits {
+        timeout: Duration::ZERO,
+        ..Limits::default()
+    };
+    let deadline = Budget::new(&limits);
+    let m = e.meaning_with_deadline(&options, Some(&deadline)).unwrap();
+    assert!(matches!(m.existence, Existence::Inconclusive(c) if c.resource == "deadline"));
+    assert!(matches!(m.uniqueness, Uniqueness::Inconclusive(c) if c.resource == "deadline"));
+
+    // In particular, starting uniqueness after an arm consumes the outer time
+    // must not create a fresh deadline from the engine's ordinary phase limits.
+    let (u, _) = e
+        .scoped_uniqueness(&BTreeSet::new(), Some(deadline.remaining_time()))
+        .unwrap();
+    assert!(matches!(u, Uniqueness::Inconclusive(c) if c.resource == "deadline"));
+    let m = e.meaning(&options).unwrap();
+    assert!(matches!(m.existence, Existence::EveryWorld));
+    assert!(matches!(m.uniqueness, Uniqueness::Multiple { .. }));
+}
+
+#[test]
 fn enumeration_appends_once_bypasses_cache_and_isolates_every_query() {
     for cached in [false, true] {
         let mut e = prepared(3, cached);

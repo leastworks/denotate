@@ -9,6 +9,7 @@ pub struct Options {
     pub sat_query_limits: denotate_check::stable_query::QueryLimits,
     pub sat_check_options: denotate_check::stable_query::CheckOptions,
     pub selection: Option<String>,
+    pub sat_split: Option<String>,
     pub validate_all_assumptions: bool,
     pub json: bool,
     pub verbose: bool,
@@ -97,7 +98,7 @@ pub fn help() -> String {
     for (flag, value) in limit_values(&Limits::default()) {
         writeln!(text, "  {flag} N (default {value})").unwrap();
     }
-    text.push_str("\nExperimental SAT checking (default engine: bdd):\n  --engine bdd|sat\n  --sat-meaning full|cone|uniqueness|none (default full; uniqueness/none keep exit 2)\n  --sat-max-worlds N (default 1024)\n  --sat-max-tuples N (default 10000)\n  --sat-max-solves N (default 128)\n  --sat-max-refinements N (default 64)\n  --sat-max-polls N (default 100000)\n  --sat-max-conflicts N (default 100000)\n  --sat-max-propagations N (default 1000000)\nSAT checks empty and at_most_one, all fixed obligations, and whole-program meaning (cone: existence plus obligations in their upstream cones).\nOther symbolic obligations and notices are explicitly not analysed.\n");
+    text.push_str("\nExperimental SAT checking (default engine: bdd):\n  --engine bdd|sat\n  --sat-meaning full|cone|uniqueness|none (default full; uniqueness/none keep exit 2)\n  --sat-split RELATION (optional exactly-one input relation hint)\n  --sat-max-pin-candidates N (default 256; 0 disables)\n  --sat-max-pin-work N (default --max-work)\n  --sat-max-split-candidates N (default 8; 0 disables)\n  --sat-max-split-members N (default 32)\n  --sat-max-split-work N (default --max-work; ranking only)\n  --sat-max-worlds N (default 1024)\n  --sat-max-tuples N (default 10000)\n  --sat-max-solves N (default 128)\n  --sat-max-refinements N (default 64)\n  --sat-max-polls N (default 100000)\n  --sat-max-conflicts N (default 100000)\n  --sat-max-propagations N (default 1000000)\nSAT checks empty and at_most_one, all fixed obligations, and whole-program meaning (cone: existence plus obligations in their upstream cones).\nOther symbolic obligations and notices are explicitly not analysed.\n");
     text.push_str(
         "\nLimits apply per operation/query, not to the whole command.\n\
         Deadlines are cooperative, not hard timeouts; loading and presentation are outside them.\n\
@@ -116,6 +117,7 @@ impl Options {
             root,
             sat: false,
             sat_query_limits: Default::default(),
+            sat_split: None,
             sat_check_options: Default::default(),
             selection: None,
             validate_all_assumptions: false,
@@ -155,6 +157,7 @@ impl Options {
                         _ => return Err((2, "--engine requires bdd or sat".into())),
                     }
                 }
+                "--sat-split" => options.sat_split = Some(value()?),
                 "--sat-meaning" => {
                     use denotate_check::stable_query::MeaningMode;
                     options.sat_check_options.meaning = match value()?.as_str() {
@@ -170,7 +173,12 @@ impl Options {
                         }
                     };
                 }
-                "--sat-max-worlds"
+                "--sat-max-pin-candidates"
+                | "--sat-max-pin-work"
+                | "--sat-max-split-candidates"
+                | "--sat-max-split-members"
+                | "--sat-max-split-work"
+                | "--sat-max-worlds"
                 | "--sat-max-tuples"
                 | "--sat-max-solves"
                 | "--sat-max-refinements"
@@ -179,6 +187,17 @@ impl Options {
                         .parse::<usize>()
                         .map_err(|_| (2, format!("{option} requires a nonnegative integer")))?;
                     match option.as_str() {
+                        "--sat-max-pin-candidates" => {
+                            options.sat_query_limits.max_pin_candidates = n
+                        }
+                        "--sat-max-pin-work" => options.sat_query_limits.max_pin_work = n,
+                        "--sat-max-split-candidates" => {
+                            options.sat_check_options.splits.max_candidates = n
+                        }
+                        "--sat-max-split-members" => {
+                            options.sat_check_options.splits.max_members = n
+                        }
+                        "--sat-max-split-work" => options.sat_check_options.splits.max_work = n,
                         "--sat-max-worlds" => options.sat_check_options.max_worlds = n,
                         "--sat-max-tuples" => options.sat_check_options.max_tuples = n,
                         "--sat-max-solves" => options.sat_query_limits.max_solves = n,
@@ -380,11 +399,11 @@ impl Options {
             }
         } else if seen
             .iter()
-            .any(|f| f.starts_with("--sat-max-") || f == "--sat-meaning")
+            .any(|f| f.starts_with("--sat-max-") || f == "--sat-meaning" || f == "--sat-split")
         {
             return Err((
                 2,
-                "--sat-max-* and --sat-meaning options require --engine sat".into(),
+                "--sat-max-*, --sat-split and --sat-meaning options require --engine sat".into(),
             ));
         }
         Ok(options)

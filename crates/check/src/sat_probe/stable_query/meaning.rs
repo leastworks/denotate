@@ -94,6 +94,7 @@ pub enum Uniqueness {
 #[derive(Debug)]
 pub struct Meaning {
     pub mode: MeaningMode,
+    pub split: Option<SplitStats>,
     pub existence_stats: Option<ExistenceStats>,
     pub uniqueness_stats: Option<UniquenessStats>,
     pub existence: Existence,
@@ -181,9 +182,18 @@ impl Engine {
     /// Callers must separately establish that permitted inputs exist; an empty
     /// context must not be published as an executable/checked success.
     pub fn meaning(&mut self, options: &CheckOptions) -> Result<Meaning> {
+        self.meaning_with_deadline(options, None)
+    }
+    /// Split arms share an outer deadline while retaining separate work allowances.
+    pub(super) fn meaning_with_deadline(
+        &mut self,
+        options: &CheckOptions,
+        deadline: Option<&Budget<'_>>,
+    ) -> Result<Meaning> {
         self.validate_meaning_scope(options.meaning)?;
         let mut meaning = Meaning {
             mode: options.meaning,
+            split: None,
             existence: Existence::NotAnalysed,
             uniqueness: Uniqueness::NotAnalysed,
             existence_stats: None,
@@ -194,7 +204,10 @@ impl Engine {
         }
         // Local stratification proves only the requested phases. Deliberately
         // skipped phases remain explicit even when the theorem would be cheap.
-        let limits = self.limits.clone();
+        let mut limits = self.limits.clone();
+        if let Some(deadline) = deadline {
+            limits.timeout = limits.timeout.min(deadline.remaining_time());
+        }
         let mut b = Budget::new(&limits);
         let stratified = (|| {
             for c in self.program.components() {
@@ -227,6 +240,9 @@ impl Engine {
             }
             Ok(false) => {}
         }
+        if let Some(split) = self.split_meaning(options, &mut b)? {
+            return Ok(split);
+        }
         let mut unique_cones = BTreeSet::new();
         if matches!(options.meaning, MeaningMode::Full | MeaningMode::Cone) {
             let (existence, stats) = self.existence_using(options, &mut unique_cones, &mut b)?;
@@ -236,7 +252,8 @@ impl Engine {
         if options.meaning == MeaningMode::Cone {
             return Ok(meaning);
         }
-        let (uniqueness, stats) = self.scoped_uniqueness(&unique_cones)?;
+        let (uniqueness, stats) =
+            self.scoped_uniqueness(&unique_cones, deadline.map(|b| b.remaining_time()))?;
         meaning.uniqueness = uniqueness;
         meaning.uniqueness_stats = Some(stats);
         Ok(meaning)

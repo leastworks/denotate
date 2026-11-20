@@ -200,6 +200,7 @@ struct Rule {
     body: Vec<(usize, bool)>,
 }
 // Named atoms precede anonymous acyclic BDD nodes; all indexed arrays include both.
+#[derive(Clone)]
 struct Cone {
     atoms: Vec<GroundAtom>,
     rules: Vec<Rule>,

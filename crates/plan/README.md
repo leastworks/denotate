@@ -26,6 +26,14 @@ This is deliberately stronger than eventual output-scope meaning: an unrelated
 ambiguous or meaningless region can prevent a plan. Successful obligation checks
 are not a prerequisite, and building a plan does not prove the obligations.
 
+The underlying checker prepares a verification-local view using input pins proved
+by W, and can establish meaning through a bounded one-level partition on an
+exactly-one input group. This can eliminate a syntactic cycle from the upfront
+meaning check. These input facts are valid only under the plan's selected contract;
+original programs and assumptions are not rewritten. The meaning partition is
+separate from availability-aware execution scheduling and does not itself emit
+plan branches.
+
 Only the requested output cone becomes plan work. Input values are available at
 entry, but are not assumed true. Fixed values become constants; ordinary rules
 become Boolean expressions once their premises are available. Pure positive SCCs

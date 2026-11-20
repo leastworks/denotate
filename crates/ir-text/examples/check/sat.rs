@@ -180,6 +180,22 @@ pub(super) fn run(
             if let Some(reason) = s["context"].get("reason") {
                 writeln!(output, "  reason: {reason}").unwrap();
             }
+            writeln!(
+                output,
+                "Input pins: {} proved, {} attempted, {} unknown{}",
+                report.pins.proved,
+                report.pins.attempted,
+                report.pins.unknown,
+                if report.pins.truncated {
+                    " (candidate limit)"
+                } else {
+                    ""
+                }
+            )
+            .unwrap();
+            if let Some(split) = s["meaning"].get("split").filter(|s| !s.is_null()) {
+                writeln!(output, "Meaning split: {}", split).unwrap();
+            }
             for phase in ["existence", "uniqueness"] {
                 if let Some(m) = s["meaning"].get(phase) {
                     writeln!(

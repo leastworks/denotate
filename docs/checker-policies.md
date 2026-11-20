@@ -1599,3 +1599,30 @@ remains explicit and cannot become scoped success. Scope construction and graph
 rebuilding are charged to preparation; there is no new allowance or default change.
 The scope does not reduce full grounding or retained evidence memory, and residual
 atom slots are preserved. No performance improvement is promised by this increment.
+
+### SAT input pins and one-level meaning partitions
+
+Optional W-only pin discovery tries at most 256 named inputs, prioritizing negative
+cones, with work bounded by the supplied checker max_work unless a smaller optional cap
+is configured.
+Each query retains the existing SAT solve/refinement/poll/conflict/propagation caps.
+Unknown discovery leaves inputs unfixed. Work has a `SatInputPins` receipt, including
+optional cutoffs; it is not a verdict. Propagation of proved pins and final encoding
+are charged to preparation. Cancellation/deadline cannot publish a partial engine.
+
+Automatic split ranking considers at most 8 exactly-one input groups of at most 32
+members, with ranking work bounded by checker max_work unless a smaller optional
+cap is configured. Ranking does no SAT
+search and retains only complete candidate scores. A cutoff without a completed
+candidate falls back to ordinary unsplit meaning. Hints restrict selection, not
+semantics. Inputs/derived values outside the selected partition are not assumed.
+
+Branch feasibility queries share the outer meaning budget. Each nonempty branch has
+its own preparation and ordinary per-phase work/world/CNF allowances and existing
+per-query SAT caps; work can therefore multiply by the bounded number of members.
+All branches share the outer remaining deadline. This explicit first-increment
+policy avoids unbounded/nested partitioning; it is provisional until measured on
+real programs. No runtime or memory improvement is promised from synthetic tests.
+Unknown arms keep meaning inconclusive unless that phase already has a confirmed
+failure. Properties and the separate diagnostic allowances are unchanged. The CLI
+exposes pin/ranking caps and a relation hint, including zero-candidate disable controls.

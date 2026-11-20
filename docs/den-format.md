@@ -671,6 +671,16 @@ whole-program meaning; human and JSON output name the scope, its atom/rule-insta
 sizes, and the unanalysed outside. W still includes every selected assumption and
 input restriction. A declaration with no selected obligations checks consistency
 and the empty cone. Symbolic coverage/exactly-one remain unanalysed as above.
+The SAT engine also folds input literals proved by W before listing components or
+checking meaning. Unknown pin queries leave inputs unfixed. Remaining negative
+components may be checked by a single split on an exactly-one input group: each
+nonempty arm is folded under its member/sibling pins, and all arms must satisfy the
+requested meaning phases. Properties remain checked over the parent context.
+Human/JSON output includes input-pin statistics and the chosen split with arm results.
+`--sat-split RELATION` restricts the candidate choice using ordinary qualified-name
+syntax; it never assumes exclusivity. `--sat-max-pin-candidates 0` and
+`--sat-max-split-candidates 0` disable the respective optimizations. `--help` lists
+the candidate, member and work caps. BDD checking and the editor are unchanged.
 The option does not change stable semantics or treat worlds with no stable model
 as invalid input worlds. SAT preparation propagates independently settled atoms
 before its stratification and meaning checks. It also reports Information notices

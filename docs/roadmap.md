@@ -26,7 +26,9 @@ direction for such programs separates meaning from schedule:
   removes constant-dead cycles before SAT meaning; syntactic same-head subsumption
   removes redundant producers, and the CLI lists remaining negative components
   without meaning search. Both reductions have advisory subsumed-producer
-  findings. Next: the remaining obligation kinds and
+  findings. W-proved input pins now specialize verification views, and meaning can
+  use a bounded one-level partition over exactly-one input groups. Derived-family
+  and nested splits remain future work. Next: the remaining obligation kinds and
   notices as needed, then session and editor integration. BDDs stay the default and
   remain the tool for small programs, editor caching and full failing conditions.
 - **Staged execution plans.** A generic driver builds what a DSL compiler's dataflow

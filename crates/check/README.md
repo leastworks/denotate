@@ -836,6 +836,45 @@ scope and original derivations. Advisory producer notices are included only when
 all their represented instances lie inside the cone. An empty selection has an
 empty cone but still requires a consistent W.
 
+SAT preparation now also proves verification-local input pins on the independent W
+encoding. It first confirms a permitted world, then tests the opposite of each
+candidate input's observed value. Only UNSAT establishes a pin; unknown queries
+leave inputs unfixed, and inconsistent W establishes none. The shared ground-atom
+propagator folds the executable view under proved pins **before** program completion
+is encoded. Assumption validation, W construction and ordinary BDD checking retain
+their unrestricted graphs. `prepared_value` and the plan driver see values valid
+under this verification's W; original rules still supply diagnostic derivations.
+Only independently justified producer notices are published.
+
+`QueryLimits::max_pin_candidates` (256, zero disables) and `max_pin_work`
+(inheriting checker `max_work` by default) bound optional discovery. Inputs reaching negative components come first, with
+semantic-key ties; unnamed inputs are skipped for bare query clients. Unknown or
+truncated discovery is reported by `pin_stats()`. Proven literals are available via
+`input_pins()`. A `SatInputPins` receipt records optional query work; preparation
+records the subsequent propagation/encoding. Clauses from a failed partial query
+append are discarded before the engine is published.
+
+`CheckOptions::splits` enables a single level of exactly-one **input** partitioning
+when negative components remain. Candidates are declared input cardinality groups
+or selected exactly-one assumptions directly over inputs. At-most-one, coverage-only
+and derived groups are ineligible. Ranking uses only the shared propagator over
+negative components' upstream rules. It minimizes the descending vector of remaining
+negative atom counts (worst branch first), with semantic group order breaking ties.
+`SplitOptions` bounds candidates (8), members (32) and ranking work (inheriting
+checker `max_work` by default); zero candidates disables splitting. `relation` optionally restricts the choice.
+
+Each selected member is pinned true and its siblings false. W-only queries discard
+empty arms. Nonempty arms own isolated solvers and pinned views; stratification proves
+meaning immediately, otherwise the existing component search runs within that arm.
+There is no nested split and no extra pin-discovery search within an arm. Existence
+and uniqueness are combined independently across the covering partition. A confirmed
+failure survives an inconclusive sibling; proof requires every nonempty arm. A
+ranking cutoff keeps only completed rankings, or falls back to unsplit meaning.
+`Meaning::split` reports the chosen group and each arm's phase results/stratification.
+Properties continue to query the parent engine, and no arm's pins, clauses or caches
+escape to it. This checker-owned meaning partition is also used by planning's
+meaning prerequisite; it does not construct execution-plan branches.
+
 Ground stratification after independent propagation proves the requested meaning phases without search. For
 unstratified programs, existence independently chooses permitted worlds. Its cubes
 preserve one finite positive derivation per true atom and one false premise per

@@ -11,6 +11,7 @@ pub enum Context {
 #[derive(Debug, Clone)]
 pub struct CheckOptions {
     pub meaning: MeaningMode,
+    pub splits: SplitOptions,
     pub max_worlds: usize,
     pub max_tuples: usize,
     pub examples: EmptinessExamples,
@@ -22,6 +23,7 @@ impl Default for CheckOptions {
     fn default() -> Self {
         Self {
             meaning: MeaningMode::Full,
+            splits: SplitOptions::default(),
             max_worlds: 1024,
             max_tuples: 10000,
             examples: Default::default(),
@@ -33,6 +35,7 @@ impl Default for CheckOptions {
 pub struct Report {
     pub meaning_mode: MeaningMode,
     pub scope: ScopeSummary,
+    pub pins: PinStats,
     pub verification: VerificationId,
     pub context: Context,
     pub meaning: Option<Meaning>,
@@ -104,6 +107,7 @@ impl Engine {
         let mut report = Report {
             meaning_mode: options.meaning,
             scope: self.scope.clone(),
+            pins: self.pin_stats.clone(),
             verification: self.verification,
             context: Context::Permitted,
             meaning: None,

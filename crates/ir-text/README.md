@@ -232,6 +232,25 @@ still restrict W, through their separate encoding. `full` retains whole-program
 semantics; `cone` does not claim that the rest of the program has meaning. There is
 no CLI cone-uniqueness switch in this increment.
 
+SAT preparation automatically discovers input facts forced by W and folds the
+verification-local view. `Input pins` / JSON `inputPins` reports attempted, proved,
+unknown and truncated discovery. Meaning can then split once over a declared
+exactly-one input group, ranking by structural propagation. `Meaning split` / JSON
+`meaning.split` reports the group, completed candidate count, ranking cutoff, and each
+arm's existence/uniqueness state and whether it was stratified. Split-based results
+do not fabricate aggregate unsplit existence/uniqueness counters.
+
+`--sat-split RELATION` optionally restricts candidates to a qualified input relation.
+The default caps are 256 pin candidates, 8 split candidates and 32 members per
+group. Pin-query and ranking work each inherit checker `--max-work`; optional
+smaller caps can be supplied. The flags are
+`--sat-max-pin-candidates`, `--sat-max-pin-work`, `--sat-max-split-candidates`,
+`--sat-max-split-members`, and `--sat-max-split-work`. Zero candidate limits disable
+the respective search. Ranking does no SAT; actual arms use isolated W-pinned
+solvers, ordinary per-branch phase allowances, and a shared remaining deadline.
+No nested or derived-family split is attempted. An unknown branch cannot be skipped;
+known failures remain visible. These flags require `--engine sat`.
+
 Existence progress and final `meaning.existenceStats` report cube count, inputs per
 cube (min/mean/max), whole-program encoded input support size, distinct inputs used
 in cubes, and `distinctCubeLiterals` versus `emittedExclusionLiterals`.

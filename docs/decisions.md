@@ -1656,3 +1656,34 @@ cannot cross scopes. The existing cone walker and meaning search are shared with
 explicit-root preparation API for future output-scoped planning. The planner's
 whole-program meaning prerequisite remains unchanged. Full grounding, atom slots
 and evidence remain retained; this increment makes no preparation-memory claim.
+
+## Verification-local SAT pins and exactly-one meaning splits
+
+An input literal can seed propagation only after the independent world encoding
+proves it. One W model establishes consistency and supplies a candidate polarity;
+UNSAT for its opposite proves the literal in every permitted world. Program-model
+queries are unsuitable: a no-meaning world could disappear and manufacture a false
+pin. Unknown queries establish nothing. W and assumption validation are never folded
+using the consequences they are being used to justify.
+
+Given these input facts, ordinary propagation preserves stable models in W. A true
+producer supplies finite support; every producer of a folded-false atom has a false
+premise. Values, components, completion and planning use this verification-local
+view, while witnesses reconstruct original derivations. Conditional propagation does
+not turn its removed producers into assumption-independent subsumption notices.
+
+An exactly-one input group partitions W by choosing one member true and every other
+member false. Ranking is structural propagation only, ordered by worst remaining
+negative atom count and then the other arms, with semantic ties. Actual branch
+meaning uses isolated encodings of W plus the pins. W-only UNSAT can skip an empty
+arm; unknown cannot. Existence and uniqueness are combined separately, preserving
+known failures across unknown siblings. Neither a partition nor proving an obligation
+changes the parent program's input contract or property queries.
+
+The first increment is automatic, one level, input groups only, with bounded ranking
+and branch counts and a shared deadline. Branch phase allowances remain separate;
+this multiplication is explicit in the checker policies. A CLI relation hint permits
+experiments without adding language syntax. Derived families, nested partitions and
+input-correlation rewrite notices remain separate work. The generic checker service
+is used by the planner's meaning prerequisite; executable plan scheduling retains its
+own availability-aware partition, because truth and availability are different.
