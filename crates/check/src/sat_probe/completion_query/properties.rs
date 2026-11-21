@@ -13,7 +13,7 @@ pub struct PropertyPart {
 pub struct ObligationResult {
     pub requirement: Requirement,
     pub parts: Vec<PropertyPart>,
-    pub rejected: Option<Observation>,
+    pub rejected: Option<Model>,
     pub not_analysed: bool,
     pub vacuous: bool,
     pub finished: bool,
@@ -44,7 +44,7 @@ impl ObligationResult {
     }
     pub(super) fn rejection(
         requirement: Requirement,
-        rejected: &Search<Observation>,
+        rejected: &Search<Model>,
         unknown: Option<Inconclusive>,
     ) -> Self {
         Self {
@@ -294,13 +294,14 @@ impl Engine {
             run.models(
                 &self.cone,
                 &pins,
-                None,
+                self.classification.as_ref().map(|(_, _, h)| *h),
                 if classification.is_some() {
                     ModelScope::Processing
                 } else {
                     ModelScope::WholeProgram
                 },
                 classification.map(|m| (self.classification.as_ref().unwrap().1.as_ref(), m)),
+                false,
             )
         })();
         match result {

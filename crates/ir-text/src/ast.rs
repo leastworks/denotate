@@ -52,6 +52,7 @@ pub(crate) enum Decl {
         name: Name,
         semantics: denotate_ir::Semantics,
         hypothesis: Option<Name>,
+        decisions: Option<Vec<Name>>,
         assumptions: Vec<Name>,
         obligations: Vec<Name>,
         notices: Vec<Name>,
@@ -617,6 +618,14 @@ fn scope(
                 } else {
                     denotate_ir::Semantics::Stable
                 },
+                decisions: node
+                    .child_by_field_name("decisions_label")
+                    .map(|_| {
+                        node.children_by_field_name("decision", &mut node.walk())
+                            .map(|n| name(source, n))
+                            .collect::<Result<_>>()
+                    })
+                    .transpose()?,
                 hypothesis: node
                     .child_by_field_name("hypothesis")
                     .map(|n| name(source, n))

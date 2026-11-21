@@ -98,11 +98,14 @@ zero-arity condition, optional zero-arity enclosing scope, and a message label.
 declarations. A notice carries no assertion and does not alter relational meaning.
 
 `verification_with_options_in` also takes `VerificationOptions { semantics,
-hypothesis }`. Existing constructors default to `Semantics::Stable` with no
-hypothesis. A hypothesis is an ordinary zero-arity relation handle, validated for
+hypothesis, decisions }`. Existing constructors default to `Semantics::Stable` with
+no hypothesis and `decisions: None` (all-relation determinacy). `Some(set)` explicitly
+selects tuple-set determinacy, including `Some(empty)` for no uniqueness requirement.
+Decision relations may have any arity and must belong to this corpus. A hypothesis is an ordinary zero-arity relation handle, validated for
 arity and corpus ownership. `require_no_rejections_in(namespace, name, hypothesis,
 message)` creates the obligation-only `Requirement::NoRejections`; selecting it
 requires completion semantics with that same hypothesis. `Restriction` deliberately
 has no such variant, so it cannot become an assumption. These declarations are
-available for construction and export; current checkers explicitly refuse completion
-and stable-with-hypothesis until their semantics are implemented.
+available for construction and export. The experimental completion checker supports
+them; stable consumers explicitly refuse completion, stable-with-hypothesis and
+stable-with-decisions until those contracts are implemented.

@@ -371,10 +371,16 @@ verification normal_operation {
 
 ### Completion semantics and acceptance
 
-Verifications may declare `semantics: completion;` and then
-`hypothesis: recognized;` before `assumptions`. Omitting `semantics` means `stable`;
-omitting the hypothesis selects no acceptance contract. These field names and
-`stable`/`completion` are contextual, not globally reserved words. The hypothesis
+Verifications may declare `semantics: completion;`, `hypothesis: recognized;`,
+and `decisions: [leaf, kept, output];` before `assumptions`, in that order.
+Each field is optional. Omitting `semantics` means `stable`; omitting the hypothesis
+selects no acceptance contract. Omitting `decisions` checks determinacy of every
+original relation. An explicit list checks that each selected relation has the
+same **set of tuples** across interpretations; it does not require one tuple.
+Relations of any arity are allowed, using ordinary namespace resolution.
+`decisions: [];` checks existence and properties without requiring uniqueness of
+any relation. Selection never removes equations or hides contradictions. These field
+names and `stable`/`completion` are contextual, not globally reserved words. The hypothesis
 uses ordinary namespace resolution and must be a zero-arity input or derived
 relation. Each field occurs at most once, in that order.
 
@@ -401,17 +407,25 @@ verification. Completion requires `--sat-meaning full` (the default); other anal
 modes and split hints are explicitly unsupported. BDD, the editor checker, the
 scorecard and the execution planner still refuse completion before stable
 preparation, while editor reference services remain available. Stable with a
-hypothesis is also unsupported. Independent supported verifications still run.
+hypothesis or an explicit decision selection is also unsupported. Independent
+supported verifications still run.
 
 For each complete observation permitted by W, completion interprets every derived
 atom as equivalent to the disjunction of its producers. Positive self-support is
 therefore possible: `p() :- p();` permits both values. Without a hypothesis, zero
-interpretations is no meaning and several are ambiguity. With H, classification
-uses only H's original upstream **ground** dependency cone, requiring H true:
-zero interpretations rejects the observation, one accepts it, and several are
-classification ambiguity. Processing then asks for whole-program extensions of
-the unique accepted classification. A processing contradiction cannot reject the
-input or choose a classification. Limits yield inconclusive results, not rejection.
+interpretations is no meaning; several distinct decision interpretations are
+ambiguity. With H, classification uses only H's original upstream **ground**
+dependency cone C, requiring H true. Decisions outside C do not enlarge it.
+One decision interpretation accepts the observation; several are classification
+ambiguity. If there is none, a second query checks C **without H**: an interpretation
+there establishes rejection; no interpretation is classification no-meaning, a
+specification failure. For example, `h() :- !h();` cannot be dismissed as rejection.
+If either required query exhausts, its unanswered question stays inconclusive.
+
+Processing then retains C's equations and H, pins only the established decision
+values in C, and checks whole-program existence and decision determinacy. Unselected
+helpers remain free, rather than being fixed to an arbitrary classification witness.
+A processing contradiction cannot reject the input or choose a classification.
 
 Selected derived assumptions and static `within` providers must have acyclic ground
 cones in this increment, so their meaning in W agrees under stable and completion
@@ -419,14 +433,19 @@ semantics. Compatibility checks do not use H or assumptions to prune cycles;
 exhaustion is inconclusive. Ordinary global assumption validation still runs.
 
 Processing obligations are checked over accepted observations, in their original
-property cones together with the pinned classification. An independent property
-failure survives unrelated processing no meaning. The SAT completion path supports
+property cones together with C's equations, H and the established decision values.
+They search all relevant helper interpretations, including ones different from the
+retained classification example. An independent property failure survives unrelated
+processing no meaning. The SAT completion path supports
 `empty`, `at_most_one`, and coverage/exactly-one on input-independent acyclic cones.
 Other coverage work and notices remain explicitly unanalysed. `no_rejections(H)`
-checks outside H that every permitted observation has at least one classification;
-ambiguity is not rejection and is reported separately.
+fails exactly when some permitted observation has an interpretation of C without H,
+but none with H. Its evidence includes both the validated interpretation without H
+and confirmation that the query with H is unsatisfiable. Classification no-meaning
+and ambiguity fail verification separately; neither is rejection.
 
-When every permitted observation rejects, the result explicitly says `all-rejected`:
+Only when every permitted observation rejects, with no classification no-meaning,
+ambiguity or unknown observation, does the result say `all-rejected`:
 processing is not applicable and processing obligations are vacuous. This is allowed
 unless `no_rejections` is selected; it is never an unqualified program proof.
 Inconsistent W remains a context error. Exit precedence is 2 for required incomplete

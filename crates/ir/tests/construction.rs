@@ -594,7 +594,8 @@ fn completion_options_validate_foreign_handles_boolean_hypotheses_and_selections
                 [],
                 VerificationOptions {
                     semantics: Semantics::Completion,
-                    hypothesis: Some(bad)
+                    hypothesis: Some(bad),
+                    decisions: None,
                 }
             )
             .is_err()
@@ -612,10 +613,12 @@ fn completion_options_validate_foreign_handles_boolean_hypotheses_and_selections
         VerificationOptions {
             semantics: Semantics::Completion,
             hypothesis: None,
+            decisions: None,
         },
         VerificationOptions {
             semantics: Semantics::Completion,
             hypothesis: Some(other),
+            decisions: None,
         },
     ] {
         assert!(
@@ -632,6 +635,7 @@ fn completion_options_validate_foreign_handles_boolean_hypotheses_and_selections
             VerificationOptions {
                 semantics: Semantics::Completion,
                 hypothesis: Some(h),
+                decisions: None,
             },
         )
         .unwrap();

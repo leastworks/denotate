@@ -40,9 +40,40 @@ fn model(m: &Model, keys: &SemanticKeys, hypothesis: Option<RelationId>) -> Resu
         })
         .transpose()?;
     Ok(
-        json!({"kind":"completion-model","scope":match m.scope(){ModelScope::Classification=>"hypothesis-cone",ModelScope::Processing=>"accepted-processing",ModelScope::Property=>"property-cone",ModelScope::WholeProgram=>"whole-program"},
+        json!({"kind":"completion-model","scope":match m.scope(){ModelScope::Classification=>"hypothesis-cone",ModelScope::ClassificationWithoutHypothesis=>"classification-without-hypothesis",ModelScope::Processing=>"accepted-processing",ModelScope::Property=>"property-cone",ModelScope::WholeProgram=>"whole-program"},
         "hypothesis":hypothesis.map(|h| atom(&GroundAtom::new(h,[]),keys)).transpose()?,
         "scopeAtoms":scope_atoms,"observation":observation(&m.observation(),keys)?,"interpretation":values.iter().map(|(a,v)|json!({"atom":atom_data(a),"value":v})).collect::<Vec<_>>(),"unlistedInScope":"false"}),
+    )
+}
+fn rejection(m: &Model, keys: &SemanticKeys, h: Option<RelationId>) -> Result<Value> {
+    Ok(
+        json!({"kind":"rejected-observation", "scope":"hypothesis-cone",
+        "observation":observation(&m.observation(),keys)?,
+        "hypothesis":h.map(|h|atom(&GroundAtom::new(h,[]),keys)).transpose()?,
+        "confirmedNoInterpretation":true,
+        "withoutHypothesis":model(m,keys,None)?}),
+    )
+}
+fn determinacy(r: &Report, keys: &SemanticKeys) -> Result<Value> {
+    let relations = r
+        .decisions
+        .as_ref()
+        .map(|rs| {
+            let mut selected = rs
+                .iter()
+                .map(|id| keys.relation(*id))
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            selected.sort();
+            Ok::<_, denotate_ir::KeyError>(
+                selected
+                    .into_iter()
+                    .map(crate::identity::relation)
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .transpose()?;
+    Ok(
+        json!({"kind":if relations.is_some(){"selected-relations"}else{"all-relations"},"relations":relations}),
     )
 }
 fn search<T>(s: &Search<T>, evidence: impl Fn(&T) -> Result<Value>) -> Result<Value> {
@@ -78,7 +109,7 @@ pub fn completion_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> R
         Context::Inconclusive(c) => json!({"state":"inconclusive","reason":reason(c)}),
     };
     let classification = if let Some(c) = &r.classification {
-        json!({"scope":"hypothesis-cone","state":if r.all_rejected(){"all-rejected"}else{"classified"},"accepted":search(&c.accepted,|m|model(m,keys,r.hypothesis))?,"rejected":search(&c.rejected,|w|Ok(json!({"kind":"rejected-observation","observation":observation(w,keys)?})))?,"ambiguous":search(&c.ambiguous,|p|pair(p,keys,r.hypothesis))?})
+        json!({"scope":"hypothesis-cone","state":if r.all_rejected(){"all-rejected"}else{"classified"},"accepted":search(&c.accepted,|m|model(m,keys,r.hypothesis))?,"rejected":search(&c.rejected,|m|rejection(m,keys,r.hypothesis))?,"noMeaning":search(&c.no_meaning,|w|Ok(json!({"kind":"completion-no-meaning","scope":"classification-without-hypothesis","observation":observation(w,keys)?})))?,"ambiguous":search(&c.ambiguous,|p|pair(p,keys,r.hypothesis))?})
     } else {
         json!({"state":"not-applicable"})
     };
@@ -130,7 +161,7 @@ pub fn completion_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> R
         }
     };
     Ok(
-        json!({"backend":{"backend":"sat","configuration":"original-completion-v1"},"semantics":"completion","hypothesis":r.hypothesis.map(|h| corpus.relation(h).unwrap().name.clone()),"hypothesisIdentity":r.hypothesis.map(|h|atom(&GroundAtom::new(h,[]),keys)).transpose()?,
+        json!({"backend":{"backend":"sat","configuration":"original-completion-v1"},"semantics":"completion","determinacy":determinacy(r,keys)?,"hypothesis":r.hypothesis.map(|h| corpus.relation(h).unwrap().name.clone()),"hypothesisIdentity":r.hypothesis.map(|h|atom(&GroundAtom::new(h,[]),keys)).transpose()?,
         "verification":[keys.verification(v.id)?.0.namespace.as_ref(),keys.verification(v.id)?.0.name.as_ref()],"activeAssumptions":v.assumptions.iter().map(|id|corpus.assumption(*id).unwrap().name.clone()).collect::<Vec<_>>(),
         "state":if r.is_incomplete(){"incomplete"}else if r.has_failures(){"findings"}else if r.all_rejected(){"all-rejected"}else{"proved"},"hasFailures":r.has_failures(),"incomplete":r.is_incomplete(),"context":context,"classification":classification,"meaning":meaning,"obligations":obligations,
         "incompletePhases":r.incomplete.iter().map(|c|reason(*c)).collect::<Vec<_>>(),"notices":r.notices_not_analysed.iter().map(|id|json!({"name":corpus.notice(*id).unwrap().name,"state":"not-analysed"})).collect::<Vec<_>>(),"advisories":{"circularSupport":advisory}}),
@@ -213,12 +244,24 @@ pub fn completion_findings(
         );
     }
     if let Some(c) = &r.classification {
+        if let Search::Exists(w) = &c.no_meaning {
+            add(
+                &mut out,
+                Identity::CompletionMeaning("classification-no-meaning"),
+                Kind::NoMeaning,
+                "The classification equations have no interpretation even without the hypothesis."
+                    .into(),
+                vec![obs_note(w)?],
+                base.clone(),
+                json!({"kind":"completion-no-meaning","scope":"classification-without-hypothesis","observation":observation(w,keys)?}),
+            );
+        }
         if let Search::Exists(p) = &c.ambiguous {
             add(
                 &mut out,
                 Identity::CompletionMeaning("classification-ambiguity"),
                 Kind::AmbiguousMeaning,
-                "A permitted observation has several classifications satisfying the hypothesis."
+                "A permitted observation has several decision interpretations satisfying the hypothesis."
                     .into(),
                 vec![obs_note(&p.first.observation())?],
                 base.clone(),
@@ -242,7 +285,8 @@ pub fn completion_findings(
             &mut out,
             Identity::CompletionMeaning("processing-ambiguity"),
             Kind::AmbiguousMeaning,
-            "The processing equations have several interpretations for this observation.".into(),
+            "The processing equations have several decision interpretations for this observation."
+                .into(),
             vec![obs_note(&p.first.observation())?],
             base.clone(),
             pair(p, keys, r.hypothesis)?,
@@ -284,9 +328,9 @@ pub fn completion_findings(
                     "Obligation {} fails: a permitted input observation is rejected.{authored_message}",
                     declaration.name
                 ),
-                vec![obs_note(w)?],
+                vec![obs_note(&w.observation())?],
                 contributions.clone(),
-                json!({"kind":"rejected-observation","observation":observation(w,keys)?,"hypothesis":r.hypothesis.map(|h|atom(&GroundAtom::new(h,[]),keys)).transpose()?,"scope":"hypothesis-cone","confirmedNoInterpretation":true}),
+                rejection(w, keys, r.hypothesis)?,
             );
         }
         for component in [
@@ -416,6 +460,11 @@ pub fn completion_findings(
                 locations,
                 model(&f.model, keys, r.hypothesis)?,
             );
+        }
+    }
+    for finding in &mut out {
+        if finding.evidence["kind"] == "completion-ambiguity" {
+            finding.evidence["determinacy"] = determinacy(r, keys)?;
         }
     }
     Ok(out)

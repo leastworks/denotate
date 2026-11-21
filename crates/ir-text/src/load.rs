@@ -968,6 +968,7 @@ pub fn load_with_resolver(
             if let Decl::Verification {
                 semantics,
                 hypothesis,
+                decisions,
                 name,
                 assumptions,
                 obligations,
@@ -1040,6 +1041,15 @@ pub fn load_with_resolver(
                 let options = VerificationOptions {
                     semantics: *semantics,
                     hypothesis: hypothesis.as_ref().map(|h| b.relation(m, h)).transpose()?,
+                    decisions: decisions
+                        .as_ref()
+                        .map(|names| {
+                            names
+                                .iter()
+                                .map(|n| b.relation(m, n))
+                                .collect::<std::result::Result<_, _>>()
+                        })
+                        .transpose()?,
                 };
                 let declaration = b.program.corpus.verification_with_options_in(
                     &m.namespace,

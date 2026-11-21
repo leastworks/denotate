@@ -807,8 +807,8 @@ fn notice_rename_updates_every_consumer_and_rejects_capture() {
 #[test]
 fn completion_references_use_shared_services_across_consumers() {
     let mut c = Client::start("base/00-valid");
-    let lib = "namespace lib; input ready(); obligation total:no_rejections(ready); verification checks{semantics:completion;hypothesis:ready;assumptions:[];obligations:[total];}";
-    let app = "use lib; relation occupied(); verification own{semantics:completion;hypothesis:ready;assumptions:[];obligations:[total];}";
+    let lib = "namespace lib; input ready(); obligation total:no_rejections(ready); verification checks{semantics:completion;hypothesis:ready;decisions:[ready];assumptions:[];obligations:[total];}";
+    let app = "use lib; relation occupied(); verification own{semantics:completion;hypothesis:ready;decisions:[ready];assumptions:[];obligations:[total];}";
     root_files(
         &mut c,
         &[
@@ -823,9 +823,9 @@ fn completion_references_use_shared_services_across_consumers() {
     let (uri, _) = c.open("lib/code.den");
     let (a_uri, _) = c.open("a/code.den");
     let b_uri = support::file_uri(&c.workspace.path().join("b/code.den"));
-    let unsaved = app.replace("hypothesis:ready", "hypothesis:lib::ready");
+    let unsaved = app.replace("ready", "lib::ready");
     c.change(&a_uri, 2, &unsaved);
-    let at = params(&a_uri, &unsaved, "ready;", "accepted");
+    let at = params(&a_uri, &unsaved, "ready]", "accepted");
     let definition = c.request("textDocument/definition", at.clone());
     assert_eq!(definition[0]["targetUri"], uri);
     let hover = c.request("textDocument/hover", at.clone());
@@ -833,9 +833,9 @@ fn completion_references_use_shared_services_across_consumers() {
     let mut refs = at.clone();
     refs["context"] = json!({"includeDeclaration":true});
     let references = c.request("textDocument/references", refs);
-    assert_eq!(references.as_array().unwrap().len(), 5, "{references}");
+    assert_eq!(references.as_array().unwrap().len(), 8, "{references}");
     let result = c.request("textDocument/rename", at);
-    assert_eq!(edits(&result), 5);
+    assert_eq!(edits(&result), 8);
     assert_eq!(
         apply_file(lib, &result, &uri),
         lib.replace("ready", "accepted")
@@ -874,22 +874,27 @@ fn completion_references_use_shared_services_across_consumers() {
         .as_array()
         .unwrap();
     let mut column = 0;
-    let mut highlighted = false;
+    let mut highlighted = 0;
     for token in tokens["data"].as_array().unwrap().chunks_exact(5) {
         assert_eq!(token[0], 0);
         column += token[1].as_u64().unwrap() as usize;
-        if column == unsaved.find("lib::ready").unwrap() {
+        if [
+            unsaved.find("lib::ready").unwrap(),
+            unsaved.rfind("lib::ready").unwrap(),
+        ]
+        .contains(&column)
+        {
             assert_eq!(legend[token[3].as_u64().unwrap() as usize], "function");
             assert_eq!(token[2], 10);
-            highlighted = true;
+            highlighted += 1;
         }
     }
-    assert!(highlighted, "{tokens}");
+    assert_eq!(highlighted, 2, "{tokens}");
     let options = json!({"textDocument":{"uri":a_uri},"options":{"tabSize":4,"insertSpaces":true}});
     let formatted = c.request("textDocument/formatting", options.clone());
     let formatted = apply_edits(&unsaved, formatted.as_array().unwrap());
     assert!(
-        formatted.contains("    semantics: completion;\n    hypothesis: lib::ready;\n"),
+        formatted.contains("    semantics: completion;\n    hypothesis: lib::ready;\n    decisions: [lib::ready];\n"),
         "{formatted}"
     );
     c.change(&a_uri, 3, &formatted);

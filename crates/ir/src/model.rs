@@ -341,10 +341,13 @@ pub enum Semantics {
     Stable,
     Completion,
 }
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct VerificationOptions {
     pub semantics: Semantics,
     pub hypothesis: Option<RelationId>,
+    /// None checks determinacy of all relations; Some selects tuple-set determinacy.
+    /// Existence and obligation queries still retain every relevant equation.
+    pub decisions: Option<BTreeSet<RelationId>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1311,6 +1314,10 @@ impl Corpus {
     ) -> Result<VerificationId> {
         if let Some(h) = options.hypothesis {
             self.boolean_hypothesis(h)?;
+        }
+        for relation in options.decisions.iter().flatten() {
+            self.relation(*relation)
+                .ok_or(ConstructionError::UnknownRelation(*relation))?;
         }
         let namespace = namespace.into();
         let name = name.into();

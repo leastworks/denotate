@@ -54,7 +54,8 @@ impl Engine {
 
     /// All omitted eligible inputs are absent. First check membership in W,
     /// then classify in H's original upstream cone, then check processing with
-    /// that unique classification pinned. No downstream model chooses a class.
+    /// its established decisions pinned, retaining C and H. Helpers remain free;
+    /// no downstream model chooses a class.
     pub fn observation(
         &self,
         present: impl IntoIterator<Item = GroundAtom>,
@@ -99,6 +100,7 @@ impl Engine {
                     None,
                     ModelScope::WholeProgram,
                     None,
+                    false,
                 )?));
             };
             match run.models(
@@ -107,8 +109,34 @@ impl Engine {
                 Some(*hypothesis),
                 ModelScope::Classification,
                 None,
+                false,
             )? {
-                Interpretations::NoMeaning => Ok(ObservationOutcome::Rejected),
+                Interpretations::NoMeaning => {
+                    // Existence of C is independent of determinacy: one validated
+                    // interpretation is enough. Disable the earlier H query gate.
+                    match run.models(
+                        cone,
+                        &pins,
+                        None,
+                        ModelScope::ClassificationWithoutHypothesis,
+                        None,
+                        true,
+                    )? {
+                        Interpretations::Unique(without_hypothesis) => {
+                            Ok(ObservationOutcome::Rejected { without_hypothesis })
+                        }
+                        Interpretations::NoMeaning => {
+                            Ok(ObservationOutcome::ClassificationNoMeaning)
+                        }
+                        Interpretations::Inconclusive { cause, .. } => {
+                            Ok(ObservationOutcome::Inconclusive {
+                                cause,
+                                example: None,
+                            })
+                        }
+                        _ => unreachable!(),
+                    }
+                }
                 Interpretations::Multiple { first, second } => {
                     Ok(ObservationOutcome::Ambiguous { first, second })
                 }
@@ -120,9 +148,10 @@ impl Engine {
                         run.models(
                             &self.cone,
                             &pins,
-                            None,
+                            Some(*hypothesis),
                             ModelScope::Processing,
                             Some((members, &classification)),
+                            false,
                         )?
                     } else {
                         Interpretations::NotAnalysed
@@ -170,8 +199,13 @@ pub(super) fn property(
         pins.push(!run.input(a)?);
     }
     if let Some(model) = classification {
-        for a in engine.classification.as_ref().unwrap().1.iter() {
+        let (_, members, hypothesis) = engine.classification.as_ref().unwrap();
+        pins.push(e.vars[*hypothesis]);
+        for a in members.iter() {
             run.budget.tick("completion property classification")?;
+            if !engine.decision(a) {
+                continue;
+            }
             let i = engine
                 .program
                 .atom_index
@@ -319,10 +353,12 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         hypothesis: Option<usize>,
         scope: ModelScope,
         accepted: Option<(&BTreeSet<GroundAtom>, &Model)>,
+        existence_only: bool,
     ) -> Result<Interpretations> {
         let mut example = None;
         let phase = match scope {
             ModelScope::Classification => "completion classification",
+            ModelScope::ClassificationWithoutHypothesis => "completion classification existence",
             ModelScope::Processing => "completion processing",
             ModelScope::WholeProgram => "completion meaning",
             ModelScope::Property => "completion property",
@@ -346,6 +382,9 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             if let Some((members, model)) = accepted {
                 for atom in members {
                     self.budget.tick(phase)?;
+                    if !self.engine.decision(atom) {
+                        continue;
+                    }
                     let i = self
                         .engine
                         .program
@@ -366,13 +405,18 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             }
             let values = checked_assignment(cone, &e, &self.cnf, self.budget)?;
             let first = self.engine.model(values, scope);
+            if existence_only {
+                return Ok(Interpretations::Unique(first));
+            }
             example = Some(first.clone());
-            // Exclude exactly this interpretation on original relational atoms,
-            // never the auxiliary body/encoding variables. World inputs are pinned.
+            // Exclude this projection onto original decision atoms, never helper
+            // or encoding variables. All equations remain; world inputs are pinned.
             let mut different = Vec::new();
             for (i, atom) in cone.atoms.iter().enumerate() {
                 self.budget.tick(phase)?;
-                if self.engine.input_relations.contains(&atom.relation) {
+                if self.engine.input_relations.contains(&atom.relation)
+                    || !self.engine.decision(atom)
+                {
                     continue;
                 }
                 if let Some(value) = first.value(atom) {

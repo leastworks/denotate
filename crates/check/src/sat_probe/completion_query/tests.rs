@@ -1,6 +1,7 @@
 use super::*;
 use crate::test_support::rewrites::{atom, rel, rule};
 use denotate_ir::*;
+mod determinacy;
 mod reports;
 
 fn keys(c: &Corpus) -> SemanticKeys {
@@ -88,6 +89,7 @@ fn verification(
         VerificationOptions {
             semantics: Semantics::Completion,
             hypothesis: h,
+            decisions: None,
         },
     )
     .unwrap()
@@ -158,7 +160,7 @@ fn rejected_is_not_no_meaning_or_inconsistent_worlds() {
     let e = prepare(&c, v, &Domains::new());
     assert!(matches!(
         e.observation([]).unwrap(),
-        ObservationOutcome::Rejected
+        ObservationOutcome::Rejected { .. }
     ));
     assert!(matches!(
         e.observation([atom(raw)]).unwrap(),
@@ -318,7 +320,7 @@ fn compatibility_is_selected_and_never_conditioned_on_h_or_other_assumptions() {
         let e = prepare(&c, v, &Domains::new());
         assert!(matches!(
             e.observation([]).unwrap(),
-            ObservationOutcome::Rejected
+            ObservationOutcome::Rejected { .. }
         ));
     }
 }
@@ -388,7 +390,7 @@ fn within_is_checked_before_evaluation_and_eligibility_edits_rebuild() {
     assert!(e.observation([atom(raw)]).is_err());
     assert!(matches!(
         e.observation([]).unwrap(),
-        ObservationOutcome::Rejected
+        ObservationOutcome::Rejected { .. }
     ));
     rule(&mut c, eligible, &[]);
     let e = prepare(&c, v, &Domains::new());
@@ -551,7 +553,7 @@ fn world_queries_accept_only_legal_input_pins_and_preserve_empty_definitions() {
         assert_eq!(w.present.contains(&atom(i)), value);
         assert!(matches!(
             e.observation(w.present).unwrap(),
-            ObservationOutcome::Rejected
+            ObservationOutcome::Rejected { .. }
         ));
         let q = WorldQuery {
             pins: vec![(atom(h), value)],
@@ -714,7 +716,15 @@ fn exhaustive_authored_equations_agree_in_both_modes() {
                     let expected = meanings.len().min(2);
                     match observed {
                         ObservationOutcome::WholeProgram(m) => assert_eq!(size(&m), expected),
-                        ObservationOutcome::Rejected => assert_eq!(expected, 0),
+                        ObservationOutcome::Rejected { without_hypothesis } => {
+                            assert_eq!(expected, 0);
+                            assert!(!oracle(&c, &roots, input, value, None).is_empty());
+                            assert_eq!(without_hypothesis.value(&atom(h.unwrap())), Some(false));
+                        }
+                        ObservationOutcome::ClassificationNoMeaning => {
+                            assert_eq!(expected, 0);
+                            assert!(oracle(&c, &roots, input, value, None).is_empty());
+                        }
                         ObservationOutcome::Ambiguous { .. } => assert_eq!(expected, 2),
                         ObservationOutcome::Accepted {
                             classification,

@@ -6,6 +6,41 @@ Settled design choices and why they were made. Current behavior is specified in 
 alternatives that were rejected. Revisit a decision only with new evidence, such as a
 real program that the current choice serves badly.
 
+## Rejection needs a classification interpretation without the hypothesis
+
+An empty answer under H is not enough to establish rejection: the classification
+rules themselves may be contradictory. For example, `h() :- !h();` has no
+interpretation with or without H. Calling it rejection would hide a specification
+bug, especially when rejecting observations is allowed.
+
+After an unsatisfiable H query, check the same original classification cone without
+H. One independently validated interpretation suffices; its uniqueness is irrelevant.
+If none exists, report classification no-meaning. Exhaustion is inconclusive.
+`no_rejections` forbids only the combination of existence without H and nonexistence
+with H; classification no-meaning independently fails the verification. Both facts
+are retained in rejection evidence. An all-rejected label excludes no-meaning and
+unknown observations.
+
+## Completion determinacy can select decision relations
+
+The verification's optional `decisions` set declares its determinacy interface.
+No names or DSL concepts are inferred. Each selected relation must have the same
+set of tuples in every relevant interpretation; comparing tuple counts would miss
+two interpretations containing different singleton tuples. Omitting the selection
+keeps full-relation determinacy. An explicit empty set makes no uniqueness claim.
+
+Existence still considers all equations. Classification counts decisions only in
+H's original ground cone, so a downstream decision cannot choose a classification.
+Processing and properties retain that cone's equations and H, and pin only its
+established decision values. Choosing and pinning one helper interpretation would
+hide failures in another valid interpretation. Property queries therefore continue
+to search all relevant helper assignments. Returned models remain examples, not
+claims that every helper value is forced.
+
+Decision references belong to the IR declaration and the semantic-keyed request
+identity. Edits require a new completion preparation; stable consumers explicitly
+refuse selected decisions until they support that contract.
+
 ## Verification semantics are authored, and rejection queries are obligation-only
 
 Rule semantics and an optional acceptance hypothesis belong to the verification.
@@ -25,8 +60,9 @@ It has no invented tuple or cardinality group. The IR therefore separates
 this query obligation-only. Declaration support lands before solver support.
 
 Whole-verification completion checking enumerates W independently of H. Each
-accepted observation pins its classification for processing, while property queries
-use their own original cones plus that classification. This prevents a downstream
+accepted observation pins its established decision values for processing, while
+property queries use their own original cones plus the classification equations
+and H. This prevents a downstream
 contradiction from hiding an independent property failure. Classification sets
 retain established witnesses through exhaustion; unresolved observations cannot
 complete a universal property proof. An all-rejected context is explicitly named,
@@ -60,12 +96,13 @@ assumptions pruning dependencies. A compatibility refusal names the declaration 
 recursive component; exhaustion does not establish incompatibility.
 
 The acceptance hypothesis is checked only in its original ground dependency cone.
-A unique satisfying interpretation accepts an observation; zero rejects it; several
-are ambiguous. Processing is a separate extension query with that interpretation
-pinned. Otherwise a downstream contradiction could select a classification or turn
+A unique satisfying decision interpretation accepts an observation; several are
+ambiguous. Zero triggers the separate existence query described above. Processing
+is a separate extension query, retaining the equations and H and pinning only
+established decisions. Otherwise a downstream contradiction could select a classification or turn
 a processing error into a rejection. Without a hypothesis, zero interpretations is
-ordinary no meaning. Uniqueness compares original relational atoms, never auxiliary
-SAT variables, and interpretations are validated against the original equations,
+ordinary no meaning. Uniqueness compares the selected original relational atoms
+(all when no selection is authored), never auxiliary SAT variables, and interpretations are validated against the original equations,
 without requiring a finite derivation. An immutable preparation can serve repeated
 queries; each query initially owns its solver, so partial encodings and learned
 clauses do not cross query or semantics boundaries.

@@ -488,6 +488,9 @@ impl Projection {
                                     (name, h.byte_range())
                                 })
                         });
+                        for n in node.children_by_field_name("decision", &mut node.walk()) {
+                            self.reference(n, &scope, Lookup::Name(Kind::Relation));
+                        }
                         let semantics = if field(node, "semantics")
                             .is_some_and(|n| &self.source.text[n.byte_range()] == "completion")
                         {
@@ -748,9 +751,10 @@ impl Projection {
         {
             let label = open.checked_sub(2).map(|i| tokens[i].text.as_str());
             let kind = match label {
-                Some("assumptions") => Some(ContractKind::Assumption),
-                Some("obligations") => Some(ContractKind::Obligation),
-                Some("notices") => Some(ContractKind::Notice),
+                Some("decisions") => Some(Lookup::Name(Kind::Relation)),
+                Some("assumptions") => Some(Lookup::Contract(ContractKind::Assumption)),
+                Some("obligations") => Some(Lookup::Contract(ContractKind::Obligation)),
+                Some("notices") => Some(Lookup::Contract(ContractKind::Notice)),
                 _ => None,
             };
             if let Some(kind) = kind.filter(|_| tokens[open - 1].text == ":") {
@@ -773,7 +777,7 @@ impl Projection {
                         }
                         _ => byte..byte,
                     };
-                    return Some((Lookup::Contract(kind), self.scope_at(byte), span));
+                    return Some((kind, self.scope_at(byte), span));
                 }
             }
         }

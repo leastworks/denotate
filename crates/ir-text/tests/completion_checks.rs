@@ -197,3 +197,111 @@ fn library_completion_findings_keep_labeled_fallback_and_upstream_hypothesis() {
             .any(|r| r.label == "condition being inspected")
     );
 }
+
+#[test]
+fn classification_no_meaning_is_distinct_from_rejection_in_findings_and_summary() {
+    let (p, r) = checked(
+        "input i();relation h();h():-i(),!h();obligation total:no_rejections(h);verification v{semantics:completion;hypothesis:h;decisions:[];assumptions:[];obligations:[total];}",
+        Default::default(),
+    );
+    let s = presentation::present_completion(&p, &r).unwrap();
+    assert!(!r.all_rejected());
+    assert_eq!(s.status["classification"]["noMeaning"]["state"], "exists");
+    assert_eq!(s.status["classification"]["rejected"]["state"], "exists");
+    let d = s
+        .diagnostics
+        .iter()
+        .find(|d| d.kind == denotate_presentation::Kind::NoMeaning)
+        .unwrap();
+    assert_eq!(d.evidence["scope"], "classification-without-hypothesis");
+    assert!(d.message.contains("even without the hypothesis"));
+    let d = s
+        .diagnostics
+        .iter()
+        .find(|d| d.evidence["kind"] == "rejected-observation")
+        .unwrap();
+    assert_eq!(d.evidence["confirmedNoInterpretation"], true);
+    assert_eq!(d.evidence["withoutHypothesis"]["kind"], "completion-model");
+    assert_eq!(
+        d.evidence["withoutHypothesis"]["scope"],
+        "classification-without-hypothesis"
+    );
+    assert!(d.evidence["withoutHypothesis"]["hypothesis"].is_null());
+    assert_eq!(
+        d.evidence["observation"],
+        d.evidence["withoutHypothesis"]["observation"]
+    );
+    assert_eq!(
+        s.status["classification"]["rejected"]["evidence"],
+        d.evidence
+    );
+}
+
+#[test]
+fn decisions_compare_tuple_sets_not_cardinality_and_never_hide_contradictions() {
+    for (rules, ambiguous, no_meaning) in [
+        ("r(a);r(b);helper():-helper();", false, false),
+        ("r(a):-!r(b);r(b):-!r(a);", true, false),
+        ("r(a);helper():-!helper();", false, true),
+    ] {
+        let (p, r) = checked(
+            &format!(
+                "sort S;const a,b:S;relation r(x:S);relation helper();{rules}verification v{{semantics:completion;decisions:[r];assumptions:[];obligations:[];}}"
+            ),
+            Default::default(),
+        );
+        assert_eq!(r.meaning.ambiguous.exists(), ambiguous);
+        assert_eq!(r.meaning.no_meaning.exists(), no_meaning);
+        assert!(!r.is_incomplete());
+        let s = presentation::present_completion(&p, &r).unwrap();
+        assert_eq!(s.status["determinacy"]["kind"], "selected-relations");
+        assert_eq!(
+            s.status["determinacy"]["relations"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        if ambiguous {
+            let d = s
+                .diagnostics
+                .iter()
+                .find(|d| d.kind == denotate_presentation::Kind::AmbiguousMeaning)
+                .unwrap();
+            assert_eq!(d.evidence["determinacy"], s.status["determinacy"]);
+        }
+    }
+}
+
+#[test]
+fn decision_edits_change_requests_and_repeated_preparations_agree() {
+    let mut identities = Vec::new();
+    for (decision, ambiguous) in [
+        ("", true),
+        ("decisions:[h];", false),
+        ("decisions:[];", false),
+        ("decisions:[helper];", true),
+    ] {
+        let text = format!(
+            "relation helper();helper():-helper();relation h();h():-helper();h():-!helper();verification v{{semantics:completion;hypothesis:h;{decision}assumptions:[];obligations:[];}}"
+        );
+        let (p, r) = checked(&text, Default::default());
+        let request = p
+            .verification_requests(&Limits::default())
+            .unwrap()
+            .remove(0)
+            .1;
+        assert!(!identities.contains(&request));
+        identities.push(request);
+        assert_eq!(
+            r.classification.as_ref().unwrap().ambiguous.exists(),
+            ambiguous
+        );
+        let (_, again) = checked(&text, Default::default());
+        assert_eq!(
+            again.classification.as_ref().unwrap().ambiguous.exists(),
+            ambiguous
+        );
+        assert_eq!(again.has_failures(), r.has_failures());
+    }
+}

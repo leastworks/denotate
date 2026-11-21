@@ -1237,15 +1237,22 @@ presenter and opt-in SAT CLI now additionally produce completion reports; these
 are not stable replay evidence or an editor capability switch.
 
 - Configuration: `original-completion-v1`, `semantics: "completion"`, hypothesis
-  display name and structured `hypothesisIdentity`. Context, classification,
-  processing meaning, obligations and advisories are separate fields.
-- Classification sets `accepted`, `rejected`, `ambiguous` use `exists`, `none`,
+  display name and structured `hypothesisIdentity`. `determinacy` is
+  `{kind: "all-relations", relations: null}` for omitted selection, or
+  `{kind: "selected-relations", relations: [...]}` with structured relation keys
+  in semantic-key order (possibly empty). It compares tuple sets, not counts.
+  Context, classification, processing meaning, obligations and advisories are
+  separate fields.
+- Classification sets `accepted`, `rejected`, `ambiguous`, `noMeaning` use `exists`, `none`,
   `inconclusive` or `not-analysed`. A witness establishes existence, not enumeration
   of the set. `all-rejected` is explicit; processing is `not-applicable` and
-  processing requirements are `vacuous`. Inconsistent W cannot produce such proofs.
+  processing requirements are `vacuous`. `all-rejected` excludes classification
+  no-meaning, ambiguity and unknowns. Inconsistent W cannot produce such proofs.
 - `completion-model` evidence retains original relational atom/value assignments,
   full present/absent input observations, hypothesis and scope (`hypothesis-cone`,
-  `accepted-processing`, `whole-program`, or `property-cone`). Unlisted legal atoms
+  `classification-without-hypothesis`, `accepted-processing`, `whole-program`, or
+  `property-cone`). Models are representative interpretations: uniqueness of the
+  selected decisions does not claim that helper values are forced. Unlisted legal atoms
   inside the scope have empty definitions. This is not a finite derivation.
   `scopeAtoms` identifies the original dependency-cone members (`null` for the
   whole program); the complete input observation also includes inputs outside it.
@@ -1253,12 +1260,18 @@ are not stable replay evidence or an editor capability switch.
   `countKind: "exact" | "at-least"` and `omittedExamples`. Each example includes
   its `group` and `presentTuples`; coverage examples have no present tuple.
 - `rejected-observation` evidence includes the full permitted observation,
-  hypothesis, `scope: "hypothesis-cone"` and `confirmedNoInterpretation: true`.
-  `completion-no-meaning` is distinct from rejection; `completion-ambiguity`
-  contains two interpretations of the same scope and observation.
+  hypothesis, `scope: "hypothesis-cone"` and `confirmedNoInterpretation: true`
+  (the query **with H** was unsatisfiable). `withoutHypothesis` is a validated
+  `completion-model` of the same classification cone without requiring H, with
+  `hypothesis: null` and scope `classification-without-hypothesis`.
+  `completion-no-meaning` with that scope records that even this second query was
+  unsatisfiable; it is distinct from rejection and independently fails verification.
+  `completion-ambiguity` contains two interpretations of the same scope and
+  observation. Diagnostic ambiguity evidence repeats `determinacy` from the summary.
 - Existing obligation finding identities are unchanged. `no_rejections` uses
   `{obligation: [namespaceKey, name], component: "rejection"}`. New meaning identities
-  use `{completionMeaning: phase}`; the all-rejected advisory uses
+  use `{completionMeaning: phase}`; `classification-no-meaning` is the new phase for
+  a contradictory classification cone. The all-rejected advisory uses
   `{context: "all-rejected"}`. Each includes the verification key as usual.
 - `ambiguous-meaning` is an Error. `all-rejected` and opt-in `circular-support` are
   Information. Circular support is keyed by `circularSupport`, the semantic atoms

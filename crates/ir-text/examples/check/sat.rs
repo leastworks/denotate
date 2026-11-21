@@ -327,6 +327,15 @@ fn completion(
         )
         .unwrap();
     }
+    if let Some(decisions) = &v.options.decisions {
+        let names = presentation::diagnostic_names(&p.corpus);
+        let mut selected = decisions
+            .iter()
+            .map(|r| names((*r).into()))
+            .collect::<Vec<_>>();
+        selected.sort();
+        writeln!(output, "Decision relations: [{}]", selected.join(", ")).unwrap();
+    }
     let refusal = if check.meaning != MeaningMode::Full {
         Some("completion supports full meaning analysis only")
     } else if check.splits.relation.is_some() {
@@ -430,10 +439,11 @@ fn completion(
             } else {
                 writeln!(
                     output,
-                    "Classification: accepted {}; rejected {}; ambiguous {}",
+                    "Classification: accepted {}; rejected {}; ambiguous {}; no-meaning {}",
                     state(&s["classification"]["accepted"]),
                     state(&s["classification"]["rejected"]),
-                    state(&s["classification"]["ambiguous"])
+                    state(&s["classification"]["ambiguous"]),
+                    state(&s["classification"]["noMeaning"])
                 )
                 .unwrap();
             }

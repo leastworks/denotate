@@ -18,11 +18,16 @@ fn verification_reports_match_exhaustive_authored_equations_and_property_cones()
                 let r = e.check(&keys(&c), &CheckOptions::default()).unwrap();
                 let (mut accept, mut reject, mut ambiguous, mut no_meaning, mut many, mut failure) =
                     (false, false, false, false, false, false);
+                let mut class_no_meaning = false;
                 for value in [false, true] {
                     if let Some(h) = h {
                         match oracle(&c, &[h], input, value, Some(h)).len() {
                             0 => {
-                                reject = true;
+                                if oracle(&c, &[h], input, value, None).is_empty() {
+                                    class_no_meaning = true;
+                                } else {
+                                    reject = true;
+                                }
                                 continue;
                             }
                             1 => accept = true,
@@ -45,6 +50,7 @@ fn verification_reports_match_exhaustive_authored_equations_and_property_cones()
                 if let Some(class) = &r.classification {
                     assert_eq!(class.accepted.exists(), accept);
                     assert_eq!(class.rejected.exists(), reject);
+                    assert_eq!(class.no_meaning.exists(), class_no_meaning);
                     assert_eq!(class.ambiguous.exists(), ambiguous);
                 }
                 assert_eq!(r.meaning.no_meaning.exists(), no_meaning);
@@ -86,6 +92,7 @@ fn selected(c: &mut Corpus, h: Option<RelationId>, obligations: &[ObligationId])
         VerificationOptions {
             semantics: Semantics::Completion,
             hypothesis: h,
+            decisions: None,
         },
     )
     .unwrap()

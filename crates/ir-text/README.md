@@ -24,13 +24,14 @@ selects exactly its declaration's assumptions and obligations. References use sh
 namespace lookup and resolve only the kind required by their list.
 
 Verification options also carry `semantics` (stable by default) and an optional
-zero-arity `hypothesis` relation. `no_rejections(H)` is an obligation-only query;
+zero-arity `hypothesis` relation and an optional `decisions: [...]` relation set.
+Omitting decisions keeps all-relation determinacy; an empty list checks no uniqueness. `no_rejections(H)` is an obligation-only query;
 loading validates its selection against a completion verification with the same H.
 Printing preserves these options, references and origins; the shared editor index
-supports navigation and validated rename of verification hypotheses and
-`no_rejections` relation references. The SAT CLI checks completion with full meaning
+supports navigation, relation completion and validated rename of verification
+hypotheses, decision lists and `no_rejections` relation references. The SAT CLI checks completion with full meaning
 analysis; BDD, editor, scorecard and planning consumers still refuse it before stable
-preparation. Stable with a hypothesis remains unsupported.
+preparation. Stable with a hypothesis or selected decisions remains unsupported.
 
 `load_with_resolver(…, Some(&mut resolver))` also restores embedded origins through a
 caller-owned `origins::OriginResolver` (one resolution per URI/view/hash identity).
@@ -558,7 +559,12 @@ Stable verifications in the same program keep their existing path. Completion ru
 retain program-wide assumption declaration validation, including unselected ones.
 
 Human and `--json` output identify the semantics and hypothesis, classification
-acceptance/rejection/ambiguity, processing meaning, properties and advisory status.
+acceptance/rejection/ambiguity/no-meaning, the declared determinacy interface,
+processing meaning, properties and advisory status. Classification no-meaning is a
+specification failure even when rejection is allowed: a genuine reject needs an
+interpretation of the original classification cone without H and none with H.
+Rejection evidence retains that checked interpretation and the unsatisfiable-query
+confirmation. All-rejected excludes classification no-meaning and unknowns.
 The configuration is `original-completion-v1`. Rejections are allowed unless selected
 `no_rejections(H)` forbids them. Fully established `all-rejected` is explicit,
 processing is not applicable, and processing obligations are vacuous. It can exit 0;

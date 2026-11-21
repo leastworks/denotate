@@ -338,13 +338,14 @@ whole-program BDD evaluation, with W shared only within the same selection:
 local absent-extension and constraint-projection shortcuts are not sound for general
 constraints. No context-dependent BDD or verdict is reused across selections.
 
-Verification declarations also own their rule semantics and optional hypothesis
-relation. Requests carry those options, using a semantic key for the hypothesis;
+Verification declarations also own their rule semantics, optional hypothesis
+relation and optional decision-relation set. Requests carry those options, using
+semantic keys for the relation references;
 CLI configuration cannot override the authored choice. The declaration interface
 supports completion. The SAT CLI and separate experimental `completion_query` Rust
 API implement preparation, classification, processing meaning and selected
 requirements. BDD, editor, scorecard and planning consumers still refuse completion
-before semantic preparation. Stable with a hypothesis remains unsupported. Stable preparation, fixed
+before semantic preparation. Stable with a hypothesis or selected decisions remains unsupported. Stable preparation, fixed
 folds and cached answers are not an implementation of completion. The parser and
 shared reference services remain usable for such declarations.
 
@@ -492,15 +493,19 @@ remains the consuming checker's responsibility.
 Both SAT APIs share the prepared-program projection and completion encoder. The
 completion API does not share stable-model refinement, attribution or solver state.
 W has independent equations and the complete input universe. Classification uses
-the original hypothesis cone; processing pins the unique classification and asks
-for whole-program extensions. Each SAT interpretation is validated against its
+the original hypothesis cone. If its query with H has no interpretation, a separate
+existence query without H distinguishes rejection from classification no-meaning.
+Determinacy compares selected decision atoms (all original relations by default).
+Processing retains the cone equations and H, pins its established decisions, and
+asks for whole-program existence and decision determinacy. Each SAT interpretation is validated against its
 scope's original equations. Exclusions distinguish relational interpretations, not
-auxiliary assignments. Queries return separate rejection, ambiguity, processing
-no-meaning and inconclusive outcomes; confirmed classification survives processing
+auxiliary assignments. Queries return separate rejection, ambiguity, classification
+and processing no-meaning, and inconclusive outcomes; confirmed classification survives processing
 exhaustion. Each query owns its solver. Whole-verification reports enumerate W independently
 of H, with separate budgets for classification, processing and properties. Property
-queries pin accepted classification in the original property cone, preserving
-failures independent of downstream contradictions. The shared completion presenter
+queries combine the original property and classification cones, retain H and pin
+established decisions; helpers remain free. This preserves failures across helper
+interpretations and independent of downstream contradictions. The shared completion presenter
 owns interpretation evidence, JSON summary and diagnostic wording; `ir-text` owns
 source placement, and the SAT CLI owns output and exit-code precedence. All-rejected
 is a distinct outcome, not an unconditional proof. Optional circular-support work

@@ -45,7 +45,7 @@ fn owner(k: &OwnerKey) -> Value {
 pub(crate) fn constant(k: &ConstantKey) -> Value {
     json!({"sort":qualified(&k.sort.0),"name":k.name.as_ref()})
 }
-fn relation(k: &RelationKey) -> Value {
+pub(crate) fn relation(k: &RelationKey) -> Value {
     match k {
         RelationKey::Named(k) => json!({"named":qualified(k)}),
         RelationKey::Generated { owner: o, local } => {

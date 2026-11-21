@@ -1236,6 +1236,38 @@
           }
         ]
       },
+      "decision": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "generated_identifier",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "quoted_identifier",
+            "named": true
+          }
+        ]
+      },
+      "decisions_label": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "decisions",
+            "named": false
+          }
+        ]
+      },
       "hypothesis": {
         "multiple": false,
         "required": false,
@@ -1426,6 +1458,10 @@
   {
     "type": "constant",
     "named": true
+  },
+  {
+    "type": "decisions",
+    "named": false
   },
   {
     "type": "domain",

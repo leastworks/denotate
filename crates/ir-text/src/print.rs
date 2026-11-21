@@ -635,6 +635,14 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
         if let Some(h) = v.options.hypothesis {
             options.push_str(&format!(" hypothesis: {};", reference(h.into(), context)));
         }
+        if let Some(decisions) = &v.options.decisions {
+            let mut names = decisions
+                .iter()
+                .map(|r| reference((*r).into(), context))
+                .collect::<Vec<_>>();
+            names.sort();
+            options.push_str(&format!(" decisions: [{}];", names.join(", ")));
+        }
         let assumptions = v
             .assumptions
             .iter()

@@ -104,7 +104,7 @@ fn roundtrip(p: &LoadedProgram) {
 #[test]
 fn completion_declarations_round_trip_references_selection_keys_and_origins() {
     let p = single(
-        "namespace 'a::b' { input 'ready now'(); relation other(); obligation total:no_rejections('ready now') message \"Recognize every input\"; verification checks {semantics:completion; hypothesis:'ready now'; assumptions:[]; obligations:[total];} } namespace app { verification own {semantics:completion; hypothesis:'a::b'::'ready now'; assumptions:[]; obligations:['a::b'::total];} verification ordinary { semantics:stable; assumptions:[]; obligations:[];} verification equations {semantics:completion; assumptions:[]; obligations:[];} }",
+        "namespace 'a::b' { input 'ready now'(); relation other(); obligation total:no_rejections('ready now') message \"Recognize every input\"; verification checks {semantics:completion; hypothesis:'ready now'; decisions:[other, 'ready now']; assumptions:[]; obligations:[total];} } namespace app { verification own {semantics:completion; hypothesis:'a::b'::'ready now'; decisions:[]; assumptions:[]; obligations:['a::b'::total];} verification ordinary { semantics:stable; assumptions:[]; obligations:[];} verification equations {semantics:completion; assumptions:[]; obligations:[];} }",
     );
     roundtrip(&p);
 }
@@ -133,6 +133,7 @@ fn construction_api_exports_the_same_completion_contract() {
             VerificationOptions {
                 semantics: Semantics::Completion,
                 hypothesis: Some(h),
+                decisions: None,
             },
         )
         .unwrap();
@@ -187,6 +188,9 @@ fn invalid_completion_declarations_have_loader_and_index_errors() {
         "assumption a:no_rejections(h);",
         "obligation bad:no_rejections(h,group_by:());",
         "verification v{semantics:typo;assumptions:[];obligations:[];}",
+        "verification v{semantics:completion;decisions:[missing];assumptions:[];obligations:[];}",
+        "verification v{semantics:completion;decisions:[total];assumptions:[];obligations:[];}",
+        "verification v{semantics:completion;decisions:[];decisions:[];assumptions:[];obligations:[];}",
         "verification v{semantics:completion;semantics:stable;assumptions:[];obligations:[];}",
         "verification v{hypothesis:h;hypothesis:h;assumptions:[];obligations:[];}",
     ] {
@@ -216,6 +220,8 @@ fn stable_consumers_refuse_before_grounding_and_cannot_override_authored_semanti
         "semantics:completion; hypothesis:h;",
         "semantics:completion;",
         "hypothesis:h;",
+        "decisions:[h];",
+        "decisions:[];",
     ] {
         let p = single(&format!(
             "relation h();h():-h(); verification v{{{options} assumptions:[];obligations:[];}}"
@@ -242,6 +248,7 @@ fn stable_consumers_refuse_before_grounding_and_cannot_override_authored_semanti
         );
         request.semantics = Semantics::Stable;
         request.hypothesis = None;
+        request.decisions = None;
         assert!(
             matches!(request.prepare(&p.corpus,&p.keys,&(&limits).into()),Err(CheckError::InvalidRequest(reason)) if reason==expected)
         );
@@ -266,6 +273,7 @@ fn hypothesis_completion_uses_relation_resolution_including_incomplete_names() {
     for prefix in [
         "verification v{semantics:completion;hypothesis:",
         "obligation o:no_rejections(",
+        "verification v{semantics:completion; decisions:[",
     ] {
         for tail in ["", "lib::", "lib::ready"] {
             let text = format!("use lib; {prefix}{tail}");

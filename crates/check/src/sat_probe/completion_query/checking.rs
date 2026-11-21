@@ -36,7 +36,9 @@ pub struct Pair {
 #[derive(Debug, Clone)]
 pub struct Classification {
     pub accepted: Search<Model>,
-    pub rejected: Search<Observation>,
+    /// Validated classification model without H; the H query was unsatisfiable.
+    pub rejected: Search<Model>,
+    pub no_meaning: Search<Observation>,
     pub ambiguous: Search<Pair>,
 }
 #[derive(Debug, Clone)]
@@ -71,6 +73,7 @@ impl Default for CheckOptions {
 pub struct Report {
     pub verification: VerificationId,
     pub hypothesis: Option<RelationId>,
+    pub decisions: Option<BTreeSet<RelationId>>,
     pub context: Context,
     pub classification: Option<Classification>,
     pub meaning: Meaning,
@@ -88,6 +91,7 @@ impl Report {
         self.classification.as_ref().is_some_and(|c| {
             matches!(c.accepted, Search::None)
                 && matches!(c.ambiguous, Search::None)
+                && matches!(c.no_meaning, Search::None)
                 && c.rejected.exists()
         })
     }
@@ -98,7 +102,7 @@ impl Report {
         ) || self
             .classification
             .as_ref()
-            .is_some_and(|c| c.ambiguous.exists())
+            .is_some_and(|c| c.ambiguous.exists() || c.no_meaning.exists())
             || self.meaning.no_meaning.exists()
             || self.meaning.ambiguous.exists()
             || self.obligations.values().any(ObligationResult::failed)
@@ -114,7 +118,10 @@ impl Report {
             || !self.notices_not_analysed.is_empty()
             || self.obligations.values().any(|o| !o.complete())
             || self.classification.as_ref().is_some_and(|c| {
-                !c.accepted.complete() || !c.rejected.complete() || !c.ambiguous.complete()
+                !c.accepted.complete()
+                    || !c.rejected.complete()
+                    || !c.ambiguous.complete()
+                    || !c.no_meaning.complete()
             })
             || (self.meaning.applicable
                 && (!self.meaning.no_meaning.complete() || !self.meaning.ambiguous.complete()))
@@ -130,10 +137,12 @@ impl Engine {
         let mut report = Report {
             verification: self.verification,
             hypothesis: self.hypothesis,
+            decisions: self.decisions.clone(),
             context: Context::Permitted,
             classification: self.hypothesis.map(|_| Classification {
                 accepted: Search::NotAnalysed,
                 rejected: Search::NotAnalysed,
+                no_meaning: Search::NotAnalysed,
                 ambiguous: Search::NotAnalysed,
             }),
             meaning: Meaning {
@@ -195,10 +204,17 @@ impl Engine {
                 };
                 let mut accepted = None;
                 let applicable = match classification {
-                    ObservationOutcome::Rejected => {
+                    ObservationOutcome::Rejected { without_hypothesis } => {
                         let c = report.classification.as_mut().unwrap();
                         if !c.rejected.exists() {
-                            c.rejected = Search::Exists(world.clone());
+                            c.rejected = Search::Exists(without_hypothesis);
+                        }
+                        false
+                    }
+                    ObservationOutcome::ClassificationNoMeaning => {
+                        let c = report.classification.as_mut().unwrap();
+                        if !c.no_meaning.exists() {
+                            c.no_meaning = Search::Exists(world.clone());
                         }
                         false
                     }
@@ -232,6 +248,7 @@ impl Engine {
                         // A validated model proves K nonempty even if uniqueness stopped.
                         if example.is_none() {
                             c.rejected.unknown(cause);
+                            c.no_meaning.unknown(cause);
                             rejected_unknown = Some(cause);
                         }
                         eligibility_unknown = Some(cause);
@@ -309,6 +326,7 @@ impl Engine {
             if let Some(c) = &mut report.classification {
                 c.accepted.unknown(cause);
                 c.rejected.unknown(cause);
+                c.no_meaning.unknown(cause);
                 c.ambiguous.unknown(cause);
             }
             rejected_unknown = Some(cause);
@@ -323,6 +341,7 @@ impl Engine {
             if let Some(c) = &mut report.classification {
                 c.accepted.finish();
                 c.rejected.finish();
+                c.no_meaning.finish();
                 c.ambiguous.finish();
             }
             report.meaning.no_meaning.finish();
@@ -361,6 +380,7 @@ impl Engine {
             report.classification = self.hypothesis.map(|_| Classification {
                 accepted: Search::NotAnalysed,
                 rejected: Search::NotAnalysed,
+                no_meaning: Search::NotAnalysed,
                 ambiguous: Search::NotAnalysed,
             });
             report.meaning.no_meaning = Search::NotAnalysed;

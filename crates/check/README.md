@@ -784,15 +784,23 @@ trigger this extra completion compatibility check.
   `NoWorld` means only that the query has no permitted observation.
 - `observation(present_inputs)` treats omitted eligible inputs as absent. Outside W
   it returns `NotPermitted`. With H, it counts interpretations of H's original
-  upstream ground cone satisfying H: zero is `Rejected`, one is `Accepted`, and
-  several are `Ambiguous`. Exhaustion is explicit. An accepted result separately
-  reports processing extensions with that unique classification pinned: no meaning,
-  unique, multiple or inconclusive. Without H it reports these whole-program
+  upstream ground cone satisfying H, projected onto selected decisions: one is
+  `Accepted`, and several are `Ambiguous`. Zero triggers existence checking of the
+  same cone without H: a model is `Rejected { without_hypothesis }`, no model is
+  `ClassificationNoMeaning`, and exhaustion is `Inconclusive`. The second query
+  stops after one independently validated model. An accepted result separately
+  reports processing existence and decision determinacy: no meaning, unique,
+  multiple or inconclusive. It retains the classification equations and H, pinning
+  only established decisions, so helpers remain free. Without H it reports these whole-program
   interpretation outcomes directly, with no rejection classification.
 - Models label their scope, retain the full input observation and return `None`
   for derived atoms outside that scope. They satisfy the original completion
   equations, checked independently of the SAT encoding. They are not finite
-  derivations. Uniqueness ignores auxiliary SAT variables. If uniqueness exhausts,
+  derivations. `ClassificationWithoutHypothesis` models witness genuine rejection;
+  they do not assert H. Uniqueness compares tuple sets of authored decision relations,
+  ignoring helper and auxiliary SAT variables; omitted selection compares every
+  original relation. `Unique` is uniqueness of that projection, not necessarily of
+  all values in its representative model. If uniqueness exhausts,
   an already validated interpretation is retained without claiming acceptance.
 
 `QueryLimits` bounds solves, solver polls, conflicts and propagations, in addition
@@ -800,19 +808,23 @@ to ordinary work/CNF/deadline limits. One observation query shares its allowance
 across W, classification and processing; completed classification survives a
 processing cutoff. Preparation is immutable and reusable; each query currently
 owns a fresh SAT solver and no query cache. Program, domain, eligibility, assumption
-or hypothesis edits require new preparation. No result is shared with stable mode.
+hypothesis or decision-selection edits require new preparation. No result is shared with stable mode.
 
 `Engine::check(keys, options)` produces a whole-verification report. It enumerates
 W outside H, with separate classification sets (`exists`, `none`, `inconclusive`),
 processing meaning and obligation results. Established witnesses survive cutoff.
-Only confirmed unique classification admits a world to processing obligations;
-unknown classification never completes a property proof. `no_rejections` asks for
-nonempty classification, independently of uniqueness. An all-rejected context is
-explicit, processing is not applicable, and processing properties are vacuous;
-inconsistent W is a context error instead.
+Only confirmed unique decision classification admits a world to processing
+obligations; unknown classification never completes a property proof.
+`Classification::no_meaning` records worlds without an interpretation even before
+H. These fail verification independently of `no_rejections`, which forbids genuine
+rejections only. An all-rejected context excludes classification no-meaning,
+ambiguity and unknowns. It is explicit, processing is not applicable, and processing
+properties are vacuous; inconsistent W is a context error instead.
 
-Property queries use the original obligation cone plus the pinned classification,
-so an independent failure remains visible when unrelated processing has no model.
+Property queries use the original obligation and classification cones, H and the
+established decision values. They search all relevant helper interpretations, so an
+arbitrary classification witness cannot hide a property failure. An independent
+failure remains visible when unrelated processing has no model.
 Supported forms are empty and uniqueness, plus coverage/exactly-one on acyclic
 input-independent cones. Other coverage work and notices remain unanalysed.
 Returned property interpretations carry `ModelScope::Property`; presentation falls

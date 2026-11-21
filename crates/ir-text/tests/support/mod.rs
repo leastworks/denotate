@@ -235,6 +235,17 @@ pub fn compare(
             y.options.hypothesis.map(Into::into)
         );
         assert_eq!(
+            x.options.decisions.as_ref().map(|rs| rs
+                .iter()
+                .map(|r| ids[&(*r).into()])
+                .collect::<std::collections::BTreeSet<_>>()),
+            y.options.decisions.as_ref().map(|rs| rs
+                .iter()
+                .map(|r| (*r).into())
+                .collect::<std::collections::BTreeSet<OccurrenceId>>(
+            ))
+        );
+        assert_eq!(
             x.assumptions
                 .iter()
                 .map(|id| ids[&(*id).into()])

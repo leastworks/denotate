@@ -522,3 +522,47 @@ fn sat_pins_and_meaning_splits_have_cli_controls_and_explicit_output() {
         2
     );
 }
+
+#[test]
+fn completion_cli_does_not_call_classification_contradictions_rejections() {
+    let f = Fixture::new(
+        "relation h();h():-!h();obligation total:no_rejections(h);verification v{semantics:completion;hypothesis:h;decisions:[];assumptions:[];obligations:[total];}",
+    );
+    for json in [false, true] {
+        let mut flags = vec!["--engine", "sat", "--no-progress"];
+        if json {
+            flags.push("--json");
+        }
+        let (code, out) = f.run(&flags);
+        assert_eq!(code, 1, "{out}");
+        assert!(out.contains("no-meaning"), "{out}");
+        assert!(!out.contains("all-rejected"), "{out}");
+        assert!(!out.contains("rejected-observation"), "{out}");
+        if !json {
+            assert!(out.contains("total (no-rejections): proved"), "{out}");
+            assert!(out.contains("rejected none"), "{out}");
+        }
+    }
+}
+
+#[test]
+fn completion_cli_selected_decisions_and_second_query_cutoff() {
+    for (selection, code) in [("", 1), ("decisions:[h];", 0)] {
+        let f = Fixture::new(&format!(
+            "relation p();p():-p();relation h();h():-p();h():-!p();verification v{{semantics:completion;hypothesis:h;{selection}assumptions:[];obligations:[];}}"
+        ));
+        let (exit, out) = f.run(&["--engine", "sat", "--no-progress"]);
+        assert_eq!(exit, code, "{out}");
+        if code == 0 {
+            assert!(out.contains("Decision relations: [h]"), "{out}");
+        }
+    }
+    let f = Fixture::new(
+        "relation h();obligation total:no_rejections(h);verification v{semantics:completion;hypothesis:h;assumptions:[];obligations:[total];}",
+    );
+    let (exit, out) = f.run(&["--engine", "sat", "--sat-max-solves", "2", "--no-progress"]);
+    assert_eq!(exit, 2, "{out}");
+    assert!(!out.contains("all-rejected"), "{out}");
+    assert!(!out.contains("counterexample"), "{out}");
+    assert!(out.contains("inconclusive"), "{out}");
+}

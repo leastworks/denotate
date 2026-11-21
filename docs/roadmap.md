@@ -34,11 +34,15 @@ direction for such programs separates meaning from schedule:
 - **Authored completion meaning and acceptance.** The SAT CLI additionally checks
   opt-in `semantics: completion` verifications, with classification in a hypothesis's
   original ground cone and separate processing extensions. Rejections are allowed
-  unless `no_rejections` forbids them; all-rejected is explicit. Independent property
-  cones retain completion-model evidence, and circular support has an opt-in advisory.
-  This first implementation uses bounded finite grounding and world enumeration;
-  it has no corpus-scale performance claim. Next: completion-aware staged planning
-  with rejection paths, and definition islands inside otherwise stable programs.
+  unless `no_rejections` forbids them; a contradictory classification cone is a
+  separate failure, and all-rejected is explicit. Optional decision relations select
+  tuple-set determinacy without hiding helper contradictions or property failures.
+  Independent property cones retain completion-model evidence, and circular support
+  has an opt-in advisory. This implementation uses bounded finite grounding and world
+  enumeration; it has no corpus-scale performance claim. Next: sparse completion-safe
+  grounding and symbolic queries across observations, before corpus checks; then
+  completion-aware staged planning with rejection paths, and definition islands
+  inside otherwise stable programs.
 - **Staged execution plans.** A generic driver builds what a DSL compiler's dataflow
   phase builds: a DAG of branches on facts settled earlier, nodes that compute values
   (readiness is value determination), joins, and a case partition whose branches make

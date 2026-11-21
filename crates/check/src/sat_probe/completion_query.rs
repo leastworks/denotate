@@ -58,6 +58,7 @@ pub enum Preparation {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelScope {
     Classification,
+    ClassificationWithoutHypothesis,
     Processing,
     WholeProgram,
     Property,
@@ -130,6 +131,7 @@ impl Model {
 pub enum Interpretations {
     NotAnalysed,
     NoMeaning,
+    /// One projection onto the selected decision relations; helpers may vary.
     Unique(Model),
     Multiple {
         first: Model,
@@ -145,7 +147,12 @@ pub enum Interpretations {
 #[derive(Debug, Clone)]
 pub enum ObservationOutcome {
     NotPermitted,
-    Rejected,
+    /// C has an interpretation, but none satisfying H.
+    Rejected {
+        without_hypothesis: Model,
+    },
+    /// Even C without H has no interpretation: a specification failure.
+    ClassificationNoMeaning,
     Ambiguous {
         first: Model,
         second: Model,
@@ -179,7 +186,7 @@ pub struct WorldQuery {
 
 /// Immutable preparation. Each query owns its SAT solver; no learned clauses,
 /// partial append or cutoff can contaminate another observation or semantics.
-/// Re-preparing is required for edits to H, W, domains, eligibility or rules.
+/// Re-preparing is required for edits to H, W, decisions, domains, eligibility or rules.
 pub struct Engine {
     program: Arc<GroundProgram>,
     cone: Cone,
@@ -190,6 +197,7 @@ pub struct Engine {
     config: QueryLimits,
     verification: VerificationId,
     hypothesis: Option<RelationId>,
+    decisions: Option<BTreeSet<RelationId>>,
     selection: Vec<(denotate_ir::ObligationId, denotate_ir::Requirement)>,
     notices: BTreeSet<denotate_ir::NoticeId>,
 }
@@ -315,6 +323,7 @@ impl Engine {
             config,
             verification,
             hypothesis: declaration.options.hypothesis,
+            decisions: declaration.options.decisions.clone(),
             selection: declaration
                 .obligations
                 .iter()
@@ -330,11 +339,20 @@ impl Engine {
         &self.program
     }
 
+    fn decision(&self, atom: &GroundAtom) -> bool {
+        self.decisions
+            .as_ref()
+            .is_none_or(|relations| relations.contains(&atom.relation))
+    }
+
     fn model(&self, values: Vec<bool>, scope: ModelScope) -> Model {
         Model {
             program: self.program.clone(),
             input_relations: self.input_relations.clone(),
-            members: if scope == ModelScope::Classification {
+            members: if matches!(
+                scope,
+                ModelScope::Classification | ModelScope::ClassificationWithoutHypothesis
+            ) {
                 Some(self.classification.as_ref().unwrap().1.clone())
             } else {
                 None

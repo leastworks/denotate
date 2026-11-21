@@ -157,6 +157,7 @@ pub struct CheckRequest {
     pub verification: Option<VerificationKey>,
     pub semantics: Semantics,
     pub hypothesis: Option<RelationKey>,
+    pub decisions: Option<BTreeSet<RelationKey>>,
     pub constraints: Vec<InputConstraint>,
     pub obligations: BTreeSet<ObligationKey>,
     pub notices: BTreeSet<NoticeKey>,
@@ -170,7 +171,11 @@ pub struct CheckRequest {
 impl CheckRequest {
     /// Until a consumer implements the authored semantics, it must refuse before preparation.
     pub fn unsupported_semantics(&self) -> Option<&'static str> {
-        unsupported_semantics(self.semantics, self.hypothesis.is_some())
+        unsupported_semantics(
+            self.semantics,
+            self.hypothesis.is_some(),
+            self.decisions.is_some(),
+        )
     }
     pub fn require_stable(&self, corpus: &Corpus, keys: &SemanticKeys) -> Result<()> {
         if let Some(reason) = self.unsupported_semantics() {
@@ -239,11 +244,21 @@ impl CheckRequest {
                 .map_err(CheckError::Keys)?
                 .clone(),
         );
-        let options = corpus.verification(verification).unwrap().options;
+        let options = &corpus.verification(verification).unwrap().options;
         request.semantics = options.semantics;
         request.hypothesis = options
             .hypothesis
             .map(|h| keys.relation(h).cloned().map_err(CheckError::Keys))
+            .transpose()?;
+        request.decisions = options
+            .decisions
+            .as_ref()
+            .map(|relations| {
+                relations
+                    .iter()
+                    .map(|r| keys.relation(*r).cloned().map_err(CheckError::Keys))
+                    .collect::<Result<_>>()
+            })
             .transpose()?;
         request.constraints = constraints;
         request.obligations = obligations;
@@ -278,6 +293,7 @@ impl CheckRequest {
             verification: None,
             semantics: Semantics::Stable,
             hypothesis: None,
+            decisions: None,
             constraints: constraints
                 .iter()
                 .map(|c| {
@@ -775,11 +791,17 @@ pub fn verification_constraints(
         .collect()
 }
 
-fn unsupported_semantics(semantics: Semantics, hypothesis: bool) -> Option<&'static str> {
+fn unsupported_semantics(
+    semantics: Semantics,
+    hypothesis: bool,
+    decisions: bool,
+) -> Option<&'static str> {
     if semantics == Semantics::Completion {
         Some("completion semantics not supported here")
     } else if hypothesis {
         Some("stable semantics with a hypothesis not supported here")
+    } else if decisions {
+        Some("stable semantics with selected decisions not supported here")
     } else {
         None
     }
@@ -789,8 +811,11 @@ pub fn require_stable_verification(corpus: &Corpus, verification: VerificationId
     let v = corpus
         .verification(verification)
         .ok_or(CheckError::InvalidRequest("unknown verification"))?;
-    if let Some(reason) = unsupported_semantics(v.options.semantics, v.options.hypothesis.is_some())
-    {
+    if let Some(reason) = unsupported_semantics(
+        v.options.semantics,
+        v.options.hypothesis.is_some(),
+        v.options.decisions.is_some(),
+    ) {
         return Err(CheckError::InvalidRequest(reason));
     }
     if v.obligations.iter().any(|id| {
