@@ -341,10 +341,12 @@ constraints. No context-dependent BDD or verdict is reused across selections.
 Verification declarations also own their rule semantics and optional hypothesis
 relation. Requests carry those options, using a semantic key for the hypothesis;
 CLI configuration cannot override the authored choice. The declaration interface
-supports completion, but current consumers refuse it (and stable-with-hypothesis)
-before semantic preparation. Stable preparation, fixed folds and cached answers
-are not an implementation of completion. The parser and shared reference services
-remain usable for such declarations while solver support is pending.
+supports completion. CLI, editor and planning consumers still refuse it (and
+stable-with-hypothesis) before semantic preparation. The separate experimental
+`completion_query` Rust API implements preparation and per-observation meaning;
+it does not yet implement complete verification reports. Stable preparation, fixed
+folds and cached answers are not an implementation of completion. The parser and
+shared reference services remain usable for such declarations.
 
 Input cardinality declarations belong to IR relation schemas, beside input
 eligibility. Preparation builds disjoint per-input groups by projecting eligible
@@ -477,6 +479,26 @@ An unextendable pair falls back to a full-program pair query, sharing the unique
 phase's remaining allowance. Unclassified components are always included; measurement
 records are not proof inputs. Numeric statistics are checker-owned, with presentation/CLI
 adapters responsible for JSON and human output.
+
+`denotate-check::completion_query` is a separate experimental query API. Its grounder
+enumerates finite substitutions, retaining unseeded recursive instances and original
+occurrences, without stable possible-tuple pruning or fixed folding. Before building
+W it checks selected assumption cones and `within` providers for ground recursion;
+only acyclic cones are compatible in this increment. Input eligibility evaluation is
+then safe under either semantics. These additional compatibility checks belong to
+the selected completion verification; ordinary program-wide declaration validation
+remains the consuming checker's responsibility.
+
+Both SAT APIs share the prepared-program projection and completion encoder. The
+completion API does not share stable-model refinement, attribution or solver state.
+W has independent equations and the complete input universe. Classification uses
+the original hypothesis cone; processing pins the unique classification and asks
+for whole-program extensions. Each SAT interpretation is validated against its
+scope's original equations. Exclusions distinguish relational interpretations, not
+auxiliary assignments. Queries return separate rejection, ambiguity, processing
+no-meaning and inconclusive outcomes; confirmed classification survives processing
+exhaustion. Each query owns its solver and work allowance. Edits require a new
+immutable preparation; there is no session cache or CLI/editor integration yet.
 Emptiness uses the shared report and presentation structures; finite derivations
 are reconstructed from each example's reduct-validated original interpretation
 under an independent diagnostic allowance. Remaining symbolic obligation kinds and

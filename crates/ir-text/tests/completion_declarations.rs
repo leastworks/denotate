@@ -11,6 +11,67 @@ fn single(text: &str) -> LoadedProgram {
     )
     .unwrap()
 }
+
+#[test]
+fn loaded_completion_queries_use_ground_hypothesis_cones_and_keep_processing_separate() {
+    use denotate_check::{GroundAtom, completion_query::*};
+    let p = single(
+        "sort S; const a, b: S; input raw(); relation p(x:S); p(X):-p(X); relation recognized(); recognized():-p(a); relation broken(); broken():-!broken(); verification v{semantics:completion;hypothesis:recognized;assumptions:[];obligations:[];}",
+    );
+    let v = p.corpus.verifications().next().unwrap().id;
+    let Preparation::Ready(engine) = Engine::prepare(
+        &p.corpus,
+        &p.domains,
+        &p.keys,
+        v,
+        &Limits::default(),
+        QueryLimits::default(),
+    )
+    .unwrap() else {
+        panic!()
+    };
+    let relation = p.corpus.relations().find(|r| r.name == "p").unwrap().id;
+    let a = p.corpus.constants().find(|c| c.name == "a").unwrap().id;
+    let b = p.corpus.constants().find(|c| c.name == "b").unwrap().id;
+    let ObservationOutcome::Accepted {
+        classification,
+        processing: Interpretations::NoMeaning,
+    } = engine.observation([]).unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(
+        classification.value(&GroundAtom::new(relation, [a])),
+        Some(true)
+    );
+    assert_eq!(classification.value(&GroundAtom::new(relation, [b])), None);
+    roundtrip(&p);
+}
+
+#[test]
+fn loaded_recursive_within_provider_gets_completion_compatibility_refusal() {
+    use denotate_check::completion_query::*;
+    let p = single(
+        "sort S; const a: S; relation candidates(x:S); candidates(X):-candidates(X); input raw(x:S) within candidates; verification v{semantics:completion;assumptions:[];obligations:[];}",
+    );
+    let v = p.corpus.verifications().next().unwrap().id;
+    let Preparation::Unsupported(issue) = Engine::prepare(
+        &p.corpus,
+        &p.domains,
+        &p.keys,
+        v,
+        &Limits::default(),
+        QueryLimits::default(),
+    )
+    .unwrap() else {
+        panic!()
+    };
+    assert!(matches!(
+        issue.source,
+        CompatibilitySource::InputDomain { .. }
+    ));
+    assert!(!issue.recursive_component.is_empty());
+}
 fn roundtrip(p: &LoadedProgram) {
     let layout = ExportLayout {
         files: vec![ExportFile {

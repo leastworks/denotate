@@ -12,9 +12,10 @@ Rule semantics and an optional acceptance hypothesis belong to the verification.
 Use an ordinary zero-arity relation as the hypothesis, with normal resolution,
 identity and provenance, rather than another declaration wrapping that relation.
 Existing constructors and syntax default to stable semantics with no hypothesis.
-Current consumers explicitly refuse the newly supported completion declarations
-until their preparation and checking paths implement that meaning; they never
-silently fall back to stable checking.
+CLI, editor and planning consumers explicitly refuse completion declarations until
+their preparation and checking paths implement that meaning; they never silently
+fall back to stable checking. The experimental Rust completion query API has its
+own preparation and interpretation checking.
 
 `no_rejections(H)` is a selectable obligation, with the same hypothesis as its
 completion verification. It is not an assumption: restricting inputs to the ones
@@ -22,6 +23,35 @@ that do not reject would discard the observations this query is supposed to chec
 It has no invented tuple or cardinality group. The IR therefore separates
 `Requirement` from `Restriction`, sharing the four cardinality forms while keeping
 this query obligation-only. Declaration support lands before solver support.
+
+## Completion preparation preserves unseeded definitions
+
+Completion reads a derived atom as equivalent to the disjunction of its producers.
+For `p() :- p();`, both truth values are possible. Stable preparation's possible-tuple
+closure and input-free least-model folding would erase the true interpretation.
+The completion query API therefore enumerates finite rule substitutions without
+those reductions. It stores input tuples and atoms occurring in rule instances;
+other legal derived tuples have empty definitions and are false. Enumeration uses
+the existing grounding limits and reports exhaustion explicitly. This initial path
+prioritizes correctness; it makes no scale claim for large Cartesian substitutions.
+
+Selected derived assumptions and static `within` providers must have acyclic ground
+dependency cones before they can define the input contract. This conservative
+restriction rules out positive as well as negative recursion, so their stable and
+completion interpretations agree. It is checked without the hypothesis or selected
+assumptions pruning dependencies. A compatibility refusal names the declaration and
+recursive component; exhaustion does not establish incompatibility.
+
+The acceptance hypothesis is checked only in its original ground dependency cone.
+A unique satisfying interpretation accepts an observation; zero rejects it; several
+are ambiguous. Processing is a separate extension query with that interpretation
+pinned. Otherwise a downstream contradiction could select a classification or turn
+a processing error into a rejection. Without a hypothesis, zero interpretations is
+ordinary no meaning. Uniqueness compares original relational atoms, never auxiliary
+SAT variables, and interpretations are validated against the original equations,
+without requiring a finite derivation. An immutable preparation can serve repeated
+queries; each query initially owns its solver, so partial encodings and learned
+clauses do not cross query or semantics boundaries.
 
 ## Positive recursive evaluation schedules changed premises
 

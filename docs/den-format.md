@@ -369,7 +369,7 @@ verification normal_operation {
   obligation that no verification in the program selects gets a notice, also when it
   is declared in a library.
 
-### Completion declarations (interface available; checking pending)
+### Completion declarations (CLI/editor checking pending)
 
 Verifications may declare `semantics: completion;` and then
 `hypothesis: recognized;` before `assumptions`. Omitting `semantics` means `stable`;
@@ -396,7 +396,9 @@ Ordinary declaration identity, messages, origins and unchecked-obligation notice
 apply. Merely declaring it activates nothing.
 
 The IR, loader, printer and editor reference services support these declarations.
-**Checking is not implemented yet:** both CLI engines, the editor checker and the
+The experimental Rust [completion query API](../crates/check/README.md#experimental-completion-queries)
+can evaluate individual observations; complete verification checking is pending.
+Both CLI engines, the editor checker and the
 execution planner explicitly refuse completion and stable-with-hypothesis before
 semantic preparation. A refused verification has an incomplete result, not a proof;
 other supported verifications still run. The CLI returns exit 2 for this required

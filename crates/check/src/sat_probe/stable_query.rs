@@ -290,7 +290,7 @@ impl Engine {
         let original = Arc::new(original);
         let mut program = settled.program.clone();
         let mut b = Budget::tracked(limits);
-        let mut cone = build::cone(&program, corpus, verification, &mut b)?;
+        let mut cone = program::original_cone(&program, corpus, verification, &mut b)?;
         let (ordered_inputs, split_groups) = pins::inventory(&program, &cone, keys, &mut b)?;
         let world_cone = world_cone(&cone, false, &mut b)?;
         let (scope, scope_atoms, origins) = scope::restrict(

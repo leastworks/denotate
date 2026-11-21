@@ -754,6 +754,60 @@ work, cumulative created BDD nodes and the cutoff. This separates a local resour
 effect from sequential composition; it does not explain every difference between
 two completed simplification runs.
 
+## Experimental completion queries
+
+`completion_query::Engine::prepare` prepares an authored completion verification.
+It returns `Preparation::Ready`, a declaration-specific `Unsupported` compatibility
+issue, or `Inconclusive` with phase/resource information. Invalid API requests and
+cancellation remain errors. This API does not replace program-wide declaration
+validation, which consumers must continue to run independently.
+
+Preparation enumerates finite rule substitutions and retains every defining
+instance, including unseeded positive recursion. It does not run stable possible-tuple
+pruning, fixed folding, admission, input-pin discovery or reduct refinement. Original
+head/body occurrences survive for later evidence. Only input tuples and atoms in
+instances are stored; other legal derived tuples have empty definitions and are
+false. Large substitution products can exhaust the ordinary grounding limits;
+this foundation is not yet a scale-optimized completion grounder.
+
+Selected derived assumptions and static `within` providers must have acyclic ground
+dependency cones, checked before using their meaning. The refusal carries semantic
+keys for the source declaration, restricted relation and recursive component. A
+cutoff is inconclusive, never an incompatibility proof. Eligible inputs and declared
+cardinality then define U; selected restrictions define W independently of the
+acceptance hypothesis and downstream equations. Unselected declarations do not
+trigger this extra completion compatibility check.
+
+- `worlds(&WorldQuery)` searches W alone with optional input pins and excluded cubes.
+  It returns a complete input observation, `NoWorld`, or `Inconclusive`. An empty
+  query's `NoWorld` means the input contract is inconsistent; a pinned query's
+  `NoWorld` means only that the query has no permitted observation.
+- `observation(present_inputs)` treats omitted eligible inputs as absent. Outside W
+  it returns `NotPermitted`. With H, it counts interpretations of H's original
+  upstream ground cone satisfying H: zero is `Rejected`, one is `Accepted`, and
+  several are `Ambiguous`. Exhaustion is explicit. An accepted result separately
+  reports processing extensions with that unique classification pinned: no meaning,
+  unique, multiple or inconclusive. Without H it reports these whole-program
+  interpretation outcomes directly, with no rejection classification.
+- Models label their scope, retain the full input observation and return `None`
+  for derived atoms outside that scope. They satisfy the original completion
+  equations, checked independently of the SAT encoding. They are not finite
+  derivations. Uniqueness ignores auxiliary SAT variables. If uniqueness exhausts,
+  an already validated interpretation is retained without claiming acceptance.
+
+`QueryLimits` bounds solves, solver polls, conflicts and propagations, in addition
+to ordinary work/CNF/deadline limits. One observation query shares its allowance
+across W, classification and processing; completed classification survives a
+processing cutoff. Preparation is immutable and reusable; each query currently
+owns a fresh SAT solver and no query cache. Program, domain, eligibility, assumption
+or hypothesis edits require new preparation. No result is shared with stable mode.
+
+This increment supplies query primitives only. It does not yet enumerate all worlds
+for verification reports, check `no_rejections` or processing obligations, publish
+completion evidence, or run the opt-in circular-support advisory. Both CLI engines,
+the editor, planner and scorecard continue to refuse completion explicitly until
+their integrations land.
+
 ## Experimental stable queries
 
 `stable_query::Engine::prepare` prepares one immutable corpus, resolved domains and

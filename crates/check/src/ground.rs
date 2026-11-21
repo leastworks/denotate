@@ -13,6 +13,8 @@ use std::{
 #[cfg(any(test, feature = "test-support"))]
 #[path = "cartesian_oracle.rs"]
 mod cartesian_oracle;
+#[path = "completion_ground.rs"]
+mod completion_ground;
 #[path = "input_domains.rs"]
 mod input_domains;
 #[path = "planning.rs"]

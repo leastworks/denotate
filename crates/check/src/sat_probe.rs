@@ -813,4 +813,6 @@ pub use candidates::{
 pub(crate) mod admission;
 pub use admission::{SatProbeEvent, SatProbeObserver};
 
+pub mod completion_query;
+mod program;
 pub mod stable_query;
