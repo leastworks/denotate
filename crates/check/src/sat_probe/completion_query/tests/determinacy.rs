@@ -63,7 +63,7 @@ fn second_query_cutoff_is_unknown_and_one_base_model_suffices_for_rejection() {
         .unwrap();
     let v = declared(&mut c, Some(h), None, &[total]);
     let mut e = prepare(&c, v, &Domains::new());
-    e.config.max_solves = 2;
+    e.config.max_solves = 1;
     let r = e.check(&keys(&c), &CheckOptions::default()).unwrap();
     assert!(r.is_incomplete());
     assert!(!r.all_rejected());
@@ -71,7 +71,7 @@ fn second_query_cutoff_is_unknown_and_one_base_model_suffices_for_rejection() {
     assert!(!r.obligations[&total].complete());
     let class = r.classification.unwrap();
     assert!(matches!(class.rejected, Search::Inconclusive(_)));
-    assert!(matches!(class.no_meaning, Search::Inconclusive(_)));
+    assert!(matches!(class.no_meaning, Search::None));
     // The cone has two models without H. Existence must not spend another solve
     // distinguishing them: ambiguity without the hypothesis is irrelevant.
     e.config.max_solves = 3;

@@ -1,11 +1,11 @@
 use super::*;
 
 pub(super) struct Run<'a, 'b, 'l> {
-    engine: &'a Engine,
-    budget: &'b mut Budget<'l>,
-    cnf: Cnf,
-    truth: Lit,
-    world: Encoding,
+    pub(super) engine: &'a Engine,
+    pub(super) budget: &'b mut Budget<'l>,
+    pub(super) cnf: Cnf,
+    pub(super) truth: Lit,
+    pub(super) world: Encoding,
     inactive: Vec<Lit>,
     solves: usize,
 }
@@ -174,6 +174,7 @@ impl Engine {
     }
 }
 
+#[cfg(test)]
 pub(super) fn property(
     engine: &Engine,
     cone: &Cone,
@@ -301,7 +302,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         Ok(self.world.vars[self.engine.program.atom_index[atom]])
     }
 
-    fn solve(&mut self, pins: &[Lit]) -> Result<bool> {
+    pub(super) fn solve(&mut self, pins: &[Lit]) -> Result<bool> {
         self.budget.tick("completion solve")?;
         self.cnf.solver.cb().check()?;
         self.budget.room(
@@ -449,7 +450,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
 }
 
 /// Check the original finite equations, not merely that SAT returned a model.
-fn checked_assignment(
+pub(super) fn checked_assignment(
     cone: &Cone,
     e: &Encoding,
     cnf: &Cnf,

@@ -571,9 +571,12 @@ processing is not applicable, and processing obligations are vacuous. It can exi
 there is no unqualified program proof. Required unknown/unanalysed work has exit 2,
 which takes precedence over a known failure (exit 1). Partial selection stays exit 2.
 
-The existing SAT solve/world/tuple/CNF limits bound this first completion path.
-World enumeration and finite-substitution grounding are deliberately conservative;
-large programs can exhaust them. Empty and at-most-one are supported, with
+The existing SAT solve/world/tuple/CNF limits bound this completion path.
+Grounding joins greatest-fixpoint possible tuples, preserving unseeded recursion
+and original classification scopes. Whole-verification checks use symbolic pair
+queries and generalized input cubes. `--sat-max-worlds` bounds candidate observations
+per search, not the number of concrete observations covered by a cube. Dense
+possible relations or difficult existence searches can still exhaust limits. Empty and at-most-one are supported, with
 coverage/exactly-one for acyclic input-independent cones; symbolic coverage and
 notices remain explicitly unanalysed. Completion property evidence includes checked
 interpretations and scope, without fabricated finite derivations. Placement falls

@@ -11,13 +11,15 @@ mod advisory;
 mod checking;
 mod properties;
 mod queries;
+mod symbolic;
 pub use advisory::*;
 pub use checking::*;
 pub use properties::*;
 #[cfg(test)]
 mod tests;
 
-/// Limits for one public query, in addition to the ordinary checker limits.
+/// Limits for one observation query or one symbolic whole-check search, in
+/// addition to the ordinary checker limits.
 #[derive(Debug, Clone)]
 pub struct QueryLimits {
     pub max_solves: usize,
@@ -65,7 +67,7 @@ pub enum ModelScope {
 }
 
 /// A completion interpretation, not a finite derivation. Unlisted legal tuples
-/// inside the scope have empty definitions and are false. Outside-scope derived
+/// inside the scope are false: no producer survives completion-safe pruning. Outside-scope derived
 /// atoms are unknown. The complete input observation is retained in every model.
 #[derive(Debug, Clone)]
 pub struct Model {
@@ -77,7 +79,7 @@ pub struct Model {
 }
 impl Model {
     /// Original named atoms in this interpretation's scope, including inputs.
-    /// Other legal tuples in scope have empty definitions and are false.
+    /// Other legal tuples in scope have no surviving producer and are false.
     pub fn interpretation(&self) -> impl Iterator<Item = (&GroundAtom, bool)> {
         self.program
             .core
@@ -189,6 +191,7 @@ pub struct WorldQuery {
 /// Re-preparing is required for edits to H, W, decisions, domains, eligibility or rules.
 pub struct Engine {
     program: Arc<GroundProgram>,
+    original: crate::ground::OriginalDependencies,
     cone: Cone,
     world: Cone,
     classification: Option<(Cone, Arc<BTreeSet<GroundAtom>>, usize)>,
@@ -253,12 +256,12 @@ impl Engine {
         // Retain ordinary construction validation. The stronger completion check
         // below is scoped to this verification's selected declarations.
         corpus.input_domain_cone_with(|| b.tick("completion input domains"))?;
-        let mut program = GroundProgram::prepare_completion(corpus, domains, &mut b)?;
+        let original = crate::ground::OriginalDependencies::new(corpus, domains, &mut b)?;
         for r in corpus.relations() {
             b.tick("completion compatibility")?;
             if let Some(provider) = r.input_domain {
                 if let Some(issue) = compatibility(
-                    &program,
+                    &original,
                     provider,
                     CompatibilitySource::InputDomain {
                         input: keys.relation(r.id).map_err(CheckError::Keys)?.clone(),
@@ -271,11 +274,11 @@ impl Engine {
             }
         }
         // Only now is least-model evaluation safe for these acyclic providers.
-        program.completion_inputs(corpus, &mut b)?;
+        let program = GroundProgram::prepare_completion(corpus, domains, &mut b)?;
         for id in &declaration.assumptions {
             let a = corpus.assumption(*id).unwrap();
             if let Some(issue) = compatibility(
-                &program,
+                &original,
                 a.restriction.relation(),
                 CompatibilitySource::SelectedAssumption(
                     keys.assumption(*id).map_err(CheckError::Keys)?.clone(),
@@ -293,7 +296,7 @@ impl Engine {
         cone.groups.clear();
         let classification = if let Some(h) = declaration.options.hypothesis {
             let atom = GroundAtom::new(h, []);
-            let closure = program.dependency_cone_with_budget([atom.clone()], &mut b)?;
+            let closure = original.cone([atom.clone()], &mut b)?;
             let members = Arc::new(closure.facts);
             let mut c = cone.clone();
             c.rules.retain(|r| members.contains(&c.atoms[r.head]));
@@ -309,6 +312,7 @@ impl Engine {
         b.check("completion preparation")?;
         Ok(Preparation::Ready(Self {
             program: Arc::new(program),
+            original,
             cone,
             world,
             classification,
@@ -333,7 +337,9 @@ impl Engine {
         }))
     }
 
-    /// Ground structure and source occurrences for inspection. Its stable
+    /// Completion-equivalent ground instances and original source occurrences.
+    /// Impossible producers are omitted; original dependency scopes are kept
+    /// separately. Its stable
     /// evaluation/admission methods are not completion-meaning operations.
     pub fn original_program(&self) -> &GroundProgram {
         &self.program
@@ -364,35 +370,24 @@ impl Engine {
 }
 
 fn compatibility(
-    p: &GroundProgram,
+    original: &crate::ground::OriginalDependencies,
     relation: RelationId,
     source: CompatibilitySource,
     keys: &SemanticKeys,
     b: &mut Budget<'_>,
 ) -> Result<Option<CompatibilityIssue>> {
-    let mut roots = Vec::new();
-    for a in &p.core.atoms {
-        b.tick("completion compatibility")?;
-        if a.relation == relation {
-            roots.push(a.clone());
-        }
-    }
-    let cone = p.dependency_cone_with_budget(roots, b)?;
-    for component in &p.components {
-        b.tick("completion compatibility")?;
-        if component.recursive && cone.components.contains(&component.id) {
-            let mut atoms = Vec::new();
-            for a in &component.atoms {
-                b.tick("completion compatibility")?;
-                atoms.push(AtomKey::from_atom(keys, a).map_err(CheckError::Keys)?);
-            }
-            atoms.sort();
-            return Ok(Some(CompatibilityIssue {
-                source,
-                relation: keys.relation(relation).map_err(CheckError::Keys)?.clone(),
-                recursive_component: atoms,
-            }));
-        }
+    let cone = original.relation_cone(relation, [], b)?;
+    if let Some(cycle) = cone.cycle {
+        let mut atoms = cycle
+            .iter()
+            .map(|a| AtomKey::from_atom(keys, a).map_err(CheckError::Keys))
+            .collect::<Result<Vec<_>>>()?;
+        atoms.sort();
+        return Ok(Some(CompatibilityIssue {
+            source,
+            relation: keys.relation(relation).map_err(CheckError::Keys)?.clone(),
+            recursive_component: atoms,
+        }));
     }
     Ok(None)
 }

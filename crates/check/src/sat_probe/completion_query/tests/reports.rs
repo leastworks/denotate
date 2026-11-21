@@ -16,6 +16,11 @@ fn verification_reports_match_exhaustive_authored_equations_and_property_cones()
                 let v = selected(&mut c, h, &[o]);
                 let e = prepare(&c, v, &Domains::new());
                 let r = e.check(&keys(&c), &CheckOptions::default()).unwrap();
+                super::scale::same_report(
+                    &r,
+                    &e.check_enumerated(&keys(&c), &CheckOptions::default())
+                        .unwrap(),
+                );
                 let (mut accept, mut reject, mut ambiguous, mut no_meaning, mut many, mut failure) =
                     (false, false, false, false, false, false);
                 let mut class_no_meaning = false;
@@ -72,13 +77,13 @@ fn unknown_classification_does_not_prove_properties_or_invent_rejection() {
         .unwrap();
     let v = selected(&mut c, Some(h), &[o, total]);
     let mut e = prepare(&c, v, &Domains::new());
-    e.config.max_solves = 2;
+    e.config.max_solves = 0;
     let r = e.check(&keys(&c), &CheckOptions::default()).unwrap();
     assert!(r.is_incomplete());
     assert!(!r.obligations[&o].complete());
     assert!(!r.obligations[&o].failed());
-    // A validated first classification model still proves that no input rejects.
-    assert!(r.obligations[&total].complete());
+    // No query completed, so rejection must remain unknown too.
+    assert!(!r.obligations[&total].complete());
     assert!(!r.obligations[&total].failed());
 }
 
@@ -229,7 +234,7 @@ fn ambiguous_classification_is_never_used_as_an_accepted_property_witness() {
     assert!(r.has_failures());
 }
 #[test]
-fn a_confirmed_rejection_survives_enumeration_exhaustion() {
+fn input_independent_rejection_finishes_without_enumerating_worlds() {
     let mut c = Corpus::new();
     rel(&mut c, "input", true);
     let h = rel(&mut c, "h", false);
@@ -247,10 +252,10 @@ fn a_confirmed_rejection_survives_enumeration_exhaustion() {
             },
         )
         .unwrap();
-    assert!(r.is_incomplete());
+    assert!(!r.is_incomplete());
     assert!(r.has_failures());
     assert!(r.obligations[&total].failed());
-    assert!(!r.all_rejected());
+    assert!(r.all_rejected());
     let r = e.check(&keys(&c), &CheckOptions::default()).unwrap();
     assert!(!r.is_incomplete());
     assert!(r.all_rejected());

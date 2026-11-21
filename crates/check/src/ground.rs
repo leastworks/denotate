@@ -15,6 +15,7 @@ use std::{
 mod cartesian_oracle;
 #[path = "completion_ground.rs"]
 mod completion_ground;
+pub(crate) use completion_ground::OriginalDependencies;
 #[path = "input_domains.rs"]
 mod input_domains;
 #[path = "planning.rs"]

@@ -62,13 +62,17 @@ fn completion_cli_evidence_meaning_and_mixed_semantics() {
     assert_eq!(f.run(&["--no-progress"]).0, 2);
 }
 #[test]
-fn completion_cli_cutoffs_and_compatibility_are_incomplete() {
+fn completion_cli_symbolic_worlds_cutoffs_and_compatibility() {
     let f = Fixture::new(
         "input i();relation h();obligation total:no_rejections(h);verification v{semantics:completion;hypothesis:h;assumptions:[];obligations:[total];}",
     );
     let (code, out) = f.run(&["--engine", "sat", "--sat-max-worlds", "1", "--no-progress"]);
-    assert_eq!(code, 2, "{out}");
+    assert_eq!(code, 1, "{out}");
     assert!(out.contains("counterexample"), "{out}");
+    assert!(out.contains("all-rejected"), "{out}");
+    let (code, out) = f.run(&["--engine", "sat", "--sat-max-worlds", "0", "--no-progress"]);
+    assert_eq!(code, 2, "{out}");
+    assert!(!out.contains("counterexample"), "{out}");
     assert!(out.contains("worlds"), "{out}");
     let f = Fixture::new(
         "relation p();p():-p();assumption a:empty(p);verification v{semantics:completion;assumptions:[a];obligations:[];}",
@@ -560,7 +564,7 @@ fn completion_cli_selected_decisions_and_second_query_cutoff() {
     let f = Fixture::new(
         "relation h();obligation total:no_rejections(h);verification v{semantics:completion;hypothesis:h;assumptions:[];obligations:[total];}",
     );
-    let (exit, out) = f.run(&["--engine", "sat", "--sat-max-solves", "2", "--no-progress"]);
+    let (exit, out) = f.run(&["--engine", "sat", "--sat-max-solves", "1", "--no-progress"]);
     assert_eq!(exit, 2, "{out}");
     assert!(!out.contains("all-rejected"), "{out}");
     assert!(!out.contains("counterexample"), "{out}");

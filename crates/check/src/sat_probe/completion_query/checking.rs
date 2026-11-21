@@ -17,11 +17,13 @@ impl<T> Search<T> {
     pub fn complete(&self) -> bool {
         matches!(self, Self::None | Self::Exists(_))
     }
+    #[cfg(test)]
     fn unknown(&mut self, cause: Inconclusive) {
         if !self.exists() {
             *self = Self::Inconclusive(cause);
         }
     }
+    #[cfg(test)]
     fn finish(&mut self) {
         if matches!(self, Self::NotAnalysed) {
             *self = Self::None;
@@ -50,6 +52,7 @@ pub struct Meaning {
 #[derive(Debug, Clone)]
 pub struct CheckOptions {
     pub meaning: MeaningMode,
+    /// Candidate observations per symbolic search; a cube may cover many worlds.
     pub max_worlds: usize,
     pub max_tuples: usize,
     pub max_examples: usize,
@@ -127,8 +130,13 @@ impl Report {
                 && (!self.meaning.no_meaning.complete() || !self.meaning.ambiguous.complete()))
     }
 }
+#[cfg(test)]
 impl Engine {
-    pub fn check(&self, keys: &SemanticKeys, options: &CheckOptions) -> Result<Report> {
+    pub(super) fn check_enumerated(
+        &self,
+        keys: &SemanticKeys,
+        options: &CheckOptions,
+    ) -> Result<Report> {
         if options.meaning != MeaningMode::Full {
             return Err(CheckError::InvalidRequest(
                 "completion supports full meaning analysis only",

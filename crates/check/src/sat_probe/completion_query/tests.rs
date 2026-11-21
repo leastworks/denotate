@@ -3,6 +3,7 @@ use crate::test_support::rewrites::{atom, rel, rule};
 use denotate_ir::*;
 mod determinacy;
 mod reports;
+mod scale;
 
 fn keys(c: &Corpus) -> SemanticKeys {
     let mut k = SemanticKeys::default();

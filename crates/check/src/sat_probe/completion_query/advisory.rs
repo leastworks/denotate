@@ -16,6 +16,7 @@ pub struct CircularSupport {
     pub model: Model,
 }
 impl Engine {
+    #[cfg(test)]
     pub(super) fn circular_advisory(
         &self,
         models: &[Model],
@@ -26,6 +27,16 @@ impl Engine {
         let mut limits = options.advisory_limits.clone();
         limits.cancellation = self.limits.cancellation.clone();
         let mut b = Budget::new(&limits);
+        self.circular_advisory_using(models, truncated, options, keys, &mut b)
+    }
+    pub(super) fn circular_advisory_using(
+        &self,
+        models: &[Model],
+        truncated: bool,
+        options: &CheckOptions,
+        keys: &SemanticKeys,
+        mut b: &mut Budget<'_>,
+    ) -> Result<Advisory> {
         let mut findings = Vec::new();
         let mut seen = BTreeSet::new();
         let result: Result<()> = (|| {
@@ -35,13 +46,8 @@ impl Engine {
             if models.is_empty() {
                 return Ok(());
             }
-            // Identity uses original positive components, not the witness's support.
-            let mut positive = (*self.program).clone();
-            for r in &mut positive.rules {
-                b.charge(r.body.len() + 1, "completion circular support")?;
-                r.body.retain(|l| l.polarity == Polarity::Positive);
-            }
-            crate::graph::analyze(&mut positive, &mut b)?;
+            // Pruned dead producers must not change the advisory's identity.
+            let mut components = BTreeMap::<GroundAtom, Arc<BTreeSet<GroundAtom>>>::new();
             let mut rule_ids = Vec::new();
             for r in &self.program.core.rules {
                 b.tick("completion circular support")?;
@@ -86,12 +92,15 @@ impl Engine {
                             stack.push((to, 0, Some(rule)));
                         } else if color[to] == 1 {
                             let start = stack.iter().position(|(a, _, _)| *a == to).unwrap();
-                            let component = positive
-                                .component_for(&cone.atoms[to])?
-                                .atoms
-                                .iter()
-                                .cloned()
-                                .collect::<BTreeSet<_>>();
+                            let root = &cone.atoms[to];
+                            if !components.contains_key(root) {
+                                let members = Arc::new(self.original.positive_component(root, b)?);
+                                for atom in members.iter() {
+                                    b.tick("completion circular support identity")?;
+                                    components.insert(atom.clone(), members.clone());
+                                }
+                            }
+                            let component = components[root].as_ref().clone();
                             let key = component
                                 .iter()
                                 .map(|a| AtomKey::from_atom(keys, a).map_err(CheckError::Keys))

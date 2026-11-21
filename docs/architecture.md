@@ -482,8 +482,10 @@ records are not proof inputs. Numeric statistics are checker-owned, with present
 adapters responsible for JSON and human output.
 
 `denotate-check::completion_query` is a separate experimental query API. Its grounder
-enumerates finite substitutions, retaining unseeded recursive instances and original
-occurrences, without stable possible-tuple pruning or fixed folding. Before building
+joins greatest-fixpoint possible tuples, retaining unseeded recursive instances and
+original occurrences. It never applies stable least-model pruning or fixed folding.
+Original dependency scopes are projected separately from rule templates, so pruning
+impossible producers cannot change classification membership or compatibility. Before building
 W it checks selected assumption cones and `within` providers for ground recursion;
 only acyclic cones are compatible in this increment. Input eligibility evaluation is
 then safe under either semantics. These additional compatibility checks belong to
@@ -501,10 +503,13 @@ asks for whole-program existence and decision determinacy. Each SAT interpretati
 scope's original equations. Exclusions distinguish relational interpretations, not
 auxiliary assignments. Queries return separate rejection, ambiguity, classification
 and processing no-meaning, and inconclusive outcomes; confirmed classification survives processing
-exhaustion. Each query owns its solver. Whole-verification reports enumerate W independently
-of H, with separate budgets for classification, processing and properties. Property
-queries combine the original property and classification cones, retain H and pin
-established decisions; helpers remain free. This preserves failures across helper
+exhaustion. Each query owns its solver. Whole-verification reports use shared-input pair queries
+for determinacy and counterexample-guided searches with generalized input cubes
+for existence and rejection. W remains independent of H and downstream equations.
+Each search has a separate allowance; candidate exclusions are gated off during
+certification. Property queries combine the original property and classification
+cones and H, and confirm unique classification decisions separately; helpers remain
+free. This preserves failures across helper
 interpretations and independent of downstream contradictions. The shared completion presenter
 owns interpretation evidence, JSON summary and diagnostic wording; `ir-text` owns
 source placement, and the SAT CLI owns output and exit-code precedence. All-rejected

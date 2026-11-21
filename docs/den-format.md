@@ -452,6 +452,13 @@ Inconsistent W remains a context error. Exit precedence is 2 for required incomp
 or unanalysed work (including partial selection), then 1 for context, meaning or
 obligation failure, otherwise 0. Operational failures use 3.
 
+The SAT path asks these questions symbolically over W. Pair queries compare
+interpretations sharing an observation; existence and rejection generalize checked
+interpretations into input cubes. `--sat-max-worlds` bounds candidate observations
+per search, rather than all concrete observations covered by a cube. Exhaustion is
+still inconclusive. Sparse preparation preserves unseeded positive loops and the
+original classification boundary, including dependencies through dead producers.
+
 Completion counterexamples carry checked interpretations and their scope, with the
 full input observation, rather than claiming a finite derivation. Unlocated support
 falls back to the obligation. `--completion-circular-support` optionally reports an

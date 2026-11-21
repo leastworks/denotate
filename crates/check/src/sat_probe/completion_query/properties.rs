@@ -19,7 +19,7 @@ pub struct ObligationResult {
     pub finished: bool,
     pub no_groups: bool,
     pub inconclusive: Option<Inconclusive>,
-    members: Option<Arc<BTreeSet<GroundAtom>>>,
+    pub(super) members: Option<Arc<BTreeSet<GroundAtom>>>,
 }
 impl ObligationResult {
     pub fn failed(&self) -> bool {
@@ -115,16 +115,13 @@ impl Engine {
                 atoms.sort_by(|a, b| a.0.cmp(&b.0));
                 let atoms: Vec<_> = atoms.into_iter().map(|(_, a)| a).collect();
                 let original = self
-                    .program
-                    .dependency_cone_with_budget(atoms.clone(), &mut b)?;
+                    .original
+                    .relation_cone(r.relation(), atoms.clone(), &mut b)?;
                 let fixed = original
                     .facts
                     .iter()
                     .all(|a| !self.program.inputs.contains(a))
-                    && original
-                        .components
-                        .iter()
-                        .all(|id| !self.program.components[id.index].recursive);
+                    && original.cycle.is_none();
                 let mut members = original.facts;
                 if let Some((_, classification, _)) = &self.classification {
                     members.extend(classification.iter().cloned());
@@ -227,6 +224,7 @@ impl Engine {
         }
         Ok(out)
     }
+    #[cfg(test)]
     pub(super) fn check_property(
         &self,
         result: &mut ObligationResult,
@@ -273,6 +271,7 @@ impl Engine {
         }
         Ok(())
     }
+    #[cfg(test)]
     pub(super) fn meaning_at(
         &self,
         world: &Observation,

@@ -762,13 +762,21 @@ issue, or `Inconclusive` with phase/resource information. Invalid API requests a
 cancellation remain errors. This API does not replace program-wide declaration
 validation, which consumers must continue to run independently.
 
-Preparation enumerates finite rule substitutions and retains every defining
-instance, including unseeded positive recursion. It does not run stable possible-tuple
-pruning, fixed folding, admission, input-pin discovery or reduct refinement. Original
-head/body occurrences survive for later evidence. Only input tuples and atoms in
-instances are stored; other legal derived tuples have empty definitions and are
-false. Large substitution products can exhaust the ordinary grounding limits;
-this foundation is not yet a scale-optimized completion grounder.
+Preparation computes a greatest fixpoint of possibly true tuples, then joins
+positive-premise tables before enumerating any remaining variables. Derived tables
+start at the full finite domain, so unseeded positive recursion survives. A producer
+is omitted only when some positive premise cannot be true in any completion.
+Negative premises never prune possibility. This does not run stable least-model
+folding, admission, input-pin discovery or reduct refinement. Retained instances
+keep their original source occurrences; other legal derived tuples are false.
+
+Original dependency scopes are kept separately, as rule templates and shared
+projected dependency patterns. Removing a dead producer must not erase a helper
+from classification, hide an assumption/provider cycle, or change a circular-support
+advisory's component identity. Projecting one dependency at a time avoids building
+every combination of unrelated body variables just to discover that scope. Both
+possibility and original-scope construction use ordinary grounding/work limits.
+Genuinely dense possible relations can still exhaust them.
 
 Selected derived assumptions and static `within` providers must have acyclic ground
 dependency cones, checked before using their meaning. The refusal carries semantic
@@ -810,8 +818,8 @@ processing cutoff. Preparation is immutable and reusable; each query currently
 owns a fresh SAT solver and no query cache. Program, domain, eligibility, assumption
 hypothesis or decision-selection edits require new preparation. No result is shared with stable mode.
 
-`Engine::check(keys, options)` produces a whole-verification report. It enumerates
-W outside H, with separate classification sets (`exists`, `none`, `inconclusive`),
+`Engine::check(keys, options)` produces a whole-verification report. It queries
+W outside H symbolically, with separate classification sets (`exists`, `none`, `inconclusive`),
 processing meaning and obligation results. Established witnesses survive cutoff.
 Only confirmed unique decision classification admits a world to processing
 obligations; unknown classification never completes a property proof.
@@ -821,8 +829,9 @@ rejections only. An all-rejected context excludes classification no-meaning,
 ambiguity and unknowns. It is explicit, processing is not applicable, and processing
 properties are vacuous; inconsistent W is a context error instead.
 
-Property queries use the original obligation and classification cones, H and the
-established decision values. They search all relevant helper interpretations, so an
+Property queries use the original obligation and classification cones and H.
+A separate eligibility query confirms unique classification decisions for each
+candidate observation, leaving helper assignments free. They search all relevant helper interpretations, so an
 arbitrary classification witness cannot hide a property failure. An independent
 failure remains visible when unrelated processing has no model.
 Supported forms are empty and uniqueness, plus coverage/exactly-one on acyclic
@@ -832,15 +841,33 @@ back to the obligation instead of inventing finite-support attribution. Existing
 obligation identities are reused. Only a bounded number of property examples is
 retained; reducing that number cannot change required outcomes.
 
-Whole-check enumeration, classification, processing meaning and each property have
-separate work/deadline budgets. `max_worlds` bounds enumeration, `max_tuples` bounds
-property candidates, and exclusion storage counts against the dependency allowance.
-There is no support-cube generalization yet: large input universes can exhaust this
-bounded enumeration. The implementation makes no corpus-scale throughput claim.
+Ambiguity uses two equation copies sharing only inputs, with a difference in a
+selected decision. Processing/property candidates cannot participate in the
+classification eligibility query. Rejection searches for a classification model
+without H, then proves that no model with H exists for that observation.
+No-meaning searches choose observations independently of the target equations.
+Successful existence checks exclude a generalized input cube: keep derived values,
+retain one true producer for every true head and one false premise for every
+producer of a false head. Inputs not needed by those witnesses may vary. This is
+completion evidence, so circular support is allowed. Pair cubes preserve both
+models. Exclusions affect candidate selection only; they never constrain W or a
+subsequent certification query. Positive SCCs have a least fixpoint, so absence of
+negative cycles proves existence without enumerating observations; it does not
+prove decision determinacy.
+
+Classification sets, processing existence/ambiguity and each property have separate
+work/deadline budgets and incremental query solvers. `QueryLimits` bounds each such
+search, in addition to individual observation queries. `max_worlds` now bounds
+candidate observations per counterexample-guided search, not the number of concrete
+worlds a successful cube covers. `max_tuples` still bounds property candidates;
+exclusion clauses count against CNF/work limits. Difficult cubes can still exhaust
+these limits and give explicit inconclusive results. No real-program throughput
+claim is made.
 `CheckOptions::meaning` currently accepts only `Full`.
 
 `circular_support` is an optional advisory, off by default. After required checking,
-retained accepted classification examples are tested for unfounded support. The
+accepted classification examples are sampled separately and tested for unfounded
+support. Sampling and detection share the independent advisory allowance. The
 checker reports actual supported positive cycles, identified by their original
 positive component's semantic keys. It never adds stable loop clauses or rejects
 those interpretations. `advisory_limits` is independent; example truncation and

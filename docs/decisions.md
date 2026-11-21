@@ -59,10 +59,10 @@ It has no invented tuple or cardinality group. The IR therefore separates
 `Requirement` from `Restriction`, sharing the four cardinality forms while keeping
 this query obligation-only. Declaration support lands before solver support.
 
-Whole-verification completion checking enumerates W independently of H. Each
-accepted observation pins its established decision values for processing, while
-property queries use their own original cones plus the classification equations
-and H. This prevents a downstream
+Whole-verification completion checking queries W independently of H. Processing
+and property candidates retain the classification equations and H, while a separate
+pair query checks decision uniqueness for that observation. Properties use their own
+original cones. This prevents a downstream
 contradiction from hiding an independent property failure. Classification sets
 retain established witnesses through exhaustion; unresolved observations cannot
 complete a universal property proof. An all-rejected context is explicitly named,
@@ -82,11 +82,20 @@ allowance, is off by default, and cannot change required completeness or exit co
 Completion reads a derived atom as equivalent to the disjunction of its producers.
 For `p() :- p();`, both truth values are possible. Stable preparation's possible-tuple
 closure and input-free least-model folding would erase the true interpretation.
-The completion query API therefore enumerates finite rule substitutions without
-those reductions. It stores input tuples and atoms occurring in rule instances;
-other legal derived tuples have empty definitions and are false. Enumeration uses
-the existing grounding limits and reports exhaustion explicitly. This initial path
-prioritizes correctness; it makes no scale claim for large Cartesian substitutions.
+The completion grounder instead computes a greatest fixpoint of possibly true
+tuples. Start derived tables at the full domain, remove a tuple only when every
+producer has a positive premise already impossible, and ignore negation for this
+upper bound. Every completion's true atoms survive each iteration. Conversely,
+every omitted producer has a premise false in every completion, so deleting it
+preserves both directions of each completion equation. Sparse positive joins avoid
+materializing substitutions whose premises are impossible. Unseeded loops remain.
+Small full-enumeration model oracles guard this distinction from stable grounding.
+
+Original dependencies are preserved independently. Even `h(); h() :- p(), absent();`
+puts p in H's original classification cone. Pruning that dead producer must not
+change determinacy, compatibility checks, or original positive-component advisory
+identities. Rule templates and shared projected dependency patterns retain exact
+reachability without multiplying variables unrelated to an individual edge.
 
 Selected derived assumptions and static `within` providers must have acyclic ground
 dependency cones before they can define the input contract. This conservative
@@ -106,6 +115,27 @@ ordinary no meaning. Uniqueness compares the selected original relational atoms
 without requiring a finite derivation. An immutable preparation can serve repeated
 queries; each query initially owns its solver, so partial encodings and learned
 clauses do not cross query or semantics boundaries.
+
+## Completion whole-verification searches generalize equations, not derivations
+
+Enumerating every observation bounds useful checking by the number of input bits.
+Instead, decision ambiguity uses two completion copies sharing inputs. Existence
+and rejection use counterexample-guided searches: candidates are selected from W
+(or the appropriate classification equations), while certification runs without
+candidate exclusions or downstream constraints.
+
+A validated interpretation covers every variation of unpinned inputs when each
+true head retains a true producer and every producer of each false head retains a
+false premise. Derived values remain fixed, including circular support; requiring
+a finite derivation would silently switch to stable semantics. A hypothesis that
+is itself an input is pinned. W is always enforced separately. The intersection
+of two such cubes preserves ambiguity. No negative ground cycle implies existence
+by successive positive least fixpoints, but says nothing about uniqueness.
+
+Each search owns its solver and allowance. Exhaustion remains inconclusive;
+independently established failures survive. Optional circular-support sampling and
+detection share a separate allowance and cannot affect required results. These
+changes remove exhaustive message enumeration, not every exponential worst case.
 
 ## Positive recursive evaluation schedules changed premises
 

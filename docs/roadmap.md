@@ -38,11 +38,12 @@ direction for such programs separates meaning from schedule:
   separate failure, and all-rejected is explicit. Optional decision relations select
   tuple-set determinacy without hiding helper contradictions or property failures.
   Independent property cones retain completion-model evidence, and circular support
-  has an opt-in advisory. This implementation uses bounded finite grounding and world
-  enumeration; it has no corpus-scale performance claim. Next: sparse completion-safe
-  grounding and symbolic queries across observations, before corpus checks; then
-  completion-aware staged planning with rejection paths, and definition islands
-  inside otherwise stable programs.
+  has an opt-in advisory. Preparation now joins greatest-fixpoint possible tuples,
+  preserving unseeded loops and original scopes. Symbolic pair queries and generalized
+  input cubes replace exhaustive observation enumeration. Measurement on real
+  programs is next; no throughput claim is made. Then completion-aware staged
+  planning with rejection paths, and definition islands inside otherwise stable
+  programs.
 - **Staged execution plans.** A generic driver builds what a DSL compiler's dataflow
   phase builds: a DAG of branches on facts settled earlier, nodes that compute values
   (readiness is value determination), joins, and a case partition whose branches make

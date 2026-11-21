@@ -1253,7 +1253,7 @@ are not stable replay evidence or an editor capability switch.
   `classification-without-hypothesis`, `accepted-processing`, `whole-program`, or
   `property-cone`). Models are representative interpretations: uniqueness of the
   selected decisions does not claim that helper values are forced. Unlisted legal atoms
-  inside the scope have empty definitions. This is not a finite derivation.
+  inside the scope are false: no producer survives completion-safe pruning. This is not a finite derivation.
   `scopeAtoms` identifies the original dependency-cone members (`null` for the
   whole program); the complete input observation also includes inputs outside it.
   Aggregated property evidence contains bounded `examples`, `count`,
@@ -1279,6 +1279,10 @@ are not stable replay evidence or an editor capability switch.
   `advisories.circularSupport.state` is `not-requested`, `none`, `findings` or
   `incomplete`; advisory exhaustion never changes required completeness.
 - Required incompleteness retains phase/resource/limit details and known failures.
+  Completion searches are symbolic; a `worlds` cutoff bounds candidate observations
+  in that search, not all concrete worlds covered by its generalized cubes. Separate
+  classification/processing phases can exhaust independently. Sparse grounding
+  preserves original `scopeAtoms` and circular-support component identities.
   Compatibility refusal uses `completion-incompatible-cone` evidence with semantic
   component keys, located on the selected assumption or input declaration. Neither
   case is reported as rejection or a vacuous proof.
