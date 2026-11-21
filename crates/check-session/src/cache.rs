@@ -339,6 +339,7 @@ impl Session {
         operations: &OperationalLimits,
         fixed: Option<&FixedPreparation<'s>>,
     ) -> Result<RequestPreparation<'s>, CheckError> {
+        request.require_stable(corpus, keys)?;
         #[cfg(any(test, feature = "test-support"))]
         if self.fresh_planning {
             return match fixed {

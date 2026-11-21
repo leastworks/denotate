@@ -6,6 +6,23 @@ Settled design choices and why they were made. Current behavior is specified in 
 alternatives that were rejected. Revisit a decision only with new evidence, such as a
 real program that the current choice serves badly.
 
+## Verification semantics are authored, and rejection queries are obligation-only
+
+Rule semantics and an optional acceptance hypothesis belong to the verification.
+Use an ordinary zero-arity relation as the hypothesis, with normal resolution,
+identity and provenance, rather than another declaration wrapping that relation.
+Existing constructors and syntax default to stable semantics with no hypothesis.
+Current consumers explicitly refuse the newly supported completion declarations
+until their preparation and checking paths implement that meaning; they never
+silently fall back to stable checking.
+
+`no_rejections(H)` is a selectable obligation, with the same hypothesis as its
+completion verification. It is not an assumption: restricting inputs to the ones
+that do not reject would discard the observations this query is supposed to check.
+It has no invented tuple or cardinality group. The IR therefore separates
+`Requirement` from `Restriction`, sharing the four cardinality forms while keeping
+this query obligation-only. Declaration support lands before solver support.
+
 ## Positive recursive evaluation schedules changed premises
 
 A full scan of all producers on every round can turn a simple propagation chain

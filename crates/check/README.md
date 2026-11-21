@@ -291,6 +291,12 @@ or cached semantic values. Frontends own delivery and source-name resolution.
 Exhaustion is immediate; repetitive inner work is sampled. Callback delivery costs
 wall time under the existing cooperative deadlines.
 
+Requests carry authored `Semantics` and an optional semantic-keyed hypothesis.
+Current BDD and SAT checking, sessions and planning support only stable semantics
+without a hypothesis. `require_stable` / `require_stable_verification` reject other
+configurations before preparation; changing request fields cannot bypass the named
+declaration. `no_rejections` has no cardinality group and is not checked yet.
+
 `CheckRequest::for_verification` builds a request from one IR verification: only its
 selected assumptions constrain permitted worlds, and only its selected obligations
 produce groups (including the compact domains for trivial groups). Preparation

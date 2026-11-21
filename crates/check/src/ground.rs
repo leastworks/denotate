@@ -421,12 +421,19 @@ impl GroundProgram {
             .filter(|o| self.obligations.contains(&o.id))
         {
             budget.tick("obligation groups")?;
-            let relation = &obligation.requirement.relation();
-            let group_by = obligation.requirement.group_by();
-            if obligation.requirement.kind() == denotate_ir::Cardinality::Empty {
+            let requirement =
+                obligation
+                    .requirement
+                    .cardinality()
+                    .ok_or(CheckError::InvalidRequest(
+                        "no_rejections is not supported by this checker",
+                    ))?;
+            let relation = &requirement.relation();
+            let group_by = requirement.group_by();
+            if requirement.kind() == denotate_ir::Cardinality::Empty {
                 self.emptiness.insert(obligation.id, *relation);
             }
-            if obligation.requirement.kind().has_coverage() {
+            if requirement.kind().has_coverage() {
                 let signature = &self.signatures[relation];
                 let mut domains = Vec::new();
                 for column in group_by {
@@ -445,7 +452,7 @@ impl GroundProgram {
                     },
                 );
             }
-            if !obligation.requirement.kind().has_uniqueness() {
+            if !requirement.kind().has_uniqueness() {
                 continue;
             }
             let mut groups = BTreeMap::<Vec<ConstantId>, Vec<GroundAtom>>::new();

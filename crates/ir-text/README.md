@@ -23,6 +23,15 @@ sorted by key; it returns an empty list when no verification is declared. Each r
 selects exactly its declaration's assumptions and obligations. References use shared
 namespace lookup and resolve only the kind required by their list.
 
+Verification options also carry `semantics` (stable by default) and an optional
+zero-arity `hypothesis` relation. `no_rejections(H)` is an obligation-only query;
+loading validates its selection against a completion verification with the same H.
+Printing preserves these options, references and origins; the shared editor index
+supports navigation and validated rename of verification hypotheses and
+`no_rejections` relation references. Current
+BDD and SAT consumers explicitly refuse completion and stable-with-hypothesis before
+semantic preparation. This is declaration support, not implemented completion checking.
+
 `load_with_resolver(…, Some(&mut resolver))` also restores embedded origins through a
 caller-owned `origins::OriginResolver` (one resolution per URI/view/hash identity).
 `&Sources` resolves in-memory snapshots; `filesystem::FileOriginResolver` reads local

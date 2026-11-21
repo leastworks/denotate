@@ -544,8 +544,8 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
         add(r.id.into(), text, rule_positions(r))?;
     }
     let contract = |kind: &str, relation: RelationId, columns: &[usize], context: &Namespace| {
-        if kind == "empty" {
-            return format!("empty({})", reference(relation.into(), context));
+        if kind == "empty" || kind == "no_rejections" {
+            return format!("{kind}({})", reference(relation.into(), context));
         }
         format!(
             "{kind}({}, group_by: ({}))",
@@ -562,12 +562,18 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
     };
     for o in c.obligations() {
         let relation = &o.requirement.relation();
-        let group_by = o.requirement.group_by();
-        let kind = match o.requirement {
-            Requirement::AtMostOne { .. } => "at_most_one",
-            Requirement::AtLeastOne { .. } => "at_least_one",
-            Requirement::ExactlyOne { .. } => "exactly_one",
-            Requirement::Empty { .. } => "empty",
+        let group_by = o
+            .requirement
+            .cardinality()
+            .map_or(&[][..], |r| r.group_by());
+        let kind = match &o.requirement {
+            Requirement::Cardinality(r) => match r.kind() {
+                Cardinality::AtMostOne => "at_most_one",
+                Cardinality::AtLeastOne => "at_least_one",
+                Cardinality::ExactlyOne => "exactly_one",
+                Cardinality::Empty => "empty",
+            },
+            Requirement::NoRejections { .. } => "no_rejections",
         };
         add(
             o.id.into(),
@@ -622,6 +628,13 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
     }
     for v in c.verifications() {
         let context = c.namespace(v.id).unwrap();
+        let mut options = String::new();
+        if v.options.semantics == Semantics::Completion {
+            options.push_str(" semantics: completion;");
+        }
+        if let Some(h) = v.options.hypothesis {
+            options.push_str(&format!(" hypothesis: {};", reference(h.into(), context)));
+        }
         let assumptions = v
             .assumptions
             .iter()
@@ -649,7 +662,7 @@ pub fn print(p: &ExportProgram<'_>, options: PrintOptions) -> Result<ExportBundl
         add(
             v.id.into(),
             format!(
-                "verification {} {{ assumptions: [{assumptions}]; obligations: [{obligations}];{notices} }}",
+                "verification {} {{{options} assumptions: [{assumptions}]; obligations: [{obligations}];{notices} }}",
                 spelling(&v.name, NameKind::Identifier)
             ),
             single(v.id.into()),

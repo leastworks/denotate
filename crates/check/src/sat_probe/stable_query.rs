@@ -284,6 +284,7 @@ impl Engine {
         config: QueryLimits,
         scope: PreparationScope,
     ) -> Result<Self> {
+        crate::require_stable_verification(corpus, verification)?;
         let (original, settled, preparation_receipts) =
             build::prepare(corpus, domains, keys, verification, limits)?;
         let original = Arc::new(original);
@@ -341,7 +342,12 @@ impl Engine {
             .obligations
             .iter()
             .map(|id| {
-                let r = &corpus.obligation(*id).unwrap().requirement;
+                let r = corpus
+                    .obligation(*id)
+                    .unwrap()
+                    .requirement
+                    .cardinality()
+                    .expect("validated stable verification");
                 (*id, r.kind(), r.relation())
             })
             .collect();
@@ -358,6 +364,8 @@ impl Engine {
                         .obligation(*id)
                         .unwrap()
                         .requirement
+                        .cardinality()
+                        .expect("validated stable verification")
                         .group_by()
                         .to_vec(),
                 )

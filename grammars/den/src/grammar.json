@@ -1063,8 +1063,17 @@
           "value": ":"
         },
         {
-          "type": "SYMBOL",
-          "name": "cardinality"
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SYMBOL",
+              "name": "cardinality"
+            },
+            {
+              "type": "SYMBOL",
+              "name": "no_rejections"
+            }
+          ]
         },
         {
           "type": "CHOICE",
@@ -1285,6 +1294,81 @@
           "value": "{"
         },
         {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "semantics"
+                },
+                {
+                  "type": "STRING",
+                  "value": ":"
+                },
+                {
+                  "type": "FIELD",
+                  "name": "semantics",
+                  "content": {
+                    "type": "CHOICE",
+                    "members": [
+                      {
+                        "type": "STRING",
+                        "value": "stable"
+                      },
+                      {
+                        "type": "STRING",
+                        "value": "completion"
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "STRING",
+                  "value": ";"
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
+          "type": "CHOICE",
+          "members": [
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "STRING",
+                  "value": "hypothesis"
+                },
+                {
+                  "type": "STRING",
+                  "value": ":"
+                },
+                {
+                  "type": "FIELD",
+                  "name": "hypothesis",
+                  "content": {
+                    "type": "SYMBOL",
+                    "name": "_reference"
+                  }
+                },
+                {
+                  "type": "STRING",
+                  "value": ";"
+                }
+              ]
+            },
+            {
+              "type": "BLANK"
+            }
+          ]
+        },
+        {
           "type": "STRING",
           "value": "assumptions"
         },
@@ -1495,6 +1579,31 @@
               "type": "BLANK"
             }
           ]
+        }
+      ]
+    },
+    "no_rejections": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "no_rejections"
+        },
+        {
+          "type": "STRING",
+          "value": "("
+        },
+        {
+          "type": "FIELD",
+          "name": "relation",
+          "content": {
+            "type": "SYMBOL",
+            "name": "_reference"
+          }
+        },
+        {
+          "type": "STRING",
+          "value": ")"
         }
       ]
     },

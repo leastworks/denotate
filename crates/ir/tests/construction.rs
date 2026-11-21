@@ -235,10 +235,10 @@ fn cardinality_grouping_uses_roles_not_a_prefix_or_sort_name() {
         .unwrap();
     assert_eq!(
         c.obligation(o).unwrap().requirement,
-        Requirement::AtMostOne {
+        Requirement::Cardinality(denotate_ir::Restriction::AtMostOne {
             relation: r,
             group_by: vec![2, 1]
-        }
+        })
     );
     assert_eq!(
         c.obligation(o).unwrap().message_template,
@@ -430,10 +430,10 @@ fn coverage_uses_the_same_namespaces_and_grouping_validation_as_uniqueness() {
     assert_eq!(c.namespace(id), Some(&namespace));
     assert_eq!(
         c.obligation(id).unwrap().requirement,
-        Requirement::AtLeastOne {
+        Requirement::Cardinality(denotate_ir::Restriction::AtLeastOne {
             relation: r,
             group_by: vec![0]
-        }
+        })
     );
     assert!(matches!(
         c.at_most_one_in(namespace, "covered", r, [], ""),
@@ -462,10 +462,10 @@ fn exactly_one_is_one_authored_declaration_with_shared_validation() {
     assert_eq!(c.namespace(id), Some(&ns));
     assert_eq!(
         c.obligation(id).unwrap().requirement,
-        Requirement::ExactlyOne {
+        Requirement::Cardinality(denotate_ir::Restriction::ExactlyOne {
             relation: r,
             group_by: vec![0]
-        }
+        })
     );
     assert_eq!(c.obligations().count(), 1);
     assert!(matches!(
@@ -493,7 +493,7 @@ fn empty_is_ungrouped_with_shared_declaration_validation() {
     assert_eq!(c.namespace(id), Some(&ns));
     assert_eq!(
         c.obligation(id).unwrap().requirement,
-        Requirement::Empty { relation: r }
+        Requirement::Cardinality(denotate_ir::Restriction::Empty { relation: r })
     );
     assert!(!Cardinality::Empty.has_coverage() && !Cardinality::Empty.has_uniqueness());
     assert!(matches!(
@@ -565,4 +565,82 @@ fn condition_notices_validate_arity_ownership_selection_and_semantic_bindings() 
     keys.bind_notice(&c, n, NoticeKey(QualifiedKey::new("lib", "n")))
         .unwrap();
     keys.validate(&c).unwrap();
+}
+
+#[test]
+fn completion_options_validate_foreign_handles_boolean_hypotheses_and_selections() {
+    let mut c = Corpus::new();
+    let h = c.declare_relation("h", RelationRole::Derived, []).unwrap();
+    let other = c
+        .declare_relation("other", RelationRole::Input, [])
+        .unwrap();
+    let s = c.declare_sort("S").unwrap();
+    let unary = unary(&mut c, "unary", s, RelationRole::Derived);
+    let mut foreign = Corpus::new();
+    let f = foreign
+        .declare_relation("h", RelationRole::Derived, [])
+        .unwrap();
+    for bad in [f, unary] {
+        assert!(
+            c.require_no_rejections_in(Namespace::default(), "bad", bad, "")
+                .is_err()
+        );
+        assert!(
+            c.verification_with_options_in(
+                Namespace::default(),
+                "bad",
+                [],
+                [],
+                [],
+                VerificationOptions {
+                    semantics: Semantics::Completion,
+                    hypothesis: Some(bad)
+                }
+            )
+            .is_err()
+        );
+    }
+    let o = c
+        .require_no_rejections_in(Namespace::default(), "total", h, "")
+        .unwrap();
+    assert_eq!(
+        c.obligation(o).unwrap().requirement,
+        Requirement::NoRejections { hypothesis: h }
+    );
+    for options in [
+        VerificationOptions::default(),
+        VerificationOptions {
+            semantics: Semantics::Completion,
+            hypothesis: None,
+        },
+        VerificationOptions {
+            semantics: Semantics::Completion,
+            hypothesis: Some(other),
+        },
+    ] {
+        assert!(
+            matches!(c.verification_with_options_in(Namespace::default(),"bad",[],[o],[],options),Err(ConstructionError::InvalidVerificationSelection {obligation}) if obligation==o)
+        );
+    }
+    let v = c
+        .verification_with_options_in(
+            Namespace::default(),
+            "v",
+            [],
+            [o],
+            [],
+            VerificationOptions {
+                semantics: Semantics::Completion,
+                hypothesis: Some(h),
+            },
+        )
+        .unwrap();
+    assert_eq!(c.verification(v).unwrap().options.hypothesis, Some(h));
+    let old = c
+        .verification_in(Namespace::default(), "old", [], [])
+        .unwrap();
+    assert_eq!(
+        c.verification(old).unwrap().options,
+        VerificationOptions::default()
+    );
 }

@@ -369,6 +369,39 @@ verification normal_operation {
   obligation that no verification in the program selects gets a notice, also when it
   is declared in a library.
 
+### Completion declarations (interface available; checking pending)
+
+Verifications may declare `semantics: completion;` and then
+`hypothesis: recognized;` before `assumptions`. Omitting `semantics` means `stable`;
+omitting the hypothesis selects no acceptance contract. These field names and
+`stable`/`completion` are contextual, not globally reserved words. The hypothesis
+uses ordinary namespace resolution and must be a zero-arity input or derived
+relation. Each field occurs at most once, in that order.
+
+```den
+input recognized();
+obligation all_inputs_recognized: no_rejections(recognized);
+verification acceptance {
+    semantics: completion;
+    hypothesis: recognized;
+    assumptions: [];
+    obligations: [all_inputs_recognized];
+}
+```
+
+`no_rejections(H)` declares an obligation over the verification's reject set. It
+takes no `group_by` and cannot be an assumption. Selecting it requires completion
+semantics and the same hypothesis relation; a mismatch is an error at the selection.
+Ordinary declaration identity, messages, origins and unchecked-obligation notices
+apply. Merely declaring it activates nothing.
+
+The IR, loader, printer and editor reference services support these declarations.
+**Checking is not implemented yet:** both CLI engines, the editor checker and the
+execution planner explicitly refuse completion and stable-with-hypothesis before
+semantic preparation. A refused verification has an incomplete result, not a proof;
+other supported verifications still run. The CLI returns exit 2 for this required
+unchecked work. Existing stable verifications keep their behavior and printed form.
+
 ## Contextual condition notices
 
 A runnable [editor example](../editors/den/examples/condition-notices/README.md)

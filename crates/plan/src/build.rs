@@ -130,6 +130,7 @@ impl<'a> Planner<'a> {
         if corpus.verification(verification).is_none() {
             return Err(CheckError::InvalidRequest("unknown plan verification"));
         }
+        denotate_check::require_stable_verification(corpus, verification)?;
         // Outputs are supplied to build. Do not first encode a whole program
         // whose meaning and query cache would have the wrong scope.
         Ok(Self {

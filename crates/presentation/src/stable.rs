@@ -153,7 +153,7 @@ pub fn stable_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> Resul
             }
         }
         obligations.push(json!({"name":o.name,"identity":json!([keys.obligation(*id)?.0.namespace.as_ref(),keys.obligation(*id)?.0.name.as_ref()]),
-            "kind":match o.requirement.kind(){denotate_ir::Cardinality::Empty=>"empty",denotate_ir::Cardinality::AtMostOne=>"at-most-one",denotate_ir::Cardinality::AtLeastOne=>"at-least-one",denotate_ir::Cardinality::ExactlyOne=>"exactly-one"},
+            "kind":match o.requirement.cardinality().ok_or(Error::InvalidFinding("non-cardinality requirement on stable path"))?.kind(){denotate_ir::Cardinality::Empty=>"empty",denotate_ir::Cardinality::AtMostOne=>"at-most-one",denotate_ir::Cardinality::AtLeastOne=>"at-least-one",denotate_ir::Cardinality::ExactlyOne=>"exactly-one"},
             "state":if r.not_analysed.contains(id){"not-analysed"}else if failed{"counterexample"}else if !reasons.is_empty(){"inconclusive"}else{"proved"},
             "fixed":r.fixed_obligations.contains(id),"reasons":reasons,
             "present":r.emptiness.get(id).map(|e|e.present),"missing":r.coverage.get(id).map(|e|e.missing),

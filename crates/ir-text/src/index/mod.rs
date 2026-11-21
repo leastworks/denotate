@@ -155,6 +155,7 @@ pub struct Declaration {
     pub scope: Scope,
     pub input: bool,
     pub input_cardinality: Option<(String, Vec<Name>)>,
+    pub rejection_hypothesis: Option<Name>,
     pub parameters: Option<Vec<(String, Option<Name>)>>,
     pub sort: Option<Name>,
     pub parent: Option<String>,
@@ -181,6 +182,8 @@ impl ContractKind {
 #[derive(Clone, Debug)]
 pub struct VerificationReferences {
     pub scope: Scope,
+    pub semantics: denotate_ir::Semantics,
+    pub hypothesis: Option<(Name, Range<usize>)>,
     pub assumptions: Vec<(Name, Range<usize>)>,
     pub obligations: Vec<(Name, Range<usize>)>,
     pub notices: Vec<(Name, Range<usize>)>,

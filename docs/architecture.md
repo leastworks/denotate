@@ -338,6 +338,14 @@ whole-program BDD evaluation, with W shared only within the same selection:
 local absent-extension and constraint-projection shortcuts are not sound for general
 constraints. No context-dependent BDD or verdict is reused across selections.
 
+Verification declarations also own their rule semantics and optional hypothesis
+relation. Requests carry those options, using a semantic key for the hypothesis;
+CLI configuration cannot override the authored choice. The declaration interface
+supports completion, but current consumers refuse it (and stable-with-hypothesis)
+before semantic preparation. Stable preparation, fixed folds and cached answers
+are not an implementation of completion. The parser and shared reference services
+remain usable for such declarations while solver support is pending.
+
 Input cardinality declarations belong to IR relation schemas, beside input
 eligibility. Preparation builds disjoint per-input groups by projecting eligible
 tuples over resolved domains, before any selected assumption. No candidates means

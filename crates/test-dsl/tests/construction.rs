@@ -189,10 +189,10 @@ fn constructs_the_example_and_library_via_the_public_api() {
     let obligation = e.corpus.obligation(e.library.unique_input).unwrap();
     assert_eq!(
         obligation.requirement,
-        Requirement::AtMostOne {
+        Requirement::Cardinality(denotate_ir::Restriction::AtMostOne {
             relation: e.library.supplies,
             group_by: vec![1],
-        }
+        })
     );
     assert_eq!(
         obligation.message_template,

@@ -765,6 +765,21 @@ warns only when the assumption relation is or depends on the checked relation,
 not when the obligation depends on an assumed premise or merely shares an input.
 Evidence kind is `assumed-conclusion`; it is not a witness or a failed obligation.
 
+### Unsupported verification semantics
+
+The editor understands verification `semantics` and `hypothesis` declarations but
+currently checks only stable semantics without a hypothesis. Other combinations
+publish an Error with code `unsupported-semantics`, on the verification, with the
+hypothesis declaration related when present. Ordinary labeled library fallback
+applies. Identity is
+`{"verification": [namespaceKey, name], "context": "unsupported-semantics"}`.
+The verification summary has `state: "incomplete"`, `consistency: "unknown"`, a
+`reason` and its finding inventory. Evidence is `{"kind":"unsupported-semantics"}`:
+a configuration refusal, with no model or counterexample. Mode edits replace prior semantic diagnostics; supported
+verifications in the same program continue normally. Assumptions selected only by
+refused verifications remain deferred; another supported verification may select
+and validate them normally.
+
 ### Contextual condition notices
 
 Selected `notice n: varies(condition, within: scope)` declarations produce advisory
@@ -1115,6 +1130,11 @@ independent even when spelled alike.
 Contract names use the standard `event` semantic token type (appended to the existing
 legend); the outline and completion also use `Event`. Formatting indents verification blocks and
 preserves comments, quoted names and attached origins.
+
+`hypothesis` and the target of `no_rejections` are ordinary relation references:
+they share definition, references, hover, semantic highlighting, completion and
+validated rename with other relation uses, across all affected programs. Arity and
+no-rejections selection validation apply even while checking is unsupported.
 
 ## Rename
 

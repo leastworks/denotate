@@ -188,3 +188,21 @@ mod tests {
         assert_eq!(out.status["state"], "findings");
     }
 }
+
+pub fn unsupported_semantics(
+    program: &LoadedProgram,
+    key: &denotate_ir::VerificationKey,
+    reason: &str,
+) -> Result<Publication, String> {
+    let id = program
+        .corpus
+        .verifications()
+        .find(|v| program.keys.verification(v.id).is_ok_and(|k| k == key))
+        .ok_or_else(|| "unknown verification".to_string())?
+        .id;
+    convert(
+        program,
+        denotate_ir_text::presentation::unsupported_semantics(program, id, reason)
+            .map_err(|e| e.to_string())?,
+    )
+}

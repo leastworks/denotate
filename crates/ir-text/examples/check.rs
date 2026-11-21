@@ -549,7 +549,10 @@ fn check_program(
             &p.corpus,
             &p.domains,
             &p.keys,
-            requests.iter().map(|(_, request)| request),
+            requests
+                .iter()
+                .map(|(_, request)| request)
+                .filter(|r| r.unsupported_semantics().is_none()),
             &limits,
             prepare,
         )
@@ -604,6 +607,18 @@ fn check_program(
             &declaration.name,
         );
         writeln!(output, "Verification {verification_name}").unwrap();
+        if let Some(reason) = request.unsupported_semantics() {
+            let shown = presentation::unsupported_semantics(&p, declaration.id, reason)
+                .map_err(|e| (2, e.to_string()))?;
+            if json {
+                writeln!(output, "Results: {}", shown.status).unwrap();
+            } else {
+                print_diagnostics(&p, &shown, output, verbose)?;
+            }
+            incomplete = true;
+            flush(output)?;
+            continue;
+        }
         trace.message(format_args!(
             "Verification {}/{verification_total}: {verification_name}",
             i + 1
@@ -654,7 +669,10 @@ fn check_program(
             trace.message(format_args!(
                 "Selected obligation: {} ({:?})",
                 name(p.corpus.namespace(*id).unwrap(), &o.name),
-                o.requirement.kind()
+                o.requirement
+                    .cardinality()
+                    .expect("supported verification")
+                    .kind()
             ));
         }
         for id in &declaration.notices {
@@ -1018,6 +1036,30 @@ mod tests {
         path::PathBuf,
         sync::atomic::{AtomicU64, Ordering},
     };
+    #[test]
+    fn completion_declarations_are_located_refusals_while_stable_checks_continue() {
+        let f = Fixture::new(
+            "relation h();h();relation bad();bad();obligation o:empty(bad); verification a{semantics:completion;hypothesis:h;assumptions:[];obligations:[o];} verification z{assumptions:[];obligations:[o];}",
+        );
+        for engine in ["bdd", "sat"] {
+            let (code, out) = f.run(&["--engine", engine]);
+            assert_eq!(code, 2, "{out}");
+            assert!(out.contains("unsupported-semantics"), "{out}");
+            assert!(
+                out.contains("completion semantics not supported here"),
+                "{out}"
+            );
+            assert!(out.contains("Verification ::z"), "{out}");
+            assert!(
+                out.contains("program.den:1:77: unsupported-semantics"),
+                "{out}"
+            );
+            assert!(out.contains("counterexample"), "{out}");
+            let (code, json) = f.run(&["--engine", engine, "--json"]);
+            assert_eq!(code, 2, "{json}");
+            assert!(json.contains("unsupported-semantics"), "{json}");
+        }
+    }
     #[derive(Clone, Default)]
     struct SharedOutput(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
     impl std::io::Write for SharedOutput {

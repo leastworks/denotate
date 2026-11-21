@@ -155,6 +155,8 @@ impl InputConstraint {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CheckRequest {
     pub verification: Option<VerificationKey>,
+    pub semantics: Semantics,
+    pub hypothesis: Option<RelationKey>,
     pub constraints: Vec<InputConstraint>,
     pub obligations: BTreeSet<ObligationKey>,
     pub notices: BTreeSet<NoticeKey>,
@@ -166,6 +168,33 @@ pub struct CheckRequest {
     pub checking_within_w: bool,
 }
 impl CheckRequest {
+    /// Until a consumer implements the authored semantics, it must refuse before preparation.
+    pub fn unsupported_semantics(&self) -> Option<&'static str> {
+        unsupported_semantics(self.semantics, self.hypothesis.is_some())
+    }
+    pub fn require_stable(&self, corpus: &Corpus, keys: &SemanticKeys) -> Result<()> {
+        if let Some(reason) = self.unsupported_semantics() {
+            return Err(CheckError::InvalidRequest(reason));
+        }
+        if let Some(key) = &self.verification {
+            let v = corpus
+                .verifications()
+                .find(|v| keys.verification(v.id).is_ok_and(|k| k == key))
+                .ok_or(CheckError::InvalidRequest("unknown verification key"))?;
+            require_stable_verification(corpus, v.id)?;
+        }
+        for o in corpus.obligations() {
+            if self.obligations.contains(keys.obligation(o.id)?)
+                && o.requirement.cardinality().is_none()
+            {
+                return Err(CheckError::InvalidRequest(
+                    "no_rejections is not supported by this checker",
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// Named assumptions selected by this request. Named verifications use exact
     /// declaration identity, even when several assumptions constrain one relation.
     /// Unnamed requests retain relation matching for declaration diagnostics;
@@ -210,6 +239,12 @@ impl CheckRequest {
                 .map_err(CheckError::Keys)?
                 .clone(),
         );
+        let options = corpus.verification(verification).unwrap().options;
+        request.semantics = options.semantics;
+        request.hypothesis = options
+            .hypothesis
+            .map(|h| keys.relation(h).cloned().map_err(CheckError::Keys))
+            .transpose()?;
         request.constraints = constraints;
         request.obligations = obligations;
         request.notices = corpus
@@ -241,6 +276,8 @@ impl CheckRequest {
         }
         Ok(Self {
             verification: None,
+            semantics: Semantics::Stable,
+            hypothesis: None,
             constraints: constraints
                 .iter()
                 .map(|c| {
@@ -312,6 +349,7 @@ impl CheckRequest {
         fixed: Option<&FixedPreparation<'s>>,
     ) -> Result<RequestPreparation<'s>> {
         operations.cancellation.check()?;
+        self.require_stable(corpus, keys)?;
         keys.validate(corpus).map_err(CheckError::Keys)?;
         if self.backend.input_order().is_none() {
             return Err(CheckError::InvalidRequest("unknown backend/configuration"));
@@ -735,6 +773,39 @@ pub fn verification_constraints(
             }
         })
         .collect()
+}
+
+fn unsupported_semantics(semantics: Semantics, hypothesis: bool) -> Option<&'static str> {
+    if semantics == Semantics::Completion {
+        Some("completion semantics not supported here")
+    } else if hypothesis {
+        Some("stable semantics with a hypothesis not supported here")
+    } else {
+        None
+    }
+}
+/// Shared refusal for stable-only consumers, including the SAT engine and planner.
+pub fn require_stable_verification(corpus: &Corpus, verification: VerificationId) -> Result<()> {
+    let v = corpus
+        .verification(verification)
+        .ok_or(CheckError::InvalidRequest("unknown verification"))?;
+    if let Some(reason) = unsupported_semantics(v.options.semantics, v.options.hypothesis.is_some())
+    {
+        return Err(CheckError::InvalidRequest(reason));
+    }
+    if v.obligations.iter().any(|id| {
+        corpus
+            .obligation(*id)
+            .unwrap()
+            .requirement
+            .cardinality()
+            .is_none()
+    }) {
+        return Err(CheckError::InvalidRequest(
+            "no_rejections is not supported by this checker",
+        ));
+    }
+    Ok(())
 }
 
 fn verification_selection(

@@ -212,6 +212,9 @@ pub fn measure(
             "selected":{"assumptions":request.constraints.len(),"obligations":request.obligations.len(),"notices":request.notices.len()}}),
         outcomes: None,
     };
+    if let Err(error) = request.require_stable(&p.corpus, &p.keys) {
+        return run.error(error, "configuration");
+    }
     let start = Instant::now();
     let mut preparation_started = false;
     let prepared = if mode == "folded-bdd" {
@@ -366,7 +369,10 @@ pub fn collect(c: &Config, base: &Snapshot, edit: Option<&Snapshot>) -> Result<V
             &program.corpus,
             &program.domains,
             &program.keys,
-            requests.iter().map(|(_, request)| request),
+            requests
+                .iter()
+                .map(|(_, request)| request)
+                .filter(|r| r.unsupported_semantics().is_none()),
             &c.limits,
             || FixedPreparation::prepare(&program.corpus, &program.domains, &c.limits),
         )

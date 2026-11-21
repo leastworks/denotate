@@ -672,3 +672,30 @@ fn empty_candidate_relation_allows_the_empty_world_and_checks_obligations() {
         }
     }
 }
+
+#[test]
+fn completion_scorecard_refuses_before_fixed_preparation() {
+    let p=snapshot("relation h();h():-h();verification v{semantics:completion;hypothesis:h;assumptions:[];obligations:[];}").load(false).unwrap();
+    let limits = Limits {
+        max_work: 0,
+        ..Limits::default()
+    };
+    let request = p.verification_requests(&limits).unwrap().remove(0).1;
+    for mode in driver::MODES {
+        let run = measure(
+            &p,
+            &request,
+            mode,
+            &mut scorecard_support::session(mode, false),
+            &limits,
+        );
+        assert_eq!(run.row["error"]["stage"], "configuration");
+        assert!(
+            run.row["error"]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("completion semantics not supported here")
+        );
+        assert!(run.row["timings_ns"]["preparation"].is_null());
+    }
+}

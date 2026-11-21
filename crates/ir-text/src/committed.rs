@@ -224,6 +224,9 @@ fn contract(
     names: &Names,
     original: bool,
 ) -> io::Result<()> {
+    let requirement = requirement.cardinality().ok_or_else(|| {
+        io::Error::other("no_rejections cannot be exported as a stable committed contract")
+    })?;
     let relation = requirement.relation();
     let name = if original {
         names.original.get(&relation)
@@ -615,7 +618,13 @@ pub fn write_committed(
             "assumption {}: ",
             spelling(&a.name, NameKind::Identifier)
         )?;
-        contract(&mut out, c, &a.restriction, &names, true)?;
+        contract(
+            &mut out,
+            c,
+            &Requirement::Cardinality(a.restriction.clone()),
+            &names,
+            true,
+        )?;
         write!(out, ";")?;
         close(&mut out, block)?;
     }

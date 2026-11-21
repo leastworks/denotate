@@ -189,7 +189,14 @@ pub fn compare(
             ids[&x.requirement.relation().into()],
             y.requirement.relation().into()
         );
-        assert_eq!(x.requirement.group_by(), y.requirement.group_by());
+        assert_eq!(
+            x.requirement
+                .cardinality()
+                .map(|r| (r.kind(), r.group_by())),
+            y.requirement
+                .cardinality()
+                .map(|r| (r.kind(), r.group_by()))
+        );
         bind(&mut ids, x.id.into(), y.id.into());
     }
     for x in a.assumptions() {
@@ -222,6 +229,11 @@ pub fn compare(
             .verifications()
             .find(|y| y.name == x.name && a.namespace(x.id) == b.namespace(y.id))
             .unwrap();
+        assert_eq!(x.options.semantics, y.options.semantics);
+        assert_eq!(
+            x.options.hypothesis.map(|h| ids[&h.into()]),
+            y.options.hypothesis.map(Into::into)
+        );
         assert_eq!(
             x.assumptions
                 .iter()

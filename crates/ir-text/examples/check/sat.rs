@@ -82,7 +82,7 @@ pub(super) fn run(
     });
     check.attribution.cancellation = limits.cancellation.clone();
     trace.message(format!("SAT limits: worlds={}, tuples={}, solves={}, refinements={}, polls={}, conflicts={}, propagations={}",check.max_worlds,check.max_tuples,query.max_solves,query.max_refinements,query.max_solver_polls,query.max_conflicts,query.max_propagations));
-    for (i, (key, _)) in requests.iter().enumerate() {
+    for (i, (key, request)) in requests.iter().enumerate() {
         let v = p
             .corpus
             .verifications()
@@ -90,6 +90,18 @@ pub(super) fn run(
             .unwrap();
         let label = name(p.corpus.namespace(v.id).unwrap(), &v.name);
         writeln!(output, "Verification {label}").unwrap();
+        if let Some(reason) = request.unsupported_semantics() {
+            let shown = presentation::unsupported_semantics(p, v.id, reason)
+                .map_err(|e| (2, e.to_string()))?;
+            if json {
+                writeln!(output, "Results: {}", shown.status).unwrap();
+            } else {
+                print_diagnostics(p, &shown, output, verbose)?;
+            }
+            incomplete = true;
+            flush(output)?;
+            continue;
+        }
         writeln!(
             output,
             "Selected assumptions: {}",

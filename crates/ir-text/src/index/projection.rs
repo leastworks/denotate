@@ -18,6 +18,7 @@ pub struct Projection {
     pub anchors: BTreeMap<String, Range<usize>>,
     pub references: Vec<Reference>,
     pub verifications: Vec<VerificationReferences>,
+    pub boolean_relations: Vec<(Name, Scope, Range<usize>)>,
     pub rules: BTreeMap<String, Rule>,
     pub rule_anchors: BTreeMap<String, BTreeMap<String, Range<usize>>>,
     pub scopes: Vec<(Range<usize>, Scope)>,
@@ -69,6 +70,7 @@ impl Projection {
             anchors: BTreeMap::new(),
             references: vec![],
             verifications: vec![],
+            boolean_relations: vec![],
             rules: BTreeMap::new(),
             rule_anchors: BTreeMap::new(),
             scopes: vec![],
@@ -288,6 +290,7 @@ impl Projection {
                 scope: scope.clone(),
                 input: false,
                 input_cardinality: None,
+                rejection_hypothesis: None,
                 parameters: None,
                 sort: None,
                 parent,
@@ -471,10 +474,27 @@ impl Projection {
                     }
                 }
                 "obligation" | "assumption" | "notice" | "verification" => {
-                    if let Some(n) = field(node, "name") {
-                        self.declare(n, &scope, Kind::Contract, None, previous);
-                    }
+                    let declaration = field(node, "name")
+                        .and_then(|n| self.declare(n, &scope, Kind::Contract, None, previous));
                     if node.kind() == "verification" {
+                        let hypothesis = field(node, "hypothesis").and_then(|h| {
+                            self.reference(h, &scope, Lookup::Name(Kind::Relation))
+                                .map(|name| {
+                                    self.boolean_relations.push((
+                                        name.clone(),
+                                        scope.clone(),
+                                        h.byte_range(),
+                                    ));
+                                    (name, h.byte_range())
+                                })
+                        });
+                        let semantics = if field(node, "semantics")
+                            .is_some_and(|n| &self.source.text[n.byte_range()] == "completion")
+                        {
+                            denotate_ir::Semantics::Completion
+                        } else {
+                            denotate_ir::Semantics::Stable
+                        };
                         let mut names = |key, kind| {
                             node.children_by_field_name(key, &mut node.walk())
                                 .filter_map(|n| {
@@ -502,6 +522,8 @@ impl Projection {
                             });
                         }
                         self.verifications.push(VerificationReferences {
+                            semantics,
+                            hypothesis,
                             scope: scope.clone(),
                             assumptions,
                             obligations,
@@ -517,11 +539,20 @@ impl Projection {
                     }
                     for card in node
                         .named_children(&mut node.walk())
-                        .filter(|n| n.kind() == "cardinality")
+                        .filter(|n| matches!(n.kind(), "cardinality" | "no_rejections"))
                     {
                         if let Some(rel) = field(card, "relation")
                             .and_then(|n| self.reference(n, &scope, Lookup::Name(Kind::Relation)))
                         {
+                            if card.kind() == "no_rejections" {
+                                let span = field(card, "relation").unwrap().byte_range();
+                                self.boolean_relations
+                                    .push((rel.clone(), scope.clone(), span));
+                                if let Some(id) = &declaration {
+                                    self.declarations.get_mut(id).unwrap().rejection_hypothesis =
+                                        Some(rel.clone());
+                                }
+                            }
                             for n in card.children_by_field_name("column", &mut card.walk()) {
                                 self.reference(n, &scope, Lookup::Parameter(rel.clone()));
                             }
@@ -685,7 +716,7 @@ impl Projection {
         // namespace separator (e.g. `within lib::`).
         if let Some(within) = tokens
             .iter()
-            .rposition(|t| t.span.end <= byte && t.text == "within")
+            .rposition(|t| t.span.end <= byte && matches!(t.text.as_str(), "within" | "hypothesis"))
         {
             let after = &tokens[within + 1..];
             let after = if after.first().is_some_and(|t| t.text == ":") {
@@ -803,14 +834,22 @@ impl Projection {
             if let Some(card) = statement.windows(2).position(|ts| {
                 matches!(
                     ts[0].text.as_str(),
-                    "at_most_one" | "at_least_one" | "exactly_one" | "empty" | "varies"
+                    "at_most_one"
+                        | "at_least_one"
+                        | "exactly_one"
+                        | "empty"
+                        | "varies"
+                        | "no_rejections"
                 ) && ts[1].text == "("
             }) {
                 let args = &statement[card + 2..];
                 if !args.iter().any(|t| t.text == ",") {
-                    return Some((Lookup::Name(Kind::Relation), scope, span));
+                    let start = args.first().map_or(span.start, |t| t.span.start);
+                    return Some((Lookup::Name(Kind::Relation), scope, start..span.end));
                 }
-                if statement[card].text != "empty" && args.iter().any(|t| t.text == "group_by") {
+                if !matches!(statement[card].text.as_str(), "empty" | "no_rejections")
+                    && args.iter().any(|t| t.text == "group_by")
+                {
                     let relation = parse_name(&args.first()?.text).ok()?;
                     return Some((Lookup::Parameter(relation), scope, span));
                 }

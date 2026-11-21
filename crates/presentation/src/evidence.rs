@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Kind {
     InvalidAssumption,
+    UnsupportedSemantics,
     UnvalidatedAssumption,
     InconsistentAssumptions,
     EmptyInputUniverse,
@@ -28,6 +29,7 @@ pub enum Kind {
 impl Kind {
     pub fn code(self) -> &'static str {
         match self {
+            Self::UnsupportedSemantics => "unsupported-semantics",
             Self::InvalidAssumption => "invalid-assumption",
             Self::UnvalidatedAssumption => "unvalidated-assumption",
             Self::InconsistentAssumptions => "inconsistent-assumptions",
@@ -50,7 +52,8 @@ impl Kind {
     }
     pub fn severity(self) -> Severity {
         match self {
-            Self::InvalidAssumption
+            Self::UnsupportedSemantics
+            | Self::InvalidAssumption
             | Self::Counterexample
             | Self::NoMeaning
             | Self::InconsistentAssumptions
@@ -791,7 +794,10 @@ pub fn uniqueness_finding<'a>(
     let obligation = corpus
         .obligation(group.group.obligation)
         .ok_or(Error::InvalidFinding("foreign obligation"))?;
-    let combined = obligation.requirement.kind() == denotate_ir::Cardinality::ExactlyOne;
+    let combined = obligation
+        .requirement
+        .cardinality()
+        .is_some_and(|r| r.kind() == denotate_ir::Cardinality::ExactlyOne);
     let identity = if combined {
         Identity::Uniqueness {
             obligation: group.group.obligation,
@@ -944,7 +950,11 @@ pub fn coverage_finding<'a>(
     let subject = format!(
         "Obligation {}{}",
         obligation.name,
-        if obligation.requirement.kind() == denotate_ir::Cardinality::ExactlyOne {
+        if obligation
+            .requirement
+            .cardinality()
+            .is_some_and(|r| r.kind() == denotate_ir::Cardinality::ExactlyOne)
+        {
             " (coverage)"
         } else {
             ""

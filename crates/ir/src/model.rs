@@ -49,6 +49,10 @@ pub enum ConstructionError {
     },
     UnknownAssumption(AssumptionId),
     UnknownNotice(NoticeId),
+    InvalidHypothesis(RelationId),
+    InvalidVerificationSelection {
+        obligation: ObligationId,
+    },
     InvalidNoticeRelation(RelationId),
     UnknownObligation(ObligationId),
     InvalidInputDomain {
@@ -253,7 +257,7 @@ pub struct InputCardinality {
 /// Obligations require this of settled meaning; restrictions use the same shape
 /// to constrain independently evaluated input/derived meaning.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Requirement {
+pub enum Restriction {
     Empty {
         relation: RelationId,
     },
@@ -271,7 +275,7 @@ pub enum Requirement {
     },
 }
 
-impl Requirement {
+impl Restriction {
     pub fn kind(&self) -> Cardinality {
         match self {
             Self::AtMostOne { .. } => Cardinality::AtMostOne,
@@ -310,9 +314,38 @@ pub struct Obligation {
     pub message_template: String,
 }
 
-/// A selected restriction on independently evaluated input/derived meaning.
-/// It shares cardinality vocabulary with obligations, but constrains worlds.
-pub type Restriction = Requirement;
+/// Requirements may ask about interpretations, not just cardinality of tuples.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Requirement {
+    Cardinality(Restriction),
+    NoRejections { hypothesis: RelationId },
+}
+impl Requirement {
+    pub fn cardinality(&self) -> Option<&Restriction> {
+        match self {
+            Self::Cardinality(r) => Some(r),
+            Self::NoRejections { .. } => None,
+        }
+    }
+    pub fn relation(&self) -> RelationId {
+        match self {
+            Self::Cardinality(r) => r.relation(),
+            Self::NoRejections { hypothesis } => *hypothesis,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Semantics {
+    #[default]
+    Stable,
+    Completion,
+}
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct VerificationOptions {
+    pub semantics: Semantics,
+    pub hypothesis: Option<RelationId>,
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct Assumption {
@@ -342,6 +375,7 @@ pub struct VerificationDeclaration {
     pub assumptions: Vec<AssumptionId>,
     pub obligations: Vec<ObligationId>,
     pub notices: Vec<NoticeId>,
+    pub options: VerificationOptions,
 }
 
 /// Assembled relational declarations and rules. No source spans or domain-specific
@@ -1021,27 +1055,72 @@ impl Corpus {
             Obligation {
                 id,
                 name,
-                requirement: match kind {
-                    Cardinality::Empty => Requirement::Empty { relation },
-                    Cardinality::AtMostOne => Requirement::AtMostOne {
+                requirement: Requirement::Cardinality(match kind {
+                    Cardinality::Empty => Restriction::Empty { relation },
+                    Cardinality::AtMostOne => Restriction::AtMostOne {
                         relation,
                         group_by: indices,
                     },
-                    Cardinality::AtLeastOne => Requirement::AtLeastOne {
+                    Cardinality::AtLeastOne => Restriction::AtLeastOne {
                         relation,
                         group_by: indices,
                     },
-                    Cardinality::ExactlyOne => Requirement::ExactlyOne {
+                    Cardinality::ExactlyOne => Restriction::ExactlyOne {
                         relation,
                         group_by: indices,
                     },
-                },
+                }),
                 message_template: message_template.into(),
             },
         );
         self.occurrences.insert(id.into());
         self.namespaces.insert(id.into(), namespace);
         Ok(id)
+    }
+
+    /// Require that every permitted observation has an interpretation satisfying H.
+    pub fn require_no_rejections_in(
+        &mut self,
+        namespace: impl Into<Namespace>,
+        name: impl Into<String>,
+        hypothesis: RelationId,
+        message_template: impl Into<String>,
+    ) -> Result<ObligationId> {
+        self.boolean_hypothesis(hypothesis)?;
+        let namespace = namespace.into();
+        let name = name.into();
+        named(&name, "obligation")?;
+        if self
+            .obligations()
+            .any(|o| o.name == name && self.namespace(o.id) == Some(&namespace))
+        {
+            return Err(ConstructionError::DuplicateName {
+                kind: "obligation",
+                name,
+            });
+        }
+        let id = ObligationId(self.fresh());
+        self.obligations.insert(
+            id,
+            Obligation {
+                id,
+                name,
+                requirement: Requirement::NoRejections { hypothesis },
+                message_template: message_template.into(),
+            },
+        );
+        self.occurrences.insert(id.into());
+        self.namespaces.insert(id.into(), namespace);
+        Ok(id)
+    }
+    fn boolean_hypothesis(&self, relation: RelationId) -> Result<()> {
+        let r = self
+            .relation(relation)
+            .ok_or(ConstructionError::UnknownRelation(relation))?;
+        if !r.parameters.is_empty() {
+            return Err(ConstructionError::InvalidHypothesis(relation));
+        }
+        Ok(())
     }
 
     /// Constrain assignments to an input, independently of verification selection.
@@ -1211,6 +1290,28 @@ impl Corpus {
         obligations: impl IntoIterator<Item = ObligationId>,
         notices: impl IntoIterator<Item = NoticeId>,
     ) -> Result<VerificationId> {
+        self.verification_with_options_in(
+            namespace,
+            name,
+            assumptions,
+            obligations,
+            notices,
+            VerificationOptions::default(),
+        )
+    }
+
+    pub fn verification_with_options_in(
+        &mut self,
+        namespace: impl Into<Namespace>,
+        name: impl Into<String>,
+        assumptions: impl IntoIterator<Item = AssumptionId>,
+        obligations: impl IntoIterator<Item = ObligationId>,
+        notices: impl IntoIterator<Item = NoticeId>,
+        options: VerificationOptions,
+    ) -> Result<VerificationId> {
+        if let Some(h) = options.hypothesis {
+            self.boolean_hypothesis(h)?;
+        }
         let namespace = namespace.into();
         let name = name.into();
         named(&name, "verification")?;
@@ -1242,6 +1343,15 @@ impl Corpus {
             if self.obligation(o).is_none() {
                 return Err(ConstructionError::UnknownObligation(o));
             }
+            if let Requirement::NoRejections { hypothesis } =
+                self.obligation(o).unwrap().requirement
+            {
+                if options.semantics != Semantics::Completion
+                    || options.hypothesis != Some(hypothesis)
+                {
+                    return Err(ConstructionError::InvalidVerificationSelection { obligation: o });
+                }
+            }
             if !seen.insert(OccurrenceId::from(o)) {
                 return Err(ConstructionError::DuplicateReference {
                     verification: name,
@@ -1269,6 +1379,7 @@ impl Corpus {
                 assumptions,
                 obligations,
                 notices,
+                options,
             },
         );
         self.occurrences.insert(id.into());

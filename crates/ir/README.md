@@ -41,13 +41,14 @@ non-inputs, other cardinality kinds, duplicate declarations and invalid columns.
 kind and column indices; it has the input's identity and provenance rather than a
 separate selectable assumption identity. The checker applies it in every context.
 
-`empty` / `empty_in` create an ungrouped `Requirement::Empty`; the construction API
-takes no grouping argument.
+`empty` / `empty_in` create an ungrouped
+`Requirement::Cardinality(Restriction::Empty)`; the construction API takes no grouping argument.
 
-`exactly_one` / `exactly_one_in` create one `Requirement::ExactlyOne` declaration.
-`Requirement::kind()` exposes its `Cardinality`; its coverage and uniqueness parts are
-checked independently. The same namespace, name and grouping validation applies to all
-three constructors.
+`exactly_one` / `exactly_one_in` create one
+`Requirement::Cardinality(Restriction::ExactlyOne)` declaration.
+`Requirement::cardinality()` exposes the shared restriction and its `kind()`;
+coverage and uniqueness parts are checked independently. The same namespace, name
+and grouping validation applies to all three constructors.
 
 `Corpus::restrict_input(input, provider)` attaches a derived domain provider after
 both signatures are declared. It checks arity and positional sorts immediately;
@@ -78,7 +79,7 @@ Construction validity does not imply admissibility; checking is `denotate-check`
 just test-crate denotate-ir
 ```
 
-Named assumptions use the same `Restriction` cardinality shape as `Requirement`:
+Named assumptions use the same `Restriction` cardinality shape as cardinality obligations:
 `assume_at_most_one_in`, `assume_at_least_one_in`, `assume_exactly_one_in` and
 `assume_empty_in` (or `assume_in`). Input and derived targets are allowed. Once rules
 are complete, `validate_assumptions` returns a classification per target relation:
@@ -95,3 +96,13 @@ zero-arity condition, optional zero-arity enclosing scope, and a message label.
 `verification_with_notices_in` selects them alongside assumptions and obligations;
 `verification_in` continues to select no notices. Bind `NoticeKey` like other named
 declarations. A notice carries no assertion and does not alter relational meaning.
+
+`verification_with_options_in` also takes `VerificationOptions { semantics,
+hypothesis }`. Existing constructors default to `Semantics::Stable` with no
+hypothesis. A hypothesis is an ordinary zero-arity relation handle, validated for
+arity and corpus ownership. `require_no_rejections_in(namespace, name, hypothesis,
+message)` creates the obligation-only `Requirement::NoRejections`; selecting it
+requires completion semantics with that same hypothesis. `Restriction` deliberately
+has no such variant, so it cannot become an assumption. These declarations are
+available for construction and export; current checkers explicitly refuse completion
+and stable-with-hypothesis until their semantics are implemented.

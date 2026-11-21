@@ -116,7 +116,10 @@ fn check_with_progress(
         &program.corpus,
         &program.domains,
         &program.keys,
-        requests.iter().map(|(_, request)| request),
+        requests
+            .iter()
+            .map(|(_, request)| request)
+            .filter(|r| r.unsupported_semantics().is_none()),
         &job.limits,
         || {
             progress.emit(Phase::FixedFacts, json!({}));
@@ -171,6 +174,10 @@ fn check_with_progress(
             }
         };
         let mut run = || -> std::result::Result<Publication, Failure> {
+            if let Some(reason) = request.unsupported_semantics() {
+                return presentation::unsupported_semantics(&program, key, reason)
+                    .map_err(Failure::Internal);
+            }
             if let Some(state) =
                 validation.selected_failure(&program.corpus, &program.keys, request)?
             {
@@ -936,6 +943,48 @@ impl CheckingHandler for Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn completion_mode_refuses_and_replaces_warm_findings_without_blocking_other_verifications() {
+        let mut session = denotate_check_session::Session::default();
+        for completion in [false, true, false] {
+            let mode = if completion {
+                "semantics:completion; hypothesis:h;"
+            } else {
+                ""
+            };
+            let text=format!("relation h();h();relation bad();bad();obligation o:empty(bad);verification a{{{mode}assumptions:[];obligations:[o];}}verification z{{assumptions:[];obligations:[o];}}");
+            let job = assumption_job(&text, Limits::default());
+            let warm = check(&job, &mut session).unwrap();
+            let fresh = check(&job, &mut denotate_check_session::Session::default()).unwrap();
+            assert_eq!(warm.status, fresh.status);
+            assert_eq!(warm.diagnostics, fresh.diagnostics);
+            assert_eq!(
+                warm.status["verifications"][0]["summary"]["state"],
+                if completion { "incomplete" } else { "findings" }
+            );
+            assert_eq!(
+                warm.status["verifications"][1]["summary"]["state"],
+                "findings"
+            );
+            let kinds = warm
+                .diagnostics
+                .values()
+                .flatten()
+                .filter_map(|d| d.data.as_ref().map(|data| data["kind"].as_str().unwrap()))
+                .collect::<Vec<_>>();
+            assert_eq!(
+                kinds
+                    .iter()
+                    .filter(|k| **k == "unsupported-semantics")
+                    .count(),
+                usize::from(completion)
+            );
+            assert_eq!(
+                kinds.iter().filter(|k| **k == "counterexample").count(),
+                if completion { 1 } else { 2 }
+            );
+        }
+    }
     #[test]
     fn progress_distinguishes_terminal_states_and_deduplicates_current_snapshots() {
         let (server, client) = Connection::memory();

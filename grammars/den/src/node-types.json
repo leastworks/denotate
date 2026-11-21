@@ -639,6 +639,34 @@
     }
   },
   {
+    "type": "no_rejections",
+    "named": true,
+    "fields": {
+      "relation": {
+        "multiple": false,
+        "required": true,
+        "types": [
+          {
+            "type": "generated_identifier",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "quoted_identifier",
+            "named": true
+          }
+        ]
+      }
+    }
+  },
+  {
     "type": "notice",
     "named": true,
     "fields": {
@@ -761,6 +789,10 @@
         },
         {
           "type": "location",
+          "named": true
+        },
+        {
+          "type": "no_rejections",
           "named": true
         }
       ]
@@ -1204,6 +1236,28 @@
           }
         ]
       },
+      "hypothesis": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "generated_identifier",
+            "named": true
+          },
+          {
+            "type": "identifier",
+            "named": true
+          },
+          {
+            "type": "qualified_name",
+            "named": true
+          },
+          {
+            "type": "quoted_identifier",
+            "named": true
+          }
+        ]
+      },
       "name": {
         "multiple": false,
         "required": true,
@@ -1259,6 +1313,20 @@
           {
             "type": "quoted_identifier",
             "named": true
+          }
+        ]
+      },
+      "semantics": {
+        "multiple": false,
+        "required": false,
+        "types": [
+          {
+            "type": "completion",
+            "named": false
+          },
+          {
+            "type": "stable",
+            "named": false
           }
         ]
       }
@@ -1348,6 +1416,10 @@
     "extra": true
   },
   {
+    "type": "completion",
+    "named": false
+  },
+  {
     "type": "const",
     "named": false
   },
@@ -1384,6 +1456,10 @@
     "named": false
   },
   {
+    "type": "hypothesis",
+    "named": false
+  },
+  {
     "type": "identifier",
     "named": true
   },
@@ -1414,6 +1490,10 @@
   {
     "type": "natural",
     "named": true
+  },
+  {
+    "type": "no_rejections",
+    "named": false
   },
   {
     "type": "notice",
@@ -1448,11 +1528,19 @@
     "named": false
   },
   {
+    "type": "semantics",
+    "named": false
+  },
+  {
     "type": "sort",
     "named": false
   },
   {
     "type": "source",
+    "named": false
+  },
+  {
+    "type": "stable",
     "named": false
   },
   {

@@ -12,6 +12,7 @@ pub enum Identity {
     InconsistentAssumptions,
     EmptyInputUniverse,
     DownstreamWork,
+    UnsupportedSemantics,
     Notice(NoticeId),
     SubsumedProducer(RuleId),
     AssumedConclusion(AssumptionId, ObligationId),
@@ -103,6 +104,7 @@ impl Identity {
                 json!({"rule":rule(keys.rule(*id)?),"notice":"subsumed-producer"})
             }
             Self::Notice(id) => json!({"notice":qualified(&keys.notice(*id)?.0)}),
+            Self::UnsupportedSemantics => json!({"context":"unsupported-semantics"}),
             Self::DownstreamWork => json!({"context":"downstream-work"}),
             Self::EmptyInputUniverse => json!({"context":"empty-input-universe"}),
             Self::InconsistentAssumptions => json!({"context":"inconsistent-assumptions"}),

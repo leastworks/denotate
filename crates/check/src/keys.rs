@@ -279,11 +279,17 @@ impl GroundKeyIndex {
             .obligations()
             .filter(|o| program.obligations.contains(&o.id))
         {
-            if o.requirement.kind() == denotate_ir::Cardinality::Empty {
+            let requirement = o
+                .requirement
+                .cardinality()
+                .ok_or(KeyError::InvalidStructure(
+                    "non-cardinality obligation has no groups",
+                ))?;
+            if requirement.kind() == denotate_ir::Cardinality::Empty {
                 continue;
             }
-            let relation = &o.requirement.relation();
-            let group_by = o.requirement.group_by();
+            let relation = &requirement.relation();
+            let group_by = requirement.group_by();
             let signature = corpus
                 .relation(*relation)
                 .ok_or(KeyError::UnknownOccurrence((*relation).into()))?;
@@ -299,7 +305,7 @@ impl GroundKeyIndex {
                 );
             }
             let mut groups = KeyedGroups {
-                kind: o.requirement.kind(),
+                kind: requirement.kind(),
                 relation: keys.relation(*relation)?.clone(),
                 columns: group_by.to_vec(),
                 domains,

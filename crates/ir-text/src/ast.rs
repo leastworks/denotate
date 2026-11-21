@@ -37,7 +37,7 @@ pub(crate) enum Decl {
     Contract {
         name: Name,
         assumption: bool,
-        kind: denotate_ir::Cardinality,
+        kind: Option<denotate_ir::Cardinality>,
         relation: Name,
         columns: Vec<Name>,
         message: String,
@@ -50,6 +50,8 @@ pub(crate) enum Decl {
     },
     Verification {
         name: Name,
+        semantics: denotate_ir::Semantics,
+        hypothesis: Option<Name>,
         assumptions: Vec<Name>,
         obligations: Vec<Name>,
         notices: Vec<Name>,
@@ -553,17 +555,27 @@ fn scope(
             "obligation" | "assumption" => {
                 let card = children(node)
                     .into_iter()
-                    .find(|n| n.kind() == "cardinality")
+                    .find(|n| matches!(n.kind(), "cardinality" | "no_rejections"))
                     .ok_or_else(|| error(source, node.byte_range(), "Missing cardinality"))?;
                 Decl::Contract {
                     name: name(source, field(source, node, "name")?)?,
                     assumption: node.kind() == "assumption",
-                    kind: match text(source, field(source, card, "kind")?) {
-                        "at_most_one" => denotate_ir::Cardinality::AtMostOne,
-                        "at_least_one" => denotate_ir::Cardinality::AtLeastOne,
-                        "empty" => denotate_ir::Cardinality::Empty,
-                        "exactly_one" => denotate_ir::Cardinality::ExactlyOne,
-                        _ => return Err(error(source, card.byte_range(), "Unknown cardinality")),
+                    kind: if card.kind() == "no_rejections" {
+                        None
+                    } else {
+                        Some(match text(source, field(source, card, "kind")?) {
+                            "at_most_one" => denotate_ir::Cardinality::AtMostOne,
+                            "at_least_one" => denotate_ir::Cardinality::AtLeastOne,
+                            "empty" => denotate_ir::Cardinality::Empty,
+                            "exactly_one" => denotate_ir::Cardinality::ExactlyOne,
+                            _ => {
+                                return Err(error(
+                                    source,
+                                    card.byte_range(),
+                                    "Unknown cardinality",
+                                ));
+                            }
+                        })
                     },
                     relation: name(source, field(source, card, "relation")?)?,
                     columns: card
@@ -597,6 +609,18 @@ fn scope(
                     .unwrap_or_default(),
             },
             "verification" => Decl::Verification {
+                semantics: if node
+                    .child_by_field_name("semantics")
+                    .is_some_and(|n| text(source, n) == "completion")
+                {
+                    denotate_ir::Semantics::Completion
+                } else {
+                    denotate_ir::Semantics::Stable
+                },
+                hypothesis: node
+                    .child_by_field_name("hypothesis")
+                    .map(|n| name(source, n))
+                    .transpose()?,
                 name: name(source, field(source, node, "name")?)?,
                 assumptions: node
                     .children_by_field_name("assumption", &mut node.walk())

@@ -115,6 +115,13 @@ fn ir_construction<T>(
             ConstructionError::UnknownSort(_) => "Unknown sort in IR construction".into(),
             ConstructionError::UnknownConstant(_) => "Unknown constant in IR construction".into(),
             ConstructionError::InvalidInputCardinality { reason, .. } => reason.to_string(),
+            ConstructionError::InvalidHypothesis(_) => {
+                "Hypothesis must be a zero-arity relation".into()
+            }
+            ConstructionError::InvalidVerificationSelection { .. } => {
+                "no_rejections requires completion semantics and the same verification hypothesis"
+                    .into()
+            }
             ConstructionError::InvalidInputDomain { reason, .. } => {
                 format!("Invalid input domain: {reason}")
             }
@@ -800,7 +807,7 @@ pub fn load_with_resolver(
                             b.program.corpus.assume_in(
                                 module,
                                 &name.text,
-                                *kind,
+                                kind.expect("assumption cardinality"),
                                 id,
                                 grouping.into_iter().map(Column::Index),
                             ),
@@ -824,24 +831,28 @@ pub fn load_with_resolver(
                             m,
                             s.span.clone(),
                             match kind {
-                                Cardinality::Empty => {
+                                None => b
+                                    .program
+                                    .corpus
+                                    .require_no_rejections_in(module, &name.text, id, message),
+                                Some(Cardinality::Empty) => {
                                     b.program.corpus.empty_in(module, &name.text, id, message)
                                 }
-                                Cardinality::AtLeastOne => b.program.corpus.at_least_one_in(
+                                Some(Cardinality::AtLeastOne) => b.program.corpus.at_least_one_in(
                                     module,
                                     &name.text,
                                     id,
                                     grouping.into_iter().map(Column::Index),
                                     message,
                                 ),
-                                Cardinality::AtMostOne => b.program.corpus.at_most_one_in(
+                                Some(Cardinality::AtMostOne) => b.program.corpus.at_most_one_in(
                                     module,
                                     &name.text,
                                     id,
                                     grouping.into_iter().map(Column::Index),
                                     message,
                                 ),
-                                Cardinality::ExactlyOne => b.program.corpus.exactly_one_in(
+                                Some(Cardinality::ExactlyOne) => b.program.corpus.exactly_one_in(
                                     module,
                                     &name.text,
                                     id,
@@ -955,6 +966,8 @@ pub fn load_with_resolver(
     for m in &scopes {
         for s in &m.statements {
             if let Decl::Verification {
+                semantics,
+                hypothesis,
                 name,
                 assumptions,
                 obligations,
@@ -1024,18 +1037,30 @@ pub fn load_with_resolver(
                             .id
                     })
                     .collect::<Vec<_>>();
-                let id = ir_construction(
-                    m,
-                    s.span.clone(),
-                    b.program.corpus.verification_with_notices_in(
-                        &m.namespace,
-                        &name.text,
-                        a,
-                        o,
-                        n,
-                    ),
-                    &b.program.corpus,
-                )?;
+                let options = VerificationOptions {
+                    semantics: *semantics,
+                    hypothesis: hypothesis.as_ref().map(|h| b.relation(m, h)).transpose()?,
+                };
+                let declaration = b.program.corpus.verification_with_options_in(
+                    &m.namespace,
+                    &name.text,
+                    a,
+                    o.iter().copied(),
+                    n,
+                    options,
+                );
+                let span = match &declaration {
+                    Err(ConstructionError::InvalidHypothesis(_)) => {
+                        hypothesis.as_ref().unwrap().span.clone()
+                    }
+                    Err(ConstructionError::InvalidVerificationSelection { obligation }) => {
+                        obligations[o.iter().position(|id| id == obligation).unwrap()]
+                            .span
+                            .clone()
+                    }
+                    _ => s.span.clone(),
+                };
+                let id = ir_construction(m, span, declaration, &b.program.corpus)?;
                 construction(
                     m,
                     name.span.clone(),

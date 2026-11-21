@@ -228,10 +228,10 @@ fn existing_overlap_lowers_through_the_api_with_exact_term_origins() {
             .obligation(p.library.unique_input)
             .unwrap()
             .requirement,
-        Requirement::AtMostOne {
+        Requirement::Cardinality(denotate_ir::Restriction::AtMostOne {
             relation: p.library.supplies,
             group_by: vec![1]
-        }
+        })
     );
     assert_terms_have_origins(&f, &p);
     let mappings: Vec<_> = p.corpus.rules().skip(4).collect();

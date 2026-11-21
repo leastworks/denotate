@@ -690,6 +690,9 @@ fn finding_identity(
 ) -> FindingIdentity {
     use denotate_presentation::Identity;
     match id {
+        Identity::UnsupportedSemantics => {
+            panic!("test DSL verifications use supported stable semantics")
+        }
         Identity::SubsumedProducer(_) => {
             panic!("SAT-only producer notices must not appear in BDD round-trip findings")
         }

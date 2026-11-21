@@ -112,7 +112,11 @@ impl Outcomes {
             if !r.context.obligations.contains(key) {
                 continue;
             }
-            let k = o.requirement.kind();
+            let k = o
+                .requirement
+                .cardinality()
+                .expect("supported verification")
+                .kind();
             let mut components = BTreeMap::new();
             if k.has_uniqueness() {
                 let mut uniqueness =

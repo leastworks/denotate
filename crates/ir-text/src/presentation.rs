@@ -286,3 +286,53 @@ pub fn present_stable(
         status,
     })
 }
+
+/// Capability refusal is shared by CLI and editor; it is not a semantic verdict.
+pub fn unsupported_semantics(
+    program: &LoadedProgram,
+    verification: denotate_ir::VerificationId,
+    reason: &str,
+) -> Result<Presentation> {
+    use denotate_presentation::{Contribution, Identity, Kind, Role};
+    let v = program.corpus.verification(verification).ok_or(
+        denotate_presentation::Error::InvalidFinding("unknown verification"),
+    )?;
+    let key = program.keys.verification(verification)?;
+    let users = program
+        .documents
+        .iter()
+        .filter(|d| d.ownership == "user")
+        .map(|d| d.uri.clone())
+        .collect();
+    let placement = Placement {
+        program: &program.root,
+        verification: Some(key),
+        user_files: &users,
+        sources: &program.sources,
+        current: &program.provenance,
+        upstream: &program.embedded.provenance,
+    };
+    let identity = Identity::UnsupportedSemantics;
+    let kind = Kind::UnsupportedSemantics;
+    let mut contributions = vec![Contribution {
+        occurrence: verification.into(),
+        role: Role::Declaration,
+    }];
+    if let Some(h) = v.options.hypothesis {
+        contributions.push(Contribution {
+            occurrence: h.into(),
+            role: Role::Condition,
+        });
+    }
+    let mut diagnostics = placement.place(&identity, kind, reason, &[], &contributions)?;
+    for diagnostic in &mut diagnostics {
+        diagnostic.evidence = json!({"kind":kind.code()});
+    }
+    let status = json!({"state":"incomplete", "consistency":"unknown", "reason":reason,
+        "findings":[{"identity":identity.data_in(&program.keys,Some(key))?,"kind":kind.code(),"message":reason,
+            "fallback":diagnostics.iter().any(|d|d.fallback),"located":!diagnostics.is_empty()}]});
+    Ok(Presentation {
+        diagnostics,
+        status,
+    })
+}

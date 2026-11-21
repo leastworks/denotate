@@ -569,6 +569,59 @@ impl Index {
                 }
             }
         }
+        for (name, scope, span) in &file.boolean_relations {
+            let found =
+                self.candidates(root, uri, scope, &Lookup::Name(Kind::Relation), Some(name));
+            if found.len() == 1
+                && self
+                    .declaration(&found[0])
+                    .is_some_and(|d| d.parameters.as_ref().is_some_and(|p| !p.is_empty()))
+            {
+                out.push(Issue {
+                    span: span.clone(),
+                    code: "hypothesis-arity".into(),
+                    message: "Hypothesis must be a zero-arity relation".into(),
+                    warning: false,
+                });
+            }
+        }
+        for v in &file.verifications {
+            for (name, span) in &v.obligations {
+                let found = self.candidates(
+                    root,
+                    uri,
+                    &v.scope,
+                    &Lookup::Contract(ContractKind::Obligation),
+                    Some(name),
+                );
+                if found.len() != 1 {
+                    continue;
+                }
+                let d = self.declaration(&found[0]).unwrap();
+                let Some(h) = &d.rejection_hypothesis else {
+                    continue;
+                };
+                let required = self.candidates(
+                    root,
+                    &found[0].uri,
+                    &d.scope,
+                    &Lookup::Name(Kind::Relation),
+                    Some(h),
+                );
+                let selected = v.hypothesis.as_ref().map(|(h, _)| {
+                    self.candidates(root, uri, &v.scope, &Lookup::Name(Kind::Relation), Some(h))
+                });
+                if v.semantics != denotate_ir::Semantics::Completion
+                    || v.hypothesis.is_none()
+                    || (required.len() == 1
+                        && selected
+                            .as_ref()
+                            .is_some_and(|s| s.len() == 1 && *s != required))
+                {
+                    out.push(Issue { span: span.clone(), code: "verification-selection".into(), message: "no_rejections requires completion semantics and the same verification hypothesis".into(), warning: false });
+                }
+            }
+        }
         let mut add = |span: Range<usize>, code: &str, message: String| {
             out.push(Issue {
                 span,
