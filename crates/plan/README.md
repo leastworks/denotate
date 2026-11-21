@@ -77,7 +77,7 @@ keys and declare value dependencies. Direct source rule keys retain provenance;
 the `.den` command adds source spans and embedded `loc(...)` descriptors separately.
 An extracted expression's sources identify its defining rules, not every rule used
 in its SAT proof. A constant with no producer refers to its declaration through its
-output key. JSON version 3 explicitly reports `meaningScope` (original cone sizes,
+output key. JSON version 4 explicitly reports `meaningScope` (original cone sizes,
 existence-and-uniqueness requirement, and `outsideAnalysed: false`) and nests `then`/`else` regions under a `split` and declares
 its `join.outputs`. Node IDs are local to a region: a complete address includes its
 semantic branch path. Size reports count branches and joins separately, including
@@ -136,7 +136,7 @@ but that is not a proof of unique output-cone meaning. Such a cone is refused wi
 its ambiguity witness. Full grounding and retained evidence still cover the program;
 this scope change makes no preparation-memory claim.
 
-Local BDD strategies, tasks, produced inputs and sharing the partition with meaning
+Local BDD strategies, slots/writers and sharing the partition with meaning
 checks are subsequent increments. No failed bounded strategy establishes that no
 static order exists. `Build::Problem` preserves semantic counterexamples, or the
 remaining atoms, signed dependencies, path pins, an example stable world and the
@@ -150,3 +150,69 @@ driver indexes the prepared graph, scans worklists for ready values, and can ret
 rules after progress; each branch specializes the output cone again. The interpreter
 and depth exporter also use simple ready scans. Lifted units, incremental worklists and shared branch partitions need their
 own measurements and validation.
+
+
+## Pure tasks and produced inputs (Rust API)
+
+`Planner::build_with_tasks(outputs, tasks, options)` accepts explicit `Task`
+descriptors. Each has a lowerer-owned qualified key, optional Boolean applicability
+atom, ordered Boolean argument atoms, a nonempty set of result input atoms, and
+source rule keys for provenance. Multiple tasks cannot produce the same input atom.
+No names are inferred, no relation equations are added, and there is no new `.den`
+syntax. The example exports a plan and executes both orders:
+
+```sh
+just plan-task-example
+```
+
+A result is an input to the relational model, but not an executable entry input.
+The driver follows both original rule dependencies and the arguments/applicability
+of reachable tasks when preparing its scope. This is a transitive closure: an
+argument can itself need another task. An unused task's dependencies do not expand
+scope. Full grounding, the full input universe and all selected assumptions remain.
+Task descriptor edits invalidate the prepared engine even if output roots match.
+Scope includes original arguments even if a task later proves inactive; this is a
+conservative prerequisite, not a path-minimal meaning check.
+
+Calls run once their applicability and arguments are available. They publish all
+results together. False applicability skips the callback and publishes false for
+every result; under a proven false path, arguments need not be available. This is
+an explicit inactive-call convention for the Boolean encoding, not a conversion of
+unavailable values to absence. Results never become entry bindings, constant
+computations, synthesized expressions or positive-kernel outputs. Other relational
+values can still be computed without a call when their equivalence proof allows it.
+Positive relational recursion remains supported; one-shot tasks cannot be iterated
+as a least fixpoint.
+
+For this foundation, a scheduling split with tasks keeps the rest of that region's
+requested work in each arm. It does not share a task continuation after the join.
+Already executed tasks' bindings are inherited; tasks executed in an arm cannot be
+forgotten and run again later for a second result. This is conservative, may duplicate
+plan structure, and keeps task-state merging out of this increment. Plain plans
+retain their existing sibling joins. Callback purity means all ready-node orders
+agree on results; callback order is observable only in the execution trace.
+
+`execute_with_tasks` receives entry inputs and a callback. The callback sees only
+its task key, ordered argument values and declared result keys. It returns exactly
+one Boolean value per result; missing or extra keys are errors. Task failures abort
+this reference interpreter. Supplying a task-produced atom at entry is an error,
+and `execute_permitted` refuses task configurations without a callback. The task
+events distinguish invocations from skips. JSON v4 includes `call` operations and
+separate `inputs` / `producedInputs`; call keys and source rule keys survive export.
+
+**Conditional guarantee:** the completed observation (entry inputs plus actual
+callback results, false for skipped calls) must satisfy the input contract and W.
+Unlike the plain interpreter, this observation is not available at entry. This API
+requires pure deterministic callbacks whose results respect that contract; it does
+not validate that promise or claim permission to execute. Callbacks must not be
+passed counterfactual precomputed results to bypass scheduling. Since a pure call
+is demanded only when a required value needs it, unused task results need only
+admit a permitted completion. No production execution, strict/run-and-log policy,
+writer-conflict handling, mandatory/optional slot arguments or trace-before-use is
+implemented yet. Those remain the next task/slot increment.
+
+Descriptor traversal and extra scope closure use existing work/cancellation limits.
+Task nodes, split arms and interpreter bookkeeping use the existing allowances.
+An arbitrary host callback cannot be preempted by the interpreter's operation cap;
+its resource control belongs to the host. No new performance claim or limits policy
+is introduced.

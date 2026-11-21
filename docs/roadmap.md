@@ -40,9 +40,11 @@ direction for such programs separates meaning from schedule:
   ranked from the dependency structure. Code generation consumes the plan later.
   The [plain Boolean driver](../crates/plan/README.md) now constructs, exports and
   interprets plans with explicit outputs, bounded expression extraction, positive
-  fixpoint kernels, nested scheduling branches and sibling joins. Whole-program
-  meaning remains a prerequisite. Local BDD strategies, tasks and produced inputs,
-  and sharing the partition with meaning/checking remain next.
+  fixpoint kernels, nested scheduling branches and sibling joins. Original output-cone
+  meaning remains a prerequisite. Rust task descriptors additionally schedule pure
+  one-shot callbacks and produced inputs; task branches conservatively retain their
+  continuation in each arm. Slots, writer proofs, tracing, local BDD strategies and
+  sharing the partition with meaning/checking remain next.
 - **Smaller encodings generically.** Structural sharing of identical definitions,
   constant folding, dead-premise removal and syntactic subsumption over acyclic parts
   shrank the program's CNF about threefold; SAT-based sweeping (simulation, then
@@ -151,8 +153,10 @@ plain Boolean output plans under one verification. It requires existence and
 uniqueness of the original output cone, with outside rules explicitly unanalysed.
 The same scoped engine supports expressions, positive fixpoint kernels, bounded
 extraction, scheduling splits and sibling joins. Value dependencies define a
-partial order; scheduling policy is separate. Next: tasks/produced inputs and
-shared branch partitions for meaning/checking. The existing admission
+partial order; scheduling policy is separate. Rust task descriptors now distinguish
+entry inputs from task-produced inputs, with callback interpretation and conditional
+orders. Next: slots/writers, source proofs, rejection, trace-before-use and shared
+branch partitions for meaning/checking. The existing admission
 schedule below remains a useful strategy, not a prerequisite for this new driver.
 
 An admitted program's dependency order is an evaluation order valid in every

@@ -27,7 +27,7 @@ consumer (the CLI, the `.den` editor, a DSL editor) shares it exactly.
 | `denotate-ir` (`crates/ir`) | Typed relational construction (`Corpus`), namespaces, occurrence identities, `Sources`/`Provenance`, semantic keys, recipe installation | Syntax, checking, wording |
 | `denotate-normalize` | Boolean normalization recipes (double-negation cancellation, Lloyd–Topor with linear helpers); no dependencies | Spans, IR handles |
 | `denotate-check` | Finite grounding, admissibility, concrete replay, BDD property checks, contextual condition queries, no-meaning and rewrite findings, limits and cancellation | Editors, sessions, wording |
-| `denotate-plan` | Experimental plain Boolean execution plans, explicit output scope, value availability, dependency order, export and reference interpretation; consumes checker meaning/expression proofs | New truth semantics, input admission, tasks, code generation, filesystem, editors |
+| `denotate-plan` | Experimental plain Boolean execution plans, explicit output scope, value availability, dependency order, export and reference interpretation; consumes checker meaning/expression proofs | New truth semantics, input admission, task implementation, code generation, filesystem, editors |
 | `denotate-check-session` | Reusable checker sessions: plan, grounding and verdict caches, retention, warm/cold equivalence | Scheduling, LSP |
 | `denotate-presentation` | Frontend-independent interpretation of checked evidence: finding identity, kind, severity, notes, primary/related placement, labeled fallback | LSP types, DSL vocabulary, filesystem |
 | `denotate-editor` | Language-independent LSP mechanics: documents, synchronization, transport, the checking scheduler and server loop, lifecycle, publication, workspace edits, LSP positions | Roots, manifests, ownership, DSL concepts |
@@ -545,4 +545,10 @@ state before preparing a replacement. Full grounding/evidence remain retained.
 Plans carry semantic keys and defining-rule provenance; the `.den` export adapter
 adds source and embedded origin descriptors. Interpretation requires independently
 validated permitted inputs. No filesystem, editor state or DSL concepts enter the
-driver. See [the plan API and limits](../crates/plan/README.md).
+driver. Rust task descriptors additionally identify produced inputs, applicability,
+arguments and source keys. The checker only follows their supplied scope edges;
+the driver schedules one-shot calls and the host implements the pure callbacks.
+Produced inputs are unavailable at entry even when W pins their truth. Task branches
+retain their continuation in each arm, avoiding producer-state loss at sibling joins.
+The interpreter's guarantee is conditional on a permitted completed observation;
+there is no runtime task-contract validator. See [the plan API and limits](../crates/plan/README.md).

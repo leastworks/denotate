@@ -10,6 +10,10 @@ pub enum Order {
 #[derive(Debug, PartialEq, Eq)]
 pub enum ExecutionError {
     MissingInput(AtomKey),
+    ProducedInputAtEntry(AtomKey),
+    TaskCallbackRequired,
+    TaskFailed(denotate_ir::QualifiedKey, String),
+    InvalidTaskResults(denotate_ir::QualifiedKey),
     WorkLimit,
     InvalidPlan,
     InfeasiblePath,
@@ -19,6 +23,7 @@ pub struct Execution {
     pub outputs: BTreeMap<AtomKey, bool>,
     pub trace: Vec<AtomKey>,
     pub branches: Vec<(AtomKey, bool)>,
+    pub tasks: Vec<TaskEvent>,
 }
 struct Work {
     left: usize,
@@ -40,7 +45,28 @@ impl Plan {
         order: Order,
         max_work: usize,
     ) -> Result<Execution, ExecutionError> {
+        if !self.produced_inputs.is_empty() {
+            return Err(ExecutionError::TaskCallbackRequired);
+        }
+        self.execute_with_tasks(inputs, order, max_work, &mut |_| unreachable!())
+    }
+    /// Execute with pure callbacks. The completed observation (entry inputs plus
+    /// task results, false for skipped calls) must satisfy W. No runtime contract
+    /// validation or permission policy is implemented here.
+    pub fn execute_with_tasks(
+        &self,
+        inputs: &BTreeMap<AtomKey, bool>,
+        order: Order,
+        max_work: usize,
+        callback: &mut dyn FnMut(&Invocation) -> Result<BTreeMap<AtomKey, bool>, String>,
+    ) -> Result<Execution, ExecutionError> {
         let mut work = Work { left: max_work };
+        for k in &self.produced_inputs {
+            work.tick()?;
+            if inputs.contains_key(k) {
+                return Err(ExecutionError::ProducedInputAtEntry(k.clone()));
+            }
+        }
         let mut values = BTreeMap::new();
         for k in &self.inputs {
             work.tick()?;
@@ -53,6 +79,8 @@ impl Plan {
         }
         let mut trace = Vec::new();
         let mut branches = Vec::new();
+        let mut tasks = Vec::new();
+        let mut executed = BTreeSet::new();
         execute_region(
             &self.nodes,
             &self.outputs,
@@ -61,6 +89,9 @@ impl Plan {
             &mut work,
             &mut trace,
             &mut branches,
+            callback,
+            &mut tasks,
+            &mut executed,
         )?;
         let outputs = self
             .outputs
@@ -76,6 +107,7 @@ impl Plan {
             outputs,
             trace,
             branches,
+            tasks,
         })
     }
 }
@@ -159,6 +191,9 @@ fn execute_region(
     work: &mut Work,
     trace: &mut Vec<AtomKey>,
     branches: &mut Vec<(AtomKey, bool)>,
+    callback: &mut dyn FnMut(&Invocation) -> Result<BTreeMap<AtomKey, bool>, String>,
+    tasks: &mut Vec<TaskEvent>,
+    executed: &mut BTreeSet<denotate_ir::QualifiedKey>,
 ) -> Result<(), ExecutionError> {
     let mut remaining: BTreeMap<_, _> = nodes.iter().collect();
     let priorities = priorities(nodes, outputs, work)?;
@@ -188,6 +223,55 @@ fn execute_region(
             .ok_or(ExecutionError::InvalidPlan)?;
         let node = remaining.remove(&id).unwrap();
         match &node.operation {
+            Operation::Call { call, inactive } => {
+                work.tick()?;
+                if !executed.insert(call.task.clone()) {
+                    return Err(ExecutionError::InvalidPlan);
+                }
+                let active = !inactive
+                    && match &call.when {
+                        None => true,
+                        Some(k) => *values.get(k).ok_or(ExecutionError::InvalidPlan)?,
+                    };
+                let result = if active {
+                    let arguments = call
+                        .arguments
+                        .iter()
+                        .map(|k| {
+                            work.tick()?;
+                            Ok((
+                                k.clone(),
+                                *values.get(k).ok_or(ExecutionError::InvalidPlan)?,
+                            ))
+                        })
+                        .collect::<Result<_, ExecutionError>>()?;
+                    for _ in &call.results {
+                        work.tick()?;
+                    }
+                    callback(&Invocation {
+                        task: call.task.clone(),
+                        arguments,
+                        results: call.results.clone(),
+                    })
+                    .map_err(|e| ExecutionError::TaskFailed(call.task.clone(), e))?
+                } else {
+                    call.results.iter().map(|k| (k.clone(), false)).collect()
+                };
+                for _ in &result {
+                    work.tick()?;
+                }
+                if result.len() != call.results.len()
+                    || result.keys().any(|k| !call.results.contains(k))
+                {
+                    return Err(ExecutionError::InvalidTaskResults(call.task.clone()));
+                }
+                values.extend(result.iter().map(|(k, v)| (k.clone(), *v)));
+                tasks.push(TaskEvent {
+                    task: call.task.clone(),
+                    invoked: active,
+                    results: result,
+                });
+            }
             Operation::Compute { output, expression } => {
                 let value = evaluate(expression, values, work)?;
                 values.insert(output.clone(), value);
@@ -212,7 +296,8 @@ fn execute_region(
                     .map(|k| (k.clone(), priorities.get(&id).copied().unwrap_or(u32::MAX)))
                     .collect();
                 execute_region(
-                    &arm.nodes, &targets, &mut local, order, work, trace, branches,
+                    &arm.nodes, &targets, &mut local, order, work, trace, branches, callback,
+                    tasks, executed,
                 )?;
                 for k in joined {
                     work.tick()?;

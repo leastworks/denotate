@@ -818,6 +818,11 @@ uniqueness **within that scope**; the CLI only exposes existence-only cone check
 outputs. The execution planner uses this scope with `Full`: both existence and
 uniqueness are required within the output cone, and all planning oracle queries
 use the same engine. Outside rules are explicitly unanalysed.
+`RootsWithDependencies` adds caller-supplied upstream edges to that original cone
+closure, for dependencies such as opaque producer arguments that are not relational
+rules. Edges only select scope; they add no equations or assumptions. The closure is
+transitive, budgeted and prepared before SAT encoding. Unreachable edge sources do
+not enlarge the cone.
 
 The cone follows original ground dependencies, including fixed evidence, before
 independent propagation and producer removal. W is encoded from the unrestricted

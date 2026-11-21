@@ -34,6 +34,7 @@ fn expression(e: &Expression) -> Value {
 fn nodes_json(nodes: &BTreeMap<AtomKey, Node>) -> Value {
     json!(nodes.values().map(|n| {
         let operation=match &n.operation {
+            Operation::Call {call,inactive}=>json!({"kind":"call","task":qualified(&call.task),"when":call.when.as_ref().map(atom),"arguments":call.arguments.iter().map(atom).collect::<Vec<_>>(),"results":call.results.iter().map(atom).collect::<Vec<_>>(),"inactive":inactive,"inactiveResults":false}),
             Operation::Compute {output,expression:e}=>json!({"kind":"compute","output":atom(output),"expression":expression(e)}),
             Operation::Fixpoint {outputs,rules}=>json!({"kind":"least-fixpoint","outputs":outputs.iter().map(atom).collect::<Vec<_>>(),"rules":rules.iter().map(|r|json!({"head":atom(&r.head),"body":r.body.iter().map(|(k,p)|json!({"atom":atom(k),"positive":p})).collect::<Vec<_>>(),"source":rule(&r.source)})).collect::<Vec<_>>()}),
             Operation::Split {on,outputs,when_true,when_false}=>json!({"kind":"split","on":atom(on),"then":when_true.as_ref().map(|r|nodes_json(&r.nodes)),"else":when_false.as_ref().map(|r|nodes_json(&r.nodes)),"join":{"outputs":outputs.iter().map(atom).collect::<Vec<_>>()}}),
@@ -103,12 +104,12 @@ fn size(nodes: &BTreeMap<AtomKey, Node>) -> Size {
     out
 }
 impl Plan {
-    /// Version 3 states the output-cone guarantee. An ID is local to its containing
+    /// Version 4 adds task calls and distinguishes entry/produced inputs; it states the output-cone guarantee. An ID is local to its containing
     /// region; its complete address is the semantic branch path plus that ID.
     pub fn to_json(&self) -> Value {
         let s = size(&self.nodes);
-        json!({"version":3,"state":"ready","verification":qualified(&self.verification.0),"contract":"permitted-inputs; unique output-cone meaning checked; outside not analysed",
-            "meaningScope":scope_json(Some(&self.scope)),"assumptions":self.assumptions.iter().map(|k|qualified(&k.0)).collect::<Vec<_>>(),"inputs":self.inputs.iter().map(atom).collect::<Vec<_>>(),"outputs":self.outputs.iter().map(|(k,p)|json!({"atom":atom(k),"priority":p})).collect::<Vec<_>>(),
+        json!({"version":4,"state":"ready","verification":qualified(&self.verification.0),"contract":"permitted-inputs; unique output-cone meaning checked; outside not analysed",
+            "meaningScope":scope_json(Some(&self.scope)),"assumptions":self.assumptions.iter().map(|k|qualified(&k.0)).collect::<Vec<_>>(),"inputs":self.inputs.iter().map(atom).collect::<Vec<_>>(),"producedInputs":self.produced_inputs.iter().map(atom).collect::<Vec<_>>(),"outputs":self.outputs.iter().map(|(k,p)|json!({"atom":atom(k),"priority":p})).collect::<Vec<_>>(),
             "nodes":nodes_json(&self.nodes),"size":{"nodes":s.nodes,"branches":s.branches,"joins":s.joins,"depth":s.depth}})
     }
 }

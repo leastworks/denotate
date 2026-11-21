@@ -657,7 +657,7 @@ the editor keeps all related information.
 plan after proving existence and uniqueness in the explicit outputs' original
 upstream cone. Selected assumptions still constrain the full input contract.
 Outside rules are not analysed and cannot filter away cone alternatives. Plan JSON
-version 3 states this scope and its sizes; a plan is conditional on independently
+version 4 states this scope and its sizes; a plan is conditional on independently
 validated permitted inputs, not a whole-program correctness or execution permission.
 
 The default checking engine is BDD. `--engine sat` opts into experimental

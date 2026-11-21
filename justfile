@@ -142,6 +142,10 @@ check-den +args:
 plan-den +args:
     cargo +1.93.0 run --release --locked -p denotate-ir-text --example plan -- "$@"
 
+# Experimental Rust task descriptors, plan export and callback interpretation.
+plan-task-example:
+    cargo +1.93.0 run --locked -p denotate-plan --example tasks
+
 # Source-linked test DSL findings; also try mixed, requires-c or fixed.
 demo-overlap mode="overlap":
     cargo +1.93.0 run --locked -p denotate-test-dsl --example overlap -- {{mode}}

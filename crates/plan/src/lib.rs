@@ -1,16 +1,19 @@
 //! Experimental, pure Boolean execution plans. Construction is verification
 //! specific; interpretation requires an independently validated permitted input.
-//! No IO, tasks, produced inputs, or execution permission policy lives here.
+//! Pure tasks use explicit scheduling descriptors and caller-supplied callbacks.
+//! No IO or execution permission policy lives here.
 mod build;
 mod export;
 mod run;
 mod search;
+mod task;
 pub use build::{Build, Options, Output, Planner, Problem};
 use denotate_check::{AtomKey, stable_query};
 use denotate_ir::{AssumptionKey, RuleKey, VerificationKey};
 pub use export::{atom as atom_json, scope_json};
 pub use run::{Execution, ExecutionError, Order};
 use std::collections::{BTreeMap, BTreeSet};
+pub use task::{Call, Invocation, Task, TaskEvent};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Term {
@@ -38,6 +41,10 @@ pub struct Rule {
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Operation {
+    Call {
+        call: Call,
+        inactive: bool,
+    },
     Compute {
         output: AtomKey,
         expression: Expression,
@@ -74,6 +81,7 @@ pub struct Node {
 impl Node {
     pub fn outputs(&self) -> BTreeSet<AtomKey> {
         match &self.operation {
+            Operation::Call { call, .. } => call.results.clone(),
             Operation::Compute { output, .. } => BTreeSet::from([output.clone()]),
             Operation::Fixpoint { outputs, .. } | Operation::Split { outputs, .. } => {
                 outputs.clone()
@@ -89,6 +97,7 @@ pub struct Plan {
     verification: VerificationKey,
     assumptions: BTreeSet<AssumptionKey>,
     inputs: BTreeSet<AtomKey>,
+    produced_inputs: BTreeSet<AtomKey>,
     outputs: BTreeMap<AtomKey, u32>,
     nodes: BTreeMap<AtomKey, Node>,
 }
@@ -104,6 +113,9 @@ impl Plan {
     }
     pub fn inputs(&self) -> &BTreeSet<AtomKey> {
         &self.inputs
+    }
+    pub fn produced_inputs(&self) -> &BTreeSet<AtomKey> {
+        &self.produced_inputs
     }
     pub fn outputs(&self) -> &BTreeMap<AtomKey, u32> {
         &self.outputs

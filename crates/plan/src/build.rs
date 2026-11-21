@@ -73,6 +73,7 @@ pub struct Planner<'a> {
     roots: BTreeSet<AtomKey>,
     engine: Option<stable_query::Engine>,
     reported_scope: Option<stable_query::ScopeSummary>,
+    task_configuration: Vec<Task>,
 }
 impl<'a> Planner<'a> {
     /// Expand a declared output relation over the resolved finite domains,
@@ -141,6 +142,7 @@ impl<'a> Planner<'a> {
             roots: BTreeSet::new(),
             engine: None,
             reported_scope: None,
+            task_configuration: Vec::new(),
         })
     }
     /// Scope prepared for the latest build attempt, if any. The checker calls
@@ -150,15 +152,30 @@ impl<'a> Planner<'a> {
         self.reported_scope.as_ref()
     }
     pub fn build(&mut self, outputs: &[Output], options: &Options) -> Result<Build> {
+        self.build_with_tasks(outputs, &[], options)
+    }
+    /// Task results are logical inputs, supplied only by their scheduled producer.
+    /// This low-level API does not validate runtime callback contracts.
+    pub fn build_with_tasks(
+        &mut self,
+        outputs: &[Output],
+        tasks: &[Task],
+        options: &Options,
+    ) -> Result<Build> {
         self.reported_scope = None;
-        match self.build_inner(outputs, options) {
+        match self.build_inner(outputs, tasks, options) {
             Err(e @ (CheckError::LimitExceeded { .. } | CheckError::Deadline { .. })) => {
                 Ok(Build::Inconclusive(e))
             }
             other => other,
         }
     }
-    fn build_inner(&mut self, outputs: &[Output], options: &Options) -> Result<Build> {
+    fn build_inner(
+        &mut self,
+        outputs: &[Output],
+        task_declarations: &[Task],
+        options: &Options,
+    ) -> Result<Build> {
         if outputs.is_empty() {
             return Err(CheckError::InvalidRequest("plan requires explicit outputs"));
         }
@@ -173,6 +190,10 @@ impl<'a> Planner<'a> {
             start: Instant::now(),
             work: 0,
         };
+        let tasks =
+            crate::task::Tasks::prepare(self.corpus, self.keys, task_declarations, &mut budget)?;
+        let mut configuration = task_declarations.to_vec();
+        configuration.sort_by(|a, b| a.key.cmp(&b.key));
         let mut requested = BTreeMap::new();
         let mut roots = BTreeMap::new();
         for output in outputs {
@@ -185,7 +206,10 @@ impl<'a> Planner<'a> {
                 .or_insert(output.priority);
         }
         let root_keys = roots.keys().cloned().collect::<BTreeSet<_>>();
-        if self.engine.is_none() || self.roots != root_keys {
+        if self.engine.is_none()
+            || self.roots != root_keys
+            || self.task_configuration != configuration
+        {
             self.engine = None; // Drop old clauses before a fallible scope switch.
             self.roots.clear();
             let preparation_start = Instant::now();
@@ -196,15 +220,27 @@ impl<'a> Planner<'a> {
                 self.verification,
                 &self.limits,
                 self.queries.clone(),
-                stable_query::PreparationScope::Roots(roots.into_values().collect()),
+                if tasks.edges.is_empty() {
+                    stable_query::PreparationScope::Roots(roots.into_values().collect())
+                } else {
+                    stable_query::PreparationScope::RootsWithDependencies {
+                        roots: roots.into_values().collect(),
+                        dependencies: tasks.edges.clone(),
+                    }
+                },
             )?;
             // Preparation retains its own checker phase deadlines, as when it
             // happened in prepare(). Do not also charge it to driver elapsed time.
             budget.start += preparation_start.elapsed();
             self.engine = Some(engine);
             self.roots = root_keys;
+            self.task_configuration = configuration;
         }
         let engine = self.engine.as_mut().unwrap();
+        for atom in tasks.atoms.values() {
+            budget.tick(atom.arguments.len() + 1)?;
+            engine.program().is_possible(atom)?; // Validate even unused descriptor atoms.
+        }
         for output in outputs {
             engine.prepared_value(&output.atom)?; // Also validate before empty-context results.
         }
@@ -250,6 +286,14 @@ impl<'a> Planner<'a> {
                 .push(rule);
         }
         let input_atoms: BTreeSet<_> = graph.input_atoms().cloned().collect();
+        for k in tasks.by_result.keys() {
+            budget.tick(1)?;
+            if !input_atoms.contains(&tasks.atoms[k]) {
+                return Err(CheckError::InvalidRequest(
+                    "task result is outside the eligible input universe",
+                ));
+            }
+        }
         let mut atoms = BTreeMap::new();
         let mut pending: Vec<_> = outputs.iter().map(|o| o.atom.clone()).collect();
         while let Some(atom) = pending.pop() {
@@ -257,6 +301,15 @@ impl<'a> Planner<'a> {
             let key = AtomKey::from_atom(self.keys, &atom)?;
             if atoms.contains_key(&key) {
                 continue;
+            }
+            if let Some(call) = tasks.by_result.get(&key) {
+                pending.extend(
+                    call.results
+                        .iter()
+                        .chain(call.arguments.iter())
+                        .chain(call.when.iter())
+                        .map(|k| tasks.atoms[k].clone()),
+                );
             }
             if !input_atoms.contains(&atom) && engine.prepared_value(&atom)?.is_none() {
                 for rule in producers.get(&atom).into_iter().flatten() {
@@ -270,11 +323,13 @@ impl<'a> Planner<'a> {
         let mut fixed = BTreeMap::new();
         let mut inputs = BTreeSet::new();
         for (key, atom) in &atoms {
-            if input_atoms.contains(atom) {
+            if input_atoms.contains(atom) && !tasks.by_result.contains_key(key) {
                 inputs.insert(key.clone());
             }
-            if let Some(v) = engine.prepared_value(atom)? {
-                fixed.insert(key.clone(), v);
+            if !tasks.by_result.contains_key(key) {
+                if let Some(v) = engine.prepared_value(atom)? {
+                    fixed.insert(key.clone(), v);
+                }
             }
             let mut rs = Vec::new();
             for r in producers.get(atom).into_iter().flatten() {
@@ -306,6 +361,7 @@ impl<'a> Planner<'a> {
             &atoms,
             &rules,
             &fixed,
+            &tasks,
             options,
             &mut budget,
         );
@@ -336,6 +392,11 @@ impl<'a> Planner<'a> {
                 .map(|a| self.keys.assumption(*a).cloned())
                 .collect::<std::result::Result<_, _>>()?,
             inputs: required_inputs,
+            produced_inputs: atoms
+                .keys()
+                .filter(|k| tasks.by_result.contains_key(*k))
+                .cloned()
+                .collect(),
             outputs: requested,
             nodes,
         }))

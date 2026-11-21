@@ -8,6 +8,12 @@ pub enum PreparationScope {
     ObligationCones,
     /// Reusable upstream-closed scope for consumers with explicit outputs.
     Roots(Vec<GroundAtom>),
+    /// Upstream closure also follows caller-supplied dependencies (e.g. opaque
+    /// producer arguments). These select scope only, never add truth equations.
+    RootsWithDependencies {
+        roots: Vec<GroundAtom>,
+        dependencies: BTreeMap<GroundAtom, Vec<GroundAtom>>,
+    },
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScopeSummary {
@@ -66,6 +72,13 @@ pub(super) fn restrict(
     Option<Arc<Members>>,
     Option<Vec<GroundRuleId>>,
 )> {
+    let (scope, dependencies) = match scope {
+        PreparationScope::RootsWithDependencies {
+            roots,
+            dependencies,
+        } => (PreparationScope::Roots(roots), dependencies),
+        other => (other, BTreeMap::new()),
+    };
     let (label, roots, root_relations) = match scope {
         PreparationScope::WholeProgram => {
             return Ok((
@@ -96,9 +109,29 @@ pub(super) fn restrict(
             }
             ("obligation-cones", roots, relations)
         }
+        PreparationScope::RootsWithDependencies { .. } => unreachable!(),
         PreparationScope::Roots(roots) => ("root-cones", roots, BTreeSet::new()),
     };
-    let selected = original.dependency_cone_with_budget(roots, b)?;
+    let mut selected = original.dependency_cone_with_budget(roots, b)?;
+    let mut followed = BTreeSet::new();
+    while !dependencies.is_empty() {
+        let mut next = Vec::new();
+        for a in &selected.facts {
+            b.tick("SAT scope producer dependencies")?;
+            if let Some(deps) = dependencies.get(a) {
+                if followed.insert(a.clone()) {
+                    b.charge(deps.len(), "SAT scope producer dependencies")?;
+                    next.extend(deps.iter().cloned());
+                }
+            }
+        }
+        if next.is_empty() {
+            break;
+        }
+        let additional = original.dependency_cone_with_budget(next, b)?;
+        selected.facts.extend(additional.facts);
+        selected.rules.extend(additional.rules);
+    }
     let summary = ScopeSummary {
         label,
         atoms: selected.facts.len(),

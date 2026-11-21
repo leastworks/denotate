@@ -27,6 +27,7 @@ pub(super) struct Search<'a, 'b> {
     atoms: &'a BTreeMap<AtomKey, GroundAtom>,
     rules: &'a Rules,
     fixed: &'a Facts,
+    tasks: &'a crate::task::Tasks,
     options: &'a Options,
     budget: &'a mut Work<'b>,
     nodes: usize,
@@ -41,6 +42,7 @@ impl<'a, 'b> Search<'a, 'b> {
         atoms: &'a BTreeMap<AtomKey, GroundAtom>,
         rules: &'a Rules,
         fixed: &'a Facts,
+        tasks: &'a crate::task::Tasks,
         options: &'a Options,
         budget: &'a mut Work<'b>,
     ) -> Self {
@@ -50,6 +52,7 @@ impl<'a, 'b> Search<'a, 'b> {
             atoms,
             rules,
             fixed,
+            tasks,
             options,
             budget,
             nodes: 0,
@@ -99,6 +102,10 @@ impl<'a, 'b> Search<'a, 'b> {
             self.budget.tick(1)?;
             if !seen.insert(k.clone()) {
                 continue;
+            }
+            if let Some(call) = self.tasks.by_result.get(&k) {
+                self.budget.tick(call.arguments.len() + 1)?;
+                todo.extend(call.arguments.iter().chain(call.when.iter()).cloned());
             }
             for r in self.rules.get(&k).into_iter().flatten() {
                 self.budget.tick(r.body.len() + 1)?;
@@ -206,6 +213,24 @@ impl<'a, 'b> Search<'a, 'b> {
                     });
                 }
             }
+            if let Some(call) = self.tasks.by_result.get(k) {
+                self.budget.tick(call.arguments.len() + 1)?;
+                let inactive = call
+                    .when
+                    .as_ref()
+                    .is_some_and(|g| facts.get(g).or_else(|| self.fixed.get(g)) == Some(&false));
+                // Scheduling edges only. Never evaluate this as a truth equation
+                // or let a one-shot producer enter a relational kernel.
+                out = vec![Rule {
+                    head: k.clone(),
+                    source: denotate_ir::RuleKey::Library(call.task.clone()),
+                    body: call
+                        .dependencies(inactive)
+                        .into_iter()
+                        .map(|a| (a, true))
+                        .collect(),
+                }];
+            }
             result.insert(k.clone(), out);
         }
         Ok(result)
@@ -240,6 +265,33 @@ impl<'a, 'b> Search<'a, 'b> {
             let mut progress = false;
             for k in &needed {
                 self.budget.tick(1)?;
+                if available.contains(k) {
+                    continue;
+                }
+                if let Some(call) = self.tasks.by_result.get(k) {
+                    let inactive = call
+                        .when
+                        .as_ref()
+                        .is_some_and(|g| path.get(g).or_else(|| self.fixed.get(g)) == Some(&false));
+                    let inputs = call.dependencies(inactive);
+                    if inputs.is_subset(&available) {
+                        self.insert(
+                            &mut nodes,
+                            &mut available,
+                            Node {
+                                id: call.results.first().unwrap().clone(),
+                                inputs,
+                                sources: self.tasks.sources[k].clone(),
+                                operation: Operation::Call {
+                                    call: call.clone(),
+                                    inactive,
+                                },
+                            },
+                        )?;
+                        progress = true;
+                    }
+                    continue;
+                }
                 let rs = rules.get(k).map(Vec::as_slice).unwrap_or(&[]);
                 let expr = if let Some(v) = self.fixed.get(k) {
                     Some(super::Expression {
@@ -297,9 +349,10 @@ impl<'a, 'b> Search<'a, 'b> {
                 if !external.is_subset(&available) {
                     continue;
                 }
-                if rs
-                    .iter()
-                    .all(|r| r.body.iter().all(|(k, p)| *p || !members.contains(k)))
+                if !members.iter().any(|k| self.tasks.by_result.contains_key(k))
+                    && rs
+                        .iter()
+                        .all(|r| r.body.iter().all(|(k, p)| *p || !members.contains(k)))
                 {
                     let id = members.first().unwrap().clone();
                     let sources = rs.iter().map(|r| r.source.clone()).collect();
@@ -327,6 +380,9 @@ impl<'a, 'b> Search<'a, 'b> {
             let mut last = None;
             let mut exhausted = None;
             for k in blocked.iter().flatten() {
+                if self.tasks.by_result.contains_key(k) {
+                    continue;
+                }
                 if self.calls >= self.options.max_oracle_calls {
                     break;
                 }
@@ -389,6 +445,26 @@ impl<'a, 'b> Search<'a, 'b> {
                         }
                     }
                 }
+                for k in members {
+                    if let Some(call) = self.tasks.by_result.get(k) {
+                        if let Some(g) = &call.when {
+                            if available.contains(g) && !path.contains_key(g) {
+                                if !scores.contains_key(g) {
+                                    room(
+                                        candidates.len() + scores.len(),
+                                        self.options.max_split_candidates,
+                                        "split candidates",
+                                    )?;
+                                }
+                                scores.entry(g.clone()).or_default()[0] += call
+                                    .arguments
+                                    .iter()
+                                    .filter(|a| members.contains(*a))
+                                    .count();
+                            }
+                        }
+                    }
+                }
                 for (k, s) in scores {
                     candidates.push((Reverse(s[0].min(s[1])), Reverse(s[0] + s[1]), k, component));
                 }
@@ -397,6 +473,18 @@ impl<'a, 'b> Search<'a, 'b> {
             candidates.sort();
             if let Some((_, _, guard, component)) = candidates.first() {
                 let members = &blocked[*component];
+                // A task branch owns the remaining continuation. No private
+                // producer state can disappear at a join and trigger a second call.
+                let joined = if !self
+                    .tasks
+                    .by_result
+                    .keys()
+                    .any(|k| self.atoms.contains_key(k))
+                {
+                    members.clone()
+                } else {
+                    goals.difference(&available).cloned().collect()
+                };
                 // Hard ceiling also bounds native recursion and recursive artifact
                 // drop/serialization. No arbitrarily deep user-supplied cap.
                 room(depth, self.options.max_split_depth.min(64), "split depth")?;
@@ -406,7 +494,7 @@ impl<'a, 'b> Search<'a, 'b> {
                 for value in [true, false] {
                     let mut facts = path.clone();
                     facts.insert(guard.clone(), value);
-                    // Whole-program unique meaning was established before search.
+                    // Unique scoped meaning was established before search.
                     // Thus absence of a stable model here means an infeasible path,
                     // not a lost permitted world. Unknown never removes an arm.
                     self.call()?;
@@ -416,7 +504,7 @@ impl<'a, 'b> Search<'a, 'b> {
                         Answer::NoModel => None,
                         Answer::Inconclusive(e) => return Err(Failure::Oracle(e)),
                         Answer::Model(_) => Some(Box::new(self.region(
-                            members,
+                            &joined,
                             &available,
                             &facts,
                             depth + 1,
@@ -445,7 +533,7 @@ impl<'a, 'b> Search<'a, 'b> {
                 let mut inputs = Set::from([guard.clone()]);
                 let mut sources = BTreeSet::new();
                 for arm in arms.iter().flatten() {
-                    inputs.extend(external(&arm.nodes, members));
+                    inputs.extend(external(&arm.nodes, &joined));
                     sources.extend(arm.nodes.values().flat_map(|n| n.sources.iter().cloned()));
                 }
                 let when_false = arms.pop().unwrap();
@@ -454,12 +542,12 @@ impl<'a, 'b> Search<'a, 'b> {
                     &mut nodes,
                     &mut available,
                     Node {
-                        id: members.first().unwrap().clone(),
+                        id: joined.first().unwrap().clone(),
                         inputs,
                         sources,
                         operation: Operation::Split {
                             on: guard.clone(),
-                            outputs: members.clone(),
+                            outputs: joined,
                             when_true,
                             when_false,
                         },

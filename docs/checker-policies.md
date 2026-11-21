@@ -1632,3 +1632,14 @@ real programs. No runtime or memory improvement is promised from synthetic tests
 Unknown arms keep meaning inconclusive unless that phase already has a confirmed
 failure. Properties and the separate diagnostic allowances are unchanged. The CLI
 exposes pin/ranking caps and a relation hint, including zero-candidate disable controls.
+
+
+### Task scheduling foundation
+
+Task descriptors use the planner's existing node/work/depth/oracle allowances.
+Additional scope dependencies are charged to checker preparation; no new SAT truth
+semantics or default changes accompany them. Changed task metadata invalidates scope
+preparation. Task splits retain the remaining continuation inside both arms, trading
+larger plan structure for simple one-shot execution without task-state merging.
+Interpreter bookkeeping is bounded; a host callback itself is not preempted by its
+operation counter. This increment makes no corpus-scale performance claim.

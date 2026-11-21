@@ -435,7 +435,7 @@ mod tests {
         a.outputs = vec!["result".into()];
         let (code, j) = export(&p, &a).unwrap();
         assert_eq!(code, 0);
-        assert_eq!(j["version"], 3);
+        assert_eq!(j["version"], 4);
         assert_eq!(j["size"]["branches"], 1);
         assert_eq!(j["size"]["joins"], 1);
         let split = j["nodes"]

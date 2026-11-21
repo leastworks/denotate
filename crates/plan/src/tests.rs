@@ -1072,3 +1072,5 @@ fn output_order_and_priorities_reuse_scope_without_leaking_old_metadata() {
         ready(warm.build(&outputs(&[a, b]), &Options::default()).unwrap())
     );
 }
+
+mod tasks;

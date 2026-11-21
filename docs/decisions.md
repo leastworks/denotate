@@ -1715,3 +1715,36 @@ Plan JSON version 3 states the narrower guarantee, cone sizes, required meaning
 phases and the unanalysed outside. Failed builds carry scope metadata too; unknown
 sizes after failed preparation are null, not an empty cone. No partial plan is
 published on failure, and CLI success/error exit codes are unchanged.
+
+
+## Produced inputs are scheduled by explicit task descriptors
+
+The first task increment uses the Rust planning API, without new IR or `.den`
+declarations. A lowerer supplies stable task keys, applicability, arguments, result
+input atoms and source rule keys. The checker still sees a plain relational model;
+produced inputs are inputs to its meaning, not facts available to execution at entry.
+Task results require a call even if W pins their truth. They cannot be replaced by
+an interpreter entry read, a constant computation or a positive fixpoint kernel.
+
+Scope must also reach task applicability and arguments, transitively. The checker's
+`RootsWithDependencies` follows caller-supplied edges together with original ground
+dependencies, before simplifying scope. This changes scope selection only. All W
+restrictions remain. A changed task descriptor gets a fresh scoped engine.
+
+A task publishes its whole result bundle at once. False applicability skips the
+callback and publishes false for each result; known-inactive paths do not wait for
+arguments. The completed observation must satisfy W: this reference API does not
+validate function contracts at runtime or implement execution permission policies.
+This convention does not make an unexecuted active task's result absent. A bounded
+failure to schedule is unresolved, not a proof that no schedule exists.
+
+Plain sibling joins carry Boolean bindings. Losing an arm's task state there could
+call a multi-result task twice. Until producer-state joins are designed, task splits
+keep the region's remaining requested work in each arm. This may duplicate plan
+structure but ensures calls are one-shot along a path. Pure callbacks and explicit
+value dependencies make all ready-node ordering policies agree on results.
+
+JSON v4 distinguishes entry and produced inputs and exports call operations. The
+reference interpreter accepts only declared callback result keys, rejects missing
+results and rejects produced inputs supplied at entry. Slots, writer safety proofs,
+classification rejection, trace-before-use and task syntax remain later increments.
