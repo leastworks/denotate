@@ -341,10 +341,10 @@ constraints. No context-dependent BDD or verdict is reused across selections.
 Verification declarations also own their rule semantics and optional hypothesis
 relation. Requests carry those options, using a semantic key for the hypothesis;
 CLI configuration cannot override the authored choice. The declaration interface
-supports completion. CLI, editor and planning consumers still refuse it (and
-stable-with-hypothesis) before semantic preparation. The separate experimental
-`completion_query` Rust API implements preparation and per-observation meaning;
-it does not yet implement complete verification reports. Stable preparation, fixed
+supports completion. The SAT CLI and separate experimental `completion_query` Rust
+API implement preparation, classification, processing meaning and selected
+requirements. BDD, editor, scorecard and planning consumers still refuse completion
+before semantic preparation. Stable with a hypothesis remains unsupported. Stable preparation, fixed
 folds and cached answers are not an implementation of completion. The parser and
 shared reference services remain usable for such declarations.
 
@@ -497,8 +497,16 @@ for whole-program extensions. Each SAT interpretation is validated against its
 scope's original equations. Exclusions distinguish relational interpretations, not
 auxiliary assignments. Queries return separate rejection, ambiguity, processing
 no-meaning and inconclusive outcomes; confirmed classification survives processing
-exhaustion. Each query owns its solver and work allowance. Edits require a new
-immutable preparation; there is no session cache or CLI/editor integration yet.
+exhaustion. Each query owns its solver. Whole-verification reports enumerate W independently
+of H, with separate budgets for classification, processing and properties. Property
+queries pin accepted classification in the original property cone, preserving
+failures independent of downstream contradictions. The shared completion presenter
+owns interpretation evidence, JSON summary and diagnostic wording; `ir-text` owns
+source placement, and the SAT CLI owns output and exit-code precedence. All-rejected
+is a distinct outcome, not an unconditional proof. Optional circular-support work
+runs afterward under its own allowance and cannot alter required outcomes.
+Edits require a new immutable preparation; no session cache or editor integration
+exists yet.
 Emptiness uses the shared report and presentation structures; finite derivations
 are reconstructed from each example's reduct-validated original interpretation
 under an independent diagnostic allowance. Remaining symbolic obligation kinds and

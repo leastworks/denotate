@@ -369,7 +369,7 @@ verification normal_operation {
   obligation that no verification in the program selects gets a notice, also when it
   is declared in a library.
 
-### Completion declarations (CLI/editor checking pending)
+### Completion semantics and acceptance
 
 Verifications may declare `semantics: completion;` and then
 `hypothesis: recognized;` before `assumptions`. Omitting `semantics` means `stable`;
@@ -395,14 +395,51 @@ semantics and the same hypothesis relation; a mismatch is an error at the select
 Ordinary declaration identity, messages, origins and unchecked-obligation notices
 apply. Merely declaring it activates nothing.
 
-The IR, loader, printer and editor reference services support these declarations.
-The experimental Rust [completion query API](../crates/check/README.md#experimental-completion-queries)
-can evaluate individual observations; complete verification checking is pending.
-Both CLI engines, the editor checker and the
-execution planner explicitly refuse completion and stable-with-hypothesis before
-semantic preparation. A refused verification has an incomplete result, not a proof;
-other supported verifications still run. The CLI returns exit 2 for this required
-unchecked work. Existing stable verifications keep their behavior and printed form.
+Run these verifications with `just check-den ROOT --engine sat`. The authored
+semantics selects the meaning; the engine flag alone does not change a stable
+verification. Completion requires `--sat-meaning full` (the default); other analysis
+modes and split hints are explicitly unsupported. BDD, the editor checker, the
+scorecard and the execution planner still refuse completion before stable
+preparation, while editor reference services remain available. Stable with a
+hypothesis is also unsupported. Independent supported verifications still run.
+
+For each complete observation permitted by W, completion interprets every derived
+atom as equivalent to the disjunction of its producers. Positive self-support is
+therefore possible: `p() :- p();` permits both values. Without a hypothesis, zero
+interpretations is no meaning and several are ambiguity. With H, classification
+uses only H's original upstream **ground** dependency cone, requiring H true:
+zero interpretations rejects the observation, one accepts it, and several are
+classification ambiguity. Processing then asks for whole-program extensions of
+the unique accepted classification. A processing contradiction cannot reject the
+input or choose a classification. Limits yield inconclusive results, not rejection.
+
+Selected derived assumptions and static `within` providers must have acyclic ground
+cones in this increment, so their meaning in W agrees under stable and completion
+semantics. Compatibility checks do not use H or assumptions to prune cycles;
+exhaustion is inconclusive. Ordinary global assumption validation still runs.
+
+Processing obligations are checked over accepted observations, in their original
+property cones together with the pinned classification. An independent property
+failure survives unrelated processing no meaning. The SAT completion path supports
+`empty`, `at_most_one`, and coverage/exactly-one on input-independent acyclic cones.
+Other coverage work and notices remain explicitly unanalysed. `no_rejections(H)`
+checks outside H that every permitted observation has at least one classification;
+ambiguity is not rejection and is reported separately.
+
+When every permitted observation rejects, the result explicitly says `all-rejected`:
+processing is not applicable and processing obligations are vacuous. This is allowed
+unless `no_rejections` is selected; it is never an unqualified program proof.
+Inconsistent W remains a context error. Exit precedence is 2 for required incomplete
+or unanalysed work (including partial selection), then 1 for context, meaning or
+obligation failure, otherwise 0. Operational failures use 3.
+
+Completion counterexamples carry checked interpretations and their scope, with the
+full input observation, rather than claiming a finite derivation. Unlocated support
+falls back to the obligation. `--completion-circular-support` optionally reports an
+accepted classification that needs a positive support cycle. It is off by default,
+bounded separately, and neither its findings nor exhaustion affect required verdicts
+or exit codes. The Rust API is documented in
+[the checker](../crates/check/README.md#experimental-completion-queries).
 
 ## Contextual condition notices
 

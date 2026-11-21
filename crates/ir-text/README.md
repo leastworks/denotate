@@ -28,9 +28,9 @@ zero-arity `hypothesis` relation. `no_rejections(H)` is an obligation-only query
 loading validates its selection against a completion verification with the same H.
 Printing preserves these options, references and origins; the shared editor index
 supports navigation and validated rename of verification hypotheses and
-`no_rejections` relation references. Current
-BDD and SAT consumers explicitly refuse completion and stable-with-hypothesis before
-semantic preparation. This is declaration support, not implemented completion checking.
+`no_rejections` relation references. The SAT CLI checks completion with full meaning
+analysis; BDD, editor, scorecard and planning consumers still refuse it before stable
+preparation. Stable with a hypothesis remains unsupported.
 
 `load_with_resolver(…, Some(&mut resolver))` also restores embedded origins through a
 caller-owned `origins::OriginResolver` (one resolution per URI/view/hash identity).
@@ -210,7 +210,7 @@ just check-den <program> --engine sat --sat-max-worlds 4096 --sat-max-solves 512
 just check-den <program> --engine sat --sat-meaning none
 ```
 
-BDD remains the default. SAT checks original stable semantics without BDD W or
+BDD remains the default. For stable verifications, SAT checks original stable semantics without BDD W or
 admission: symbolic `empty` and `at_most_one`, plus **all fixed obligations** whose
 relations were settled by input-independent preparation. Symbolic `at_least_one`,
 `exactly_one` and notices are explicitly **not analysed**. Notices stay advisory.
@@ -547,3 +547,34 @@ line/column, or null). The inventory is structural, not a no-meaning finding.
 `--dump-component FILE` additionally writes bounded JSONL atoms and rules for this
 SAT view (`state: sat-prepared`). Dump or inventory truncation never changes exit
 status. BDD's existing dump behavior is unchanged.
+
+
+### Completion verification from the CLI
+
+`just check-den ROOT --engine sat` also runs authored `semantics: completion`
+verifications. Full meaning analysis is required; `--sat-meaning cone`,
+`uniqueness`, `none`, and explicit split hints are refused for these verifications.
+Stable verifications in the same program keep their existing path. Completion runs
+retain program-wide assumption declaration validation, including unselected ones.
+
+Human and `--json` output identify the semantics and hypothesis, classification
+acceptance/rejection/ambiguity, processing meaning, properties and advisory status.
+The configuration is `original-completion-v1`. Rejections are allowed unless selected
+`no_rejections(H)` forbids them. Fully established `all-rejected` is explicit,
+processing is not applicable, and processing obligations are vacuous. It can exit 0;
+there is no unqualified program proof. Required unknown/unanalysed work has exit 2,
+which takes precedence over a known failure (exit 1). Partial selection stays exit 2.
+
+The existing SAT solve/world/tuple/CNF limits bound this first completion path.
+World enumeration and finite-substitution grounding are deliberately conservative;
+large programs can exhaust them. Empty and at-most-one are supported, with
+coverage/exactly-one for acyclic input-independent cones; symbolic coverage and
+notices remain explicitly unanalysed. Completion property evidence includes checked
+interpretations and scope, without fabricated finite derivations. Placement falls
+back to the obligation, retaining labeled library fallbacks and upstream origins.
+
+`--completion-circular-support` opts into an advisory on accepted classifications
+that require positive circular support. It is off by default, uses separate limits,
+and cannot change exit codes even when detection is incomplete. It does not apply
+to stable verifications. BDD/editor/planner/scorecard completion checking remains
+unsupported.

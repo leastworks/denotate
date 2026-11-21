@@ -690,7 +690,11 @@ fn finding_identity(
 ) -> FindingIdentity {
     use denotate_presentation::Identity;
     match id {
-        Identity::UnsupportedSemantics => {
+        Identity::UnsupportedSemantics
+        | Identity::Rejection(_)
+        | Identity::CompletionMeaning(_)
+        | Identity::AllRejected
+        | Identity::CircularSupport(_) => {
             panic!("test DSL verifications use supported stable semantics")
         }
         Identity::SubsumedProducer(_) => {

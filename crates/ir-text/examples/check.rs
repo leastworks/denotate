@@ -313,7 +313,7 @@ fn run_streaming(
         Ok(code) => trace.finish(format_args!(
             "Finished: exit {code} ({})",
             match code {
-                0 => "proved",
+                0 => "complete without failures",
                 1 => "findings",
                 _ => "incomplete/invalid/partial",
             }
@@ -342,6 +342,7 @@ fn check_program(
         sat_query_limits,
         sat_split,
         mut sat_check_options,
+        completion_circular_support,
         selection,
         validate_all_assumptions,
         json,
@@ -519,6 +520,7 @@ fn check_program(
             &requests,
             sat_query_limits,
             sat_check_options,
+            completion_circular_support,
             &mut dump.borrow_mut(),
             partial,
             unchecked,
@@ -1041,7 +1043,7 @@ mod tests {
         let f = Fixture::new(
             "relation h();h();relation bad();bad();obligation o:empty(bad); verification a{semantics:completion;hypothesis:h;assumptions:[];obligations:[o];} verification z{assumptions:[];obligations:[o];}",
         );
-        for engine in ["bdd", "sat"] {
+        for engine in ["bdd"] {
             let (code, out) = f.run(&["--engine", engine]);
             assert_eq!(code, 2, "{out}");
             assert!(out.contains("unsupported-semantics"), "{out}");

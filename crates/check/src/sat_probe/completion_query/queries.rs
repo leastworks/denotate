@@ -1,8 +1,8 @@
 use super::*;
 
-struct Run<'a> {
+pub(super) struct Run<'a, 'b, 'l> {
     engine: &'a Engine,
-    budget: Budget<'a>,
+    budget: &'b mut Budget<'l>,
     cnf: Cnf,
     truth: Lit,
     world: Encoding,
@@ -14,8 +14,15 @@ impl Engine {
     /// W alone. No completion equations outside selected acyclic restrictions
     /// can suppress an otherwise permitted observation.
     pub fn worlds(&self, query: &WorldQuery) -> Result<WorldAnswer> {
+        self.worlds_using(query, &mut Budget::new(&self.limits))
+    }
+    pub(super) fn worlds_using(
+        &self,
+        query: &WorldQuery,
+        budget: &mut Budget<'_>,
+    ) -> Result<WorldAnswer> {
         let result: Result<WorldAnswer> = (|| {
-            let mut run = Run::new(self)?;
+            let mut run = Run::new(self, budget)?;
             let mut pins = Vec::new();
             for (a, value) in &query.pins {
                 let l = run.input(a)?;
@@ -27,12 +34,12 @@ impl Engine {
                     let l = run.input(a)?;
                     clause.push(if *value { !l } else { l });
                 }
-                run.cnf.clause(clause, &mut run.budget)?;
+                run.cnf.clause(clause, run.budget)?;
             }
             if !run.solve(&pins)? {
                 return Ok(WorldAnswer::NoWorld);
             }
-            let values = checked_assignment(&self.world, &run.world, &run.cnf, &mut run.budget)?;
+            let values = checked_assignment(&self.world, &run.world, &run.cnf, run.budget)?;
             Ok(WorldAnswer::World(
                 self.model(values, ModelScope::WholeProgram).observation(),
             ))
@@ -52,9 +59,17 @@ impl Engine {
         &self,
         present: impl IntoIterator<Item = GroundAtom>,
     ) -> Result<ObservationOutcome> {
+        self.observation_using(present, &mut Budget::new(&self.limits), true)
+    }
+    pub(super) fn observation_using(
+        &self,
+        present: impl IntoIterator<Item = GroundAtom>,
+        budget: &mut Budget<'_>,
+        processing: bool,
+    ) -> Result<ObservationOutcome> {
         let mut present_set = BTreeSet::new();
         let result = (|| {
-            let mut run = Run::new(self)?;
+            let mut run = Run::new(self, budget)?;
             for a in present {
                 run.budget.tick("completion observation")?;
                 if !self.program.inputs.contains(&a) {
@@ -71,8 +86,13 @@ impl Engine {
                 return Ok(ObservationOutcome::NotPermitted);
             }
             // Validate W independently, before any program equations are installed.
-            checked_assignment(&self.world, &run.world, &run.cnf, &mut run.budget)?;
+            checked_assignment(&self.world, &run.world, &run.cnf, run.budget)?;
             let Some((cone, members, hypothesis)) = &self.classification else {
+                if !processing {
+                    return Ok(ObservationOutcome::WholeProgram(
+                        Interpretations::NotAnalysed,
+                    ));
+                }
                 return Ok(ObservationOutcome::WholeProgram(run.models(
                     &self.cone,
                     &pins,
@@ -96,18 +116,23 @@ impl Engine {
                     Ok(ObservationOutcome::Inconclusive { cause, example })
                 }
                 Interpretations::Unique(classification) => {
-                    let processing = run.models(
-                        &self.cone,
-                        &pins,
-                        None,
-                        ModelScope::Processing,
-                        Some((members, &classification)),
-                    )?;
+                    let processing = if processing {
+                        run.models(
+                            &self.cone,
+                            &pins,
+                            None,
+                            ModelScope::Processing,
+                            Some((members, &classification)),
+                        )?
+                    } else {
+                        Interpretations::NotAnalysed
+                    };
                     Ok(ObservationOutcome::Accepted {
                         classification,
                         processing,
                     })
                 }
+                Interpretations::NotAnalysed => unreachable!(),
             }
         })();
         match result {
@@ -120,9 +145,77 @@ impl Engine {
     }
 }
 
-impl<'a> Run<'a> {
-    fn new(engine: &'a Engine) -> Result<Self> {
-        let mut budget = Budget::new(&engine.limits);
+pub(super) fn property(
+    engine: &Engine,
+    cone: &Cone,
+    members: Arc<BTreeSet<GroundAtom>>,
+    world: &Observation,
+    classification: Option<&Model>,
+    part: &PropertyPart,
+    budget: &mut Budget<'_>,
+) -> Result<Option<Model>> {
+    let mut run = Run::new(engine, budget)?;
+    let e = encode(
+        cone,
+        &mut run.cnf,
+        run.truth,
+        Some(&run.world.vars),
+        run.budget,
+    )?;
+    let mut pins = Vec::new();
+    for a in &world.present {
+        pins.push(run.input(a)?);
+    }
+    for a in &world.absent {
+        pins.push(!run.input(a)?);
+    }
+    if let Some(model) = classification {
+        for a in engine.classification.as_ref().unwrap().1.iter() {
+            run.budget.tick("completion property classification")?;
+            let i = engine
+                .program
+                .atom_index
+                .get(a)
+                .copied()
+                .unwrap_or(cone.atoms.len() + 1);
+            pins.push(if model.value(a).unwrap() {
+                e.vars[i]
+            } else {
+                !e.vars[i]
+            });
+        }
+    }
+    let mut lits = Vec::new();
+    for a in &part.tuples {
+        run.budget.tick("completion property tuples")?;
+        lits.push(e.vars[engine.program.atom_index[a]]);
+    }
+    match part.component {
+        Cardinality::Empty => pins.extend(lits),
+        Cardinality::AtLeastOne => pins.extend(lits.iter().map(|l| !*l)),
+        Cardinality::AtMostOne => {
+            let mut seen = !run.truth;
+            let mut many = !run.truth;
+            for l in lits {
+                let both = run.cnf.and(&[seen, l], run.budget)?;
+                many = run.cnf.or(&[many, both], run.budget)?;
+                seen = run.cnf.or(&[seen, l], run.budget)?;
+            }
+            pins.push(many);
+        }
+        Cardinality::ExactlyOne => unreachable!(),
+    }
+    if !run.solve(&pins)? {
+        return Ok(None);
+    }
+    let values = checked_assignment(cone, &e, &run.cnf, run.budget)?;
+    let mut model = engine.model(values, ModelScope::Property);
+    model.members = Some(members);
+    Ok(Some(model))
+}
+
+impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
+    pub(super) fn new(engine: &'a Engine, budget: &'b mut Budget<'l>) -> Result<Self> {
         budget.check("completion query")?;
         let mut cnf = Cnf {
             solver: Solver::new(
@@ -134,7 +227,7 @@ impl<'a> Run<'a> {
                     }),
                     cancellation: engine.limits.cancellation.clone(),
                     start: Instant::now(),
-                    timeout: engine.limits.timeout,
+                    timeout: engine.limits.timeout.min(budget.remaining_time()),
                     #[cfg(test)]
                     hook: None,
                 },
@@ -143,9 +236,9 @@ impl<'a> Run<'a> {
             literals: 0,
             gate: None,
         };
-        let truth = cnf.var(&mut budget)?;
-        cnf.clause(vec![truth], &mut budget)?;
-        let world = encode(&engine.world, &mut cnf, truth, None, &mut budget)?;
+        let truth = cnf.var(budget)?;
+        cnf.clause(vec![truth], budget)?;
+        let world = encode(&engine.world, &mut cnf, truth, None, budget)?;
         Ok(Self {
             engine,
             budget,
@@ -157,7 +250,7 @@ impl<'a> Run<'a> {
         })
     }
 
-    fn input(&mut self, atom: &GroundAtom) -> Result<Lit> {
+    pub(super) fn input(&mut self, atom: &GroundAtom) -> Result<Lit> {
         self.budget
             .charge(atom.arguments.len() + 1, "completion input query")?;
         self.engine.program.validate_atom(atom)?;
@@ -219,7 +312,7 @@ impl<'a> Run<'a> {
         }
     }
 
-    fn models(
+    pub(super) fn models(
         &mut self,
         cone: &Cone,
         world_pins: &[Lit],
@@ -232,16 +325,17 @@ impl<'a> Run<'a> {
             ModelScope::Classification => "completion classification",
             ModelScope::Processing => "completion processing",
             ModelScope::WholeProgram => "completion meaning",
+            ModelScope::Property => "completion property",
         };
         let result: Result<Interpretations> = (|| {
-            let gate = self.cnf.var(&mut self.budget)?;
+            let gate = self.cnf.var(self.budget)?;
             self.cnf.gate = Some(gate);
             let e = encode(
                 cone,
                 &mut self.cnf,
                 self.truth,
                 Some(&self.world.vars),
-                &mut self.budget,
+                self.budget,
             )?;
             let mut pins = world_pins.to_vec();
             pins.extend(self.inactive.iter().map(|g| !*g));
@@ -270,7 +364,7 @@ impl<'a> Run<'a> {
             if !self.solve(&pins)? {
                 return Ok(Interpretations::NoMeaning);
             }
-            let values = checked_assignment(cone, &e, &self.cnf, &mut self.budget)?;
+            let values = checked_assignment(cone, &e, &self.cnf, self.budget)?;
             let first = self.engine.model(values, scope);
             example = Some(first.clone());
             // Exclude exactly this interpretation on original relational atoms,
@@ -285,15 +379,15 @@ impl<'a> Run<'a> {
                     different.push(if value { !e.vars[i] } else { e.vars[i] });
                 }
             }
-            let second_gate = self.cnf.var(&mut self.budget)?;
+            let second_gate = self.cnf.var(self.budget)?;
             self.cnf.gate = Some(second_gate);
-            self.cnf.clause(different, &mut self.budget)?;
+            self.cnf.clause(different, self.budget)?;
             self.inactive.push(second_gate);
             pins.push(second_gate);
             if !self.solve(&pins)? {
                 return Ok(Interpretations::Unique(first));
             }
-            let values = checked_assignment(cone, &e, &self.cnf, &mut self.budget)?;
+            let values = checked_assignment(cone, &e, &self.cnf, self.budget)?;
             Ok(Interpretations::Multiple {
                 first,
                 second: self.engine.model(values, scope),

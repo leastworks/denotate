@@ -13,6 +13,10 @@ pub enum Identity {
     EmptyInputUniverse,
     DownstreamWork,
     UnsupportedSemantics,
+    Rejection(ObligationId),
+    CompletionMeaning(&'static str),
+    AllRejected,
+    CircularSupport(BTreeSet<GroundAtom>),
     Notice(NoticeId),
     SubsumedProducer(RuleId),
     AssumedConclusion(AssumptionId, ObligationId),
@@ -38,7 +42,7 @@ fn qualified(k: &QualifiedKey) -> Value {
 fn owner(k: &OwnerKey) -> Value {
     json!([k.namespace(), k.value()])
 }
-fn constant(k: &ConstantKey) -> Value {
+pub(crate) fn constant(k: &ConstantKey) -> Value {
     json!({"sort":qualified(&k.sort.0),"name":k.name.as_ref()})
 }
 fn relation(k: &RelationKey) -> Value {
@@ -105,6 +109,14 @@ impl Identity {
             }
             Self::Notice(id) => json!({"notice":qualified(&keys.notice(*id)?.0)}),
             Self::UnsupportedSemantics => json!({"context":"unsupported-semantics"}),
+            Self::Rejection(id) => {
+                json!({"obligation":qualified(&keys.obligation(*id)?.0),"component":"rejection"})
+            }
+            Self::CompletionMeaning(phase) => json!({"completionMeaning":phase}),
+            Self::AllRejected => json!({"context":"all-rejected"}),
+            Self::CircularSupport(atoms) => {
+                json!({"circularSupport":atoms.iter().map(|a| AtomKey::from_atom(keys,a)).collect::<std::result::Result<BTreeSet<_>,_>>()?.iter().map(atom_data).collect::<Vec<_>>()})
+            }
             Self::DownstreamWork => json!({"context":"downstream-work"}),
             Self::EmptyInputUniverse => json!({"context":"empty-input-universe"}),
             Self::InconsistentAssumptions => json!({"context":"inconsistent-assumptions"}),

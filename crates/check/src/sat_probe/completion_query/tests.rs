@@ -1,6 +1,7 @@
 use super::*;
 use crate::test_support::rewrites::{atom, rel, rule};
 use denotate_ir::*;
+mod reports;
 
 fn keys(c: &Corpus) -> SemanticKeys {
     let mut k = SemanticKeys::default();
@@ -56,6 +57,14 @@ fn keys(c: &Corpus) -> SemanticKeys {
     }
     for a in c.assumptions() {
         k.bind_assumption(c, a.id, AssumptionKey(qualified(&a.name)))
+            .unwrap();
+    }
+    for o in c.obligations() {
+        k.bind_obligation(c, o.id, ObligationKey(qualified(&o.name)))
+            .unwrap();
+    }
+    for n in c.notices() {
+        k.bind_notice(c, n.id, NoticeKey(qualified(&n.name)))
             .unwrap();
     }
     for v in c.verifications() {

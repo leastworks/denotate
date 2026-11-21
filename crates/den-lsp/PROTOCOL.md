@@ -1228,3 +1228,44 @@ is null or explains an absent/inconclusive full-program extension. The same shap
 appears in uniqueness progress and the human CLI's `Uniqueness search` line.
 A scoped pair is never published without two full-program reduct-validated extensions;
 meaning evidence and finding identities keep whole-program scope.
+
+
+### Completion evidence shared with the SAT CLI
+
+The editor still refuses completion verifications as described above. The shared
+presenter and opt-in SAT CLI now additionally produce completion reports; these
+are not stable replay evidence or an editor capability switch.
+
+- Configuration: `original-completion-v1`, `semantics: "completion"`, hypothesis
+  display name and structured `hypothesisIdentity`. Context, classification,
+  processing meaning, obligations and advisories are separate fields.
+- Classification sets `accepted`, `rejected`, `ambiguous` use `exists`, `none`,
+  `inconclusive` or `not-analysed`. A witness establishes existence, not enumeration
+  of the set. `all-rejected` is explicit; processing is `not-applicable` and
+  processing requirements are `vacuous`. Inconsistent W cannot produce such proofs.
+- `completion-model` evidence retains original relational atom/value assignments,
+  full present/absent input observations, hypothesis and scope (`hypothesis-cone`,
+  `accepted-processing`, `whole-program`, or `property-cone`). Unlisted legal atoms
+  inside the scope have empty definitions. This is not a finite derivation.
+  `scopeAtoms` identifies the original dependency-cone members (`null` for the
+  whole program); the complete input observation also includes inputs outside it.
+  Aggregated property evidence contains bounded `examples`, `count`,
+  `countKind: "exact" | "at-least"` and `omittedExamples`. Each example includes
+  its `group` and `presentTuples`; coverage examples have no present tuple.
+- `rejected-observation` evidence includes the full permitted observation,
+  hypothesis, `scope: "hypothesis-cone"` and `confirmedNoInterpretation: true`.
+  `completion-no-meaning` is distinct from rejection; `completion-ambiguity`
+  contains two interpretations of the same scope and observation.
+- Existing obligation finding identities are unchanged. `no_rejections` uses
+  `{obligation: [namespaceKey, name], component: "rejection"}`. New meaning identities
+  use `{completionMeaning: phase}`; the all-rejected advisory uses
+  `{context: "all-rejected"}`. Each includes the verification key as usual.
+- `ambiguous-meaning` is an Error. `all-rejected` and opt-in `circular-support` are
+  Information. Circular support is keyed by `circularSupport`, the semantic atoms
+  of the original positive ground component; the chosen cycle/world is evidence.
+  `advisories.circularSupport.state` is `not-requested`, `none`, `findings` or
+  `incomplete`; advisory exhaustion never changes required completeness.
+- Required incompleteness retains phase/resource/limit details and known failures.
+  Compatibility refusal uses `completion-incompatible-cone` evidence with semantic
+  component keys, located on the selected assumption or input declaration. Neither
+  case is reported as rejection or a vacuous proof.

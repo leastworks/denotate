@@ -802,11 +802,40 @@ processing cutoff. Preparation is immutable and reusable; each query currently
 owns a fresh SAT solver and no query cache. Program, domain, eligibility, assumption
 or hypothesis edits require new preparation. No result is shared with stable mode.
 
-This increment supplies query primitives only. It does not yet enumerate all worlds
-for verification reports, check `no_rejections` or processing obligations, publish
-completion evidence, or run the opt-in circular-support advisory. Both CLI engines,
-the editor, planner and scorecard continue to refuse completion explicitly until
-their integrations land.
+`Engine::check(keys, options)` produces a whole-verification report. It enumerates
+W outside H, with separate classification sets (`exists`, `none`, `inconclusive`),
+processing meaning and obligation results. Established witnesses survive cutoff.
+Only confirmed unique classification admits a world to processing obligations;
+unknown classification never completes a property proof. `no_rejections` asks for
+nonempty classification, independently of uniqueness. An all-rejected context is
+explicit, processing is not applicable, and processing properties are vacuous;
+inconsistent W is a context error instead.
+
+Property queries use the original obligation cone plus the pinned classification,
+so an independent failure remains visible when unrelated processing has no model.
+Supported forms are empty and uniqueness, plus coverage/exactly-one on acyclic
+input-independent cones. Other coverage work and notices remain unanalysed.
+Returned property interpretations carry `ModelScope::Property`; presentation falls
+back to the obligation instead of inventing finite-support attribution. Existing
+obligation identities are reused. Only a bounded number of property examples is
+retained; reducing that number cannot change required outcomes.
+
+Whole-check enumeration, classification, processing meaning and each property have
+separate work/deadline budgets. `max_worlds` bounds enumeration, `max_tuples` bounds
+property candidates, and exclusion storage counts against the dependency allowance.
+There is no support-cube generalization yet: large input universes can exhaust this
+bounded enumeration. The implementation makes no corpus-scale throughput claim.
+`CheckOptions::meaning` currently accepts only `Full`.
+
+`circular_support` is an optional advisory, off by default. After required checking,
+retained accepted classification examples are tested for unfounded support. The
+checker reports actual supported positive cycles, identified by their original
+positive component's semantic keys. It never adds stable loop clauses or rejects
+those interpretations. `advisory_limits` is independent; example truncation and
+exhaustion are reported separately and do not change required verdicts.
+
+The SAT CLI consumes these reports and the shared completion presenter. Editor,
+planner, scorecard and BDD checking continue to refuse completion explicitly.
 
 ## Experimental stable queries
 

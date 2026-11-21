@@ -10,6 +10,7 @@ pub(super) fn run(
     requests: &[(denotate_ir::VerificationKey, denotate_check::CheckRequest)],
     query: QueryLimits,
     mut check: CheckOptions,
+    circular_support: bool,
     dump: &mut Option<component_dump::Dump>,
     partial: bool,
     unchecked: bool,
@@ -22,7 +23,11 @@ pub(super) fn run(
 ) -> Result<u8, Failure> {
     let mut incomplete = partial || unchecked;
     let mut failure = false;
-    if validate_all {
+    if validate_all
+        || requests
+            .iter()
+            .any(|(_, r)| r.semantics == denotate_ir::Semantics::Completion)
+    {
         let validation =
             denotate_check::validate_assumption_cones(&p.corpus, &p.domains, &p.keys, limits)
                 .map_err(checker_failure)?;
@@ -90,6 +95,23 @@ pub(super) fn run(
             .unwrap();
         let label = name(p.corpus.namespace(v.id).unwrap(), &v.name);
         writeln!(output, "Verification {label}").unwrap();
+        if v.options.semantics == denotate_ir::Semantics::Completion {
+            let (inc, failed) = completion(
+                p,
+                v,
+                &limits,
+                &query,
+                &check,
+                circular_support,
+                json,
+                verbose,
+                output,
+            )?;
+            incomplete |= inc;
+            failure |= failed;
+            flush(output)?;
+            continue;
+        }
         if let Some(reason) = request.unsupported_semantics() {
             let shown = presentation::unsupported_semantics(p, v.id, reason)
                 .map_err(|e| (2, e.to_string()))?;
@@ -282,6 +304,189 @@ pub(super) fn run(
     } else {
         0
     })
+}
+
+fn completion(
+    p: &LoadedProgram,
+    v: &denotate_ir::VerificationDeclaration,
+    limits: &Limits,
+    query: &QueryLimits,
+    check: &CheckOptions,
+    circular_support: bool,
+    json: bool,
+    verbose: bool,
+    output: &mut String,
+) -> Result<(bool, bool), Failure> {
+    use denotate_check::completion_query as cq;
+    writeln!(output, "Semantics: completion").unwrap();
+    if let Some(h) = v.options.hypothesis {
+        writeln!(
+            output,
+            "Hypothesis: {}",
+            presentation::diagnostic_names(&p.corpus)(h.into())
+        )
+        .unwrap();
+    }
+    let refusal = if check.meaning != MeaningMode::Full {
+        Some("completion supports full meaning analysis only")
+    } else if check.splits.relation.is_some() {
+        Some("completion does not support SAT split hints")
+    } else {
+        None
+    };
+    let mut problem = refusal.map(str::to_owned);
+    let mut prepared = None;
+    let mut compatibility = None;
+    let mut exhausted = None;
+    if problem.is_none() {
+        match cq::Engine::prepare(
+            &p.corpus,
+            &p.domains,
+            &p.keys,
+            v.id,
+            limits,
+            cq::QueryLimits {
+                max_solves: query.max_solves,
+                max_solver_polls: query.max_solver_polls,
+                max_conflicts: query.max_conflicts,
+                max_propagations: query.max_propagations,
+            },
+        ) {
+            Ok(cq::Preparation::Ready(e)) => prepared = Some(e),
+            Ok(cq::Preparation::Unsupported(issue)) => {
+                let relation = p
+                    .corpus
+                    .relations()
+                    .find(|r| p.keys.relation(r.id).is_ok_and(|k| k == &issue.relation))
+                    .unwrap();
+                problem = Some(format!(
+                    "Completion compatibility: {} has a recursive assumption or input-domain cone; this increment requires an acyclic cone.",
+                    relation.name
+                ));
+                compatibility = Some(issue);
+            }
+            Ok(cq::Preparation::Inconclusive(c)) => {
+                exhausted = Some(c);
+                problem = Some(denotate_presentation::exhaustion_text(
+                    c.phase, c.resource, c.details,
+                ))
+            }
+            Err(
+                e @ (denotate_check::CheckError::Internal(_)
+                | denotate_check::CheckError::Cancelled),
+            ) => return Err((3, e.to_string())),
+            Err(e) => problem = Some(checker_failure(e).1),
+        }
+    }
+    if let Some(problem) = problem {
+        let shown = presentation::completion_preparation_failure(
+            p,
+            v.id,
+            compatibility.as_ref(),
+            exhausted,
+            &problem,
+        )
+        .map_err(|e| (2, e.to_string()))?;
+        if json {
+            writeln!(output, "Results: {}", shown.status).unwrap();
+        } else {
+            print_diagnostics(p, &shown, output, verbose)?;
+        }
+        return Ok((true, false));
+    }
+    let options = cq::CheckOptions {
+        meaning: check.meaning,
+        max_worlds: check.max_worlds,
+        max_tuples: check.max_tuples,
+        max_examples: match check.examples {
+            denotate_check::EmptinessExamples::Limited(n) => n.get(),
+            denotate_check::EmptinessExamples::All => usize::MAX,
+        },
+        circular_support,
+        advisory_limits: check.attribution.clone(),
+    };
+    let report = prepared
+        .unwrap()
+        .check(&p.keys, &options)
+        .map_err(|e| match e {
+            e @ (CheckError::Internal(_) | CheckError::Cancelled) => (3, e.to_string()),
+            e => checker_failure(e),
+        })?;
+    let shown = presentation::present_completion(p, &report).map_err(|e| (2, e.to_string()))?;
+    let s = &shown.status;
+    if json {
+        writeln!(output, "Results: {s:#}").unwrap();
+    } else {
+        writeln!(
+            output,
+            "Context: {}",
+            s["context"]["state"].as_str().unwrap()
+        )
+        .unwrap();
+        if report.classification.is_some() {
+            let state = |s: &serde_json::Value| s["state"].as_str().unwrap().to_owned();
+            if report.all_rejected() {
+                writeln!(output, "Classification: all-rejected").unwrap();
+            } else {
+                writeln!(
+                    output,
+                    "Classification: accepted {}; rejected {}; ambiguous {}",
+                    state(&s["classification"]["accepted"]),
+                    state(&s["classification"]["rejected"]),
+                    state(&s["classification"]["ambiguous"])
+                )
+                .unwrap();
+            }
+        }
+        if !report.meaning.applicable {
+            writeln!(output, "Processing meaning: not-applicable").unwrap();
+        } else {
+            for phase in ["existence", "uniqueness"] {
+                writeln!(
+                    output,
+                    "Meaning {phase} ({}): {}",
+                    s["meaning"]["scope"].as_str().unwrap(),
+                    s["meaning"][phase]["state"].as_str().unwrap()
+                )
+                .unwrap();
+            }
+        }
+        print_diagnostics(p, &shown, output, verbose)?;
+        for o in s["obligations"].as_array().unwrap() {
+            writeln!(
+                output,
+                "Obligation {} ({}): {} [{}]",
+                o["name"].as_str().unwrap(),
+                o["kind"].as_str().unwrap(),
+                o["state"].as_str().unwrap(),
+                o["scope"].as_str().unwrap()
+            )
+            .unwrap();
+            for reason in o["reasons"].as_array().unwrap() {
+                writeln!(output, "  reason: {}", reason["message"]).unwrap();
+            }
+        }
+        for n in s["notices"].as_array().unwrap() {
+            writeln!(
+                output,
+                "Notice {}: not analysed by the SAT engine",
+                n["name"].as_str().unwrap()
+            )
+            .unwrap();
+        }
+        if circular_support {
+            writeln!(
+                output,
+                "Circular-support advisory: {}",
+                s["advisories"]["circularSupport"]["state"]
+                    .as_str()
+                    .unwrap()
+            )
+            .unwrap();
+        }
+        writeln!(output, "Result: {}", s["state"].as_str().unwrap()).unwrap();
+    }
+    Ok((report.is_incomplete(), report.has_failures()))
 }
 
 fn inventory(

@@ -12,10 +12,10 @@ Rule semantics and an optional acceptance hypothesis belong to the verification.
 Use an ordinary zero-arity relation as the hypothesis, with normal resolution,
 identity and provenance, rather than another declaration wrapping that relation.
 Existing constructors and syntax default to stable semantics with no hypothesis.
-CLI, editor and planning consumers explicitly refuse completion declarations until
-their preparation and checking paths implement that meaning; they never silently
-fall back to stable checking. The experimental Rust completion query API has its
-own preparation and interpretation checking.
+Consumers explicitly refuse completion declarations until their preparation and
+checking paths implement that meaning; they never silently fall back to stable
+checking. The experimental Rust completion API and SAT CLI support this meaning;
+the BDD CLI, editor, scorecard and planner still refuse it.
 
 `no_rejections(H)` is a selectable obligation, with the same hypothesis as its
 completion verification. It is not an assumption: restricting inputs to the ones
@@ -23,6 +23,23 @@ that do not reject would discard the observations this query is supposed to chec
 It has no invented tuple or cardinality group. The IR therefore separates
 `Requirement` from `Restriction`, sharing the four cardinality forms while keeping
 this query obligation-only. Declaration support lands before solver support.
+
+Whole-verification completion checking enumerates W independently of H. Each
+accepted observation pins its classification for processing, while property queries
+use their own original cones plus that classification. This prevents a downstream
+contradiction from hiding an independent property failure. Classification sets
+retain established witnesses through exhaustion; unresolved observations cannot
+complete a universal property proof. An all-rejected context is explicitly named,
+with vacuous processing requirements, and is allowed unless `no_rejections` forbids
+it. A contradiction in W is never a vacuous success.
+
+Evidence is labeled `completion-model` and retains its interpretation, observation
+and scope. It is not passed through reduct acceptance or finite-derivation attribution;
+the first presenter falls back to the checked obligation. The optional circular
+support detector uses the reduct only to identify an advisory, then locates a real
+supported positive cycle. Its identity uses the original positive component, not
+the chosen cycle or world. It runs after required checking under a separate bounded
+allowance, is off by default, and cannot change required completeness or exit codes.
 
 ## Completion preparation preserves unseeded definitions
 

@@ -1,6 +1,7 @@
 //! Shared interpretation of checked evidence. No editor protocol, source language,
 //! filesystem, scheduling or source-edit authority lives here.
 mod assumptions;
+mod completion;
 mod cycles;
 mod evidence;
 mod identity;
@@ -9,6 +10,7 @@ mod locations;
 mod rewrites;
 mod stable;
 pub use assumptions::*;
+pub use completion::*;
 pub use evidence::*;
 pub use identity::*;
 pub use limits::*;

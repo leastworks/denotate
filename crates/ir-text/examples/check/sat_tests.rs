@@ -1,6 +1,94 @@
 use super::tests::Fixture;
 
 #[test]
+fn completion_cli_all_rejected_and_explicit_rejection_obligation() {
+    for (declaration, selection, exit) in [
+        ("", "", 0),
+        ("obligation total:no_rejections(h);", "total", 1),
+    ] {
+        let f = Fixture::new(&format!(
+            "relation h();{declaration}verification v{{semantics:completion;hypothesis:h;assumptions:[];obligations:[{selection}];}}"
+        ));
+        for json in [false, true] {
+            let mut flags = vec!["--engine", "sat", "--no-progress"];
+            if json {
+                flags.push("--json");
+            }
+            let (code, out) = f.run(&flags);
+            assert_eq!(code, exit, "{out}");
+            assert!(out.contains("all-rejected"), "{out}");
+            assert!(out.contains("not-applicable"), "{out}");
+            if !json {
+                assert!(out.contains("Semantics: completion"));
+                assert!(!out.contains("Result: proved"));
+            }
+        }
+    }
+}
+#[test]
+fn completion_cli_evidence_meaning_and_mixed_semantics() {
+    let f = Fixture::new(
+        "relation p();p():-p();relation h();h():-p();relation odd();odd():-!odd();obligation clean:empty(p);verification v{semantics:completion;hypothesis:h;assumptions:[];obligations:[clean];}verification stable{assumptions:[];obligations:[];}",
+    );
+    let (code, out) = f.run(&["--engine", "sat", "--no-progress"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("Present tuple: p()"), "{out}");
+    assert!(out.contains("no-meaning"));
+    assert!(out.contains("Verification ::stable"));
+    let (code, out) = f.run(&["--engine", "sat", "--no-progress", "--json"]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("original-completion-v1"));
+    assert!(out.contains("original-stable-v1"));
+    assert!(out.contains("completion-model"));
+    assert!(!out.contains("circular-support"));
+    let (code, out) = f.run(&[
+        "--engine",
+        "sat",
+        "--no-progress",
+        "--completion-circular-support",
+    ]);
+    assert_eq!(code, 1, "{out}");
+    assert!(out.contains("circular-support"));
+    assert_eq!(
+        f.run(&["--engine", "sat", "--no-progress", "--sat-meaning", "none"])
+            .0,
+        2
+    );
+    assert_eq!(
+        f.run(&["--engine", "sat", "--no-progress", "--verification", "v"])
+            .0,
+        2
+    );
+    assert_eq!(f.run(&["--no-progress"]).0, 2);
+}
+#[test]
+fn completion_cli_cutoffs_and_compatibility_are_incomplete() {
+    let f = Fixture::new(
+        "input i();relation h();obligation total:no_rejections(h);verification v{semantics:completion;hypothesis:h;assumptions:[];obligations:[total];}",
+    );
+    let (code, out) = f.run(&["--engine", "sat", "--sat-max-worlds", "1", "--no-progress"]);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("counterexample"), "{out}");
+    assert!(out.contains("worlds"), "{out}");
+    let f = Fixture::new(
+        "relation p();p():-p();assumption a:empty(p);verification v{semantics:completion;assumptions:[a];obligations:[];}",
+    );
+    let (code, out) = f.run(&["--engine", "sat", "--no-progress", "--json"]);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("completion-incompatible-cone"), "{out}");
+    let (code, out) = f.run(&[
+        "--engine",
+        "sat",
+        "--max-atoms",
+        "0",
+        "--no-progress",
+        "--json",
+    ]);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("resource"), "{out}");
+}
+
+#[test]
 fn sat_cli_checks_overlap_and_preserves_partial_selection_and_default_engine() {
     let f = Fixture::new(
         "sort S;const a,b:S;input i(x:S);relation r(x:S);r(X):-i(X);obligation one:at_most_one(r,group_by:());verification v{assumptions:[];obligations:[one];}",

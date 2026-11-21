@@ -287,6 +287,130 @@ pub fn present_stable(
     })
 }
 
+/// Completion evidence uses the same source placement and fallback policy, without
+/// manufacturing a stable derivation or asking presentation to solve equations.
+pub fn present_completion(
+    program: &LoadedProgram,
+    report: &denotate_check::completion_query::Report,
+) -> Result<Presentation> {
+    let own = program
+        .documents
+        .iter()
+        .filter(|d| d.ownership == "user")
+        .map(|d| d.uri.clone())
+        .collect();
+    let key = program.keys.verification(report.verification)?;
+    let placement = Placement {
+        program: &program.root,
+        verification: Some(key),
+        user_files: &own,
+        sources: &program.sources,
+        current: &program.provenance,
+        upstream: &program.embedded.provenance,
+    };
+    let mut diagnostics = Vec::new();
+    let mut inventory = Vec::new();
+    for item in denotate_presentation::completion_findings(
+        &program.corpus,
+        &program.keys,
+        report,
+        &diagnostic_names(&program.corpus),
+    )? {
+        let f = item.finding;
+        let mut placed =
+            placement.place(&f.identity, f.kind, &f.message, &f.notes, &f.contributions)?;
+        for d in &mut placed {
+            d.evidence = item.evidence.clone();
+        }
+        inventory.push(json!({"identity":f.identity.data_in(&program.keys,Some(key))?,"kind":f.kind.code(),"message":f.message,"evidence":item.evidence,"fallback":placed.iter().any(|d|d.fallback),"located":!placed.is_empty()}));
+        diagnostics.extend(placed);
+    }
+    let mut status =
+        denotate_presentation::completion_summary(&program.corpus, &program.keys, report)?;
+    status["findings"] = json!(inventory);
+    Ok(Presentation {
+        diagnostics,
+        status,
+    })
+}
+
+pub fn completion_preparation_failure(
+    program: &LoadedProgram,
+    verification: denotate_ir::VerificationId,
+    issue: Option<&denotate_check::completion_query::CompatibilityIssue>,
+    exhausted: Option<denotate_check::Inconclusive>,
+    reason: &str,
+) -> Result<Presentation> {
+    use denotate_ir::OccurrenceKey;
+    use denotate_presentation::{Contribution, Identity, Kind, Role};
+    let users = program
+        .documents
+        .iter()
+        .filter(|d| d.ownership == "user")
+        .map(|d| d.uri.clone())
+        .collect();
+    let key = program.keys.verification(verification)?;
+    let placement = Placement {
+        program: &program.root,
+        verification: Some(key),
+        user_files: &users,
+        sources: &program.sources,
+        current: &program.provenance,
+        upstream: &program.embedded.provenance,
+    };
+    let mut contributions = vec![Contribution {
+        occurrence: verification.into(),
+        role: Role::Declaration,
+    }];
+    let mut evidence = json!({"kind":"unsupported-semantics"});
+    if let Some(issue) = issue {
+        let source = match &issue.source {
+            denotate_check::completion_query::CompatibilitySource::SelectedAssumption(k) => {
+                OccurrenceKey::Assumption(k.clone())
+            }
+            denotate_check::completion_query::CompatibilitySource::InputDomain { input } => {
+                OccurrenceKey::Relation(input.clone())
+            }
+        };
+        contributions[0].role = Role::EnclosingScope;
+        contributions.push(Contribution {
+            occurrence: program.keys.bindings().resolve(&source)?,
+            role: Role::Declaration,
+        });
+        for a in &issue.recursive_component {
+            contributions.push(Contribution {
+                occurrence: program
+                    .keys
+                    .bindings()
+                    .resolve(&OccurrenceKey::Relation(a.relation.clone()))?,
+                role: Role::BlockingCycle,
+            });
+        }
+        evidence = json!({"kind":"completion-incompatible-cone","component":issue.recursive_component.iter().map(denotate_presentation::atom_data).collect::<Vec<_>>()});
+    }
+    let (identity, kind) = if let Some(c) = exhausted {
+        evidence = denotate_presentation::with_limit_details(
+            json!({"kind":"incomplete","phase":c.phase,"resource":c.resource}),
+            c.details,
+        );
+        (
+            Identity::CompletionMeaning("preparation"),
+            Kind::Inconclusive,
+        )
+    } else {
+        (Identity::UnsupportedSemantics, Kind::UnsupportedSemantics)
+    };
+    let mut diagnostics = placement.place(&identity, kind, reason, &[], &contributions)?;
+    for d in &mut diagnostics {
+        d.evidence = evidence.clone();
+    }
+    let status = json!({"backend":{"backend":"sat","configuration":"original-completion-v1"},"semantics":"completion","state":"incomplete","incomplete":true,"hasFailures":false,"reason":reason,"findings":[{"identity":identity.data_in(&program.keys,Some(key))?,"kind":kind.code(),"message":reason,"evidence":evidence,"fallback":diagnostics.iter().any(|d|d.fallback),"located":!diagnostics.is_empty()}]});
+    Ok(Presentation {
+        diagnostics,
+        status,
+    })
+}
+
 /// Capability refusal is shared by CLI and editor; it is not a semantic verdict.
 pub fn unsupported_semantics(
     program: &LoadedProgram,

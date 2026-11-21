@@ -1,12 +1,19 @@
 //! Experimental completion queries, separate from stable-model search.
-//! No least-model folding, reduct validation, loop clauses or admission rewrites
-//! enter this engine. Interpretations are checked against the original equations.
+//! Required queries use no least-model folding, reduct acceptance, loop clauses or
+//! admission rewrites. Interpretations are checked against the original equations;
+//! the optional reduct detector reports circular support without changing meaning.
 use super::*;
 use denotate_ir::{AssumptionKey, Corpus, RelationKey, SemanticKeys, Semantics, VerificationId};
 use existence::{Encoding, encode, world_cone};
 use std::sync::Arc;
 
+mod advisory;
+mod checking;
+mod properties;
 mod queries;
+pub use advisory::*;
+pub use checking::*;
+pub use properties::*;
 #[cfg(test)]
 mod tests;
 
@@ -53,6 +60,7 @@ pub enum ModelScope {
     Classification,
     Processing,
     WholeProgram,
+    Property,
 }
 
 /// A completion interpretation, not a finite derivation. Unlisted legal tuples
@@ -67,6 +75,20 @@ pub struct Model {
     scope: ModelScope,
 }
 impl Model {
+    /// Original named atoms in this interpretation's scope, including inputs.
+    /// Other legal tuples in scope have empty definitions and are false.
+    pub fn interpretation(&self) -> impl Iterator<Item = (&GroundAtom, bool)> {
+        self.program
+            .core
+            .atoms
+            .iter()
+            .filter_map(|a| self.value(a).map(|v| (a, v)))
+    }
+    /// None denotes the whole program; input observations are always complete,
+    /// including inputs outside these original dependency-cone members.
+    pub fn scope_atoms(&self) -> Option<&BTreeSet<GroundAtom>> {
+        self.members.as_deref()
+    }
     pub fn scope(&self) -> ModelScope {
         self.scope
     }
@@ -106,6 +128,7 @@ impl Model {
 
 #[derive(Debug, Clone)]
 pub enum Interpretations {
+    NotAnalysed,
     NoMeaning,
     Unique(Model),
     Multiple {
@@ -165,6 +188,10 @@ pub struct Engine {
     input_relations: Arc<BTreeSet<RelationId>>,
     limits: Limits,
     config: QueryLimits,
+    verification: VerificationId,
+    hypothesis: Option<RelationId>,
+    selection: Vec<(denotate_ir::ObligationId, denotate_ir::Requirement)>,
+    notices: BTreeSet<denotate_ir::NoticeId>,
 }
 
 fn inconclusive(error: CheckError) -> Result<Inconclusive> {
@@ -286,6 +313,14 @@ impl Engine {
             ),
             limits: limits.clone(),
             config,
+            verification,
+            hypothesis: declaration.options.hypothesis,
+            selection: declaration
+                .obligations
+                .iter()
+                .map(|id| (*id, corpus.obligation(*id).unwrap().requirement.clone()))
+                .collect(),
+            notices: declaration.notices.iter().copied().collect(),
         }))
     }
 

@@ -349,8 +349,8 @@ impl CheckRequest {
         fixed: Option<&FixedPreparation<'s>>,
     ) -> Result<RequestPreparation<'s>> {
         operations.cancellation.check()?;
-        self.require_stable(corpus, keys)?;
         keys.validate(corpus).map_err(CheckError::Keys)?;
+        self.require_stable(corpus, keys)?;
         if self.backend.input_order().is_none() {
             return Err(CheckError::InvalidRequest("unknown backend/configuration"));
         }

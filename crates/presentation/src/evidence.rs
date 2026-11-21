@@ -8,6 +8,9 @@ use std::collections::BTreeSet;
 pub enum Kind {
     InvalidAssumption,
     UnsupportedSemantics,
+    AmbiguousMeaning,
+    AllRejected,
+    CircularSupport,
     UnvalidatedAssumption,
     InconsistentAssumptions,
     EmptyInputUniverse,
@@ -30,6 +33,9 @@ impl Kind {
     pub fn code(self) -> &'static str {
         match self {
             Self::UnsupportedSemantics => "unsupported-semantics",
+            Self::AmbiguousMeaning => "ambiguous-meaning",
+            Self::AllRejected => "all-rejected",
+            Self::CircularSupport => "circular-support",
             Self::InvalidAssumption => "invalid-assumption",
             Self::UnvalidatedAssumption => "unvalidated-assumption",
             Self::InconsistentAssumptions => "inconsistent-assumptions",
@@ -53,6 +59,7 @@ impl Kind {
     pub fn severity(self) -> Severity {
         match self {
             Self::UnsupportedSemantics
+            | Self::AmbiguousMeaning
             | Self::InvalidAssumption
             | Self::Counterexample
             | Self::NoMeaning
@@ -64,6 +71,8 @@ impl Kind {
             | Self::AssumedConclusion
             | Self::ImpossibleCondition => Severity::Warning,
             Self::UnvalidatedAssumption
+            | Self::AllRejected
+            | Self::CircularSupport
             | Self::UnsupportedGroup
             | Self::Inconclusive
             | Self::IncompleteDownstreamWork
