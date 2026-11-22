@@ -1774,3 +1774,20 @@ search scopes can overlap; do not sum them. Neither times nor counters are golde
 Anchored-first descent is unchanged: a shrunk provider can reschedule its readers,
 which still rejoin from scratch. The sparse-cycle regression records those calls;
 no descent-delta cache is introduced without evidence that it is the next bottleneck.
+
+
+### Completion descent measurements
+
+The `guarded-schema` [zoo family](../scripts/SHAPE-ZOO.md#guarded-schema-completion)
+separates fact-row growth from depth at fixed block counts. Its impossible-root
+control forces shrinking propagation; it is reported separately from the ordinary
+forest. Measure preparation stage work/time and completed atom/rule counts, with
+identical source and limits on both builds. Partial attempts remain visible and
+are excluded from completed-stage fits. No growth slope is a correctness golden.
+
+Descent uses removed-tuple joins and affected-head rechecks with the existing work,
+atom and deadline limits. Pending heads are subsets of retained possibility tables;
+it does not cache a second set of ground rule instances. This is not a guarantee
+of linear joins: projection onto a shared head can require rechecking many
+alternative supports, and symbolic-to-concrete changes can still require a full
+join. The opt-in diagnostic LFP continues to use its own growing delta frontier.

@@ -145,7 +145,7 @@ impl Measurement {
                             .completion_size(index + 1, total, round + 1, fixed);
                         let mut next = BTreeMap::<RelationId, BTreeSet<GroundAtom>>::new();
                         let mut evaluate =
-                            |rule: &Rule, pivot: Option<(usize, &Table)>| -> Result<()> {
+                            |rule: &Rule, pivot: Option<JoinSeed<'_>>| -> Result<()> {
                                 join_bindings(
                                     rule,
                                     &tables,
@@ -187,7 +187,7 @@ impl Measurement {
                             for (relation, new) in &delta {
                                 for (rule, position) in readers.get(relation).into_iter().flatten()
                                 {
-                                    evaluate(rule, Some((*position, new)))?;
+                                    evaluate(rule, Some(JoinSeed::Body(*position, new)))?;
                                 }
                             }
                         }

@@ -517,6 +517,14 @@ fn committed_zoo_obligation_and_notice_conclusions_agree_cold_and_warm() {
     let sources: Vec<(String, String)> = serde_json::from_slice(&output.stdout).unwrap();
     for (name, text) in sources {
         let p = load_text(&text);
+        // Committed admission export is a stable-semantics API. Completion zoo
+        // families have separate grounding oracles and CLI smoke coverage.
+        if p.corpus
+            .verifications()
+            .any(|v| v.options.semantics == Semantics::Completion)
+        {
+            continue;
+        }
         let graph = admitted(&p);
         let q = load_text(&export(&p, &graph));
         let expected = conclusions(&p, &mut Session::default());

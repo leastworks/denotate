@@ -353,3 +353,61 @@ varying decision, exposing repeated scans independently of large BDD conditions.
 Use `just bench-den-zoo --family knowledge-scc --sizes 128,1024 -- --profile-conditions`
 for in-component records (or generate its source and use the schema runner).
 This sparse workload is not a promise of one-pass evaluation for arbitrary SCCs.
+
+## Guarded-schema completion
+
+`guarded-schema` uses the SAT engine with completion semantics and a recognition
+hypothesis. It models a forest of format roots and guarded blocks, a field-value
+admission loop, task-produced values, and classification feeding back into guards.
+Each condition site has its own zero-arity relation. Generic rules join derived
+blocks and values against authored statement, field and task tables. This is a
+synthetic structural regression, not an implementation of a particular DSL; its
+ordinary checks may find ambiguity or violations.
+
+`--sizes` varies `sets` by default. `--schema-axis stmts` varies statement rows per
+nested block; `--schema-axis depth` requires `--schema-blocks N` to hold the number
+of nested blocks **per format** constant. The latter distributes those blocks
+across levels rather than preserving fixed fanout. Depth is a source shape, not a
+promise of that many grounding rounds. `--schema-impossible 1` is a separate
+control: an empty positive guard disables roots, so deletions must propagate down
+the block levels. It should have no accepted observations.
+
+```sh
+just bench-den-zoo --family guarded-schema --sizes 275 --repeat 1 \
+  --schema-depth 2 --schema-fanout 5 --schema-stmts 3 --schema-triggers 1
+just bench-den-zoo --family guarded-schema --schema-axis stmts --sizes 1,3,9 \
+  --schema-sets 32 --schema-depth 2 --schema-fanout 5 --repeat 2 \
+  -- --sat-max-worlds 0
+just bench-den-zoo --family guarded-schema --schema-axis depth --sizes 1,2,4,8 \
+  --schema-sets 32 --schema-blocks 32 --schema-impossible 1 --repeat 2 \
+  -- --sat-max-worlds 0
+```
+
+The first command uses unmodified SAT defaults. The two preparation sweeps use
+zero search worlds to avoid spending time on semantic searches after preparation;
+their inconclusive checking outcomes are intentional and are not default-limit
+verification results. Provider validation still runs. Use the same flags on both
+builds. `--check-binary PATH` selects a preserved checker binary; its path and hash
+are recorded by the runner. It must support the same CLI options.
+
+Other integer knobs are `--schema-elements`, `--schema-values`, `--schema-reads`,
+`--schema-tasks`, `--schema-outs`, `--schema-splice` and `--schema-self`. Splice and
+self are percentages (defaults 25 and 50); assignment is deterministic. Defaults
+are 2 values per element, 1 read per guard, 5 outputs per task and 1 trigger per
+block. Element/task counts scale with blocks unless supplied. `self` changes where
+a term's classifying field is first declared; other generated block/task bindings
+can still admit or produce that field. It is not a semantic exclusivity promise.
+For the 275-format shape there are 8,250 nested blocks and 24,750 statement rows.
+
+Reports include `shape`, completion preparation attempts, stage work and time,
+peak temporary possibility counts, top join rules, and `completion` stage fits.
+Incomplete preparations keep their records but do not enter completed-stage fits.
+The diagnostic least-model comparison is off unless `--completion-size-lfp` follows
+`--`. BDD input-order and admission-probe options do not apply to this family.
+
+Completion runs use the runner's `--compact-outcomes`: report summaries omit
+`evidence` objects while retaining states, counts, identities and exhaustion
+reasons. The original evidence remains in `stdout.txt`. Recovery parses outcomes
+as a stream and skips evidence before allocation, so large interpretations do not
+have to fit in a JavaScript string. The CLI still constructs and writes that
+evidence; its time and disk cost remain part of the whole-process measurement.

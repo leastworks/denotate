@@ -36,7 +36,7 @@ test('each family reaches its semantic and structural path; two-size smoke has n
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-zoo-'));
   try {
     for(const f of families.filter(f=>f!=='schema-layered'))assert.equal(source(f,2),source(f,2));
-    const r=run({out:path.join(root,'tiny'),binary:'target/debug/examples/bench_schema',family:families,sizes:[2],repeat:1,threshold:1.3,ringLanes:1,ringRelays:2});
+    const r=run({out:path.join(root,'tiny'),binary:'target/debug/examples/bench_schema',family:families,sizes:[2],repeat:1,threshold:1.3,ringLanes:1,ringRelays:2,schema:{depth:1,fanout:2}});
     for(const [name,{runs}] of Object.entries(r.families)) {
       const r=runs[0];assert.ok(r.checkerFinished,name);assert.ok(r.sizes.atoms>0,name);
       if(name==='negative-guarded') {assert.equal(r.after.admitted,true);assert.ok(r.sizes.dischargeProofs>0||joint(r));}
@@ -46,7 +46,7 @@ test('each family reaches its semantic and structural path; two-size smoke has n
       if(name==='presentation')assert.ok(r.sizes.findings>=2);
       if(name.startsWith('fan-in'))assert.ok(r.outcomes[0].emptiness.some(e=>e.outcome==='counterexample'));
       if(name==='guarded-ring'||name==='guarded-fan-in'||name==='guarded-worlds') {assert.equal(r.before.ground.largestComponentAtoms,name==='guarded-ring'?12:6);assert.equal(r.after.admitted,true);assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));assert.ok(joint(r)||r.attemptSummaries.some(a=>a.complete&&a.attempts.some(c=>c.kind==='guarded-bounds')));}
-      if(name.startsWith('guarded-')) {assert.ok(joint(r)||r.guardedAttempts.some(g=>g.attempt.state==='completed'&&g.attempt.restricted&&g.attempt.coneAtoms>0));assert.ok(r.guardedAttempts.every(g=>Number.isFinite(g.attempt.preprocessingMs)&&Number.isFinite(g.attempt.iterationMs)));}
+      if(name.startsWith('guarded-')&&name!=='guarded-schema') {assert.ok(joint(r)||r.guardedAttempts.some(g=>g.attempt.state==='completed'&&g.attempt.restricted&&g.attempt.coneAtoms>0));assert.ok(r.guardedAttempts.every(g=>Number.isFinite(g.attempt.preprocessingMs)&&Number.isFinite(g.attempt.iterationMs)));}
       if(name==='guarded-hub') {assert.equal(r.after.admitted,true);assert.equal(r.exit,0);assert.ok(r.outcomes[0].findings.some(f=>f.kind==='guarded-settlement'));assert.equal(r.outcomes[0].notices[0].result.state,'varying');}
       if(name==='writer-ring') {assert.equal(r.after.admitted,true);assert.equal(r.outcomes[0].emptiness[0].outcome,'proved');assert.equal(r.outcomes[0].notices[0].result.state,'varying');}
       if(name==='declared-groups') {assert.equal(r.exit,0);assert.equal(r.outcomes[0].emptiness[0].outcome,'proved');}
@@ -282,6 +282,47 @@ test('repeated field has independent appender and task-output paths and an absen
       assert.equal(r.exit,0);
       assert.equal(r.after.admitted,true);
       assert.equal(r.outcomes[0].notices[0].result.state,'varying');
+    }
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('guarded schema is reproducible, scales facts independently and fixes blocks across depth',async()=>{
+  const {guardedSchema}=await import('../guarded-schema.mjs');
+  const base={sets:3,blocks:12,depth:2};
+  assert.equal(guardedSchema(base).source,guardedSchema(base).source);
+  const rows=guardedSchema({...base,stmts:4}), fewer=guardedSchema({...base,stmts:2});
+  assert.equal(rows.shape.statementRows,2*fewer.shape.statementRows);
+  assert.equal(rows.shape.totalBlocks,fewer.shape.totalBlocks);
+  for(const depth of [1,3,6]) {
+    const a=guardedSchema({...base,depth});
+    assert.equal(a.shape.totalBlocks,guardedSchema(base).shape.totalBlocks);
+    assert.equal(a.shape.statementRows,guardedSchema(base).shape.statementRows);
+    assert.equal(a.shape.conditionSites,36);
+  }
+  const corpus=guardedSchema({sets:275,depth:2,fanout:5,stmts:3,triggers:1});
+  assert.equal(corpus.shape.nestedBlocks,8250);assert.equal(corpus.shape.statementRows,24750);
+  assert.doesNotMatch(corpus.source,/message_set|\bgiven\b|\bkept\b|\bmti\b|\bSTIP\b/i);
+  assert.match(guardedSchema({...base,impossible:1}).source,/relation control_present\(\);/);
+  for(const cfg of [{depth:0},{self:101},{blocks:2,depth:3},{impossible:2}])assert.throws(()=>guardedSchema(cfg));
+});
+
+test('guarded schema completion reports recover stages and control semantics',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-guarded-schema-'));
+  try {
+    for(const impossible of [0,1]) {
+      const out=path.join(root,`case-${impossible}`);
+      const report=run({out,binary:'target/debug/examples/bench_schema',family:['guarded-schema'],sizes:[1,2],repeat:1,schema:{sets:2,blocks:4,impossible},schemaAxis:'depth',limits:impossible?[]:['--sat-max-worlds','0']});
+      const family=report.families['guarded-schema'];
+      for(const r of family.runs) {
+        assert.equal(r.checkerFinished,true);
+        assert.equal(r.phases.preparation.complete,true);
+        assert.ok(r.completion.preparationWork.workByStage['runtime-grounding']>0);
+        assert.equal(r.shape.nestedBlocks,8);
+        assert.equal(r.completion.preparations.find(p=>p.scope==='runtime').leastEnabled,false);
+        if(impossible) assert.equal(r.outcomes[0].classification.accepted.state,'none');
+      }
+      assert.equal(family.completion['runtime-grounding'].work.state,'insufficient data');
+      assert.deepEqual(summarize(out),report);
     }
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });

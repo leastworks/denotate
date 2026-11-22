@@ -862,7 +862,18 @@ start at the full finite domain, so unseeded positive recursion survives. Within
 positive relation SCC, evaluate relations whose producers are concretely anchored
 before symbolic-domain fallback. Install each shrinking table immediately and
 reschedule its positive readers; no anchored pending update is bypassed for a
-symbolic expansion. Unanchored alternatives remain live. This computes the same GFP
+symbolic expansion. A symbolic-full table becoming concrete with the same contents
+only reclassifies pending work, without scheduling a redundant recheck. Anchoring
+is monotone during descent and is cached within the preparation. For a concrete
+shrink, joins start from removed tuples and collect affected heads; rechecking all
+of those heads' producers preserves alternative supports. Delta joins use the old
+tables at every other occurrence, including repeated occurrences of the changed
+relation. This prevents missing a binding whose premises disappear together.
+The zero-arity full domain has one tuple, so its first removal also has a delta.
+Other symbolic-to-concrete shrinks still request a full recheck. Pending head sets
+are bounded by the existing possibility tables; no second graph of producer
+instances is retained. Index creation, delta joins and rechecks consume the existing
+work/deadline allowance. Unanchored alternatives remain live. This computes the same GFP
 by monotone chaotic iteration, for static providers and runtime grounding alike.
 Concrete joins use hash indexes on bound columns and select the smallest current
 bucket at each step; a large table with a selective binding precedes a small but

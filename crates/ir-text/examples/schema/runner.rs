@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
     fs,
-    io::{BufRead, BufReader, BufWriter, Write},
+    io::{BufRead, BufReader, BufWriter, Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     time::{Instant, SystemTime, UNIX_EPOCH},
@@ -34,6 +34,8 @@ const HELP: &str = "Usage: just bench-den-schema [OPTIONS] [-- CHECKER_LIMITS...
 --profile-conditions      Include detailed condition observations in the profile\n\
 --samply                  Also save a CPU recording; requires samply on PATH\n\
 --source FILE             Use an authored source (shared shape-zoo runner)\n\
+--compact-outcomes        Omit evidence from report only; keep complete stdout\n\
+--check-binary PATH        Use a saved checker build (hash and path recorded)\n\
 --generate-only           Save sources and configuration without invoking check\n\
 --summarize DIR           Rebuild report.json from an interrupted run's saved files\n\
 \nLimits after -- are the check-den resource flags, e.g. --max-atoms 2000000.\n\
@@ -53,6 +55,8 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
     let mut shape = Shape::default();
     let mut out = None;
     let mut source_path = None;
+    let mut check_binary = None;
+    let mut compact_outcomes = false;
     let mut component_dump = None;
     let mut sampled = false;
     let mut generate_only = false;
@@ -68,6 +72,10 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
             return Err(format!("repeated option {arg}"));
         }
         match arg.as_str() {
+            "--compact-outcomes" => {
+                compact_outcomes = true;
+                continue;
+            }
             "--profile-conditions" => {
                 forwarded.push(arg);
                 continue;
@@ -98,6 +106,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         match arg.as_str() {
             "--out" => out = Some(PathBuf::from(value)),
             "--source" => source_path = Some(PathBuf::from(value)),
+            "--check-binary" => check_binary = Some(PathBuf::from(value)),
             "--dump-component" => {
                 let path = PathBuf::from(&value);
                 if path.components().count() != 1
@@ -203,10 +212,13 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         if flag == "--sat-probe"
             || flag == "--sat-probe-candidates"
             || flag == "--profile-conditions"
+            || flag == "--completion-size-lfp"
         {
             continue;
         }
         if flag != "--input-order"
+            && flag != "--engine"
+            && !flag.starts_with("--sat-max-")
             && flag != "--sat-probe-timeout-ms"
             && flag != "--sat-probe-refinements"
             && flag != "--dump-component-limit"
@@ -259,11 +271,13 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         },
     )
     .map_err(|e| e.to_string())?;
-    let binary = std::env::current_exe()
-        .map_err(|e| e.to_string())?
-        .parent()
-        .unwrap()
-        .join("check");
+    let binary = check_binary.unwrap_or(
+        std::env::current_exe()
+            .map_err(|e| e.to_string())?
+            .parent()
+            .unwrap()
+            .join("check"),
+    );
     let mut check_args = vec![
         dir.join("program").to_string_lossy().into_owned(),
         "--json".into(),
@@ -309,6 +323,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
             manifest.as_object_mut().unwrap().remove(key);
         }
     }
+    manifest["compactOutcomes"] = json!(compact_outcomes);
     save(&dir.join("run.json"), &manifest)?;
     save(&dir.join("report.json"), &manifest)?;
     eprintln!("Saved run: {}", dir.display());
@@ -457,14 +472,30 @@ pub(super) fn summarize(dir: &Path) -> Result<(), String> {
             }
         }
     }
-    let stdout = fs::read_to_string(dir.join("stdout.txt")).unwrap_or_default();
     let mut outcomes = Vec::new();
-    for text in stdout.split("Results: ").skip(1) {
-        if let Some(Ok(v)) = serde_json::Deserializer::from_str(text)
-            .into_iter::<Value>()
-            .next()
-        {
-            outcomes.push(v);
+    if let Ok(file) = fs::File::open(dir.join("stdout.txt")) {
+        let mut stdout = BufReader::new(file);
+        let mut line = String::new();
+        while stdout.read_line(&mut line).map_err(|e| e.to_string())? != 0 {
+            if let Some(text) = line.strip_prefix("Results: ") {
+                let stream = std::io::Cursor::new(text.as_bytes()).chain(&mut stdout);
+                let value = if report["compactOutcomes"] == true {
+                    serde_json::Deserializer::from_reader(stream)
+                        .into_iter::<super::outcomes::Compact>()
+                        .next()
+                        .and_then(Result::ok)
+                        .map(|v| v.0)
+                } else {
+                    serde_json::Deserializer::from_reader(stream)
+                        .into_iter::<Value>()
+                        .next()
+                        .and_then(Result::ok)
+                };
+                if let Some(value) = value {
+                    outcomes.push(value);
+                }
+            }
+            line.clear();
         }
     }
     let (summaries, samples) = attempts.finish();

@@ -294,3 +294,192 @@ fn anchored_coordinate_updates_preserve_full_models_with_unanchored_alternatives
         }
     }
 }
+
+// Compare live instances, not just answers: deleting one support must not delete
+// a head that another producer still supports. This oracle grounds the full
+// product first and then removes unsupported atoms in synchronous rounds.
+fn assert_live_instances_match_dense(c: &Corpus, domains: &Domains) {
+    let limits = Limits::default();
+    let mut full =
+        GroundProgram::prepare_completion_enumerated(c, domains, &mut Budget::new(&limits))
+            .unwrap();
+    full.completion_inputs(c, &mut Budget::new(&limits))
+        .unwrap();
+    let mut possible: BTreeSet<_> = full.atoms.iter().cloned().collect();
+    loop {
+        let next: BTreeSet<_> = full
+            .inputs
+            .iter()
+            .cloned()
+            .chain(
+                full.rules
+                    .iter()
+                    .filter(|r| {
+                        r.body
+                            .iter()
+                            .filter(|l| l.polarity == Polarity::Positive)
+                            .all(|l| possible.contains(&l.term.atom))
+                    })
+                    .map(|r| r.head.atom.clone()),
+            )
+            .collect();
+        if next == possible {
+            break;
+        }
+        possible = next;
+    }
+    let key = |r: &GroundRule| {
+        (
+            r.source,
+            r.head.atom.clone(),
+            r.body
+                .iter()
+                .map(|l| (l.polarity == Polarity::Positive, l.term.atom.clone()))
+                .collect::<Vec<_>>(),
+        )
+    };
+    let expected: BTreeSet<_> = full
+        .rules
+        .iter()
+        .filter(|r| {
+            r.body
+                .iter()
+                .filter(|l| l.polarity == Polarity::Positive)
+                .all(|l| possible.contains(&l.term.atom))
+        })
+        .map(key)
+        .collect();
+    let sparse = GroundProgram::prepare_completion(c, domains, &mut Budget::new(&limits)).unwrap();
+    assert_eq!(
+        sparse.rules.iter().map(key).collect::<BTreeSet<_>>(),
+        expected
+    );
+}
+
+#[test]
+fn shrinking_deltas_preserve_multiple_support_repeated_premises_and_negative_literals() {
+    // The edge chain loses its last endpoint, then its predecessors. The other
+    // branch remains self-supported. Two occurrences of p can disappear in the
+    // same update; projection gives multiple supports for a common head.
+    for keep in [false, true] {
+        let mut c = Corpus::new();
+        let s = c.declare_sort("S").unwrap();
+        let values: Vec<_> = (0..5)
+            .map(|i| c.declare_constant(format!("v{i}"), s).unwrap())
+            .collect();
+        let p = c
+            .declare_relation("p", RelationRole::Derived, [Parameter::new("x", s)])
+            .unwrap();
+        let q = c
+            .declare_relation("q", RelationRole::Derived, [Parameter::new("x", s)])
+            .unwrap();
+        let edge = c
+            .declare_relation(
+                "edge",
+                RelationRole::Derived,
+                [Parameter::new("x", s), Parameter::new("y", s)],
+            )
+            .unwrap();
+        let absent = c
+            .declare_relation("absent", RelationRole::Derived, [])
+            .unwrap();
+        for (x, y) in [(0, 1), (1, 2), (2, 3), (4, 4)] {
+            let h = c
+                .atom(edge, [Term::Constant(values[x]), Term::Constant(values[y])])
+                .unwrap();
+            c.add_rule(h, []).unwrap();
+        }
+        if keep {
+            let h = c.atom(p, [Term::Constant(values[3])]).unwrap();
+            c.add_rule(h, []).unwrap();
+        }
+        let x = || Term::variable("X", s);
+        let y = || Term::variable("Y", s);
+        let h = c.atom(p, [x()]).unwrap();
+        let e = c.atom(edge, [x(), y()]).unwrap();
+        let pp = c.atom(p, [y()]).unwrap();
+        c.add_rule(h, [Literal::Positive(e), Literal::Positive(pp)])
+            .unwrap();
+        let h = c.atom(q, [x()]).unwrap();
+        let a = c.atom(p, [x()]).unwrap();
+        let b = c.atom(p, [y()]).unwrap();
+        let n = c.atom(absent, []).unwrap();
+        c.add_rule(
+            h,
+            [
+                Literal::Positive(a),
+                Literal::Positive(b),
+                Literal::Negative(n),
+            ],
+        )
+        .unwrap();
+        let h = c.atom(p, [x()]).unwrap();
+        let b = c.atom(q, [x()]).unwrap();
+        let e = c.atom(edge, [x(), x()]).unwrap();
+        c.add_rule(h, [Literal::Positive(b), Literal::Positive(e)])
+            .unwrap();
+        assert_live_instances_match_dense(&c, &Domains::from([(s, values)]));
+    }
+}
+
+#[test]
+fn delta_gfp_agrees_with_dense_oracle_on_generated_small_programs() {
+    for seed in 0..96u64 {
+        let mut random = seed + 1;
+        let mut next = || {
+            random = random.wrapping_mul(6364136223846793005).wrapping_add(1);
+            random >> 32
+        };
+        let mut c = Corpus::new();
+        let s = c.declare_sort("S").unwrap();
+        let values: Vec<_> = (0..3)
+            .map(|i| c.declare_constant(format!("v{i}"), s).unwrap())
+            .collect();
+        let rs: Vec<_> = (0..4)
+            .map(|i| {
+                c.declare_relation(
+                    format!("r{i}"),
+                    if i == 0 {
+                        RelationRole::Input
+                    } else {
+                        RelationRole::Derived
+                    },
+                    [Parameter::new("x", s)],
+                )
+                .unwrap()
+            })
+            .collect();
+        for _ in 0..12 {
+            let r = rs[1 + (next() as usize % 3)];
+            let head_arg = if next() % 2 == 0 {
+                Term::variable("X", s)
+            } else {
+                Term::Constant(values[next() as usize % 3])
+            };
+            let head = c.atom(r, [head_arg]).unwrap();
+            let mut body = Vec::new();
+            for _ in 0..next() % 4 {
+                let r = rs[next() as usize % 4];
+                let arg = match next() % 3 {
+                    0 => Term::variable("X", s),
+                    1 => Term::variable("Y", s),
+                    _ => Term::Constant(values[next() as usize % 3]),
+                };
+                let atom = c.atom(r, [arg]).unwrap();
+                body.push(if next() % 4 == 0 {
+                    Literal::Negative(atom)
+                } else {
+                    Literal::Positive(atom)
+                });
+            }
+            // Bind both possible variable names through the eligible input.
+            for name in ["X", "Y"] {
+                body.push(Literal::Positive(
+                    c.atom(rs[0], [Term::variable(name, s)]).unwrap(),
+                ));
+            }
+            c.add_rule(head, body).unwrap();
+        }
+        assert_live_instances_match_dense(&c, &Domains::from([(s, values)]));
+    }
+}

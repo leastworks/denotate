@@ -339,6 +339,12 @@ fn bindings<'a>(
     })
 }
 
+#[derive(Clone, Copy)]
+enum JoinSeed<'a> {
+    Body(usize, &'a Table),
+    Head(&'a Table),
+}
+
 // Diagnostics join concrete tuples only. They must never expand an unbound
 // variable over its sort just to obtain an optional size comparison.
 fn join_bindings<'a>(
@@ -347,9 +353,14 @@ fn join_bindings<'a>(
     domains: &Domains,
     b: &mut Budget<'_>,
     enumerate_domains: bool,
-    delta: Option<(usize, &Table)>,
+    delta: Option<JoinSeed<'_>>,
     mut emit: impl FnMut(&Binding<'a>, &mut Budget<'_>) -> Result<()>,
 ) -> Result<()> {
+    if let Some(JoinSeed::Head(heads)) = delta {
+        if heads.candidate_count(&rule.head, &BTreeMap::new(), b)? == 0 {
+            return Ok(());
+        }
+    }
     let mut variables = BTreeMap::new();
     let mut steps = Vec::new();
     for atom in std::iter::once(&rule.head).chain(rule.body.iter().map(Literal::atom)) {
@@ -360,17 +371,23 @@ fn join_bindings<'a>(
             }
         }
     }
-    let mut delta_step = None;
+    // A head seed restricts a GFP recheck to heads that lost some support.
+    let mut delta_step = match delta {
+        Some(JoinSeed::Head(t)) => Some((&rule.head, t)),
+        _ => None,
+    };
     for (index, literal) in rule.body.iter().enumerate() {
         if let Literal::Positive(atom) = literal {
-            if let Some((_, table)) = delta.filter(|(i, _)| *i == index) {
+            if let Some(JoinSeed::Body(_, table)) =
+                delta.filter(|seed| matches!(seed, JoinSeed::Body(i, _) if *i == index))
+            {
                 delta_step = Some((atom, table));
             } else if let Some(table) = &tables[&atom.relation()] {
                 steps.push((atom, table));
             }
         }
     }
-    // Bind from the new tuples before probing accumulated indexes. Otherwise a
+    // Bind from the delta or affected heads before probing other indexes. Otherwise a
     // long chain can scan the whole accumulated table at every delta round.
     if let Some(step) = delta_step {
         steps.insert(0, step);
@@ -421,7 +438,7 @@ fn join_bindings<'a>(
         };
     let initial = BTreeMap::new();
     let remaining: Vec<_> = (0..steps.len()).collect();
-    // The semi-naive diagnostic delta must still seed the join.
+    // Both growing and shrinking frontiers must seed the join.
     let first = if delta_step.is_some() {
         0
     } else {

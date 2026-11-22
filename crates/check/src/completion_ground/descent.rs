@@ -44,6 +44,24 @@ fn anchored(
     Ok(true)
 }
 
+// Full rechecks are needed for transitions from symbolic domains. Afterwards,
+// only heads reached by a removed binding can lose support. Pending head sets
+// are subsets of existing possibility tables, not retained rule instances.
+enum Pending {
+    Full,
+    Heads(BTreeSet<GroundAtom>),
+}
+
+fn full_table(corpus: &Corpus, domains: &Domains, relation: RelationId, size: usize) -> bool {
+    corpus
+        .relation(relation)
+        .unwrap()
+        .parameters
+        .iter()
+        .try_fold(1usize, |n, p| n.checked_mul(domains[&p.sort].len()))
+        == Some(size)
+}
+
 pub(super) fn descend(
     corpus: &Corpus,
     domains: &Domains,
@@ -80,15 +98,19 @@ pub(super) fn descend(
             continue;
         }
         let members: BTreeSet<_> = component.iter().copied().collect();
+        let mut pending = BTreeMap::<RelationId, Pending>::new();
         let mut ready = BTreeSet::new();
+        let mut anchored_relations = BTreeSet::new();
         let mut deferred = BTreeSet::new();
         for r in &component {
+            pending.insert(*r, Pending::Full);
             if anchored(
                 producers.get(r).map(Vec::as_slice).unwrap_or(&[]),
                 tables,
                 domains,
                 b,
             )? {
+                anchored_relations.insert(*r);
                 ready.insert(*r);
             } else {
                 deferred.insert(*r);
@@ -101,28 +123,51 @@ pub(super) fn descend(
             if measurement.enabled() {
                 b.excluding_time(|| measurement.round(&[relation]));
             }
+            let changed_heads = match pending.remove(&relation).unwrap() {
+                Pending::Full => None,
+                Pending::Heads(heads) => Some(Table::new(heads)),
+            };
             let mut out = BTreeSet::new();
+            if let Some(heads) = &changed_heads {
+                for a in &tables[&relation].as_ref().unwrap().rows {
+                    b.tick("completion descent retained heads")?;
+                    if heads.rows.binary_search(a).is_err() {
+                        out.insert(a.clone());
+                    }
+                }
+            }
             let result: Result<()> = (|| {
                 for rule in producers.get(&relation).into_iter().flatten() {
-                    bindings(rule, tables, domains, b, |binding, b| {
-                        let atom = ground_atom(&rule.head, binding, b)?.atom;
-                        if !out.contains(&atom) {
-                            let demand = fixed_count + concrete_count - old_size + out.len();
-                            if measurement.enabled() {
-                                measurement.data.peak_possibility_atoms = measurement
-                                    .data
-                                    .peak_possibility_atoms
-                                    .max(demand.saturating_add(1));
-                            }
-                            b.room(
-                                demand,
-                                b.limits.max_atoms,
-                                "completion possibility",
-                                "atoms",
-                            )?;
-                            out.insert(atom);
-                        }
-                        Ok(())
+                    b.completion_rule(rule.id, |b| {
+                        join_bindings(
+                            rule,
+                            tables,
+                            domains,
+                            b,
+                            true,
+                            changed_heads.as_ref().map(JoinSeed::Head),
+                            |binding, b| {
+                                let atom = ground_atom(&rule.head, binding, b)?.atom;
+                                if !out.contains(&atom) {
+                                    let demand =
+                                        fixed_count + concrete_count - old_size + out.len();
+                                    if measurement.enabled() {
+                                        measurement.data.peak_possibility_atoms = measurement
+                                            .data
+                                            .peak_possibility_atoms
+                                            .max(demand.saturating_add(1));
+                                    }
+                                    b.room(
+                                        demand,
+                                        b.limits.max_atoms,
+                                        "completion possibility",
+                                        "atoms",
+                                    )?;
+                                    out.insert(atom);
+                                }
+                                Ok(())
+                            },
+                        )
                     })?;
                 }
                 Ok(())
@@ -139,9 +184,31 @@ pub(super) fn descend(
                 continue;
             }
             concrete_count = concrete_count - old_size + out.len();
-            tables.insert(relation, Some(Table::new(out)));
-            // Only readers of the changed coordinate need another evaluation.
-            // Reclassify pending readers before taking any unanchored fallback.
+            let old = tables[&relation].as_ref();
+            let unchanged_top = old.is_none() && full_table(corpus, domains, relation, out.len());
+            let delta = if let Some(old) = old {
+                let mut removed = Vec::new();
+                for a in &old.rows {
+                    b.tick("completion descent delta")?;
+                    if !out.contains(a) {
+                        removed.push(a.clone());
+                    }
+                }
+                Some(Table::new(removed))
+            } else if out.is_empty() && corpus.relation(relation).unwrap().parameters.is_empty() {
+                // The full zero-arity domain is exactly one tuple. No product
+                // enumeration is needed to represent its first removal.
+                Some(Table::new([GroundAtom {
+                    relation,
+                    arguments: vec![],
+                }]))
+            } else {
+                None
+            };
+            // Use OLD tables here, including every occurrence of the changed
+            // relation. Joining the delta against new tables would miss bindings
+            // where two premises disappear together. Negative literals have no
+            // role in this positive-support greatest fixpoint.
             for r in readers
                 .get(&relation)
                 .into_iter()
@@ -149,14 +216,80 @@ pub(super) fn descend(
                 .filter(|r| members.contains(r))
             {
                 b.tick("completion descent reschedule")?;
+                if unchanged_top {
+                    // Still reclassify already-pending work after installation:
+                    // a concrete full table can anchor a join without changing it.
+                    continue;
+                }
+                if !matches!(pending.get(r), Some(Pending::Full)) {
+                    let rules = producers.get(r).map(Vec::as_slice).unwrap_or(&[]);
+                    if let Some(delta) = delta.as_ref().filter(|_| tables[r].is_some()) {
+                        let entry = pending
+                            .entry(*r)
+                            .or_insert_with(|| Pending::Heads(BTreeSet::new()));
+                        let Pending::Heads(heads) = entry else {
+                            unreachable!()
+                        };
+                        for rule in rules {
+                            for (i, literal) in rule.body.iter().enumerate() {
+                                b.tick("completion descent delta readers")?;
+                                if matches!(literal, Literal::Positive(a) if a.relation() == relation)
+                                {
+                                    b.completion_rule(rule.id, |b| {
+                                        join_bindings(
+                                            rule,
+                                            tables,
+                                            domains,
+                                            b,
+                                            true,
+                                            Some(JoinSeed::Body(i, delta)),
+                                            |binding, b| {
+                                                let a = ground_atom(&rule.head, binding, b)?.atom;
+                                                if tables[r]
+                                                    .as_ref()
+                                                    .unwrap()
+                                                    .rows
+                                                    .binary_search(&a)
+                                                    .is_ok()
+                                                {
+                                                    heads.insert(a);
+                                                }
+                                                Ok(())
+                                            },
+                                        )
+                                    })?;
+                                }
+                            }
+                        }
+                        if heads.is_empty() {
+                            pending.remove(r);
+                        }
+                    } else {
+                        pending.insert(*r, Pending::Full);
+                    }
+                }
+            }
+            tables.insert(relation, Some(Table::new(out)));
+            for r in readers
+                .get(&relation)
+                .into_iter()
+                .flatten()
+                .filter(|r| members.contains(r))
+            {
+                if !pending.contains_key(r) {
+                    continue;
+                }
                 ready.remove(r);
                 deferred.remove(r);
-                if anchored(
-                    producers.get(r).map(Vec::as_slice).unwrap_or(&[]),
-                    tables,
-                    domains,
-                    b,
-                )? {
+                if anchored_relations.contains(r)
+                    || anchored(
+                        producers.get(r).map(Vec::as_slice).unwrap_or(&[]),
+                        tables,
+                        domains,
+                        b,
+                    )?
+                {
+                    anchored_relations.insert(*r);
                     ready.insert(*r);
                 } else {
                     deferred.insert(*r);

@@ -21,6 +21,7 @@ sha2 = "=0.10.9"
 cc = "=1.5.1"
 
 [dev-dependencies]
+serde.workspace = true
 denotate-plan = { path = "../plan" }
 libc = "=0.2.189"
 denotate-check = { path = "../check", features = ["test-support"] }

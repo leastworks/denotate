@@ -473,6 +473,14 @@ fn zoo_tiny_sources_match_independent_oracles() {
             &[doc],
         )
         .unwrap();
+        // These are stable-model/admission oracles; completion has its own
+        // dense grounding oracle and completion CLI zoo checks.
+        if p.corpus
+            .verifications()
+            .any(|v| v.options.semantics == denotate_ir::Semantics::Completion)
+        {
+            continue;
+        }
         let l = Limits::default();
         let ops = (&l).into();
         for order in [

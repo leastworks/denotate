@@ -230,6 +230,7 @@ dependencies = [
  "denotate-presentation",
  "libc",
  "salsa",
+ "serde",
  "serde_json",
  "sha2",
  "tree-sitter",

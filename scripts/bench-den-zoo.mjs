@@ -1,13 +1,15 @@
 // Shape workloads and analysis. Execution uses the schema runner's persistent CLI runs.
 import fs from 'node:fs';
+import {guardedSchema} from './guarded-schema.mjs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-export const families = ['declared-groups','knowledge-scc','repeated-field','fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','writer-ring','guarded-hub','component-chain','symbolic-exhaustion','schema-layered'];
-export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1,hubVariant='pairs',hubTagValues=2,ringLanes=8,ringRelays=6,ringReaders=1}={}) {
+export const families = ['declared-groups','knowledge-scc','repeated-field','fan-in-fixed','fan-in-input','negative-guarded','negative-unresolved','certification','removal-heavy','presentation','guarded-ring','guarded-fan-in','guarded-worlds','writer-ring','guarded-hub','component-chain','symbolic-exhaustion','schema-layered','guarded-schema'];
+export function source(family, n, {hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1,hubVariant='pairs',hubTagValues=2,ringLanes=8,ringRelays=6,ringReaders=1,schema={}}={}) {
   if (!['pairs','tagged'].includes(hubVariant)) throw Error('invalid hub variant');
   if (hubVariant==='pairs' && hubTagValues!==2) throw Error('tag values requires tagged hub variant');
   if (!families.includes(family) || !Number.isSafeInteger(n) || n < 1) throw Error('invalid family/positive size');
+  if (family==='guarded-schema') return guardedSchema({sets:n,...schema}).source;
   let s = 'relation bad();\n';
   let assumptions = '';
   const add = x => { s += x + '\n'; };
@@ -375,12 +377,32 @@ export function aggregate(runs, sizes, repeat, threshold) {
   return phases;
 }
 
+export function completionFits(runs,sizes,threshold,repeat) {
+  const names=[...new Set(runs.flatMap(r=>Object.keys(r.completion?.preparationWork?.workByStage??{})))].sort();
+  return Object.fromEntries(names.map(stage=>{
+    const rows=sizes.map(size=>{
+      const complete=runs.filter(r=>r.size===size&&r.phases.preparation?.complete);
+      return {size,completed:complete.length,requested:repeat,work:stats(complete.map(r=>r.completion.preparationWork.workByStage[stage]??0),complete.length).median,
+        ms:stats(complete.map(r=>r.completion.preparationWork.elapsedMsByStage[stage]??0),complete.length).median};
+    });
+    return [stage,{rows,work:fit(rows.map(r=>[r.size,r.work]),threshold),time:fit(rows.map(r=>[r.size,r.ms]),threshold)}];
+  }));
+}
+
 function readRun(dir, size, rep) {
   const report = JSON.parse(fs.readFileSync(path.join(dir, 'report.json')));
   const profile = path.join(dir, 'memory.jsonl');
   const records = (fs.existsSync(profile) ? fs.readFileSync(profile, 'utf8') : '')
     .split('\n').flatMap(line => { try { return [JSON.parse(line)]; } catch { return []; } });
-  const ground = report.beforeAdmission?.ground ?? {};
+  const completionRecords=records.filter(r=>r.type==='completion-preparation-sizes'||r.type==='completion-sizes');
+  const completion=completionRecords.at(-1)?.sizes ?? null;
+  const prep=completion?.preparations?.filter(p=>p.scope==='runtime').at(-1);
+  const ground = prep ? {atoms:prep.atoms,ruleInstances:prep.rules} : report.beforeAdmission?.ground ?? {};
+  const phases=measurements(records,report.outcomes);
+  if(completion?.preparationWork) {
+    const work=completion.preparationWork;
+    phases.preparation={...phases.preparation,complete:prep?.complete===true,ms:Object.values(work.elapsedMsByStage??{}).reduce((a,b)=>a+b,0)};
+  }
   const rounds = report.admissionRounds ?? [];
   return {
     size, rep, dir, inputOrder: report.inputOrderDetails, checkerFinished: report.checkerFinished,
@@ -397,7 +419,7 @@ function readRun(dir, size, rep) {
     candidateProbes: report.candidateProbes ?? [],
     attemptSummaries: report.admissionAttemptSummaries ?? [],
     attemptSamples: report.admissionAttemptSamples ?? [],
-    phases: measurements(records, report.outcomes),
+    phases, completion,
   };
 }
 
@@ -405,7 +427,7 @@ function readRun(dir, size, rep) {
 export function summarize(out) {
   const config = JSON.parse(fs.readFileSync(path.join(out, 'sweep.json')));
   const { family, sizes, repeat, threshold, binary } = config;
-  const report = { threshold, repeat, sizes, inputOrder: config.inputOrder ?? 'key', hubReader: config.hubReader ?? 'split', hubRoutes: config.hubRoutes ?? true, hubDecoys: config.hubDecoys ?? 0, hubDecoyShape: config.hubDecoyShape ?? 'full', hubWriters: config.hubWriters ?? 0, hubReaders: config.hubReaders ?? 1, hubValues: config.hubValues ?? 1, hubVariant: config.hubVariant ?? 'pairs', hubTagValues: config.hubTagValues ?? 2, ringLanes: config.ringLanes ?? 8, ringRelays: config.ringRelays ?? 6, ringReaders: config.ringReaders ?? 1, satProbe: config.satProbe ?? false, satProbeCandidates: config.satProbeCandidates ?? false, families: {} };
+  const report = { threshold, repeat, sizes, inputOrder: config.inputOrder ?? 'key', hubReader: config.hubReader ?? 'split', hubRoutes: config.hubRoutes ?? true, hubDecoys: config.hubDecoys ?? 0, hubDecoyShape: config.hubDecoyShape ?? 'full', hubWriters: config.hubWriters ?? 0, hubReaders: config.hubReaders ?? 1, hubValues: config.hubValues ?? 1, hubVariant: config.hubVariant ?? 'pairs', hubTagValues: config.hubTagValues ?? 2, ringLanes: config.ringLanes ?? 8, ringRelays: config.ringRelays ?? 6, ringReaders: config.ringReaders ?? 1, satProbe: config.satProbe ?? false, satProbeCandidates: config.satProbeCandidates ?? false, schema:config.schema??{}, schemaAxis:config.schemaAxis??'sets', checkBinary:config.checkBinary??null, families: {} };
   for (const name of family) {
     const runs = [];
     for (const size of sizes) for (let rep = 0; rep < repeat; rep++) {
@@ -413,36 +435,47 @@ export function summarize(out) {
       if (!fs.existsSync(path.join(dir, 'run.json'))) continue;
       const proc = spawnSync(binary, ['--summarize', dir], { encoding: 'utf8' });
       if (proc.error || proc.status !== 0) throw Error(proc.error?.message || proc.stderr);
-      runs.push(readRun(dir, size, rep));
+      const measured=readRun(dir,size,rep);
+      if(name==='guarded-schema') measured.shape=guardedSchema({sets:size,...report.schema,[report.schemaAxis]:size}).shape;
+      runs.push(measured);
     }
-    report.families[name] = { runs, attempts: attemptTable(runs), phases: aggregate(runs, sizes, repeat, threshold) };
+    report.families[name] = { runs, attempts: attemptTable(runs), phases: aggregate(runs, sizes, repeat, threshold), completion:completionFits(runs,sizes,threshold,repeat) };
   }
   fs.writeFileSync(path.join(out, 'zoo.json'), JSON.stringify(report, null, 2));
   return report;
 }
 
-export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3,binary='target/profiling/examples/bench_schema',samply=false,limits=[],inputOrder='key',hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1,hubVariant='pairs',hubTagValues=2,ringLanes=8,ringRelays=6,ringReaders=1,satProbe=false,satProbeCandidates=false}) {
+export function run({out,family= families,sizes=[8,16,32],repeat=3,threshold=1.3,binary='target/profiling/examples/bench_schema',samply=false,limits=[],inputOrder='key',hubReader='split',hubRoutes=true,hubDecoys=0,hubDecoyShape='full',hubWriters=0,hubReaders=1,hubValues=1,hubVariant='pairs',hubTagValues=2,ringLanes=8,ringRelays=6,ringReaders=1,satProbe=false,satProbeCandidates=false,schema={},schemaAxis='sets',checkBinary=null}) {
+  if (!['sets','stmts','depth'].includes(schemaAxis)) throw Error('invalid schema sweep axis');
+  if (family.includes('guarded-schema') && (satProbe || satProbeCandidates)) throw Error('guarded-schema uses completion SAT, not admission probes');
+  if (family.includes('guarded-schema') && schemaAxis==='depth' && !schema.blocks) throw Error('depth sweep requires --schema-blocks to hold fact rows constant');
   if (!['split','merged'].includes(hubReader)) throw Error('hub reader must be split or merged');
   if (!['key','reverse-key','structural'].includes(inputOrder)) throw Error('invalid input order');
   fs.mkdirSync(path.dirname(out),{recursive:true});
   fs.mkdirSync(out,{recursive:false});
-  fs.writeFileSync(path.join(out, 'sweep.json'), JSON.stringify({family, sizes, repeat, threshold, inputOrder, hubReader, hubRoutes, hubDecoys, hubDecoyShape, hubWriters, hubReaders, hubValues, hubVariant, hubTagValues, ringLanes, ringRelays, ringReaders, satProbe, satProbeCandidates, binary: path.resolve(binary)}, null, 2));
-  const report={threshold,repeat,sizes,inputOrder,hubReader,hubRoutes,hubDecoys,hubDecoyShape,hubWriters,hubReaders,hubValues,hubVariant,hubTagValues,ringLanes,ringRelays,ringReaders,satProbe,satProbeCandidates,families:{}};
+  fs.writeFileSync(path.join(out, 'sweep.json'), JSON.stringify({family, sizes, repeat, threshold, inputOrder, hubReader, hubRoutes, hubDecoys, hubDecoyShape, hubWriters, hubReaders, hubValues, hubVariant, hubTagValues, ringLanes, ringRelays, ringReaders, satProbe, satProbeCandidates, schema, schemaAxis, checkBinary, binary: path.resolve(binary)}, null, 2));
+  const report={threshold,repeat,sizes,inputOrder,hubReader,hubRoutes,hubDecoys,hubDecoyShape,hubWriters,hubReaders,hubValues,hubVariant,hubTagValues,ringLanes,ringRelays,ringReaders,satProbe,satProbeCandidates,schema,schemaAxis,checkBinary,families:{}};
   for(const name of family) {
     const runs=[];
     for(const size of sizes) for(let rep=0;rep<repeat;rep++) {
       const dir=path.resolve(out,`${name}-${size}-${rep}`);
-      let args=['--out',dir,'--input-order',inputOrder];
+      let args=['--out',dir];
+      if(name==='guarded-schema')args.push('--compact-outcomes');
+      if (name!=='guarded-schema') args.push('--input-order',inputOrder);
+      if (checkBinary) args.push('--check-binary',path.resolve(checkBinary));
+      const schemaShape={sets:size,...schema,[schemaAxis]:size};
       if(name==='schema-layered') args.push('--topology','layered','--fields',String(size+2),'--reads',String(size),'--depth','2','--encoding','assumed');
-      else {const input=path.resolve(out,`${name}-${size}.den`);fs.writeFileSync(input,source(name,size,{hubReader,hubRoutes,hubDecoys,hubDecoyShape,hubWriters,hubReaders,hubValues,hubVariant,hubTagValues,ringLanes,ringRelays,ringReaders}));args.push('--source',input);}
+      else {const input=path.resolve(out,`${name}-${size}.den`);fs.writeFileSync(input,source(name,size,{hubReader,hubRoutes,hubDecoys,hubDecoyShape,hubWriters,hubReaders,hubValues,hubVariant,hubTagValues,ringLanes,ringRelays,ringReaders,schema:schemaShape}));args.push('--source',input);}
       if(samply) args.push('--samply');
       if(satProbe) args.push('--sat-probe');
       if(satProbeCandidates) args.push('--sat-probe-candidates');
-      if(limits.length) args.push('--',...limits);
+      if(limits.length || name==='guarded-schema') args.push('--',...(name==='guarded-schema'?['--engine','sat']:[]),...limits);
       const proc=spawnSync(binary,args,{stdio:'pipe',encoding:'utf8'});
       if(proc.error || proc.status!==0) throw Error(proc.error?.message||proc.stderr);
-      runs.push(readRun(dir, size, rep));
-      report.families[name]={runs,attempts:attemptTable(runs),phases:aggregate(runs,sizes,repeat,threshold)};
+      const measured=readRun(dir,size,rep);
+      if(name==='guarded-schema') measured.shape=guardedSchema(schemaShape).shape;
+      runs.push(measured);
+      report.families[name]={runs,attempts:attemptTable(runs),phases:aggregate(runs,sizes,repeat,threshold),completion:completionFits(runs,sizes,threshold,repeat)};
       fs.writeFileSync(path.join(out,'zoo.json'),JSON.stringify(report,null,2));
     }
     const flags=Object.entries(report.families[name].phases).filter(([,p])=>Object.values(p.fits).some(f=>f.knob.flag||f.measured.flag)).map(([p])=>p);
@@ -464,10 +497,14 @@ if(!process.execArgv.some(a=>a==='-e'||a==='--eval') && process.argv[1] && path.
       if(key==='--samply'){opts.samply=true;continue;}
       if(key==='--sat-probe-candidates'){opts.satProbeCandidates=true;continue;}
       if(key==='--sat-probe'){opts.satProbe=true;continue;}
-      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [--hub-reader split|merged] [--hub-no-routes] [--sat-probe] [--sat-probe-candidates] [--hub-variant pairs|tagged] [--hub-tag-values V] [--hub-writers N] [--hub-readers N] [--hub-values N] [--hub-decoys N] [--hub-decoy-shape full|near-full] [--ring-lanes N] [--ring-relays N] [--ring-readers N] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
+      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [--hub-reader split|merged] [--hub-no-routes] [--sat-probe] [--sat-probe-candidates] [--hub-variant pairs|tagged] [--hub-tag-values V] [--hub-writers N] [--hub-readers N] [--hub-values N] [--hub-decoys N] [--hub-decoy-shape full|near-full] [--ring-lanes N] [--ring-relays N] [--ring-readers N] [--schema-axis sets|stmts|depth] [--schema-sets N] [--schema-depth N] [--schema-fanout N] [--schema-stmts N] [--schema-blocks N] [--schema-impossible 0|1] [--check-binary PATH] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
       const val=args[++i];
       if(key==='--family')opts.family=val.split(',');else if(key==='--sizes')opts.sizes=val.split(',').map(Number);
       else if(key==='--input-order')opts.inputOrder=val;
+      else if(key==='--binary')opts.binary=val;
+      else if(key==='--check-binary')opts.checkBinary=val;
+      else if(key==='--schema-axis')opts.schemaAxis=val;
+      else if(key.startsWith('--schema-')) { const field=key.slice(9); if(!['sets','depth','fanout','stmts','elements','values','reads','tasks','outs','triggers','splice','self','blocks','impossible'].includes(field))throw Error('unknown schema knob'); (opts.schema??={})[field]=Number(val); }
       else if(key==='--ring-lanes')opts.ringLanes=Number(val);
       else if(key==='--ring-relays')opts.ringRelays=Number(val);
       else if(key==='--ring-readers')opts.ringReaders=Number(val);

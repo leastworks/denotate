@@ -2021,3 +2021,21 @@ are constructed lazily. The diagnostic LFP requires its own opt-in flag. Ordinar
 size output retains stage work/time and costly-rule records, so requesting an
 explanation does not automatically run another fixpoint. The GFP, live scopes,
 completion equations and anchored-first scheduling are unchanged.
+
+
+## Completion descent propagates lost support, not least-model growth
+
+Completion's possibility tables descend from the full finite domains. Use a
+removed tuple to find heads that may have lost support, then recheck those heads
+against every producer. Removing a head immediately on loss of one derivation
+would be unsound: another producer, including an unseeded cycle, may still support
+it. Delta joins therefore read the old tables, so simultaneous removal of two
+premises cannot hide an affected binding. Negative premises are ignored by this
+positive-support calculation, as before.
+
+A concrete representation of an unchanged full table is not a semantic update.
+It can help anchor work already pending, but need not reschedule readers that have
+finished. Likewise, an anchored join stays anchored as tables shrink. Both facts
+avoid repeated scans caused by thousands of per-site zero-arity conditions.
+All state is preparation-local; eligibility, domain and rule edits rebuild it.
+The full-product oracle checks live instances as well as existing model tests.

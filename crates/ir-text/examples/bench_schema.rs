@@ -8,6 +8,8 @@ mod generate;
 #[cfg(test)]
 #[path = "schema/knowledge_tests.rs"]
 mod knowledge_tests;
+#[path = "schema/outcomes.rs"]
+mod outcomes;
 #[path = "schema/runner.rs"]
 mod runner;
 #[cfg(test)]
