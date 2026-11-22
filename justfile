@@ -146,6 +146,10 @@ plan-den +args:
 plan-task-example:
     cargo +1.93.0 run --locked -p denotate-plan --example tasks
 
+# Completion plan export and accept/reject reference interpretation.
+plan-completion-example:
+    cargo +1.93.0 run --locked -p denotate-plan --example completion
+
 # Source-linked test DSL findings; also try mixed, requires-c or fixed.
 demo-overlap mode="overlap":
     cargo +1.93.0 run --locked -p denotate-test-dsl --example overlap -- {{mode}}

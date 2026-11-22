@@ -83,41 +83,9 @@ impl<'a> Planner<'a> {
         relation: denotate_ir::RelationId,
         priority: u32,
     ) -> Result<Vec<Output>> {
-        let r = self
-            .corpus
-            .relation(relation)
-            .ok_or(CheckError::InvalidRequest("unknown output relation"))?;
-        let mut budget = Work {
-            limits: &self.limits,
-            start: Instant::now(),
-            work: 0,
-        };
-        let mut tuples = vec![vec![]];
-        for parameter in &r.parameters {
-            let domain = self
-                .domains
-                .get(&parameter.sort)
-                .ok_or(CheckError::InvalidRequest("missing output domain"))?;
-            let mut next = Vec::new();
-            for tuple in &tuples {
-                for value in domain {
-                    budget.tick(tuple.len() + 1)?;
-                    room(next.len(), self.limits.max_atoms, "output atoms")?;
-                    let mut t = tuple.clone();
-                    t.push(*value);
-                    next.push(t);
-                }
-            }
-            tuples = next;
-        }
-        Ok(tuples
-            .into_iter()
-            .map(|t| Output {
-                atom: GroundAtom::new(relation, t),
-                priority,
-            })
-            .collect())
+        relation_outputs(self.corpus, &self.domains, &self.limits, relation, priority)
     }
+
     pub fn prepare(
         corpus: &'a Corpus,
         domains: &Domains,
@@ -404,9 +372,9 @@ impl<'a> Planner<'a> {
     }
 }
 pub(super) struct Work<'a> {
-    limits: &'a Limits,
-    start: Instant,
-    work: usize,
+    pub(super) limits: &'a Limits,
+    pub(super) start: Instant,
+    pub(super) work: usize,
 }
 impl Work<'_> {
     pub(super) fn tick(&mut self, n: usize) -> Result<()> {
@@ -477,4 +445,46 @@ pub(super) fn convert(expr: stable_query::Expression, keys: &SemanticKeys) -> Re
             })
             .collect::<Result<_>>()?,
     })
+}
+
+/// Expand output tuples with the same resolved-domain and resource rules for both planners.
+pub fn relation_outputs(
+    corpus: &Corpus,
+    domains: &Domains,
+    limits: &Limits,
+    relation: denotate_ir::RelationId,
+    priority: u32,
+) -> Result<Vec<Output>> {
+    let r = corpus
+        .relation(relation)
+        .ok_or(CheckError::InvalidRequest("unknown output relation"))?;
+    let mut budget = Work {
+        limits: limits,
+        start: Instant::now(),
+        work: 0,
+    };
+    let mut tuples = vec![vec![]];
+    for parameter in &r.parameters {
+        let domain = domains
+            .get(&parameter.sort)
+            .ok_or(CheckError::InvalidRequest("missing output domain"))?;
+        let mut next = Vec::new();
+        for tuple in &tuples {
+            for value in domain {
+                budget.tick(tuple.len() + 1)?;
+                room(next.len(), limits.max_atoms, "output atoms")?;
+                let mut t = tuple.clone();
+                t.push(*value);
+                next.push(t);
+            }
+        }
+        tuples = next;
+    }
+    Ok(tuples
+        .into_iter()
+        .map(|t| Output {
+            atom: GroundAtom::new(relation, t),
+            priority,
+        })
+        .collect())
 }

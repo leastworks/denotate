@@ -513,7 +513,18 @@ omitted. Structural loading checks signatures and input independence; stable con
 keep their additional stratification validation. Completion validation is scoped
 to the selected verification, including when declarations have stable consumers too.
 
-Both SAT APIs share the prepared-program projection and completion encoder. The
+The separate completion planner consumes checker-owned runtime context, constant,
+and explicit-output meaning queries. The checker certifies classification without
+consulting processing, and checks accepted output existence/determinacy in the union
+of live output cones and C(H). Plan construction emits ordinary computations and
+accepted-value constants, with an explicit classification barrier before processing.
+The reference interpreter performs no SAT calls. Entry inputs stay actual values;
+H-conditional constants cannot replace runtime classification. Stable plan structures
+are shared only for neutral compute nodes, expression export and scheduling; stable
+meaning, kernels and v4 export remain separate from completion v5.
+
+Both SAT APIs share the prepared-program projection; completion has its own
+scope-local Fitting encoder. The
 completion API does not share stable-model refinement, attribution or solver state.
 W has independent equations and the complete input universe. Classification uses
 the live hypothesis cone. If its query with H has no interpretation, a separate

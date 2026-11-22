@@ -25,11 +25,11 @@ pub struct Execution {
     pub branches: Vec<(AtomKey, bool)>,
     pub tasks: Vec<TaskEvent>,
 }
-struct Work {
-    left: usize,
+pub(crate) struct Work {
+    pub(crate) left: usize,
 }
 impl Work {
-    fn tick(&mut self) -> Result<(), ExecutionError> {
+    pub(crate) fn tick(&mut self) -> Result<(), ExecutionError> {
         self.left = self.left.checked_sub(1).ok_or(ExecutionError::WorkLimit)?;
         Ok(())
     }
@@ -183,7 +183,7 @@ fn priorities(
     Ok(result)
 }
 
-fn execute_region(
+pub(crate) fn execute_region(
     nodes: &BTreeMap<AtomKey, Node>,
     outputs: &BTreeMap<AtomKey, u32>,
     values: &mut BTreeMap<AtomKey, bool>,

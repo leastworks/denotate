@@ -27,9 +27,10 @@ pub(super) fn prepare(
     verification: VerificationId,
     limits: &Limits,
     config: &QueryLimits,
+    planning_roots: &BTreeSet<RelationId>,
     b: &mut Budget<'_>,
 ) -> Result<Inputs> {
-    let mut needed = BTreeSet::new();
+    let mut needed = planning_roots.clone();
     let v = corpus.verification(verification).unwrap();
     needed.extend(
         v.assumptions
@@ -228,7 +229,7 @@ pub(super) fn prepare(
             None,
             b,
         )?;
-        let mut live_needed = BTreeSet::new();
+        let mut live_needed = planning_roots.clone();
         live_needed.extend(
             v.assumptions
                 .iter()

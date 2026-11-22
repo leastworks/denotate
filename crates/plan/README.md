@@ -216,3 +216,68 @@ Task nodes, split arms and interpreter bookkeeping use the existing allowances.
 An arbitrary host callback cannot be preempted by the interpreter's operation cap;
 its resource control belongs to the host. No new performance claim or limits policy
 is introduced.
+
+## Completion plans
+
+`denotate_plan::completion::Planner` is the separate completion driver. It uses
+`completion_query`, preserves helper freedom, and emits JSON **v5**; the stable
+planner and v4 export keep their existing contract.
+
+```sh
+just plan-den fixtures/execution-plan-completion --verification checks --output result
+just plan-completion-example
+```
+
+The first command exports a plan from `.den`, with no read descriptors or extra
+syntax. The second builds and executes a small Rust example in all three ready-node
+orders. Message inputs are available at entry. Task-produced inputs require the
+later completion task-scheduling increment; this API does not infer task ownership
+from names or accept task descriptors yet.
+
+Construction first certifies W and classification, including existence without H
+and the selected classification decisions. It then checks existence on **every
+accepted observation** and determinacy of the explicitly requested atoms in the
+union of their live cones and C(H). Requested outputs require determinacy even if
+omitted from the declaration's `decisions`; unrelated helpers need not be unique.
+Outside processing rules do not block the plan. A direct bounded-input output also
+causes its `within` provider to be prepared, without changing declared decisions.
+
+This slice produces two straight-line regions with an explicit control barrier:
+
+- Classification uses ordinary equations over entry inputs. For mixed outcomes,
+  its terminal tests the actual computed H value; it never substitutes an
+  H-conditional proof into that runtime test. `h :- raw` therefore rejects when
+  raw is false. An independently certified accept-only/reject-only context can
+  instead have a constant terminal.
+- Only the accepted continuation computes processing outputs. Ordinary dependency
+  sequencing comes first; bounded constant proofs under H can cut remaining loops.
+  For `p :- p; h :- p`, the accepted p value is true. No least-fixpoint kernel is
+  used, and no general expression synthesis or scheduling split is attempted.
+
+A constant proof alone is insufficient: its scope might lack an interpretation on
+some accepted inputs. The preceding output-existence check prevents such gaps from
+being hidden. Computations agree with every accepted interpretation by induction:
+entry inputs agree, ordinary equations preserve agreement, and the checker proves
+constant steps in their live scope. Runtime classification is independently valid
+on rejecting inputs. The barrier keeps all processing after acceptance regardless
+of ready-node order.
+
+`completion::Plan::execute_permitted` returns `Accepted { outputs }` or `Rejected`
+with the computations actually executed in its trace. The caller certifies the
+input contract; missing input values are errors. It performs no runtime SAT query.
+A rejected run cannot execute the accepted region. Reject-only plans are complete
+and `plan-den` exits 0 for them. Invalid meaning, unresolved construction and limits
+exit 2 and expose no partial plan. Checking verdicts remain independent.
+
+The v5 header names the verification, assumptions, hypothesis and decision selection,
+with live scope counts. It separates `classification` and `accepted` regions and
+records the conditional constant steps. `.den` adds origins for both regions.
+Plan-only failures retain scoped evidence or unresolved atoms and signed dependencies;
+bounded failure does not prove that no executable order exists.
+
+Existing node, oracle-call, work and deadline bounds apply. Preparation has its own
+checker budget; each oracle operation remains bounded. Repeated builds prepare
+fresh immutable engines: there is no completion planner/session cache or scale
+claim. Splits/joins, H-justified classification computations, conditional tasks and
+the task-only sidecar follow in the next slice. Until then a mixed classification
+cycle that ordinary sequencing cannot resolve remains explicitly unresolved.

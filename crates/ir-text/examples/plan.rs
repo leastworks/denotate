@@ -1,4 +1,6 @@
 //! Experimental plan export. Source IO and origin rendering remain in the frontend.
+#[path = "plan/completion.rs"]
+mod completion;
 use denotate_check::{Limits, stable_query::QueryLimits};
 use denotate_ir_text::{LoadedProgram, filesystem, index, load};
 use denotate_plan::{Build, Options, Planner, Problem};
@@ -88,15 +90,6 @@ fn export(p: &LoadedProgram, args: &Args) -> Result<(u8, Value), String> {
     let [v] = vs.as_slice() else {
         return Err("Unknown or ambiguous verification; use its qualified name".into());
     };
-    let mut planner = Planner::prepare(
-        &p.corpus,
-        &p.domains,
-        &p.keys,
-        v.id,
-        &args.limits,
-        QueryLimits::default(),
-    )
-    .map_err(|e| e.to_string())?;
     let mut outputs = Vec::new();
     for raw in &args.outputs {
         let wanted = index::parse_name(raw)?;
@@ -111,14 +104,25 @@ fn export(p: &LoadedProgram, args: &Args) -> Result<(u8, Value), String> {
             ));
         };
         outputs.extend(
-            planner
-                .relation_outputs(r.id, 0)
+            denotate_plan::relation_outputs(&p.corpus, &p.domains, &args.limits, r.id, 0)
                 .map_err(|e| e.to_string())?,
         );
         if outputs.len() > args.limits.max_atoms {
             return Err("Output expansion exceeds max-atoms".into());
         }
     }
+    if v.options.semantics == denotate_ir::Semantics::Completion {
+        return completion::export(p, args, v.id, &outputs);
+    }
+    let mut planner = Planner::prepare(
+        &p.corpus,
+        &p.domains,
+        &p.keys,
+        v.id,
+        &args.limits,
+        QueryLimits::default(),
+    )
+    .map_err(|e| e.to_string())?;
     let built = planner
         .build(&outputs, &args.options)
         .map_err(|e| e.to_string())?;
@@ -651,5 +655,60 @@ mod tests {
         assert!(split["operation"]["then"].is_array());
         assert!(split["operation"]["else"].is_array());
         assert_eq!(j["meaningScope"]["outsideAnalysed"], false);
+    }
+}
+
+#[cfg(test)]
+mod completion_tests {
+    use super::*;
+    use denotate_ir_text::{ProgramMembership, SourceFile};
+    fn run(text: &str) -> (u8, Value) {
+        let s = SourceFile::new("file:///completion.den", 1, text);
+        let p = load(&ProgramMembership::single("plan", [s.uri.clone()]), &[s]).unwrap();
+        export(
+            &p,
+            &parse(["root", "--verification", "checks", "--output", "out"].map(str::to_owned))
+                .unwrap(),
+        )
+        .unwrap()
+    }
+    const V: &str = "verification checks{semantics:completion;hypothesis:h;decisions:[];assumptions:[];obligations:[];}";
+    #[test]
+    fn completion_exports_real_reject_control_and_both_regions_origins() {
+        let (code, j) = run(&format!(
+            "input raw();relation h();h():-raw();relation out();out():-raw();{V}"
+        ));
+        assert_eq!(code, 0);
+        assert_eq!(j["version"], 5);
+        assert_eq!(j["classification"]["terminal"]["else"]["kind"], "reject");
+        for phase in ["classification", "accepted"] {
+            assert_eq!(
+                j[phase]["nodes"][0]["origins"][0]["uri"],
+                "file:///completion.den"
+            );
+        }
+    }
+    #[test]
+    fn reject_only_is_success_and_unresolved_or_invalid_meaning_is_not() {
+        let (code, j) = run(&format!("relation h();relation out();out():-!out();{V}"));
+        assert_eq!(code, 0);
+        assert_eq!(j["classification"]["terminal"]["kind"], "reject");
+        for text in [
+            "relation h();h():-!h();relation out();out();",
+            "input raw();relation p();p():-p();relation h();h():-raw(),p();relation out();out();",
+        ] {
+            let (code, j) = run(&format!("{text}{V}"));
+            assert_eq!(code, 2);
+            assert!(j.get("classification").is_none());
+        }
+    }
+    #[test]
+    fn no_hypothesis_completion_runs_without_descriptors() {
+        let (code, j) = run(
+            "input raw();relation out();out():-raw();verification checks{semantics:completion;decisions:[];assumptions:[];obligations:[];}",
+        );
+        assert_eq!(code, 0);
+        assert!(j["hypothesis"].is_null());
+        assert_eq!(j["classification"]["terminal"]["kind"], "accept");
     }
 }

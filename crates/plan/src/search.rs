@@ -624,11 +624,11 @@ pub(super) fn external(nodes: &BTreeMap<AtomKey, Node>, goals: &Set) -> Set {
         .cloned()
         .collect()
 }
-fn expression(
+pub(super) fn expression(
     rules: &[Rule],
     available: &Set,
     budget: &mut Work<'_>,
-) -> Result<Option<super::Expression>> {
+) -> std::result::Result<Option<super::Expression>, CheckError> {
     let mut bodies = Vec::new();
     let mut unavailable = false;
     for r in rules {

@@ -45,9 +45,10 @@ direction for such programs separates meaning from schedule:
   determined tuples. Contract errors preserve explicit partial results instead of
   becoming rejection or vacuous success. Symbolic pair queries and generalized
   input cubes replace exhaustive observation enumeration. Measurement on real
-  programs is next; no throughput claim is made. Then completion-aware staged
-  planning with rejection paths, and definition islands inside otherwise stable
-  programs.
+  programs continues; no throughput claim is made. Straight-line completion plans
+  now have explicit rejection paths, a reference interpreter and v5 export. Available
+  value splits, joins and conditional tasks follow; definition islands inside otherwise
+  stable programs remain later work.
 - **Staged execution plans.** A generic driver builds what a DSL compiler's dataflow
   phase builds: a DAG of branches on facts settled earlier, nodes that compute values
   (readiness is value determination), joins, and a case partition whose branches make

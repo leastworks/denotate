@@ -1,7 +1,7 @@
 use super::*;
 use denotate_ir::{OwnerKey, QualifiedKey, RelationKey};
 use serde_json::{Value, json};
-fn qualified(k: &QualifiedKey) -> Value {
+pub(crate) fn qualified(k: &QualifiedKey) -> Value {
     json!({"namespace":k.namespace.as_ref(),"name":k.name.as_ref()})
 }
 fn owner(k: &OwnerKey) -> Value {
@@ -31,7 +31,7 @@ fn expression(e: &Expression) -> Value {
         Term::Constant(v)=>json!({"constant":v}),Term::Read(k)=>json!({"read":atom(k)}),Term::Not(i)=>json!({"not":i}),Term::And(xs)=>json!({"and":xs}),Term::Or(xs)=>json!({"or":xs}),Term::If {atom:k,when_true,when_false}=>json!({"if":atom(k),"then":when_true,"else":when_false})
     }).collect::<Vec<_>>()})
 }
-fn nodes_json(nodes: &BTreeMap<AtomKey, Node>) -> Value {
+pub(crate) fn nodes_json(nodes: &BTreeMap<AtomKey, Node>) -> Value {
     json!(nodes.values().map(|n| {
         let operation=match &n.operation {
             Operation::Call {call,inactive}=>json!({"kind":"call","task":qualified(&call.task),"when":call.when.as_ref().map(atom),"arguments":call.arguments.iter().map(atom).collect::<Vec<_>>(),"results":call.results.iter().map(atom).collect::<Vec<_>>(),"inactive":inactive,"inactiveResults":false}),

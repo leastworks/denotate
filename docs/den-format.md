@@ -405,9 +405,10 @@ apply. Merely declaring it activates nothing.
 Run these verifications with `just check-den ROOT --engine sat`. The authored
 semantics selects the meaning; the engine flag alone does not change a stable
 verification. Completion requires `--sat-meaning full` (the default); other analysis
-modes and split hints are explicitly unsupported. BDD, the editor checker, the
-scorecard and the execution planner still refuse completion before stable
-preparation, while editor reference services remain available. Stable with a
+modes and split hints are explicitly unsupported. BDD, the editor checker and the
+scorecard still refuse completion before stable preparation, while editor reference
+services remain available. `just plan-den` supports separate straight-line completion
+plans with accept/reject control; see [the planning API](../crates/plan/README.md#completion-plans). Stable with a
 hypothesis or an explicit decision selection is also unsupported. Independent
 supported verifications still run.
 

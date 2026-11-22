@@ -823,10 +823,19 @@ instance construction and dependency graph analysis. Diagnostic LFP work/time is
 excluded. Common verification setup and subsequent provider SAT queries are outside
 those grounding totals. Partial records retain consumed work and the stopping error.
 
+Planning also exposes `planning_outputs(path, targets, options)`: independently audit
+classification and the input contract, then check existence on every accepted input
+in the union of the targets' live cones and C(H), and ambiguity projected onto those
+exact atoms. Declared decisions do not exempt an explicitly requested output from
+uniqueness. Outside helpers and processing do not enlarge this scope. Without H,
+all certified inputs are accepted and output meaning is still checked separately.
+`prepare_for_planning(..., outputs)` prepares bounded input providers required by
+explicit outputs without changing the verification's decision selection.
+
 The planning foundation exposes `planning_context(path, options)` and
 `planning_constant(path, target, scope, options)`. A runtime path pins actual input
-atoms; derived pins are refused. Both operations currently require an explicit
-hypothesis. Context analysis reports accept, reject, mixed, invalid, inconclusive
+atoms; derived pins are refused. Without a hypothesis, certified inputs are accepted
+and output queries still check their own meaning. Context analysis reports accept, reject, mixed, invalid, inconclusive
 or no permitted inputs, using the existing independent symbolic searches and the
 second count without H. Selected assumptions are still audited over U.
 
@@ -836,9 +845,10 @@ context grants no proof. A scoped constant proof is conditional on an interpreta
 existing; it does not certify existence for every observation, justify fabricating
 a raw input/task result, or decide acceptance. For `h() :- raw();`, raw is true
 under H while an actual false raw input must reject. The planner must preserve
-that distinction. This API adds no execution support yet: the stable planner,
-`plan-den`, and its interpreter still refuse completion. No synthesis, session cache
-or performance claim is added by these bounded operations.
+that distinction. The separate completion planner and `plan-den` consume these
+queries for straight-line v5 plans with accept/reject control; the stable planner
+remains separate. No general synthesis, session cache or performance claim is added
+by these bounded operations.
 
 `completion_query::Engine::prepare` prepares an authored completion verification.
 It returns `Preparation::Ready`, `InputDomains` with provider failures, or
@@ -991,8 +1001,9 @@ This may enumerate substitutions under `advisory_limits`; its truncation or exha
 cannot change required results. No removal edit is offered for a whole source rule
 on the strength of one dead ground instance.
 
-The SAT CLI consumes these reports and the shared completion presenter. Editor,
-planner, scorecard and BDD checking continue to refuse completion explicitly.
+The SAT CLI consumes these reports and the shared completion presenter. A separate
+completion planner uses the scoped planning APIs. Editor, scorecard and BDD checking
+continue to refuse completion explicitly.
 
 ## Experimental stable queries
 

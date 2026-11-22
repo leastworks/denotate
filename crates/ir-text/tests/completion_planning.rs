@@ -197,3 +197,31 @@ fn runtime_outcome_matches_exhaustive_equations_including_reject_and_no_meaning(
         }
     }
 }
+
+#[test]
+fn no_hypothesis_context_and_output_constants_do_not_consult_outside_equations() {
+    let p = loaded(
+        "input raw();relation bad();bad():-raw(),!bad();verification v{semantics:completion;decisions:[];assumptions:[];obligations:[];}",
+    );
+    let e = engine(&p, Default::default());
+    let path = RuntimePath::new();
+    let opts = CheckOptions::default();
+    assert_eq!(
+        e.planning_context(&path, &opts).unwrap().outcome,
+        PathOutcome::Accept
+    );
+    assert!(matches!(
+        e.planning_constant(&path, &atom(&p, "raw"), ConstantScope::Output, &opts)
+            .unwrap(),
+        PlanningConstant::Varying(_)
+    ));
+    assert!(
+        e.planning_constant(
+            &path,
+            &atom(&p, "raw"),
+            ConstantScope::Classification,
+            &opts
+        )
+        .is_err()
+    );
+}

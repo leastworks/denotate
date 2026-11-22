@@ -50,7 +50,8 @@ Existing constructors and syntax default to stable semantics with no hypothesis.
 Consumers explicitly refuse completion declarations until their preparation and
 checking paths implement that meaning; they never silently fall back to stable
 checking. The experimental Rust completion API and SAT CLI support this meaning;
-the BDD CLI, editor, scorecard and planner still refuse it.
+the BDD CLI, editor and scorecard still refuse it. The separate completion planner
+now exports straight-line v5 plans; the stable planner retains its existing semantics.
 
 `no_rejections(H)` is a selectable obligation, with the same hypothesis as its
 completion verification. It is not an assumption: restricting inputs to the ones
@@ -1960,3 +1961,28 @@ JSON v4 distinguishes entry and produced inputs and exports call operations. The
 reference interpreter accepts only declared callback result keys, rejects missing
 results and rejects produced inputs supplied at entry. Slots, writer safety proofs,
 classification rejection, trace-before-use and task syntax remain later increments.
+
+## Completion plans separate runtime rejection from accepted-value proofs
+
+Completion planning has its own driver and v5 export; the stable driver keeps its
+meaning and v4 contract. Message inputs are entry-available. An accepted-value proof
+under H cannot replace an input or decide runtime acceptance: `h :- raw` must still
+reject the actual raw=false message. Mixed straight-line classification therefore
+computes its equations without H substitutions, then uses an explicit accept/reject
+barrier. A context already certified accept-only or reject-only can use that terminal
+directly. Only accepted processing may use H-conditional constant proofs.
+
+Before emitting processing, check existence on every accepted observation in the
+union of requested live output cones and C(H), and uniqueness of the requested
+atoms. A conditional constant proof by itself can hide missing interpretations;
+checking each output cone separately can also miss incompatible helper assignments
+in their union. Helpers need not be unique and outside processing contradictions
+cannot choose classification or block unrelated outputs. Explicitly requested input
+outputs require their providers even if the verification otherwise ignores them.
+
+The reference interpreter has no runtime solver. Its control barrier prevents a
+ready-node scheduler from running processing before acceptance or after rejection.
+No least-model kernel is valid for completion self-support: `p :- p; h :- p` instead
+uses a checked p=true value. The first construction slice is straight-line; unresolved
+mixed cycles await splits and joins, and task descriptors remain a later integration.
+Checking results are never gated by planning success.

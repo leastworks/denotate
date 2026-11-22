@@ -45,17 +45,13 @@ pub enum PlanningConstant {
 impl Engine {
     /// Classify all certified W observations extending a runtime path. The
     /// selected contract is audited independently over U, exactly as in checking.
-    /// This first interface requires an explicit hypothesis.
+    /// Without H every certified observation is accepted; output meaning is a
+    /// separate query and may still fail.
     pub fn planning_context(
         &self,
         path: &RuntimePath,
         options: &CheckOptions,
     ) -> Result<PlanningContext> {
-        if self.classification.is_none() {
-            return Err(CheckError::InvalidRequest(
-                "planning context requires a hypothesis",
-            ));
-        }
         // Validate pins even when the contract cannot be certified.
         let world = self.worlds_using(
             &WorldQuery {
@@ -93,6 +89,10 @@ impl Engine {
                 return Ok(result);
             }
             WorldAnswer::World(_) => {}
+        }
+        if self.classification.is_none() {
+            result.outcome = PathOutcome::Accept;
+            return Ok(result);
         }
         let ambiguous = self.symbolic_pair_in(path, true, true, options)?;
         let accepted =
@@ -136,14 +136,24 @@ impl Engine {
         options: &CheckOptions,
     ) -> Result<PlanningConstant> {
         self.program.validate_atom(target)?;
+        if scope == ConstantScope::Classification && self.classification.is_none() {
+            return Err(CheckError::InvalidRequest(
+                "classification constant requires a hypothesis",
+            ));
+        }
         let context = self.planning_context(path, options)?;
         if !matches!(context.outcome, PathOutcome::Accept | PathOutcome::Mixed) {
             return Ok(PlanningConstant::ContextNotReady(Box::new(context)));
         }
         let answer = self.symbolic_search_in(path, "completion planning constant", |s| {
-            let (classification, cm, _) = self.classification.as_ref().unwrap();
-            let mut members = cm.as_ref().clone();
-            let mut cone = classification.clone();
+            let mut members = self
+                .classification
+                .as_ref()
+                .map_or_else(BTreeSet::new, |(_, m, _)| m.as_ref().clone());
+            let mut cone = self
+                .classification
+                .as_ref()
+                .map_or_else(|| self.cone.clone(), |(c, _, _)| c.clone());
             if scope == ConstantScope::Classification
                 && !members.contains(target)
                 && !self.input_relations.contains(&target.relation)
@@ -195,5 +205,92 @@ impl Engine {
             Search::Inconclusive(c) => PlanningConstant::Inconclusive(c),
             Search::NotAnalysed => unreachable!(),
         })
+    }
+}
+
+/// Output meaning in the frozen union of explicit root cones and C(H). The
+/// requested atoms must be determined even when omitted from declared decisions;
+/// other helpers remain free. Classification is audited independently first.
+#[derive(Debug, Clone)]
+pub struct PlanningOutputs {
+    pub context: PlanningContext,
+    pub members: BTreeSet<GroundAtom>,
+    pub no_meaning: Search<Observation>,
+    pub ambiguous: Search<Pair>,
+}
+impl PlanningOutputs {
+    pub fn certified(&self) -> bool {
+        matches!(
+            self.context.outcome,
+            PathOutcome::Accept | PathOutcome::Mixed
+        ) && matches!(self.no_meaning, Search::None)
+            && matches!(self.ambiguous, Search::None)
+    }
+}
+impl Engine {
+    pub fn planning_outputs(
+        &self,
+        path: &RuntimePath,
+        targets: &BTreeSet<GroundAtom>,
+        options: &CheckOptions,
+    ) -> Result<PlanningOutputs> {
+        let mut budget = Budget::new(&self.limits);
+        for atom in targets {
+            budget.tick("completion planning scope")?;
+            self.program.validate_atom(atom)?;
+            if self
+                .ignored_input_domains
+                .iter()
+                .any(|i| i.input == atom.relation)
+            {
+                return Err(CheckError::InvalidRequest(
+                    "planning output input domain was omitted; use prepare_for_planning",
+                ));
+            }
+        }
+        let context = self.planning_context(path, options)?;
+        let mut answer = PlanningOutputs {
+            context,
+            members: BTreeSet::new(),
+            no_meaning: Search::NotAnalysed,
+            ambiguous: Search::NotAnalysed,
+        };
+        if !matches!(
+            answer.context.outcome,
+            PathOutcome::Accept | PathOutcome::Mixed
+        ) {
+            return Ok(answer);
+        }
+        let mut members = self
+            .program
+            .dependency_cone_with_budget(targets.iter().cloned(), &mut budget)?
+            .facts;
+        if let Some((_, cm, _)) = &self.classification {
+            members.extend(cm.iter().cloned());
+        }
+        budget.charge(
+            self.cone.atoms.len() + self.cone.rules.len(),
+            "completion planning scope",
+        )?;
+        let mut cone = self.cone.clone();
+        cone.rules.retain(|r| members.contains(&cone.atoms[r.head]));
+        answer.members = members.clone();
+        answer.no_meaning = self.symbolic_no_meaning_cone(path, false, true, options, &cone)?;
+        answer.ambiguous =
+            self.symbolic_search_in(path, "completion planning output ambiguity", |s| {
+                let a = s.encode(&cone, true)?;
+                let b = s.encode(&cone, true)?;
+                let diff = s.difference_selected(&cone, &a, &b, Some(targets), false)?;
+                if !s.solve(&[a.gate, b.gate, diff], &[])? {
+                    return Ok(None);
+                }
+                let mut first = self.model(s.values(&cone, &a)?, ModelScope::Property);
+                let mut second = self.model(s.values(&cone, &b)?, ModelScope::Property);
+                let members = Arc::new(members);
+                first.members = Some(members.clone());
+                second.members = Some(members);
+                Ok(Some(Pair { first, second }))
+            })?;
+        Ok(answer)
     }
 }

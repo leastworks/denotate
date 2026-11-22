@@ -1,0 +1,15 @@
+// Read the actual message bit before choosing the outcome. H is a planning
+// hypothesis for accepted values, not permission to replace this input with true.
+input ready();
+input flagged();
+relation accepted();
+accepted() :- ready();
+relation result();
+result() :- ready(), !flagged();
+verification checks {
+    semantics: completion;
+    hypothesis: accepted;
+    decisions: [result];
+    assumptions: [];
+    obligations: [];
+}

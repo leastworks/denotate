@@ -144,13 +144,23 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
         b: &Encoded,
         members: Option<&BTreeSet<GroundAtom>>,
     ) -> Result<Lit> {
+        self.difference_selected(cone, a, b, members, true)
+    }
+    fn difference_selected(
+        &mut self,
+        cone: &Cone,
+        a: &Encoded,
+        b: &Encoded,
+        members: Option<&BTreeSet<GroundAtom>>,
+        declared_only: bool,
+    ) -> Result<Lit> {
         let gate = self.gate()?;
         self.run.cnf.gate = Some(gate);
         let mut differences = Vec::new();
         for (i, atom) in cone.atoms.iter().enumerate() {
             self.run.budget.tick("completion pair")?;
             if cone.input[i]
-                || !self.run.engine.decision(atom)
+                || (declared_only && !self.run.engine.decision(atom))
                 || members.is_some_and(|m| !m.contains(atom))
             {
                 continue;
@@ -498,6 +508,16 @@ impl Engine {
         } else {
             &self.cone
         };
+        self.symbolic_no_meaning_cone(context, classification, unique, options, cone)
+    }
+    fn symbolic_no_meaning_cone(
+        &self,
+        context: &BTreeMap<GroundAtom, bool>,
+        classification: bool,
+        unique: bool,
+        options: &CheckOptions,
+        cone: &Cone,
+    ) -> Result<Search<Observation>> {
         let phase = if classification {
             "completion classification existence"
         } else {

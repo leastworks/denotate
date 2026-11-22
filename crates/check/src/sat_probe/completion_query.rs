@@ -233,7 +233,22 @@ impl Engine {
         limits: &Limits,
         config: QueryLimits,
     ) -> Result<Preparation> {
-        let result = Self::prepare_inner(corpus, domains, keys, verification, limits, config);
+        Self::prepare_for_planning(corpus, domains, keys, verification, limits, config, &[])
+    }
+
+    /// Explicit planning outputs can require a bounded input universe that the
+    /// verification otherwise never reads. They do not change declared decisions.
+    pub fn prepare_for_planning(
+        corpus: &Corpus,
+        domains: &Domains,
+        keys: &SemanticKeys,
+        verification: VerificationId,
+        limits: &Limits,
+        config: QueryLimits,
+        outputs: &[GroundAtom],
+    ) -> Result<Preparation> {
+        let result =
+            Self::prepare_inner(corpus, domains, keys, verification, limits, config, outputs);
         match result {
             Ok(p) => Ok(p),
             Err(e) => Ok(Preparation::Inconclusive(inconclusive(e)?)),
@@ -247,6 +262,7 @@ impl Engine {
         verification: VerificationId,
         limits: &Limits,
         config: QueryLimits,
+        planning_outputs: &[GroundAtom],
     ) -> Result<Preparation> {
         limits.cancellation.check()?;
         let declaration = corpus
@@ -261,12 +277,24 @@ impl Engine {
         }
         keys.validate(corpus).map_err(CheckError::Keys)?;
         let mut b = Budget::new(limits);
+        let mut planning_roots = BTreeSet::new();
+        for a in planning_outputs {
+            b.charge(a.arguments.len() + 1, "completion planning roots")?;
+            planning_roots.insert(a.relation);
+        }
         corpus.input_domain_structure_with(|| b.tick("completion input domains"))?;
-        let (program, ignored_input_domains) =
-            match providers::prepare(corpus, domains, verification, limits, &config, &mut b)? {
-                providers::Inputs::Ready(p, ignored) => (p, ignored),
-                providers::Inputs::Invalid(issues) => return Ok(Preparation::InputDomains(issues)),
-            };
+        let (program, ignored_input_domains) = match providers::prepare(
+            corpus,
+            domains,
+            verification,
+            limits,
+            &config,
+            &planning_roots,
+            &mut b,
+        )? {
+            providers::Inputs::Ready(p, ignored) => (p, ignored),
+            providers::Inputs::Invalid(issues) => return Ok(Preparation::InputDomains(issues)),
+        };
         let mut engine = Self::skeleton(
             corpus,
             domains,

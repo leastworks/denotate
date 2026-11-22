@@ -643,3 +643,15 @@ that require positive circular support. It is off by default, uses separate limi
 and cannot change exit codes even when detection is incomplete. It does not apply
 to stable verifications. BDD/editor/planner/scorecard completion checking remains
 unsupported.
+
+### Completion plan export
+
+`just plan-den ROOT --verification NAME --output RELATION` also supports authored
+completion verifications, with no read descriptors. It emits v5 with separate
+classification and accepted-processing regions, an explicit accept/reject terminal,
+live scope counts and source origins. Try
+`just plan-den fixtures/execution-plan-completion --verification checks --output result`.
+A reject-only plan exits 0; unresolved/invalid/inconclusive construction exits 2.
+This is export, not runtime execution or input validation. Stable plans remain v4.
+The current completion slice is straight-line; splits, joins and tasks follow.
+See [the planning API](../plan/README.md#completion-plans) for its guarantee and limits.

@@ -3,11 +3,12 @@
 //! Pure tasks use explicit scheduling descriptors and caller-supplied callbacks.
 //! No IO or execution permission policy lives here.
 mod build;
+pub mod completion;
 mod export;
 mod run;
 mod search;
 mod task;
-pub use build::{Build, Options, Output, Planner, Problem};
+pub use build::{Build, Options, Output, Planner, Problem, relation_outputs};
 use denotate_check::{AtomKey, stable_query};
 use denotate_ir::{AssumptionKey, RuleKey, VerificationKey};
 pub use export::{atom as atom_json, scope_json};

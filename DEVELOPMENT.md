@@ -19,8 +19,9 @@ The repository root is one Cargo workspace (`Cargo.toml`, `Cargo.lock`, `target/
 covering every crate in `crates/`.
 
 Experimental plain Boolean execution plans: `just plan-den ROOT --verification NAME
---output RELATION`; see [the plan API](crates/plan/README.md). This exports a plan
+--output RELATION`; see [the plan API](crates/plan/README.md). This exports a stable (v4) or straight-line completion (v5) plan
 under the verification's input contract; it does not run the program.
+`just plan-completion-example` runs the completion reference interpreter on a small example.
 
 Editor commands install the pinned npm dependencies when missing or changed; repeat
 runs reuse them. `just setup-den --force` and `just setup-test-dsl --force` reinstall
