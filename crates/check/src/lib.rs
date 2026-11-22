@@ -22,6 +22,8 @@ mod certification;
 mod checking_progress;
 pub use checking_progress::*;
 mod completion;
+mod completion_sizes;
+pub use completion_sizes::*;
 mod contracts;
 mod evaluate;
 mod findings;

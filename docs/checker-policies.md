@@ -32,6 +32,14 @@ operation may not expose an exact count; no count is fabricated. Counts can incl
 rejected demand, and an effective ceiling can be tightened by remaining work/storage
 or backend capacity. These diagnostics do not change accounting or semantic outcomes.
 
+Completion's optional size diagnostics compare positive-support greatest and least
+fixpoints without changing grounding. The least-fixpoint comparison has a separate
+copy of the configured atom/work/time allowances; its time and cleanup are excluded
+from the semantic preparation clock. Cancellation still applies. Diagnostic exhaustion
+reports incomplete counts, never changes checking completeness or causes pruning.
+The comparison retains additional temporary tables; enable it to diagnose size, not
+to measure the uninstrumented memory/time baseline. No budget defaults change.
+
 ## IR construction
 
 Constant duplicate validation uses an ordered name set per namespace/sort pair,

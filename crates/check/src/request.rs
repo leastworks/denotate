@@ -66,6 +66,7 @@ impl From<&Limits> for OperationalLimits {
 impl DeterministicLimits {
     pub fn with_operations(&self, o: &OperationalLimits) -> Limits {
         Limits {
+            completion_sizes: None,
             cancellation: o.cancellation.clone(),
             profile: o.profile.clone(),
             progress: o.progress.clone(),

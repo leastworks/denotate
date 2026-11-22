@@ -395,7 +395,7 @@ fn check_program(
     )
     .map_err(|e| (2, format_errors(e)))?;
     if options.profile_conditions {
-        condition_profile::install(&p, &limits.profile, profile_file);
+        condition_profile::install(&p, &limits.profile, profile_file.clone());
     }
     trace.message(format_args!(
         "Loaded: {} sorts, {} constants, {} relations, {} rules, {} verifications",
@@ -524,6 +524,7 @@ fn check_program(
             completion_circular_support,
             completion_dead_producers,
             &mut dump.borrow_mut(),
+            &profile_file,
             partial,
             unchecked,
             validate_all_assumptions,

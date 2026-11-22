@@ -114,11 +114,22 @@ impl Callbacks for Stop {
     }
 }
 struct Cnf {
+    measurement: Option<(crate::CompletionSizes, crate::CompletionSearchSize)>,
     solver: Solver<Stop>,
     clauses: usize,
     literals: usize,
     /// Clauses emitted in this mode apply only when this literal is true.
     gate: Option<Lit>,
+}
+impl Drop for Cnf {
+    fn drop(&mut self) {
+        if let Some((sink, mut stats)) = self.measurement.take() {
+            stats.variables = self.solver.num_vars() as usize;
+            stats.clauses = self.clauses;
+            stats.literals = self.literals;
+            sink.search(stats);
+        }
+    }
 }
 impl Cnf {
     fn var(&mut self, b: &mut Budget<'_>) -> Result<Lit> {
@@ -518,6 +529,7 @@ fn probe_built(
         existence: None,
     };
     let mut cnf = Cnf {
+        measurement: None,
         solver: Solver::new(
             Default::default(),
             Stop {

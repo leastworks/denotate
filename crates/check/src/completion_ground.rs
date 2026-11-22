@@ -14,6 +14,9 @@ mod full;
 #[path = "completion_ground/tests.rs"]
 mod tests;
 
+#[path = "completion_ground/sizes.rs"]
+mod sizes;
+
 type Binding<'a> = BTreeMap<&'a str, ConstantId>;
 type Index = BTreeMap<Vec<ConstantId>, Vec<usize>>;
 struct Table {
@@ -86,136 +89,162 @@ impl GroundProgram {
         static_scope: Option<&BTreeSet<RelationId>>,
         b: &mut Budget<'_>,
     ) -> Result<Self> {
+        let mut measurement = sizes::Measurement::new(b, static_scope.is_some());
         let domains = validate_domains(corpus, domains, b)?;
         let mut p = Self::empty(corpus, domains.clone());
         p.obligations.clear();
-        if static_scope.is_none() {
-            match eligibility {
-                Some(values) => {
-                    p.input_domains = values;
-                    p.seed_completion_inputs(corpus, b)?;
+        let result: Result<()> = (|| {
+            if static_scope.is_none() {
+                match eligibility {
+                    Some(values) => {
+                        p.input_domains = values;
+                        p.seed_completion_inputs(corpus, b)?;
+                    }
+                    None => p.completion_inputs(corpus, b)?,
                 }
-                None => p.completion_inputs(corpus, b)?,
             }
-        }
-        let mut tables: Upper = corpus
-            .relations()
-            .map(|r| {
-                (
-                    r.id,
-                    if r.role == RelationRole::Input {
-                        Some(Table::new(
-                            p.inputs.iter().filter(|a| a.relation == r.id).cloned(),
-                        ))
-                    } else {
-                        None
-                    },
-                )
-            })
-            .collect();
-        let mut producers = BTreeMap::<_, Vec<_>>::new();
-        for r in corpus
-            .rules()
-            .filter(|r| static_scope.is_none_or(|scope| scope.contains(&r.head.relation())))
-        {
-            b.tick("completion grounding")?;
-            producers.entry(r.head.relation()).or_default().push(r);
-        }
-        let mut fixed_count = p.inputs.len();
-        for component in positive_components(corpus, b)? {
-            if component
-                .iter()
-                .all(|r| corpus.relation(*r).unwrap().role == RelationRole::Input)
+            measurement.least(corpus, &domains, &p.inputs, static_scope, b);
+            let mut tables: Upper = corpus
+                .relations()
+                .map(|r| {
+                    (
+                        r.id,
+                        if r.role == RelationRole::Input {
+                            Some(Table::new(
+                                p.inputs.iter().filter(|a| a.relation == r.id).cloned(),
+                            ))
+                        } else {
+                            None
+                        },
+                    )
+                })
+                .collect();
+            let mut producers = BTreeMap::<_, Vec<_>>::new();
+            for r in corpus
+                .rules()
+                .filter(|r| static_scope.is_none_or(|scope| scope.contains(&r.head.relation())))
             {
-                continue;
+                b.tick("completion grounding")?;
+                producers.entry(r.head.relation()).or_default().push(r);
             }
-            loop {
-                let mut next = BTreeMap::<RelationId, BTreeSet<GroundAtom>>::new();
-                let mut count = 0;
-                for relation in &component {
-                    let out = next.entry(*relation).or_default();
-                    for rule in producers.get(relation).into_iter().flatten() {
-                        bindings(rule, &tables, &domains, b, |binding, b| {
-                            let atom = ground_atom(&rule.head, binding, b)?.atom;
-                            if !out.contains(&atom) {
-                                b.room(
-                                    fixed_count + count,
-                                    b.limits.max_atoms,
-                                    "completion possibility",
-                                    "atoms",
-                                )?;
-                                out.insert(atom);
-                                count += 1;
-                            }
-                            Ok(())
-                        })?;
+            let mut fixed_count = p.inputs.len();
+            for component in positive_components(corpus, b)? {
+                if component
+                    .iter()
+                    .all(|r| corpus.relation(*r).unwrap().role == RelationRole::Input)
+                {
+                    continue;
+                }
+                loop {
+                    if measurement.enabled() {
+                        b.excluding_time(|| measurement.round(&component));
+                    }
+                    let mut next = BTreeMap::<RelationId, BTreeSet<GroundAtom>>::new();
+                    let mut count = 0;
+                    for relation in &component {
+                        let out = next.entry(*relation).or_default();
+                        for rule in producers.get(relation).into_iter().flatten() {
+                            bindings(rule, &tables, &domains, b, |binding, b| {
+                                let atom = ground_atom(&rule.head, binding, b)?.atom;
+                                if !out.contains(&atom) {
+                                    b.room(
+                                        fixed_count + count,
+                                        b.limits.max_atoms,
+                                        "completion possibility",
+                                        "atoms",
+                                    )?;
+                                    if measurement.enabled() {
+                                        b.excluding_time(|| measurement.observe(&atom));
+                                    }
+                                    out.insert(atom);
+                                    count += 1;
+                                }
+                                Ok(())
+                            })?;
+                        }
+                    }
+                    let mut equal = true;
+                    for (relation, atoms) in next {
+                        b.charge(atoms.len() + 1, "completion possibility")?;
+                        equal &= tables[&relation]
+                            .as_ref()
+                            .is_some_and(|old| old.rows.iter().eq(atoms.iter()));
+                        tables.insert(relation, Some(Table::new(atoms)));
+                    }
+                    if equal {
+                        if measurement.enabled() {
+                            b.excluding_time(|| measurement.fixed(&component));
+                        }
+                        fixed_count += count;
+                        break;
                     }
                 }
-                let mut equal = true;
-                for (relation, atoms) in next {
-                    b.charge(atoms.len() + 1, "completion possibility")?;
-                    equal &= tables[&relation]
-                        .as_ref()
-                        .is_some_and(|old| old.rows.iter().eq(atoms.iter()));
-                    tables.insert(relation, Some(Table::new(atoms)));
-                }
-                if equal {
-                    fixed_count += count;
-                    break;
-                }
             }
-        }
-        // Construct only instances whose positive premises survived the greatest
-        // fixpoint. Every omitted producer has a premise false in every completion.
-        let mut dependencies = 0;
-        for rule in corpus
-            .rules()
-            .filter(|r| static_scope.is_none_or(|scope| scope.contains(&r.head.relation())))
-        {
-            bindings(rule, &tables, &domains, b, |binding, b| {
-                b.room(
-                    p.rules.len(),
-                    b.limits.max_rules,
-                    "completion grounding",
-                    "rules",
-                )?;
-                let head = ground_atom(&rule.head, binding, b)?;
-                p.completion_atom(head.atom.clone(), b)?;
-                let mut body = Vec::new();
-                for literal in &rule.body {
+            // Construct only instances whose positive premises survived the greatest
+            // fixpoint. Every omitted producer has a premise false in every completion.
+            let mut dependencies = 0;
+            for rule in corpus
+                .rules()
+                .filter(|r| static_scope.is_none_or(|scope| scope.contains(&r.head.relation())))
+            {
+                bindings(rule, &tables, &domains, b, |binding, b| {
                     b.room(
-                        dependencies,
-                        b.limits.max_dependencies,
+                        p.rules.len(),
+                        b.limits.max_rules,
                         "completion grounding",
-                        "dependencies",
+                        "rules",
                     )?;
-                    dependencies += 1;
-                    let term = ground_atom(literal.atom(), binding, b)?;
-                    p.completion_atom(term.atom.clone(), b)?;
-                    body.push(GroundLiteral {
-                        polarity: if matches!(literal, Literal::Positive(_)) {
-                            Polarity::Positive
-                        } else {
-                            Polarity::Negative
-                        },
-                        term,
+                    let head = ground_atom(&rule.head, binding, b)?;
+                    p.completion_atom(head.atom.clone(), b)?;
+                    let mut body = Vec::new();
+                    for literal in &rule.body {
+                        b.room(
+                            dependencies,
+                            b.limits.max_dependencies,
+                            "completion grounding",
+                            "dependencies",
+                        )?;
+                        dependencies += 1;
+                        let term = ground_atom(literal.atom(), binding, b)?;
+                        p.completion_atom(term.atom.clone(), b)?;
+                        body.push(GroundLiteral {
+                            polarity: if matches!(literal, Literal::Positive(_)) {
+                                Polarity::Positive
+                            } else {
+                                Polarity::Negative
+                            },
+                            term,
+                        });
+                    }
+                    let id = GroundRuleId {
+                        preparation: p.preparation,
+                        index: p.rules.len(),
+                    };
+                    p.rules.push(GroundRule {
+                        id,
+                        source: rule.id,
+                        head,
+                        body,
+                        replacements: vec![],
                     });
+                    Ok(())
+                })?;
+            }
+            graph::analyze(&mut p, b)?;
+            Ok(())
+        })();
+        if measurement.enabled() && measurement.data.relations.is_empty() {
+            b.excluding_time(|| {
+                for a in &p.inputs {
+                    measurement.observe(a);
                 }
-                let id = GroundRuleId {
-                    preparation: p.preparation,
-                    index: p.rules.len(),
-                };
-                p.rules.push(GroundRule {
-                    id,
-                    source: rule.id,
-                    head,
-                    body,
-                    replacements: vec![],
-                });
-                Ok(())
-            })?;
+            });
         }
-        graph::analyze(&mut p, b)?;
+        measurement.data.atoms = p.atoms.len();
+        measurement.data.rules = p.rules.len();
+        measurement.data.complete = result.is_ok();
+        b.excluding_time(|| drop(measurement));
+        result?;
         Ok(p)
     }
     pub(crate) fn completion_inputs(

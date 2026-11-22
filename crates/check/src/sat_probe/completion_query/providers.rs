@@ -124,6 +124,7 @@ pub(super) fn prepare(
                 .rules
                 .retain(|r| members.contains(&e.cone.atoms[r.head]));
             let mut run = Run::universe(&e, b)?;
+            run.label("completion input provider");
             let encoded = encode(
                 &e.cone,
                 &mut run.cnf,

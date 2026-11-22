@@ -234,6 +234,7 @@ impl Engine {
     }
     pub(super) fn reset_world(&mut self, b: &mut Budget<'_>) -> Result<()> {
         self.cnf = Cnf {
+            measurement: None,
             solver: Solver::new(
                 Default::default(),
                 Stop {

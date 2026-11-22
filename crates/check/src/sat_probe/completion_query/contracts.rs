@@ -290,7 +290,11 @@ impl Engine {
     ) -> Result<Search<T>> {
         let _progress = self.limits.progress.scope(phase, None, true);
         let mut budget = Budget::new(&self.limits);
-        let result = (|| f(&mut Run::universe(self, &mut budget)?))();
+        let result = (|| {
+            let mut run = Run::universe(self, &mut budget)?;
+            run.label(phase);
+            f(&mut run)
+        })();
         match result {
             Ok(Some(v)) => Ok(Search::Exists(v)),
             Ok(None) => Ok(Search::None),

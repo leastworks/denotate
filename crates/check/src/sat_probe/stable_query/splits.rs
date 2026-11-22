@@ -154,6 +154,7 @@ impl Engine {
         let mut input_pins = self.input_pins.clone();
         input_pins.extend(pins.clone());
         let cnf = Cnf {
+            measurement: None,
             solver: Solver::new(
                 Default::default(),
                 Stop {

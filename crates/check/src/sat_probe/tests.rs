@@ -10,6 +10,7 @@ fn cardinality_truth_tables_and_selector_isolation() {
             let limits = Limits::default();
             let mut budget = Budget::new(&limits);
             let mut cnf = Cnf {
+                measurement: None,
                 solver: Solver::new(
                     Default::default(),
                     Stop {
@@ -336,6 +337,7 @@ fn solver_polls_cancellation_during_a_real_search() {
     let seen = polls.clone();
     let token = l.cancellation.clone();
     let mut cnf = Cnf {
+        measurement: None,
         solver: Solver::new(
             Default::default(),
             Stop {

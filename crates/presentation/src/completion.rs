@@ -736,3 +736,62 @@ fn observation_note(
         show(&w.absent)?
     ))
 }
+
+/// Bounded size report, separate from verdicts and evidence. Counts at an
+/// unfinished descending round are observations, not lower bounds on its GFP.
+pub fn completion_sizes(
+    keys: &SemanticKeys,
+    sizes: &denotate_check::CompletionSizeSnapshot,
+) -> Result<Value> {
+    let relation =
+        |r: RelationId| -> Result<Value> { Ok(crate::identity::relation(keys.relation(r)?)) };
+    let mut preparations = Vec::new();
+    for p in &sizes.preparations {
+        let mut rows = p.relations.iter().collect::<Vec<_>>();
+        rows.sort_by(|(a, x), (b, y)| {
+            y.observed
+                .cmp(&x.observed)
+                .then_with(|| keys.relation(**a).unwrap().cmp(keys.relation(**b).unwrap()))
+        });
+        let relations=rows.iter().take(32).map(|(id,r)| Ok(json!({"relation":relation(**id)?,"possibility":r.observed,"state":if r.fixed {"fixed-point"} else {"partial-round"},"round":r.round,"least":r.least,"leastCountKind":if p.least_complete {"exact"} else {"at-least"},"circularOnly":if r.fixed {r.circular} else {None},"observedOutsideLeast":r.circular,"example":r.example.as_ref().map(|a|atom(a,keys)).transpose()?}))).collect::<Result<Vec<_>>>()?;
+        let mut components = Vec::new();
+        for members in &p.components {
+            let count = members
+                .iter()
+                .filter_map(|r| p.relations.get(r))
+                .map(|r| r.observed)
+                .sum::<usize>();
+            let least = members
+                .iter()
+                .filter_map(|r| p.relations.get(r))
+                .map(|r| r.least)
+                .sum::<usize>();
+            let fixed = members
+                .iter()
+                .all(|r| p.relations.get(r).is_some_and(|r| r.fixed));
+            let circular = if fixed && p.least_complete {
+                Some(count.saturating_sub(least))
+            } else {
+                None
+            };
+            let mut members = members.clone();
+            members.sort_by_key(|r| keys.relation(*r).unwrap());
+            let example = members
+                .iter()
+                .filter_map(|r| p.relations.get(r))
+                .find_map(|r| r.example.as_ref());
+            components.push((count,json!({"relations":members.iter().take(32).map(|r|relation(*r)).collect::<Result<Vec<_>>>()?,"omittedRelations":members.len().saturating_sub(32),"possibility":count,"least":least,"state":if fixed {"fixed-point"} else {"partial"},"circularOnly":circular,"example":example.map(|a|atom(a,keys)).transpose()?})));
+        }
+        components.sort_by(|a, b| {
+            b.0.cmp(&a.0).then_with(|| {
+                a.1["relations"]
+                    .to_string()
+                    .cmp(&b.1["relations"].to_string())
+            })
+        });
+        preparations.push(json!({"scope":if p.static_provider {"static-provider"} else {"runtime"},"complete":p.complete,"atoms":p.atoms,"rules":p.rules,"possibilityObserved":p.relations.values().map(|r|r.observed).sum::<usize>(),"possibilityComplete":p.relations.values().all(|r|r.fixed),"countKind":if p.complete {"exact"} else {"at-least"},"leastComplete":p.least_complete,"leastError":p.least_error.as_ref().map(ToString::to_string),"relations":relations,"omittedRelations":rows.len().saturating_sub(32),"positiveRelationComponents":components.iter().take(32).map(|(_,v)|v).collect::<Vec<_>>(),"omittedComponents":components.len().saturating_sub(32)}));
+    }
+    Ok(
+        json!({"preparations":preparations,"searches":sizes.searches.iter().map(|s|json!({"phase":s.phase,"variables":s.variables,"clauses":s.clauses,"literals":s.literals,"encodingsStarted":s.encodings})).collect::<Vec<_>>(),"omittedPreparations":sizes.omitted_preparations,"omittedSearches":sizes.omitted_searches}),
+    )
+}

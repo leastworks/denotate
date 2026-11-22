@@ -576,6 +576,24 @@ there is no unqualified program proof. Required unknown/unanalysed work has exit
 which takes precedence over a known failure (exit 1). Partial selection stays exit 2.
 
 The existing SAT solve/world/tuple/CNF limits bound this completion path.
+`--verbose` or `--json` also collects completion sizes. `--profile-memory FILE`
+collects them and writes a `completion-sizes` JSONL record per verification, plus
+a separate `completion size LFP` profile span for the diagnostic comparison.
+The JSON console section is labelled `Completion sizes:`. It includes ground
+atom/rule counts, observed possibility tuples, relation counts (largest first),
+positive relation SCCs with example atoms, and CNF variables/clauses/literals and
+encoding attempts per solver instance. Encoding attempts include W, assumption and
+model copies, including a partially built copy at cutoff; they are not solve counts.
+
+The support split compares the positive-support GFP with the LFP of the same rules,
+ignoring negation and using eligible inputs. `circularOnly` is exact only when both
+fixpoints completed. It is not a semantic counterexample. A preparation cutoff
+retains `partial-round` observations, which are **not** lower bounds on the final GFP;
+an LFP cutoff leaves circular-only counts unknown. This diagnostic pass uses its own
+copy of the configured limits and does not consume semantic work or preparation
+time allowance. It adds diagnostic work/memory but changes no checker limits or
+verdict. Output bounds and details are in the [checker README](../check/README.md#experimental-completion-queries).
+
 Grounding joins greatest-fixpoint possible tuples, preserving unseeded recursion
 and scopes defined by those live instances. Dead producers do not enlarge a scope;
 W, H, decisions and later solver pruning do not change liveness. Whole-verification checks use symbolic pair

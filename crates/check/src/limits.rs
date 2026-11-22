@@ -137,6 +137,8 @@ impl Cancellation {
 /// cooperatively between work items, not a promise of hard real-time preemption.
 #[derive(Debug, Clone)]
 pub struct Limits {
+    /// Opt-in completion measurement, excluded from semantic/cache configuration.
+    pub completion_sizes: Option<crate::CompletionSizes>,
     pub profile: crate::Profile,
     pub progress: crate::CheckingProgress,
     pub cancellation: Cancellation,
@@ -166,6 +168,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
+            completion_sizes: None,
             cancellation: Cancellation::default(),
             profile: Default::default(),
             progress: Default::default(),

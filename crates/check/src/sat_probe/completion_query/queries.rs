@@ -34,6 +34,7 @@ impl Engine {
     ) -> Result<WorldAnswer> {
         let result: Result<WorldAnswer> = (|| {
             let mut run = Run::new(self, budget)?;
+            run.label("completion worlds");
             let mut pins = Vec::new();
             for (a, value) in &query.pins {
                 let l = run.input(a)?;
@@ -94,6 +95,7 @@ impl Engine {
                 return Ok(ObservationOutcome::UndeterminedAssumptions(issues));
             }
             let mut run = Run::new(self, budget)?;
+            run.label("completion observation");
             run.solve_limit = self.config.max_solves.saturating_sub(solves);
             // Inputs stay pinned through every query below; their assumption
             // determinacy was already established independently.
@@ -270,6 +272,11 @@ pub(super) fn property(
 }
 
 impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
+    pub(super) fn label(&mut self, phase: &'static str) {
+        if let Some((_, stats)) = &mut self.cnf.measurement {
+            stats.phase = phase;
+        }
+    }
     pub(super) fn new(engine: &'a Engine, budget: &'b mut Budget<'l>) -> Result<Self> {
         let mut run = Self::universe(engine, budget)?;
         for a in &engine.assumptions {
@@ -289,6 +296,18 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
     pub(super) fn universe(engine: &'a Engine, budget: &'b mut Budget<'l>) -> Result<Self> {
         budget.check("completion query")?;
         let mut cnf = Cnf {
+            measurement: engine.limits.completion_sizes.clone().map(|sink| {
+                (
+                    sink,
+                    crate::CompletionSearchSize {
+                        phase: "completion query",
+                        variables: 0,
+                        clauses: 0,
+                        literals: 0,
+                        encodings: 0,
+                    },
+                )
+            }),
             solver: Solver::new(
                 Default::default(),
                 Stop {
@@ -396,6 +415,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
                 // A separate solver prevents downstream equations, H, other
                 // restrictions and candidate exclusions from choosing A's truth.
                 let mut check = Run::universe(self.engine, self.budget)?;
+                check.label("completion assumption certification");
                 check.solve_limit = self.solve_limit.saturating_sub(self.solves);
                 let result: Result<_> = (|| {
                     let e = encode(

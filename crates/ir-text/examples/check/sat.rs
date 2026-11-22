@@ -13,6 +13,7 @@ pub(super) fn run(
     circular_support: bool,
     dead_producers: bool,
     dump: &mut Option<component_dump::Dump>,
+    profile_file: &Option<profile_writer::Shared>,
     partial: bool,
     unchecked: bool,
     validate_all: bool,
@@ -126,6 +127,7 @@ pub(super) fn run(
                 json,
                 verbose,
                 output,
+                profile_file,
             )?;
             incomplete |= inc;
             failure |= failed;
@@ -327,6 +329,85 @@ pub(super) fn run(
 }
 
 fn completion(
+    p: &LoadedProgram,
+    v: &denotate_ir::VerificationDeclaration,
+    limits: &Limits,
+    query: &QueryLimits,
+    check: &CheckOptions,
+    circular_support: bool,
+    dead_producers: bool,
+    json: bool,
+    verbose: bool,
+    output: &mut String,
+    profile_file: &Option<profile_writer::Shared>,
+) -> Result<(bool, bool), Failure> {
+    let mut limits = limits.clone();
+    if verbose || json || limits.profile.enabled() {
+        limits.completion_sizes = Some(denotate_check::CompletionSizes::default());
+    }
+    let result = completion_inner(
+        p,
+        v,
+        &limits,
+        query,
+        check,
+        circular_support,
+        dead_producers,
+        json,
+        verbose,
+        output,
+    );
+    if let Some(sink) = &limits.completion_sizes {
+        let sizes = denotate_presentation::completion_sizes(&p.keys, &sink.snapshot())
+            .map_err(|e| (2, e.to_string()))?;
+        profile_record(
+            profile_file,
+            json!({"type":"completion-sizes","verification":p.keys.verification(v.id).map(|k|format!("{}::{}",k.0.namespace,k.0.name)).unwrap_or_default(),"sizes":sizes}),
+        );
+        if json {
+            writeln!(output, "Completion sizes: {sizes:#}").unwrap();
+        } else {
+            for prep in sizes["preparations"].as_array().unwrap() {
+                writeln!(output,"Completion preparation ({}; complete={}): {} atoms, {} rules; least complete={}",prep["scope"],prep["complete"],prep["atoms"],prep["rules"],prep["leastComplete"]).unwrap();
+                for r in prep["relations"].as_array().unwrap() {
+                    writeln!(output,"  relation {}: possibility {} ({}), least {} ({}), circular-only {}; example {}",r["relation"],r["possibility"],r["state"],r["least"],r["leastCountKind"],r["circularOnly"],r["example"]).unwrap();
+                }
+                for c in prep["positiveRelationComponents"].as_array().unwrap() {
+                    writeln!(output,"  positive relation SCC {}: possibility {}, least {}, circular-only {}; example {}",c["relations"],c["possibility"],c["least"],c["circularOnly"],c["example"]).unwrap();
+                }
+                if !prep["leastError"].is_null() {
+                    writeln!(output, "  size analysis incomplete: {}", prep["leastError"]).unwrap();
+                }
+                writeln!(
+                    output,
+                    "  omitted: {} relations, {} components",
+                    prep["omittedRelations"], prep["omittedComponents"]
+                )
+                .unwrap();
+            }
+            for search in sizes["searches"].as_array().unwrap() {
+                writeln!(
+                    output,
+                    "Completion CNF {}: {} variables, {} clauses, {} encoding attempts",
+                    search["phase"],
+                    search["variables"],
+                    search["clauses"],
+                    search["encodingsStarted"]
+                )
+                .unwrap();
+            }
+            writeln!(
+                output,
+                "Completion size records omitted: {} preparations, {} searches",
+                sizes["omittedPreparations"], sizes["omittedSearches"]
+            )
+            .unwrap();
+        }
+    }
+    result
+}
+
+fn completion_inner(
     p: &LoadedProgram,
     v: &denotate_ir::VerificationDeclaration,
     limits: &Limits,

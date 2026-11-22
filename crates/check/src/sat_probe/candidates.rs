@@ -194,6 +194,7 @@ fn probe(
         elapsed: Duration::ZERO,
     };
     let mut cnf = Cnf {
+        measurement: None,
         solver: Solver::new(
             Default::default(),
             Stop {

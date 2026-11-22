@@ -107,6 +107,9 @@ pub(super) fn encode(
     inputs: Option<&[Lit]>,
     b: &mut Budget<'_>,
 ) -> Result<Encoding> {
+    if let Some((_, stats)) = &mut cnf.measurement {
+        stats.encodings += 1;
+    }
     let mut vars = Vec::new();
     for i in 0..c.fixed.len() {
         b.tick("SAT existence encoding")?;
@@ -302,6 +305,7 @@ pub(super) fn search_built(
         elapsed: Duration::ZERO,
     };
     let mut cnf = Cnf {
+        measurement: None,
         solver: Solver::new(
             Default::default(),
             Stop {

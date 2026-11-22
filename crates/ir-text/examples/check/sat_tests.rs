@@ -668,3 +668,59 @@ fn completion_cli_shared_and_unselected_declarations_keep_stable_validation() {
     assert_eq!(code, 2, "{out}");
     assert!(out.contains("invalid-assumption"), "{out}");
 }
+
+#[test]
+fn completion_cli_size_diagnostics_are_opt_in_and_keep_cutoff_counts() {
+    let f = Fixture::new(
+        "sort S;const a,b,c,d,e,f:S;relation loop(s:S);loop(X):-loop(X);verification v{semantics:completion;decisions:[];assumptions:[];obligations:[];}",
+    );
+    let (plain_code, plain) = f.run(&["--engine", "sat", "--no-progress"]);
+    assert!(!plain.contains("Completion preparation"));
+    let (code, out) = f.run(&["--engine", "sat", "--no-progress", "--verbose"]);
+    assert_eq!(code, plain_code);
+    assert!(out.contains("circular-only"));
+    assert!(out.contains("Completion CNF"));
+    let (code, out) = f.run(&[
+        "--engine",
+        "sat",
+        "--no-progress",
+        "--json",
+        "--max-atoms",
+        "3",
+    ]);
+    assert_eq!(code, 2, "{out}");
+    let data = out.split_once("Completion sizes: ").unwrap().1;
+    let data: serde_json::Value = serde_json::from_str(data).unwrap();
+    assert_eq!(data["preparations"][0]["complete"], false);
+    assert_eq!(
+        data["preparations"][0]["relations"][0]["state"],
+        "partial-round"
+    );
+}
+
+#[test]
+fn completion_size_counts_reach_memory_profile() {
+    let f = Fixture::new(
+        "relation p();p():-p();verification v{semantics:completion;decisions:[];assumptions:[];obligations:[];}",
+    );
+    let path = f.0.join("completion-profile.jsonl");
+    let (code, out, _) = f.traced(&[
+        "--engine",
+        "sat",
+        "--no-progress",
+        "--profile-memory",
+        path.to_str().unwrap(),
+    ]);
+    assert_eq!(code.unwrap(), 0, "{out}");
+    let events = std::fs::read_to_string(&path)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
+        .collect::<Vec<_>>();
+    let event = events
+        .iter()
+        .find(|e| e["type"] == "completion-sizes")
+        .unwrap();
+    assert!(event["sizes"]["searches"].as_array().unwrap().len() > 0);
+    assert_eq!(event["sizes"]["preparations"][0]["complete"], true);
+}

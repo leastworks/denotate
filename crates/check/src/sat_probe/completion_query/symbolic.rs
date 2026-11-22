@@ -314,6 +314,7 @@ impl Engine {
         let mut budget = Budget::new(&self.limits);
         let answer = (|| {
             let mut solver = Solver::new(self, &mut budget)?;
+            solver.run.label(phase);
             for (atom, value) in context {
                 let literal = solver.run.input(atom)?;
                 solver.run.cnf.clause(
@@ -638,6 +639,7 @@ impl Engine {
         budget: &mut Budget<'_>,
     ) -> Result<Option<Model>> {
         let mut s = Solver::new(self, budget)?;
+        s.run.label("completion property");
         let encoded = s.encode(cone, true)?;
         s.run.cnf.gate = Some(encoded.gate);
         let lits: Vec<_> = part

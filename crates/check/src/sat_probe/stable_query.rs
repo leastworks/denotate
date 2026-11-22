@@ -305,6 +305,7 @@ impl Engine {
         )?;
         let program = Arc::new(program);
         let mut cnf = Cnf {
+            measurement: None,
             solver: Solver::new(
                 Default::default(),
                 Stop {
