@@ -674,6 +674,15 @@ impl AdmissionDetails<'_> {
                 Some(denotate_check::CheckingTarget::SatUniqueness(s)) => {
                     Some(denotate_presentation::stable_uniqueness_stats(&s))
                 }
+                Some(denotate_check::CheckingTarget::CompletionSize {
+                    component,
+                    components,
+                    round,
+                    tuples,
+                }) => Some(json!({
+                    "kind":"completion-size", "component":component, "components":components,
+                    "round":round, "tuples":tuples
+                })),
                 Some(denotate_check::CheckingTarget::InputOrder(_)) => None,
                 None => None,
             };

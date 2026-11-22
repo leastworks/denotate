@@ -761,17 +761,32 @@ solver's CNF variables, clauses, literals and encoding attempts, including cutof
 It is a per-invocation observation sink, excluded from cache identity. A separate
 positive-support least-fixpoint pass uses the same finite domains and eligible
 inputs as possibility grounding, ignoring negation. Its own work/atom/time allowance
-copies the configured limits; diagnostic time is excluded from the preparation
-budget, including cleanup. Its exhaustion never changes a verdict. Disabled runs
-do not compute that LFP.
+copies the configured limits, with its cooperative deadline capped at five seconds
+per grounding attempt even if the run's timeout is larger. Diagnostic time is
+excluded from the preparation budget, including cleanup. Progress reports the
+component, round and tuple count; a cutoff explicitly reports that checking
+continues. Its exhaustion never changes a verdict. Disabled runs do not compute
+that LFP. Rules and positive readers are indexed once. The pass is semi-naive:
+seed producers run once, then only new tuples trigger their recursive readers.
+Accumulated join indexes are extended, never rebuilt per round. All LFP tables start
+concrete and empty (eligible inputs are seeded); joins use concrete tuples, never symbolic-full
+tables. If a join would require unbound sort-domain enumeration, the optional
+comparison stops with an explicit cutoff. Large concrete joins remain possible,
+bounded by this pass's work, atom and time allowances.
 
-For a completed GFP and LFP, `circularOnly` counts GFP minus LFP, with an example.
+For a completed GFP and LFP, `circularOnly` counts GFP minus LFP, with an optional example.
 These atoms need circular support in the positive possibility abstraction; this is
 not a claim that they satisfy the original completion equations. A downstream
 acyclic relation can inherit such support. Partial descending rounds report observed
 tuples, not lower bounds on the final GFP. An unfinished LFP reports a lower bound
 and leaves `circularOnly` unknown. Components are positive **relation** SCCs.
-The retained LFP tables add diagnostic memory/work; this is not a memory optimization.
+The retained LFP membership sets add diagnostic memory/work; this is not a memory
+optimization. GFP observation bookkeeping runs once per relation, including failed
+joins, with no per-tuple clock calls. A complete descending relation table contains
+the LFP, so its difference count uses the two cardinalities. Partial tables leave
+that difference unknown unless the LFP is empty. Example lookup examines at most
+1,024 tuples in deterministic table order; a positive difference can therefore
+have no example. This bound never changes the count.
 Measurements keep at most 128 preparation and 1,024 solver records per sink, with
 omitted counts. Presentation shows the largest 32 relations/components and bounds
 each component's relation list; full program counters remain available.

@@ -1,4 +1,5 @@
 use super::tests::Fixture;
+use super::{Limits, filesystem, sat};
 
 #[test]
 fn completion_cli_all_rejected_and_explicit_rejection_obligation() {
@@ -680,6 +681,7 @@ fn completion_cli_size_diagnostics_are_opt_in_and_keep_cutoff_counts() {
     assert_eq!(code, plain_code);
     assert!(out.contains("circular-only"));
     assert!(out.contains("Completion CNF"));
+    assert!(out.find("Completion preparation").unwrap() < out.find("Context:").unwrap());
     let (code, out) = f.run(&[
         "--engine",
         "sat",
@@ -689,8 +691,12 @@ fn completion_cli_size_diagnostics_are_opt_in_and_keep_cutoff_counts() {
         "3",
     ]);
     assert_eq!(code, 2, "{out}");
-    let data = out.split_once("Completion sizes: ").unwrap().1;
-    let data: serde_json::Value = serde_json::from_str(data).unwrap();
+    let data = out.split_once("Completion preparation sizes: ").unwrap().1;
+    let data: serde_json::Value = serde_json::Deserializer::from_str(data)
+        .into_iter()
+        .next()
+        .unwrap()
+        .unwrap();
     assert_eq!(data["preparations"][0]["complete"], false);
     assert_eq!(
         data["preparations"][0]["relations"][0]["state"],
@@ -717,10 +723,81 @@ fn completion_size_counts_reach_memory_profile() {
         .lines()
         .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .collect::<Vec<_>>();
+    let prep = events
+        .iter()
+        .position(|e| e["type"] == "completion-preparation-sizes")
+        .unwrap();
+    assert!(events[prep]["sizes"]["preparations"][0]["complete"] == true);
+    assert!(
+        events[prep]["sizes"]["searches"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        prep < events
+            .iter()
+            .position(|e| e["type"] == "completion-sizes")
+            .unwrap()
+    );
     let event = events
         .iter()
         .find(|e| e["type"] == "completion-sizes")
         .unwrap();
     assert!(event["sizes"]["searches"].as_array().unwrap().len() > 0);
     assert_eq!(event["sizes"]["preparations"][0]["complete"], true);
+}
+
+#[test]
+fn completion_preparation_sizes_are_flushed_before_checking_even_without_progress() {
+    let f = Fixture::new(
+        "relation p();p();verification v{semantics:completion;decisions:[];assumptions:[];obligations:[];}",
+    );
+    let (membership, sources) = filesystem::discover(&f.0).unwrap();
+    let p = denotate_ir_text::load(&membership, &sources).unwrap();
+    let sink = denotate_check::CompletionSizes::default();
+    let limits = Limits {
+        completion_sizes: Some(sink.clone()),
+        ..Default::default()
+    };
+    let mut flushed = false;
+    let mut output = String::new();
+    let result = sat::completion_inner(
+        &p,
+        p.corpus.verifications().next().unwrap(),
+        &limits,
+        &Default::default(),
+        &Default::default(),
+        false,
+        false,
+        true,
+        false,
+        &mut output,
+        &None,
+        &mut |text| {
+            assert!(text.contains("Completion preparation sizes:"));
+            assert!(
+                sink.snapshot().searches.is_empty(),
+                "checking ran before preparation was published"
+            );
+            flushed = true;
+            limits.cancellation.cancel();
+            Ok(())
+        },
+    );
+    assert!(flushed);
+    assert!(result.unwrap_err().1.contains("Cancelled"));
+    assert!(!output.contains("Results:"));
+}
+
+#[test]
+fn completion_size_progress_reports_the_diagnostic_pass() {
+    let f = Fixture::new(
+        "relation p();p();verification v{semantics:completion;decisions:[];assumptions:[];obligations:[];}",
+    );
+    let (code, _, trace) = f.traced(&["--engine", "sat", "--verbose"]);
+    assert_eq!(code.unwrap(), 0);
+    assert!(trace.contains("completion size LFP"), "{trace}");
+    assert!(trace.contains("component 1/1"), "{trace}");
+    assert!(trace.contains("tuples"), "{trace}");
 }

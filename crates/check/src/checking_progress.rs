@@ -9,6 +9,12 @@ use std::{
 
 #[derive(Debug, Clone)]
 pub enum CheckingTarget {
+    CompletionSize {
+        component: usize,
+        components: usize,
+        round: usize,
+        tuples: usize,
+    },
     SatExistence(crate::stable_query::ExistenceStats),
     SatUniqueness(crate::stable_query::UniquenessStats),
     InputOrder(InputOrderReport),
@@ -97,6 +103,30 @@ impl CheckingProgress {
             drop(frame);
             self.emit("progress", first);
         }
+    }
+    pub(crate) fn completion_size(
+        &self,
+        component: usize,
+        components: usize,
+        round: usize,
+        tuples: usize,
+    ) {
+        if let Some(s) = &self.0 {
+            s.current.lock().unwrap().target = Some(CheckingTarget::CompletionSize {
+                component,
+                components,
+                round,
+                tuples,
+            });
+            self.emit("progress", false);
+        }
+    }
+    pub(crate) fn diagnostic(&self, stage: &'static str) -> CheckingScope {
+        let scope = self.enter(stage, None, true, true, false);
+        if let Some(s) = &self.0 {
+            s.current.lock().unwrap().deadline_recovers = true;
+        }
+        scope
     }
     pub fn enabled(&self) -> bool {
         self.0.is_some()

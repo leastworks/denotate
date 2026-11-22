@@ -577,9 +577,13 @@ which takes precedence over a known failure (exit 1). Partial selection stays ex
 
 The existing SAT solve/world/tuple/CNF limits bound this completion path.
 `--verbose` or `--json` also collects completion sizes. `--profile-memory FILE`
-collects them and writes a `completion-sizes` JSONL record per verification, plus
-a separate `completion size LFP` profile span for the diagnostic comparison.
-The JSON console section is labelled `Completion sizes:`. It includes ground
+collects them and writes a `completion-preparation-sizes` JSONL record immediately
+when preparation finishes or stops, before checking searches, plus the final
+`completion-sizes` record containing the full snapshot. A separate
+`completion size LFP` profile span covers the diagnostic comparison.
+Console output flushes preparation counts at the same boundary, even with
+`--no-progress`. JSON sections are labelled `Completion preparation sizes:` and,
+after checking, `Completion sizes:` (search counts). Together they include ground
 atom/rule counts, observed possibility tuples, relation counts (largest first),
 positive relation SCCs with example atoms, and CNF variables/clauses/literals and
 encoding attempts per solver instance. Encoding attempts include W, assumption and
@@ -590,9 +594,15 @@ ignoring negation and using eligible inputs. `circularOnly` is exact only when b
 fixpoints completed. It is not a semantic counterexample. A preparation cutoff
 retains `partial-round` observations, which are **not** lower bounds on the final GFP;
 an LFP cutoff leaves circular-only counts unknown. This diagnostic pass uses its own
-copy of the configured limits and does not consume semantic work or preparation
-time allowance. It adds diagnostic work/memory but changes no checker limits or
-verdict. Output bounds and details are in the [checker README](../check/README.md#experimental-completion-queries).
+copy of the configured limits, with a cooperative deadline capped at five seconds
+per grounding attempt. It reports progress and recoverable cutoffs and does not
+consume semantic work or preparation time allowance. It joins concrete tables
+from empty, never enumerating symbolic-full tables or unbound sort domains;
+large concrete joins can still exhaust its allowance. The LFP propagates only new
+tuples, with incremental join indexes; observation bookkeeping uses table counts
+once per relation rather than inspecting each emitted tuple. Circular-only examples
+are optional and use a bounded scan. It adds diagnostic work/memory but changes no
+semantic checker limits or verdict. Output bounds and details are in the [checker README](../check/README.md#experimental-completion-queries).
 
 Grounding joins greatest-fixpoint possible tuples, preserving unseeded recursion
 and scopes defined by those live instances. Dead producers do not enlarge a scope;

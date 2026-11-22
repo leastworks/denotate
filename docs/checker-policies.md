@@ -1651,3 +1651,18 @@ preparation. Task splits retain the remaining continuation inside both arms, tra
 larger plan structure for simple one-shot execution without task-state merging.
 Interpreter bookkeeping is bounded; a host callback itself is not preempted by its
 operation counter. This increment makes no corpus-scale performance claim.
+
+### Optional completion size analysis
+
+The positive-support LFP used only for completion size diagnostics has an independent
+work/atom allowance and a cooperative deadline of the configured timeout or five
+seconds, whichever is shorter, per grounding attempt. Raising the production timeout
+does not lengthen this optional pass. Its time, including cleanup, is excluded from
+semantic preparation; its cutoff leaves circular-only counts unknown and does not
+change a verdict. It reports progress and cutoffs. Its semi-naive propagation runs
+seed rules once and recursive readers only for new tuples, retaining join indexes
+across rounds. GFP observation counts are recorded once per relation; examples
+inspect at most 1,024 tuples, so exact counts need not have an example. All its joins
+use concrete tables; unbound sort-domain enumeration stops the diagnostic comparison. This does not alter
+the completion GFP descent order or its limits. CLI preparation counts are flushed
+before checking searches, including partial counts when preparation stops.

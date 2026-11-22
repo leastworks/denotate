@@ -30,6 +30,21 @@ impl Table {
             indexes: RefCell::new(BTreeMap::new()),
         }
     }
+    // Accumulating diagnostic tables keep indexes across delta rounds. Update
+    // each already-built index only for the new row; never rebuild old prefixes.
+    fn append(&mut self, atom: GroundAtom, b: &mut Budget<'_>) -> Result<()> {
+        b.charge(atom.arguments.len() + 1, "completion size append")?;
+        let index = self.rows.len();
+        for (columns, entries) in self.indexes.get_mut() {
+            b.charge(columns.len() + 1, "completion size index append")?;
+            entries
+                .entry(columns.iter().map(|j| atom.arguments[*j]).collect())
+                .or_default()
+                .push(index);
+        }
+        self.rows.push(atom);
+        Ok(())
+    }
     fn candidates(
         &self,
         atom: &Atom,
@@ -143,25 +158,31 @@ impl GroundProgram {
                     let mut count = 0;
                     for relation in &component {
                         let out = next.entry(*relation).or_default();
-                        for rule in producers.get(relation).into_iter().flatten() {
-                            bindings(rule, &tables, &domains, b, |binding, b| {
-                                let atom = ground_atom(&rule.head, binding, b)?.atom;
-                                if !out.contains(&atom) {
-                                    b.room(
-                                        fixed_count + count,
-                                        b.limits.max_atoms,
-                                        "completion possibility",
-                                        "atoms",
-                                    )?;
-                                    if measurement.enabled() {
-                                        b.excluding_time(|| measurement.observe(&atom));
+                        let relation_result: Result<()> = (|| {
+                            for rule in producers.get(relation).into_iter().flatten() {
+                                bindings(rule, &tables, &domains, b, |binding, b| {
+                                    let atom = ground_atom(&rule.head, binding, b)?.atom;
+                                    if !out.contains(&atom) {
+                                        b.room(
+                                            fixed_count + count,
+                                            b.limits.max_atoms,
+                                            "completion possibility",
+                                            "atoms",
+                                        )?;
+                                        out.insert(atom);
+                                        count += 1;
                                     }
-                                    out.insert(atom);
-                                    count += 1;
-                                }
-                                Ok(())
-                            })?;
+                                    Ok(())
+                                })?;
+                            }
+                            Ok(())
+                        })();
+                        if measurement.enabled() {
+                            b.excluding_time(|| {
+                                measurement.relation(*relation, out, relation_result.is_ok())
+                            });
                         }
+                        relation_result?;
                     }
                     let mut equal = true;
                     for (relation, atoms) in next {
@@ -302,6 +323,20 @@ fn bindings<'a>(
     tables: &Upper,
     domains: &Domains,
     b: &mut Budget<'_>,
+    emit: impl FnMut(&Binding<'a>, &mut Budget<'_>) -> Result<()>,
+) -> Result<()> {
+    join_bindings(rule, tables, domains, b, true, None, emit)
+}
+
+// Diagnostics join concrete tuples only. They must never expand an unbound
+// variable over its sort just to obtain an optional size comparison.
+fn join_bindings<'a>(
+    rule: &'a Rule,
+    tables: &Upper,
+    domains: &Domains,
+    b: &mut Budget<'_>,
+    enumerate_domains: bool,
+    delta: Option<(usize, &Table)>,
     mut emit: impl FnMut(&Binding<'a>, &mut Budget<'_>) -> Result<()>,
 ) -> Result<()> {
     let mut variables = BTreeMap::new();
@@ -314,19 +349,35 @@ fn bindings<'a>(
             }
         }
     }
-    for literal in &rule.body {
+    let mut delta_step = None;
+    for (index, literal) in rule.body.iter().enumerate() {
         if let Literal::Positive(atom) = literal {
-            if let Some(table) = &tables[&atom.relation()] {
+            if let Some((_, table)) = delta.filter(|(i, _)| *i == index) {
+                delta_step = Some((atom, table));
+            } else if let Some(table) = &tables[&atom.relation()] {
                 steps.push((atom, table));
             }
         }
     }
     steps.sort_by_key(|(_, t)| t.rows.len());
+    // Bind from the new tuples before probing accumulated indexes. Otherwise a
+    // long chain can scan the whole accumulated table at every delta round.
+    if let Some(step) = delta_step {
+        steps.insert(0, step);
+    }
     let mut complete = |binding: &Binding<'a>, b: &mut Budget<'_>| -> Result<()> {
         let unbound: Vec<_> = variables
             .iter()
             .filter(|(v, _)| !binding.contains_key(**v))
             .collect();
+        if !enumerate_domains && !unbound.is_empty() {
+            return Err(CheckError::limit(
+                "completion size LFP",
+                "unbound domain enumeration",
+                0,
+                Some(unbound.len()),
+            ));
+        }
         let columns: Vec<_> = unbound.iter().map(|(_, s)| domains[s].as_slice()).collect();
         each_tuple(&columns, b, |values, b| {
             b.charge(binding.len() + values.len(), "completion bindings")?;

@@ -27,7 +27,8 @@ impl<W: Write> Writer<W> {
         self.pending = 0;
     }
     fn record(&mut self, event: Value) {
-        let boundary = event["type"] == "run-end"
+        let boundary = event["type"] == "completion-preparation-sizes"
+            || event["type"] == "run-end"
             || event["type"] == "profile"
             || (event["type"] == "progress"
                 && event["detail"].get("phase").is_some()
