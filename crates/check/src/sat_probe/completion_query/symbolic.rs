@@ -3,6 +3,8 @@
 use super::*;
 use queries::{Run, checked_assignment};
 
+pub mod planning;
+
 type Cube = BTreeMap<usize, bool>;
 #[cfg(test)]
 mod cube_tests {
@@ -302,14 +304,25 @@ pub(super) fn cover(
 }
 
 impl Engine {
-    fn symbolic_search<T>(
+    fn symbolic_search_in<T>(
         &self,
+        context: &BTreeMap<GroundAtom, bool>,
         phase: &'static str,
         f: impl FnOnce(&mut Solver<'_, '_, '_>) -> Result<Option<T>>,
     ) -> Result<Search<T>> {
         let _progress = self.limits.progress.scope(phase, None, true);
         let mut budget = Budget::new(&self.limits);
-        let answer = (|| f(&mut Solver::new(self, &mut budget)?))();
+        let answer = (|| {
+            let mut solver = Solver::new(self, &mut budget)?;
+            for (atom, value) in context {
+                let literal = solver.run.input(atom)?;
+                solver.run.cnf.clause(
+                    vec![if *value { literal } else { !literal }],
+                    solver.run.budget,
+                )?;
+            }
+            f(&mut solver)
+        })();
         match answer {
             Ok(Some(value)) => Ok(Search::Exists(value)),
             Ok(None) => Ok(Search::None),
@@ -320,6 +333,15 @@ impl Engine {
     }
     fn symbolic_pair(
         &self,
+        classification: bool,
+        unique: bool,
+        options: &CheckOptions,
+    ) -> Result<Search<Pair>> {
+        self.symbolic_pair_in(&BTreeMap::new(), classification, unique, options)
+    }
+    fn symbolic_pair_in(
+        &self,
+        context: &BTreeMap<GroundAtom, bool>,
         classification: bool,
         unique: bool,
         options: &CheckOptions,
@@ -338,7 +360,8 @@ impl Engine {
                 },
             )
         };
-        self.symbolic_search(
+        self.symbolic_search_in(
+            context,
             if classification {
                 "completion classification ambiguity"
             } else {
@@ -375,8 +398,16 @@ impl Engine {
         )
     }
     fn symbolic_accepted(&self, unique: bool, options: &CheckOptions) -> Result<Search<Model>> {
+        self.symbolic_accepted_in(&BTreeMap::new(), unique, options)
+    }
+    fn symbolic_accepted_in(
+        &self,
+        context: &BTreeMap<GroundAtom, bool>,
+        unique: bool,
+        options: &CheckOptions,
+    ) -> Result<Search<Model>> {
         let (cone, _, _) = self.classification.as_ref().unwrap();
-        self.symbolic_search("completion accepted observations", |s| {
+        self.symbolic_search_in(context, "completion accepted observations", |s| {
             let encoded = s.encode(cone, true)?;
             let selector = s.gate()?;
             let mut examined = 0;
@@ -402,8 +433,15 @@ impl Engine {
         })
     }
     fn symbolic_rejected(&self, options: &CheckOptions) -> Result<Search<Model>> {
+        self.symbolic_rejected_in(&BTreeMap::new(), options)
+    }
+    fn symbolic_rejected_in(
+        &self,
+        context: &BTreeMap<GroundAtom, bool>,
+        options: &CheckOptions,
+    ) -> Result<Search<Model>> {
         let (cone, _, h) = self.classification.as_ref().unwrap();
-        self.symbolic_search("completion rejection", |s| {
+        self.symbolic_search_in(context, "completion rejection", |s| {
             let base = s.encode(cone, false)?;
             let accepted = s.encode(cone, true)?;
             let selector = s.gate()?;
@@ -440,6 +478,15 @@ impl Engine {
         unique: bool,
         options: &CheckOptions,
     ) -> Result<Search<Observation>> {
+        self.symbolic_no_meaning_in(&BTreeMap::new(), classification, unique, options)
+    }
+    fn symbolic_no_meaning_in(
+        &self,
+        context: &BTreeMap<GroundAtom, bool>,
+        classification: bool,
+        unique: bool,
+        options: &CheckOptions,
+    ) -> Result<Search<Observation>> {
         let cone = if classification {
             &self.classification.as_ref().unwrap().0
         } else {
@@ -450,7 +497,7 @@ impl Engine {
         } else {
             "completion processing existence"
         };
-        self.symbolic_search(phase, |s| {
+        self.symbolic_search_in(context, phase, |s| {
             // Every positive SCC has a least fixpoint for each assignment of its
             // providers. Classification is upstream-closed, so this also proves
             // an extension for each accepted classification when no negative SCC

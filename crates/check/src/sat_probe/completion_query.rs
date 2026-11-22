@@ -19,6 +19,7 @@ mod symbolic;
 pub use advisory::*;
 pub use checking::*;
 pub use properties::*;
+pub use symbolic::planning::*;
 #[cfg(test)]
 mod tests;
 

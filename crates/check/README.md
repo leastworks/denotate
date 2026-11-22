@@ -756,6 +756,23 @@ two completed simplification runs.
 
 ## Experimental completion queries
 
+The planning foundation exposes `planning_context(path, options)` and
+`planning_constant(path, target, scope, options)`. A runtime path pins actual input
+atoms; derived pins are refused. Both operations currently require an explicit
+hypothesis. Context analysis reports accept, reject, mixed, invalid, inconclusive
+or no permitted inputs, using the existing independent symbolic searches and the
+second count without H. Selected assumptions are still audited over U.
+
+Constant proofs range over accepted interpretations, either in C(H) or in its
+union with the target's frozen live cone. Helpers remain free. An empty accepted
+context grants no proof. A scoped constant proof is conditional on an interpretation
+existing; it does not certify existence for every observation, justify fabricating
+a raw input/task result, or decide acceptance. For `h() :- raw();`, raw is true
+under H while an actual false raw input must reject. The planner must preserve
+that distinction. This API adds no execution support yet: the stable planner,
+`plan-den`, and its interpreter still refuse completion. No synthesis, session cache
+or performance claim is added by these bounded operations.
+
 `completion_query::Engine::prepare` prepares an authored completion verification.
 It returns `Preparation::Ready`, `InputDomains` with provider failures, or
 `Inconclusive` with phase/resource information. Invalid API requests and cancellation
