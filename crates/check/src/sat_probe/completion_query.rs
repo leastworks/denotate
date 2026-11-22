@@ -197,7 +197,7 @@ pub struct WorldQuery {
 /// Re-preparing is required for edits to H, W, decisions, domains, eligibility or rules.
 pub struct Engine {
     program: Arc<GroundProgram>,
-    original: crate::ground::OriginalDependencies,
+    original: Arc<crate::ground::OriginalDependencies>,
     assumptions: Vec<contracts::Assumption>,
     ignored_input_domains: Vec<InputDomainIssue>,
     cone: Cone,
@@ -276,7 +276,14 @@ impl Engine {
             ));
         }
         keys.validate(corpus).map_err(CheckError::Keys)?;
-        let mut b = Budget::new(limits);
+        let mut b = Budget::completion_preparation(limits);
+        b.completion_stage("domains");
+        let domains = crate::ground::CompletionDomains::new(corpus, domains, &mut b)?;
+        b.completion_stage("original-dependencies");
+        let original = Arc::new(crate::ground::OriginalDependencies::from_validated(
+            corpus, &domains, &mut b,
+        )?);
+        b.completion_stage("input-structure");
         let mut planning_roots = BTreeSet::new();
         for a in planning_outputs {
             b.charge(a.arguments.len() + 1, "completion planning roots")?;
@@ -285,7 +292,8 @@ impl Engine {
         corpus.input_domain_structure_with(|| b.tick("completion input domains"))?;
         let (program, ignored_input_domains) = match providers::prepare(
             corpus,
-            domains,
+            &domains,
+            &original,
             verification,
             limits,
             &config,
@@ -295,9 +303,10 @@ impl Engine {
             providers::Inputs::Ready(p, ignored) => (p, ignored),
             providers::Inputs::Invalid(issues) => return Ok(Preparation::InputDomains(issues)),
         };
+        b.completion_stage("runtime-engine");
         let mut engine = Self::skeleton(
             corpus,
-            domains,
+            original,
             verification,
             program,
             limits,
@@ -305,7 +314,9 @@ impl Engine {
             &mut b,
         )?;
         engine.ignored_input_domains = ignored_input_domains;
+        b.completion_stage("assumption-contracts");
         engine.assumptions = contracts::build(&engine, corpus, &mut b)?;
+        b.completion_stage("classification");
         let cone = &engine.cone;
         let program = &engine.program;
         let classification = if let Some(h) = declaration.options.hypothesis {
@@ -329,7 +340,7 @@ impl Engine {
     }
     fn skeleton(
         corpus: &Corpus,
-        domains: &Domains,
+        original: Arc<crate::ground::OriginalDependencies>,
         verification: VerificationId,
         program: GroundProgram,
         limits: &Limits,
@@ -337,7 +348,6 @@ impl Engine {
         b: &mut Budget<'_>,
     ) -> Result<Self> {
         let declaration = corpus.verification(verification).unwrap();
-        let original = crate::ground::OriginalDependencies::new(corpus, domains, b)?;
         let mut cone = program::completion_cone(&program, corpus, verification, b)?;
         let world = world_cone(&cone, false, b)?;
         cone.groups.clear();

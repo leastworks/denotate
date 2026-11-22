@@ -382,6 +382,7 @@ fn completion(
             json!({"type":"completion-sizes","verification":p.keys.verification(v.id).map(|k|format!("{}::{}",k.0.namespace,k.0.name)).unwrap_or_default(),"sizes":sizes}),
         );
         let mut searches = sink.snapshot();
+        searches.preparation_work = None;
         searches.preparations.clear();
         searches.omitted_preparations = 0;
         let sizes = denotate_presentation::completion_sizes(&p.keys, &searches)
@@ -405,6 +406,22 @@ fn write_completion_sizes(
         };
         writeln!(output, "{label}: {sizes:#}").unwrap();
     } else {
+        if let Some(work) = sizes.get("preparationWork").filter(|w| !w.is_null()) {
+            writeln!(
+                output,
+                "Completion preparation work (includes grounding attempts): {}; last stage {}",
+                work["work"], work["lastStage"]
+            )
+            .unwrap();
+            writeln!(output, "  work by stage: {}", work["workByStage"]).unwrap();
+            writeln!(output, "  work by phase: {}", work["workByPhase"]).unwrap();
+            writeln!(
+                output,
+                "  rejected work (not in total): {}",
+                work["rejectedWorkByPhase"]
+            )
+            .unwrap();
+        }
         for prep in sizes["preparations"].as_array().unwrap() {
             writeln!(
                 output,

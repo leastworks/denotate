@@ -598,6 +598,13 @@ reports `work`, `workByStage`, its provider (when applicable), and its stopping 
 Work excludes the separate diagnostic LFP; provider scope discovery is counted,
 including the shared dependency index on the first needed provider. Common engine
 setup and subsequent provider SAT queries are outside these grounding totals.
+The enclosing `preparationWork` record covers the entire preparation budget,
+including that common work and provider queries: `work`, `workByStage`,
+`workByPhase`, `rejectedWorkByPhase` (excluded from `work`) and `lastStage`.
+Grounding attempt work is already included in this total. Records survive early
+exhaustion, including before the first provider, and are flushed before checking.
+Domain validation and original advisory dependency indexing run once per preparation.
+The diagnostic LFP and later checking searches remain separate budgets.
 
 The support split compares the positive-support GFP with the LFP of the same rules,
 ignoring negation and using eligible inputs. `circularOnly` is exact only when both

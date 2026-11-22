@@ -1703,3 +1703,21 @@ including partial attempts. The optional LFP comparison is excluded from that wo
 Provider dependency indexing is lazy and shared within preparation; no-provider runs
 pay no indexing cost. Detailed records let corpus runs distinguish scope discovery,
 GFP descent, rule instances and graph analysis before changing any limits.
+
+### Completion preparation common work
+
+Validate and normalize finite domains once per preparation, including constants in
+all authored rules, and reuse the result for provider, provisional and runtime
+grounding. Build the original advisory dependency templates and head index once;
+provider engines and the runtime engine share that immutable value. This removes
+repeated whole-program scans without changing live scopes, provider determinacy,
+meaning or any allowance. Preparation is fresh on every invocation.
+
+With size reporting enabled, `preparationWork` accounts for every successful charge
+of the preparation budget, by orchestration stage and by the charge's phase. It also
+reports rejected work charges separately and survives early returns before any
+grounding attempt. Stages distinguish common setup, provider scope/grounding/query
+work, provisional grounding, runtime grounding/setup, assumptions and classification.
+The per-attempt records are a breakdown of this total, not additional work. The
+optional diagnostic LFP and later checking searches use independent budgets and are
+excluded. Counters describe logical work, not timings or memory, and are not goldens.

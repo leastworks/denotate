@@ -55,8 +55,43 @@ pub struct CompletionSearchSize {
     pub encoding_details: Vec<CompletionEncodingSize>,
     pub omitted_encodings: usize,
 }
+/// One preparation budget, including work outside grounding attempts. Attempt
+/// records are a breakdown of this total, not additional work. Diagnostic LFP
+/// and subsequent checking searches have separate budgets and are excluded.
+#[derive(Debug, Clone, Default)]
+pub struct CompletionPreparationWork {
+    pub work: usize,
+    pub by_stage: BTreeMap<&'static str, usize>,
+    pub by_phase: BTreeMap<&'static str, usize>,
+    /// Charges refused by the work allowance; not included in `work`.
+    pub rejected_by_phase: BTreeMap<&'static str, usize>,
+    pub last_stage: &'static str,
+}
+pub(crate) struct PreparationWorkMonitor {
+    sink: CompletionSizes,
+    pub data: CompletionPreparationWork,
+}
+impl PreparationWorkMonitor {
+    pub fn new(sink: CompletionSizes) -> Self {
+        Self {
+            sink,
+            data: CompletionPreparationWork::default(),
+        }
+    }
+    pub fn charge(&mut self, amount: usize, phase: &'static str) {
+        self.data.work += amount;
+        *self.data.by_phase.entry(phase).or_default() += amount;
+        *self.data.by_stage.entry(self.data.last_stage).or_default() += amount;
+    }
+}
+impl Drop for PreparationWorkMonitor {
+    fn drop(&mut self) {
+        self.sink.0.lock().unwrap().preparation_work = Some(std::mem::take(&mut self.data));
+    }
+}
 #[derive(Debug, Clone, Default)]
 pub struct CompletionSizeSnapshot {
+    pub preparation_work: Option<CompletionPreparationWork>,
     pub preparations: Vec<CompletionPreparationSize>,
     pub searches: Vec<CompletionSearchSize>,
     pub omitted_preparations: usize,

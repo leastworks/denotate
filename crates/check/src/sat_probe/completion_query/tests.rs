@@ -765,3 +765,85 @@ fn exhaustive_authored_equations_agree_in_both_modes() {
         }
     }
 }
+
+#[test]
+fn common_preparation_is_charged_once_for_several_providers() {
+    let mut c = Corpus::new();
+    let s = c.declare_sort("S").unwrap();
+    let a = c.declare_constant("a", s).unwrap();
+    let z = c.declare_constant("z", s).unwrap();
+    let facts = c
+        .declare_relation("facts", RelationRole::Derived, [Parameter::new("x", s)])
+        .unwrap();
+    let head = c.atom(facts, [Term::Constant(a)]).unwrap();
+    c.add_rule(head, []).unwrap();
+    let mut inputs = Vec::new();
+    for i in 0..4 {
+        let provider = rel(&mut c, &format!("provider{i}"), false);
+        rule(&mut c, provider, &[]);
+        let input = rel(&mut c, &format!("input{i}"), true);
+        c.restrict_input(input, provider).unwrap();
+        let used = rel(&mut c, &format!("used{i}"), false);
+        rule(&mut c, used, &[(input, false)]);
+        inputs.push(input);
+    }
+    let v = verification(&mut c, None, &[]);
+    // Unsorted caller domains remain valid; sharing must use the normalized set.
+    let domains = Domains::from([(s, vec![z, a])]);
+    let limits = Limits::default();
+    let mut reference = Budget::new(&limits);
+    let validated = crate::ground::CompletionDomains::new(&c, &domains, &mut reference).unwrap();
+    let validation_work = reference.used();
+    crate::ground::OriginalDependencies::from_validated(&c, &validated, &mut reference).unwrap();
+    let original_work = reference.used() - validation_work;
+    for _ in 0..2 {
+        let sink = crate::CompletionSizes::default();
+        let observed = Limits {
+            completion_sizes: Some(sink.clone()),
+            ..limits.clone()
+        };
+        let Preparation::Ready(e) =
+            Engine::prepare(&c, &domains, &keys(&c), v, &observed, Default::default()).unwrap()
+        else {
+            panic!()
+        };
+        assert!(matches!(
+            e.observation(inputs.iter().map(|i| atom(*i))).unwrap(),
+            ObservationOutcome::WholeProgram(Interpretations::Unique(_))
+        ));
+        let stats = sink.snapshot();
+        let work = stats.preparation_work.unwrap();
+        // Compare to one independently built common value, never a numeric work golden.
+        assert_eq!(work.by_stage["domains"], validation_work);
+        assert_eq!(work.by_phase["domains"], validation_work);
+        assert_eq!(work.by_stage["original-dependencies"], original_work);
+        assert_eq!(
+            stats
+                .preparations
+                .iter()
+                .filter(|p| p.static_provider)
+                .count(),
+            inputs.len()
+        );
+        assert!(
+            stats
+                .preparations
+                .iter()
+                .all(|p| p.work_by_stage.get("domains").copied().unwrap_or(0) == 0)
+        );
+    }
+    for invalid in [vec![a, a], vec![z]] {
+        let result = Engine::prepare(
+            &c,
+            &Domains::from([(s, invalid)]),
+            &keys(&c),
+            v,
+            &limits,
+            Default::default(),
+        );
+        assert!(matches!(
+            result,
+            Err(CheckError::InvalidDomain { .. } | CheckError::ConstantOutsideDomain(_))
+        ));
+    }
+}

@@ -487,7 +487,10 @@ original occurrences. Within each positive relation component it evaluates ancho
 coordinates first, installs smaller tables immediately and reschedules their readers.
 A symbolic-domain fallback runs only when no anchored update is pending. The same
 path grounds static providers and runtime programs; provider relation scopes use a
-shared, lazily built dependency index. It never applies stable least-model pruning or fixed folding.
+shared, lazily built dependency index. One validated finite-domain value and one
+immutable original-dependency index serve all provider and runtime attempts within
+a preparation. They are rebuilt for each invocation, with no implicit cross-run cache.
+It never applies stable least-model pruning or fixed folding.
 The resulting live-instance graph is the frozen scope boundary for classification,
 properties and input-contract checks. Liveness is the positive-support greatest
 fixpoint, independent of W, H and decisions; further solver simplification cannot

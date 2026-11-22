@@ -23,13 +23,15 @@ pub(super) enum Inputs {
 
 pub(super) fn prepare(
     corpus: &Corpus,
-    domains: &Domains,
+    domains: &crate::ground::CompletionDomains,
+    original: &Arc<crate::ground::OriginalDependencies>,
     verification: VerificationId,
     limits: &Limits,
     config: &QueryLimits,
     planning_roots: &BTreeSet<RelationId>,
     b: &mut Budget<'_>,
 ) -> Result<Inputs> {
+    b.completion_stage("input-scope");
     let mut needed = planning_roots.clone();
     let v = corpus.verification(verification).unwrap();
     needed.extend(
@@ -54,7 +56,7 @@ pub(super) fn prepare(
             for t in a.arguments() {
                 b.tick("completion input scope")?;
                 if let Term::Variable { sort, .. } = t.value() {
-                    instantiated &= domains.get(sort).is_some_and(|d| !d.is_empty());
+                    instantiated &= domains.values().get(sort).is_some_and(|d| !d.is_empty());
                 }
             }
         }
@@ -72,6 +74,7 @@ pub(super) fn prepare(
     let mut issues = Vec::new();
     let mut dependencies: Option<BTreeMap<RelationId, BTreeSet<RelationId>>> = None;
     for r in corpus.relations().filter(|r| r.input_domain.is_some()) {
+        b.completion_stage("provider-scope");
         b.tick("completion input domains")?;
         let provider = r.input_domain.unwrap();
         if !needed.contains(&r.id) {
@@ -127,6 +130,7 @@ pub(super) fn prepare(
                 }
             }
             scoped?;
+            b.completion_stage("provider-grounding");
             let p = GroundProgram::prepare_completion_with_inputs(
                 corpus,
                 domains,
@@ -138,6 +142,7 @@ pub(super) fn prepare(
                 }),
                 b,
             )?;
+            b.completion_stage("provider-query");
             // Only a reachability bound if the provider is invalid. Never used as
             // a verification's input universe or as a presented observation.
             eligibility.insert(
@@ -154,8 +159,15 @@ pub(super) fn prepare(
                 )?
                 .facts,
             );
-            let mut e =
-                Engine::skeleton(corpus, domains, verification, p, limits, config.clone(), b)?;
+            let mut e = Engine::skeleton(
+                corpus,
+                original.clone(),
+                verification,
+                p,
+                limits,
+                config.clone(),
+                b,
+            )?;
             e.cone
                 .rules
                 .retain(|r| members.contains(&e.cone.atoms[r.head]));
@@ -222,6 +234,7 @@ pub(super) fn prepare(
         // graph can still prove that a dead producer cannot reach one: use the
         // provider's positive-support upper bound (or the declared domain if its
         // preparation was interrupted), only for this dependency test.
+        b.completion_stage("provisional-grounding");
         let provisional = GroundProgram::prepare_completion_with_inputs(
             corpus,
             domains,
@@ -229,6 +242,7 @@ pub(super) fn prepare(
             None,
             b,
         )?;
+        b.completion_stage("live-input-scope");
         let mut live_needed = planning_roots.clone();
         live_needed.extend(
             v.assumptions
@@ -270,6 +284,7 @@ pub(super) fn prepare(
             return Ok(Inputs::Invalid(issues));
         }
     }
+    b.completion_stage("runtime-grounding");
     Ok(Inputs::Ready(
         GroundProgram::prepare_completion_with_inputs(corpus, domains, Some(eligibility), None, b)?,
         ignored,

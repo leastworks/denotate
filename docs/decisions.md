@@ -1986,3 +1986,20 @@ No least-model kernel is valid for completion self-support: `p :- p; h :- p` ins
 uses a checked p=true value. The first construction slice is straight-line; unresolved
 mixed cycles await splits and joins, and task descriptors remain a later integration.
 Checking results are never gated by planning success.
+
+
+## Share immutable completion setup within a preparation
+
+Corpus feedback showed identical whole-program domain work charged for every static
+provider and substantial preparation work outside the grounding records. Each
+provider's temporary query engine also rebuilt the original advisory dependencies,
+including a second domain-validation pass. Neither value depends on that provider's
+scope, W, H or its chosen interpretation.
+
+Completion now validates domains once and shares the normalized result across its
+grounding attempts. Provider and runtime engines also share one immutable original
+advisory dependency index. Query equations, eligibility and live scopes remain
+provider-specific. These common values are local to one preparation and rebuilt on
+edits; no cache key or semantic contract changes. Limits are unchanged. Overall
+preparation accounting includes common setup and provider queries so grounding-only
+measurements cannot hide their cost; the diagnostic LFP has its own budget.

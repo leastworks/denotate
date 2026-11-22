@@ -335,3 +335,91 @@ fn reverse_declared_provider_chain_uses_indexed_scope_discovery() {
     assert!(provider.complete && provider.provider.is_some());
     assert!(provider.work_by_stage["provider-scope"] > 0);
 }
+
+#[test]
+fn preparation_work_covers_common_provider_and_runtime_stages() {
+    let constants = (0..2000)
+        .map(|i| format!("v{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let facts = (0..2000)
+        .map(|i| format!("candidate(v{i});"))
+        .collect::<String>();
+    let providers = (0..4).map(|i| format!("relation p{i}(x:S);p{i}(X):-candidate(X);input raw{i}(x:S) within p{i};relation use{i}(x:S);use{i}(X):-raw{i}(X);")).collect::<String>();
+    let p = loaded(&format!(
+        "sort S;const {constants}:S;relation candidate(x:S);{facts}{providers}{V}"
+    ));
+    let sink = CompletionSizes::default();
+    let limits = Limits {
+        completion_sizes: Some(sink.clone()),
+        ..Default::default()
+    };
+    assert!(matches!(prepare(&p, &limits), Preparation::Ready(_)));
+    let stats = sink.snapshot();
+    let work = stats.preparation_work.as_ref().unwrap();
+    assert_eq!(work.work, work.by_stage.values().sum::<usize>());
+    assert_eq!(work.work, work.by_phase.values().sum::<usize>());
+    assert!(work.rejected_by_phase.is_empty());
+    for stage in [
+        "domains",
+        "original-dependencies",
+        "input-structure",
+        "input-scope",
+        "provider-scope",
+        "provider-grounding",
+        "provider-query",
+        "runtime-grounding",
+        "runtime-engine",
+    ] {
+        assert!(work.by_stage[stage] > 0, "{stage}");
+    }
+    let provider_work: usize = stats
+        .preparations
+        .iter()
+        .filter(|p| p.static_provider)
+        .map(|p| p.work)
+        .sum();
+    assert_eq!(
+        provider_work,
+        work.by_stage["provider-grounding"]
+            + stats
+                .preparations
+                .iter()
+                .map(|p| p.work_by_stage.get("provider-scope").copied().unwrap_or(0))
+                .sum::<usize>()
+    );
+    assert_eq!(
+        stats.preparations.last().unwrap().work,
+        work.by_stage["runtime-grounding"]
+    );
+    let json = denotate_presentation::completion_sizes(&p.keys, &stats).unwrap();
+    assert_eq!(
+        json["preparationWork"]["work"].as_u64().unwrap() as usize,
+        work.work
+    );
+    eprintln!(
+        "four sparse providers: work {}, stages {:?}",
+        work.work, work.by_stage
+    );
+}
+
+#[test]
+fn preparation_work_survives_exhaustion_before_the_first_attempt() {
+    let p = loaded(&format!("sort S;const a,b:S;relation r(x:S);r(a);{V}"));
+    let sink = CompletionSizes::default();
+    let limits = Limits {
+        max_work: 1,
+        completion_sizes: Some(sink.clone()),
+        ..Default::default()
+    };
+    assert!(matches!(prepare(&p, &limits), Preparation::Inconclusive(_)));
+    let stats = sink.snapshot();
+    assert!(stats.preparations.is_empty());
+    let work = stats.preparation_work.as_ref().unwrap();
+    assert_eq!(work.work, work.by_phase.values().sum::<usize>());
+    assert_eq!(work.work, work.by_stage.values().sum::<usize>());
+    assert_eq!(work.last_stage, "domains");
+    assert!(!work.rejected_by_phase.is_empty());
+    let json = denotate_presentation::completion_sizes(&p.keys, &stats).unwrap();
+    assert_eq!(json["preparationWork"]["lastStage"], "domains");
+}

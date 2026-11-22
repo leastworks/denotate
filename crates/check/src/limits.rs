@@ -196,6 +196,7 @@ pub(crate) struct Budget<'a> {
     start: Instant,
     work: usize,
     charges: Option<WorkCharges>,
+    preparation_work: Option<crate::completion_sizes::PreparationWorkMonitor>,
     structural_split_start: Option<usize>,
     charges_until_clock: usize,
     #[cfg(test)]
@@ -231,12 +232,28 @@ impl<'a> Budget<'a> {
             start: Instant::now(),
             work: 0,
             charges: None,
+            preparation_work: None,
             structural_split_start: None,
             charges_until_clock: 0,
             #[cfg(test)]
             clock: None,
             #[cfg(any(test, feature = "test-support"))]
             profile: None,
+        }
+    }
+    /// Detailed phase accounting only for the completion preparation budget.
+    /// The monitor publishes on drop, including every early return.
+    pub(crate) fn completion_preparation(limits: &'a Limits) -> Self {
+        let mut budget = Self::new(limits);
+        budget.preparation_work = limits
+            .completion_sizes
+            .clone()
+            .map(crate::completion_sizes::PreparationWorkMonitor::new);
+        budget
+    }
+    pub(crate) fn completion_stage(&mut self, stage: &'static str) {
+        if let Some(monitor) = &mut self.preparation_work {
+            monitor.data.last_stage = stage;
         }
     }
     pub fn tracked(limits: &'a Limits) -> Self {
@@ -410,6 +427,10 @@ impl<'a> Budget<'a> {
             self.charges_until_clock -= 1;
         }
         if amount > self.limits.max_work.saturating_sub(self.work) {
+            if let Some(monitor) = &mut self.preparation_work {
+                let rejected = monitor.data.rejected_by_phase.entry(phase).or_default();
+                *rejected = rejected.saturating_add(amount);
+            }
             if let Some(charges) = &mut self.charges {
                 let rejected = charges.rejected_work.entry(phase.into()).or_default();
                 *rejected = rejected
@@ -455,6 +476,9 @@ impl<'a> Budget<'a> {
             *phase_work = phase_work
                 .checked_add(amount)
                 .ok_or(CheckError::Receipts(crate::ReceiptError::Overflow))?;
+        }
+        if let Some(monitor) = &mut self.preparation_work {
+            monitor.charge(amount, phase);
         }
         #[cfg(any(test, feature = "test-support"))]
         if let Some(profile) = &mut self.profile {

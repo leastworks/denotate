@@ -88,6 +88,18 @@ impl Table {
 }
 type Upper = BTreeMap<RelationId, Option<Table>>;
 
+/// Validated once for this corpus and preparation, then borrowed by every
+/// provider, provisional live-scope pass and runtime grounder.
+pub(crate) struct CompletionDomains(Domains);
+impl CompletionDomains {
+    pub(crate) fn new(corpus: &Corpus, domains: &Domains, b: &mut Budget<'_>) -> Result<Self> {
+        validate_domains(corpus, domains, b).map(Self)
+    }
+    pub(crate) fn values(&self) -> &Domains {
+        &self.0
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct StaticScope<'a> {
     pub relations: &'a BTreeSet<RelationId>,
@@ -102,13 +114,14 @@ impl GroundProgram {
         domains: &Domains,
         b: &mut Budget<'_>,
     ) -> Result<Self> {
-        Self::prepare_completion_with_inputs(corpus, domains, None, None, b)
+        let domains = CompletionDomains::new(corpus, domains, b)?;
+        Self::prepare_completion_with_inputs(corpus, &domains, None, None, b)
     }
     /// Supplied eligibility has already been evaluated under the selected semantics.
     /// A static scope builds only that provider's rules, without any runtime inputs.
     pub(crate) fn prepare_completion_with_inputs(
         corpus: &Corpus,
-        domains: &Domains,
+        domains: &CompletionDomains,
         eligibility: Option<BTreeMap<RelationId, BTreeSet<GroundAtom>>>,
         static_scope: Option<StaticScope<'_>>,
         b: &mut Budget<'_>,
@@ -123,12 +136,8 @@ impl GroundProgram {
                 .insert("provider-scope", scope.work);
         }
         let static_scope = static_scope.map(|s| s.relations);
-        let domains_result = validate_domains(corpus, domains, b);
+        let domains = domains.values();
         measurement.stage("inputs", b);
-        if let Err(error) = &domains_result {
-            measurement.data.error = Some(error.clone());
-        }
-        let domains = domains_result?;
         let mut p = Self::empty(corpus, domains.clone());
         p.obligations.clear();
         let result: Result<()> = (|| {

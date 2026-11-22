@@ -37,8 +37,17 @@ enum Node {
     Pattern(Pattern),
 }
 impl OriginalDependencies {
+    #[cfg(test)]
     pub(crate) fn new(corpus: &Corpus, domains: &Domains, b: &mut Budget<'_>) -> Result<Self> {
-        let domains = validate_domains(corpus, domains, b)?;
+        let domains = CompletionDomains::new(corpus, domains, b)?;
+        Self::from_validated(corpus, &domains, b)
+    }
+    pub(crate) fn from_validated(
+        corpus: &Corpus,
+        domains: &CompletionDomains,
+        b: &mut Budget<'_>,
+    ) -> Result<Self> {
+        let domains = domains.values();
         let mut templates = BTreeMap::<_, Vec<_>>::new();
         for rule in corpus.rules() {
             b.tick("completion original dependencies")?;
@@ -111,7 +120,7 @@ impl OriginalDependencies {
         }
         Ok(Self {
             templates,
-            domains,
+            domains: domains.clone(),
             heads,
         })
     }

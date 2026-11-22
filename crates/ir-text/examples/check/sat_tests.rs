@@ -679,6 +679,8 @@ fn completion_cli_size_diagnostics_are_opt_in_and_keep_cutoff_counts() {
     assert!(!plain.contains("Completion preparation"));
     let (code, out) = f.run(&["--engine", "sat", "--no-progress", "--verbose"]);
     assert_eq!(code, plain_code);
+    assert!(out.contains("Completion preparation work (includes grounding attempts)"));
+    assert!(out.contains("work by stage:"));
     assert!(out.contains("circular-only"));
     assert!(out.contains("Completion CNF"));
     assert!(out.find("Completion preparation").unwrap() < out.find("Context:").unwrap());
@@ -697,6 +699,12 @@ fn completion_cli_size_diagnostics_are_opt_in_and_keep_cutoff_counts() {
         .next()
         .unwrap()
         .unwrap();
+    assert!(
+        data["preparationWork"]["workByStage"]["runtime-grounding"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
     assert_eq!(data["preparations"][0]["complete"], false);
     assert_eq!(
         data["preparations"][0]["relations"][0]["state"],
@@ -776,6 +784,7 @@ fn completion_preparation_sizes_are_flushed_before_checking_even_without_progres
         &None,
         &mut |text| {
             assert!(text.contains("Completion preparation sizes:"));
+            assert!(text.contains("preparationWork"));
             assert!(
                 sink.snapshot().searches.is_empty(),
                 "checking ran before preparation was published"

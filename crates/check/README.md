@@ -865,7 +865,12 @@ reschedule its positive readers; no anchored pending update is bypassed for a
 symbolic expansion. Unanchored alternatives remain live. This computes the same GFP
 by monotone chaotic iteration, for static providers and runtime grounding alike.
 Provider scope discovery uses one lazy dependency index rather than repeated full
-corpus scans. A producer
+corpus scans. Finite domains are validated and normalized once per completion
+preparation. All provider attempts, provisional live-scope grounding and runtime
+grounding borrow that validated value. Original advisory dependency templates and
+their head index are built once and shared immutably by the temporary provider
+engines and final runtime engine. None of this state survives into a new preparation;
+domain, rule and eligibility edits rebuild it. A producer
 is omitted only when some positive premise cannot be true in any completion.
 Negative premises never prune possibility. This does not run stable least-model
 folding, admission, input-pin discovery or reduct refinement. Retained instances
