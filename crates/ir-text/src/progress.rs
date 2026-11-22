@@ -674,6 +674,9 @@ impl AdmissionDetails<'_> {
                 Some(denotate_check::CheckingTarget::SatUniqueness(s)) => {
                     Some(denotate_presentation::stable_uniqueness_stats(&s))
                 }
+                Some(denotate_check::CheckingTarget::CompletionExistence(s)) => Some(json!({
+                    "kind":"completion-existence","components":s.components,"totalComponents":s.total_components,"fallbackComponents":s.fallback_components,"rounds":s.rounds,"cubes":s.cubes,"pins":s.pins,"maxPins":s.max_pins,"validationWork":s.validation_work,"liftingAttempts":s.lifting_attempts,"liftedPins":s.lifted_pins
+                })),
                 Some(denotate_check::CheckingTarget::CompletionSize {
                     component,
                     components,

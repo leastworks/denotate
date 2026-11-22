@@ -10,6 +10,7 @@ pub struct Options {
     pub sat_check_options: denotate_check::stable_query::CheckOptions,
     pub completion_circular_support: bool,
     pub completion_dead_producers: bool,
+    pub completion_full_models: bool,
     pub selection: Option<String>,
     pub sat_split: Option<String>,
     pub validate_all_assumptions: bool,
@@ -101,7 +102,7 @@ pub fn help() -> String {
         writeln!(text, "  {flag} N (default {value})").unwrap();
     }
     text.push_str("\nExperimental SAT checking (default engine: bdd):\n  --engine bdd|sat\n  --sat-meaning full|cone|uniqueness|none (default full; uniqueness/none keep exit 2)\n  --sat-split RELATION (optional exactly-one input relation hint)\n  --sat-max-pin-candidates N (default 256; 0 disables)\n  --sat-max-pin-work N (default --max-work)\n  --sat-max-split-candidates N (default 8; 0 disables)\n  --sat-max-split-members N (default 32)\n  --sat-max-split-work N (default --max-work; ranking only)\n  --sat-max-worlds N (default 100000)\n  --sat-max-tuples N (default 5000000)\n  --sat-max-solves N (default 100000)\n  --sat-max-refinements N (default 100000)\n  --sat-max-polls N (default 100000000)\n  --sat-max-conflicts N (default 1000000000)\n  --sat-max-propagations N (default 10000000000)\nSAT checks empty and at_most_one, all fixed obligations, and whole-program meaning (cone: existence plus obligations in their upstream cones).\nOther symbolic obligations and notices are explicitly not analysed.\n");
-    text.push_str("\nCompletion verifications use --engine sat --sat-meaning full. Rejections are allowed unless no_rejections is selected.\n  --completion-size-lfp (opt-in diagnostic least-fixpoint comparison; off with verbose/JSON alone)\n  --completion-circular-support (opt-in advisory; completion verifications only)\n  --completion-dead-producers (opt-in advisory for dead classification links)\n");
+    text.push_str("\nCompletion verifications use --engine sat --sat-meaning full. Rejections are allowed unless no_rejections is selected.\n  --completion-full-models (explicit full interpretations; default evidence is projected and bounded)\n  --completion-size-lfp (opt-in diagnostic least-fixpoint comparison; off with verbose/JSON alone)\n  --completion-circular-support (opt-in advisory; completion verifications only)\n  --completion-dead-producers (opt-in advisory for dead classification links)\n");
     text.push_str(
         "\nBDD limits apply per operation/query. SAT CLI defaults use a shared 120000 ms run deadline,\n\
         5000000 atoms, 7000000 rules, 50000000 dependencies and 2000000000 work per operation.\n\
@@ -126,6 +127,7 @@ impl Options {
             sat_check_options: Default::default(),
             completion_circular_support: false,
             completion_dead_producers: false,
+            completion_full_models: false,
             selection: None,
             validate_all_assumptions: false,
             json: false,
@@ -224,6 +226,7 @@ impl Options {
                 }
                 "--validate-all-assumptions" => options.validate_all_assumptions = true,
                 "--completion-circular-support" => options.completion_circular_support = true,
+                "--completion-full-models" => options.completion_full_models = true,
                 "--completion-dead-producers" => options.completion_dead_producers = true,
                 "--json" => options.json = true,
                 "--checking-within-w" => options.checking_within_w = true,
@@ -417,6 +420,7 @@ impl Options {
                 || f == "--sat-meaning"
                 || f == "--sat-split"
                 || f == "--completion-circular-support"
+                || f == "--completion-full-models"
                 || f == "--completion-dead-producers"
                 || f == "--completion-size-lfp"
         }) {

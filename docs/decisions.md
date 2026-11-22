@@ -2039,3 +2039,33 @@ finished. Likewise, an anchored join stays anchored as tables shrink. Both facts
 avoid repeated scans caused by thousands of per-site zero-arity conditions.
 All state is preparation-local; eligibility, domain and rule edits rebuild it.
 The full-product oracle checks live instances as well as existing model tests.
+
+## Completion existence composes total components; local failures are not verdicts
+
+A positive component has a completion model for each assignment of its providers.
+For negative components, prove the same property over independent provider atoms.
+If every component is total, models compose in dependency order. If a component is
+not total, retain it and its upstream cone for the ordinary permitted-world search.
+A failing local provider assignment might be unreachable, or an upstream helper
+might have another extendible value: neither is a no-meaning counterexample.
+Processing retains classification and H; classification existence does not assume H.
+
+Model cubes can be lifted by holding the derived interpretation fixed and asking
+whether an original equation can fail after removing a pin. Only unsatisfiability
+permits removal. All returned models still undergo independent equation validation;
+precomputed validation indexes avoid checking unrelated producer-less false slots
+on every round. Component proofs, lifting and fallback share existing search limits.
+The shared CLI deadline is divided among remaining required questions; unused time
+passes forward. This changes which partial answers fit, not conclusive meaning.
+
+## Completion diagnostic models are bounded views of checked interpretations
+
+Full interpretations repeated at every finding made diagnostic output larger than
+the program and consumed substantial memory after checking. Default presentation
+now projects to the relevant cone or declared decisions and retains at most 64
+atoms per model, with explicit omitted counts. A verification-local model table is
+shared by findings and summary; its references are not finding identities. Omitted
+display atoms are unknown to the reader, never implicitly false. Validation always
+uses the original full interpretation. `--completion-full-models` explicitly opts
+into full scoped interpretations; `--verbose` alone does not. The bound is a display
+policy, not a semantic or cache input.

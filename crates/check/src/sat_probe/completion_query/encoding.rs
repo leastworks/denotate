@@ -5,6 +5,15 @@ use std::collections::VecDeque;
 
 pub(super) struct Encoding {
     pub vars: Vec<Lit>,
+    pub validation: Option<Validation>,
+}
+
+/// Precomputed scope of independent model validation. Omitted slots have the
+/// literal false and no producer/constant to check; materialize them as false.
+/// Every original rule (including folded rules) is still replayed below.
+pub(super) struct Validation {
+    pub read: Vec<usize>,
+    pub heads: Vec<usize>,
 }
 
 fn fitting(c: &Cone, b: &mut Budget<'_>) -> Result<Vec<Option<bool>>> {
@@ -238,7 +247,26 @@ pub(super) fn encode_named(
                 }
             }
         }
-        Ok(Encoding { vars })
+        let mut heads: BTreeSet<_> = c.rules.iter().map(|r| r.head).collect();
+        heads.extend(
+            c.fixed
+                .iter()
+                .enumerate()
+                .filter_map(|(i, v)| v.is_some().then_some(i)),
+        );
+        let read = vars
+            .iter()
+            .enumerate()
+            .filter_map(|(i, l)| (*l != !truth).then_some(i))
+            .collect();
+        b.charge(vars.len() + c.rules.len(), "completion validation index")?;
+        Ok(Encoding {
+            vars,
+            validation: Some(Validation {
+                read,
+                heads: heads.into_iter().collect(),
+            }),
+        })
     })();
     if let Some((_, stats)) = &mut cnf.measurement {
         detail.complete = result.is_ok();
@@ -295,7 +323,10 @@ mod tests {
             if run.solve(&pins).unwrap() {
                 let values = queries::checked_assignment(
                     c,
-                    &Encoding { vars: vars.clone() },
+                    &Encoding {
+                        vars: vars.clone(),
+                        validation: None,
+                    },
                     &run.cnf,
                     run.budget,
                 )

@@ -9,6 +9,7 @@ use std::{
 
 #[derive(Debug, Clone)]
 pub enum CheckingTarget {
+    CompletionExistence(crate::CompletionExistenceStats),
     CompletionSize {
         component: usize,
         components: usize,
@@ -102,6 +103,13 @@ impl CheckingProgress {
             frame.target = Some(CheckingTarget::SatUniqueness(stats.clone()));
             drop(frame);
             self.emit("progress", first);
+        }
+    }
+    pub(crate) fn completion_existence(&self, stats: &crate::CompletionExistenceStats) {
+        if let Some(s) = &self.0 {
+            s.current.lock().unwrap().target =
+                Some(CheckingTarget::CompletionExistence(stats.clone()));
+            self.emit("progress", false);
         }
     }
     pub(crate) fn completion_size(

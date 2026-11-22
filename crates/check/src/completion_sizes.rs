@@ -46,8 +46,23 @@ pub struct CompletionEncodingSize {
     pub variables: usize,
     pub clauses: usize,
 }
+/// Operational observations, not proof evidence or policy thresholds.
+#[derive(Debug, Clone, Default)]
+pub struct CompletionExistenceStats {
+    pub components: usize,
+    pub total_components: usize,
+    pub fallback_components: usize,
+    pub rounds: usize,
+    pub cubes: usize,
+    pub pins: usize,
+    pub max_pins: usize,
+    pub validation_work: usize,
+    pub lifting_attempts: usize,
+    pub lifted_pins: usize,
+}
 #[derive(Debug, Clone)]
 pub struct CompletionSearchSize {
+    pub existence: CompletionExistenceStats,
     pub elapsed: Duration,
     /// Query-scope work including construction; unavailable if construction failed
     /// before a Run existed. Nested query scopes may overlap; do not sum them.

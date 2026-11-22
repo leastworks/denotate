@@ -1248,26 +1248,31 @@ are not stable replay evidence or an editor capability switch.
   of the set. `all-rejected` is explicit; processing is `not-applicable` and
   processing requirements are `vacuous`. `all-rejected` excludes classification
   no-meaning, ambiguity and unknowns. Inconsistent W cannot produce such proofs.
-- `completion-model` evidence retains original relational atom/value assignments,
-  full present/absent input observations, hypothesis and scope (`hypothesis-cone`,
-  `classification-without-hypothesis`, `accepted-processing`, `whole-program`, or
-  `property-cone`, `assumption-cone`, `input-domain-cone`). Models are representative interpretations: uniqueness of the
-  selected decisions does not claim that helper values are forced. Unlisted legal atoms
-  inside the scope are false: no producer survives completion-safe pruning. This is not a finite derivation.
-  `scopeAtoms` identifies live dependency-cone members (`null` for the whole
-  program). Liveness is frozen at the positive-support greatest fixpoint before
-  W, H and decisions; further solver simplifications cannot alter it. Input
-  observations include inputs outside the derived cone, except relations explicitly
-  listed in `omittedInputRelations` (outside this verification's dependency scope).
-  Static provider models (`input-domain-cone`) omit every runtime input relation:
-  they precede the runtime input universe. Omitted tuples are unknown, not false.
-  Aggregated property evidence contains bounded `examples`, `count`,
-  `countKind: "exact" | "at-least"` and `omittedExamples`. Each example includes
-  its `group` and `presentTuples`; coverage examples have no present tuple.
-- `rejected-observation` evidence includes the full permitted observation,
+- Checked `completion-model` values retain full interpretations internally. The
+  combined presenter emits a verification-local `completionEvidence` table
+  (`version: 1`, `fullModels`, `maxAtoms`, `models`) shared by findings and summary.
+  A `completion-model-reference` carries `modelRef`; this is not a finding identity
+  or a persistent key. Table entries keep `scope`, `hypothesis`, `interpretation`
+  and `observation`. Default entries project to relevant cone inputs and selected
+  decisions, prioritize counterexample/differing tuples, and retain at most 64 atoms.
+  `projection`, `projectedOutAtoms`, `omittedAtoms`, and observation
+  `omittedPresent`/`omittedAbsent` make truncation explicit. Omitted display atoms
+  must **not** be interpreted as false. Standalone presenter helpers use bounded
+  inline models instead of references.
+  `scopeAtomsComplete: false` means the scope list is not serialized; `scopeAtoms`
+  is then null. Explicit full-model output includes the original scope list
+  (`null` for whole-program scope), full observations and original assignments.
+  Models remain representative interpretations, not finite derivations or claims
+  that helpers are forced. `omittedInputRelations` still identifies unavailable
+  input universes, independently of display truncation.
+  Aggregated property evidence keeps bounded `examples`, `count`, `countKind`
+  and `omittedExamples`. Each example has its `group`, bounded `presentTuples`
+  and `omittedPresentTuples`. Coverage has no present tuple. Finding identities,
+  severities, scope semantics and validation are unchanged.
+- `rejected-observation` evidence includes a bounded permitted observation,
   hypothesis, `scope: "hypothesis-cone"` and `confirmedNoInterpretation: true`
   (the query **with H** was unsatisfiable). `withoutHypothesis` is a validated
-  `completion-model` of the same classification cone without requiring H, with
+  model (inline or referenced) of the same classification cone without requiring H, with
   `hypothesis: null` and scope `classification-without-hypothesis`.
   `completion-no-meaning` with that scope records that even this second query was
   unsatisfiable; it is distinct from rejection and independently fails verification.

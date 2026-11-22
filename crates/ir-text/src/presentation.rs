@@ -332,17 +332,22 @@ pub fn present_completion(
     program: &LoadedProgram,
     report: &denotate_check::completion_query::Report,
 ) -> Result<Presentation> {
-    place_completion_findings(
-        program,
-        report.verification,
-        denotate_presentation::completion_findings(
-            &program.corpus,
-            &program.keys,
-            report,
-            &diagnostic_names(&program.corpus),
-        )?,
-        denotate_presentation::completion_summary(&program.corpus, &program.keys, report)?,
-    )
+    present_completion_with_options(program, report, Default::default())
+}
+
+pub fn present_completion_with_options(
+    program: &LoadedProgram,
+    report: &denotate_check::completion_query::Report,
+    options: denotate_presentation::CompletionEvidenceOptions,
+) -> Result<Presentation> {
+    let (findings, summary) = denotate_presentation::completion_presentation(
+        &program.corpus,
+        &program.keys,
+        report,
+        &diagnostic_names(&program.corpus),
+        options,
+    )?;
+    place_completion_findings(program, report.verification, findings, summary)
 }
 
 pub fn completion_input_domain_failure(
@@ -350,22 +355,26 @@ pub fn completion_input_domain_failure(
     verification: denotate_ir::VerificationId,
     issues: &[denotate_check::completion_query::InputDomainIssue],
 ) -> Result<Presentation> {
+    completion_input_domain_failure_with_options(program, verification, issues, Default::default())
+}
+pub fn completion_input_domain_failure_with_options(
+    program: &LoadedProgram,
+    verification: denotate_ir::VerificationId,
+    issues: &[denotate_check::completion_query::InputDomainIssue],
+    options: denotate_presentation::CompletionEvidenceOptions,
+) -> Result<Presentation> {
     use denotate_check::completion_query::InputDomainFailure;
+    let (findings, data, models) = denotate_presentation::completion_input_domain_presentation(
+        &program.corpus,
+        &program.keys,
+        issues,
+        &diagnostic_names(&program.corpus),
+        options,
+    )?;
     let status = json!({"backend":{"backend":"sat"},"semantics":"completion","state":"incomplete","incomplete":true,
         "hasFailures":issues.iter().any(|i|matches!(i.failure,InputDomainFailure::Ambiguous(_)|InputDomainFailure::NoMeaning)),
-        "inputDomains":issues.iter().map(|i|denotate_presentation::input_domain_data(i,&program.keys)).collect::<Result<Vec<_>>>()?,
-        "meaning":{"state":"not-analysed"}});
-    place_completion_findings(
-        program,
-        verification,
-        denotate_presentation::completion_input_domain_findings(
-            &program.corpus,
-            &program.keys,
-            issues,
-            &diagnostic_names(&program.corpus),
-        )?,
-        status,
-    )
+        "inputDomains":data,"completionEvidence":models,"meaning":{"state":"not-analysed"}});
+    place_completion_findings(program, verification, findings, status)
 }
 
 fn place_completion_findings(

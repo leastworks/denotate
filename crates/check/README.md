@@ -1324,3 +1324,17 @@ counters use interned slots on the hot path. `Limits::run_deadline` optionally b
 multiple operations cooperatively and is carried by `OperationalLimits`, never by
 semantic/cache identity. Default Rust limits leave it unset. The SAT CLI policy is
 separate; see [checker policies](../../docs/checker-policies.md#sat-cli-exploration-policy-2026-11-22).
+
+Completion existence checks totality per negative SCC over unconstrained provider
+atoms. Positive SCCs always extend their providers. A failed local check retains
+that component and its upstream cone for the global W search; it cannot itself
+produce a no-meaning finding. Processing keeps C and H in that fallback. Successful
+model cubes are lifted only after a SAT check rules out violations of the original
+equations with the proposed pin removed. Validation indexes are constructed once
+per encoding and still check every original rule, including folded producers.
+
+`CompletionSearchSize::existence` and `CheckingTarget::CompletionExistence` expose
+rounds, cube pins, validation work, total/fallback component counts and lifting.
+These are observations, not certificates or stable identities. When a run deadline
+is configured, completion divides remaining time among remaining required queries;
+a query's local timeout does not restart the run deadline or suppress later work.

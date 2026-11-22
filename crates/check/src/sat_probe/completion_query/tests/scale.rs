@@ -219,3 +219,123 @@ fn requested_advisory_reports_empty_or_unknown_context_without_changing_it() {
         }
     ));
 }
+
+#[test]
+fn local_non_total_boundary_is_not_a_global_counterexample() {
+    for hypothesis in [false, true] {
+        let mut c = Corpus::new();
+        let p = rel(&mut c, "optional_provider", false);
+        let bad = rel(&mut c, "contradiction_if_provider", false);
+        rule(&mut c, p, &[(p, false)]);
+        rule(&mut c, bad, &[(p, false), (bad, true)]);
+        let v = verification(&mut c, hypothesis.then_some(p), &[]);
+        let e = prepare(&c, v, &Domains::new());
+        let r = e.check(&keys(&c), &Default::default()).unwrap();
+        same_report(
+            &r,
+            &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
+        );
+        assert_eq!(r.meaning.no_meaning.exists(), hypothesis);
+    }
+}
+
+#[test]
+fn unreachable_boundary_assignment_is_checked_in_its_upstream_cone() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let p = rel(&mut c, "impossible_provider", false);
+    let bad = rel(&mut c, "bad", false);
+    rule(&mut c, p, &[(i, false), (i, true)]);
+    rule(&mut c, bad, &[(p, false), (bad, true)]);
+    let v = verification(&mut c, None, &[]);
+    let e = prepare(&c, v, &Domains::new());
+    let r = e.check(&keys(&c), &Default::default()).unwrap();
+    same_report(
+        &r,
+        &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
+    );
+    assert!(matches!(r.meaning.no_meaning, Search::None));
+}
+
+#[test]
+fn complementary_producers_lift_a_boundary_pin_without_losing_models() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let p = rel(&mut c, "p", false);
+    let q = rel(&mut c, "q", false);
+    rule(&mut c, p, &[(q, true), (i, false)]);
+    rule(&mut c, p, &[(q, true), (i, true)]);
+    rule(&mut c, q, &[(p, true), (i, false)]);
+    rule(&mut c, q, &[(p, true), (i, true)]);
+    let v = verification(&mut c, None, &[]);
+    let mut e = prepare(&c, v, &Domains::new());
+    let sizes = crate::CompletionSizes::default();
+    e.limits.completion_sizes = Some(sizes.clone());
+    let r = e.check(&keys(&c), &Default::default()).unwrap();
+    same_report(
+        &r,
+        &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
+    );
+    let snapshot = sizes.snapshot();
+    let stats = &snapshot
+        .searches
+        .iter()
+        .find(|s| s.phase == "completion processing existence")
+        .unwrap()
+        .existence;
+    assert!(
+        stats.lifted_pins > 0,
+        "complementary alternatives should remove an otherwise unnecessary pin"
+    );
+    assert!(stats.validation_work > 0);
+    assert!(matches!(r.meaning.no_meaning, Search::None));
+}
+
+#[test]
+fn deadline_shares_leave_room_for_later_questions_and_never_restart_deadline() {
+    let mut c = Corpus::new();
+    let p = rel(&mut c, "p", false);
+    rule(&mut c, p, &[]);
+    let v = verification(&mut c, None, &[]);
+    let mut e = prepare(&c, v, &Domains::new());
+    let deadline = Instant::now() + Duration::from_secs(60);
+    e.limits.run_deadline = Some(deadline);
+    e.limits.timeout = Duration::from_secs(60);
+    let first = e.shared_limits(4);
+    let last = e.shared_limits(1);
+    assert_eq!(first.run_deadline, Some(deadline));
+    assert_eq!(last.run_deadline, Some(deadline));
+    assert!(first.timeout < last.timeout);
+    assert!(first.timeout <= Duration::from_secs(15));
+    assert!(last.timeout <= Duration::from_secs(60));
+}
+
+#[test]
+fn component_proofs_share_the_search_candidate_allowance() {
+    let mut c = Corpus::new();
+    for suffix in ["a", "b"] {
+        let p = rel(&mut c, &format!("p_{suffix}"), false);
+        let q = rel(&mut c, &format!("q_{suffix}"), false);
+        rule(&mut c, p, &[(q, true)]);
+        rule(&mut c, q, &[(p, true)]);
+    }
+    let v = verification(&mut c, None, &[]);
+    let e = prepare(&c, v, &Domains::new());
+    let short = e
+        .check(
+            &keys(&c),
+            &CheckOptions {
+                max_worlds: 1,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(matches!(short.meaning.no_meaning, Search::Inconclusive(_)));
+    let complete = e.check(&keys(&c), &CheckOptions::default()).unwrap();
+    assert!(matches!(complete.meaning.no_meaning, Search::None));
+    same_report(
+        &complete,
+        &e.check_enumerated(&keys(&c), &CheckOptions::default())
+            .unwrap(),
+    );
+}

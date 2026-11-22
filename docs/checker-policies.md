@@ -1791,3 +1791,30 @@ it does not cache a second set of ground rule instances. This is not a guarantee
 of linear joins: projection onto a shared head can require rechecking many
 alternative supports, and symbolic-to-concrete changes can still require a full
 join. The opt-in diagnostic LFP continues to use its own growing delta frontier.
+
+### Completion existence and evidence at scale
+
+Existence first proves totality of negative components over free boundary providers;
+positive components need no SAT totality search. A component that is not total is
+retained with its upstream cone for the global search. Model cubes retain one
+interpretation while varying unpinned inputs. SAT lifting attempts to remove up to
+64 pins per cube, in deterministic index order, by checking the original equations.
+All work, solves and deadlines remain charged; the lifting cap never changes a
+verdict, and exhausted required searches remain inconclusive. Component validation
+uses compact arrays. Global validation indexes retain every original producer and
+constant while skipping unrelated producer-less false slots.
+
+With a shared run deadline, required searches get an equal share of the remaining
+time by remaining question count (each obligation counts once). Rejection and
+classification existence precede ambiguity; accepted-input eligibility remains
+independently checked. Unused time passes forward. Preparation, input-contract
+validation, global cancellation and the final deadline are unchanged. No time or
+count is a test golden.
+
+Search size records include `existence`: component totals/fallbacks, rounds, cubes,
+sum and maximum pins per cube, model-validation work and lifting attempts/removals.
+Counts are operational and may be partial; a local fallback is not a finding.
+Progress exposes the same running counters. Default completion evidence retains
+64 atoms per model and 64 present/absent inputs each, with omissions explicit;
+retained examples still follow the existing example limit. Full models require
+`--completion-full-models`. Shared model references are local to one report.

@@ -84,7 +84,35 @@ impl Model {
             .core
             .atoms
             .iter()
-            .filter_map(|a| self.value(a).map(|v| (a, v)))
+            .enumerate()
+            .filter(move |(_, a)| {
+                !self.omitted_inputs.contains(&a.relation)
+                    && (self.input_relations.contains(&a.relation)
+                        || self.members.as_ref().is_none_or(|m| m.contains(*a)))
+            })
+            .map(|(i, a)| (a, self.values[i]))
+    }
+    /// Equality for sharing evidence within one prepared program. This is not a
+    /// persistent identity and does not compare solver auxiliary assignments.
+    pub fn same_interpretation(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.program, &other.program)
+            && self.scope == other.scope
+            && self.values == other.values
+            && self.members == other.members
+            && self.omitted_inputs == other.omitted_inputs
+    }
+
+    /// Differences between interpretations of the same prepared program, for
+    /// bounded diagnostic projection. No solver auxiliaries or new proof work.
+    pub fn differing_atoms<'a>(&'a self, other: &'a Self) -> impl Iterator<Item = &'a GroundAtom> {
+        self.interpretation().filter_map(move |(a, v)| {
+            let other_value = if Arc::ptr_eq(&self.program, &other.program) {
+                other.program.atom_index.get(a).map(|i| other.values[*i])
+            } else {
+                other.value(a)
+            };
+            (other_value.is_some_and(|w| w != v)).then_some(a)
+        })
     }
     /// None denotes the whole program. Observations include eligible inputs
     /// outside these live cone members, except `omitted_input_relations`.
@@ -120,14 +148,20 @@ impl Model {
                 .program
                 .inputs
                 .iter()
-                .filter(|a| self.value(a) == Some(true))
+                .filter(|a| {
+                    !self.omitted_inputs.contains(&a.relation)
+                        && self.values[self.program.atom_index[*a]]
+                })
                 .cloned()
                 .collect(),
             absent: self
                 .program
                 .inputs
                 .iter()
-                .filter(|a| self.value(a) == Some(false))
+                .filter(|a| {
+                    !self.omitted_inputs.contains(&a.relation)
+                        && !self.values[self.program.atom_index[*a]]
+                })
                 .cloned()
                 .collect(),
         }

@@ -778,6 +778,7 @@ fn completion_preparation_sizes_are_flushed_before_checking_even_without_progres
         &Default::default(),
         false,
         false,
+        false,
         true,
         false,
         &mut output,
@@ -869,4 +870,29 @@ fn sat_cli_defaults_and_overrides_do_not_depend_on_argument_order() {
     ]);
     assert_eq!(code, 2, "{out}");
     assert!(out.contains("deadline"), "{out}");
+}
+
+#[test]
+fn completion_full_models_is_explicit_and_not_enabled_by_verbose() {
+    let f = Fixture::new(
+        "relation p();p();obligation clean:empty(p);verification v{semantics:completion;assumptions:[];obligations:[clean];}",
+    );
+    for extra in [vec![], vec!["--verbose"], vec!["--completion-full-models"]] {
+        let mut args = vec!["--engine", "sat", "--json", "--no-progress"];
+        args.extend(extra.iter().copied());
+        let (code, out) = f.run(&args);
+        assert_eq!(code, 1, "{out}");
+        let full = extra.contains(&"--completion-full-models");
+        assert!(
+            out.contains(if full {
+                "\"fullModels\": true"
+            } else {
+                "\"fullModels\": false"
+            }),
+            "{out}"
+        );
+        assert!(out.contains("modelRef"));
+    }
+    let (code, _) = f.run(&["--completion-full-models"]);
+    assert_eq!(code, 2);
 }

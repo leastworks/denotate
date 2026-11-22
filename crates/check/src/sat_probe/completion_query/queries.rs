@@ -319,6 +319,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
                 (
                     sink,
                     crate::CompletionSearchSize {
+                        existence: Default::default(),
                         elapsed: Duration::ZERO,
                         work: None,
                         phase: "completion query",
@@ -636,17 +637,29 @@ pub(super) fn checked_assignment(
     cnf: &Cnf,
     b: &mut Budget<'_>,
 ) -> Result<Vec<bool>> {
-    let mut values = Vec::new();
-    for l in &e.vars {
-        b.tick("completion model validation")?;
-        values.push(cnf.solver.value_lit(*l) == lbool::TRUE);
+    let mut values = vec![false; e.vars.len()];
+    if let Some(index) = &e.validation {
+        b.charge(index.read.len(), "completion model validation")?;
+        for i in &index.read {
+            values[*i] = cnf.solver.value_lit(e.vars[*i]) == lbool::TRUE;
+        }
+    } else {
+        b.charge(e.vars.len(), "completion model validation")?;
+        for (i, l) in e.vars.iter().enumerate() {
+            values[i] = cnf.solver.value_lit(*l) == lbool::TRUE;
+        }
     }
     let mut produced = vec![false; values.len()];
     for r in &cone.rules {
         b.charge(r.body.len() + 1, "completion model validation")?;
         produced[r.head] |= r.body.iter().all(|(a, pos)| values[*a] == *pos);
     }
-    for i in 0..values.len() {
+    let heads: Box<dyn Iterator<Item = usize>> = if let Some(index) = &e.validation {
+        Box::new(index.heads.iter().copied())
+    } else {
+        Box::new(0..values.len())
+    };
+    for i in heads {
         b.tick("completion model validation")?;
         if let Some(fixed) = cone.fixed[i] {
             if values[i] != fixed {

@@ -488,7 +488,10 @@ not add scope edges; later solver pruning must not change this boundary. Thus
 while p's ambiguity belongs to processing.
 
 Completion counterexamples carry checked interpretations and their scope, with the
-full input observation, rather than claiming a finite derivation. Unlocated support
+checked input observation, rather than claiming a finite derivation. Default CLI
+output projects and bounds those models, with explicit omissions and shared model
+references; `--completion-full-models` requests the full scoped interpretations.
+Display bounds do not change validation or verdicts. Unlocated support
 falls back to the obligation. `--completion-circular-support` optionally reports an
 accepted classification that needs a positive support cycle. It is off by default,
 bounded separately, and neither its findings nor exhaustion affect required verdicts

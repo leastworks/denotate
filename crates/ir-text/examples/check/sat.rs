@@ -12,6 +12,7 @@ pub(super) fn run(
     mut check: CheckOptions,
     circular_support: bool,
     dead_producers: bool,
+    full_models: bool,
     dump: &mut Option<component_dump::Dump>,
     profile_file: &Option<profile_writer::Shared>,
     partial: bool,
@@ -75,6 +76,9 @@ pub(super) fn run(
         .collect::<std::collections::BTreeMap<_, _>>();
     let observer = trace.clone();
     limits.progress = denotate_check::CheckingProgress::new(move |e| {
+        if let Some(denotate_check::CheckingTarget::CompletionExistence(ref stats)) = e.target {
+            observer.message(format!("{} {}: components {}/{}, fallback {}, rounds {}, cubes {}, pins {} (max {}), validation work {}, lifted {}/{}",e.stage,e.state,stats.total_components,stats.components,stats.fallback_components,stats.rounds,stats.cubes,stats.pins,stats.max_pins,stats.validation_work,stats.lifted_pins,stats.lifting_attempts));
+        }
         if let Some(denotate_check::CheckingTarget::SatExistence(ref stats)) = e.target {
             observer.message(format!(
                 "SAT existence {}: {}",
@@ -113,6 +117,7 @@ pub(super) fn run(
                 denotate_check::CheckingTarget::SatExistence(_)
                     | denotate_check::CheckingTarget::SatUniqueness(_)
                     | denotate_check::CheckingTarget::CompletionSize { .. }
+                    | denotate_check::CheckingTarget::CompletionExistence(_)
             )
         ) {
             observer.message(format!("{} {}: {}", e.stage, target, e.state));
@@ -140,6 +145,7 @@ pub(super) fn run(
                 &check,
                 circular_support,
                 dead_producers,
+                full_models,
                 json,
                 verbose,
                 output,
@@ -353,6 +359,7 @@ fn completion(
     check: &CheckOptions,
     circular_support: bool,
     dead_producers: bool,
+    full_models: bool,
     json: bool,
     verbose: bool,
     output: &mut String,
@@ -381,6 +388,7 @@ fn completion(
         check,
         circular_support,
         dead_producers,
+        full_models,
         json,
         verbose,
         output,
@@ -513,6 +521,8 @@ fn write_completion_sizes(
             .unwrap();
         }
         for search in sizes["searches"].as_array().unwrap() {
+            let e = &search["existence"];
+            writeln!(output,"  search progress {}: total components {}/{}, fallback {}, rounds {}, cubes {}, pins {} (max {}), validation work {}, lifted {}/{}",search["phase"],e["totalComponents"],e["components"],e["fallbackComponents"],e["rounds"],e["cubes"],e["pins"],e["maxPins"],e["validationWork"],e["liftedPins"],e["liftingAttempts"]).unwrap();
             for e in search["encodingDetails"].as_array().unwrap() {
                 writeln!(output, "  encoding {} / {} (complete={}): {} inputs; folded {} true, {} false; {} variables, {} clauses", search["phase"], e["purpose"], e["complete"], e["inputAtoms"], e["foldedTrue"], e["foldedFalse"], e["variables"], e["clauses"]).unwrap();
             }
@@ -542,6 +552,7 @@ pub(super) fn completion_inner(
     check: &CheckOptions,
     circular_support: bool,
     dead_producers: bool,
+    full_models: bool,
     json: bool,
     verbose: bool,
     output: &mut String,
@@ -607,10 +618,18 @@ pub(super) fn completion_inner(
         match preparation {
             Ok(cq::Preparation::Ready(e)) => prepared = Some(e),
             Ok(cq::Preparation::InputDomains(issues)) => {
-                let shown = presentation::completion_input_domain_failure(p, v.id, &issues)
-                    .map_err(|e| (2, e.to_string()))?;
+                let shown = presentation::completion_input_domain_failure_with_options(
+                    p,
+                    v.id,
+                    &issues,
+                    denotate_presentation::CompletionEvidenceOptions {
+                        full_models,
+                        ..Default::default()
+                    },
+                )
+                .map_err(|e| (2, e.to_string()))?;
                 if json {
-                    writeln!(output, "Results: {}", shown.status).unwrap();
+                    stream_results(&shown.status, output, flush)?;
                 } else {
                     print_diagnostics(p, &shown, output, verbose)?;
                 }
@@ -633,7 +652,7 @@ pub(super) fn completion_inner(
         let shown = presentation::completion_preparation_failure(p, v.id, exhausted, &problem)
             .map_err(|e| (2, e.to_string()))?;
         if json {
-            writeln!(output, "Results: {}", shown.status).unwrap();
+            stream_results(&shown.status, output, flush)?;
         } else {
             print_diagnostics(p, &shown, output, verbose)?;
         }
@@ -658,10 +677,18 @@ pub(super) fn completion_inner(
             e @ (CheckError::Internal(_) | CheckError::Cancelled) => (3, e.to_string()),
             e => checker_failure(e),
         })?;
-    let shown = presentation::present_completion(p, &report).map_err(|e| (2, e.to_string()))?;
+    let shown = presentation::present_completion_with_options(
+        p,
+        &report,
+        denotate_presentation::CompletionEvidenceOptions {
+            full_models,
+            ..Default::default()
+        },
+    )
+    .map_err(|e| (2, e.to_string()))?;
     let s = &shown.status;
     if json {
-        writeln!(output, "Results: {s:#}").unwrap();
+        stream_results(s, output, flush)?;
     } else {
         if !s["inputContract"]["complete"].as_bool().unwrap() {
             writeln!(
@@ -880,5 +907,78 @@ fn print_inventory(inventory: &serde_json::Value, output: &mut String) {
             inventory["reason"].as_str().unwrap()
         )
         .unwrap();
+    }
+}
+
+/// Serialize in bounded chunks. Explicit full-model output may be large; do not
+/// also keep a second giant formatted String until the verification returns.
+fn stream_results(
+    status: &serde_json::Value,
+    output: &mut String,
+    flush: &mut dyn FnMut(&mut String) -> Result<(), Failure>,
+) -> Result<(), Failure> {
+    struct Writer<'a> {
+        output: &'a mut String,
+        flush: &'a mut dyn FnMut(&mut String) -> Result<(), Failure>,
+        failure: Option<Failure>,
+    }
+    impl std::io::Write for Writer<'_> {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            // serde_json emits complete UTF-8 fragments (or ASCII escapes).
+            let text = std::str::from_utf8(bytes).map_err(std::io::Error::other)?;
+            self.output.push_str(text);
+            if self.output.len() >= 64 * 1024 {
+                if let Err(error) = (self.flush)(self.output) {
+                    self.failure = Some(error);
+                    return Err(std::io::Error::other("output failed"));
+                }
+            }
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    output.push_str("Results: ");
+    let mut writer = Writer {
+        output,
+        flush,
+        failure: None,
+    };
+    let result = serde_json::to_writer_pretty(&mut writer, status);
+    if let Some(failure) = writer.failure {
+        return Err(failure);
+    }
+    result.map_err(|e| (3, e.to_string()))?;
+    writer.output.push('\n');
+    Ok(())
+}
+
+#[cfg(test)]
+mod streaming_tests {
+    use super::*;
+    #[test]
+    fn chunked_json_roundtrips_unicode_and_propagates_output_errors() {
+        let data = json!({"models":(0..2000).map(|i|json!({"id":i,"text":"á 🎈".repeat(30)})).collect::<Vec<_>>()});
+        let mut out = String::new();
+        let mut chunks = Vec::new();
+        stream_results(&data, &mut out, &mut |s| {
+            chunks.push(std::mem::take(s));
+            Ok(())
+        })
+        .unwrap();
+        assert!(chunks.len() > 1);
+        chunks.push(out);
+        let text = chunks.concat();
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(text.strip_prefix("Results: ").unwrap())
+                .unwrap(),
+            data
+        );
+        let error = stream_results(&data, &mut String::new(), &mut |_| {
+            Err((3, "disk full".into()))
+        })
+        .unwrap_err();
+        assert_eq!(error, (3, "disk full".into()));
     }
 }

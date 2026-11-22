@@ -47,7 +47,7 @@ impl<'de> Deserialize<'de> for Compact {
             fn visit_map<A: MapAccess<'de>>(self, mut a: A) -> Result<Compact, A::Error> {
                 let mut values = Map::new();
                 while let Some(key) = a.next_key::<String>()? {
-                    if key == "evidence" {
+                    if key == "evidence" || key == "completionEvidence" {
                         a.next_value::<de::IgnoredAny>()?;
                     } else {
                         values.insert(key, a.next_value::<Compact>()?.0);
@@ -65,13 +65,17 @@ mod tests {
     use super::*;
     #[test]
     fn summary_preserves_states_counts_and_reasons_but_skips_nested_evidence() {
-        let source = serde_json::json!({"state":"incomplete", "count":3,"complete":false,
+        let source = serde_json::json!({"completionEvidence":{"models":{"m0":{"interpretation":[1,2,3]}}},"state":"incomplete", "count":3,"complete":false,
             "classification":{"accepted":{"state":"found","evidence":{"interpretation":[1,2,3]}}},
             "findings":[{"kind":"inconclusive","evidence":{"huge":[1,2,3]}}],
             "reason":{"phase":"checking","resource":"work","limit":100,"observed":101},"optional":null});
         let summary: Compact =
             serde_json::from_reader(std::io::Cursor::new(source.to_string())).unwrap();
         let mut expected = source;
+        expected
+            .as_object_mut()
+            .unwrap()
+            .remove("completionEvidence");
         expected["classification"]["accepted"]
             .as_object_mut()
             .unwrap()

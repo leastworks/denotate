@@ -3,6 +3,7 @@
 use super::*;
 use queries::{Run, checked_assignment};
 
+mod existence;
 pub mod planning;
 
 type Cube = BTreeMap<usize, bool>;
@@ -98,6 +99,7 @@ struct Solver<'a, 'b, 'l> {
     run: Run<'a, 'b, 'l>,
     gates: Vec<Lit>,
     eligibility: Option<(Encoded, Encoded, Lit)>,
+    stats: crate::CompletionExistenceStats,
 }
 impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
     fn new(engine: &'a Engine, budget: &'b mut Budget<'l>) -> Result<Self> {
@@ -105,7 +107,24 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
             run: Run::new(engine, budget)?,
             gates: vec![],
             eligibility: None,
+            stats: Default::default(),
         })
+    }
+    fn metrics(&mut self) {
+        if let Some((_, stats)) = &mut self.run.cnf.measurement {
+            stats.existence = self.stats.clone();
+        }
+        self.run
+            .engine
+            .limits
+            .progress
+            .completion_existence(&self.stats);
+    }
+    fn cube_metrics(&mut self, cube: &Cube) {
+        self.stats.cubes += 1;
+        self.stats.pins += cube.len();
+        self.stats.max_pins = self.stats.max_pins.max(cube.len());
+        self.metrics();
     }
     fn gate(&mut self) -> Result<Lit> {
         let gate = self.run.cnf.var(self.run.budget)?;
@@ -192,15 +211,23 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
         self.run.solve(&assumptions)
     }
     fn values(&mut self, cone: &Cone, encoded: &Encoded) -> Result<Vec<bool>> {
-        checked_assignment(cone, &encoded.encoding, &self.run.cnf, self.run.budget)
+        let started = self.run.budget.used();
+        let result = checked_assignment(cone, &encoded.encoding, &self.run.cnf, self.run.budget);
+        self.stats.validation_work += self.run.budget.used() - started;
+        self.metrics();
+        result
     }
     fn world(&mut self) -> Result<Observation> {
-        let values = checked_assignment(
+        let started = self.run.budget.used();
+        let checked = checked_assignment(
             &self.run.engine.world,
             &self.run.world,
             &self.run.cnf,
             self.run.budget,
-        )?;
+        );
+        self.stats.validation_work += self.run.budget.used() - started;
+        self.metrics();
+        let values = checked?;
         Ok(self
             .run
             .engine
@@ -219,6 +246,7 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
             .collect()
     }
     fn exclude(&mut self, selector: Lit, cube: &Cube) -> Result<()> {
+        self.cube_metrics(cube);
         self.run
             .budget
             .charge(cube.len(), "completion cube exclusion")?;
@@ -258,8 +286,10 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
         }
         let (a, b, _) = self.eligibility.as_ref().unwrap();
         let (cone, _, h) = self.run.engine.classification.as_ref().unwrap();
+        let started = self.run.budget.used();
         let av = checked_assignment(cone, &a.encoding, &self.run.cnf, self.run.budget)?;
         let bv = checked_assignment(cone, &b.encoding, &self.run.cnf, self.run.budget)?;
+        self.stats.validation_work += self.run.budget.used() - started;
         let mut cube = cover(cone, &av, Some(*h), self.run.budget)?;
         cube.extend(cover(cone, &bv, Some(*h), self.run.budget)?);
         Ok(Some(cube))
@@ -319,14 +349,26 @@ pub(super) fn cover(
 }
 
 impl Engine {
+    pub(super) fn shared_limits(&self, shares: usize) -> Limits {
+        let mut limits = self.limits.clone();
+        if let Some(deadline) = limits.run_deadline {
+            limits.timeout = limits.timeout.min(
+                deadline.saturating_duration_since(Instant::now())
+                    / shares.max(1).min(u32::MAX as usize) as u32,
+            );
+        }
+        limits
+    }
     fn symbolic_search_in<T>(
         &self,
         context: &BTreeMap<GroundAtom, bool>,
         phase: &'static str,
+        shares: usize,
         f: impl FnOnce(&mut Solver<'_, '_, '_>) -> Result<Option<T>>,
     ) -> Result<Search<T>> {
         let _progress = self.limits.progress.scope(phase, None, true);
-        let mut budget = Budget::new(&self.limits);
+        let limits = self.shared_limits(shares);
+        let mut budget = Budget::new(&limits);
         let answer = (|| {
             let mut solver = Solver::new(self, &mut budget)?;
             solver.run.label(phase);
@@ -352,8 +394,9 @@ impl Engine {
         classification: bool,
         unique: bool,
         options: &CheckOptions,
+        shares: usize,
     ) -> Result<Search<Pair>> {
-        self.symbolic_pair_in(&BTreeMap::new(), classification, unique, options)
+        self.symbolic_pair_in(&BTreeMap::new(), classification, unique, options, shares)
     }
     fn symbolic_pair_in(
         &self,
@@ -361,6 +404,7 @@ impl Engine {
         classification: bool,
         unique: bool,
         options: &CheckOptions,
+        shares: usize,
     ) -> Result<Search<Pair>> {
         let (cone, members, scope) = if classification {
             let (c, m, _) = self.classification.as_ref().unwrap();
@@ -383,6 +427,7 @@ impl Engine {
             } else {
                 "completion processing ambiguity"
             },
+            shares,
             |s| {
                 let a = s.encode(cone, true)?;
                 let b = s.encode(cone, true)?;
@@ -397,6 +442,8 @@ impl Engine {
                         .budget
                         .room(examined, options.max_worlds, "completion pair", "worlds")?;
                     examined += 1;
+                    s.stats.rounds += 1;
+                    s.metrics();
                     let world = s.world()?;
                     // Retain both original assignments before the eligibility query
                     // changes the solver's current model.
@@ -413,17 +460,23 @@ impl Engine {
             },
         )
     }
-    fn symbolic_accepted(&self, unique: bool, options: &CheckOptions) -> Result<Search<Model>> {
-        self.symbolic_accepted_in(&BTreeMap::new(), unique, options)
+    fn symbolic_accepted(
+        &self,
+        unique: bool,
+        options: &CheckOptions,
+        shares: usize,
+    ) -> Result<Search<Model>> {
+        self.symbolic_accepted_in(&BTreeMap::new(), unique, options, shares)
     }
     fn symbolic_accepted_in(
         &self,
         context: &BTreeMap<GroundAtom, bool>,
         unique: bool,
         options: &CheckOptions,
+        shares: usize,
     ) -> Result<Search<Model>> {
         let (cone, _, _) = self.classification.as_ref().unwrap();
-        self.symbolic_search_in(context, "completion accepted observations", |s| {
+        self.symbolic_search_in(context, "completion accepted observations", shares, |s| {
             let encoded = s.encode(cone, true)?;
             let selector = s.gate()?;
             let mut examined = 0;
@@ -438,6 +491,8 @@ impl Engine {
                     "worlds",
                 )?;
                 examined += 1;
+                s.stats.rounds += 1;
+                s.metrics();
                 let world = s.world()?;
                 let model = self.model(s.values(cone, &encoded)?, ModelScope::Classification);
                 if let Some(cube) = s.eligible(&world, unique)? {
@@ -448,16 +503,17 @@ impl Engine {
             }
         })
     }
-    fn symbolic_rejected(&self, options: &CheckOptions) -> Result<Search<Model>> {
-        self.symbolic_rejected_in(&BTreeMap::new(), options)
+    fn symbolic_rejected(&self, options: &CheckOptions, shares: usize) -> Result<Search<Model>> {
+        self.symbolic_rejected_in(&BTreeMap::new(), options, shares)
     }
     fn symbolic_rejected_in(
         &self,
         context: &BTreeMap<GroundAtom, bool>,
         options: &CheckOptions,
+        shares: usize,
     ) -> Result<Search<Model>> {
         let (cone, _, h) = self.classification.as_ref().unwrap();
-        self.symbolic_search_in(context, "completion rejection", |s| {
+        self.symbolic_search_in(context, "completion rejection", shares, |s| {
             let base = s.encode(cone, false)?;
             let selector = s.gate()?;
             let mut examined = 0;
@@ -472,6 +528,8 @@ impl Engine {
                     "worlds",
                 )?;
                 examined += 1;
+                s.stats.rounds += 1;
+                s.metrics();
                 let world = s.world()?;
                 let model = self.model(
                     s.values(cone, &base)?,
@@ -493,8 +551,9 @@ impl Engine {
         classification: bool,
         unique: bool,
         options: &CheckOptions,
+        shares: usize,
     ) -> Result<Search<Observation>> {
-        self.symbolic_no_meaning_in(&BTreeMap::new(), classification, unique, options)
+        self.symbolic_no_meaning_in(&BTreeMap::new(), classification, unique, options, shares)
     }
     fn symbolic_no_meaning_in(
         &self,
@@ -502,13 +561,14 @@ impl Engine {
         classification: bool,
         unique: bool,
         options: &CheckOptions,
+        shares: usize,
     ) -> Result<Search<Observation>> {
         let cone = if classification {
             &self.classification.as_ref().unwrap().0
         } else {
             &self.cone
         };
-        self.symbolic_no_meaning_cone(context, classification, unique, options, cone)
+        self.symbolic_no_meaning_cone(context, classification, unique, options, shares, cone)
     }
     fn symbolic_no_meaning_cone(
         &self,
@@ -516,6 +576,7 @@ impl Engine {
         classification: bool,
         unique: bool,
         options: &CheckOptions,
+        shares: usize,
         cone: &Cone,
     ) -> Result<Search<Observation>> {
         let phase = if classification {
@@ -523,27 +584,11 @@ impl Engine {
         } else {
             "completion processing existence"
         };
-        self.symbolic_search_in(context, phase, |s| {
-            // Every positive SCC has a least fixpoint for each assignment of its
-            // providers. Classification is upstream-closed, so this also proves
-            // an extension for each accepted classification when no negative SCC
-            // exists in the complete program. This does not prove determinacy.
-            let mut negative = false;
-            for c in self.program.components() {
-                s.run.budget.tick(phase)?;
-                if c.cycle.is_some()
-                    && (!classification
-                        || c.atoms
-                            .iter()
-                            .any(|a| self.classification.as_ref().unwrap().1.contains(a)))
-                {
-                    negative = true;
-                    break;
-                }
-            }
-            if !negative {
+        self.symbolic_search_in(context, phase, shares, |s| {
+            let Some(cone) = existence::residual(self, cone, classification, s, options)? else {
                 return Ok(None);
-            }
+            };
+            let cone = &cone;
             let candidate = if !classification {
                 self.classification
                     .as_ref()
@@ -558,15 +603,15 @@ impl Engine {
             if let Some(candidate) = &candidate {
                 active.push(candidate.gate);
             }
-            let mut examined = 0;
             loop {
                 if !s.solve(&active, &[])? {
                     return Ok(None);
                 }
                 s.run
                     .budget
-                    .room(examined, options.max_worlds, phase, "worlds")?;
-                examined += 1;
+                    .room(s.stats.rounds, options.max_worlds, phase, "worlds")?;
+                s.stats.rounds += 1;
+                s.metrics();
                 let world = s.world()?;
                 if !classification {
                     if let Some(cube) = s.eligible(&world, unique)? {
@@ -613,6 +658,8 @@ impl Engine {
                     "worlds",
                 )?;
                 examined += 1;
+                s.stats.rounds += 1;
+                s.metrics();
                 let world = s.world()?;
                 let values = s.values(cone, &encoded)?;
                 if let Some(cube) = s.eligible(&world, unique)? {
@@ -704,6 +751,8 @@ impl Engine {
                 "worlds",
             )?;
             examined += 1;
+            s.stats.rounds += 1;
+            s.metrics();
             let world = s.world()?;
             let mut model = self.model(s.values(cone, &encoded)?, ModelScope::Property);
             model.members = Some(members.clone());
@@ -787,12 +836,26 @@ impl Engine {
             return Ok(report);
         }
         let mut globally_unique = true;
+        let mut remaining = report.obligations.len()
+            + 2
+            + if report.classification.is_some() {
+                4
+            } else {
+                0
+            };
         if let Some(c) = &mut report.classification {
-            c.ambiguous = self.symbolic_pair(true, true, options)?;
+            // Rejection and component existence often finish cheaply. Every
+            // search receives a fair part of the remaining *shared* deadline;
+            // unused time automatically remains available to later searches.
+            c.rejected = self.symbolic_rejected(options, remaining)?;
+            remaining -= 1;
+            c.no_meaning = self.symbolic_no_meaning(true, true, options, remaining)?;
+            remaining -= 1;
+            c.ambiguous = self.symbolic_pair(true, true, options, remaining)?;
+            remaining -= 1;
             globally_unique = matches!(c.ambiguous, Search::None);
-            c.accepted = self.symbolic_accepted(globally_unique, options)?;
-            c.rejected = self.symbolic_rejected(options)?;
-            c.no_meaning = self.symbolic_no_meaning(true, true, options)?;
+            c.accepted = self.symbolic_accepted(globally_unique, options, remaining)?;
+            remaining -= 1;
             for state in [
                 &c.accepted as &dyn Unknown,
                 &c.rejected,
@@ -815,12 +878,16 @@ impl Engine {
             .and_then(|c| Unknown::unknown(&c.accepted));
         report.meaning.applicable = !vacuous;
         if vacuous {
+            remaining = remaining.saturating_sub(2);
             report.meaning.no_meaning = Search::None;
             report.meaning.ambiguous = Search::None;
         } else {
             report.meaning.no_meaning =
-                self.symbolic_no_meaning(false, globally_unique, options)?;
-            report.meaning.ambiguous = self.symbolic_pair(false, globally_unique, options)?;
+                self.symbolic_no_meaning(false, globally_unique, options, remaining)?;
+            remaining -= 1;
+            report.meaning.ambiguous =
+                self.symbolic_pair(false, globally_unique, options, remaining)?;
+            remaining -= 1;
             for state in [
                 &report.meaning.no_meaning as &dyn Unknown,
                 &report.meaning.ambiguous,
@@ -830,8 +897,15 @@ impl Engine {
                 }
             }
         }
-        for property in report.obligations.values_mut() {
-            let mut budget = Budget::new(&self.limits);
+        for (id, property) in &mut report.obligations {
+            let _progress = self.limits.progress.scope(
+                "completion property",
+                Some(crate::CheckingTarget::Obligation(*id)),
+                true,
+            );
+            let limits = self.shared_limits(remaining);
+            remaining = remaining.saturating_sub(1);
+            let mut budget = Budget::new(&limits);
             if !vacuous {
                 if let Some(members) = property.members.clone() {
                     let mut cone = self.cone.clone();

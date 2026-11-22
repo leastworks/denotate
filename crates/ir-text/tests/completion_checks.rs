@@ -21,6 +21,12 @@ fn checked(text: &str, options: CheckOptions) -> (LoadedProgram, Report) {
     let r = e.check(&p.keys, &options).unwrap();
     (p, r)
 }
+fn evidence_model<'a>(
+    status: &'a serde_json::Value,
+    reference: &serde_json::Value,
+) -> &'a serde_json::Value {
+    &status["completionEvidence"]["models"][reference["modelRef"].as_str().unwrap()]
+}
 #[test]
 fn circular_empty_counterexample_keeps_completion_evidence_and_obligation_location() {
     let (p, r) = checked(
@@ -40,8 +46,9 @@ fn circular_empty_counterexample_keeps_completion_evidence_and_obligation_locati
         .unwrap();
     assert_eq!(d.evidence["kind"], "completion-model");
     assert!(d.notes.iter().any(|s| s.contains("p()")));
-    assert_eq!(d.evidence["examples"][0]["model"]["scope"], "property-cone");
-    assert!(d.evidence["examples"][0]["model"]["scopeAtoms"].is_array());
+    let model = evidence_model(&s.status, &d.evidence["examples"][0]["model"]);
+    assert_eq!(model["scope"], "property-cone");
+    assert_eq!(model["scopeAtomsComplete"], false);
     assert_eq!(
         d.evidence["examples"][0]["presentTuples"]
             .as_array()
@@ -50,7 +57,7 @@ fn circular_empty_counterexample_keeps_completion_evidence_and_obligation_locati
         1
     );
     assert!(
-        d.evidence["examples"][0]["model"]["interpretation"]
+        model["interpretation"]
             .as_array()
             .unwrap()
             .iter()
@@ -221,16 +228,11 @@ fn classification_no_meaning_is_distinct_from_rejection_in_findings_and_summary(
         .find(|d| d.evidence["kind"] == "rejected-observation")
         .unwrap();
     assert_eq!(d.evidence["confirmedNoInterpretation"], true);
-    assert_eq!(d.evidence["withoutHypothesis"]["kind"], "completion-model");
-    assert_eq!(
-        d.evidence["withoutHypothesis"]["scope"],
-        "classification-without-hypothesis"
-    );
-    assert!(d.evidence["withoutHypothesis"]["hypothesis"].is_null());
-    assert_eq!(
-        d.evidence["observation"],
-        d.evidence["withoutHypothesis"]["observation"]
-    );
+    let model = evidence_model(&s.status, &d.evidence["withoutHypothesis"]);
+    assert_eq!(model["kind"], "completion-model");
+    assert_eq!(model["scope"], "classification-without-hypothesis");
+    assert!(model["hypothesis"].is_null());
+    assert_eq!(d.evidence["observation"], model["observation"]);
     assert_eq!(
         s.status["classification"]["rejected"]["evidence"],
         d.evidence
@@ -304,4 +306,118 @@ fn decision_edits_change_requests_and_repeated_preparations_agree() {
         );
         assert_eq!(again.has_failures(), r.has_failures());
     }
+}
+
+#[test]
+fn evidence_is_bounded_shared_and_explicitly_expandable_without_changing_findings() {
+    let mut text = String::from("sort S;const ");
+    text.push_str(
+        &(0..150)
+            .map(|i| format!("c{i}"))
+            .collect::<Vec<_>>()
+            .join(","),
+    );
+    text.push_str(":S;relation r(x:S);");
+    for i in 0..150 {
+        text.push_str(&format!("r(c{i});"));
+    }
+    text.push_str("obligation first:at_most_one(r,group_by:());obligation second:at_most_one(r,group_by:());verification v{semantics:completion;assumptions:[];obligations:[first,second];}");
+    let (p, r) = checked(&text, Default::default());
+    let bounded = presentation::present_completion(&p, &r).unwrap();
+    let full = presentation::present_completion_with_options(
+        &p,
+        &r,
+        denotate_presentation::CompletionEvidenceOptions {
+            full_models: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let empty = presentation::present_completion_with_options(
+        &p,
+        &r,
+        denotate_presentation::CompletionEvidenceOptions {
+            max_atoms: 0,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    for shown in [&bounded, &full, &empty] {
+        assert_eq!(shown.status["state"], "findings");
+        assert_eq!(
+            shown
+                .diagnostics
+                .iter()
+                .map(|d| &d.identity)
+                .collect::<Vec<_>>(),
+            bounded
+                .diagnostics
+                .iter()
+                .map(|d| &d.identity)
+                .collect::<Vec<_>>()
+        );
+    }
+    let models = bounded.status["completionEvidence"]["models"]
+        .as_object()
+        .unwrap();
+    assert_eq!(
+        models.len(),
+        1,
+        "identical property models must be shared across obligations"
+    );
+    let model = models.values().next().unwrap();
+    assert_eq!(model["interpretation"].as_array().unwrap().len(), 64);
+    assert!(model["omittedAtoms"].as_u64().unwrap() > 0);
+    assert_eq!(
+        full.status["completionEvidence"]["models"]
+            .as_object()
+            .unwrap()
+            .values()
+            .next()
+            .unwrap()["interpretation"]
+            .as_array()
+            .unwrap()
+            .len(),
+        150
+    );
+    assert!(
+        empty.status["completionEvidence"]["models"]
+            .as_object()
+            .unwrap()
+            .values()
+            .all(|m| m["interpretation"].as_array().unwrap().is_empty())
+    );
+    for d in &bounded.diagnostics {
+        if let Some(examples) = d.evidence["examples"].as_array() {
+            for e in examples {
+                assert!(e["presentTuples"].as_array().unwrap().len() <= 64);
+            }
+        }
+    }
+}
+
+#[test]
+fn projected_property_evidence_omits_unrelated_inputs_but_full_models_retain_them() {
+    let (p, r) = checked(
+        "input relevant();input unrelated();relation bad();bad():-relevant();obligation clean:empty(bad);verification v{semantics:completion;assumptions:[];obligations:[clean];}",
+        Default::default(),
+    );
+    let shown = presentation::present_completion(&p, &r).unwrap();
+    let text = shown.status["completionEvidence"].to_string();
+    assert!(text.contains("relevant"));
+    assert!(!text.contains("unrelated"));
+    let full = presentation::present_completion_with_options(
+        &p,
+        &r,
+        denotate_presentation::CompletionEvidenceOptions {
+            full_models: true,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        full.status["completionEvidence"]
+            .to_string()
+            .contains("unrelated")
+    );
 }

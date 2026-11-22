@@ -639,3 +639,16 @@ Produced inputs are unavailable at entry even when W pins their truth. Task bran
 retain their continuation in each arm, avoiding producer-state loss at sibling joins.
 The interpreter's guarantee is conditional on a permitted completed observation;
 there is no runtime task-contract validator. See [the plan API and limits](../crates/plan/README.md).
+
+Completion existence composes proofs of component totality over free provider
+assignments. A local failure never becomes a diagnostic: the checker retains that
+component's upstream cone and searches permitted observations there. Positive SCCs
+always extend their providers. Validation checks original equations, independently
+of model display and scope-local CNF folding. Invocation-local indexes and counters
+are rebuilt with each encoding; they add no reuse identity.
+
+The shared completion presenter owns bounded evidence projection. It emits one
+verification-local model table, with references from diagnostics and summaries,
+explicit omissions and optional full-model expansion. Those references are display
+identifiers, not diagnostic identities or proof keys. The CLI streams formatted
+JSON in chunks; no LSP or IO dependency enters the checker or presenter.

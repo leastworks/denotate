@@ -94,11 +94,11 @@ impl Engine {
             result.outcome = PathOutcome::Accept;
             return Ok(result);
         }
-        let ambiguous = self.symbolic_pair_in(path, true, true, options)?;
+        let ambiguous = self.symbolic_pair_in(path, true, true, options, 1)?;
         let accepted =
-            self.symbolic_accepted_in(path, matches!(ambiguous, Search::None), options)?;
-        let rejected = self.symbolic_rejected_in(path, options)?;
-        let no_meaning = self.symbolic_no_meaning_in(path, true, true, options)?;
+            self.symbolic_accepted_in(path, matches!(ambiguous, Search::None), options, 1)?;
+        let rejected = self.symbolic_rejected_in(path, options, 1)?;
+        let no_meaning = self.symbolic_no_meaning_in(path, true, true, options, 1)?;
         result.outcome = if ambiguous.exists() || no_meaning.exists() {
             PathOutcome::Invalid
         } else if !ambiguous.complete()
@@ -145,7 +145,7 @@ impl Engine {
         if !matches!(context.outcome, PathOutcome::Accept | PathOutcome::Mixed) {
             return Ok(PlanningConstant::ContextNotReady(Box::new(context)));
         }
-        let answer = self.symbolic_search_in(path, "completion planning constant", |s| {
+        let answer = self.symbolic_search_in(path, "completion planning constant", 1, |s| {
             let mut members = self
                 .classification
                 .as_ref()
@@ -275,9 +275,9 @@ impl Engine {
         let mut cone = self.cone.clone();
         cone.rules.retain(|r| members.contains(&cone.atoms[r.head]));
         answer.members = members.clone();
-        answer.no_meaning = self.symbolic_no_meaning_cone(path, false, true, options, &cone)?;
+        answer.no_meaning = self.symbolic_no_meaning_cone(path, false, true, options, 1, &cone)?;
         answer.ambiguous =
-            self.symbolic_search_in(path, "completion planning output ambiguity", |s| {
+            self.symbolic_search_in(path, "completion planning output ambiguity", 1, |s| {
                 let a = s.encode(&cone, true)?;
                 let b = s.encode(&cone, true)?;
                 let diff = s.difference_selected(&cone, &a, &b, Some(targets), false)?;

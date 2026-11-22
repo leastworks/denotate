@@ -672,3 +672,12 @@ A reject-only plan exits 0; unresolved/invalid/inconclusive construction exits 2
 This is export, not runtime execution or input validation. Stable plans remain v4.
 The current completion slice is straight-line; splits, joins and tasks follow.
 See [the planning API](../plan/README.md#completion-plans) for its guarantee and limits.
+
+Completion diagnostic output is bounded by default. Models are shared in the
+verification's `completionEvidence.models` table; findings refer to them by
+`modelRef`. Each model shows at most 64 relevant atoms, with explicit projection and
+omitted counts; property tuple lists and input observations are bounded too.
+`--completion-full-models` requests full scoped interpretations without changing
+checking or verdicts. `--verbose` continues to control source-location detail only.
+Completion size records and progress include component existence rounds, cube pins,
+validation work and lifting counts.
