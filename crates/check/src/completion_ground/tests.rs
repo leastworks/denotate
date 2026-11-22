@@ -179,3 +179,118 @@ fn joins_respect_repeated_variables_constants_and_eligibility() {
     assert_eq!(models(&full, &universe), models(&sparse, &universe));
     assert!(!sparse.inputs.contains(&GroundAtom::new(input, [b, b])));
 }
+
+#[test]
+fn anchored_coordinate_updates_preserve_full_models_with_unanchored_alternatives() {
+    for reverse in [false, true] {
+        for seeded in [false, true] {
+            for alternative in [false, true] {
+                let mut c = Corpus::new();
+                let s = c.declare_sort("S").unwrap();
+                let a = c.declare_constant("a", s).unwrap();
+                let z = c.declare_constant("z", s).unwrap();
+                let mut names = vec!["p", "q", "free", "anchor"];
+                if reverse {
+                    names.reverse();
+                }
+                let mut ids = BTreeMap::new();
+                for name in names {
+                    ids.insert(
+                        name,
+                        c.declare_relation(name, RelationRole::Derived, [Parameter::new("x", s)])
+                            .unwrap(),
+                    );
+                }
+                let mut add = |head: &str, body: &[&str]| {
+                    let h = c.atom(ids[head], [Term::variable("X", s)]).unwrap();
+                    let bs = body
+                        .iter()
+                        .map(|name| {
+                            Literal::Positive(c.atom(ids[name], [Term::variable("X", s)]).unwrap())
+                        })
+                        .collect::<Vec<_>>();
+                    c.add_rule(h, bs).unwrap();
+                };
+                add("p", &["q"]);
+                add("q", &["p", "anchor"]);
+                add("free", &["free"]);
+                if alternative {
+                    add("p", &["free"]);
+                }
+                if seeded {
+                    add("q", &["anchor"]);
+                }
+                let fact = c.atom(ids["anchor"], [Term::Constant(a)]).unwrap();
+                c.add_rule(fact, []).unwrap();
+                let domains = Domains::from([(s, vec![a, z])]);
+                let limits = Limits::default();
+                let full = GroundProgram::prepare_completion_enumerated(
+                    &c,
+                    &domains,
+                    &mut Budget::new(&limits),
+                )
+                .unwrap();
+                let sparse =
+                    GroundProgram::prepare_completion(&c, &domains, &mut Budget::new(&limits))
+                        .unwrap();
+                let universe: Vec<_> = full
+                    .atoms
+                    .iter()
+                    .chain(&sparse.atoms)
+                    .cloned()
+                    .collect::<BTreeSet<_>>()
+                    .into_iter()
+                    .collect();
+                assert_eq!(
+                    models(&full, &universe),
+                    models(&sparse, &universe),
+                    "reverse={reverse}, seeded={seeded}, alternative={alternative}"
+                );
+                // Scope depends on positive-support liveness, not just model
+                // equality. Independently descend the fully enumerated atoms.
+                let mut possible: BTreeSet<_> = full.atoms.iter().cloned().collect();
+                loop {
+                    let next: BTreeSet<_> = full
+                        .rules
+                        .iter()
+                        .filter(|r| {
+                            r.body.iter().all(|l| {
+                                l.polarity == Polarity::Negative || possible.contains(&l.term.atom)
+                            })
+                        })
+                        .map(|r| r.head.atom.clone())
+                        .chain(full.inputs.iter().cloned())
+                        .collect();
+                    if next == possible {
+                        break;
+                    }
+                    possible = next;
+                }
+                let identity = |r: &GroundRule| {
+                    (
+                        r.source,
+                        r.head.atom.clone(),
+                        r.body
+                            .iter()
+                            .map(|l| (l.polarity == Polarity::Positive, l.term.atom.clone()))
+                            .collect::<Vec<_>>(),
+                    )
+                };
+                let live: BTreeSet<_> = full
+                    .rules
+                    .iter()
+                    .filter(|r| {
+                        r.body.iter().all(|l| {
+                            l.polarity == Polarity::Negative || possible.contains(&l.term.atom)
+                        })
+                    })
+                    .map(identity)
+                    .collect();
+                assert_eq!(
+                    sparse.rules.iter().map(identity).collect::<BTreeSet<_>>(),
+                    live
+                );
+            }
+        }
+    }
+}

@@ -115,12 +115,17 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
     fn encode(&mut self, cone: &Cone, h: bool) -> Result<Encoded> {
         let gate = self.gate()?;
         self.run.cnf.gate = Some(gate);
-        let encoding = encode(
+        let encoding = encoding::encode_named(
             cone,
             &mut self.run.cnf,
             self.run.truth,
             Some(&self.run.world.vars),
             self.run.budget,
+            if h && self.run.engine.classification.is_some() {
+                "model-under-hypothesis"
+            } else {
+                "model"
+            },
         )?;
         if h {
             if let Some((_, _, i)) = &self.run.engine.classification {
@@ -444,7 +449,6 @@ impl Engine {
         let (cone, _, h) = self.classification.as_ref().unwrap();
         self.symbolic_search_in(context, "completion rejection", |s| {
             let base = s.encode(cone, false)?;
-            let accepted = s.encode(cone, true)?;
             let selector = s.gate()?;
             let mut examined = 0;
             loop {
@@ -463,11 +467,12 @@ impl Engine {
                     s.values(cone, &base)?,
                     ModelScope::ClassificationWithoutHypothesis,
                 );
-                let pins = s.pins(&world)?;
-                if !s.solve(&[accepted.gate], &pins)? {
+                let mut pins = s.pins(&world)?;
+                pins.push(base.encoding.vars[*h]);
+                if !s.solve(&[base.gate], &pins)? {
                     return Ok(Some(model));
                 }
-                let values = s.values(cone, &accepted)?;
+                let values = s.values(cone, &base)?;
                 let cube = cover(cone, &values, Some(*h), s.run.budget)?;
                 s.exclude(selector, &cube)?;
             }

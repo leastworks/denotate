@@ -208,10 +208,19 @@ impl Cnf {
         values
     }
 }
-fn normalize(mut lits: Vec<i32>) -> Option<Vec<i32>> {
+fn normalize(lits: Vec<i32>) -> Option<Vec<i32>> {
+    normalize_literals(lits, |l| -l)
+}
+
+/// Shared literal normalization for measurement and completion encoding.
+/// A complementary pair makes a conjunction false (or a clause tautological).
+pub(crate) fn normalize_literals<T: Copy + Ord>(
+    mut lits: Vec<T>,
+    negate: impl Fn(T) -> T,
+) -> Option<Vec<T>> {
     lits.sort_unstable();
     lits.dedup();
-    if lits.iter().any(|l| lits.binary_search(&-*l).is_ok()) {
+    if lits.iter().any(|l| lits.binary_search(&negate(*l)).is_ok()) {
         None
     } else {
         Some(lits)

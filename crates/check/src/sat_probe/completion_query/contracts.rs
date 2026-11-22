@@ -40,6 +40,7 @@ impl Assumption {
         truth: Lit,
         b: &mut Budget<'_>,
     ) -> Result<Lit> {
+        let mut logic = encoding::Booleans::new(truth);
         let mut all = Vec::new();
         for (_, atoms) in &self.groups {
             let mut seen = !truth;
@@ -47,18 +48,18 @@ impl Assumption {
             for i in atoms {
                 b.tick("completion assumption formula")?;
                 let l = e.vars[*i];
-                let both = cnf.and(&[seen, l], b)?;
-                many = cnf.or(&[many, both], b)?;
-                seen = cnf.or(&[seen, l], b)?;
+                let both = logic.and(&[seen, l], cnf, b)?;
+                many = logic.or(&[many, both], cnf, b)?;
+                seen = logic.or(&[seen, l], cnf, b)?;
             }
             all.push(match self.kind {
                 Cardinality::Empty => !seen,
                 Cardinality::AtMostOne => !many,
                 Cardinality::AtLeastOne => seen,
-                Cardinality::ExactlyOne => cnf.and(&[seen, !many], b)?,
+                Cardinality::ExactlyOne => logic.and(&[seen, !many], cnf, b)?,
             });
         }
-        cnf.and(&all, b)
+        logic.and(&all, cnf, b)
     }
     fn group_value(&self, atoms: &[usize], values: &[bool]) -> bool {
         let n = atoms.iter().filter(|i| values[**i]).count();
@@ -186,19 +187,21 @@ impl Engine {
             .map(|a| {
                 let ambiguous = if a.recursive {
                     self.contract_search("completion assumption determinacy", |run| {
-                        let first = encode(
+                        let first = encoding::encode_named(
                             &a.cone,
                             &mut run.cnf,
                             run.truth,
                             Some(&run.world.vars),
                             run.budget,
+                            "assumption-audit",
                         )?;
-                        let second = encode(
+                        let second = encoding::encode_named(
                             &a.cone,
                             &mut run.cnf,
                             run.truth,
                             Some(&run.world.vars),
                             run.budget,
+                            "assumption-audit",
                         )?;
                         let yes = a.formula(&first, &mut run.cnf, run.truth, run.budget)?;
                         let no = a.formula(&second, &mut run.cnf, run.truth, run.budget)?;
@@ -231,12 +234,13 @@ impl Engine {
                     self.contract_search("completion assumption existence", |run| {
                         let gate = run.cnf.var(run.budget)?;
                         run.cnf.gate = Some(gate);
-                        let e = encode(
+                        let e = encoding::encode_named(
                             &a.cone,
                             &mut run.cnf,
                             run.truth,
                             Some(&run.world.vars),
                             run.budget,
+                            "assumption-audit",
                         )?;
                         run.cnf.gate = None;
                         let selection = run.cnf.var(run.budget)?;
@@ -331,12 +335,13 @@ impl Engine {
                 if !run.solve(&pins)? {
                     return Ok(None);
                 }
-                let e = encode(
+                let e = encoding::encode_named(
                     &a.cone,
                     &mut run.cnf,
                     run.truth,
                     Some(&run.world.vars),
                     run.budget,
+                    "assumption-audit",
                 )?;
                 let formula = a.formula(&e, &mut run.cnf, run.truth, run.budget)?;
                 if !run.solve(&pins)? {

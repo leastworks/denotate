@@ -69,6 +69,7 @@ pub(super) fn prepare(
     let mut eligibility = BTreeMap::new();
     let mut ignored = Vec::new();
     let mut issues = Vec::new();
+    let mut dependencies: Option<BTreeMap<RelationId, BTreeSet<RelationId>>> = None;
     for r in corpus.relations().filter(|r| r.input_domain.is_some()) {
         b.tick("completion input domains")?;
         let provider = r.input_domain.unwrap();
@@ -82,24 +83,58 @@ pub(super) fn prepare(
             continue;
         }
         let result: Result<_> = (|| {
-            let mut scope = BTreeSet::from([provider]);
-            loop {
-                let count = scope.len();
-                for rule in corpus.rules() {
+            let started = b.used();
+            let mut scope = BTreeSet::new();
+            let mut pending = vec![provider];
+            let scoped: Result<()> = (|| {
+                // Lazy, shared by needed providers only. Reverse-declared chains
+                // otherwise require one whole-corpus scan per dependency depth.
+                if dependencies.is_none() {
+                    let mut index = BTreeMap::<RelationId, BTreeSet<RelationId>>::new();
+                    for rule in corpus.rules() {
+                        b.charge(rule.body.len() + 1, "completion provider index")?;
+                        index
+                            .entry(rule.head.relation())
+                            .or_default()
+                            .extend(rule.body.iter().map(|l| l.atom().relation()));
+                    }
+                    dependencies = Some(index);
+                }
+                let dependencies = dependencies.as_ref().unwrap();
+                while let Some(relation) = pending.pop() {
                     b.tick("completion provider relations")?;
-                    if scope.contains(&rule.head.relation()) {
-                        scope.extend(rule.body.iter().map(|l| l.atom().relation()));
+                    if scope.insert(relation) {
+                        for dependency in dependencies.get(&relation).into_iter().flatten() {
+                            b.tick("completion provider relations")?;
+                            pending.push(*dependency);
+                        }
                     }
                 }
-                if count == scope.len() {
-                    break;
+                Ok(())
+            })();
+            let scope_work = b.used().saturating_sub(started);
+            if let Err(error) = &scoped {
+                if let Some(sink) = &limits.completion_sizes {
+                    sink.preparation(crate::CompletionPreparationSize {
+                        static_provider: true,
+                        provider: Some(provider),
+                        work: scope_work,
+                        work_by_stage: BTreeMap::from([("provider-scope", scope_work)]),
+                        error: Some(error.clone()),
+                        ..Default::default()
+                    });
                 }
             }
+            scoped?;
             let p = GroundProgram::prepare_completion_with_inputs(
                 corpus,
                 domains,
                 None,
-                Some(&scope),
+                Some(crate::ground::StaticScope {
+                    relations: &scope,
+                    provider,
+                    work: scope_work,
+                }),
                 b,
             )?;
             // Only a reachability bound if the provider is invalid. Never used as
@@ -125,12 +160,13 @@ pub(super) fn prepare(
                 .retain(|r| members.contains(&e.cone.atoms[r.head]));
             let mut run = Run::universe(&e, b)?;
             run.label("completion input provider");
-            let encoded = encode(
+            let encoded = encoding::encode_named(
                 &e.cone,
                 &mut run.cnf,
                 run.truth,
                 Some(&run.world.vars),
                 run.budget,
+                "input-domain",
             )?;
             if !run.solve(&[])? {
                 return Ok(Err(InputDomainFailure::NoMeaning));

@@ -416,6 +416,21 @@ fn write_completion_sizes(
                 prep["leastComplete"]
             )
             .unwrap();
+            writeln!(
+                output,
+                "  peak transient possibility atoms (allowance demand): {}",
+                prep["peakPossibilityAtoms"]
+            )
+            .unwrap();
+            writeln!(
+                output,
+                "  provider {}; work {}: {}",
+                prep["provider"], prep["work"], prep["workByStage"]
+            )
+            .unwrap();
+            if !prep["error"].is_null() {
+                writeln!(output, "  preparation stopped: {}", prep["error"]).unwrap();
+            }
             for r in prep["relations"].as_array().unwrap() {
                 writeln!(output,"  relation {}: possibility {} ({}), least {} ({}), circular-only {}; example {}",r["relation"],r["possibility"],r["state"],r["least"],r["leastCountKind"],r["circularOnly"],r["example"]).unwrap();
             }
@@ -439,6 +454,19 @@ fn write_completion_sizes(
                 search["phase"], search["variables"], search["clauses"], search["encodingsStarted"]
             )
             .unwrap();
+        }
+        for search in sizes["searches"].as_array().unwrap() {
+            for e in search["encodingDetails"].as_array().unwrap() {
+                writeln!(output, "  encoding {} / {} (complete={}): {} inputs; folded {} true, {} false; {} variables, {} clauses", search["phase"], e["purpose"], e["complete"], e["inputAtoms"], e["foldedTrue"], e["foldedFalse"], e["variables"], e["clauses"]).unwrap();
+            }
+            if search["omittedEncodings"].as_u64().unwrap_or(0) > 0 {
+                writeln!(
+                    output,
+                    "  encoding records omitted: {}",
+                    search["omittedEncodings"]
+                )
+                .unwrap();
+            }
         }
         writeln!(
             output,

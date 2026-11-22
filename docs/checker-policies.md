@@ -1664,5 +1664,42 @@ seed rules once and recursive readers only for new tuples, retaining join indexe
 across rounds. GFP observation counts are recorded once per relation; examples
 inspect at most 1,024 tuples, so exact counts need not have an example. All its joins
 use concrete tables; unbound sort-domain enumeration stops the diagnostic comparison. This does not alter
-the completion GFP descent order or its limits. CLI preparation counts are flushed
+the completion GFP semantics or its limits. CLI preparation counts are flushed
 before checking searches, including partial counts when preparation stops.
+
+### Completion encoding reductions
+
+Before CNF allocation, completion performs an incremental Fitting propagation within
+the frozen query scope, under unrestricted inputs. It preserves unseeded positive
+self-support and does not use H or W to settle atoms. Work is charged to the existing
+query allowance; there is no new limit or default-budget increase. Gate-local literal
+normalization, body deduplication, conjunction sharing and direct single-definition
+clauses reduce private Boolean registers. Named atoms remain protected query and
+replay targets; the measurement experiment's general named-variable elimination
+requires a separate reconstruction contract before reuse here.
+
+Input-only restrictions add formulas over the existing world variables. General
+assumption cones and paired interpretations retain independent copies. Rejection
+reuses classification equations across its two solves with the appropriate H pin;
+its exclusions never constrain the H-existence query. Per-copy allocation details
+are measurements, not policy goldens. The transient GFP peak is the demand checked
+against `max_atoms`, not cumulative work, final ground size, or a memory peak.
+
+### Anchored completion descent
+
+Completion's positive-support greatest fixpoint now uses provider-first SCCs and
+anchored coordinate updates within them. A relation is anchored only if each producer
+can bind all variables from concrete positive tables or has an empty premise/domain.
+Process every pending anchored update before an unanchored finite-domain fallback;
+install smaller tables immediately and reschedule readers. Monotone descent from top
+preserves the same greatest fixpoint, including unseeded cycles. The original atom,
+work and deadline allowances still bound it; no policy budget is raised.
+
+The transient atom allowance counts fixed preceding components plus concrete current
+component tables, replacing the coordinate being evaluated. It excludes the old copy
+of that coordinate while constructing its replacement, so it is not a live-memory
+cap. Work records per attempt include scope indexing/traversal and grounding stages,
+including partial attempts. The optional LFP comparison is excluded from that work.
+Provider dependency indexing is lazy and shared within preparation; no-provider runs
+pay no indexing cost. Detailed records let corpus runs distinguish scope discovery,
+GFP descent, rule instances and graph analysis before changing any limits.

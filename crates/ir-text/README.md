@@ -588,6 +588,16 @@ atom/rule counts, observed possibility tuples, relation counts (largest first),
 positive relation SCCs with example atoms, and CNF variables/clauses/literals and
 encoding attempts per solver instance. Encoding attempts include W, assumption and
 model copies, including a partially built copy at cutoff; they are not solve counts.
+Each search also lists bounded per-copy purpose, constant substitutions, variables
+and clauses. Input-only assumptions reuse the universe variables. Remaining general
+assumption copies are independent, as are the two interpretations of a pair search.
+Preparation's `peakPossibilityAtoms` records the largest transient GFP atom-allowance
+demand (including rejected insertion), which can exceed the final ground atom count;
+it is not cumulative work or peak resident memory. Each preparation attempt also
+reports `work`, `workByStage`, its provider (when applicable), and its stopping error.
+Work excludes the separate diagnostic LFP; provider scope discovery is counted,
+including the shared dependency index on the first needed provider. Common engine
+setup and subsequent provider SAT queries are outside these grounding totals.
 
 The support split compares the positive-support GFP with the LFP of the same rules,
 ignoring negation and using eligible inputs. `circularOnly` is exact only when both
@@ -605,7 +615,9 @@ are optional and use a bounded scan. It adds diagnostic work/memory but changes 
 semantic checker limits or verdict. Output bounds and details are in the [checker README](../check/README.md#experimental-completion-queries).
 
 Grounding joins greatest-fixpoint possible tuples, preserving unseeded recursion
-and scopes defined by those live instances. Dead producers do not enlarge a scope;
+and scopes defined by those live instances. It descends concretely anchored
+relations first within positive SCCs, applying each update immediately before any
+pending symbolic-domain fallback. This applies to static `within` providers too. Dead producers do not enlarge a scope;
 W, H, decisions and later solver pruning do not change liveness. Whole-verification checks use symbolic pair
 queries and generalized input cubes. `--sat-max-worlds` bounds candidate observations
 per search, not the number of concrete observations covered by a cube. Dense

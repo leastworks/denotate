@@ -280,14 +280,23 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
     pub(super) fn new(engine: &'a Engine, budget: &'b mut Budget<'l>) -> Result<Self> {
         let mut run = Self::universe(engine, budget)?;
         for a in &engine.assumptions {
-            let e = encode(
-                &a.cone,
-                &mut run.cnf,
-                run.truth,
-                Some(&run.world.vars),
-                run.budget,
-            )?;
-            let truth = a.formula(&e, &mut run.cnf, run.truth, run.budget)?;
+            let local;
+            let e = if a.cone.rules.is_empty() {
+                // With no defining rules, derived tuples are false, exactly as
+                // in U. Input-only restrictions need no equation copy at all.
+                &run.world
+            } else {
+                local = encoding::encode_named(
+                    &a.cone,
+                    &mut run.cnf,
+                    run.truth,
+                    Some(&run.world.vars),
+                    run.budget,
+                    "selected-assumption",
+                )?;
+                &local
+            };
+            let truth = a.formula(e, &mut run.cnf, run.truth, run.budget)?;
             run.cnf.clause(vec![truth], run.budget)?;
         }
         run.certified = true;
@@ -305,6 +314,8 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
                         clauses: 0,
                         literals: 0,
                         encodings: 0,
+                        encoding_details: vec![],
+                        omitted_encodings: 0,
                     },
                 )
             }),
@@ -328,7 +339,14 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         };
         let truth = cnf.var(budget)?;
         cnf.clause(vec![truth], budget)?;
-        let world = encode(&engine.world, &mut cnf, truth, None, budget)?;
+        let world = encoding::encode_named(
+            &engine.world,
+            &mut cnf,
+            truth,
+            None,
+            budget,
+            "input-universe",
+        )?;
         Ok(Self {
             engine,
             budget,

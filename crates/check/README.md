@@ -791,6 +791,38 @@ Measurements keep at most 128 preparation and 1,024 solver records per sink, wit
 omitted counts. Presentation shows the largest 32 relations/components and bounds
 each component's relation list; full program counters remain available.
 
+Completion CNF encoding runs a scope-local Fitting fixpoint before allocation:
+facts and producer-less atoms seed propagation, inputs remain unknown, and only
+certain bodies settle a head. Self-support remains unknown. W, H and assumptions
+cannot justify folding. Original atom positions and equations remain available for
+model validation and evidence. Normalized bodies are deduplicated, single literals
+are reused, conjunctions are shared within a gate, and single-definition private
+body registers are eliminated directly. All named atoms remain query/replay targets;
+general named-variable elimination from the size experiment is not enabled.
+
+W builds one input-universe encoding plus independent copies for restrictions that
+actually have defining rules. Input-only restrictions use world variables directly.
+Rejection uses the same classification equations for its two solves, switching H
+and disabling candidate-exclusion clauses. Pair searches still need independent
+interpretations, including a separate classification pair when eligibility is not
+already known. This preserves free helpers and prevents downstream filtering.
+
+Search size records include bounded per-encoding details: purpose, completion,
+input atoms, true/false constant substitutions and newly allocated variables/clauses.
+Constants include producer-less/out-of-scope slots; they are local to that encoding,
+not program-wide semantic findings. At most 64 detail records are retained per
+search, with an omitted count. Other clauses (gates, restriction formulas, differences,
+exclusion cubes) contribute to the search total, so copy deltas need not sum to it.
+Preparation also records the peak GFP atom-allowance demand, including a rejected
+insertion. This is neither the sum across rounds nor peak live memory: an intermediate
+possibility table can be much larger than the final ground program. The descent
+limits are unchanged. The order now prioritizes concrete anchors as described below.
+Work per preparation attempt includes provider scope discovery (and its shared index
+on the first needed provider), domain validation, input setup, possibility descent,
+instance construction and dependency graph analysis. Diagnostic LFP work/time is
+excluded. Common verification setup and subsequent provider SAT queries are outside
+those grounding totals. Partial records retain consumed work and the stopping error.
+
 The planning foundation exposes `planning_context(path, options)` and
 `planning_constant(path, target, scope, options)`. A runtime path pins actual input
 atoms; derived pins are refused. Both operations currently require an explicit
@@ -816,7 +848,14 @@ validator must not be used to veto a completion result.
 
 Preparation computes a greatest fixpoint of possibly true tuples, then joins
 positive-premise tables before enumerating any remaining variables. Derived tables
-start at the full finite domain, so unseeded positive recursion survives. A producer
+start at the full finite domain, so unseeded positive recursion survives. Within a
+positive relation SCC, evaluate relations whose producers are concretely anchored
+before symbolic-domain fallback. Install each shrinking table immediately and
+reschedule its positive readers; no anchored pending update is bypassed for a
+symbolic expansion. Unanchored alternatives remain live. This computes the same GFP
+by monotone chaotic iteration, for static providers and runtime grounding alike.
+Provider scope discovery uses one lazy dependency index rather than repeated full
+corpus scans. A producer
 is omitted only when some positive premise cannot be true in any completion.
 Negative premises never prune possibility. This does not run stable least-model
 folding, admission, input-pin discovery or reduct refinement. Retained instances

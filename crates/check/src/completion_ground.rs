@@ -14,6 +14,8 @@ mod full;
 #[path = "completion_ground/tests.rs"]
 mod tests;
 
+#[path = "completion_ground/descent.rs"]
+mod descent;
 #[path = "completion_ground/sizes.rs"]
 mod sizes;
 
@@ -86,6 +88,13 @@ impl Table {
 }
 type Upper = BTreeMap<RelationId, Option<Table>>;
 
+#[derive(Clone, Copy)]
+pub(crate) struct StaticScope<'a> {
+    pub relations: &'a BTreeSet<RelationId>,
+    pub provider: RelationId,
+    pub work: usize,
+}
+
 impl GroundProgram {
     #[cfg(test)]
     pub(crate) fn prepare_completion(
@@ -101,11 +110,25 @@ impl GroundProgram {
         corpus: &Corpus,
         domains: &Domains,
         eligibility: Option<BTreeMap<RelationId, BTreeSet<GroundAtom>>>,
-        static_scope: Option<&BTreeSet<RelationId>>,
+        static_scope: Option<StaticScope<'_>>,
         b: &mut Budget<'_>,
     ) -> Result<Self> {
         let mut measurement = sizes::Measurement::new(b, static_scope.is_some());
-        let domains = validate_domains(corpus, domains, b)?;
+        if let Some(scope) = static_scope {
+            measurement.data.provider = Some(scope.provider);
+            measurement.data.work = scope.work;
+            measurement
+                .data
+                .work_by_stage
+                .insert("provider-scope", scope.work);
+        }
+        let static_scope = static_scope.map(|s| s.relations);
+        let domains_result = validate_domains(corpus, domains, b);
+        measurement.stage("inputs", b);
+        if let Err(error) = &domains_result {
+            measurement.data.error = Some(error.clone());
+        }
+        let domains = domains_result?;
         let mut p = Self::empty(corpus, domains.clone());
         p.obligations.clear();
         let result: Result<()> = (|| {
@@ -118,6 +141,8 @@ impl GroundProgram {
                     None => p.completion_inputs(corpus, b)?,
                 }
             }
+            measurement.stage("possibility", b);
+            measurement.data.peak_possibility_atoms = p.inputs.len();
             measurement.least(corpus, &domains, &p.inputs, static_scope, b);
             let mut tables: Upper = corpus
                 .relations()
@@ -142,65 +167,16 @@ impl GroundProgram {
                 b.tick("completion grounding")?;
                 producers.entry(r.head.relation()).or_default().push(r);
             }
-            let mut fixed_count = p.inputs.len();
-            for component in positive_components(corpus, b)? {
-                if component
-                    .iter()
-                    .all(|r| corpus.relation(*r).unwrap().role == RelationRole::Input)
-                {
-                    continue;
-                }
-                loop {
-                    if measurement.enabled() {
-                        b.excluding_time(|| measurement.round(&component));
-                    }
-                    let mut next = BTreeMap::<RelationId, BTreeSet<GroundAtom>>::new();
-                    let mut count = 0;
-                    for relation in &component {
-                        let out = next.entry(*relation).or_default();
-                        let relation_result: Result<()> = (|| {
-                            for rule in producers.get(relation).into_iter().flatten() {
-                                bindings(rule, &tables, &domains, b, |binding, b| {
-                                    let atom = ground_atom(&rule.head, binding, b)?.atom;
-                                    if !out.contains(&atom) {
-                                        b.room(
-                                            fixed_count + count,
-                                            b.limits.max_atoms,
-                                            "completion possibility",
-                                            "atoms",
-                                        )?;
-                                        out.insert(atom);
-                                        count += 1;
-                                    }
-                                    Ok(())
-                                })?;
-                            }
-                            Ok(())
-                        })();
-                        if measurement.enabled() {
-                            b.excluding_time(|| {
-                                measurement.relation(*relation, out, relation_result.is_ok())
-                            });
-                        }
-                        relation_result?;
-                    }
-                    let mut equal = true;
-                    for (relation, atoms) in next {
-                        b.charge(atoms.len() + 1, "completion possibility")?;
-                        equal &= tables[&relation]
-                            .as_ref()
-                            .is_some_and(|old| old.rows.iter().eq(atoms.iter()));
-                        tables.insert(relation, Some(Table::new(atoms)));
-                    }
-                    if equal {
-                        if measurement.enabled() {
-                            b.excluding_time(|| measurement.fixed(&component));
-                        }
-                        fixed_count += count;
-                        break;
-                    }
-                }
-            }
+            descent::descend(
+                corpus,
+                &domains,
+                &producers,
+                &mut tables,
+                p.inputs.len(),
+                &mut measurement,
+                b,
+            )?;
+            measurement.stage("instances", b);
             // Construct only instances whose positive premises survived the greatest
             // fixpoint. Every omitted producer has a premise false in every completion.
             let mut dependencies = 0;
@@ -251,9 +227,12 @@ impl GroundProgram {
                     Ok(())
                 })?;
             }
+            measurement.stage("dependency-graph", b);
             graph::analyze(&mut p, b)?;
             Ok(())
         })();
+        measurement.stage("done", b);
+        measurement.data.error = result.as_ref().err().cloned();
         if measurement.enabled() && measurement.data.relations.is_empty() {
             b.excluding_time(|| {
                 for a in &p.inputs {

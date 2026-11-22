@@ -91,6 +91,54 @@ preserves both directions of each completion equation. Sparse positive joins avo
 materializing substitutions whose premises are impossible. Unseeded loops remain.
 Small full-enumeration model oracles guard this distinction from stable grounding.
 
+Descend coordinates with concrete positive anchors before expanding a symbolic-full
+table. Every producer must have its variables bound by concrete premises, or be
+empty, for a relation to take that priority. Install each result immediately and
+reschedule affected positive readers. This is fair chaotic iteration from top of
+the same monotone operator: each update remains above every fixpoint and below the
+previous upper bound; termination therefore yields the same greatest fixpoint.
+Unanchored cycles still fall back to finite-domain enumeration and retain self-support.
+A bounded anchor on one producer does not suppress an unanchored alternative.
+
+This matters for static providers too: a few thousand eligible tuples can otherwise
+require a huge temporary product before anchors propagate. Provider scope discovery
+also uses a shared relation dependency index instead of whole-corpus rescans at each
+dependency depth. Neither change uses assumptions or changes the live scope. Reports
+separate final ground counts, transient possibility allowance demand, and consumed
+work per attempt/stage; these are different quantities.
+
+## Completion encoding folds equations without changing their meaning
+
+Completion encoding starts from the frozen live scope and computes the Fitting
+(Kripke–Kleene) three-valued fixpoint. Inputs remain unknown. Facts settle true;
+producer-less atoms settle false; a certainly true body settles its head true and
+all certainly false bodies settle their head false. W, H and restriction formulas
+do not participate. In particular `p() :- p();` remains unknown and keeps both
+completion interpretations, unlike stable least-model folding.
+
+Each settled value holds in every interpretation of those equations, by induction
+on the propagation steps. Substituting it preserves all original models. Conversely,
+a settled true head has a body already true in every extension, and a settled false
+head has every body already false; omitting its equation introduces no new model.
+The remaining biconditionals stay exact. Scopes and original rules are unchanged,
+and reconstructed assignments are still validated against the original equations.
+
+The encoder shares literal normalization with the CNF measurement tool. It deduplicates
+bodies, reuses single literals, shares Boolean expressions inside each gate, and
+eliminates the private body register of a single-definition equation by emitting
+that definition directly. All named atoms remain protected query/replay targets;
+the measurement tool's broader named-variable elimination is not applied without a
+query-target and model-reconstruction contract. Definitions cannot be shared across
+independently disabled gates.
+
+W consists only of declared input constraints and selected assumption formulas.
+Input-only restrictions use the existing world variables; general assumption cones
+keep independent copies, sharing only inputs. Joining those cones could demand
+agreement between free helper interpretations. Pair queries likewise retain two
+independent interpretations. Rejection search reuses one classification copy across
+separate solves with and without H, with candidate-exclusion clauses disabled for
+the H-existence solve. No assumption or downstream equation chooses classification.
+
 ## Completion verdict scopes use a fixed live-instance graph
 
 A dead producer must not connect processing into classification. For example,

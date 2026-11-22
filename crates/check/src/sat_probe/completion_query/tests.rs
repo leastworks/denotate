@@ -77,7 +77,7 @@ fn keys(c: &Corpus) -> SemanticKeys {
     k
 }
 
-fn verification(
+pub(super) fn verification(
     c: &mut Corpus,
     h: Option<RelationId>,
     assumptions: &[AssumptionId],
@@ -96,7 +96,7 @@ fn verification(
     )
     .unwrap()
 }
-fn prepare(c: &Corpus, v: VerificationId, d: &Domains) -> Engine {
+pub(super) fn prepare(c: &Corpus, v: VerificationId, d: &Domains) -> Engine {
     match Engine::prepare(
         c,
         d,

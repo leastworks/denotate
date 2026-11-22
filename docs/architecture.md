@@ -483,17 +483,26 @@ adapters responsible for JSON and human output.
 
 `denotate-check::completion_query` is a separate experimental query API. Its grounder
 joins greatest-fixpoint possible tuples, retaining unseeded recursive instances and
-original occurrences. It never applies stable least-model pruning or fixed folding.
+original occurrences. Within each positive relation component it evaluates anchored
+coordinates first, installs smaller tables immediately and reschedules their readers.
+A symbolic-domain fallback runs only when no anchored update is pending. The same
+path grounds static providers and runtime programs; provider relation scopes use a
+shared, lazily built dependency index. It never applies stable least-model pruning or fixed folding.
 The resulting live-instance graph is the frozen scope boundary for classification,
 properties and input-contract checks. Liveness is the positive-support greatest
 fixpoint, independent of W, H and decisions; further solver simplification cannot
 change scopes. Original dependency templates remain only for advisory identities
-and dead-producer explanations.
+and dead-producer explanations. Completion encoding then applies a scope-local
+Fitting fixpoint over the original equations and unrestricted inputs. It substitutes
+facts and determined consequences without using W or H; original atom positions,
+rules and scopes remain available for queries and model validation. Literal
+normalization is shared with the CNF measurement tool. Private Boolean registers
+are reduced within one gate; named query/replay targets remain protected.
 
 Selected assumptions are interpreted separately in their live cones. Over U,
 shared-input pair queries test their formula's truth determinacy; cube search tests
-existence. Candidate W queries use separate cone copies sharing only inputs, then
-certify each candidate against an independent false-formula query. This prevents
+existence. Input-only assumptions refer directly to W's input variables. General
+candidate W restrictions use separate cone copies sharing only inputs, then certify each candidate against an independent false-formula query. This prevents
 other assumptions, H or downstream rules from choosing helper assignments or hiding
 an invalid contract. Generalized false-model cubes exclude uncertified candidates.
 Static providers are checked for tuple-set determinacy before using their eligibility.

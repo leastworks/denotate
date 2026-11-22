@@ -1,10 +1,13 @@
 //! Experimental completion queries, separate from stable-model search.
 //! Required queries use no least-model folding, reduct acceptance, loop clauses or
-//! admission rewrites. Interpretations are checked against the original equations;
+//! admission rewrites. Scope-local Fitting substitutions preserve both directions
+//! of the equations without using W or H. Interpretations are checked against the original equations;
 //! the optional reduct detector reports circular support without changing meaning.
 use super::*;
 use denotate_ir::{Corpus, SemanticKeys, Semantics, VerificationId};
-use existence::{Encoding, encode, world_cone};
+use existence::world_cone;
+mod encoding;
+use encoding::{Encoding, encode};
 use std::sync::Arc;
 
 mod advisory;

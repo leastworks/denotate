@@ -6,6 +6,8 @@ pub(super) struct Measurement {
     sink: Option<CompletionSizes>,
     pub data: CompletionPreparationSize,
     least: BTreeMap<RelationId, HashSet<GroundAtom>>,
+    work_at: usize,
+    work_stage: &'static str,
 }
 impl Measurement {
     pub fn new(b: &Budget<'_>, static_provider: bool) -> Self {
@@ -16,6 +18,17 @@ impl Measurement {
                 ..Default::default()
             },
             least: BTreeMap::new(),
+            work_at: b.used(),
+            work_stage: "domains",
+        }
+    }
+    pub fn stage(&mut self, name: &'static str, b: &Budget<'_>) {
+        if self.enabled() {
+            let delta = b.used().saturating_sub(self.work_at);
+            self.data.work += delta;
+            *self.data.work_by_stage.entry(self.work_stage).or_default() += delta;
+            self.work_at = b.used();
+            self.work_stage = name;
         }
     }
     pub fn enabled(&self) -> bool {
