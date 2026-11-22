@@ -8,9 +8,16 @@ pub struct CompletionFinding {
     pub finding: ContextFinding,
     pub evidence: Value,
 }
+fn cause_text(c: Inconclusive) -> String {
+    if c.phase == "completion input contract" {
+        "Universal results are incomplete because a selected assumption could not be determined on every input.".into()
+    } else {
+        exhaustion_text(c.phase, c.resource, c.details)
+    }
+}
 fn reason(c: Inconclusive) -> Value {
     with_limit_details(
-        json!({"phase":c.phase,"resource":c.resource,"message":exhaustion_text(c.phase,c.resource,c.details)}),
+        json!({"phase":c.phase,"resource":c.resource,"message":cause_text(c)}),
         c.details,
     )
 }
@@ -40,9 +47,9 @@ fn model(m: &Model, keys: &SemanticKeys, hypothesis: Option<RelationId>) -> Resu
         })
         .transpose()?;
     Ok(
-        json!({"kind":"completion-model","scope":match m.scope(){ModelScope::Classification=>"hypothesis-cone",ModelScope::ClassificationWithoutHypothesis=>"classification-without-hypothesis",ModelScope::Processing=>"accepted-processing",ModelScope::Property=>"property-cone",ModelScope::WholeProgram=>"whole-program"},
+        json!({"kind":"completion-model","scope":match m.scope(){ModelScope::Classification=>"hypothesis-cone",ModelScope::ClassificationWithoutHypothesis=>"classification-without-hypothesis",ModelScope::Processing=>"accepted-processing",ModelScope::Property=>"property-cone",ModelScope::WholeProgram=>"whole-program",ModelScope::Assumption=>"assumption-cone",ModelScope::InputDomain=>"input-domain-cone"},
         "hypothesis":hypothesis.map(|h| atom(&GroundAtom::new(h,[]),keys)).transpose()?,
-        "scopeAtoms":scope_atoms,"observation":observation(&m.observation(),keys)?,"interpretation":values.iter().map(|(a,v)|json!({"atom":atom_data(a),"value":v})).collect::<Vec<_>>(),"unlistedInScope":"false"}),
+        "scopeAtoms":scope_atoms,"omittedInputRelations":m.omitted_input_relations().iter().map(|r|keys.relation(*r).map(crate::identity::relation)).collect::<std::result::Result<Vec<_>,_>>()?,"observation":observation(&m.observation(),keys)?,"interpretation":values.iter().map(|(a,v)|json!({"atom":atom_data(a),"value":v})).collect::<Vec<_>>(),"unlistedInScope":"false"}),
     )
 }
 fn rejection(m: &Model, keys: &SemanticKeys, h: Option<RelationId>) -> Result<Value> {
@@ -160,11 +167,21 @@ pub fn completion_summary(corpus: &Corpus, keys: &SemanticKeys, r: &Report) -> R
             json!({"state":if incomplete.is_some(){"incomplete"}else if findings.is_empty(){"none"}else{"findings"},"findings":findings.len(),"reason":incomplete.map(reason)})
         }
     };
+    let dead = match &r.dead_producers {
+        DeadProducerAdvisory::NotRequested => json!({"state":"not-requested"}),
+        DeadProducerAdvisory::Checked {
+            findings,
+            incomplete,
+        } => {
+            json!({"state":if incomplete.is_some(){"incomplete"}else if findings.is_empty(){"none"}else{"findings"},"findings":findings.len(),"reason":incomplete.map(reason)})
+        }
+    };
     Ok(
         json!({"backend":{"backend":"sat","configuration":"original-completion-v1"},"semantics":"completion","determinacy":determinacy(r,keys)?,"hypothesis":r.hypothesis.map(|h| corpus.relation(h).unwrap().name.clone()),"hypothesisIdentity":r.hypothesis.map(|h|atom(&GroundAtom::new(h,[]),keys)).transpose()?,
         "verification":[keys.verification(v.id)?.0.namespace.as_ref(),keys.verification(v.id)?.0.name.as_ref()],"activeAssumptions":v.assumptions.iter().map(|id|corpus.assumption(*id).unwrap().name.clone()).collect::<Vec<_>>(),
         "state":if r.is_incomplete(){"incomplete"}else if r.has_failures(){"findings"}else if r.all_rejected(){"all-rejected"}else{"proved"},"hasFailures":r.has_failures(),"incomplete":r.is_incomplete(),"context":context,"classification":classification,"meaning":meaning,"obligations":obligations,
-        "incompletePhases":r.incomplete.iter().map(|c|reason(*c)).collect::<Vec<_>>(),"notices":r.notices_not_analysed.iter().map(|id|json!({"name":corpus.notice(*id).unwrap().name,"state":"not-analysed"})).collect::<Vec<_>>(),"advisories":{"circularSupport":advisory}}),
+        "inputContract":{"complete":r.assumptions.iter().all(AssumptionAnalysis::certified),"assumptions":r.assumptions.iter().map(|a|assumption_data(a,keys)).collect::<Result<Vec<_>>>()?,"omittedInputDomains":r.ignored_input_domains.iter().map(|d|input_domain_data(d,keys)).collect::<Result<Vec<_>>>()?},
+        "incompletePhases":r.incomplete.iter().map(|c|reason(*c)).collect::<Vec<_>>(),"notices":r.notices_not_analysed.iter().map(|id|json!({"name":corpus.notice(*id).unwrap().name,"state":"not-analysed"})).collect::<Vec<_>>(),"advisories":{"circularSupport":advisory,"deadProducers":dead}}),
     )
 }
 
@@ -174,7 +191,7 @@ pub fn completion_findings(
     r: &Report,
     names: &dyn Fn(OccurrenceId) -> String,
 ) -> Result<Vec<CompletionFinding>> {
-    let mut out = Vec::new();
+    let mut out = assumption_findings(corpus, keys, r, names)?;
     let location = |id: OccurrenceId, role| Contribution {
         occurrence: id,
         role,
@@ -201,25 +218,7 @@ pub fn completion_findings(
             evidence,
         });
     };
-    let obs_note = |w: &Observation| -> Result<String> {
-        let show = |items: &std::collections::BTreeSet<GroundAtom>| -> Result<String> {
-            let mut ts = items
-                .iter()
-                .map(|a| crate::evidence::atom_name(corpus, names, a))
-                .collect::<Result<Vec<_>>>()?;
-            ts.sort();
-            Ok(if ts.is_empty() {
-                "(none)".into()
-            } else {
-                ts.join(", ")
-            })
-        };
-        Ok(format!(
-            "Example input observation — present: {}; absent: {}.",
-            show(&w.present)?,
-            show(&w.absent)?
-        ))
-    };
+    let obs_note = |w: &Observation| observation_note(corpus, names, w);
     if r.context == Context::InconsistentAssumptions || r.context == Context::EmptyUniverse {
         add(
             &mut out,
@@ -293,11 +292,18 @@ pub fn completion_findings(
         );
     }
     if r.is_incomplete() {
-        let notes = r
-            .incomplete
-            .iter()
-            .map(|c| exhaustion_text(c.phase, c.resource, c.details))
-            .collect();
+        let mut notes: Vec<_> = r.incomplete.iter().map(|c| cause_text(*c)).collect();
+        let uncertain: Vec<_> = r.assumptions.iter().filter(|a| !a.certified()).collect();
+        if !uncertain.is_empty() {
+            notes.push(format!(
+                "Unvalidated input contract: {}.",
+                uncertain
+                    .iter()
+                    .map(|a| names(a.assumption.into()))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
         add(
             &mut out,
             Identity::CompletionMeaning("incomplete"),
@@ -305,7 +311,7 @@ pub fn completion_findings(
             "Completion verification is incomplete.".into(),
             notes,
             base.clone(),
-            json!({"kind":"incomplete","reasons":r.incomplete.iter().map(|c|reason(*c)).collect::<Vec<_>>()}),
+            json!({"kind":"incomplete","reasons":r.incomplete.iter().map(|c|reason(*c)).collect::<Vec<_>>(),"assumptions":uncertain.iter().map(|a|Identity::CompletionAssumption(a.assumption,"contract").data(keys)).collect::<Result<Vec<_>>>()?}),
         );
     }
     for (id, o) in &r.obligations {
@@ -462,10 +468,271 @@ pub fn completion_findings(
             );
         }
     }
+    if let DeadProducerAdvisory::Checked { findings, .. } = &r.dead_producers {
+        for f in findings {
+            let outside = bounded_list(
+                f.outside
+                    .iter()
+                    .map(|a| crate::evidence::atom_name(corpus, names, a))
+                    .collect::<Result<Vec<_>>>()?,
+            );
+            add(&mut out,Identity::CompletionDeadProducer(f.rule),Kind::DeadProducer,
+                "This producer instance never fires; its dependencies do not enter the classification scope.".into(),
+                vec![format!("Positive premise {} has no possible support.",crate::evidence::atom_name(corpus,names,&f.missing)?),format!("For {}, this dead instance would link {outside} into the hypothesis cone.",crate::evidence::atom_name(corpus,names,&f.head)?)],
+                vec![location(f.rule.into(),Role::Producer)],
+                json!({"kind":"completion-dead-producer","head":atom(&f.head,keys)?,"missingPremise":atom(&f.missing,keys)?,"outside":f.outside.iter().map(|a|atom(a,keys)).collect::<Result<Vec<_>>>()?}));
+        }
+    }
     for finding in &mut out {
         if finding.evidence["kind"] == "completion-ambiguity" {
             finding.evidence["determinacy"] = determinacy(r, keys)?;
         }
     }
     Ok(out)
+}
+
+fn assumption_data(a: &AssumptionAnalysis, keys: &SemanticKeys) -> Result<Value> {
+    Ok(
+        json!({"identity":Identity::CompletionAssumption(a.assumption,"contract").data(keys)?,"complete":a.certified(),"ambiguous":search(&a.ambiguous,|v|Ok(json!({"kind":"completion-assumption-ambiguity","group":v.group.iter().map(|c|keys.constant(*c).map(crate::identity::constant)).collect::<std::result::Result<Vec<_>,_>>()?,"trueModel":model(&v.models.first,keys,None)?,"falseModel":model(&v.models.second,keys,None)?})))?,"noMeaning":search(&a.no_meaning,|w|Ok(json!({"kind":"completion-assumption-no-meaning","observation":observation(w,keys)?,"confirmedNoInterpretation":true})))?}),
+    )
+}
+fn assumption_findings(
+    corpus: &Corpus,
+    keys: &SemanticKeys,
+    report: &Report,
+    names: &dyn Fn(OccurrenceId) -> String,
+) -> Result<Vec<CompletionFinding>> {
+    let mut out = Vec::new();
+    for a in &report.assumptions {
+        let data = assumption_data(a, keys)?;
+        for (phase, state) in [
+            ("determinacy", &data["ambiguous"]),
+            ("existence", &data["noMeaning"]),
+        ] {
+            let status = state["state"].as_str().unwrap();
+            if status == "none" {
+                continue;
+            }
+            let message = if status == "exists" {
+                if phase == "determinacy" {
+                    format!(
+                        "Assumption {} has undetermined truth: its formula is true in one interpretation and false in another for the same input.",
+                        names(a.assumption.into())
+                    )
+                } else {
+                    format!(
+                        "Assumption {} has no completion interpretation for an input observation.",
+                        names(a.assumption.into())
+                    )
+                }
+            } else {
+                format!(
+                    "Assumption {} could not be validated under completion: {}.",
+                    names(a.assumption.into()),
+                    state["reason"]["message"].as_str().unwrap_or("incomplete")
+                )
+            };
+            let mut notes = vec![];
+            if phase == "existence" {
+                if let Search::Exists(w) = &a.no_meaning {
+                    notes.push(observation_note(corpus, names, w)?);
+                }
+            }
+            if phase == "determinacy" {
+                if let Search::Exists(v) = &a.ambiguous {
+                    notes.push(observation_note(
+                        corpus,
+                        names,
+                        &v.models.first.observation(),
+                    )?);
+                    let group = v
+                        .group
+                        .iter()
+                        .map(|c| names((*c).into()))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    notes.push(format!(
+                        "A differing group is ({group}). Other helper values may differ."
+                    ));
+                    notes.push(format!(
+                        "True formula: {}. False formula: {}.",
+                        tuple_description(
+                            corpus,
+                            names,
+                            &v.models.first,
+                            corpus
+                                .assumption(a.assumption)
+                                .unwrap()
+                                .restriction
+                                .relation()
+                        )?,
+                        tuple_description(
+                            corpus,
+                            names,
+                            &v.models.second,
+                            corpus
+                                .assumption(a.assumption)
+                                .unwrap()
+                                .restriction
+                                .relation()
+                        )?
+                    ));
+                }
+            }
+            out.push(CompletionFinding {
+                finding: ContextFinding {
+                    identity: Identity::CompletionAssumption(a.assumption, phase),
+                    kind: if status == "exists" {
+                        Kind::InvalidAssumption
+                    } else {
+                        Kind::UnvalidatedAssumption
+                    },
+                    message,
+                    notes,
+                    contributions: vec![Contribution {
+                        occurrence: a.assumption.into(),
+                        role: Role::Declaration,
+                    }],
+                },
+                evidence: state[if status == "exists" {
+                    "evidence"
+                } else {
+                    "reason"
+                }]
+                .clone(),
+            });
+        }
+    }
+    Ok(out)
+}
+fn tuple_description(
+    corpus: &Corpus,
+    names: &dyn Fn(OccurrenceId) -> String,
+    m: &Model,
+    relation: RelationId,
+) -> Result<String> {
+    let mut tuples = m
+        .interpretation()
+        .filter(|(a, v)| *v && a.relation == relation)
+        .map(|(a, _)| crate::evidence::atom_name(corpus, names, a))
+        .collect::<Result<Vec<_>>>()?;
+    tuples.sort();
+    Ok(bounded_list(tuples))
+}
+pub fn input_domain_data(d: &InputDomainIssue, keys: &SemanticKeys) -> Result<Value> {
+    let failure = match &d.failure {
+        InputDomainFailure::NotNeeded => json!({"state":"outside-verification-scope"}),
+        InputDomainFailure::NoMeaning => {
+            json!({"state":"no-meaning","confirmedNoInterpretation":true})
+        }
+        InputDomainFailure::Inconclusive(c) => json!({"state":"inconclusive","reason":reason(*c)}),
+        InputDomainFailure::Ambiguous(p) => {
+            let differing = p
+                .first
+                .interpretation()
+                .find(|(a, v)| a.relation == d.provider && p.second.value(a) != Some(*v))
+                .map(|(a, _)| atom(a, keys))
+                .transpose()?;
+            json!({"state":"ambiguous","differingTuple":differing,"first":model(&p.first,keys,None)?,"second":model(&p.second,keys,None)?})
+        }
+    };
+    Ok(
+        json!({"kind":"completion-input-domain","input":crate::identity::relation(keys.relation(d.input)?),"provider":crate::identity::relation(keys.relation(d.provider)?),"outcome":failure}),
+    )
+}
+pub fn completion_input_domain_findings(
+    corpus: &Corpus,
+    keys: &SemanticKeys,
+    issues: &[InputDomainIssue],
+    names: &dyn Fn(OccurrenceId) -> String,
+) -> Result<Vec<CompletionFinding>> {
+    issues
+        .iter()
+        .filter(|d| !matches!(d.failure, InputDomainFailure::NotNeeded))
+        .map(|d| {
+            let (kind, why) = match &d.failure {
+                InputDomainFailure::Ambiguous(_) => (
+                    Kind::InvalidInputDomain,
+                    "has different tuple sets in two completion interpretations".into(),
+                ),
+                InputDomainFailure::NoMeaning => (
+                    Kind::InvalidInputDomain,
+                    "has no completion interpretation".into(),
+                ),
+                InputDomainFailure::Inconclusive(c) => (
+                    Kind::Inconclusive,
+                    exhaustion_text(c.phase, c.resource, c.details),
+                ),
+                InputDomainFailure::NotNeeded => unreachable!(),
+            };
+            let mut notes = vec![];
+            if let InputDomainFailure::Ambiguous(p) = &d.failure {
+                if let Some((a, _)) = p
+                    .first
+                    .interpretation()
+                    .find(|(a, v)| a.relation == d.provider && p.second.value(a) != Some(*v))
+                {
+                    notes.push(format!(
+                        "Differing tuple: {}.",
+                        crate::evidence::atom_name(corpus, names, a)?
+                    ));
+                }
+            }
+            Ok(CompletionFinding {
+                finding: ContextFinding {
+                    identity: Identity::CompletionInputDomain(d.input),
+                    kind,
+                    message: format!(
+                        "Domain provider {} for input {} {why}.",
+                        names(d.provider.into()),
+                        names(d.input.into())
+                    ),
+                    notes,
+                    contributions: vec![
+                        Contribution {
+                            occurrence: d.input.into(),
+                            role: Role::Declaration,
+                        },
+                        Contribution {
+                            occurrence: d.provider.into(),
+                            role: Role::Condition,
+                        },
+                    ],
+                },
+                evidence: input_domain_data(d, keys)?,
+            })
+        })
+        .collect()
+}
+
+fn bounded_list(mut values: Vec<String>) -> String {
+    if values.is_empty() {
+        return "(none)".into();
+    }
+    values.sort();
+    let count = values.len();
+    values.truncate(8);
+    if count > 8 {
+        values.push(format!("… and {} more", count - 8));
+    }
+    values.join(", ")
+}
+fn observation_note(
+    corpus: &Corpus,
+    names: &dyn Fn(OccurrenceId) -> String,
+    w: &Observation,
+) -> Result<String> {
+    let show = |items: &std::collections::BTreeSet<GroundAtom>| -> Result<String> {
+        Ok(bounded_list(
+            items
+                .iter()
+                .map(|a| crate::evidence::atom_name(corpus, names, a))
+                .collect::<Result<Vec<_>>>()?,
+        ))
+    };
+    Ok(format!(
+        "Example input observation — present: {}; absent: {}.",
+        show(&w.present)?,
+        show(&w.absent)?
+    ))
 }

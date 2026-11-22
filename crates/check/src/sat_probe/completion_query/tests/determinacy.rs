@@ -72,8 +72,8 @@ fn second_query_cutoff_is_unknown_and_one_base_model_suffices_for_rejection() {
     let class = r.classification.unwrap();
     assert!(matches!(class.rejected, Search::Inconclusive(_)));
     assert!(matches!(class.no_meaning, Search::None));
-    // The cone has two models without H. Existence must not spend another solve
-    // distinguishing them: ambiguity without the hypothesis is irrelevant.
+    // The dead producer leaves only H in the classification cone. Existence
+    // does not spend another solve distinguishing processing interpretations.
     e.config.max_solves = 3;
     let ObservationOutcome::Rejected { without_hypothesis } = e.observation([]).unwrap() else {
         panic!()
@@ -83,7 +83,7 @@ fn second_query_cutoff_is_unknown_and_one_base_model_suffices_for_rejection() {
         ModelScope::ClassificationWithoutHypothesis
     );
     assert_eq!(without_hypothesis.value(&atom(h)), Some(false));
-    assert_eq!(without_hypothesis.value(&atom(absent)), Some(false));
+    assert_eq!(without_hypothesis.value(&atom(absent)), None);
     let r = e.check(&keys(&c), &CheckOptions::default()).unwrap();
     assert!(r.all_rejected());
     assert!(r.obligations[&total].failed());

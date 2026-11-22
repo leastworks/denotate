@@ -16,6 +16,7 @@ struct Pattern {
 }
 #[derive(Clone)]
 struct Template {
+    source: denotate_ir::RuleId,
     head: Pattern,
     body: Vec<(Pattern, bool)>,
 }
@@ -26,6 +27,7 @@ pub(crate) struct OriginalDependencies {
     heads: BTreeMap<RelationId, BTreeMap<Vec<usize>, BTreeMap<Vec<ConstantId>, Vec<usize>>>>,
 }
 pub(crate) struct OriginalCone {
+    #[cfg(test)]
     pub(crate) facts: BTreeSet<GroundAtom>,
     pub(crate) cycle: Option<Vec<GroundAtom>>,
 }
@@ -73,6 +75,7 @@ impl OriginalDependencies {
                 .entry(rule.head.relation())
                 .or_default()
                 .push(Template {
+                    source: rule.id,
                     head: project(&rule.head),
                     body: rule
                         .body
@@ -112,27 +115,13 @@ impl OriginalDependencies {
             heads,
         })
     }
+    #[cfg(test)]
     pub(crate) fn cone(
         &self,
         roots: impl IntoIterator<Item = GroundAtom>,
         b: &mut Budget<'_>,
     ) -> Result<OriginalCone> {
         self.walk(roots.into_iter().map(Node::Atom).collect(), None, b)
-    }
-    pub(crate) fn relation_cone(
-        &self,
-        relation: RelationId,
-        roots: impl IntoIterator<Item = GroundAtom>,
-        b: &mut Budget<'_>,
-    ) -> Result<OriginalCone> {
-        let mut pending: Vec<_> = roots.into_iter().map(Node::Atom).collect();
-        if let Some(ts) = self.templates.get(&relation) {
-            for t in ts {
-                b.tick("completion original roots")?;
-                pending.push(Node::Pattern(canonical(&t.head, &BTreeMap::new())));
-            }
-        }
-        self.walk(pending, None, b)
     }
     pub(crate) fn positive_component(
         &self,
@@ -145,6 +134,105 @@ impl OriginalDependencies {
             .unwrap_or_else(|| vec![root.clone()])
             .into_iter()
             .collect())
+    }
+    /// Inspect authored producers of live classification atoms. This runs only
+    /// for the opt-in advisory; exhaustive substitutions have their own budget.
+    pub(crate) fn dead_links(
+        &self,
+        members: &BTreeSet<GroundAtom>,
+        possible: &BTreeSet<GroundAtom>,
+        b: &mut Budget<'_>,
+        mut emit: impl FnMut(
+            denotate_ir::RuleId,
+            GroundAtom,
+            GroundAtom,
+            BTreeSet<GroundAtom>,
+            &mut Budget<'_>,
+        ) -> Result<()>,
+    ) -> Result<()> {
+        let mut seen = BTreeSet::new();
+        for head in members {
+            for t in self.templates.get(&head.relation).into_iter().flatten() {
+                b.tick("completion dead producers")?;
+                if seen.contains(&t.source) {
+                    continue;
+                }
+                let mut binding = BTreeMap::new();
+                if !t
+                    .head
+                    .arguments
+                    .iter()
+                    .zip(&head.arguments)
+                    .all(|(a, c)| match a {
+                        Arg::Constant(k) => k == c,
+                        Arg::Variable(v, _) => binding.insert(*v, *c).is_none_or(|old| old == *c),
+                    })
+                {
+                    continue;
+                }
+                let variables: BTreeMap<_, _> = t
+                    .body
+                    .iter()
+                    .flat_map(|(p, _)| &p.arguments)
+                    .filter_map(|a| match a {
+                        Arg::Variable(v, s) if !binding.contains_key(v) => Some((*v, *s)),
+                        _ => None,
+                    })
+                    .collect();
+                let columns: Vec<_> = variables
+                    .iter()
+                    .map(|(v, s)| (*v, &self.domains[s]))
+                    .collect();
+                if columns.iter().any(|(_, d)| d.is_empty()) {
+                    continue;
+                }
+                let mut positions = vec![0; columns.len()];
+                loop {
+                    b.tick("completion dead producers")?;
+                    for ((v, domain), i) in columns.iter().zip(&positions) {
+                        binding.insert(*v, domain[*i]);
+                    }
+                    let mut missing = None;
+                    let mut outside = BTreeSet::new();
+                    for (p, positive) in &t.body {
+                        b.charge(p.arguments.len() + 1, "completion dead producers")?;
+                        let a = GroundAtom::new(
+                            p.relation,
+                            p.arguments.iter().map(|a| match a {
+                                Arg::Constant(c) => *c,
+                                Arg::Variable(v, _) => binding[v],
+                            }),
+                        );
+                        if *positive && !possible.contains(&a) {
+                            missing.get_or_insert(a.clone());
+                        }
+                        if !members.contains(&a) {
+                            outside.insert(a);
+                        }
+                    }
+                    if let Some(missing) = missing {
+                        if !outside.is_empty() {
+                            emit(t.source, head.clone(), missing, outside, b)?;
+                            seen.insert(t.source);
+                            break;
+                        }
+                    }
+                    let mut advanced = false;
+                    for i in (0..positions.len()).rev() {
+                        positions[i] += 1;
+                        if positions[i] < columns[i].1.len() {
+                            advanced = true;
+                            break;
+                        }
+                        positions[i] = 0;
+                    }
+                    if !advanced {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(())
     }
     fn walk(
         &self,
@@ -313,6 +401,7 @@ impl OriginalDependencies {
             }
         }
         Ok(OriginalCone {
+            #[cfg(test)]
             facts: atoms,
             cycle,
         })

@@ -33,13 +33,17 @@ direction for such programs separates meaning from schedule:
   remain the tool for small programs, editor caching and full failing conditions.
 - **Authored completion meaning and acceptance.** The SAT CLI additionally checks
   opt-in `semantics: completion` verifications, with classification in a hypothesis's
-  original ground cone and separate processing extensions. Rejections are allowed
+  live ground cone and separate processing extensions. Rejections are allowed
   unless `no_rejections` forbids them; a contradictory classification cone is a
   separate failure, and all-rejected is explicit. Optional decision relations select
   tuple-set determinacy without hiding helper contradictions or property failures.
   Independent property cones retain completion-model evidence, and circular support
   has an opt-in advisory. Preparation now joins greatest-fixpoint possible tuples,
-  preserving unseeded loops and original scopes. Symbolic pair queries and generalized
+  preserving unseeded loops and freezing scopes before W, H and decisions. Dead
+  producers do not enlarge classification; an opt-in advisory explains those links.
+  Recursive assumptions require determined restriction truth; static providers require
+  determined tuples. Contract errors preserve explicit partial results instead of
+  becoming rejection or vacuous success. Symbolic pair queries and generalized
   input cubes replace exhaustive observation enumeration. Measurement on real
   programs is next; no throughput claim is made. Then completion-aware staged
   planning with rejection paths, and definition islands inside otherwise stable

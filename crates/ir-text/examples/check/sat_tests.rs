@@ -62,7 +62,7 @@ fn completion_cli_evidence_meaning_and_mixed_semantics() {
     assert_eq!(f.run(&["--no-progress"]).0, 2);
 }
 #[test]
-fn completion_cli_symbolic_worlds_cutoffs_and_compatibility() {
+fn completion_cli_symbolic_worlds_cutoffs_and_assumption_diagnostics() {
     let f = Fixture::new(
         "input i();relation h();obligation total:no_rejections(h);verification v{semantics:completion;hypothesis:h;assumptions:[];obligations:[total];}",
     );
@@ -79,7 +79,7 @@ fn completion_cli_symbolic_worlds_cutoffs_and_compatibility() {
     );
     let (code, out) = f.run(&["--engine", "sat", "--no-progress", "--json"]);
     assert_eq!(code, 2, "{out}");
-    assert!(out.contains("completion-incompatible-cone"), "{out}");
+    assert!(out.contains("completion-assumption-ambiguity"), "{out}");
     let (code, out) = f.run(&[
         "--engine",
         "sat",
@@ -569,4 +569,102 @@ fn completion_cli_selected_decisions_and_second_query_cutoff() {
     assert!(!out.contains("all-rejected"), "{out}");
     assert!(!out.contains("counterexample"), "{out}");
     assert!(out.contains("inconclusive"), "{out}");
+}
+
+#[test]
+fn completion_cli_contract_truth_provider_scope_and_stable_audit_are_separate() {
+    let f = Fixture::new(
+        "relation p();relation q();p():-!q();q():-!p();relation valid();valid():-p();valid():-q();assumption a:at_least_one(valid,group_by:());verification v{semantics:completion;decisions:[];assumptions:[a];obligations:[];}",
+    );
+    for audit in [false, true] {
+        let mut flags = vec!["--engine", "sat", "--no-progress"];
+        if audit {
+            flags.push("--validate-all-assumptions");
+        }
+        let (code, out) = f.run(&flags);
+        assert_eq!(code, 0, "{out}");
+        assert!(!out.contains("invalid-assumption"), "{out}");
+        assert!(!out.contains("unvalidated-assumption"), "{out}");
+    }
+    let (code, out) = f.run(&[
+        "--engine",
+        "sat",
+        "--no-progress",
+        "--validate-all-assumptions",
+        "--json",
+    ]);
+    assert_eq!(code, 0, "{out}");
+    let audit = out
+        .split_once("Assumption validation: ")
+        .unwrap_or_else(|| panic!("missing audit: {out}"))
+        .1
+        .split("Verification ")
+        .next()
+        .unwrap();
+    let audit: serde_json::Value = serde_json::from_str(audit).unwrap();
+    assert_eq!(audit["assumptions"], serde_json::json!([]));
+    assert_eq!(audit["findings"], serde_json::json!([]));
+    let f = Fixture::new(
+        "relation eligible();eligible():-eligible();input raw() within eligible;relation good();obligation o:empty(raw);obligation good:empty(good);verification a_bad{semantics:completion;decisions:[];assumptions:[];obligations:[o];}verification z_good{semantics:completion;decisions:[];assumptions:[];obligations:[good];}",
+    );
+    for json in [false, true] {
+        let mut flags = vec!["--engine", "sat", "--no-progress"];
+        if json {
+            flags.push("--json");
+        }
+        let (code, out) = f.run(&flags);
+        assert_eq!(code, 2, "{out}");
+        assert!(out.contains("invalid-input-domain"), "{out}");
+        assert!(out.contains("Verification ::z_good"), "{out}");
+        assert!(out.contains("proved"), "{out}");
+    }
+}
+#[test]
+fn completion_cli_dead_producer_advisory_does_not_change_exit_codes() {
+    let f = Fixture::new(
+        "relation h();h();relation p();p():-p();relation absent();h():-p(),absent();verification v{semantics:completion;hypothesis:h;decisions:[h];assumptions:[];obligations:[];}",
+    );
+    let (code, plain) = f.run(&["--engine", "sat", "--no-progress"]);
+    assert_eq!(code, 0, "{plain}");
+    assert!(!plain.contains("dead-producer"));
+    let (code, out) = f.run(&[
+        "--engine",
+        "sat",
+        "--no-progress",
+        "--completion-dead-producers",
+    ]);
+    assert_eq!(code, 0, "{out}");
+    assert!(out.contains("dead-producer"), "{out}");
+    assert!(out.contains("p()"));
+    assert_eq!(f.run(&["--completion-dead-producers"]).0, 2);
+}
+
+#[test]
+fn completion_cli_shared_and_unselected_declarations_keep_stable_validation() {
+    let prefix = "relation p();relation q();p():-!q();q():-!p();relation valid();valid():-p();valid():-q();assumption a:at_least_one(valid,group_by:());";
+    let f = Fixture::new(&format!(
+        "{prefix}verification done{{semantics:completion;decisions:[];assumptions:[a];obligations:[];}}verification stable{{assumptions:[a];obligations:[];}}"
+    ));
+    let (code, out) = f.run(&[
+        "--engine",
+        "sat",
+        "--no-progress",
+        "--validate-all-assumptions",
+    ]);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("invalid-assumption"), "{out}");
+    assert!(out.contains("Verification ::done"), "{out}");
+    assert!(out.contains("at-most-one"), "{out}");
+    let f = Fixture::new(&format!(
+        "{prefix}verification v{{semantics:completion;decisions:[];assumptions:[];obligations:[];}}"
+    ));
+    assert_eq!(f.run(&["--engine", "sat", "--no-progress"]).0, 0);
+    let (code, out) = f.run(&[
+        "--engine",
+        "sat",
+        "--no-progress",
+        "--validate-all-assumptions",
+    ]);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("invalid-assumption"), "{out}");
 }

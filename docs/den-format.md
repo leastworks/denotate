@@ -54,8 +54,8 @@ verification single_value {
   `obligation name: exactly_one(rel, group_by: (cols))` requires both coverage and
   uniqueness; `obligation name: empty(rel)` requires no tuples.
   `assumption name: at_most_one(input, group_by: (cols))` restricts input
-  worlds. Assumptions support all four cardinality forms over input or independently
-  stratified derived relations (see [selected assumptions](#selected-assumptions)).
+  worlds. Assumptions support all four cardinality forms over input or derived
+  relations, validated under the verification's semantics (see [selected assumptions](#selected-assumptions)).
   Declarations take effect through selection: a [verification](#verifications)
   selects which are checked, and under which assumptions.
 - **Names.** Quote any non-identifier or reserved word: `'007'`, `'module'`.
@@ -113,9 +113,10 @@ input selected(x: S) within eligible;
 
 Here only `selected(a)` can be supplied. The provider must have the same arity and
 positional sorts as the input (parameter names may differ). Its whole dependency
-cone must be input-free and stratified: positive recursion and layered negation are
-allowed, but a cycle through negation is rejected, even if some verification's
-assumptions could discharge it. Provider references follow ordinary relation lookup,
+cone must be input-free. Under stable semantics it must also be stratified:
+positive recursion and layered negation are allowed, but a cycle through negation
+is rejected, even if selected assumptions could discharge it. Completion instead
+requires tuple-set determinacy, as described under [verifications](#verifications). Provider references follow ordinary relation lookup,
 including namespaces, `use` and forward references. Only inputs can carry `within`;
 the clause precedes an optional `loc(...)`.
 
@@ -414,7 +415,7 @@ For each complete observation permitted by W, completion interprets every derive
 atom as equivalent to the disjunction of its producers. Positive self-support is
 therefore possible: `p() :- p();` permits both values. Without a hypothesis, zero
 interpretations is no meaning; several distinct decision interpretations are
-ambiguity. With H, classification uses only H's original upstream **ground**
+ambiguity. With H, classification uses only H's live upstream **ground**
 dependency cone C, requiring H true. Decisions outside C do not enlarge it.
 One decision interpretation accepts the observation; several are classification
 ambiguity. If there is none, a second query checks C **without H**: an interpretation
@@ -427,12 +428,33 @@ values in C, and checks whole-program existence and decision determinacy. Unsele
 helpers remain free, rather than being fixed to an arbitrary classification witness.
 A processing contradiction cannot reject the input or choose a classification.
 
-Selected derived assumptions and static `within` providers must have acyclic ground
-cones in this increment, so their meaning in W agrees under stable and completion
-semantics. Compatibility checks do not use H or assumptions to prune cycles;
-exhaustion is inconclusive. Ordinary global assumption validation still runs.
+A selected assumption is evaluated in its own live dependency cone under completion,
+independently of H, downstream equations and other assumptions. Its entire formula
+must have the same truth in every interpretation for an input. For example, two
+interpretations with different singleton tuples both satisfy `exactly_one`; this
+is a valid assumption, although selecting that relation in `decisions` reports
+ambiguity. With grouping, determinacy applies to the conjunction over all groups.
 
-Processing obligations are checked over accepted observations, in their original
+An assumption whose truth varies, or whose cone has no interpretation, produces
+an Error with an input observation and two interpretations or a no-model witness.
+Checking continues only on inputs where every selected assumption is determined
+and satisfied. Confirmed counterexamples survive; this increment marks every
+universal result in an affected verification incomplete, citing its assumptions.
+Exhaustion has the same conservative effect. An empty remaining set cannot produce
+inconsistent-W, all-rejected or vacuous proofs.
+
+A static `within` provider instead needs a determined **tuple set**, with free
+helpers. Ambiguity or no meaning produces an Error on the bounded input, related
+to its provider, and stops preparation of dependent verifications. No least model
+or guessed input universe is substituted. Inputs outside a verification's dependency
+scope are explicitly omitted from its observations; querying them is unsupported,
+not an assertion that their tuples are absent. Ordinary processing includes all
+live rules; an input read by any such rule is a dependency. Direct selections and
+input-cardinality declarations also require the input. Input-dependent providers
+remain declaration errors. Stable consumers retain their existing provider and
+assumption-validation rules.
+
+Processing obligations are checked over accepted observations, in their live
 property cones together with C's equations, H and the established decision values.
 They search all relevant helper interpretations, including ones different from the
 retained classification example. An independent property failure survives unrelated
@@ -456,15 +478,22 @@ The SAT path asks these questions symbolically over W. Pair queries compare
 interpretations sharing an observation; existence and rejection generalize checked
 interpretations into input cubes. `--sat-max-worlds` bounds candidate observations
 per search, rather than all concrete observations covered by a cube. Exhaustion is
-still inconclusive. Sparse preparation preserves unseeded positive loops and the
-original classification boundary, including dependencies through dead producers.
+still inconclusive. Scope liveness is fixed before W, H and decision selection:
+a producer is live when every positive premise belongs to the positive-support
+greatest fixpoint, starting from eligible inputs and ignoring negation. Relations
+without producers are empty. Unseeded positive loops survive. Dead producers do
+not add scope edges; later solver pruning must not change this boundary. Thus
+`h(); h() :- p(), absent(); p() :- p();` with producer-less `absent` accepts under H,
+while p's ambiguity belongs to processing.
 
 Completion counterexamples carry checked interpretations and their scope, with the
 full input observation, rather than claiming a finite derivation. Unlocated support
 falls back to the obligation. `--completion-circular-support` optionally reports an
 accepted classification that needs a positive support cycle. It is off by default,
 bounded separately, and neither its findings nor exhaustion affect required verdicts
-or exit codes. The Rust API is documented in
+or exit codes. `--completion-dead-producers` separately explains dead producer
+instances that would connect outside atoms to the classification cone; it is also
+bounded, opt-in and advisory only. The Rust API is documented in
 [the checker](../crates/check/README.md#experimental-completion-queries).
 
 ## Contextual condition notices
@@ -550,7 +579,10 @@ assumption required: empty(missing);
 verification check_presence { assumptions: [required]; obligations: []; }
 ```
 
-An assumption's dependency cone must be stratified independently of assumptions.
+The following validation policy is for stable semantics. Completion verifications
+use the independent formula-truth checks described [above](#verifications).
+
+A stable assumption's dependency cone must be stratified independently of assumptions.
 Positive recursion and layered negation are allowed. A cycle between relation names
 is accepted when no negative cycle is reachable from the assumption relation's
 ground atoms after independently propagating settled truth to a fixpoint.

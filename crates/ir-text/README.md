@@ -556,13 +556,17 @@ status. BDD's existing dump behavior is unchanged.
 verifications. Full meaning analysis is required; `--sat-meaning cone`,
 `uniqueness`, `none`, and explicit split hints are refused for these verifications.
 Stable verifications in the same program keep their existing path. Completion runs
-retain program-wide assumption declaration validation, including unselected ones.
+validate selected assumptions under completion. Unselected declarations are not
+completion-checked. With `--validate-all-assumptions`, the stable declaration audit
+covers unselected declarations and declarations with any stable consumer; it excludes
+completion-only declarations. A declaration shared by both meanings receives each
+consumer's validation independently.
 
 Human and `--json` output identify the semantics and hypothesis, classification
 acceptance/rejection/ambiguity/no-meaning, the declared determinacy interface,
 processing meaning, properties and advisory status. Classification no-meaning is a
 specification failure even when rejection is allowed: a genuine reject needs an
-interpretation of the original classification cone without H and none with H.
+interpretation of the live classification cone without H and none with H.
 Rejection evidence retains that checked interpretation and the unsatisfiable-query
 confirmation. All-rejected excludes classification no-meaning and unknowns.
 The configuration is `original-completion-v1`. Rejections are allowed unless selected
@@ -573,7 +577,8 @@ which takes precedence over a known failure (exit 1). Partial selection stays ex
 
 The existing SAT solve/world/tuple/CNF limits bound this completion path.
 Grounding joins greatest-fixpoint possible tuples, preserving unseeded recursion
-and original classification scopes. Whole-verification checks use symbolic pair
+and scopes defined by those live instances. Dead producers do not enlarge a scope;
+W, H, decisions and later solver pruning do not change liveness. Whole-verification checks use symbolic pair
 queries and generalized input cubes. `--sat-max-worlds` bounds candidate observations
 per search, not the number of concrete observations covered by a cube. Dense
 possible relations or difficult existence searches can still exhaust limits. Empty and at-most-one are supported, with
@@ -581,6 +586,17 @@ coverage/exactly-one for acyclic input-independent cones; symbolic coverage and
 notices remain explicitly unanalysed. Completion property evidence includes checked
 interpretations and scope, without fabricated finite derivations. Placement falls
 back to the obligation, retaining labeled library fallbacks and upstream origins.
+
+Recursive assumptions require determined formula truth, not determined tuples.
+Ambiguity/no-meaning is a located Error; certified counterexamples remain available,
+while universal results of the affected verification stay incomplete. Invalid static
+`within` providers require tuple determinacy and stop dependent verifications;
+independent verifications continue. Human and JSON output distinguish these input
+contract failures from inconsistent W and rejection.
+
+`--completion-dead-producers` explains dead instances that would connect other
+atoms to the classification cone. It uses an independent advisory budget and cannot
+change exit codes. It does not propose deleting an entire source rule.
 
 `--completion-circular-support` opts into an advisory on accepted classifications
 that require positive circular support. It is off by default, uses separate limits,

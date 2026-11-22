@@ -3,11 +3,15 @@
 //! admission rewrites. Interpretations are checked against the original equations;
 //! the optional reduct detector reports circular support without changing meaning.
 use super::*;
-use denotate_ir::{AssumptionKey, Corpus, RelationKey, SemanticKeys, Semantics, VerificationId};
+use denotate_ir::{Corpus, SemanticKeys, Semantics, VerificationId};
 use existence::{Encoding, encode, world_cone};
 use std::sync::Arc;
 
 mod advisory;
+mod contracts;
+mod providers;
+pub use contracts::{AssumptionAmbiguity, AssumptionAnalysis};
+pub use providers::{InputDomainFailure, InputDomainIssue};
 mod checking;
 mod properties;
 mod queries;
@@ -38,22 +42,9 @@ impl Default for QueryLimits {
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum CompatibilitySource {
-    SelectedAssumption(AssumptionKey),
-    InputDomain { input: RelationKey },
-}
-/// Conservative compatibility refusal, not proof that the program has no models.
-#[derive(Debug, Clone)]
-pub struct CompatibilityIssue {
-    pub source: CompatibilitySource,
-    pub relation: RelationKey,
-    pub recursive_component: Vec<AtomKey>,
-}
-
 pub enum Preparation {
     Ready(Engine),
-    Unsupported(CompatibilityIssue),
+    InputDomains(Vec<InputDomainIssue>),
     Inconclusive(Inconclusive),
 }
 
@@ -64,11 +55,14 @@ pub enum ModelScope {
     Processing,
     WholeProgram,
     Property,
+    Assumption,
+    InputDomain,
 }
 
 /// A completion interpretation, not a finite derivation. Unlisted legal tuples
 /// inside the scope are false: no producer survives completion-safe pruning. Outside-scope derived
-/// atoms are unknown. The complete input observation is retained in every model.
+/// atoms are unknown. Every model retains its input observation and explicitly
+/// names unused bounded input relations omitted from that observation.
 #[derive(Debug, Clone)]
 pub struct Model {
     program: Arc<GroundProgram>,
@@ -76,6 +70,7 @@ pub struct Model {
     members: Option<Arc<BTreeSet<GroundAtom>>>,
     values: Arc<[bool]>,
     scope: ModelScope,
+    omitted_inputs: Arc<BTreeSet<RelationId>>,
 }
 impl Model {
     /// Original named atoms in this interpretation's scope, including inputs.
@@ -87,15 +82,21 @@ impl Model {
             .iter()
             .filter_map(|a| self.value(a).map(|v| (a, v)))
     }
-    /// None denotes the whole program; input observations are always complete,
-    /// including inputs outside these original dependency-cone members.
+    /// None denotes the whole program. Observations include eligible inputs
+    /// outside these live cone members, except `omitted_input_relations`.
     pub fn scope_atoms(&self) -> Option<&BTreeSet<GroundAtom>> {
         self.members.as_deref()
     }
     pub fn scope(&self) -> ModelScope {
         self.scope
     }
+    pub fn omitted_input_relations(&self) -> &BTreeSet<RelationId> {
+        &self.omitted_inputs
+    }
     pub fn value(&self, atom: &GroundAtom) -> Option<bool> {
+        if self.omitted_inputs.contains(&atom.relation) {
+            return None;
+        }
         self.program.validate_atom(atom).ok()?;
         if !self.input_relations.contains(&atom.relation)
             && self.members.as_ref().is_some_and(|m| !m.contains(atom))
@@ -148,6 +149,7 @@ pub enum Interpretations {
 
 #[derive(Debug, Clone)]
 pub enum ObservationOutcome {
+    UndeterminedAssumptions(Vec<AssumptionAnalysis>),
     NotPermitted,
     /// C has an interpretation, but none satisfying H.
     Rejected {
@@ -192,6 +194,8 @@ pub struct WorldQuery {
 pub struct Engine {
     program: Arc<GroundProgram>,
     original: crate::ground::OriginalDependencies,
+    assumptions: Vec<contracts::Assumption>,
+    ignored_input_domains: Vec<InputDomainIssue>,
     cone: Cone,
     world: Cone,
     classification: Option<(Cone, Arc<BTreeSet<GroundAtom>>, usize)>,
@@ -253,50 +257,28 @@ impl Engine {
         }
         keys.validate(corpus).map_err(CheckError::Keys)?;
         let mut b = Budget::new(limits);
-        // Retain ordinary construction validation. The stronger completion check
-        // below is scoped to this verification's selected declarations.
-        corpus.input_domain_cone_with(|| b.tick("completion input domains"))?;
-        let original = crate::ground::OriginalDependencies::new(corpus, domains, &mut b)?;
-        for r in corpus.relations() {
-            b.tick("completion compatibility")?;
-            if let Some(provider) = r.input_domain {
-                if let Some(issue) = compatibility(
-                    &original,
-                    provider,
-                    CompatibilitySource::InputDomain {
-                        input: keys.relation(r.id).map_err(CheckError::Keys)?.clone(),
-                    },
-                    keys,
-                    &mut b,
-                )? {
-                    return Ok(Preparation::Unsupported(issue));
-                }
-            }
-        }
-        // Only now is least-model evaluation safe for these acyclic providers.
-        let program = GroundProgram::prepare_completion(corpus, domains, &mut b)?;
-        for id in &declaration.assumptions {
-            let a = corpus.assumption(*id).unwrap();
-            if let Some(issue) = compatibility(
-                &original,
-                a.restriction.relation(),
-                CompatibilitySource::SelectedAssumption(
-                    keys.assumption(*id).map_err(CheckError::Keys)?.clone(),
-                ),
-                keys,
-                &mut b,
-            )? {
-                return Ok(Preparation::Unsupported(issue));
-            }
-        }
-        let mut cone = program::original_cone(&program, corpus, verification, &mut b)?;
-        let world = world_cone(&cone, false, &mut b)?;
-        // Restrictions belong exclusively to W. In particular, definitions
-        // omitted from a classification cone must not make W inconsistent.
-        cone.groups.clear();
+        corpus.input_domain_structure_with(|| b.tick("completion input domains"))?;
+        let (program, ignored_input_domains) =
+            match providers::prepare(corpus, domains, verification, limits, &config, &mut b)? {
+                providers::Inputs::Ready(p, ignored) => (p, ignored),
+                providers::Inputs::Invalid(issues) => return Ok(Preparation::InputDomains(issues)),
+            };
+        let mut engine = Self::skeleton(
+            corpus,
+            domains,
+            verification,
+            program,
+            limits,
+            config,
+            &mut b,
+        )?;
+        engine.ignored_input_domains = ignored_input_domains;
+        engine.assumptions = contracts::build(&engine, corpus, &mut b)?;
+        let cone = &engine.cone;
+        let program = &engine.program;
         let classification = if let Some(h) = declaration.options.hypothesis {
             let atom = GroundAtom::new(h, []);
-            let closure = original.cone([atom.clone()], &mut b)?;
+            let closure = program.dependency_cone_with_budget([atom.clone()], &mut b)?;
             let members = Arc::new(closure.facts);
             let mut c = cone.clone();
             c.rules.retain(|r| members.contains(&c.atoms[r.head]));
@@ -310,12 +292,31 @@ impl Engine {
             None
         };
         b.check("completion preparation")?;
-        Ok(Preparation::Ready(Self {
+        engine.classification = classification;
+        Ok(Preparation::Ready(engine))
+    }
+    fn skeleton(
+        corpus: &Corpus,
+        domains: &Domains,
+        verification: VerificationId,
+        program: GroundProgram,
+        limits: &Limits,
+        config: QueryLimits,
+        b: &mut Budget<'_>,
+    ) -> Result<Self> {
+        let declaration = corpus.verification(verification).unwrap();
+        let original = crate::ground::OriginalDependencies::new(corpus, domains, b)?;
+        let mut cone = program::completion_cone(&program, corpus, verification, b)?;
+        let world = world_cone(&cone, false, b)?;
+        cone.groups.clear();
+        Ok(Self {
             program: Arc::new(program),
             original,
             cone,
             world,
-            classification,
+            classification: None,
+            assumptions: vec![],
+            ignored_input_domains: vec![],
             input_relations: Arc::new(
                 corpus
                     .relations()
@@ -334,12 +335,12 @@ impl Engine {
                 .map(|id| (*id, corpus.obligation(*id).unwrap().requirement.clone()))
                 .collect(),
             notices: declaration.notices.iter().copied().collect(),
-        }))
+        })
     }
 
     /// Completion-equivalent ground instances and original source occurrences.
-    /// Impossible producers are omitted; original dependency scopes are kept
-    /// separately. Its stable
+    /// Impossible producers are omitted; the resulting dependency scopes are
+    /// frozen before W, H or decision selection. Its stable
     /// evaluation/admission methods are not completion-meaning operations.
     pub fn original_program(&self) -> &GroundProgram {
         &self.program
@@ -365,29 +366,13 @@ impl Engine {
             },
             values: values.into(),
             scope,
+            omitted_inputs: if scope == ModelScope::InputDomain {
+                // Static provider interpretations precede the runtime universe.
+                // They cannot claim any runtime input tuple is absent.
+                self.input_relations.clone()
+            } else {
+                Arc::new(self.ignored_input_domains.iter().map(|i| i.input).collect())
+            },
         }
     }
-}
-
-fn compatibility(
-    original: &crate::ground::OriginalDependencies,
-    relation: RelationId,
-    source: CompatibilitySource,
-    keys: &SemanticKeys,
-    b: &mut Budget<'_>,
-) -> Result<Option<CompatibilityIssue>> {
-    let cone = original.relation_cone(relation, [], b)?;
-    if let Some(cycle) = cone.cycle {
-        let mut atoms = cycle
-            .iter()
-            .map(|a| AtomKey::from_atom(keys, a).map_err(CheckError::Keys))
-            .collect::<Result<Vec<_>>>()?;
-        atoms.sort();
-        return Ok(Some(CompatibilityIssue {
-            source,
-            relation: keys.relation(relation).map_err(CheckError::Keys)?.clone(),
-            recursive_component: atoms,
-        }));
-    }
-    Ok(None)
 }

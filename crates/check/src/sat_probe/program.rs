@@ -10,6 +10,23 @@ pub(super) fn original_cone(
     verification: denotate_ir::VerificationId,
     b: &mut Budget<'_>,
 ) -> Result<Cone> {
+    original_cone_with_assumptions(p, corpus, verification, true, b)
+}
+pub(super) fn completion_cone(
+    p: &GroundProgram,
+    corpus: &denotate_ir::Corpus,
+    verification: denotate_ir::VerificationId,
+    b: &mut Budget<'_>,
+) -> Result<Cone> {
+    original_cone_with_assumptions(p, corpus, verification, false, b)
+}
+fn original_cone_with_assumptions(
+    p: &GroundProgram,
+    corpus: &denotate_ir::Corpus,
+    verification: denotate_ir::VerificationId,
+    selected: bool,
+    b: &mut Budget<'_>,
+) -> Result<Cone> {
     let n = p.core.atoms.len();
     if n >= i32::MAX as usize - 1 {
         return Err(CheckError::InvalidRequest("SAT original program too large"));
@@ -63,7 +80,7 @@ pub(super) fn original_cone(
         groups.push((g.kind, atoms));
     }
     let v = corpus.verification(verification).unwrap();
-    for id in &v.assumptions {
+    for id in v.assumptions.iter().filter(|_| selected) {
         let r = &corpus.assumption(*id).unwrap().restriction;
         let mut grouped = BTreeMap::<Vec<ConstantId>, Vec<usize>>::new();
         if r.kind().has_coverage() {

@@ -58,6 +58,7 @@ pub struct CheckOptions {
     pub max_examples: usize,
     /// Independent advisory work, never charged to required checking.
     pub circular_support: bool,
+    pub dead_producers: bool,
     pub advisory_limits: Limits,
 }
 impl Default for CheckOptions {
@@ -68,6 +69,7 @@ impl Default for CheckOptions {
             max_tuples: 10000,
             max_examples: 8,
             circular_support: false,
+            dead_producers: false,
             advisory_limits: Limits::default(),
         }
     }
@@ -84,28 +86,55 @@ pub struct Report {
     pub notices_not_analysed: BTreeSet<NoticeId>,
     pub incomplete: Vec<Inconclusive>,
     pub advisory: Advisory,
+    pub dead_producers: DeadProducerAdvisory,
+    pub assumptions: Vec<AssumptionAnalysis>,
+    pub ignored_input_domains: Vec<InputDomainIssue>,
     pub(crate) program: Arc<GroundProgram>,
 }
 impl Report {
+    pub(super) fn mark_partial_contract(&mut self) {
+        fn unknown<T>(s: &mut Search<T>) {
+            if matches!(s, Search::None | Search::NotAnalysed) {
+                *s = Search::Inconclusive(contracts::uncertified());
+            }
+        }
+        if let Some(c) = &mut self.classification {
+            unknown(&mut c.accepted);
+            unknown(&mut c.rejected);
+            unknown(&mut c.no_meaning);
+            unknown(&mut c.ambiguous);
+        }
+        unknown(&mut self.meaning.no_meaning);
+        unknown(&mut self.meaning.ambiguous);
+        self.meaning.applicable = true;
+        for o in self.obligations.values_mut() {
+            o.vacuous = false;
+            o.inconclusive.get_or_insert(contracts::uncertified());
+        }
+        self.incomplete.push(contracts::uncertified());
+    }
     pub fn program(&self) -> &GroundProgram {
         &self.program
     }
     pub fn all_rejected(&self) -> bool {
-        self.classification.as_ref().is_some_and(|c| {
-            matches!(c.accepted, Search::None)
-                && matches!(c.ambiguous, Search::None)
-                && matches!(c.no_meaning, Search::None)
-                && c.rejected.exists()
-        })
+        self.assumptions.iter().all(AssumptionAnalysis::certified)
+            && self.classification.as_ref().is_some_and(|c| {
+                matches!(c.accepted, Search::None)
+                    && matches!(c.ambiguous, Search::None)
+                    && matches!(c.no_meaning, Search::None)
+                    && c.rejected.exists()
+            })
     }
     pub fn has_failures(&self) -> bool {
-        matches!(
-            self.context,
-            Context::EmptyUniverse | Context::InconsistentAssumptions
-        ) || self
-            .classification
-            .as_ref()
-            .is_some_and(|c| c.ambiguous.exists() || c.no_meaning.exists())
+        self.assumptions.iter().any(AssumptionAnalysis::failed)
+            || matches!(
+                self.context,
+                Context::EmptyUniverse | Context::InconsistentAssumptions
+            )
+            || self
+                .classification
+                .as_ref()
+                .is_some_and(|c| c.ambiguous.exists() || c.no_meaning.exists())
             || self.meaning.no_meaning.exists()
             || self.meaning.ambiguous.exists()
             || self.obligations.values().any(ObligationResult::failed)
@@ -117,7 +146,8 @@ impl Report {
         if self.context != Context::Permitted {
             return false;
         }
-        !self.incomplete.is_empty()
+        self.assumptions.iter().any(|a| !a.certified())
+            || !self.incomplete.is_empty()
             || !self.notices_not_analysed.is_empty()
             || self.obligations.values().any(|o| !o.complete())
             || self.classification.as_ref().is_some_and(|c| {
@@ -162,6 +192,9 @@ impl Engine {
             notices_not_analysed: self.notices.clone(),
             incomplete: vec![],
             advisory: Advisory::NotRequested,
+            dead_producers: DeadProducerAdvisory::NotRequested,
+            assumptions: self.assumption_analysis(options)?,
+            ignored_input_domains: self.ignored_input_domains.clone(),
             program: self.program.clone(),
         };
         let mut world_budget = Budget::new(&self.limits);
@@ -262,6 +295,9 @@ impl Engine {
                         eligibility_unknown = Some(cause);
                         report.incomplete.push(cause);
                         false
+                    }
+                    ObservationOutcome::UndeterminedAssumptions(_) => {
+                        return Err(CheckError::from(contracts::uncertified()));
                     }
                     ObservationOutcome::NotPermitted => {
                         return Err(CheckError::Internal(

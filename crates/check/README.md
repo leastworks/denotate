@@ -757,10 +757,10 @@ two completed simplification runs.
 ## Experimental completion queries
 
 `completion_query::Engine::prepare` prepares an authored completion verification.
-It returns `Preparation::Ready`, a declaration-specific `Unsupported` compatibility
-issue, or `Inconclusive` with phase/resource information. Invalid API requests and
-cancellation remain errors. This API does not replace program-wide declaration
-validation, which consumers must continue to run independently.
+It returns `Preparation::Ready`, `InputDomains` with provider failures, or
+`Inconclusive` with phase/resource information. Invalid API requests and cancellation
+remain errors. Completion validates its selected assumptions itself; the stable
+validator must not be used to veto a completion result.
 
 Preparation computes a greatest fixpoint of possibly true tuples, then joins
 positive-premise tables before enumerating any remaining variables. Derived tables
@@ -770,28 +770,48 @@ Negative premises never prune possibility. This does not run stable least-model
 folding, admission, input-pin discovery or reduct refinement. Retained instances
 keep their original source occurrences; other legal derived tuples are false.
 
-Original dependency scopes are kept separately, as rule templates and shared
-projected dependency patterns. Removing a dead producer must not erase a helper
-from classification, hide an assumption/provider cycle, or change a circular-support
-advisory's component identity. Projecting one dependency at a time avoids building
-every combination of unrelated body variables just to discover that scope. Both
-possibility and original-scope construction use ordinary grounding/work limits.
-Genuinely dense possible relations can still exhaust them.
+The grounder's live-instance graph fixes every verdict scope: classification,
+properties, assumptions and static providers. Its positive-support greatest fixpoint
+ignores negation and is independent of W, H and decision selection. Later solver
+pruning must not change that graph. The original templates remain for circular-support
+component identity and opt-in dead-producer explanations, not verdict reachability.
 
-Selected derived assumptions and static `within` providers must have acyclic ground
-dependency cones, checked before using their meaning. The refusal carries semantic
-keys for the source declaration, restricted relation and recursive component. A
-cutoff is inconclusive, never an incompatibility proof. Eligible inputs and declared
-cardinality then define U; selected restrictions define W independently of the
-acceptance hypothesis and downstream equations. Unselected declarations do not
-trigger this extra completion compatibility check.
+Assumption cones may be recursive. `assumption_analysis` checks each restriction's
+whole formula, independently over U: two models differing in formula truth establish
+ambiguity; a cube search finds inputs with no model. Helpers and even the restricted
+relation's tuples may vary if the formula's truth does not. Each candidate W solver
+uses separate equation copies for each assumption, sharing only inputs. Before
+returning a candidate, an independent query rules out a false interpretation of each
+recursive assumption. A false-model cube excludes only observations for which that
+interpretation remains valid. Other assumptions, H and downstream equations cannot
+influence this certification.
+
+`AssumptionAnalysis` retains the assumption, a differing group and true/false model
+pair, or a no-model input. Known failures are Errors. Checking proceeds on certified,
+satisfied observations, retaining counterexamples. This increment marks every
+universal result incomplete when any selected assumption is invalid or unknown;
+an empty certified subset is not inconsistent W, all-rejected or a vacuous proof.
+
+Static `within` providers require tuple-set determinacy, ignoring helper differences.
+`InputDomainIssue` names input and provider, and carries an ambiguity pair, no-meaning
+or resource exhaustion. A dependency test can use a provider's positive-support
+upper bound to prove it unreachable; this provisional graph is never a query's
+input universe. Dependent preparations stop on failure. Unused bounded inputs are
+listed in `ignored_input_domains`; models return `None` for their tuples and expose
+`omitted_input_relations`. World queries on those relations are refused. All live
+processing rules, selected assumption/obligation/decision/hypothesis relations and
+input-cardinality declarations count as dependencies. Selected notices currently
+conservatively require all inputs. Input-independent positive recursion may have
+multiple completion interpretations; stable least-model evaluation is not a fallback.
 
 - `worlds(&WorldQuery)` searches W alone with optional input pins and excluded cubes.
   It returns a complete input observation, `NoWorld`, or `Inconclusive`. An empty
   query's `NoWorld` means the input contract is inconsistent; a pinned query's
-  `NoWorld` means only that the query has no permitted observation.
+  `NoWorld` means only that the query has no permitted observation. If the certified
+  search is empty and global assumption validation is invalid or unknown, it instead
+  returns `Inconclusive` (conservatively even for pins outside the bad input region).
 - `observation(present_inputs)` treats omitted eligible inputs as absent. Outside W
-  it returns `NotPermitted`. With H, it counts interpretations of H's original
+  it returns `NotPermitted`. An invalid recursive restriction returns `UndeterminedAssumptions`. With H, it counts interpretations of H's live
   upstream ground cone satisfying H, projected onto selected decisions: one is
   `Accepted`, and several are `Ambiguous`. Zero triggers existence checking of the
   same cone without H: a model is `Rejected { without_hypothesis }`, no model is
@@ -829,7 +849,7 @@ rejections only. An all-rejected context excludes classification no-meaning,
 ambiguity and unknowns. It is explicit, processing is not applicable, and processing
 properties are vacuous; inconsistent W is a context error instead.
 
-Property queries use the original obligation and classification cones and H.
+Property queries use the live obligation and classification cones and H.
 A separate eligibility query confirms unique classification decisions for each
 candidate observation, leaving helper assignments free. They search all relevant helper interpretations, so an
 arbitrary classification witness cannot hide a property failure. An independent
@@ -872,6 +892,13 @@ checker reports actual supported positive cycles, identified by their original
 positive component's semantic keys. It never adds stable loop clauses or rejects
 those interpretations. `advisory_limits` is independent; example truncation and
 exhaustion are reported separately and do not change required verdicts.
+
+`dead_producers` separately requests a bounded advisory for dead instances whose
+heads are in C(H) and whose premises would connect atoms outside it. One example
+per authored producer names a positive premise outside the possibility fixpoint.
+This may enumerate substitutions under `advisory_limits`; its truncation or exhaustion
+cannot change required results. No removal edit is offered for a whole source rule
+on the strength of one dead ground instance.
 
 The SAT CLI consumes these reports and the shared completion presenter. Editor,
 planner, scorecard and BDD checking continue to refuse completion explicitly.

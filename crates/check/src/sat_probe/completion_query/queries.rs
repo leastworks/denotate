@@ -7,14 +7,25 @@ pub(super) struct Run<'a, 'b, 'l> {
     pub(super) truth: Lit,
     pub(super) world: Encoding,
     inactive: Vec<Lit>,
-    solves: usize,
+    pub(super) solves: usize,
+    pub(super) solve_limit: usize,
+    certified: bool,
 }
 
 impl Engine {
-    /// W alone. No completion equations outside selected acyclic restrictions
+    /// Certified W alone. No completion equations outside selected restrictions
     /// can suppress an otherwise permitted observation.
     pub fn worlds(&self, query: &WorldQuery) -> Result<WorldAnswer> {
-        self.worlds_using(query, &mut Budget::new(&self.limits))
+        let result = self.worlds_using(query, &mut Budget::new(&self.limits))?;
+        if matches!(result, WorldAnswer::NoWorld)
+            && self
+                .assumption_analysis(&CheckOptions::default())?
+                .iter()
+                .any(|a| !a.certified())
+        {
+            return Ok(WorldAnswer::Inconclusive(contracts::uncertified()));
+        }
+        Ok(result)
     }
     pub(super) fn worlds_using(
         &self,
@@ -53,7 +64,7 @@ impl Engine {
     }
 
     /// All omitted eligible inputs are absent. First check membership in W,
-    /// then classify in H's original upstream cone, then check processing with
+    /// then classify in H's live upstream cone, then check processing with
     /// its established decisions pinned, retaining C and H. Helpers remain free;
     /// no downstream model chooses a class.
     pub fn observation(
@@ -70,14 +81,23 @@ impl Engine {
     ) -> Result<ObservationOutcome> {
         let mut present_set = BTreeSet::new();
         let result = (|| {
-            let mut run = Run::new(self, budget)?;
             for a in present {
-                run.budget.tick("completion observation")?;
+                budget.tick("completion observation")?;
                 if !self.program.inputs.contains(&a) {
                     return Err(CheckError::InvalidObservation(a));
                 }
                 present_set.insert(a);
             }
+            let mut solves = 0;
+            let issues = self.assumptions_at(&present_set, budget, &mut solves)?;
+            if !issues.is_empty() {
+                return Ok(ObservationOutcome::UndeterminedAssumptions(issues));
+            }
+            let mut run = Run::new(self, budget)?;
+            run.solve_limit = self.config.max_solves.saturating_sub(solves);
+            // Inputs stay pinned through every query below; their assumption
+            // determinacy was already established independently.
+            run.certified = false;
             let mut pins = Vec::new();
             for a in &self.program.inputs {
                 let l = run.input(a)?;
@@ -251,6 +271,22 @@ pub(super) fn property(
 
 impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
     pub(super) fn new(engine: &'a Engine, budget: &'b mut Budget<'l>) -> Result<Self> {
+        let mut run = Self::universe(engine, budget)?;
+        for a in &engine.assumptions {
+            let e = encode(
+                &a.cone,
+                &mut run.cnf,
+                run.truth,
+                Some(&run.world.vars),
+                run.budget,
+            )?;
+            let truth = a.formula(&e, &mut run.cnf, run.truth, run.budget)?;
+            run.cnf.clause(vec![truth], run.budget)?;
+        }
+        run.certified = true;
+        Ok(run)
+    }
+    pub(super) fn universe(engine: &'a Engine, budget: &'b mut Budget<'l>) -> Result<Self> {
         budget.check("completion query")?;
         let mut cnf = Cnf {
             solver: Solver::new(
@@ -282,12 +318,24 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             world,
             inactive: vec![],
             solves: 0,
+            solve_limit: engine.config.max_solves,
+            certified: false,
         })
     }
 
     pub(super) fn input(&mut self, atom: &GroundAtom) -> Result<Lit> {
         self.budget
             .charge(atom.arguments.len() + 1, "completion input query")?;
+        if self
+            .engine
+            .ignored_input_domains
+            .iter()
+            .any(|d| d.input == atom.relation)
+        {
+            return Err(CheckError::InvalidRequest(
+                "input domain is outside this verification's dependency scope",
+            ));
+        }
         self.engine.program.validate_atom(atom)?;
         if !self.engine.input_relations.contains(&atom.relation) {
             return Err(CheckError::InvalidRequest(
@@ -302,15 +350,93 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         Ok(self.world.vars[self.engine.program.atom_index[atom]])
     }
 
+    pub(super) fn input_pins(&self, values: &[bool]) -> Vec<Lit> {
+        self.engine
+            .world
+            .input
+            .iter()
+            .enumerate()
+            .filter_map(|(i, input)| {
+                input.then_some(if values[i] {
+                    self.world.vars[i]
+                } else {
+                    !self.world.vars[i]
+                })
+            })
+            .collect()
+    }
+    pub(super) fn exclude(&mut self, cube: &BTreeMap<usize, bool>) -> Result<()> {
+        self.budget
+            .charge(cube.len(), "completion assumption cube")?;
+        self.cnf.clause(
+            cube.iter()
+                .map(|(i, v)| {
+                    if *v {
+                        !self.world.vars[*i]
+                    } else {
+                        self.world.vars[*i]
+                    }
+                })
+                .collect(),
+            self.budget,
+        )
+    }
     pub(super) fn solve(&mut self, pins: &[Lit]) -> Result<bool> {
+        while self.raw_solve(pins)? {
+            if !self.certified {
+                return Ok(true);
+            }
+            let values =
+                checked_assignment(&self.engine.world, &self.world, &self.cnf, self.budget)?;
+            let mut excluded = false;
+            for a in &self.engine.assumptions {
+                if !a.recursive {
+                    continue;
+                }
+                // A separate solver prevents downstream equations, H, other
+                // restrictions and candidate exclusions from choosing A's truth.
+                let mut check = Run::universe(self.engine, self.budget)?;
+                check.solve_limit = self.solve_limit.saturating_sub(self.solves);
+                let result: Result<_> = (|| {
+                    let e = encode(
+                        &a.cone,
+                        &mut check.cnf,
+                        check.truth,
+                        Some(&check.world.vars),
+                        check.budget,
+                    )?;
+                    let formula = a.formula(&e, &mut check.cnf, check.truth, check.budget)?;
+                    let mut fixed = check.input_pins(&values);
+                    fixed.push(!formula);
+                    if !check.solve(&fixed)? {
+                        return Ok(None);
+                    }
+                    let model = checked_assignment(&a.cone, &e, &check.cnf, check.budget)?;
+                    Ok(Some(super::symbolic::cover(
+                        &a.cone,
+                        &model,
+                        None,
+                        check.budget,
+                    )?))
+                })();
+                self.solves += check.solves;
+                if let Some(cube) = result? {
+                    self.exclude(&cube)?;
+                    excluded = true;
+                    break;
+                }
+            }
+            if !excluded {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+    fn raw_solve(&mut self, pins: &[Lit]) -> Result<bool> {
         self.budget.tick("completion solve")?;
         self.cnf.solver.cb().check()?;
-        self.budget.room(
-            self.solves,
-            self.engine.config.max_solves,
-            "completion solve",
-            "solves",
-        )?;
+        self.budget
+            .room(self.solves, self.solve_limit, "completion solve", "solves")?;
         self.solves += 1;
         let answer = self.cnf.solver.solve_limited(pins);
         self.cnf.solver.cb().check()?;
@@ -363,6 +489,8 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             ModelScope::Processing => "completion processing",
             ModelScope::WholeProgram => "completion meaning",
             ModelScope::Property => "completion property",
+            ModelScope::Assumption => "completion assumption",
+            ModelScope::InputDomain => "completion input domain",
         };
         let result: Result<Interpretations> = (|| {
             let gate = self.cnf.var(self.budget)?;

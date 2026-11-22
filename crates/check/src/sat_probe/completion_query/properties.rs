@@ -114,15 +114,15 @@ impl Engine {
                 }
                 atoms.sort_by(|a, b| a.0.cmp(&b.0));
                 let atoms: Vec<_> = atoms.into_iter().map(|(_, a)| a).collect();
-                let original = self
-                    .original
-                    .relation_cone(r.relation(), atoms.clone(), &mut b)?;
-                let fixed = original
-                    .facts
-                    .iter()
-                    .all(|a| !self.program.inputs.contains(a))
-                    && original.cycle.is_none();
-                let mut members = original.facts;
+                let live = self
+                    .program
+                    .dependency_cone_with_budget(atoms.clone(), &mut b)?;
+                let fixed = live.facts.iter().all(|a| !self.program.inputs.contains(a))
+                    && !self
+                        .program
+                        .components()
+                        .any(|c| c.recursive && live.components.contains(&c.id));
+                let mut members = live.facts;
                 if let Some((_, classification, _)) = &self.classification {
                     members.extend(classification.iter().cloned());
                 }

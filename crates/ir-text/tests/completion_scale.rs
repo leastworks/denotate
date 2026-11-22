@@ -22,7 +22,7 @@ fn prepared(p: &LoadedProgram) -> Engine {
     .unwrap()
     {
         Preparation::Ready(e) => e,
-        Preparation::Unsupported(e) => panic!("{e:?}"),
+        Preparation::InputDomains(e) => panic!("{e:?}"),
         Preparation::Inconclusive(e) => panic!("{e:?}"),
     }
 }
@@ -63,7 +63,7 @@ fn sparse_join_preserves_self_support_at_a_scale_that_exceeds_full_grounding() {
     }
 }
 #[test]
-fn projected_original_dependencies_survive_dead_cartesian_producers() {
+fn dead_cartesian_producers_leave_helpers_in_processing_only() {
     let mut text = constants(100);
     text.push_str("relation r(x:S);r(X):-r(X);relation absent(x:S);relation h(x:S);h(X):-r(X),r(Y),absent(Z);relation recognized();recognized();recognized():-h(c0);verification v{semantics:completion;hypothesis:recognized;decisions:[r];assumptions:[];obligations:[];}");
     let p = loaded(&text);
@@ -72,15 +72,16 @@ fn projected_original_dependencies_survive_dead_cartesian_producers() {
         .unwrap();
     assert!(!r.is_incomplete());
     let class = r.classification.unwrap();
-    assert!(class.ambiguous.exists());
-    assert!(matches!(class.accepted, Search::None));
+    assert!(matches!(class.ambiguous, Search::None));
+    assert!(class.accepted.exists());
+    assert!(r.meaning.ambiguous.exists());
     assert!(matches!(class.rejected, Search::None));
     assert!(matches!(class.no_meaning, Search::None));
 }
 #[test]
-fn dead_producers_do_not_hide_original_assumption_or_provider_cycles() {
+fn dead_recursive_producers_have_determined_false_completion() {
     for declarations in [
-        "input raw(x:S) within p;verification v{semantics:completion;assumptions:[];obligations:[];}",
+        "input raw(x:S) within p;verification v{semantics:completion;decisions:[raw];assumptions:[];obligations:[];}",
         "assumption a:empty(p);verification v{semantics:completion;assumptions:[a];obligations:[];}",
     ] {
         let p = loaded(&format!(
@@ -97,7 +98,7 @@ fn dead_producers_do_not_hide_original_assumption_or_provider_cycles() {
                 QueryLimits::default()
             )
             .unwrap(),
-            Preparation::Unsupported(_)
+            Preparation::Ready(_)
         ));
     }
 }

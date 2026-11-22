@@ -11,6 +11,7 @@ pub(super) fn run(
     query: QueryLimits,
     mut check: CheckOptions,
     circular_support: bool,
+    dead_producers: bool,
     dump: &mut Option<component_dump::Dump>,
     partial: bool,
     unchecked: bool,
@@ -23,15 +24,33 @@ pub(super) fn run(
 ) -> Result<u8, Failure> {
     let mut incomplete = partial || unchecked;
     let mut failure = false;
-    if validate_all
-        || requests
-            .iter()
-            .any(|(_, r)| r.semantics == denotate_ir::Semantics::Completion)
-    {
-        let validation =
-            denotate_check::validate_assumption_cones(&p.corpus, &p.domains, &p.keys, limits)
-                .map_err(checker_failure)?;
-        let presented = presentation::present_assumption_validation(p, &validation)
+    if validate_all {
+        // A declaration selected only by completion has no stable validation
+        // requirement. Unselected declarations retain the explicit audit's stable
+        // policy; declarations shared with stable verifications get both checks.
+        let completion: std::collections::BTreeSet<_> = p
+            .corpus
+            .verifications()
+            .filter(|v| v.options.semantics == denotate_ir::Semantics::Completion)
+            .flat_map(|v| v.assumptions.iter().copied())
+            .collect();
+        let stable: std::collections::BTreeSet<_> = p
+            .corpus
+            .verifications()
+            .filter(|v| v.options.semantics == denotate_ir::Semantics::Stable)
+            .flat_map(|v| v.assumptions.iter().copied())
+            .collect();
+        let selected = p
+            .corpus
+            .assumptions()
+            .filter(|a| !completion.contains(&a.id) || stable.contains(&a.id))
+            .map(|a| p.keys.assumption(a.id).unwrap().clone())
+            .collect();
+        let validation = denotate_check::validate_assumption_cone_keys(
+            &p.corpus, &p.domains, &p.keys, &selected, limits,
+        )
+        .map_err(checker_failure)?;
+        let presented = presentation::present_assumption_audit(p, &validation)
             .map_err(|e| (2, e.to_string()))?;
         incomplete |= validation.has_failures();
         if json {
@@ -103,6 +122,7 @@ pub(super) fn run(
                 &query,
                 &check,
                 circular_support,
+                dead_producers,
                 json,
                 verbose,
                 output,
@@ -313,6 +333,7 @@ fn completion(
     query: &QueryLimits,
     check: &CheckOptions,
     circular_support: bool,
+    dead_producers: bool,
     json: bool,
     verbose: bool,
     output: &mut String,
@@ -345,7 +366,6 @@ fn completion(
     };
     let mut problem = refusal.map(str::to_owned);
     let mut prepared = None;
-    let mut compatibility = None;
     let mut exhausted = None;
     if problem.is_none() {
         match cq::Engine::prepare(
@@ -362,17 +382,15 @@ fn completion(
             },
         ) {
             Ok(cq::Preparation::Ready(e)) => prepared = Some(e),
-            Ok(cq::Preparation::Unsupported(issue)) => {
-                let relation = p
-                    .corpus
-                    .relations()
-                    .find(|r| p.keys.relation(r.id).is_ok_and(|k| k == &issue.relation))
-                    .unwrap();
-                problem = Some(format!(
-                    "Completion compatibility: {} has a recursive assumption or input-domain cone; this increment requires an acyclic cone.",
-                    relation.name
-                ));
-                compatibility = Some(issue);
+            Ok(cq::Preparation::InputDomains(issues)) => {
+                let shown = presentation::completion_input_domain_failure(p, v.id, &issues)
+                    .map_err(|e| (2, e.to_string()))?;
+                if json {
+                    writeln!(output, "Results: {}", shown.status).unwrap();
+                } else {
+                    print_diagnostics(p, &shown, output, verbose)?;
+                }
+                return Ok((true, shown.status["hasFailures"].as_bool().unwrap()));
             }
             Ok(cq::Preparation::Inconclusive(c)) => {
                 exhausted = Some(c);
@@ -388,14 +406,8 @@ fn completion(
         }
     }
     if let Some(problem) = problem {
-        let shown = presentation::completion_preparation_failure(
-            p,
-            v.id,
-            compatibility.as_ref(),
-            exhausted,
-            &problem,
-        )
-        .map_err(|e| (2, e.to_string()))?;
+        let shown = presentation::completion_preparation_failure(p, v.id, exhausted, &problem)
+            .map_err(|e| (2, e.to_string()))?;
         if json {
             writeln!(output, "Results: {}", shown.status).unwrap();
         } else {
@@ -412,6 +424,7 @@ fn completion(
             denotate_check::EmptinessExamples::All => usize::MAX,
         },
         circular_support,
+        dead_producers,
         advisory_limits: check.attribution.clone(),
     };
     let report = prepared
@@ -426,6 +439,13 @@ fn completion(
     if json {
         writeln!(output, "Results: {s:#}").unwrap();
     } else {
+        if !s["inputContract"]["complete"].as_bool().unwrap() {
+            writeln!(
+                output,
+                "Input contract: incomplete; results cover only determined, satisfied assumptions"
+            )
+            .unwrap();
+        }
         writeln!(
             output,
             "Context: {}",

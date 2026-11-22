@@ -15,8 +15,11 @@ pub enum Identity {
     UnsupportedSemantics,
     Rejection(ObligationId),
     CompletionMeaning(&'static str),
+    CompletionAssumption(AssumptionId, &'static str),
+    CompletionInputDomain(RelationId),
     AllRejected,
     CircularSupport(BTreeSet<GroundAtom>),
+    CompletionDeadProducer(RuleId),
     Notice(NoticeId),
     SubsumedProducer(RuleId),
     AssumedConclusion(AssumptionId, ObligationId),
@@ -113,6 +116,15 @@ impl Identity {
                 json!({"obligation":qualified(&keys.obligation(*id)?.0),"component":"rejection"})
             }
             Self::CompletionMeaning(phase) => json!({"completionMeaning":phase}),
+            Self::CompletionAssumption(id, phase) => {
+                json!({"assumption":qualified(&keys.assumption(*id)?.0),"check":"completion","phase":phase})
+            }
+            Self::CompletionInputDomain(id) => {
+                json!({"inputDomain":relation(keys.relation(*id)?),"check":"completion"})
+            }
+            Self::CompletionDeadProducer(id) => {
+                json!({"deadProducer":rule(keys.rule(*id)?),"semantics":"completion"})
+            }
             Self::AllRejected => json!({"context":"all-rejected"}),
             Self::CircularSupport(atoms) => {
                 json!({"circularSupport":atoms.iter().map(|a| AtomKey::from_atom(keys,a)).collect::<std::result::Result<BTreeSet<_>,_>>()?.iter().map(atom_data).collect::<Vec<_>>()})

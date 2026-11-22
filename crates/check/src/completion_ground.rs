@@ -69,17 +69,35 @@ impl Table {
 type Upper = BTreeMap<RelationId, Option<Table>>;
 
 impl GroundProgram {
+    #[cfg(test)]
     pub(crate) fn prepare_completion(
         corpus: &Corpus,
         domains: &Domains,
         b: &mut Budget<'_>,
     ) -> Result<Self> {
+        Self::prepare_completion_with_inputs(corpus, domains, None, None, b)
+    }
+    /// Supplied eligibility has already been evaluated under the selected semantics.
+    /// A static scope builds only that provider's rules, without any runtime inputs.
+    pub(crate) fn prepare_completion_with_inputs(
+        corpus: &Corpus,
+        domains: &Domains,
+        eligibility: Option<BTreeMap<RelationId, BTreeSet<GroundAtom>>>,
+        static_scope: Option<&BTreeSet<RelationId>>,
+        b: &mut Budget<'_>,
+    ) -> Result<Self> {
         let domains = validate_domains(corpus, domains, b)?;
         let mut p = Self::empty(corpus, domains.clone());
         p.obligations.clear();
-        // The caller has checked original provider compatibility before this
-        // least-model evaluation. Providers are acyclic and input independent.
-        p.completion_inputs(corpus, b)?;
+        if static_scope.is_none() {
+            match eligibility {
+                Some(values) => {
+                    p.input_domains = values;
+                    p.seed_completion_inputs(corpus, b)?;
+                }
+                None => p.completion_inputs(corpus, b)?,
+            }
+        }
         let mut tables: Upper = corpus
             .relations()
             .map(|r| {
@@ -96,7 +114,10 @@ impl GroundProgram {
             })
             .collect();
         let mut producers = BTreeMap::<_, Vec<_>>::new();
-        for r in corpus.rules() {
+        for r in corpus
+            .rules()
+            .filter(|r| static_scope.is_none_or(|scope| scope.contains(&r.head.relation())))
+        {
             b.tick("completion grounding")?;
             producers.entry(r.head.relation()).or_default().push(r);
         }
@@ -147,7 +168,10 @@ impl GroundProgram {
         // Construct only instances whose positive premises survived the greatest
         // fixpoint. Every omitted producer has a premise false in every completion.
         let mut dependencies = 0;
-        for rule in corpus.rules() {
+        for rule in corpus
+            .rules()
+            .filter(|r| static_scope.is_none_or(|scope| scope.contains(&r.head.relation())))
+        {
             bindings(rule, &tables, &domains, b, |binding, b| {
                 b.room(
                     p.rules.len(),
@@ -200,6 +224,9 @@ impl GroundProgram {
         budget: &mut Budget<'_>,
     ) -> Result<()> {
         self.input_domains = input_domains::evaluate(corpus, &self.domains, budget)?;
+        self.seed_completion_inputs(corpus, budget)
+    }
+    fn seed_completion_inputs(&mut self, corpus: &Corpus, budget: &mut Budget<'_>) -> Result<()> {
         let domains = self.domains.clone();
         for r in corpus.relations().filter(|r| r.role == RelationRole::Input) {
             if let Some(allowed) = self.input_domains.get(&r.id).cloned() {

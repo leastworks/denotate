@@ -44,6 +44,35 @@ pub fn present_assumption_validation(
     program: &LoadedProgram,
     validation: &denotate_check::AssumptionValidation,
 ) -> Result<Presentation> {
+    present_assumptions(
+        program,
+        validation,
+        program.corpus.assumptions().map(|a| a.id),
+    )
+}
+
+/// An explicit stable audit can omit declarations checked only by completion.
+pub fn present_assumption_audit(
+    program: &LoadedProgram,
+    validation: &denotate_check::AssumptionValidation,
+) -> Result<Presentation> {
+    let mut selected = Vec::new();
+    for a in program.corpus.assumptions() {
+        if validation
+            .assumptions
+            .contains_key(program.keys.assumption(a.id)?)
+        {
+            selected.push(a.id);
+        }
+    }
+    present_assumptions(program, validation, selected)
+}
+
+fn present_assumptions(
+    program: &LoadedProgram,
+    validation: &denotate_check::AssumptionValidation,
+    selected: impl IntoIterator<Item = denotate_ir::AssumptionId>,
+) -> Result<Presentation> {
     let user_files = program
         .documents
         .iter()
@@ -60,11 +89,12 @@ pub fn present_assumption_validation(
     };
     let mut diagnostics = Vec::new();
     let mut inventory = Vec::new();
-    for (finding, evidence) in denotate_presentation::assumption_validation_findings(
+    for (finding, evidence) in denotate_presentation::assumption_validation_findings_for(
         &program.corpus,
         &program.keys,
         validation,
         &diagnostic_names(&program.corpus),
+        selected,
     )? {
         let mut placed = placement.place(
             &finding.identity,
@@ -210,6 +240,15 @@ pub fn diagnostic_names(
             ),
         );
     }
+    for assumption in corpus.assumptions() {
+        names.insert(
+            assumption.id.into(),
+            qualify(
+                assumption.id.into(),
+                spelling(&assumption.name, NameKind::Identifier),
+            ),
+        );
+    }
     move |id| {
         names
             .get(&id)
@@ -293,13 +332,55 @@ pub fn present_completion(
     program: &LoadedProgram,
     report: &denotate_check::completion_query::Report,
 ) -> Result<Presentation> {
+    place_completion_findings(
+        program,
+        report.verification,
+        denotate_presentation::completion_findings(
+            &program.corpus,
+            &program.keys,
+            report,
+            &diagnostic_names(&program.corpus),
+        )?,
+        denotate_presentation::completion_summary(&program.corpus, &program.keys, report)?,
+    )
+}
+
+pub fn completion_input_domain_failure(
+    program: &LoadedProgram,
+    verification: denotate_ir::VerificationId,
+    issues: &[denotate_check::completion_query::InputDomainIssue],
+) -> Result<Presentation> {
+    use denotate_check::completion_query::InputDomainFailure;
+    let status = json!({"backend":{"backend":"sat"},"semantics":"completion","state":"incomplete","incomplete":true,
+        "hasFailures":issues.iter().any(|i|matches!(i.failure,InputDomainFailure::Ambiguous(_)|InputDomainFailure::NoMeaning)),
+        "inputDomains":issues.iter().map(|i|denotate_presentation::input_domain_data(i,&program.keys)).collect::<Result<Vec<_>>>()?,
+        "meaning":{"state":"not-analysed"}});
+    place_completion_findings(
+        program,
+        verification,
+        denotate_presentation::completion_input_domain_findings(
+            &program.corpus,
+            &program.keys,
+            issues,
+            &diagnostic_names(&program.corpus),
+        )?,
+        status,
+    )
+}
+
+fn place_completion_findings(
+    program: &LoadedProgram,
+    verification: denotate_ir::VerificationId,
+    findings: Vec<denotate_presentation::CompletionFinding>,
+    mut status: Value,
+) -> Result<Presentation> {
     let own = program
         .documents
         .iter()
         .filter(|d| d.ownership == "user")
         .map(|d| d.uri.clone())
         .collect();
-    let key = program.keys.verification(report.verification)?;
+    let key = program.keys.verification(verification)?;
     let placement = Placement {
         program: &program.root,
         verification: Some(key),
@@ -310,12 +391,7 @@ pub fn present_completion(
     };
     let mut diagnostics = Vec::new();
     let mut inventory = Vec::new();
-    for item in denotate_presentation::completion_findings(
-        &program.corpus,
-        &program.keys,
-        report,
-        &diagnostic_names(&program.corpus),
-    )? {
+    for item in findings {
         let f = item.finding;
         let mut placed =
             placement.place(&f.identity, f.kind, &f.message, &f.notes, &f.contributions)?;
@@ -325,8 +401,6 @@ pub fn present_completion(
         inventory.push(json!({"identity":f.identity.data_in(&program.keys,Some(key))?,"kind":f.kind.code(),"message":f.message,"evidence":item.evidence,"fallback":placed.iter().any(|d|d.fallback),"located":!placed.is_empty()}));
         diagnostics.extend(placed);
     }
-    let mut status =
-        denotate_presentation::completion_summary(&program.corpus, &program.keys, report)?;
     status["findings"] = json!(inventory);
     Ok(Presentation {
         diagnostics,
@@ -337,11 +411,9 @@ pub fn present_completion(
 pub fn completion_preparation_failure(
     program: &LoadedProgram,
     verification: denotate_ir::VerificationId,
-    issue: Option<&denotate_check::completion_query::CompatibilityIssue>,
     exhausted: Option<denotate_check::Inconclusive>,
     reason: &str,
 ) -> Result<Presentation> {
-    use denotate_ir::OccurrenceKey;
     use denotate_presentation::{Contribution, Identity, Kind, Role};
     let users = program
         .documents
@@ -358,36 +430,11 @@ pub fn completion_preparation_failure(
         current: &program.provenance,
         upstream: &program.embedded.provenance,
     };
-    let mut contributions = vec![Contribution {
+    let contributions = vec![Contribution {
         occurrence: verification.into(),
         role: Role::Declaration,
     }];
     let mut evidence = json!({"kind":"unsupported-semantics"});
-    if let Some(issue) = issue {
-        let source = match &issue.source {
-            denotate_check::completion_query::CompatibilitySource::SelectedAssumption(k) => {
-                OccurrenceKey::Assumption(k.clone())
-            }
-            denotate_check::completion_query::CompatibilitySource::InputDomain { input } => {
-                OccurrenceKey::Relation(input.clone())
-            }
-        };
-        contributions[0].role = Role::EnclosingScope;
-        contributions.push(Contribution {
-            occurrence: program.keys.bindings().resolve(&source)?,
-            role: Role::Declaration,
-        });
-        for a in &issue.recursive_component {
-            contributions.push(Contribution {
-                occurrence: program
-                    .keys
-                    .bindings()
-                    .resolve(&OccurrenceKey::Relation(a.relation.clone()))?,
-                role: Role::BlockingCycle,
-            });
-        }
-        evidence = json!({"kind":"completion-incompatible-cone","component":issue.recursive_component.iter().map(denotate_presentation::atom_data).collect::<Vec<_>>()});
-    }
     let (identity, kind) = if let Some(c) = exhausted {
         evidence = denotate_presentation::with_limit_details(
             json!({"kind":"incomplete","phase":c.phase,"resource":c.resource}),

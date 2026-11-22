@@ -49,13 +49,13 @@ fn loaded_completion_queries_use_ground_hypothesis_cones_and_keep_processing_sep
 }
 
 #[test]
-fn loaded_recursive_within_provider_gets_completion_compatibility_refusal() {
+fn loaded_recursive_within_provider_reports_two_interpretations() {
     use denotate_check::completion_query::*;
     let p = single(
-        "sort S; const a: S; relation candidates(x:S); candidates(X):-candidates(X); input raw(x:S) within candidates; verification v{semantics:completion;assumptions:[];obligations:[];}",
+        "sort S; const a: S; relation candidates(x:S); candidates(X):-candidates(X); input raw(x:S) within candidates; verification v{semantics:completion;decisions:[raw];assumptions:[];obligations:[];}",
     );
     let v = p.corpus.verifications().next().unwrap().id;
-    let Preparation::Unsupported(issue) = Engine::prepare(
+    let Preparation::InputDomains(issues) = Engine::prepare(
         &p.corpus,
         &p.domains,
         &p.keys,
@@ -66,11 +66,11 @@ fn loaded_recursive_within_provider_gets_completion_compatibility_refusal() {
     .unwrap() else {
         panic!()
     };
+    assert_eq!(issues.len(), 1);
     assert!(matches!(
-        issue.source,
-        CompatibilitySource::InputDomain { .. }
+        issues[0].failure,
+        InputDomainFailure::Ambiguous(_)
     ));
-    assert!(!issue.recursive_component.is_empty());
 }
 fn roundtrip(p: &LoadedProgram) {
     let layout = ExportLayout {

@@ -58,6 +58,27 @@ impl Corpus {
     /// input-free dependency cone, without evaluating any rules.
     pub fn input_domain_cone_with<E: From<ConstructionError>>(
         &self,
+        tick: impl FnMut() -> Result<(), E>,
+    ) -> Result<BTreeSet<RelationId>, E> {
+        self.input_domain_structure_impl(true, tick)
+    }
+
+    /// Structural requirements independent of the verification's rule semantics.
+    /// Completion evaluates recursive static providers in the checker.
+    pub fn validate_input_domain_structure(
+        &self,
+    ) -> Result<BTreeSet<RelationId>, ConstructionError> {
+        self.input_domain_structure_with(|| Ok(()))
+    }
+    pub fn input_domain_structure_with<E: From<ConstructionError>>(
+        &self,
+        tick: impl FnMut() -> Result<(), E>,
+    ) -> Result<BTreeSet<RelationId>, E> {
+        self.input_domain_structure_impl(false, tick)
+    }
+    fn input_domain_structure_impl<E: From<ConstructionError>>(
+        &self,
+        stratified: bool,
         mut tick: impl FnMut() -> Result<(), E>,
     ) -> Result<BTreeSet<RelationId>, E> {
         let mut edges: BTreeMap<RelationId, Vec<(RelationId, bool)>> = BTreeMap::new();
@@ -103,7 +124,7 @@ impl Corpus {
             for source in &cone {
                 for (target, negative) in edges.get(source).into_iter().flatten() {
                     tick()?;
-                    if !negative {
+                    if !stratified || !negative {
                         continue;
                     }
                     let mut seen = BTreeSet::new();

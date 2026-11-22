@@ -106,6 +106,25 @@ pub fn validate_assumption_cones(
     Ok(validate_assumption_cones_for_run(corpus, domains, keys, limits)?.result)
 }
 
+/// Stable validation for an explicit declaration selection. Mixed-semantics
+/// consumers must validate completion assumptions through `completion_query`.
+/// The result contains only the selected declarations.
+pub fn validate_assumption_cone_keys(
+    corpus: &Corpus,
+    domains: &Domains,
+    keys: &SemanticKeys,
+    selected: &BTreeSet<AssumptionKey>,
+    limits: &Limits,
+) -> Result<AssumptionValidation> {
+    let mut result =
+        validate_assumption_selection_using(corpus, domains, keys, Some(selected), limits, || {
+            FixedPreparation::prepare(corpus, domains, limits)
+        })?
+        .result;
+    result.assumptions.retain(|key, _| selected.contains(key));
+    Ok(result)
+}
+
 /// Sealed evidence for this snapshot, not a caller-editable validity assertion.
 /// It retains the shared fold and residual preparation. The ordinary
 /// result remains available for diagnostics, including unselected assumptions.

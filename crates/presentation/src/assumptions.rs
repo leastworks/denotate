@@ -44,8 +44,29 @@ pub fn assumption_validation_findings(
     validation: &AssumptionValidation,
     names: &dyn Fn(OccurrenceId) -> String,
 ) -> Result<Vec<(ContextFinding, Value)>> {
+    assumption_validation_findings_for(
+        corpus,
+        keys,
+        validation,
+        names,
+        corpus.assumptions().map(|a| a.id),
+    )
+}
+
+/// Present an explicit audit selection. Every selected declaration must have a
+/// validation result; declarations outside the audit have no finding here.
+pub fn assumption_validation_findings_for(
+    corpus: &Corpus,
+    keys: &SemanticKeys,
+    validation: &AssumptionValidation,
+    names: &dyn Fn(OccurrenceId) -> String,
+    selected: impl IntoIterator<Item = denotate_ir::AssumptionId>,
+) -> Result<Vec<(ContextFinding, Value)>> {
     let mut findings = Vec::new();
-    for assumption in corpus.assumptions() {
+    for id in selected {
+        let assumption = corpus
+            .assumption(id)
+            .ok_or(Error::InvalidFinding("unknown assumption in audit"))?;
         let state = validation
             .assumptions
             .get(keys.assumption(assumption.id)?)

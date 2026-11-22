@@ -253,7 +253,12 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
 /// A true head needs one true producer; a false head needs one blocker for each
 /// producer. Derived literals keep their model values, including circular support:
 /// completion requires equations, not a finite derivation. W is enforced separately.
-fn cover(c: &Cone, values: &[bool], h: Option<usize>, b: &mut Budget<'_>) -> Result<Cube> {
+pub(super) fn cover(
+    c: &Cone,
+    values: &[bool],
+    h: Option<usize>,
+    b: &mut Budget<'_>,
+) -> Result<Cube> {
     b.charge(c.fixed.len(), "completion model cube")?;
     let mut supported = vec![false; c.fixed.len()];
     let mut cube = Cube::new();
@@ -667,10 +672,25 @@ impl Engine {
             notices_not_analysed: self.notices.clone(),
             incomplete: vec![],
             advisory: Advisory::NotRequested,
+            dead_producers: DeadProducerAdvisory::NotRequested,
+            assumptions: self.assumption_analysis(options)?,
+            ignored_input_domains: self.ignored_input_domains.clone(),
             program: self.program.clone(),
         };
-        match self.worlds(&WorldQuery::default())? {
-            WorldAnswer::NoWorld => report.context = Context::InconsistentAssumptions,
+        let contract_incomplete = report.assumptions.iter().any(|a| !a.certified());
+        for a in &report.assumptions {
+            if let Search::Inconclusive(c) = a.ambiguous {
+                report.incomplete.push(c);
+            }
+            if let Search::Inconclusive(c) = a.no_meaning {
+                report.incomplete.push(c);
+            }
+        }
+        match self.worlds_using(&WorldQuery::default(), &mut Budget::new(&self.limits))? {
+            WorldAnswer::NoWorld if !contract_incomplete => {
+                report.context = Context::InconsistentAssumptions
+            }
+            WorldAnswer::NoWorld => (),
             WorldAnswer::Inconclusive(c) => {
                 report.context = Context::Inconclusive(c);
                 report.incomplete.push(c);
@@ -689,6 +709,7 @@ impl Engine {
             if options.circular_support {
                 report.advisory = self.symbolic_advisory(false, options, keys)?;
             }
+            report.dead_producers = self.dead_producer_advisory(options)?;
             return Ok(report);
         }
         let mut globally_unique = true;
@@ -709,10 +730,11 @@ impl Engine {
                 }
             }
         }
-        let vacuous = report
-            .classification
-            .as_ref()
-            .is_some_and(|c| matches!(c.accepted, Search::None));
+        let vacuous = !contract_incomplete
+            && report
+                .classification
+                .as_ref()
+                .is_some_and(|c| matches!(c.accepted, Search::None));
         let eligibility_unknown = report
             .classification
             .as_ref()
@@ -781,8 +803,12 @@ impl Engine {
         if options.circular_support {
             report.advisory = self.symbolic_advisory(globally_unique, options, keys)?;
         }
+        if contract_incomplete {
+            report.mark_partial_contract();
+        }
         report.incomplete.sort_by_key(|c| (c.phase, c.resource));
         report.incomplete.dedup();
+        report.dead_producers = self.dead_producer_advisory(options)?;
         Ok(report)
     }
 }

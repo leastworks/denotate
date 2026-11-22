@@ -1251,11 +1251,16 @@ are not stable replay evidence or an editor capability switch.
 - `completion-model` evidence retains original relational atom/value assignments,
   full present/absent input observations, hypothesis and scope (`hypothesis-cone`,
   `classification-without-hypothesis`, `accepted-processing`, `whole-program`, or
-  `property-cone`). Models are representative interpretations: uniqueness of the
+  `property-cone`, `assumption-cone`, `input-domain-cone`). Models are representative interpretations: uniqueness of the
   selected decisions does not claim that helper values are forced. Unlisted legal atoms
   inside the scope are false: no producer survives completion-safe pruning. This is not a finite derivation.
-  `scopeAtoms` identifies the original dependency-cone members (`null` for the
-  whole program); the complete input observation also includes inputs outside it.
+  `scopeAtoms` identifies live dependency-cone members (`null` for the whole
+  program). Liveness is frozen at the positive-support greatest fixpoint before
+  W, H and decisions; further solver simplifications cannot alter it. Input
+  observations include inputs outside the derived cone, except relations explicitly
+  listed in `omittedInputRelations` (outside this verification's dependency scope).
+  Static provider models (`input-domain-cone`) omit every runtime input relation:
+  they precede the runtime input universe. Omitted tuples are unknown, not false.
   Aggregated property evidence contains bounded `examples`, `count`,
   `countKind: "exact" | "at-least"` and `omittedExamples`. Each example includes
   its `group` and `presentTuples`; coverage examples have no present tuple.
@@ -1282,7 +1287,31 @@ are not stable replay evidence or an editor capability switch.
   Completion searches are symbolic; a `worlds` cutoff bounds candidate observations
   in that search, not all concrete worlds covered by its generalized cubes. Separate
   classification/processing phases can exhaust independently. Sparse grounding
-  preserves original `scopeAtoms` and circular-support component identities.
-  Compatibility refusal uses `completion-incompatible-cone` evidence with semantic
-  component keys, located on the selected assumption or input declaration. Neither
-  case is reported as rejection or a vacuous proof.
+  preserves the fixed live `scopeAtoms` and original circular-support identities.
+- `inputContract` contains `complete`, `assumptions` and `omittedInputDomains`.
+  Assumption analyses contain declaration identity, `ambiguous` and `noMeaning`
+  searches. `completion-assumption-ambiguity` carries `group`, `trueModel` and
+  `falseModel`; these share the input observation and differ in the **whole
+  restriction's truth**. `completion-assumption-no-meaning` carries the observation
+  and `confirmedNoInterpretation: true`. The models have `assumption-cone` scope.
+  Known failures use Error `invalid-assumption`; unknowns use Information
+  `unvalidated-assumption` with phase/resource details. Identity is
+  `{assumption: [namespaceKey, name], check: "completion", phase: "determinacy" | "existence"}`
+  plus verification. Universal results become incomplete with a
+  `completion input contract` reason citing affected assumptions; this is not a
+  resource exhaustion. Certified counterexamples remain counterexamples, and the
+  empty certified set does not produce all-rejected, inconsistent-W or vacuous results.
+- Provider preparation failures appear in `inputDomains` and findings with kind
+  `completion-input-domain`: structured `input` and `provider`, plus `outcome`.
+  Ambiguous outcomes carry two models and `differingTuple`; no-meaning carries
+  `confirmedNoInterpretation`; inconclusive carries phase/resource details.
+  Error `invalid-input-domain` is primary on the bounded input with provider related.
+  Identity is `{inputDomain: relationKey, check: "completion"}` plus verification.
+  Unneeded inputs appear as `outside-verification-scope` in `omittedInputDomains`.
+  Preparation failure does not prevent other verifications or language services.
+- Opt-in `dead-producer` is Information, with identity
+  `{deadProducer: ruleKey, semantics: "completion"}` plus verification. Evidence
+  `completion-dead-producer` names a dead instance's `head`, `missingPremise` and
+  `outside` atoms. There is one bounded example per source rule, without a removal
+  edit. `advisories.deadProducers` uses the same state vocabulary as circular support;
+  its exhaustion is advisory only.

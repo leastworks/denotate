@@ -1110,7 +1110,17 @@ pub fn load_with_resolver(
             }
         }
     }
-    if let Err(e) = b.program.corpus.validate_input_domains() {
+    let input_domains = if b
+        .program
+        .corpus
+        .verifications()
+        .any(|v| v.options.semantics == denotate_ir::Semantics::Completion)
+    {
+        b.program.corpus.validate_input_domain_structure()
+    } else {
+        b.program.corpus.validate_input_domains()
+    };
+    if let Err(e) = input_domains {
         let ConstructionError::InvalidInputDomain { input, .. } = &e else {
             unreachable!("provider signatures were validated before rules")
         };

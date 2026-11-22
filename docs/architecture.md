@@ -484,18 +484,30 @@ adapters responsible for JSON and human output.
 `denotate-check::completion_query` is a separate experimental query API. Its grounder
 joins greatest-fixpoint possible tuples, retaining unseeded recursive instances and
 original occurrences. It never applies stable least-model pruning or fixed folding.
-Original dependency scopes are projected separately from rule templates, so pruning
-impossible producers cannot change classification membership or compatibility. Before building
-W it checks selected assumption cones and `within` providers for ground recursion;
-only acyclic cones are compatible in this increment. Input eligibility evaluation is
-then safe under either semantics. These additional compatibility checks belong to
-the selected completion verification; ordinary program-wide declaration validation
-remains the consuming checker's responsibility.
+The resulting live-instance graph is the frozen scope boundary for classification,
+properties and input-contract checks. Liveness is the positive-support greatest
+fixpoint, independent of W, H and decisions; further solver simplification cannot
+change scopes. Original dependency templates remain only for advisory identities
+and dead-producer explanations.
+
+Selected assumptions are interpreted separately in their live cones. Over U,
+shared-input pair queries test their formula's truth determinacy; cube search tests
+existence. Candidate W queries use separate cone copies sharing only inputs, then
+certify each candidate against an independent false-formula query. This prevents
+other assumptions, H or downstream rules from choosing helper assignments or hiding
+an invalid contract. Generalized false-model cubes exclude uncertified candidates.
+Static providers are checked for tuple-set determinacy before using their eligibility.
+An invalid provider blocks only dependent verifications. A conservative possibility
+graph may prove an input unreachable even through dead references; that graph is
+never used as a verification universe. Irrelevant bounded inputs are explicitly
+omitted. Structural loading checks signatures and input independence; stable consumers
+keep their additional stratification validation. Completion validation is scoped
+to the selected verification, including when declarations have stable consumers too.
 
 Both SAT APIs share the prepared-program projection and completion encoder. The
 completion API does not share stable-model refinement, attribution or solver state.
 W has independent equations and the complete input universe. Classification uses
-the original hypothesis cone. If its query with H has no interpretation, a separate
+the live hypothesis cone. If its query with H has no interpretation, a separate
 existence query without H distinguishes rejection from classification no-meaning.
 Determinacy compares selected decision atoms (all original relations by default).
 Processing retains the cone equations and H, pins its established decisions, and
@@ -507,14 +519,16 @@ exhaustion. Each query owns its solver. Whole-verification reports use shared-in
 for determinacy and counterexample-guided searches with generalized input cubes
 for existence and rejection. W remains independent of H and downstream equations.
 Each search has a separate allowance; candidate exclusions are gated off during
-certification. Property queries combine the original property and classification
+certification. Property queries combine the live property and classification
 cones and H, and confirm unique classification decisions separately; helpers remain
 free. This preserves failures across helper
 interpretations and independent of downstream contradictions. The shared completion presenter
 owns interpretation evidence, JSON summary and diagnostic wording; `ir-text` owns
 source placement, and the SAT CLI owns output and exit-code precedence. All-rejected
-is a distinct outcome, not an unconditional proof. Optional circular-support work
-runs afterward under its own allowance and cannot alter required outcomes.
+is a distinct outcome, not an unconditional proof. Invalid or unknown input contracts
+retain certified counterexamples and mark universal answers incomplete, never vacuous.
+Optional circular-support and dead-producer work run afterward under separate
+allowances and cannot alter required outcomes.
 Edits require a new immutable preparation; no session cache or editor integration
 exists yet.
 Emptiness uses the shared report and presentation structures; finite derivations

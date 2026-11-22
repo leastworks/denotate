@@ -7,10 +7,12 @@ use std::collections::BTreeSet;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Kind {
     InvalidAssumption,
+    InvalidInputDomain,
     UnsupportedSemantics,
     AmbiguousMeaning,
     AllRejected,
     CircularSupport,
+    DeadProducer,
     UnvalidatedAssumption,
     InconsistentAssumptions,
     EmptyInputUniverse,
@@ -36,7 +38,9 @@ impl Kind {
             Self::AmbiguousMeaning => "ambiguous-meaning",
             Self::AllRejected => "all-rejected",
             Self::CircularSupport => "circular-support",
+            Self::DeadProducer => "dead-producer",
             Self::InvalidAssumption => "invalid-assumption",
+            Self::InvalidInputDomain => "invalid-input-domain",
             Self::UnvalidatedAssumption => "unvalidated-assumption",
             Self::InconsistentAssumptions => "inconsistent-assumptions",
             Self::EmptyInputUniverse => "empty-input-universe",
@@ -61,6 +65,7 @@ impl Kind {
             Self::UnsupportedSemantics
             | Self::AmbiguousMeaning
             | Self::InvalidAssumption
+            | Self::InvalidInputDomain
             | Self::Counterexample
             | Self::NoMeaning
             | Self::InconsistentAssumptions
@@ -73,6 +78,7 @@ impl Kind {
             Self::UnvalidatedAssumption
             | Self::AllRejected
             | Self::CircularSupport
+            | Self::DeadProducer
             | Self::UnsupportedGroup
             | Self::Inconclusive
             | Self::IncompleteDownstreamWork

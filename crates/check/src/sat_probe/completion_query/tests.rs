@@ -1,6 +1,7 @@
 use super::*;
 use crate::test_support::rewrites::{atom, rel, rule};
 use denotate_ir::*;
+mod contracts;
 mod determinacy;
 mod reports;
 mod scale;
@@ -107,7 +108,7 @@ fn prepare(c: &Corpus, v: VerificationId, d: &Domains) -> Engine {
     .unwrap()
     {
         Preparation::Ready(e) => e,
-        Preparation::Unsupported(e) => panic!("unsupported: {e:?}"),
+        Preparation::InputDomains(e) => panic!("domains: {e:?}"),
         Preparation::Inconclusive(e) => panic!("inconclusive: {e:?}"),
     }
 }
@@ -204,8 +205,9 @@ fn downstream_cannot_choose_classification_or_erase_its_ambiguity() {
     let downstream = rel(&mut c, "downstream", false);
     rule(&mut c, p, &[(p, false)]);
     rule(&mut c, h, &[]);
-    // Even a dead producer belongs to the original classification cone.
-    let absent = rel(&mut c, "absent", false);
+    // A possible producer remains in scope even when its input is false in
+    // this particular observation: liveness is independent of the observation.
+    let absent = rel(&mut c, "absent", true);
     rule(&mut c, h, &[(p, false), (absent, false)]);
     // Only the p=true classification has a whole-program extension.
     rule(&mut c, downstream, &[(p, true), (downstream, true)]);
@@ -287,7 +289,7 @@ fn finite_unseeded_instances_and_domain_edits_survive_preparation() {
 }
 
 #[test]
-fn compatibility_is_selected_and_never_conditioned_on_h_or_other_assumptions() {
+fn assumption_truth_is_selected_and_never_conditioned_on_h_or_other_assumptions() {
     for negative in [false, true] {
         let mut c = Corpus::new();
         let p = rel(&mut c, "p", false);
@@ -301,20 +303,13 @@ fn compatibility_is_selected_and_never_conditioned_on_h_or_other_assumptions() {
             .assume_empty_in(Namespace::new(["test"]).unwrap(), "no_flag", flag)
             .unwrap();
         let v = verification(&mut c, Some(h), &[a, no_flag]);
+        let e = prepare(&c, v, &Domains::new());
+        let report = e.check(&keys(&c), &CheckOptions::default()).unwrap();
+        assert!(report.is_incomplete());
+        assert!(report.assumptions.iter().any(|a| a.failed()));
         assert!(matches!(
-            Engine::prepare(
-                &c,
-                &Domains::new(),
-                &keys(&c),
-                v,
-                &Limits::default(),
-                QueryLimits::default()
-            )
-            .unwrap(),
-            Preparation::Unsupported(CompatibilityIssue {
-                source: CompatibilitySource::SelectedAssumption(_),
-                ..
-            })
+            e.observation([atom(flag)]).unwrap(),
+            ObservationOutcome::UndeterminedAssumptions(_)
         ));
         // Extra completion compatibility is not a global declaration check.
         let v = verification(&mut c, Some(h), &[no_flag]);
@@ -400,20 +395,10 @@ fn within_is_checked_before_evaluation_and_eligibility_edits_rebuild() {
         ObservationOutcome::Accepted { .. }
     ));
     rule(&mut c, eligible, &[(eligible, false)]);
+    let e = prepare(&c, v, &Domains::new());
     assert!(matches!(
-        Engine::prepare(
-            &c,
-            &Domains::new(),
-            &keys(&c),
-            v,
-            &Limits::default(),
-            QueryLimits::default()
-        )
-        .unwrap(),
-        Preparation::Unsupported(CompatibilityIssue {
-            source: CompatibilitySource::InputDomain { .. },
-            ..
-        })
+        e.observation([atom(raw)]).unwrap(),
+        ObservationOutcome::Accepted { .. }
     ));
 }
 
@@ -652,10 +637,38 @@ fn oracle(
     value: bool,
     require: Option<RelationId>,
 ) -> Vec<BTreeSet<RelationId>> {
+    // Independent positive-support gfp: negation does not prune scope edges.
+    let mut possible: BTreeSet<_> = c.relations().map(|r| r.id).collect();
+    loop {
+        let next: BTreeSet<_> = c
+            .relations()
+            .filter(|r| {
+                r.role == RelationRole::Input
+                    || c.rules()
+                        .filter(|rule| rule.head.relation() == r.id)
+                        .any(|rule| {
+                            rule.body.iter().all(|l| {
+                                !matches!(l, Literal::Positive(_))
+                                    || possible.contains(&l.atom().relation())
+                            })
+                        })
+            })
+            .map(|r| r.id)
+            .collect();
+        if next == possible {
+            break;
+        }
+        possible = next;
+    }
+    let live = |r: &denotate_ir::Rule| {
+        r.body
+            .iter()
+            .all(|l| !matches!(l, Literal::Positive(_)) || possible.contains(&l.atom().relation()))
+    };
     let mut scope: BTreeSet<_> = roots.iter().copied().collect();
     loop {
         let n = scope.len();
-        for r in c.rules() {
+        for r in c.rules().filter(|r| live(r)) {
             if scope.contains(&r.head.relation()) {
                 scope.extend(r.body.iter().map(|l| l.atom().relation()));
             }

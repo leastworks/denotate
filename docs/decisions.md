@@ -13,7 +13,7 @@ rules themselves may be contradictory. For example, `h() :- !h();` has no
 interpretation with or without H. Calling it rejection would hide a specification
 bug, especially when rejecting observations is allowed.
 
-After an unsatisfiable H query, check the same original classification cone without
+After an unsatisfiable H query, check the same classification cone without
 H. One independently validated interpretation suffices; its uniqueness is irrelevant.
 If none exists, report classification no-meaning. Exhaustion is inconclusive.
 `no_rejections` forbids only the combination of existence without H and nonexistence
@@ -30,7 +30,7 @@ two interpretations containing different singleton tuples. Omitting the selectio
 keeps full-relation determinacy. An explicit empty set makes no uniqueness claim.
 
 Existence still considers all equations. Classification counts decisions only in
-H's original ground cone, so a downstream decision cannot choose a classification.
+H's live ground cone, so a downstream decision cannot choose a classification.
 Processing and properties retain that cone's equations and H, and pin only its
 established decision values. Choosing and pinning one helper interpretation would
 hide failures in another valid interpretation. Property queries therefore continue
@@ -62,7 +62,7 @@ this query obligation-only. Declaration support lands before solver support.
 Whole-verification completion checking queries W independently of H. Processing
 and property candidates retain the classification equations and H, while a separate
 pair query checks decision uniqueness for that observation. Properties use their own
-original cones. This prevents a downstream
+live cones. This prevents a downstream
 contradiction from hiding an independent property failure. Classification sets
 retain established witnesses through exhaustion; unresolved observations cannot
 complete a universal property proof. An all-rejected context is explicitly named,
@@ -91,20 +91,53 @@ preserves both directions of each completion equation. Sparse positive joins avo
 materializing substitutions whose premises are impossible. Unseeded loops remain.
 Small full-enumeration model oracles guard this distinction from stable grounding.
 
-Original dependencies are preserved independently. Even `h(); h() :- p(), absent();`
-puts p in H's original classification cone. Pruning that dead producer must not
-change determinacy, compatibility checks, or original positive-component advisory
-identities. Rule templates and shared projected dependency patterns retain exact
-reachability without multiplying variables unrelated to an individual edge.
+## Completion verdict scopes use a fixed live-instance graph
 
-Selected derived assumptions and static `within` providers must have acyclic ground
-dependency cones before they can define the input contract. This conservative
-restriction rules out positive as well as negative recursion, so their stable and
-completion interpretations agree. It is checked without the hypothesis or selected
-assumptions pruning dependencies. A compatibility refusal names the declaration and
-recursive component; exhaustion does not establish incompatibility.
+A dead producer must not connect processing into classification. For example,
+`h(); h() :- p(), absent(); p() :- p();` with producer-less `absent` has a determined
+classification and ambiguous processing. More seriously, a dead link can pull a
+processing contradiction into C(H), making H impossible while a model without H
+exists. Calling that rejection hides the processing bug. Production DSL feedback
+exposed this; it reverses the earlier original-boundary choice.
 
-The acceptance hypothesis is checked only in its original ground dependency cone.
+Freeze scopes at the positive-support greatest fixpoint used by sparse grounding:
+eligible inputs seed possibility, no-producer relations are empty, negative premises
+are ignored, and unseeded positive loops survive. Classification, property and
+assumption/provider scopes use that graph. W, H, decisions and later simplifications
+cannot change it. A condition false only under a selected assumption is still live.
+The original graph remains for circular-support identity and an optional advisory
+explaining dead instances that would link outside atoms into classification.
+
+## Completion input contracts distinguish truth from tuple determinacy
+
+An assumption promises a restriction, not a choice of interpretation. Two models
+with different singleton tuples can both satisfy `exactly_one`; rejecting that
+assumption would unnecessarily impose decision determinacy. Check the truth of the
+whole restriction in its own live cone, before H, other assumptions or downstream
+rules. With grouping, check the conjunction, naming a differing group when it varies.
+Helpers remain free. Independent cone copies share only inputs: merging helpers can
+otherwise turn a processing contradiction into apparent inconsistent W.
+
+Known truth ambiguity or no model is a declaration Error with evidence. Continue
+checking only inputs where every selected assumption is determined and satisfied,
+retain counterexamples, and conservatively mark all universal claims of that
+verification incomplete. An empty remaining set proves nothing and is not ordinary
+inconsistent W. Queries that exhaust also cannot license an arbitrary model.
+
+`within` determines which input tuples exist, so it needs tuple-set determinacy,
+not just invariant cardinality. An invalid or unknown provider stops dependent
+preparations; independent verifications continue and explicitly omit irrelevant
+bounded inputs. A conservative possibility graph may establish that an input is
+unreachable through dead references; it never supplies an approximate universe to
+checking. Recursive reachability may therefore error under completion even when
+its stable least model is unambiguous. Definition islands are future work.
+
+Stable validation is unchanged. Completion-only declarations are not vetoed by a
+stable audit; shared declarations receive both consumers' checks. Explicit auditing
+of unselected assumptions uses stable semantics until they acquire a completion
+consumer.
+
+The acceptance hypothesis is checked only in its live ground dependency cone.
 A unique satisfying decision interpretation accepts an observation; several are
 ambiguous. Zero triggers the separate existence query described above. Processing
 is a separate extension query, retaining the equations and H and pinning only

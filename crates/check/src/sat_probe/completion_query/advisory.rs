@@ -147,3 +147,72 @@ impl Engine {
         })
     }
 }
+
+/// One bounded example per authored producer with a dead classification edge.
+#[derive(Debug)]
+pub struct DeadProducer {
+    pub rule: denotate_ir::RuleId,
+    pub head: GroundAtom,
+    pub missing: GroundAtom,
+    pub outside: BTreeSet<GroundAtom>,
+}
+#[derive(Debug)]
+pub enum DeadProducerAdvisory {
+    NotRequested,
+    Checked {
+        findings: Vec<DeadProducer>,
+        incomplete: Option<Inconclusive>,
+    },
+}
+impl Engine {
+    pub(super) fn dead_producer_advisory(
+        &self,
+        options: &CheckOptions,
+    ) -> Result<DeadProducerAdvisory> {
+        if !options.dead_producers {
+            return Ok(DeadProducerAdvisory::NotRequested);
+        }
+        let mut limits = options.advisory_limits.clone();
+        limits.cancellation = self.limits.cancellation.clone();
+        let mut b = Budget::new(&limits);
+        let mut findings = Vec::new();
+        let checked: Result<()> = (|| {
+            let Some((_, members, _)) = &self.classification else {
+                return Ok(());
+            };
+            let mut possible = self.program.inputs.clone();
+            for r in self.program.rules() {
+                b.tick("completion dead producers")?;
+                possible.insert(r.head.atom.clone());
+            }
+            self.original.dead_links(
+                members,
+                &possible,
+                &mut b,
+                |rule, head, missing, outside, b| {
+                    b.room(
+                        findings.len(),
+                        options.max_examples,
+                        "completion dead producers",
+                        "examples",
+                    )?;
+                    findings.push(DeadProducer {
+                        rule,
+                        head,
+                        missing,
+                        outside,
+                    });
+                    Ok(())
+                },
+            )
+        })();
+        let incomplete = checked
+            .err()
+            .map(|e| inconclusive(e.in_phase("completion dead producers", None)))
+            .transpose()?;
+        Ok(DeadProducerAdvisory::Checked {
+            findings,
+            incomplete,
+        })
+    }
+}
