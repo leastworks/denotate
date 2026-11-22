@@ -864,6 +864,10 @@ before symbolic-domain fallback. Install each shrinking table immediately and
 reschedule its positive readers; no anchored pending update is bypassed for a
 symbolic expansion. Unanchored alternatives remain live. This computes the same GFP
 by monotone chaotic iteration, for static providers and runtime grounding alike.
+Concrete joins use hash indexes on bound columns and select the smallest current
+bucket at each step; a large table with a selective binding precedes a small but
+disconnected table. Bucket iteration remains deterministic. Negative premises,
+unseeded cycles and domain fallback are unchanged.
 Provider scope discovery uses one lazy dependency index rather than repeated full
 corpus scans. Finite domains are validated and normalized once per completion
 preparation. All provider attempts, provisional live-scope grounding and runtime
@@ -1299,3 +1303,13 @@ key order. Each sample cycle starts at a deterministic negative edge and follows
 a shortest return path; at most twelve edges are retained. Reporting has a separate
 caller-supplied allowance and marks incomplete output without changing verdicts.
 View-local cycle rules map back through `original_instance`.
+
+
+Completion size reporting does not itself run the diagnostic least fixpoint. Use
+`CompletionSizes::with_least_analysis()` to request that independent bounded pass;
+`CompletionSizes::default()` records preparation, joins, SCCs and search sizes only.
+`preparationWork` includes stage times and work per authored join rule/stage; phase
+counters use interned slots on the hot path. `Limits::run_deadline` optionally bounds
+multiple operations cooperatively and is carried by `OperationalLimits`, never by
+semantic/cache identity. Default Rust limits leave it unset. The SAT CLI policy is
+separate; see [checker policies](../../docs/checker-policies.md#sat-cli-exploration-policy-2026-11-22).

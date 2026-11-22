@@ -23,6 +23,9 @@ pub(super) fn run(
     trace: &trace::Trace,
     flush: &mut dyn FnMut(&mut String) -> Result<(), Failure>,
 ) -> Result<u8, Failure> {
+    let mut run_limits = limits.clone();
+    super::sat_policy::start(&mut run_limits);
+    let limits = &run_limits;
     let mut incomplete = partial || unchecked;
     let mut failure = false;
     if validate_all {
@@ -357,8 +360,18 @@ fn completion(
     flush: &mut dyn FnMut(&mut String) -> Result<(), Failure>,
 ) -> Result<(bool, bool), Failure> {
     let mut limits = limits.clone();
-    if verbose || json || limits.profile.enabled() {
-        limits.completion_sizes = Some(denotate_check::CompletionSizes::default());
+    if verbose || json || limits.profile.enabled() || limits.completion_sizes.is_some() {
+        limits.completion_sizes = Some(
+            if limits
+                .completion_sizes
+                .as_ref()
+                .is_some_and(|s| s.least_analysis_enabled())
+            {
+                denotate_check::CompletionSizes::with_least_analysis()
+            } else {
+                denotate_check::CompletionSizes::default()
+            },
+        );
     }
     let result = completion_inner(
         p,
@@ -413,6 +426,28 @@ fn write_completion_sizes(
                 work["work"], work["lastStage"]
             )
             .unwrap();
+            writeln!(
+                output,
+                "  elapsed ms by stage (excludes diagnostic LFP): {}",
+                work["elapsedMsByStage"]
+            )
+            .unwrap();
+            for row in work["topJoinRules"].as_array().into_iter().flatten() {
+                writeln!(
+                    output,
+                    "  join rule {} ({}): {} work",
+                    row["rule"], row["stage"], row["work"]
+                )
+                .unwrap();
+            }
+            if work["omittedJoinRules"].as_u64().unwrap_or(0) > 0 {
+                writeln!(
+                    output,
+                    "  +{} other join-rule/stage entries",
+                    work["omittedJoinRules"]
+                )
+                .unwrap();
+            }
             writeln!(output, "  work by stage: {}", work["workByStage"]).unwrap();
             writeln!(output, "  work by phase: {}", work["workByPhase"]).unwrap();
             writeln!(
@@ -467,8 +502,13 @@ fn write_completion_sizes(
         for search in sizes["searches"].as_array().unwrap() {
             writeln!(
                 output,
-                "Completion CNF {}: {} variables, {} clauses, {} encoding attempts",
-                search["phase"], search["variables"], search["clauses"], search["encodingsStarted"]
+                "Completion CNF {}: {} variables, {} clauses, {} encoding attempts; {} ms, work {}",
+                search["phase"],
+                search["variables"],
+                search["clauses"],
+                search["encodingsStarted"],
+                search["elapsedMs"],
+                search["work"]
             )
             .unwrap();
         }

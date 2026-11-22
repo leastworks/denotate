@@ -312,7 +312,7 @@ impl Engine {
                     polls: None,
                     cancellation: limits.cancellation.clone(),
                     start: Instant::now(),
-                    timeout: limits.timeout,
+                    timeout: b.remaining_time(),
                     #[cfg(test)]
                     hook: None,
                 },

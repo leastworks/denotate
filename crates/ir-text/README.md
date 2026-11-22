@@ -575,8 +575,14 @@ processing is not applicable, and processing obligations are vacuous. It can exi
 there is no unqualified program proof. Required unknown/unanalysed work has exit 2,
 which takes precedence over a known failure (exit 1). Partial selection stays exit 2.
 
-The existing SAT solve/world/tuple/CNF limits bound this completion path.
-`--verbose` or `--json` also collects completion sizes. `--profile-memory FILE`
+SAT CLI runs now share a cooperative 120-second deadline after loading, across
+preparation and all selected verifications. `--timeout-ms` overrides it. The default
+runaway guards are 5M atoms, 7M rules, 50M dependencies and 2B work per operation;
+SAT query defaults and explicit overrides are listed by `just check-den --help`.
+BDD/editor and library API defaults are unchanged. The same policy applies to
+`just plan-den`; its JSON includes completion sizes and total run elapsed time.
+`--verbose` or `--json` also collects completion sizes, without running the
+extra diagnostic LFP. Use `--completion-size-lfp` to enable that comparison. `--profile-memory FILE`
 collects them and writes a `completion-preparation-sizes` JSONL record immediately
 when preparation finishes or stops, before checking searches, plus the final
 `completion-sizes` record containing the full snapshot. A separate
@@ -601,6 +607,10 @@ setup and subsequent provider SAT queries are outside these grounding totals.
 The enclosing `preparationWork` record covers the entire preparation budget,
 including that common work and provider queries: `work`, `workByStage`,
 `workByPhase`, `rejectedWorkByPhase` (excluded from `work`) and `lastStage`.
+`elapsedMsByStage` excludes the optional diagnostic pass. `topJoinRules` lists up to
+32 authored rule/stage entries with `work` and `calls`, plus `omittedJoinRules`.
+Search records include `elapsedMs` and scoped `work` (null on an early construction
+failure); nested scopes can overlap.
 Grounding attempt work is already included in this total. Records survive early
 exhaustion, including before the first provider, and are flushed before checking.
 Domain validation and original advisory dependency indexing run once per preparation.

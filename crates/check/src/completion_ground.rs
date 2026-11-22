@@ -3,7 +3,7 @@
 //! initially denote their complete domains; sparse known providers bind variables
 //! before any remaining domain enumeration. Retain unseeded positive loops.
 use super::*;
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::HashMap};
 #[path = "completion_ground/original.rs"]
 mod original;
 pub(crate) use original::OriginalDependencies;
@@ -20,16 +20,16 @@ mod descent;
 mod sizes;
 
 type Binding<'a> = BTreeMap<&'a str, ConstantId>;
-type Index = BTreeMap<Vec<ConstantId>, Vec<usize>>;
+type Index = HashMap<Vec<ConstantId>, Vec<usize>>;
 struct Table {
     rows: Vec<GroundAtom>,
-    indexes: RefCell<BTreeMap<Vec<usize>, Index>>,
+    indexes: RefCell<HashMap<Vec<usize>, Index>>,
 }
 impl Table {
     fn new(atoms: impl IntoIterator<Item = GroundAtom>) -> Self {
         Self {
             rows: atoms.into_iter().collect(),
-            indexes: RefCell::new(BTreeMap::new()),
+            indexes: RefCell::new(HashMap::new()),
         }
     }
     // Accumulating diagnostic tables keep indexes across delta rounds. Update
@@ -47,16 +47,17 @@ impl Table {
         self.rows.push(atom);
         Ok(())
     }
-    fn candidates(
+    fn with_candidates<T>(
         &self,
         atom: &Atom,
         binding: &Binding<'_>,
         b: &mut Budget<'_>,
-    ) -> Result<Vec<usize>> {
+        use_rows: impl FnOnce(&[usize], &mut Budget<'_>) -> Result<T>,
+    ) -> Result<T> {
         let mut columns = Vec::new();
         let mut key = Vec::new();
         for (i, t) in atom.arguments().iter().enumerate() {
-            b.tick("completion joins")?;
+            b.tick("completion join planning")?;
             let value = match t.value() {
                 Term::Constant(c) => Some(*c),
                 Term::Variable { name, .. } => binding.get(name.as_str()).copied(),
@@ -78,12 +79,32 @@ impl Table {
             }
             indexes.insert(columns.clone(), index);
         }
-        let found = indexes[&columns]
-            .get(&key)
-            .map(Vec::as_slice)
-            .unwrap_or(&[]);
-        b.charge(found.len() + 1, "completion joins")?;
-        Ok(found.to_vec())
+        use_rows(
+            indexes[&columns]
+                .get(&key)
+                .map(Vec::as_slice)
+                .unwrap_or(&[]),
+            b,
+        )
+    }
+    fn candidate_count(
+        &self,
+        atom: &Atom,
+        binding: &Binding<'_>,
+        b: &mut Budget<'_>,
+    ) -> Result<usize> {
+        self.with_candidates(atom, binding, b, |rows, _| Ok(rows.len()))
+    }
+    fn candidates(
+        &self,
+        atom: &Atom,
+        binding: &Binding<'_>,
+        b: &mut Budget<'_>,
+    ) -> Result<Vec<usize>> {
+        self.with_candidates(atom, binding, b, |rows, b| {
+            b.charge(rows.len() + 1, "completion joins")?;
+            Ok(rows.to_vec())
+        })
     }
 }
 type Upper = BTreeMap<RelationId, Option<Table>>;
@@ -313,7 +334,9 @@ fn bindings<'a>(
     b: &mut Budget<'_>,
     emit: impl FnMut(&Binding<'a>, &mut Budget<'_>) -> Result<()>,
 ) -> Result<()> {
-    join_bindings(rule, tables, domains, b, true, None, emit)
+    b.completion_rule(rule.id, |b| {
+        join_bindings(rule, tables, domains, b, true, None, emit)
+    })
 }
 
 // Diagnostics join concrete tuples only. They must never expand an unbound
@@ -347,7 +370,6 @@ fn join_bindings<'a>(
             }
         }
     }
-    steps.sort_by_key(|(_, t)| t.rows.len());
     // Bind from the new tuples before probing accumulated indexes. Otherwise a
     // long chain can scan the whole accumulated table at every delta round.
     if let Some(step) = delta_step {
@@ -379,18 +401,42 @@ fn join_bindings<'a>(
     if steps.is_empty() {
         return complete(&BTreeMap::new(), b);
     }
+    // Choose using the actual current bindings, not whole-table size. A large
+    // connected premise may have one matching row while a smaller disconnected
+    // premise would create a Cartesian prefix. Only copy the chosen bucket.
+    let choose =
+        |binding: &Binding<'a>, remaining: &[usize], b: &mut Budget<'_>| -> Result<usize> {
+            let mut best = (usize::MAX, remaining[0]);
+            for &i in remaining {
+                b.tick("completion join planning")?;
+                let count = steps[i].1.candidate_count(steps[i].0, binding, b)?;
+                if (count, i) < best {
+                    best = (count, i);
+                }
+                if count == 0 {
+                    break;
+                }
+            }
+            Ok(best.1)
+        };
     let initial = BTreeMap::new();
-    let candidates = steps[0].1.candidates(steps[0].0, &initial, b)?;
-    let mut stack = vec![(initial, candidates.into_iter())];
+    let remaining: Vec<_> = (0..steps.len()).collect();
+    // The semi-naive diagnostic delta must still seed the join.
+    let first = if delta_step.is_some() {
+        0
+    } else {
+        choose(&initial, &remaining, b)?
+    };
+    let candidates = steps[first].1.candidates(steps[first].0, &initial, b)?;
+    let mut stack = vec![(initial, remaining, first, candidates.into_iter())];
     while !stack.is_empty() {
         b.tick("completion joins")?;
-        let depth = stack.len() - 1;
-        let (binding, candidates) = stack.last_mut().unwrap();
+        let (binding, remaining, step, candidates) = stack.last_mut().unwrap();
         let Some(i) = candidates.next() else {
             stack.pop();
             continue;
         };
-        let (atom, table) = steps[depth];
+        let (atom, table) = steps[*step];
         b.charge(binding.len() + atom.arguments().len(), "completion joins")?;
         let mut next = binding.clone();
         let matches = atom
@@ -406,13 +452,14 @@ fn join_bindings<'a>(
         if !matches {
             continue;
         }
-        if depth + 1 == steps.len() {
+        if remaining.len() == 1 {
             complete(&next, b)?;
         } else {
-            let candidates = steps[depth + 1]
-                .1
-                .candidates(steps[depth + 1].0, &next, b)?;
-            stack.push((next, candidates.into_iter()));
+            b.charge(remaining.len(), "completion join planning")?;
+            let rest: Vec<_> = remaining.iter().copied().filter(|i| i != step).collect();
+            let chosen = choose(&next, &rest, b)?;
+            let candidates = steps[chosen].1.candidates(steps[chosen].0, &next, b)?;
+            stack.push((next, rest, chosen, candidates.into_iter()));
         }
     }
     Ok(())

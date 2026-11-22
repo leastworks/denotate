@@ -2003,3 +2003,21 @@ provider-specific. These common values are local to one preparation and rebuilt 
 edits; no cache key or semantic contract changes. Limits are unchanged. Overall
 preparation accounting includes common setup and provider queries so grounding-only
 measurements cannot hide their cost; the diagnostic LFP has its own budget.
+
+
+## SAT CLI exploration is time-boxed; diagnostics are separate work
+
+Repeated private-corpus runs exhausted successive counters without reaching the
+next bottleneck. The SAT CLI now uses a shared cooperative deadline, with larger
+explicit runaway guards; new queries cannot restart that deadline. Library, BDD
+and editor defaults remain unchanged. This is a provisional CLI policy, not a new
+semantic guarantee or a claim that every program completes in two minutes.
+
+A runtime sample also showed cost in ordered join lookups, per-charge string-map
+accounting and an LFP comparison enabled implicitly by verbose/JSON output. Concrete
+joins now use hash indexes and current-binding selectivity. Phase counters use
+interned integer slots, and errors at hot checked-arithmetic/ground-variable sites
+are constructed lazily. The diagnostic LFP requires its own opt-in flag. Ordinary
+size output retains stage work/time and costly-rule records, so requesting an
+explanation does not automatically run another fixpoint. The GFP, live scopes,
+completion equations and anchored-first scheduling are unchanged.

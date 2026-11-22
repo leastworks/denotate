@@ -56,7 +56,7 @@ pub(crate) fn relation(k: &RelationKey) -> Value {
         }
     }
 }
-fn rule(k: &RuleKey) -> Value {
+pub(crate) fn rule(k: &RuleKey) -> Value {
     match k {
         RuleKey::Library(k) => json!({"library":qualified(k)}),
         RuleKey::Installed { owner: o, local } => {

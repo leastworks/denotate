@@ -388,7 +388,12 @@ impl Work<'_> {
                 Some(self.work),
             ));
         }
-        if self.start.elapsed() >= self.limits.timeout {
+        if self.start.elapsed() >= self.limits.timeout
+            || self
+                .limits
+                .run_deadline
+                .is_some_and(|d| Instant::now() >= d)
+        {
             return Err(CheckError::deadline(
                 "plan construction",
                 self.limits.timeout,

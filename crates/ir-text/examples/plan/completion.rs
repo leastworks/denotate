@@ -14,7 +14,12 @@ pub(super) fn export(
         &p.keys,
         v,
         &args.limits,
-        Default::default(),
+        q::QueryLimits {
+            max_solves: args.queries.max_solves,
+            max_solver_polls: args.queries.max_solver_polls,
+            max_conflicts: args.queries.max_conflicts,
+            max_propagations: args.queries.max_propagations,
+        },
     )
     .map_err(|e| e.to_string())?;
     let (code, mut json) = match planner

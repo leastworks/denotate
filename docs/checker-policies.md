@@ -1654,7 +1654,8 @@ operation counter. This increment makes no corpus-scale performance claim.
 
 ### Optional completion size analysis
 
-The positive-support LFP used only for completion size diagnostics has an independent
+The positive-support LFP used only for completion size diagnostics is opt-in
+(`--completion-size-lfp`), independent of verbose/JSON/profile size output. It has an independent
 work/atom allowance and a cooperative deadline of the configured timeout or five
 seconds, whichever is shorter, per grounding attempt. Raising the production timeout
 does not lengthen this optional pass. Its time, including cleanup, is excluded from
@@ -1721,3 +1722,55 @@ work, provisional grounding, runtime grounding/setup, assumptions and classifica
 The per-attempt records are a breakdown of this total, not additional work. The
 optional diagnostic LFP and later checking searches use independent budgets and are
 excluded. Counters describe logical work, not timings or memory, and are not goldens.
+
+
+### SAT CLI exploration policy (2026-11-22)
+
+`check-den --engine sat` and `plan-den` use a shared cooperative 120-second deadline
+across preparation and subsequent queries. It starts after loading and covers all
+selected verifications (or the selected plan). `--timeout-ms` overrides it; creating
+a new query, replay budget or planner phase does not restart it. SAT callbacks use
+the remaining time. Loading, rendering and uninterruptible allocations are outside
+hard preemption; this is an exploration time box, not a real-time guarantee.
+BDD/editor defaults and the Rust API's default limits are unchanged.
+
+CLI runaway guards are 5M atoms/CNF variables, 7M rules/CNF clauses, 50M dependencies
+and 2B logical work per operation. These are rounded margins around the observed
+433k atoms / 615k rules and the reported 182M join-work episode, not new evidence
+that every workload fits. Per-search defaults are 100k solves and refinements,
+100M solver polls, 1B conflicts and 10B propagations; world/cube and tuple inspection
+caps are 100k and 5M. Explicit flags override each cap, regardless of argument order.
+Structural/CNF/output guards can still stop a runaway before the deadline.
+
+Re-scoring evidence: a real program's runtime-grounding sample (at cde4fd1) spent most time in
+joins, phase-accounting maps and the optional diagnostic LFP. The new selective-join
+control has 3,000 left and right tuples and 6,000 connecting tuples; it completes
+under the unchanged Rust API defaults with either authored premise order. Runtime
+work is reported in the local handoff, not asserted as a golden. The private corpus
+must be re-run to establish its next bottleneck; this is a provisional CLI policy.
+
+### Completion join indexes and observation cost
+
+Completion tables index by bound columns with hash maps. A probe hashes the bound
+values and visits only its matching bucket; indexes are built once per column shape
+per table and updated for diagnostic LFP appends. Hash iteration never chooses
+bindings: tuple buckets retain deterministic row order. Each join step chooses the
+smallest matching concrete bucket under the current binding, with deterministic
+premise-order ties. The diagnostic delta still seeds semi-naive joins. Negative
+premises and finite-domain fallback keep their existing semantics.
+
+Preparation accounting interns static phase addresses into counter slots, with a
+small fixed cache; hot charges update integer counters, not string-keyed trees.
+Textual phase totals are assembled at publication. These addresses are private to
+one run and never become identities or serialized data. Join work/calls accumulate
+per authored rule and orchestration stage; reporting keeps the top 32, ties by
+semantic key. Index-build work belongs to the first rule that requests that index.
+The observer retains a counter per visited rule/stage until preparation ends.
+
+Stage elapsed times exclude the separately bounded diagnostic LFP, but the shared
+run deadline includes it. Each completion search reports elapsed time and scoped
+work (unavailable if construction failed before the query runner existed). Nested
+search scopes can overlap; do not sum them. Neither times nor counters are goldens.
+Anchored-first descent is unchanged: a shrunk provider can reschedule its readers,
+which still rejoin from scratch. The sparse-cycle regression records those calls;
+no descent-delta cache is introduced without evidence that it is the next bottleneck.

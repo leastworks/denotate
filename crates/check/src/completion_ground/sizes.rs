@@ -15,6 +15,11 @@ impl Measurement {
             sink: b.limits.completion_sizes.clone(),
             data: CompletionPreparationSize {
                 static_provider,
+                least_enabled: b
+                    .limits
+                    .completion_sizes
+                    .as_ref()
+                    .is_some_and(|s| s.least_analysis_enabled()),
                 ..Default::default()
             },
             least: BTreeMap::new(),
@@ -42,7 +47,22 @@ impl Measurement {
         scope: Option<&BTreeSet<RelationId>>,
         b: &mut Budget<'_>,
     ) {
-        if !self.enabled() {
+        if !self
+            .sink
+            .as_ref()
+            .is_some_and(|s| s.least_analysis_enabled())
+        {
+            if self.enabled() {
+                b.excluding_time(|| {
+                    for r in corpus.relations() {
+                        self.data.relations.entry(r.id).or_default().fixed =
+                            r.role == RelationRole::Input;
+                    }
+                    for atom in inputs {
+                        self.observe(atom);
+                    }
+                });
+            }
             return;
         }
         let mut limits = b.limits.clone();
@@ -289,7 +309,7 @@ mod tests {
         let captured = events.clone();
         let limits = Limits {
             timeout: std::time::Duration::ZERO,
-            completion_sizes: Some(CompletionSizes::default()),
+            completion_sizes: Some(CompletionSizes::with_least_analysis()),
             progress: crate::CheckingProgress::new(move |e| captured.lock().unwrap().push(e)),
             ..Default::default()
         };
@@ -349,7 +369,7 @@ mod tests {
         let limits = Limits {
             max_atoms: 10,
             max_work: 10_000,
-            completion_sizes: Some(CompletionSizes::default()),
+            completion_sizes: Some(CompletionSizes::with_least_analysis()),
             ..Default::default()
         };
         let mut budget = Budget::new(&limits);
@@ -439,7 +459,7 @@ mod tests {
         c.add_rule(head, [Literal::Positive(previous), Literal::Positive(step)])
             .unwrap();
         let limits = Limits {
-            completion_sizes: Some(CompletionSizes::default()),
+            completion_sizes: Some(CompletionSizes::with_least_analysis()),
             ..Default::default()
         };
         let mut budget = Budget::new(&limits);
@@ -504,7 +524,7 @@ mod tests {
             c.add_rule(head, [Literal::Positive(left), Literal::Positive(right)])
                 .unwrap();
             let limits = Limits {
-                completion_sizes: Some(CompletionSizes::default()),
+                completion_sizes: Some(CompletionSizes::with_least_analysis()),
                 ..Default::default()
             };
             let mut budget = Budget::new(&limits);

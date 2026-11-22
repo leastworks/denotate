@@ -48,6 +48,7 @@ impl From<&Limits> for DeterministicLimits {
 }
 #[derive(Debug, Clone)]
 pub struct OperationalLimits {
+    pub run_deadline: Option<std::time::Instant>,
     pub profile: Profile,
     pub progress: CheckingProgress,
     pub cancellation: Cancellation,
@@ -56,6 +57,7 @@ pub struct OperationalLimits {
 impl From<&Limits> for OperationalLimits {
     fn from(l: &Limits) -> Self {
         Self {
+            run_deadline: l.run_deadline,
             cancellation: l.cancellation.clone(),
             profile: l.profile.clone(),
             progress: l.progress.clone(),
@@ -66,6 +68,7 @@ impl From<&Limits> for OperationalLimits {
 impl DeterministicLimits {
     pub fn with_operations(&self, o: &OperationalLimits) -> Limits {
         Limits {
+            run_deadline: o.run_deadline,
             completion_sizes: None,
             cancellation: o.cancellation.clone(),
             profile: o.profile.clone(),

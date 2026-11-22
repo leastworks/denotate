@@ -694,7 +694,7 @@ fn validate_domains(
                 if let Term::Constant(id) = term.value() {
                     let c = corpus
                         .constant(*id)
-                        .ok_or(CheckError::Internal("IR constant missing"))?;
+                        .ok_or_else(|| CheckError::Internal("IR constant missing"))?;
                     if normalized[&c.sort].binary_search(id).is_err() {
                         return Err(CheckError::ConstantOutsideDomain(*id));
                     }
@@ -718,7 +718,7 @@ fn ground_atom(
             Term::Constant(id) => *id,
             Term::Variable { name, .. } => *binding
                 .get(name.as_str())
-                .ok_or(CheckError::Internal("unbound grounding variable"))?,
+                .ok_or_else(|| CheckError::Internal("unbound grounding variable"))?,
         });
         origins.push(term.id());
     }

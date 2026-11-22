@@ -10,6 +10,15 @@ pub(super) struct Run<'a, 'b, 'l> {
     pub(super) solves: usize,
     pub(super) solve_limit: usize,
     certified: bool,
+    work_started: usize,
+}
+
+impl Drop for Run<'_, '_, '_> {
+    fn drop(&mut self) {
+        if let Some((_, stats)) = &mut self.cnf.measurement {
+            stats.work = Some(self.budget.used().saturating_sub(self.work_started));
+        }
+    }
 }
 
 impl Engine {
@@ -303,12 +312,15 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         Ok(run)
     }
     pub(super) fn universe(engine: &'a Engine, budget: &'b mut Budget<'l>) -> Result<Self> {
+        let work_started = budget.used();
         budget.check("completion query")?;
         let mut cnf = Cnf {
             measurement: engine.limits.completion_sizes.clone().map(|sink| {
                 (
                     sink,
                     crate::CompletionSearchSize {
+                        elapsed: Duration::ZERO,
+                        work: None,
                         phase: "completion query",
                         variables: 0,
                         clauses: 0,
@@ -357,6 +369,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             solves: 0,
             solve_limit: engine.config.max_solves,
             certified: false,
+            work_started,
         })
     }
 
@@ -458,6 +471,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
                     )?))
                 })();
                 self.solves += check.solves;
+                drop(check);
                 if let Some(cube) = result? {
                     self.exclude(&cube)?;
                     excluded = true;

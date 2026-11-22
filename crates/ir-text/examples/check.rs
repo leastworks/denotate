@@ -1,4 +1,6 @@
 //! Load a den.root closure and execute its explicit verifications.
+#[path = "support/sat_policy.rs"]
+mod sat_policy;
 use denotate_check::{
     BackendIdentity, CheckError, Limits, LocalCheckOutcome, OperationalLimits, RegionCompletion,
     RequestPreparation, ScopedResult,
@@ -216,9 +218,9 @@ fn run_streaming(
         "Checking within W: {}",
         options.checking_within_w
     ));
-    trace.message(
-        "Effective limits (per operation/query; timeout is cooperative, not a command deadline):",
-    );
+    trace.message(if options.sat {
+        "Effective SAT limits (shared cooperative run deadline after loading; logical caps are runaway guards):"
+    } else { "Effective limits (per operation/query; timeout is cooperative, not a command deadline):" });
     for (flag, value) in options::limit_values(&options.limits) {
         trace.message(format_args!("  {flag} {value}"));
     }

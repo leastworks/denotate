@@ -147,6 +147,9 @@ pub struct Limits {
     pub max_dependencies: usize,
     pub max_work: usize,
     pub timeout: Duration,
+    /// Optional cooperative deadline shared across operations/queries. Operational
+    /// only; never part of semantic identity. CLI SAT runs set it after loading.
+    pub run_deadline: Option<Instant>,
     pub max_bdd_variables: usize,
     pub max_bdd_nodes: usize,
     pub max_bdd_tasks: usize,
@@ -177,6 +180,7 @@ impl Default for Limits {
             max_dependencies: 1_000_000,
             max_work: 20_000_000,
             timeout: Duration::from_secs(10),
+            run_deadline: None,
             max_bdd_variables: 10_000,
             max_bdd_nodes: 100_000,
             max_bdd_tasks: 100_000,
@@ -253,8 +257,25 @@ impl<'a> Budget<'a> {
     }
     pub(crate) fn completion_stage(&mut self, stage: &'static str) {
         if let Some(monitor) = &mut self.preparation_work {
-            monitor.data.last_stage = stage;
+            monitor.stage(stage);
         }
+    }
+    pub(crate) fn completion_rule<T>(
+        &mut self,
+        rule: denotate_ir::RuleId,
+        run: impl FnOnce(&mut Self) -> Result<T>,
+    ) -> Result<T> {
+        let start = self
+            .preparation_work
+            .as_ref()
+            .map(|m| (m.join_work, m.data.last_stage));
+        let result = run(self);
+        if let (Some((start, stage)), Some(m)) = (start, &mut self.preparation_work) {
+            let entry = m.data.join_rules.entry((rule, stage)).or_default();
+            entry.work += m.join_work - start;
+            entry.calls += 1;
+        }
+        result
     }
     pub fn tracked(limits: &'a Limits) -> Self {
         let mut budget = Self::new(limits);
@@ -355,6 +376,9 @@ impl<'a> Budget<'a> {
         result
     }
     fn exclude_elapsed(&mut self, elapsed: Duration) {
+        if let Some(m) = &mut self.preparation_work {
+            m.exclude_elapsed(elapsed);
+        }
         self.start += elapsed;
     }
     pub fn remaining(&self) -> usize {
@@ -399,7 +423,12 @@ impl<'a> Budget<'a> {
     }
     pub fn check(&self, phase: &'static str) -> Result<()> {
         self.limits.cancellation.check()?;
-        if self.elapsed() >= self.limits.timeout {
+        if self.elapsed() >= self.limits.timeout
+            || self
+                .limits
+                .run_deadline
+                .is_some_and(|d| Instant::now() >= d)
+        {
             let error = CheckError::deadline(phase, self.limits.timeout);
             self.limits.progress.failure(&error);
             return Err(error);
@@ -407,7 +436,10 @@ impl<'a> Budget<'a> {
         Ok(())
     }
     pub(crate) fn remaining_time(&self) -> Duration {
-        self.limits.timeout.saturating_sub(self.elapsed())
+        let local = self.limits.timeout.saturating_sub(self.elapsed());
+        self.limits.run_deadline.map_or(local, |d| {
+            local.min(d.saturating_duration_since(Instant::now()))
+        })
     }
     fn elapsed(&self) -> Duration {
         #[cfg(test)]
@@ -435,7 +467,7 @@ impl<'a> Budget<'a> {
                 let rejected = charges.rejected_work.entry(phase.into()).or_default();
                 *rejected = rejected
                     .checked_add(amount)
-                    .ok_or(CheckError::Receipts(crate::ReceiptError::Overflow))?;
+                    .ok_or_else(|| CheckError::Receipts(crate::ReceiptError::Overflow))?;
                 charges.exhausted.insert(ResourceKey {
                     phase: phase.into(),
                     resource: "work".into(),
@@ -466,16 +498,16 @@ impl<'a> Budget<'a> {
         self.work = self
             .work
             .checked_add(amount)
-            .ok_or(CheckError::Receipts(crate::ReceiptError::Overflow))?;
+            .ok_or_else(|| CheckError::Receipts(crate::ReceiptError::Overflow))?;
         if let Some(charges) = &mut self.charges {
             charges.work = charges
                 .work
                 .checked_add(amount)
-                .ok_or(CheckError::Receipts(crate::ReceiptError::Overflow))?;
+                .ok_or_else(|| CheckError::Receipts(crate::ReceiptError::Overflow))?;
             let phase_work = charges.by_phase.entry(phase.into()).or_default();
             *phase_work = phase_work
                 .checked_add(amount)
-                .ok_or(CheckError::Receipts(crate::ReceiptError::Overflow))?;
+                .ok_or_else(|| CheckError::Receipts(crate::ReceiptError::Overflow))?;
         }
         if let Some(monitor) = &mut self.preparation_work {
             monitor.charge(amount, phase);
@@ -485,11 +517,11 @@ impl<'a> Budget<'a> {
             let work = profile.work.entry(phase).or_default();
             *work = work
                 .checked_add(amount)
-                .ok_or(CheckError::Receipts(crate::ReceiptError::Overflow))?;
+                .ok_or_else(|| CheckError::Receipts(crate::ReceiptError::Overflow))?;
             let calls = profile.calls.entry(phase).or_default();
             *calls = calls
                 .checked_add(1)
-                .ok_or(CheckError::Receipts(crate::ReceiptError::Overflow))?;
+                .ok_or_else(|| CheckError::Receipts(crate::ReceiptError::Overflow))?;
         }
         Ok(())
     }
@@ -644,5 +676,31 @@ mod diagnostic_clock_tests {
             budget.check("admission"),
             Err(CheckError::Deadline { .. })
         ));
+    }
+}
+
+#[cfg(test)]
+mod shared_deadline_tests {
+    use super::*;
+    #[test]
+    fn new_budgets_and_excluded_diagnostic_time_cannot_restart_run_deadline() {
+        let limits = Limits {
+            run_deadline: Some(Instant::now()),
+            timeout: Duration::from_secs(120),
+            ..Default::default()
+        };
+        for _ in 0..2 {
+            let mut b = Budget::new(&limits);
+            b.exclude_elapsed(Duration::from_secs(1));
+            assert!(matches!(
+                b.check("query"),
+                Err(CheckError::Deadline { phase: "query", .. })
+            ));
+            assert_eq!(b.remaining_time(), Duration::ZERO);
+        }
+        let operations = crate::OperationalLimits::from(&limits);
+        let rebound = crate::DeterministicLimits::from(&limits).with_operations(&operations);
+        assert_eq!(rebound.run_deadline, limits.run_deadline);
+        assert!(Budget::new(&Limits::default()).check("BDD").is_ok());
     }
 }

@@ -124,6 +124,7 @@ struct Cnf {
 impl Drop for Cnf {
     fn drop(&mut self) {
         if let Some((sink, mut stats)) = self.measurement.take() {
+            stats.elapsed = self.solver.cb_mut().start.elapsed();
             stats.variables = self.solver.num_vars() as usize;
             stats.clauses = self.clauses;
             stats.literals = self.literals;

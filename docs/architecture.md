@@ -485,7 +485,9 @@ adapters responsible for JSON and human output.
 joins greatest-fixpoint possible tuples, retaining unseeded recursive instances and
 original occurrences. Within each positive relation component it evaluates anchored
 coordinates first, installs smaller tables immediately and reschedules their readers.
-A symbolic-domain fallback runs only when no anchored update is pending. The same
+A symbolic-domain fallback runs only when no anchored update is pending. Concrete
+joins probe hash indexes on the current bound columns and choose a selective bucket
+at each step; index iteration never determines tuple order. The same
 path grounds static providers and runtime programs; provider relation scopes use a
 shared, lazily built dependency index. One validated finite-domain value and one
 immutable original-dependency index serve all provider and runtime attempts within

@@ -745,6 +745,11 @@ pub fn completion_sizes(
 ) -> Result<Value> {
     let relation =
         |r: RelationId| -> Result<Value> { Ok(crate::identity::relation(keys.relation(r)?)) };
+    let preparation_work = sizes.preparation_work.as_ref().map(|w| -> Result<Value> {
+        let mut rows = w.join_rules.iter().map(|((rule, stage), work)| Ok((keys.rule(*rule)?, *stage, *work))).collect::<Result<Vec<_>>>()?;
+        rows.sort_by(|a,b| b.2.work.cmp(&a.2.work).then_with(||a.0.cmp(b.0)).then_with(||a.1.cmp(b.1)));
+        Ok(json!({"work":w.work,"workByStage":w.by_stage,"workByPhase":w.by_phase,"elapsedMsByStage":w.time_by_stage.iter().map(|(k,v)|(*k,v.as_secs_f64()*1000.0)).collect::<std::collections::BTreeMap<_,_>>(),"rejectedWorkByPhase":w.rejected_by_phase,"lastStage":w.last_stage,"topJoinRules":rows.iter().take(32).map(|(rule,stage,work)|json!({"rule":crate::identity::rule(rule),"stage":stage,"work":work.work,"calls":work.calls})).collect::<Vec<_>>(),"omittedJoinRules":rows.len().saturating_sub(32)}))
+    }).transpose()?;
     let mut preparations = Vec::new();
     for p in &sizes.preparations {
         let mut rows = p.relations.iter().collect::<Vec<_>>();
@@ -789,9 +794,9 @@ pub fn completion_sizes(
                     .cmp(&b.1["relations"].to_string())
             })
         });
-        preparations.push(json!({"scope":if p.static_provider {"static-provider"} else {"runtime"},"provider":p.provider.map(relation).transpose()?,"work":p.work,"workByStage":p.work_by_stage,"error":p.error.as_ref().map(ToString::to_string),"complete":p.complete,"atoms":p.atoms,"rules":p.rules,"peakPossibilityAtoms":p.peak_possibility_atoms,"possibilityObserved":p.relations.values().map(|r|r.observed).sum::<usize>(),"possibilityComplete":p.relations.values().all(|r|r.fixed),"countKind":if p.complete {"exact"} else {"at-least"},"leastComplete":p.least_complete,"leastError":p.least_error.as_ref().map(ToString::to_string),"relations":relations,"omittedRelations":rows.len().saturating_sub(32),"positiveRelationComponents":components.iter().take(32).map(|(_,v)|v).collect::<Vec<_>>(),"omittedComponents":components.len().saturating_sub(32)}));
+        preparations.push(json!({"scope":if p.static_provider {"static-provider"} else {"runtime"},"provider":p.provider.map(relation).transpose()?,"work":p.work,"workByStage":p.work_by_stage,"error":p.error.as_ref().map(ToString::to_string),"complete":p.complete,"atoms":p.atoms,"rules":p.rules,"peakPossibilityAtoms":p.peak_possibility_atoms,"possibilityObserved":p.relations.values().map(|r|r.observed).sum::<usize>(),"possibilityComplete":p.relations.values().all(|r|r.fixed),"countKind":if p.complete {"exact"} else {"at-least"},"leastEnabled":p.least_enabled,"leastComplete":p.least_complete,"leastError":p.least_error.as_ref().map(ToString::to_string),"relations":relations,"omittedRelations":rows.len().saturating_sub(32),"positiveRelationComponents":components.iter().take(32).map(|(_,v)|v).collect::<Vec<_>>(),"omittedComponents":components.len().saturating_sub(32)}));
     }
     Ok(
-        json!({"preparationWork":sizes.preparation_work.as_ref().map(|w|json!({"work":w.work,"workByStage":w.by_stage,"workByPhase":w.by_phase,"rejectedWorkByPhase":w.rejected_by_phase,"lastStage":w.last_stage})),"preparations":preparations,"searches":sizes.searches.iter().map(|s|json!({"phase":s.phase,"variables":s.variables,"clauses":s.clauses,"literals":s.literals,"encodingsStarted":s.encodings,"encodingDetails":s.encoding_details.iter().map(|e|json!({"purpose":e.purpose,"complete":e.complete,"atoms":e.atoms,"inputAtoms":e.input_atoms,"foldedTrue":e.folded_true,"foldedFalse":e.folded_false,"variables":e.variables,"clauses":e.clauses})).collect::<Vec<_>>(),"omittedEncodings":s.omitted_encodings})).collect::<Vec<_>>(),"omittedPreparations":sizes.omitted_preparations,"omittedSearches":sizes.omitted_searches}),
+        json!({"preparationWork":preparation_work,"preparations":preparations,"searches":sizes.searches.iter().map(|s|json!({"phase":s.phase,"elapsedMs":s.elapsed.as_secs_f64()*1000.0,"work":s.work,"variables":s.variables,"clauses":s.clauses,"literals":s.literals,"encodingsStarted":s.encodings,"encodingDetails":s.encoding_details.iter().map(|e|json!({"purpose":e.purpose,"complete":e.complete,"atoms":e.atoms,"inputAtoms":e.input_atoms,"foldedTrue":e.folded_true,"foldedFalse":e.folded_false,"variables":e.variables,"clauses":e.clauses})).collect::<Vec<_>>(),"omittedEncodings":s.omitted_encodings})).collect::<Vec<_>>(),"omittedPreparations":sizes.omitted_preparations,"omittedSearches":sizes.omitted_searches}),
     )
 }

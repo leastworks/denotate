@@ -21,7 +21,7 @@ fn separates_seeded_and_circular_support_without_changing_meaning() {
     let p = loaded(&format!(
         "sort S;const a,b,c:S;relation loop(s:S);loop(X):-loop(X);loop(a);relation consumer(s:S);consumer(X):-loop(X);relation impossible();impossible();relation neg();neg():-!impossible();{V}"
     ));
-    let sink = CompletionSizes::default();
+    let sink = CompletionSizes::with_least_analysis();
     let limits = Limits {
         completion_sizes: Some(sink.clone()),
         ..Default::default()
@@ -75,7 +75,7 @@ fn cutoff_keeps_partial_round_counts_without_claiming_a_final_gfp() {
     let p = loaded(&format!(
         "sort S;const a,b,c,d,e,f:S;relation loop(s:S);loop(X):-loop(X);{V}"
     ));
-    let sink = CompletionSizes::default();
+    let sink = CompletionSizes::with_least_analysis();
     let limits = Limits {
         max_atoms: 3,
         completion_sizes: Some(sink.clone()),
@@ -104,7 +104,7 @@ fn cnf_cutoff_keeps_the_partial_encoding() {
     let p = loaded(&format!(
         "input a();input b();input c();input d();relation h();h():-a();{V}"
     ));
-    let sink = CompletionSizes::default();
+    let sink = CompletionSizes::with_least_analysis();
     let limits = Limits {
         max_atoms: 6,
         completion_sizes: Some(sink.clone()),
@@ -132,7 +132,7 @@ fn cnf_cutoff_keeps_the_partial_encoding() {
 #[test]
 fn measurements_are_per_invocation_not_cached_or_shared_implicitly() {
     let p = loaded(&format!("relation a();a();{V}"));
-    let sink = CompletionSizes::default();
+    let sink = CompletionSizes::with_least_analysis();
     let limits = Limits {
         completion_sizes: Some(sink.clone()),
         ..Default::default()
@@ -146,7 +146,7 @@ fn measurements_are_per_invocation_not_cached_or_shared_implicitly() {
     let after = sink.snapshot();
     assert_eq!(before.preparations.len(), after.preparations.len());
     assert!(after.searches.len() > before.searches.len());
-    let fresh = CompletionSizes::default();
+    let fresh = CompletionSizes::with_least_analysis();
     assert!(fresh.snapshot().searches.is_empty());
 }
 
@@ -155,7 +155,7 @@ fn incomplete_least_analysis_does_not_label_unseen_support_circular() {
     let p = loaded(&format!(
         "sort S;const a,b,c,d,e,f:S;relation seeded(s:S);seeded(a);seeded(b);seeded(c);seeded(d);seeded(e);seeded(f);{V}"
     ));
-    let sink = CompletionSizes::default();
+    let sink = CompletionSizes::with_least_analysis();
     let limits = Limits {
         max_atoms: 3,
         completion_sizes: Some(sink.clone()),
@@ -179,7 +179,7 @@ fn empty_eligible_inputs_have_exact_zero_circular_support() {
         "relation eligible();input raw() within eligible;obligation absent:empty(raw);verification v{semantics:completion;decisions:[];assumptions:[];obligations:[absent];}",
     );
     let raw = p.corpus.relations().find(|r| r.name == "raw").unwrap().id;
-    let sink = CompletionSizes::default();
+    let sink = CompletionSizes::with_least_analysis();
     let limits = Limits {
         completion_sizes: Some(sink.clone()),
         ..Default::default()
@@ -208,7 +208,7 @@ fn anchored_descent_avoids_the_old_transient_product_at_default_and_tight_limits
         "sort S;const {constants}:S;relation anchor(x:S,y:S);anchor(v0,v0);relation p(x:S,y:S);relation q(x:S,y:S);p(X,Y):-q(X,Y);q(X,Y):-p(X,Y),anchor(X,Y);{V}"
     ));
     for max_atoms in [100_000, 100] {
-        let sink = CompletionSizes::default();
+        let sink = CompletionSizes::with_least_analysis();
         let limits = Limits {
             max_atoms,
             completion_sizes: Some(sink.clone()),
@@ -238,7 +238,7 @@ fn world_encoding_does_not_copy_unrelated_facts_for_each_input_assumption() {
         let p = loaded(&format!(
             "input raw();{facts}{assumptions}verification v{{semantics:completion;decisions:[];assumptions:[a0,a1,a2,a3,a4,a5];obligations:[];}}"
         ));
-        let sink = CompletionSizes::default();
+        let sink = CompletionSizes::with_least_analysis();
         let limits = Limits {
             completion_sizes: Some(sink.clone()),
             ..Default::default()
@@ -279,7 +279,7 @@ fn sparse_recursive_static_provider_and_runtime_both_avoid_full_products() {
     let p = loaded(&format!(
         "sort S;const {constants}:S;relation anchor(x:S,y:S);anchor(v0,v0);relation p(x:S,y:S);relation q(x:S,y:S);p(X,Y):-q(X,Y);q(X,Y):-p(X,Y),anchor(X,Y);q(X,Y):-anchor(X,Y);input raw(x:S,y:S) within p;relation used(x:S,y:S);used(X,Y):-raw(X,Y);{V}"
     ));
-    let sink = CompletionSizes::default();
+    let sink = CompletionSizes::with_least_analysis();
     let limits = Limits {
         completion_sizes: Some(sink.clone()),
         ..Default::default()
@@ -320,7 +320,7 @@ fn reverse_declared_provider_chain_uses_indexed_scope_discovery() {
     let p = loaded(&format!(
         "{declarations}{rules}p{n}();input raw() within p0;relation used();used():-raw();{V}"
     ));
-    let sink = CompletionSizes::default();
+    let sink = CompletionSizes::with_least_analysis();
     let limits = Limits {
         completion_sizes: Some(sink.clone()),
         ..Default::default()
@@ -349,7 +349,7 @@ fn preparation_work_covers_common_provider_and_runtime_stages() {
     let p = loaded(&format!(
         "sort S;const {constants}:S;relation candidate(x:S);{facts}{providers}{V}"
     ));
-    let sink = CompletionSizes::default();
+    let sink = CompletionSizes::with_least_analysis();
     let limits = Limits {
         completion_sizes: Some(sink.clone()),
         ..Default::default()
@@ -406,7 +406,7 @@ fn preparation_work_covers_common_provider_and_runtime_stages() {
 #[test]
 fn preparation_work_survives_exhaustion_before_the_first_attempt() {
     let p = loaded(&format!("sort S;const a,b:S;relation r(x:S);r(a);{V}"));
-    let sink = CompletionSizes::default();
+    let sink = CompletionSizes::with_least_analysis();
     let limits = Limits {
         max_work: 1,
         completion_sizes: Some(sink.clone()),
@@ -422,4 +422,146 @@ fn preparation_work_survives_exhaustion_before_the_first_attempt() {
     assert!(!work.rejected_by_phase.is_empty());
     let json = denotate_presentation::completion_sizes(&p.keys, &stats).unwrap();
     assert_eq!(json["preparationWork"]["lastStage"], "domains");
+}
+
+#[test]
+fn selective_bound_join_avoids_disconnected_cartesian_prefix() {
+    let n = 3000;
+    let constants = (0..n)
+        .map(|i| format!("v{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let facts = (0..n)
+        .map(|i| {
+            format!(
+                "left(v{i});right(v{i});edge(v{i},v{i});edge(v{i},v{});",
+                (i + 1) % n
+            )
+        })
+        .collect::<String>();
+    for body in ["left(X),right(Y),edge(X,Y)", "edge(X,Y),right(Y),left(X)"] {
+        let p = loaded(&format!(
+            "sort S;const {constants}:S;relation left(x:S);relation right(x:S);relation edge(x:S,y:S);{facts}relation joined(x:S,y:S);joined(X,Y):-{body};{V}"
+        ));
+        let sink = CompletionSizes::default();
+        let limits = Limits {
+            completion_sizes: Some(sink.clone()),
+            ..Default::default()
+        };
+        let Preparation::Ready(e) = prepare(&p, &limits) else {
+            panic!("selective join must finish at defaults")
+        };
+        let r = p
+            .corpus
+            .relations()
+            .find(|r| r.name == "joined")
+            .unwrap()
+            .id;
+        let tuples: std::collections::BTreeSet<_> = e
+            .original_program()
+            .rules()
+            .filter(|r0| r0.head.atom.relation == r)
+            .map(|r| r.head.atom.arguments.clone())
+            .collect();
+        assert_eq!(tuples.len(), n * 2);
+        let stats = sink.snapshot();
+        assert!(!stats.preparations[0].least_enabled);
+        assert!(stats.preparations[0].least_error.is_none());
+        assert!(!stats.preparations[0].components.is_empty());
+        let w = stats.preparation_work.as_ref().unwrap();
+        assert_eq!(w.work, w.by_phase.values().sum::<usize>());
+        assert_eq!(w.work, w.by_stage.values().sum::<usize>());
+        assert!(!w.join_rules.is_empty());
+        let json = denotate_presentation::completion_sizes(&p.keys, &stats).unwrap();
+        assert!(
+            !json["preparationWork"]["topJoinRules"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        eprintln!(
+            "selective join {body}: total work {}, join phases {:?}",
+            w.work,
+            w.by_phase
+                .iter()
+                .filter(|(k, _)| k.contains("join"))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn diagnostic_lfp_is_explicit_and_never_changes_prepared_rules_or_work() {
+    let p = loaded(&format!(
+        "sort S;const a,b:S;input i(s:S);relation p(s:S);p(X):-p(X);p(a):-i(a);{V}"
+    ));
+    let mut results = Vec::new();
+    for sink in [
+        CompletionSizes::default(),
+        CompletionSizes::with_least_analysis(),
+    ] {
+        let limits = Limits {
+            completion_sizes: Some(sink.clone()),
+            ..Default::default()
+        };
+        let Preparation::Ready(e) = prepare(&p, &limits) else {
+            panic!()
+        };
+        let snapshot = sink.snapshot();
+        let prep = &snapshot.preparations[0];
+        assert_eq!(prep.least_enabled, sink.least_analysis_enabled());
+        assert_eq!(prep.least_complete, sink.least_analysis_enabled());
+        let input = p.corpus.relations().find(|r| r.name == "i").unwrap().id;
+        assert_eq!(prep.relations[&input].observed, 2);
+        let work = snapshot.preparation_work.unwrap();
+        results.push((
+            e.original_program().atoms().cloned().collect::<Vec<_>>(),
+            work.work,
+            work.by_phase,
+        ));
+    }
+    assert_eq!(results[0], results[1]);
+}
+
+#[test]
+fn shrinking_reader_rejoins_are_counted_and_remain_bounded_on_sparse_cycle() {
+    let constants = (0..2000)
+        .map(|i| format!("v{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let p = loaded(&format!(
+        "sort S;const {constants}:S;relation anchor(x:S);anchor(v0);relation p(x:S);relation q(x:S);relation r(x:S);p(X):-q(X);q(X):-r(X);r(X):-p(X),anchor(X);{V}"
+    ));
+    let sink = CompletionSizes::default();
+    let limits = Limits {
+        completion_sizes: Some(sink.clone()),
+        ..Default::default()
+    };
+    let Preparation::Ready(e) = prepare(&p, &limits) else {
+        panic!()
+    };
+    for name in ["p", "q", "r"] {
+        let relation = p.corpus.relations().find(|r| r.name == name).unwrap().id;
+        assert_eq!(
+            e.original_program()
+                .atoms()
+                .filter(|a| a.relation == relation)
+                .count(),
+            1
+        );
+    }
+    let snapshot = sink.snapshot();
+    let work = snapshot.preparation_work.unwrap();
+    assert!(
+        work.join_rules
+            .iter()
+            .any(|((_, stage), r)| *stage == "runtime-grounding" && r.calls > 0)
+    );
+    eprintln!(
+        "sparse cycle reader re-joins: {:?}",
+        work.join_rules
+            .values()
+            .map(|r| (r.calls, r.work))
+            .collect::<Vec<_>>()
+    );
 }

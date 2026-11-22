@@ -1,6 +1,8 @@
 //! Experimental plan export. Source IO and origin rendering remain in the frontend.
 #[path = "plan/completion.rs"]
 mod completion;
+#[path = "support/sat_policy.rs"]
+mod sat_policy;
 use denotate_check::{Limits, stable_query::QueryLimits};
 use denotate_ir_text::{LoadedProgram, filesystem, index, load};
 use denotate_plan::{Build, Options, Planner, Problem};
@@ -8,16 +10,23 @@ use serde_json::{Value, json};
 use std::{path::PathBuf, process::ExitCode};
 
 const USAGE: &str = "just plan-den ROOT --verification NAME --output RELATION [--output RELATION ...]\n\
-  --max-atoms N --max-rules N --max-work N --timeout-ms N\n\
+  --engine sat (optional; planning always uses SAT)\n\
+  --max-atoms N --max-rules N --max-dependencies N --max-work N --timeout-ms N\n\
+  --sat-max-solves N --sat-max-refinements N --sat-max-polls N\n\
+  --sat-max-conflicts N --sat-max-propagations N --sat-max-worlds N --sat-max-tuples N\n\
+  --completion-size-lfp (extra diagnostic pass, off by default)\n\
   --max-nodes N --max-oracle-calls N --max-available N\n\
   --max-split-depth N --max-splits N --max-split-candidates N --max-support-trials N\n\
+SAT defaults: shared cooperative 120000 ms after loading; 5M atoms, 7M rules, 50M dependencies, 2B work. Explicit flags override.\n\
 Exports a conditional plan for permitted inputs, not executable code or input validation.";
+#[derive(Clone)]
 struct Args {
     root: PathBuf,
     verification: String,
     outputs: Vec<String>,
     limits: Limits,
     options: Options,
+    queries: QueryLimits,
 }
 fn parse(args: impl IntoIterator<Item = String>) -> Result<Args, String> {
     let mut args = args.into_iter();
@@ -28,12 +37,21 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Args, String> {
         outputs: vec![],
         limits: Limits::default(),
         options: Options::default(),
+        queries: QueryLimits::default(),
     };
+    let mut explicit = std::collections::BTreeSet::new();
     while let Some(arg) = args.next() {
+        explicit.insert(arg.clone());
+        if arg == "--completion-size-lfp" {
+            result.limits.completion_sizes =
+                Some(denotate_check::CompletionSizes::with_least_analysis());
+            continue;
+        }
         let value = args
             .next()
             .ok_or_else(|| format!("Missing value for {arg}\n{USAGE}"))?;
         match arg.as_str() {
+            "--engine" if value == "sat" => {}
             "--verification" => {
                 if !result.verification.is_empty() {
                     return Err("Select one verification".into());
@@ -43,10 +61,23 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--output" => result.outputs.push(value),
             "--max-atoms" => result.limits.max_atoms = number(&value)?,
             "--max-rules" => result.limits.max_rules = number(&value)?,
+            "--max-dependencies" => result.limits.max_dependencies = number(&value)?,
             "--max-work" => result.limits.max_work = number(&value)?,
             "--timeout-ms" => {
                 result.limits.timeout =
                     std::time::Duration::from_millis(value.parse().map_err(|_| "Invalid timeout")?)
+            }
+            "--sat-max-worlds" => result.options.meaning.max_worlds = number(&value)?,
+            "--sat-max-tuples" => result.options.meaning.max_tuples = number(&value)?,
+            "--sat-max-solves" => result.queries.max_solves = number(&value)?,
+            "--sat-max-refinements" => result.queries.max_refinements = number(&value)?,
+            "--sat-max-polls" => result.queries.max_solver_polls = number(&value)?,
+            "--sat-max-conflicts" => {
+                result.queries.max_conflicts = value.parse().map_err(|_| "Invalid conflicts")?
+            }
+            "--sat-max-propagations" => {
+                result.queries.max_propagations =
+                    value.parse().map_err(|_| "Invalid propagations")?
             }
             "--max-nodes" => result.options.max_nodes = number(&value)?,
             "--max-oracle-calls" => result.options.max_oracle_calls = number(&value)?,
@@ -61,6 +92,8 @@ fn parse(args: impl IntoIterator<Item = String>) -> Result<Args, String> {
     if result.verification.is_empty() || result.outputs.is_empty() {
         return Err(USAGE.into());
     }
+    sat_policy::apply(&mut result.limits, &mut result.queries, &explicit);
+    sat_policy::checks(&mut result.options.meaning, &explicit);
     Ok(result)
 }
 fn number(raw: &str) -> Result<usize, String> {
@@ -81,6 +114,30 @@ fn matches(
             .is_none_or(|ns| p.corpus.namespace(id) == Some(ns))
 }
 fn export(p: &LoadedProgram, args: &Args) -> Result<(u8, Value), String> {
+    let mut args = args.clone();
+    sat_policy::start(&mut args.limits);
+    let sink = if args
+        .limits
+        .completion_sizes
+        .as_ref()
+        .is_some_and(|s| s.least_analysis_enabled())
+    {
+        denotate_check::CompletionSizes::with_least_analysis()
+    } else {
+        denotate_check::CompletionSizes::default()
+    };
+    args.limits.completion_sizes = Some(sink.clone());
+    let started = std::time::Instant::now();
+    let mut result = export_inner(p, &args)?;
+    result.1["runElapsedMs"] = json!(started.elapsed().as_secs_f64() * 1000.0);
+    if sink.snapshot().preparation_work.is_some() {
+        result.1["completionSizes"] =
+            denotate_presentation::completion_sizes(&p.keys, &sink.snapshot())
+                .map_err(|e| e.to_string())?;
+    }
+    Ok(result)
+}
+fn export_inner(p: &LoadedProgram, args: &Args) -> Result<(u8, Value), String> {
     let wanted = index::parse_name(&args.verification)?;
     let vs: Vec<_> = p
         .corpus
@@ -120,7 +177,7 @@ fn export(p: &LoadedProgram, args: &Args) -> Result<(u8, Value), String> {
         &p.keys,
         v.id,
         &args.limits,
-        QueryLimits::default(),
+        args.queries.clone(),
     )
     .map_err(|e| e.to_string())?;
     let built = planner

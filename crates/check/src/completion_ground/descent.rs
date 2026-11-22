@@ -68,7 +68,11 @@ pub(super) fn descend(
         }
     }
     let mut fixed_count = input_count;
-    for component in positive_components(corpus, b)? {
+    let components = positive_components(corpus, b)?;
+    if measurement.enabled() {
+        measurement.data.components = components.clone();
+    }
+    for component in components {
         if component
             .iter()
             .all(|r| corpus.relation(*r).unwrap().role == RelationRole::Input)

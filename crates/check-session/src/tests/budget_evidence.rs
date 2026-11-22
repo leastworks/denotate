@@ -316,6 +316,7 @@ fn interrupted_queries_return_no_accounted_result_and_recovery_is_fresh() {
         panic!()
     };
     let interrupted = OperationalLimits {
+        run_deadline: None,
         progress: Default::default(),
         profile: Default::default(),
         cancellation: Cancellation::default(),

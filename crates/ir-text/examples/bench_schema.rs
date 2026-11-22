@@ -14,6 +14,9 @@ mod runner;
 #[path = "schema/tests.rs"]
 mod tests;
 // Reuse CLI limit validation and defaults; no second limit policy.
+#[allow(dead_code)]
+#[path = "support/sat_policy.rs"]
+mod sat_policy;
 type Failure = (u8, String);
 #[allow(dead_code)]
 #[path = "check/options.rs"]

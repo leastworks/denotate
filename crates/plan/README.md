@@ -101,7 +101,12 @@ records the guards and choices of branches taken.
 
 ## Bounds and remaining work
 
-The existing checker limits bound preparation and each meaning/oracle operation.
+The Rust API's checker limits bound preparation and each meaning/oracle operation.
+The `plan-den` CLI uses the SAT exploration profile: a shared cooperative 120-second
+deadline after loading, 5M atoms, 7M rules, 50M dependencies and 2B work. Explicit
+flags override these; `--engine sat` is accepted but optional because planning uses
+SAT. Completion size output includes join work and stage timing; its extra LFP
+comparison requires `--completion-size-lfp`. See `just plan-den --help`.
 Preparation keeps its own checker deadlines and is excluded from the driver's
 elapsed construction time. Construction separately charges its graph/expression
 work to `Limits::max_work`

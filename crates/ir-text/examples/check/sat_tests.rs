@@ -1,5 +1,5 @@
 use super::tests::Fixture;
-use super::{Limits, filesystem, sat};
+use super::{Limits, filesystem, options, sat};
 
 #[test]
 fn completion_cli_all_rejected_and_explicit_rejection_obligation() {
@@ -804,9 +804,69 @@ fn completion_size_progress_reports_the_diagnostic_pass() {
     let f = Fixture::new(
         "relation p();p();verification v{semantics:completion;decisions:[];assumptions:[];obligations:[];}",
     );
-    let (code, _, trace) = f.traced(&["--engine", "sat", "--verbose"]);
+    let (code, plain, quiet) = f.traced(&["--engine", "sat", "--verbose"]);
+    assert_eq!(code.unwrap(), 0);
+    assert!(!quiet.contains("completion size LFP"));
+    assert!(plain.contains("work by phase"));
+    let (code, _, trace) = f.traced(&["--engine", "sat", "--verbose", "--completion-size-lfp"]);
     assert_eq!(code.unwrap(), 0);
     assert!(trace.contains("completion size LFP"), "{trace}");
     assert!(trace.contains("component 1/1"), "{trace}");
     assert!(trace.contains("tuples"), "{trace}");
+}
+
+#[test]
+fn sat_cli_defaults_and_overrides_do_not_depend_on_argument_order() {
+    for flags in [
+        vec![
+            "root",
+            "--engine",
+            "sat",
+            "--timeout-ms",
+            "10",
+            "--max-atoms",
+            "100000",
+            "--sat-max-polls",
+            "3",
+        ],
+        vec![
+            "root",
+            "--sat-max-polls",
+            "3",
+            "--max-atoms",
+            "100000",
+            "--timeout-ms",
+            "10",
+            "--engine",
+            "sat",
+        ],
+    ] {
+        let o = options::Options::parse(flags.into_iter().map(str::to_owned), Limits::default())
+            .unwrap();
+        assert_eq!(o.limits.timeout, std::time::Duration::from_millis(10));
+        assert_eq!(o.limits.max_atoms, 100000);
+        assert_eq!(o.sat_query_limits.max_solver_polls, 3);
+    }
+    let b = options::Options::parse(["root".into()], Limits::default()).unwrap();
+    let s = options::Options::parse(
+        ["root".into(), "--engine".into(), "sat".into()],
+        Limits::default(),
+    )
+    .unwrap();
+    assert_eq!(b.limits.timeout, Limits::default().timeout);
+    assert_eq!(s.limits.timeout, std::time::Duration::from_secs(120));
+    assert!(s.limits.max_atoms > b.limits.max_atoms);
+    let f = Fixture::new(
+        "relation p();p();verification v{semantics:completion;decisions:[];assumptions:[];obligations:[];}",
+    );
+    let (code, out) = f.run(&[
+        "--engine",
+        "sat",
+        "--timeout-ms",
+        "0",
+        "--json",
+        "--no-progress",
+    ]);
+    assert_eq!(code, 2, "{out}");
+    assert!(out.contains("deadline"), "{out}");
 }
