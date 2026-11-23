@@ -68,6 +68,44 @@ fn opts() -> CheckOptions {
     }
 }
 
+fn partition_report(c: &Corpus, e: &Engine, options: &CheckOptions) -> BranchReport {
+    let expected = e.check_enumerated(&keys(c), &Default::default()).unwrap();
+    let mut e = e.clone();
+    e.branches = Some(Arc::new(std::sync::Mutex::new(BranchReport::default())));
+    for classification in [false, true] {
+        if classification && e.classification.is_none() {
+            continue;
+        }
+        for existence in [false, true] {
+            let got = super::super::symbolic::branches::test_partition(
+                &e,
+                classification,
+                existence,
+                options,
+            )
+            .unwrap();
+            let expected_failure = match (classification, existence) {
+                (true, true) => expected
+                    .classification
+                    .as_ref()
+                    .unwrap()
+                    .no_meaning
+                    .exists(),
+                (true, false) => expected.classification.as_ref().unwrap().ambiguous.exists(),
+                (false, true) => expected.meaning.no_meaning.exists(),
+                (false, false) => expected.meaning.ambiguous.exists(),
+            };
+            assert_eq!(got.exists(), expected_failure);
+            assert!(!matches!(
+                got,
+                Search::Inconclusive(_) | Search::NotAnalysed
+            ));
+        }
+    }
+    let report = e.branches.as_ref().unwrap().lock().unwrap().clone();
+    report
+}
+
 #[test]
 fn fitting_input_branches_cut_an_odd_loop_for_declared_and_selected_groups() {
     for selected in [false, true] {
@@ -89,9 +127,10 @@ fn fitting_input_branches_cut_an_odd_loop_for_declared_and_selected_groups() {
                 super::scale::same_report(&got, &reference);
                 assert!(!got.is_incomplete());
                 assert!(!got.has_failures());
-                assert!(got.branches.splits > 0);
+                let partitions = partition_report(&c, &e, &options);
+                assert!(partitions.splits > 0);
                 assert!(
-                    got.branches
+                    partitions
                         .records
                         .iter()
                         .any(|r| r.depth > 0 && r.state == "proved")
@@ -131,6 +170,7 @@ fn branch_queries_agree_with_exhaustive_signed_equations_including_real_failures
                         ..opts()
                     };
                     super::scale::same_report(&e.check(&keys(&c), &options).unwrap(), &reference);
+                    partition_report(&c, &e, &options);
                 }
             }
         }
@@ -229,9 +269,17 @@ fn nested_partitions_respect_depth_and_preserve_residual_search() {
             )
             .unwrap();
         super::scale::same_report(&got, &expected);
-        assert!(got.branches.records.iter().all(|r| r.depth <= depth));
+        let partitions = partition_report(
+            &c,
+            &e,
+            &CheckOptions {
+                split_depth: depth,
+                ..opts()
+            },
+        );
+        assert!(partitions.records.iter().all(|r| r.depth <= depth));
         assert!(
-            got.branches
+            partitions
                 .records
                 .iter()
                 .any(|r| r.depth == depth && r.state == "proved")
@@ -253,19 +301,20 @@ fn a_confirmed_branch_failure_survives_another_branch_cutoff() {
     let e = prepare(&c, verification, &domains(&c));
     let input = GroundAtom::new(tag, [v[0]]);
     let index = e.program.atom_index[&input];
-    let result = super::super::symbolic::branches::run(&e, false, true, &opts(), 1, |branch, _| {
-        assert!(Arc::ptr_eq(&e.program, &branch.program));
-        assert!(branch.pruning.is_none());
-        assert!(branch.config.max_solves <= e.config.max_solves);
-        if branch.cone.fixed[index] == Some(true) {
-            Ok(Search::Inconclusive(
-                inconclusive(CheckError::limit("test branch", "work", 1, Some(2))).unwrap(),
-            ))
-        } else {
-            Ok(Search::Exists("confirmed"))
-        }
-    })
-    .unwrap();
+    let result =
+        super::super::symbolic::branches::partition(&e, false, true, &opts(), 1, |branch, _| {
+            assert!(Arc::ptr_eq(&e.program, &branch.program));
+            assert!(branch.pruning.is_none());
+            assert!(branch.config.max_solves <= e.config.max_solves);
+            if branch.cone.fixed[index] == Some(true) {
+                Ok(Search::Inconclusive(
+                    inconclusive(CheckError::limit("test branch", "work", 1, Some(2))).unwrap(),
+                ))
+            } else {
+                Ok(Search::Exists("confirmed"))
+            }
+        })
+        .unwrap();
     assert!(matches!(result, Search::Exists("confirmed")));
 }
 
@@ -305,7 +354,7 @@ fn branches_keep_projected_helpers_free_and_respect_world_restrictions() {
         let got = e.check(&keys(&c), &opts()).unwrap();
         super::scale::same_report(&got, &expected);
         assert!(!got.meaning.ambiguous.exists());
-        assert!(got.branches.splits > 0);
+        assert!(partition_report(&c, &e, &opts()).splits > 0);
         assert!(got.obligations[&o].failed());
     }
 }

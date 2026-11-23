@@ -280,6 +280,14 @@ pub fn branch_formatter(
                 c.guarded_edges
             ));
         }
+        if let Some(r) = &c.runner_up {
+            line.push_str(&format!(
+                "; runner-up {}: {} edges / {} extra children",
+                crate::progress::atom_text(&r.split, &names),
+                r.guarded_edges,
+                r.children - 1
+            ));
+        }
         if !c.values.is_empty() {
             line.push_str(&format!(
                 "; own values [{}]{}",

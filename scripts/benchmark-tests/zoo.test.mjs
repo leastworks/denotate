@@ -397,7 +397,7 @@ test('guarded schema identifies its known odd edge, rule location and disabling 
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
 
-test('guarded schema type-field partition preserves verdicts and reports branch propagation',async()=>{
+test('guarded schema type-field checking preserves verdicts with an unsplit first attempt',async()=>{
   const {guardedSchema}=await import('../guarded-schema.mjs');
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-type-cut-'));
   try {
@@ -415,15 +415,15 @@ test('guarded schema type-field partition preserves verdicts and reports branch 
     assert.equal(after.checkerExitCode,before.checkerExitCode);
     const [a,b]=outcomes.map(r=>r.outcomes[0]);
     assert.equal(b.state,a.state);assert.equal(b.hasFailures,a.hasFailures);
-    assert.ok(b.branches.splits>0);
-    assert.ok(b.branches.records.some(r=>r.state==='proved'&&r.depth>0));
+    assert.ok(b.branches.records.some(r=>r.state==='unsplit-proved'));
+    assert.equal(b.branches.splits,0);
     assert.ok(b.branches.records.filter(r=>r.state==='split').every(r=>r.children===2));
     assert.throws(()=>guardedSchema({typecut:2}));
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
 
 
-test('guarded schema field-value splits use derived assumptions and retain a rest branch',()=>{
+test('guarded schema field-value checking preserves each result with an unsplit first attempt',()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-field-cut-'));
   try {
     const rows=[];
@@ -441,6 +441,7 @@ test('guarded schema field-value splits use derived assumptions and retain a res
     for (const question of ['existence','uniqueness'])
       assert.equal(b.meaning[question].state,a.meaning[question].state,question);
     assert.deepEqual(b.obligations.map(o=>[o.name,o.state]),a.obligations.map(o=>[o.name,o.state]));
-    assert.ok(b.branches.records.some(r=>r.splitKind==='at-most-one'&&r.assumption&&r.mapping.length&&r.hasRest));
+    assert.ok(b.branches.records.some(r=>r.state==='unsplit-proved'));
+    assert.equal(b.branches.splits,0);
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });

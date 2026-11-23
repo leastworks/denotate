@@ -89,6 +89,17 @@ pub(super) struct Choice {
     pub binary: bool,
 }
 impl Choice {
+    pub fn child_count(&self) -> usize {
+        self.selected.len() + usize::from(self.rest)
+    }
+    /// Exact rational comparison; stable iteration breaks remaining ties.
+    pub fn rank(&self, other: &Self) -> std::cmp::Ordering {
+        ((self.score as u128) * (other.child_count() - 1) as u128)
+            .cmp(&((other.score as u128) * (self.child_count() - 1) as u128))
+            .then_with(|| self.score.cmp(&other.score))
+            .then_with(|| other.child_count().cmp(&self.child_count()))
+    }
+
     pub fn children(&self) -> Vec<(Vec<(usize, bool)>, bool)> {
         let mut children = vec![];
         for chosen in &self.selected {

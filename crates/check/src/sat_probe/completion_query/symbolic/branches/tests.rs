@@ -123,8 +123,19 @@ fn rest_preserves_other_values_and_absence_and_can_split_again() {
             &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
         );
         assert!(got.meaning.no_meaning.exists());
+        let mut forced = e.clone();
+        forced.branches = Some(Arc::new(std::sync::Mutex::new(BranchReport::default())));
+        assert!(matches!(
+            test_partition(&forced, false, true, &options).unwrap(),
+            Search::Exists(())
+        ));
         assert!(
-            got.branches
+            forced
+                .branches
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
                 .records
                 .iter()
                 .any(|r| r.rest && r.state == "split")
@@ -207,7 +218,7 @@ fn branch_solvers_inherit_the_absolute_question_deadline() {
     let mut options = CheckOptions::default();
     options.split_depth = 2;
     let seen = std::cell::Cell::new(None);
-    let result = run(&e, false, true, &options, 1, |branch, _| {
+    let result = partition(&e, false, true, &options, 1, |branch, _| {
         let deadline = branch.limits.run_deadline.expect("absolute deadline");
         if let Some(old) = seen.get() {
             assert_eq!(old, deadline);
@@ -268,4 +279,173 @@ fn expired_partition_does_not_start_pending_units() {
     )
     .unwrap();
     assert!(matches!(result, Search::Inconclusive(_)));
+}
+
+#[test]
+fn ranking_uses_edges_per_extra_child_with_deterministic_ties() {
+    fn candidate(edges: usize, children: usize) -> Choice {
+        Choice {
+            group: Group {
+                atoms: (0..children).collect(),
+                exact: true,
+                assumption: None,
+                mapping: vec![],
+            },
+            selected: (0..children).collect(),
+            rest: false,
+            score: edges,
+            binary: false,
+        }
+    }
+    assert!(candidate(12, 3).rank(&candidate(5, 2)).is_gt());
+    assert!(candidate(12, 3).rank(&candidate(6, 2)).is_gt());
+    assert!(candidate(3, 2).rank(&candidate(12, 6)).is_gt());
+    assert!(
+        candidate(usize::MAX, 2)
+            .rank(&candidate(usize::MAX, 3))
+            .is_gt()
+    );
+}
+#[test]
+fn unsplit_proofs_and_counterexamples_return_without_partitioning() {
+    let (_, e, _) = fixture(false, false, false);
+    for counterexample in [false, true] {
+        let calls = std::cell::Cell::new(0);
+        let got = run(
+            &e,
+            false,
+            true,
+            &CheckOptions {
+                split_depth: 3,
+                ..Default::default()
+            },
+            1,
+            |b, o| {
+                calls.set(calls.get() + 1);
+                assert_eq!(o.split_depth, 0);
+                assert!(b.limits.run_deadline.is_some());
+                Ok(if counterexample {
+                    Search::Exists("confirmed")
+                } else {
+                    Search::None
+                })
+            },
+        )
+        .unwrap();
+        assert_eq!(calls.get(), 1);
+        assert_eq!(got.exists(), counterexample);
+    }
+}
+#[test]
+fn inconclusive_unsplit_attempt_reserves_allowances_and_keeps_the_outer_deadline() {
+    let (_, mut e, _) = fixture(false, false, false);
+    let calls = std::cell::Cell::new(0);
+    let first = std::cell::Cell::new(None);
+    let end = Instant::now() + e.limits.timeout;
+    e.limits.run_deadline = Some(end);
+    let got = run(
+        &e,
+        false,
+        true,
+        &CheckOptions {
+            split_depth: 3,
+            ..Default::default()
+        },
+        1,
+        |b, _| {
+            let i = calls.get();
+            calls.set(i + 1);
+            if i == 0 {
+                first.set(Some((
+                    b.limits.max_work,
+                    b.config.max_solver_polls,
+                    b.limits.run_deadline.unwrap(),
+                )));
+                Ok(Search::Inconclusive(
+                    inconclusive(CheckError::limit("test unsplit", "work", 1, Some(2))).unwrap(),
+                ))
+            } else {
+                let (work, polls, deadline) = first.get().unwrap();
+                assert!(work + b.limits.max_work <= e.limits.max_work);
+                assert!(polls + b.config.max_solver_polls <= e.config.max_solver_polls);
+                assert!(b.limits.run_deadline.unwrap() >= deadline);
+                assert!(b.limits.run_deadline.unwrap() <= end);
+                Ok(Search::Exists("confirmed"))
+            }
+        },
+    )
+    .unwrap();
+    assert!(matches!(got, Search::Exists("confirmed")));
+    assert!(calls.get() > 1);
+}
+
+#[test]
+fn ranking_counts_edges_across_components_and_reports_the_runner_up_within_the_cap() {
+    let (mut c, _, _) = fixture(false, false, false);
+    let input = c.relations().find(|r| r.name == "value").unwrap().id;
+    let vs: Vec<_> = c.constants().map(|a| a.id).collect();
+    let sort = c.constants().next().unwrap().sort;
+    let guard = rel(&mut c, "two_values", false);
+    for v in &vs[..2] {
+        emit(&mut c, guard, &[(input, Some(*v), true)]);
+    }
+    for n in 0..3 {
+        let r = rel(&mut c, &format!("loop{n}"), false);
+        emit(&mut c, r, &[(guard, None, true), (r, None, false)]);
+    }
+    let v = c.verifications().next().unwrap().id;
+    let e = prepare(&c, v, &[(sort, vs)].into());
+    for cap in [2, 3] {
+        let mut b = Budget::new(&e.limits);
+        let state = fitting::Bundle::new(&e, &mut b).unwrap();
+        let branch = state.engine(&e, &mut b).unwrap();
+        let (winner, runner) = choose(
+            &branch,
+            &state,
+            false,
+            true,
+            cap,
+            &mut e.config.clone(),
+            &mut b,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(winner.child_count(), cap);
+        if cap == 3 {
+            let runner = runner.expect("competing single-value cut");
+            assert!(winner.rank(&runner).is_gt());
+            assert!(winner.score > runner.score);
+        }
+    }
+}
+
+#[test]
+fn unsplit_progress_does_not_leak_into_the_following_question() {
+    let (_, mut e, _) = fixture(false, false, false);
+    let seen = Arc::new(std::sync::Mutex::new(vec![]));
+    let output = seen.clone();
+    e.limits.progress =
+        crate::CheckingProgress::new(move |event| output.lock().unwrap().push(event));
+    run(
+        &e,
+        false,
+        true,
+        &CheckOptions {
+            split_depth: 2,
+            ..Default::default()
+        },
+        1,
+        |_, _| Ok(Search::<()>::None),
+    )
+    .unwrap();
+    e.limits
+        .progress
+        .failure(&CheckError::limit("next question", "work", 0, Some(1)));
+    let events = seen.lock().unwrap();
+    assert!(
+        events
+            .iter()
+            .any(|e| matches!(e.target, Some(crate::CheckingTarget::CompletionBranch(_))))
+    );
+    assert!(events.last().unwrap().target.is_none());
 }

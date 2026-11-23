@@ -1985,9 +1985,11 @@ silently dropped.
 
 Ranking uses one compact parity witness per odd component, or cyclic edges in
 decision-relevant components independently shown non-unique. Guard-input reachability
-is cached within the ranking pass. Candidate partitions are ranked by fewer
-children first, then more distinct guarded edges; this is a heuristic, not a proof
-of edge deletion. Input at-most-one groups include an absent case. Selected derived
+is cached within the ranking pass. Candidate partitions are ranked by distinct
+affected edges across all targeted components divided by extra children
+(`children - 1`). Ratios use integer cross-products, with ties broken by more
+edges, fewer children, then stable iteration order. The best alternative is
+reported beside the winner. This is a heuristic, not a proof of edge deletion. Input at-most-one groups include an absent case. Selected derived
 cardinality groups qualify only through injective one-positive-input equations
 in their own assumption cones. A second live producer disqualifies that shortcut;
 otherwise binary input splitting remains available.
@@ -2003,6 +2005,14 @@ copy-on-write pages and propagate changes from the new pins; they share program
 tables and indexes. Dense fixed-value materialization, graph/ranking passes and
 residual encodings still cost work per visited child. Local uniqueness for ranking
 is charged and its query use is subtracted before children or residual searches.
+
+Before partitioning, an enabled question gets one unsplit attempt with half its
+time, work, solver and observation-round allowances. Conclusive results return
+immediately. An inconclusive attempt leaves the reserved logical half and the
+remaining time until the original question deadline for splitting; unused logical
+allowances are not reclaimed. There is no extra full-budget retry. This protects
+witnesses found in the first attempt; it cannot guarantee every witness that a
+full-allowance unsplit run could find. Depth zero keeps the original path.
 
 Traversal is breadth-first and deterministic. On a split, remaining work, solver
 allowances and observation rounds are divided evenly among children (integer
@@ -2041,6 +2051,17 @@ but exhausted its divided allowances with splits on. These partitions avoid the
 earlier fan-out; they do not yet demonstrate a throughput or completeness gain.
 Keeping splitting opt-in is still warranted. These are single-run observations,
 not regression thresholds; the local handoff records commands and setup costs.
+
+Ranking/unsplit-first follow-up (2026-11-23), same 275-format field-value shape,
+default limits, same profiling build off/on: 44.91 s / 57.44 s. Classification
+existence now chooses `observed_value(type_field, tag_0)` first (7 distinct affected
+edges, 2 children), with another type value as the tied runner-up; rest later
+chooses `tag_1`. The first unsplit classification-ambiguity attempt confirms its
+counterexample in 5.34 s, so this question is not partitioned. Both modes retain
+the same confirmed outcomes and inconclusive questions. The split mode visits
+8 leaves (3 proved, 5 inconclusive) after 6 splits. This meets the selection and
+witness-preservation regression, without demonstrating a speedup. The half-share
+policy remains provisional; a harder witness can still need more than that share.
 
 Completion solvers retain an absolute deadline in addition to their local timer.
 Nested solvers inherit it; branch questions use the earlier of the run deadline

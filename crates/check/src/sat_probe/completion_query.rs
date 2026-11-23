@@ -24,7 +24,7 @@ mod symbolic;
 pub use advisory::*;
 pub use checking::*;
 pub use properties::*;
-pub use symbolic::branches::{BranchRecord, BranchReport};
+pub use symbolic::branches::{BranchRecord, BranchReport, SplitAlternative};
 pub use symbolic::planning::*;
 #[cfg(test)]
 mod tests;

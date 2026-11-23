@@ -972,7 +972,7 @@ fn targeted_pruning_reports_considered_proved_and_optional_cutoffs_without_verbo
 }
 
 #[test]
-fn completion_branches_are_opt_in_and_report_the_chosen_input_values() {
+fn completion_branches_are_opt_in_and_try_unsplit_before_reporting_input_choices() {
     let f = Fixture::new(
         "sort Tag;const a,b:Tag;input tag(v:Tag) exactly_one(group_by:());relation p();relation q();p():-tag(a);p():-tag(b),q();q():-tag(b);q():-tag(a),!p();verification v{semantics:completion;assumptions:[];obligations:[];}",
     );
@@ -989,9 +989,21 @@ fn completion_branches_are_opt_in_and_report_the_chosen_input_values() {
         "--no-progress",
     ]);
     assert_eq!(code, 0, "{shown}");
-    assert!(shown.contains("split group tag(a)"), "{shown}");
-    assert!(shown.contains("tag(a)=true"), "{shown}");
-    assert!(shown.contains("tag(b)=true"), "{shown}");
+    assert!(shown.contains("unsplit-proved"), "{shown}");
+    assert!(!shown.contains("split group"), "{shown}");
+    let (_, bounded) = f.run(&[
+        "--engine",
+        "sat",
+        "--completion-split-depth",
+        "2",
+        "--sat-max-worlds",
+        "1",
+        "--no-progress",
+    ]);
+    assert!(bounded.contains("unsplit-inconclusive"), "{bounded}");
+    assert!(bounded.contains("split group tag(a)"), "{bounded}");
+    assert!(bounded.contains("tag(a)=true"), "{bounded}");
+    assert!(bounded.contains("tag(b)=true"), "{bounded}");
     let (code, json) = f.run(&[
         "--engine",
         "sat",

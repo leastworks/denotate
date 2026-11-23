@@ -1426,7 +1426,8 @@ Opt-in completion partitions (`--completion-split-depth N`, API
 `CheckOptions::split_depth`) add a `branches` object to CLI JSON status:
 `splits`, `leaves`, `records` (at most 256), `omittedRecords`.
 Each record has `kind: "completion-branch"`, `phase`, `depth`, `state`
-(`preparing`, `split`, `searching`, `proved`, `counterexample`, `inconclusive`),
+(`preparing`, `split`, `searching`, `proved`, `counterexample`, `inconclusive`,
+`unsplit-proved`, `unsplit-counterexample`, `unsplit-inconclusive`),
 `pins` (up to 32 atom/value pairs), `omittedPins`, nullable `split`
 (a representative tuple of the selected group), `children`, `guardedEdges`,
 `work`, `elapsedMs` and nullable `cutoff`. Positive pins precede false pins in
@@ -1448,6 +1449,16 @@ question), `splitKind` (`none`, `binary`, `at-most-one`, `exactly-one`), nullabl
 `rest` (this unit is a rest child). Values/mapping lists are capped at 32.
 `preparationWork` and `searchWork` separate branch setup/ranking from residual
 search; `work` is their sum. Rest does not assert that every input is absent.
+A split record's nullable `runnerUp` contains `split` (representative input),
+nullable `assumption`, `children`, `guardedEdges`, and `hasRest`. Both candidates
+are scored by `guardedEdges / (children - 1)`, counting distinct affected edges
+across targeted components. Equal ratios favor more edges, then fewer children,
+then stable order. No alternative is reported when none fits the cap.
+Unsplit-attempt records have ID 0; partition IDs start at 1, within each question.
+An unsplit proof/counterexample finishes that question without any partition leaves.
+Its size records have null `branchDepth`; a fallback still shares the original
+question deadline. Records and omitted counts include the unsplit attempt.
+
 The branch summary also carries `pendingUnits`: queued units left unstarted when
 the shared question deadline expired. They remain inconclusive, not proved leaves.
 

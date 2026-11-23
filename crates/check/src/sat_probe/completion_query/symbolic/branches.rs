@@ -6,6 +6,14 @@ mod groups;
 use groups::{Choice, Group};
 
 #[derive(Debug, Clone)]
+pub struct SplitAlternative {
+    pub split: GroundAtom,
+    pub assumption: Option<denotate_ir::AssumptionId>,
+    pub children: usize,
+    pub guarded_edges: usize,
+    pub has_rest: bool,
+}
+#[derive(Debug, Clone)]
 pub struct BranchRecord {
     pub id: usize,
     pub parent: Option<usize>,
@@ -16,6 +24,7 @@ pub struct BranchRecord {
     pub pins: Vec<(GroundAtom, bool)>,
     pub omitted_pins: usize,
     pub split: Option<GroundAtom>,
+    pub runner_up: Option<SplitAlternative>,
     pub children: usize,
     pub split_kind: &'static str,
     pub assumption: Option<denotate_ir::AssumptionId>,
@@ -63,7 +72,7 @@ fn choose(
     capacity: usize,
     remaining: &mut QueryLimits,
     b: &mut Budget<'_>,
-) -> Result<Option<Choice>> {
+) -> Result<Option<(Choice, Option<Choice>)>> {
     let groups = groups::groups(e, state, b)?;
     let c = if classification {
         &*e.classification.as_ref().unwrap().0
@@ -231,9 +240,19 @@ fn choose(
             }
         }
     }
+    let mut all = BTreeMap::<usize, BTreeSet<(usize, usize, bool)>>::new();
+    for inputs in influence.values() {
+        for (i, edges) in inputs {
+            b.charge(edges.len() + 1, "completion split ranking")?;
+            all.entry(*i).or_default().extend(edges.iter().copied());
+        }
+    }
     let mut best: Option<Choice> = None;
+    let mut runner_up: Option<Choice> = None;
+    let mut seen = BTreeSet::new();
     for inputs in influence.values() {
         for group in &groups {
+            b.charge(group.atoms.len() + 1, "completion split ranking")?;
             if group.atoms.iter().any(|i| c.fixed[*i] == Some(true)) {
                 continue;
             }
@@ -256,9 +275,18 @@ fn choose(
             if n < 2 || n > capacity {
                 continue;
             }
+            if !seen.insert((group.atoms.as_slice(), selected.clone(), rest)) {
+                continue;
+            }
+            // A candidate can cut witness edges in several components. Count
+            // their union, not only the component that suggested its values.
+            b.charge(
+                selected.iter().map(|i| all[i].len()).sum(),
+                "completion split ranking",
+            )?;
             let score = selected
                 .iter()
-                .flat_map(|i| inputs[i].iter())
+                .flat_map(|i| all[i].iter())
                 .collect::<BTreeSet<_>>()
                 .len();
             let choice = Choice {
@@ -268,23 +296,19 @@ fn choose(
                 score,
                 binary: false,
             };
-            if best.as_ref().is_none_or(|old| {
-                n < old.selected.len() + usize::from(old.rest)
-                    || (n == old.selected.len() + usize::from(old.rest) && score > old.score)
-            }) {
-                best = Some(choice);
+            if best.as_ref().is_none_or(|old| choice.rank(old).is_gt()) {
+                runner_up = best.replace(choice);
+            } else if runner_up
+                .as_ref()
+                .is_none_or(|old| choice.rank(old).is_gt())
+            {
+                runner_up = Some(choice);
             }
         }
     }
     // Without a certified useful partition, true/false on one input is always
     // exhaustive. In particular repeated elements never imply sibling exclusion.
     if best.is_none() && capacity >= 2 {
-        let mut all = BTreeMap::<usize, BTreeSet<(usize, usize, bool)>>::new();
-        for inputs in influence.values() {
-            for (i, edges) in inputs {
-                all.entry(*i).or_default().extend(edges.iter().copied());
-            }
-        }
         if let Some((i, edges)) = all
             .into_iter()
             .max_by(|(i, a), (j, b)| a.len().cmp(&b.len()).then_with(|| j.cmp(i)))
@@ -303,7 +327,7 @@ fn choose(
             });
         }
     }
-    Ok(best)
+    Ok(best.map(|choice| (choice, runner_up)))
 }
 
 // Use the existing parity-doubled witness search on compact per-component arrays.
@@ -387,6 +411,8 @@ fn divided(q: &QueryLimits, n: usize) -> QueryLimits {
     }
 }
 
+/// Try the original whole question before dividing it into partitions. Reserve
+/// half of each logical allowance; retries never reset the original allowance.
 pub(in crate::sat_probe::completion_query) fn run<T>(
     e: &Engine,
     classification: bool,
@@ -398,19 +424,131 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
     if options.split_depth == 0 {
         return leaf(e, options);
     }
-    let phase = match (classification, existence) {
+    let limits = e.shared_limits(shares);
+    if let Err(error) = Budget::new(&limits).check("completion unsplit attempt") {
+        return Ok(Search::Inconclusive(inconclusive(error)?));
+    }
+    let started = Instant::now();
+    let end = started + limits.timeout;
+    let end = limits.run_deadline.map_or(end, |d| d.min(end));
+    let mut first = e.clone();
+    first.limits = limits.clone();
+    first.limits.timeout /= 2;
+    first.limits.run_deadline = Some(end.min(started + first.limits.timeout));
+    first.limits.max_work /= 2;
+    first.config = divided(&e.config, 2);
+    let sink = crate::CompletionSizes::default();
+    first.limits.completion_sizes = Some(sink.clone());
+    let mut opts = options.clone();
+    opts.split_depth = 0;
+    opts.max_worlds /= 2;
+    let phase = question_phase(classification, existence);
+    let progress = e
+        .limits
+        .progress
+        .scope("completion unsplit attempt", None, true);
+    let result = leaf(&first, &opts)?;
+    let searches = sink.snapshot();
+    let work = searches
+        .searches
+        .iter()
+        .filter(|s| s.phase == phase)
+        .map(|s| s.work.unwrap_or(0))
+        .sum();
+    let (state, cutoff) = match &result {
+        Search::Exists(_) => ("unsplit-counterexample", None),
+        Search::None => ("unsplit-proved", None),
+        Search::Inconclusive(c) => ("unsplit-inconclusive", Some(*c)),
+        Search::NotAnalysed => return Err(CheckError::Internal("unanalysed unsplit attempt")),
+    };
+    let record = BranchRecord {
+        id: 0,
+        parent: None,
+        closed_children: 0,
+        phase,
+        depth: 0,
+        state,
+        pins: vec![],
+        omitted_pins: 0,
+        split: None,
+        runner_up: None,
+        children: 0,
+        split_kind: "none",
+        assumption: None,
+        values: vec![],
+        omitted_values: 0,
+        mapping: vec![],
+        omitted_mapping: 0,
+        has_rest: false,
+        rest: false,
+        preparation_work: 0,
+        search_work: work,
+        guarded_edges: 0,
+        work,
+        elapsed: started.elapsed(),
+        cutoff,
+    };
+    e.limits.progress.completion_branch(&record);
+    if let Some(sink) = &e.branches {
+        let mut report = sink.lock().unwrap();
+        if report.records.len() < 256 {
+            report.records.push(record);
+        } else {
+            report.omitted_records += 1;
+        }
+    }
+    if let Some(out) = &e.limits.completion_sizes {
+        for search in searches.searches {
+            out.search(search);
+        }
+    }
+    drop(progress);
+    if !matches!(result, Search::Inconclusive(_)) {
+        return Ok(result);
+    }
+    let mut rest = e.clone();
+    rest.limits = limits;
+    rest.limits.timeout = end.saturating_duration_since(Instant::now());
+    rest.limits.run_deadline = Some(end);
+    rest.limits.max_work -= first.limits.max_work;
+    rest.config = QueryLimits {
+        max_solves: e.config.max_solves - first.config.max_solves,
+        max_solver_polls: e.config.max_solver_polls - first.config.max_solver_polls,
+        max_conflicts: e.config.max_conflicts - first.config.max_conflicts,
+        max_propagations: e.config.max_propagations - first.config.max_propagations,
+    };
+    opts = options.clone();
+    opts.max_worlds -= options.max_worlds / 2;
+    partition(&rest, classification, existence, &opts, 1, leaf)
+}
+fn question_phase(classification: bool, existence: bool) -> &'static str {
+    match (classification, existence) {
         (true, true) => "completion classification existence",
         (true, false) => "completion classification ambiguity",
         (false, true) => "completion processing existence",
         (false, false) => "completion processing ambiguity",
-    };
+    }
+}
+
+pub(in crate::sat_probe::completion_query) fn partition<T>(
+    e: &Engine,
+    classification: bool,
+    existence: bool,
+    options: &CheckOptions,
+    shares: usize,
+    leaf: impl Fn(&Engine, &CheckOptions) -> Result<Search<T>>,
+) -> Result<Search<T>> {
+    if options.split_depth == 0 {
+        return leaf(e, options);
+    }
+    let phase = question_phase(classification, existence);
     let limits = e.shared_limits(shares);
     let local_deadline = Instant::now() + limits.timeout;
     let deadline = limits
         .run_deadline
         .map_or(local_deadline, |d| d.min(local_deadline));
     let mut queue = std::collections::VecDeque::from([Unit {
-        id: 0,
+        id: 1,
         parent_id: None,
         parent: None,
         delta: vec![],
@@ -422,7 +560,7 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
         worlds: options.max_worlds,
     }]);
     let mut report = BranchReport::default();
-    let mut next_id = 1;
+    let mut next_id = 2;
     let mut unknown = None;
     let mut answer = None;
     while let Some(unit) = queue.pop_front() {
@@ -452,6 +590,7 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
             },
             omitted_pins: unit.pins.len().saturating_sub(32),
             split: None,
+            runner_up: None,
             children: 0,
             split_kind: "none",
             assumption: None,
@@ -498,7 +637,7 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
                 .split_branches
                 .saturating_sub(report.leaves + queue.len());
             if unit.depth < options.split_depth && capacity > 0 {
-                if let Some(choice) = choose(
+                if let Some((choice, runner_up)) = choose(
                     &branch,
                     &state,
                     classification,
@@ -510,6 +649,13 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
                     let children = choice.children();
                     let n = children.len();
                     if n > 0 {
+                        record.runner_up = runner_up.map(|r| SplitAlternative {
+                            split: e.cone.atoms[r.selected[0]].clone(),
+                            assumption: r.group.assumption,
+                            children: r.child_count(),
+                            guarded_edges: r.score,
+                            has_rest: r.rest,
+                        });
                         record.state = "split";
                         record.split = Some(e.cone.atoms[choice.selected[0]].clone());
                         record.children = n;
@@ -665,3 +811,29 @@ fn forward(e: &Engine, sink: &crate::CompletionSizes, depth: usize) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(in crate::sat_probe::completion_query) fn test_partition(
+    e: &Engine,
+    classification: bool,
+    existence: bool,
+    options: &CheckOptions,
+) -> Result<Search<()>> {
+    fn erased<T>(s: Search<T>) -> Search<()> {
+        match s {
+            Search::Exists(_) => Search::Exists(()),
+            Search::None => Search::None,
+            Search::Inconclusive(c) => Search::Inconclusive(c),
+            Search::NotAnalysed => Search::NotAnalysed,
+        }
+    }
+    partition(e, classification, existence, options, 1, |b, o| {
+        if existence {
+            b.symbolic_no_meaning_in(&BTreeMap::new(), classification, false, o, 1)
+                .map(erased)
+        } else {
+            b.symbolic_pair_in(&BTreeMap::new(), classification, false, o, 1)
+                .map(erased)
+        }
+    })
+}

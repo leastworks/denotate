@@ -942,7 +942,9 @@ share. Acyclic or locally unique heads no longer receive these optimization noti
 Completion checks can opt into bounded input partitions with
 `just check-den ROOT --engine sat --completion-split-depth 2`.
 `--completion-split-branches N` bounds leaves per question (default 512); depth
-defaults to zero, retaining unsplit checking. Declared or selected at-most-one and
+defaults to zero, retaining unsplit checking. When enabled, each question first
+tries unsplit search with a reserved share of its allowances and partitions only
+if that attempt is inconclusive. Declared or selected at-most-one and
 exactly-one input restrictions support value partitions, including derived selected
 restrictions with certified one-to-one input equations. Otherwise binary input
 splits are available. A rest child keeps other values unknown, and includes absence

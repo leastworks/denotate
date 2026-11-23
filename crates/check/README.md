@@ -1442,8 +1442,11 @@ justify this certificate. Without a useful certified group, split one input into
 true/false cases.
 
 Rank witness-cycle guard influence per odd component, or guard influence per
-decision-relevant component independently shown non-unique. Prefer fewer children,
-then more guarded edges. Only distinguished values receive their own child; one
+decision-relevant component independently shown non-unique. Count distinct affected
+edges across all targeted components and rank by `edges / (children - 1)`. Compare
+ratios exactly; ties favor more edges, then fewer children, then stable iteration
+order. The leaf cap still excludes oversized candidates. Telemetry records the
+runner-up. Only distinguished values receive their own child; one
 rest child pins those values false and leaves other values unknown. At-most-one
 rest includes absence and can be split again later. Exactly-one rest remains
 subject to W's coverage requirement. A value child excludes siblings by the
@@ -1452,6 +1455,13 @@ Each child applies Fitting propagation before parity/local uniqueness and residu
 search. Scopes stay frozen. Reaching depth or leaf bounds uses residual search;
 resource exhaustion remains inconclusive. A confirmed failure in one child survives
 another child's cutoff; absence of a failure requires every child to finish.
+
+Each question first tries unsplit search with half its time and logical allowances.
+A proof or counterexample returns immediately; only an inconclusive attempt starts
+partitioning. The reserved half of work/query/round allowances remains for splitting,
+along with time left before the original question deadline. Unused logical allowance
+from the first attempt is conservatively not reclaimed. Splitting is still opt-in;
+this policy cannot guarantee finding every witness an unrestricted unsplit run finds.
 
 Units share copy-on-write rule/atom tables and read-only incidence indexes.
 Children inherit paged Fitting state and propagate only newly pinned inputs;
