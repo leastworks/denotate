@@ -1843,3 +1843,29 @@ may witness multiple present tuples, but never a universal absence claim. SAT
 solve/poll/conflict/propagation windows remain per part as before reuse. Work and
 deadlines remain shared by the obligation; CNF limits now bound the retained solver,
 including definitions accumulated for groups. No limits or CLI defaults increase.
+
+### Completion odd-cycle cores and bounded failure triage
+
+Component totality first uses linear signed-SCC/parity analysis. Parity-consistent
+components require no SAT boundary enumeration. The remaining search retains
+odd-cycle SCCs and their upstream providers. Guarding cubes can prove totality
+without freezing derived assignments; the existing model cube is retained when
+smaller. These are sufficient proofs; failing parity is not evidence of no meaning.
+No search limits increase. Work for graph analysis, cubes and validation is charged.
+
+Completion size records include each search's `workByPhase`, whose entries sum to
+its cumulative `work`, including on cutoff. A work exhaustion's subphase is the
+operation that could not obtain another charge, not the cost of that operation.
+The optional counters intern static phase identities and use a small integer cache;
+there is no string-keyed tree lookup on every work unit. Size records and progress
+also name the current component, its atoms/rules/boundary, bounded relation list,
+and parity-inconsistent SCC count. `oddComponents` counts SCCs, not all cycles.
+Completed records retain at most 64 components and 32 relations each, with omissions;
+the current component remains visible even after that record bound.
+
+Completion failure triage stops at `max_failures` distinct failed parts per obligation
+(default eight in the API). The CLI derives that bound from `--empty-examples`
+(default three; `all` disables early triage stopping). This changes enumeration,
+not a confirmed verdict. A truncated count is explicitly a lower bound. Ordinary
+solver/time limits still apply, and a real cutoff remains inconclusive. Resource
+measurements and selected examples remain observations, never goldens.

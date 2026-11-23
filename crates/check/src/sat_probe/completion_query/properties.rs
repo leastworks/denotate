@@ -17,6 +17,8 @@ pub struct ObligationResult {
     pub not_analysed: bool,
     pub vacuous: bool,
     pub finished: bool,
+    /// Verdict is decided, but the failure count is only a lower bound.
+    pub failures_truncated: bool,
     pub no_groups: bool,
     pub inconclusive: Option<Inconclusive>,
     pub(super) members: Option<Arc<BTreeSet<GroundAtom>>>,
@@ -58,6 +60,7 @@ impl ObligationResult {
             not_analysed: matches!(rejected, Search::NotAnalysed),
             vacuous: false,
             finished: rejected.complete(),
+            failures_truncated: false,
             no_groups: false,
             inconclusive: unknown.or_else(|| {
                 if let Search::Inconclusive(c) = rejected {
@@ -96,6 +99,7 @@ impl Engine {
                 not_analysed: false,
                 vacuous: false,
                 finished: false,
+                failures_truncated: false,
                 no_groups: false,
                 inconclusive: None,
                 members: None,

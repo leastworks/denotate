@@ -50,11 +50,77 @@ pub(super) fn residual(
     s.metrics();
     for heads in components {
         let local = component(cone, &producers, &heads, s.run.budget)?;
-        if total(&local, s, options)? {
+        let mut detail = crate::CompletionComponentStats {
+            index: s.stats.total_components + s.stats.fallback_components,
+            atoms: heads.len(),
+            rules: local.rules.len(),
+            boundary: local.input.iter().filter(|v| **v).count(),
+            relations: local
+                .atoms
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !local.input[*i])
+                .map(|(_, a)| a.relation)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .take(32)
+                .collect(),
+            relation_count: local
+                .atoms
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !local.input[*i])
+                .map(|(_, a)| a.relation)
+                .collect::<BTreeSet<_>>()
+                .len(),
+            state: "analysing",
+            ..Default::default()
+        };
+        s.stats.current_component = Some(detail.clone());
+        s.metrics();
+        let core = consistency::analyse(&local, None, s.run.budget)?;
+        detail.odd_components = core.odd_components;
+        detail.odd_atoms = core.odd_atoms;
+        detail.state = "searching";
+        s.stats.current_component = Some(detail.clone());
+        s.metrics();
+        let result = if core.odd_components == 0 {
+            Ok(true)
+        } else {
+            // Compact the odd-cycle cores and their providers; discard total
+            // downstream equations before model enumeration and cube building.
+            let mut local_producers = vec![Vec::new(); local.fixed.len()];
+            for (i, r) in local.rules.iter().enumerate() {
+                local_producers[r.head].push(i);
+            }
+            let needed = core
+                .needed
+                .iter()
+                .enumerate()
+                .filter_map(|(i, v)| (*v).then_some(i))
+                .collect();
+            let reduced = component(&local, &local_producers, &needed, s.run.budget)?;
+            total(&reduced, s, options)
+        };
+        detail.state = match &result {
+            Ok(true) => "total",
+            Ok(false) => "requires-upstream-search",
+            Err(_) => "incomplete",
+        };
+        s.stats.current_component = Some(detail.clone());
+        if s.stats.component_details.len() < 64 {
+            s.stats.component_details.push(detail);
+        } else {
+            s.stats.omitted_components += 1;
+        }
+        s.metrics();
+        if result? {
             s.stats.total_components += 1;
         } else {
             s.stats.fallback_components += 1;
-            pending.extend(heads);
+            pending.extend(core.needed.iter().enumerate().filter_map(|(i, needed)| {
+                needed.then(|| engine.program.atom_index[&local.atoms[i]])
+            }));
         }
         s.metrics();
     }
@@ -139,6 +205,9 @@ fn component(
 }
 
 fn total(c: &Cone, s: &mut Solver<'_, '_, '_>, options: &CheckOptions) -> Result<bool> {
+    if consistency::analyse(c, None, s.run.budget)?.odd_components == 0 {
+        return Ok(true);
+    }
     let gate = s.gate()?;
     s.run.cnf.gate = Some(gate);
     // Boundary atoms are independent variables, even when they name derived
@@ -185,7 +254,22 @@ fn total(c: &Cone, s: &mut Solver<'_, '_, '_>, options: &CheckOptions) -> Result
         }
         let values = s.values(c, &target)?;
         let mut cube = cover(c, &values, None, s.run.budget)?;
-        lift(c, &values, &target, &mut cube, s)?;
+        if !cube.is_empty() {
+            let specialized = consistency::analyse(c, Some(&values), s.run.budget)?;
+            let mut structural = false;
+            if specialized.odd_components == 0 {
+                let guards = consistency::guard_cube(c, &values, &specialized, s.run.budget)?;
+                if guards.len() < cube.len() {
+                    cube = guards;
+                    structural = true;
+                }
+            }
+            // Equation lifting fixes derived values. Structural cubes allow
+            // models to vary, so cannot go through that lifting query.
+            if !structural {
+                lift(c, &values, &target, &mut cube, s)?;
+            }
+        }
         s.cube_metrics(&cube);
         s.run.cnf.gate = Some(selector);
         let clause = cube
@@ -365,6 +449,94 @@ mod tests {
                 });
                 assert_eq!(result, expected, "{left}, {right}");
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod parity_oracle {
+    use super::*;
+    use crate::sat_probe::completion_query::tests::{prepare, verification};
+    use crate::test_support::rewrites::{rel, rule};
+    #[test]
+    fn signed_three_atom_equations_match_exhaustive_totality_and_guard_cubes() {
+        let mut corpus = denotate_ir::Corpus::new();
+        let input = rel(&mut corpus, "input", true);
+        let ids: Vec<_> = ["a", "b", "c"]
+            .iter()
+            .map(|n| rel(&mut corpus, n, false))
+            .collect();
+        for id in &ids {
+            rule(&mut corpus, *id, &[(*id, false)]);
+        }
+        let v = verification(&mut corpus, None, &[]);
+        let e = prepare(&corpus, v, &crate::Domains::new());
+        let index = |r| e.cone.atoms.iter().position(|a| a.relation == r).unwrap();
+        let input = index(input);
+        let heads: Vec<_> = ids.into_iter().map(index).collect();
+        let all: Vec<_> = std::iter::once(input)
+            .chain(heads.iter().copied())
+            .collect();
+        for shape in 0..512usize {
+            let mut c = e.cone.clone();
+            c.rules.clear();
+            for (k, head) in heads.iter().enumerate() {
+                let literal = (shape >> (3 * k)) & 7;
+                c.rules.push(crate::sat_probe::Rule {
+                    head: *head,
+                    body: vec![(all[literal / 2], literal % 2 == 0)],
+                });
+            }
+            // Multiple producers and a guarded odd cycle, not only unary rings.
+            c.rules.push(crate::sat_probe::Rule {
+                head: heads[0],
+                body: vec![(input, true), (heads[2], false)],
+            });
+            let mut b = Budget::new(&e.limits);
+            let proof = consistency::analyse(&c, None, &mut b).unwrap();
+            let mut every = true;
+            for input_value in [false, true] {
+                let mut values = vec![false; c.fixed.len()];
+                values[input] = input_value;
+                let exists = (0..8).any(|bits| {
+                    for (k, h) in heads.iter().enumerate() {
+                        values[*h] = bits & (1 << k) != 0;
+                    }
+                    heads.iter().all(|h| {
+                        values[*h]
+                            == c.rules.iter().any(|r| {
+                                r.head == *h && r.body.iter().all(|(i, p)| values[*i] == *p)
+                            })
+                    })
+                });
+                every &= exists;
+                let specialized = consistency::analyse(&c, Some(&values), &mut b).unwrap();
+                if specialized.odd_components == 0 {
+                    assert!(exists, "shape {shape}, input {input_value}");
+                    let cube = consistency::guard_cube(&c, &values, &specialized, &mut b).unwrap();
+                    for other in [false, true] {
+                        if cube.get(&input).is_some_and(|v| *v != other) {
+                            continue;
+                        }
+                        values[input] = other;
+                        assert_eq!(
+                            consistency::analyse(&c, Some(&values), &mut b)
+                                .unwrap()
+                                .odd_components,
+                            0
+                        );
+                    }
+                }
+            }
+            if proof.odd_components == 0 {
+                assert!(every, "shape {shape}");
+            }
+            let mut s = Solver::new(&e, &mut b).unwrap();
+            assert_eq!(
+                total(&c, &mut s, &CheckOptions::default()).unwrap(),
+                every,
+                "shape {shape}"
+            );
         }
     }
 }

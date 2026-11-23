@@ -565,3 +565,69 @@ fn shrinking_reader_rejoins_are_counted_and_remain_bounded_on_sparse_cycle() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn existence_reports_odd_cores_and_cumulative_work_separately_from_validation() {
+    let p = loaded(
+        "input guard(); relation conflict(); conflict():-guard(),!conflict(); relation h(); h():-!conflict(); verification v{semantics:completion;hypothesis:h;assumptions:[];obligations:[];}",
+    );
+    let sink = CompletionSizes::default();
+    let limits = Limits {
+        completion_sizes: Some(sink.clone()),
+        ..Default::default()
+    };
+    let Preparation::Ready(e) = prepare(&p, &limits) else {
+        panic!()
+    };
+    let r = e.check(&p.keys, &Default::default()).unwrap();
+    assert!(r.classification.as_ref().unwrap().no_meaning.exists());
+    let stats = sink.snapshot();
+    let json = denotate_presentation::completion_sizes(&p.keys, &stats).unwrap();
+    let search = json["searches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["phase"] == "completion classification existence")
+        .unwrap();
+    let components = search["existence"]["componentDetails"].as_array().unwrap();
+    assert!(components.iter().any(|c| c["oddComponents"] == 1
+        && c["state"] == "requires-upstream-search"
+        && c["boundary"] == 1
+        && c["relations"].to_string().contains("conflict")));
+    let sum: u64 = search["workByPhase"]
+        .as_object()
+        .unwrap()
+        .values()
+        .map(|n| n.as_u64().unwrap())
+        .sum();
+    assert_eq!(search["work"], sum);
+    assert!(
+        search["workByPhase"]["completion call consistency"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    // Candidate limit is reporting only: retain the current component on cutoff.
+    let partial = e
+        .check(
+            &p.keys,
+            &CheckOptions {
+                max_worlds: 0,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(matches!(
+        partial.classification.unwrap().no_meaning,
+        Search::Inconclusive(_)
+    ));
+    let json = denotate_presentation::completion_sizes(&p.keys, &sink.snapshot()).unwrap();
+    assert!(
+        json["searches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|s| s["phase"] == "completion classification existence"
+                && s["existence"]["currentComponent"]["state"] == "incomplete")
+    );
+}

@@ -467,6 +467,12 @@ but none with H. Its evidence includes both the validated interpretation without
 and confirmation that the query with H is unsatisfiable. Classification no-meaning
 and ambiguity fail verification separately; neither is rejection.
 
+Completion SAT may stop enumerating counterexamples once an obligation has several
+confirmed failures. The obligation remains failed; the reported count is explicitly
+“at least”, with a note that further failures may exist. This is distinct from a
+solver cutoff. `check-den --empty-examples N|all` controls this completion triage
+bound as well as retained examples; `all` continues under the usual query limits.
+
 Only when every permitted observation rejects, with no classification no-meaning,
 ambiguity or unknown observation, does the result say `all-rejected`:
 processing is not applicable and processing obligations are vacuous. This is allowed

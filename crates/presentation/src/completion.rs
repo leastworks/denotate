@@ -11,6 +11,22 @@ pub struct CompletionFinding {
 fn cause_text(c: Inconclusive) -> String {
     if c.phase == "completion input contract" {
         "Universal results are incomplete because a selected assumption could not be determined on every input.".into()
+    } else if c.resource == "work"
+        && matches!(
+            c.phase,
+            "completion classification existence"
+                | "completion processing existence"
+                | "completion classification ambiguity"
+                | "completion processing ambiguity"
+                | "completion property"
+                | "completion accepted observations"
+                | "completion rejection"
+        )
+    {
+        format!(
+            "{} The work allowance is cumulative across this query; the subphase names the stopping operation, not where all work was spent.",
+            exhaustion_text(c.phase, c.resource, c.details)
+        )
     } else {
         exhaustion_text(c.phase, c.resource, c.details)
     }
@@ -160,7 +176,7 @@ fn summary_using(
         };
         let k = keys.obligation(*id)?;
         obligations.push(json!({"name":corpus.obligation(*id).unwrap().name,"identity":[k.0.namespace.as_ref(),k.0.name.as_ref()],"kind":kind(&o.requirement),"state":state,"complete":r.context==Context::Permitted&&o.complete(),"vacuous":o.vacuous&&r.context==Context::Permitted,
-            "scope":if matches!(o.requirement,Requirement::NoRejections{..}){"permitted-observations"}else if r.hypothesis.is_some(){"accepted-observations-property-cone"}else{"property-cone"},"reasons":o.inconclusive.map(reason).into_iter().collect::<Vec<_>>(),"failures":o.parts.iter().filter(|p|p.failed).count()+usize::from(o.rejected.is_some())}));
+            "scope":if matches!(o.requirement,Requirement::NoRejections{..}){"permitted-observations"}else if r.hypothesis.is_some(){"accepted-observations-property-cone"}else{"property-cone"},"reasons":o.inconclusive.map(reason).into_iter().collect::<Vec<_>>(),"failureCountKind":if o.failures_truncated || !o.complete(){"at-least"}else{"exact"},"failureEnumerationComplete":o.complete() && !o.failures_truncated,"failures":o.parts.iter().filter(|p|p.failed).count()+usize::from(o.rejected.is_some())}));
     }
     let advisory = match &r.advisory {
         Advisory::NotRequested => json!({"state":"not-requested"}),
@@ -380,6 +396,9 @@ fn findings_using(
                     }
                 };
                 let mut notes = Vec::new();
+                if o.failures_truncated {
+                    notes.push("Stopped after the configured number of distinct failures for this obligation; more may exist.".into());
+                }
                 let mut examples = Vec::new();
                 for p in &parts {
                     if let Some(m) = &p.example {
@@ -434,7 +453,7 @@ fn findings_using(
                     ),
                     notes,
                     contributions.clone(),
-                    json!({"kind":"completion-model","scope":"property-cone","examples":examples,"count":parts.len(),"countKind":if o.complete(){"exact"}else{"at-least"},"omittedExamples":parts.iter().filter(|p|p.example.is_none()).count()}),
+                    json!({"kind":"completion-model","scope":"property-cone","examples":examples,"count":parts.len(),"countKind":if o.complete() && !o.failures_truncated{"exact"}else{"at-least"},"omittedExamples":parts.iter().filter(|p|p.example.is_none()).count()}),
                 );
             }
         }
@@ -829,7 +848,7 @@ pub fn completion_sizes(
         preparations.push(json!({"scope":if p.static_provider {"static-provider"} else {"runtime"},"provider":p.provider.map(relation).transpose()?,"work":p.work,"workByStage":p.work_by_stage,"error":p.error.as_ref().map(ToString::to_string),"complete":p.complete,"atoms":p.atoms,"rules":p.rules,"peakPossibilityAtoms":p.peak_possibility_atoms,"possibilityObserved":p.relations.values().map(|r|r.observed).sum::<usize>(),"possibilityComplete":p.relations.values().all(|r|r.fixed),"countKind":if p.complete {"exact"} else {"at-least"},"leastEnabled":p.least_enabled,"leastComplete":p.least_complete,"leastError":p.least_error.as_ref().map(ToString::to_string),"relations":relations,"omittedRelations":rows.len().saturating_sub(32),"positiveRelationComponents":components.iter().take(32).map(|(_,v)|v).collect::<Vec<_>>(),"omittedComponents":components.len().saturating_sub(32)}));
     }
     Ok(
-        json!({"preparationWork":preparation_work,"preparations":preparations,"searches":sizes.searches.iter().map(|s|json!({"phase":s.phase,"elapsedMs":s.elapsed.as_secs_f64()*1000.0,"work":s.work,"variables":s.variables,"clauses":s.clauses,"literals":s.literals,"encodingsStarted":s.encodings,"encodingDetails":s.encoding_details.iter().map(|e|json!({"purpose":e.purpose,"complete":e.complete,"atoms":e.atoms,"inputAtoms":e.input_atoms,"foldedTrue":e.folded_true,"foldedFalse":e.folded_false,"variables":e.variables,"clauses":e.clauses})).collect::<Vec<_>>(),"existence":{"components":s.existence.components,"totalComponents":s.existence.total_components,"fallbackComponents":s.existence.fallback_components,"rounds":s.existence.rounds,"cubes":s.existence.cubes,"pins":s.existence.pins,"maxPins":s.existence.max_pins,"validationWork":s.existence.validation_work,"liftingAttempts":s.existence.lifting_attempts,"liftedPins":s.existence.lifted_pins},"omittedEncodings":s.omitted_encodings})).collect::<Vec<_>>(),"omittedPreparations":sizes.omitted_preparations,"omittedSearches":sizes.omitted_searches}),
+        json!({"preparationWork":preparation_work,"preparations":preparations,"searches":sizes.searches.iter().map(|s| -> Result<Value> { Ok(json!({"phase":s.phase,"elapsedMs":s.elapsed.as_secs_f64()*1000.0,"work":s.work,"workByPhase":s.work_by_phase,"variables":s.variables,"clauses":s.clauses,"literals":s.literals,"encodingsStarted":s.encodings,"encodingDetails":s.encoding_details.iter().map(|e|json!({"purpose":e.purpose,"complete":e.complete,"atoms":e.atoms,"inputAtoms":e.input_atoms,"foldedTrue":e.folded_true,"foldedFalse":e.folded_false,"variables":e.variables,"clauses":e.clauses})).collect::<Vec<_>>(),"existence":completion_existence_stats(&s.existence, relation)?,"omittedEncodings":s.omitted_encodings})) }).collect::<Result<Vec<_>>>()?,"omittedPreparations":sizes.omitted_preparations,"omittedSearches":sizes.omitted_searches}),
     )
 }
 
@@ -902,5 +921,28 @@ pub fn completion_input_domain_findings(
         issues,
         names,
         &Evidence::new(Default::default(), None, false),
+    )
+}
+
+/// Bounded component details are observations; oddComponents counts parity-
+/// inconsistent SCCs, not all elementary cycles.
+pub fn completion_existence_stats(
+    s: &denotate_check::CompletionExistenceStats,
+    relation: impl Fn(RelationId) -> Result<Value>,
+) -> Result<Value> {
+    let detail = |c: &denotate_check::CompletionComponentStats| -> Result<Value> {
+        Ok(
+            json!({"index":c.index,"atoms":c.atoms,"rules":c.rules,"boundary":c.boundary,
+            "relations":c.relations.iter().map(|r|relation(*r)).collect::<Result<Vec<_>>>()?,
+            "omittedRelations":c.relation_count.saturating_sub(c.relations.len()),
+            "oddComponents":(c.state != "analysing").then_some(c.odd_components),"oddAtoms":(c.state != "analysing").then_some(c.odd_atoms),"state":c.state}),
+        )
+    };
+    Ok(
+        json!({"components":s.components,"totalComponents":s.total_components,"fallbackComponents":s.fallback_components,
+        "rounds":s.rounds,"cubes":s.cubes,"pins":s.pins,"maxPins":s.max_pins,"validationWork":s.validation_work,
+        "liftingAttempts":s.lifting_attempts,"liftedPins":s.lifted_pins,
+        "currentComponent":s.current_component.as_ref().map(&detail).transpose()?,
+        "componentDetails":s.component_details.iter().map(detail).collect::<Result<Vec<_>>>()?,"omittedComponents":s.omitted_components}),
     )
 }

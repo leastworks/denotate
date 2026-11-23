@@ -19,6 +19,7 @@ impl Drop for Run<'_, '_, '_> {
     fn drop(&mut self) {
         if let Some((_, stats)) = &mut self.cnf.measurement {
             stats.work = Some(self.budget.used().saturating_sub(self.work_started));
+            stats.work_by_phase = self.budget.query_work();
         }
     }
 }
@@ -315,6 +316,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
     }
     pub(super) fn universe(engine: &'a Engine, budget: &'b mut Budget<'l>) -> Result<Self> {
         let work_started = budget.used();
+        budget.begin_query_work();
         budget.check("completion query")?;
         let mut cnf = Cnf {
             measurement: engine.limits.completion_sizes.clone().map(|sink| {
@@ -324,6 +326,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
                         existence: Default::default(),
                         elapsed: Duration::ZERO,
                         work: None,
+                        work_by_phase: Default::default(),
                         phase: "completion query",
                         variables: 0,
                         clauses: 0,

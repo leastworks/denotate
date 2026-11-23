@@ -56,6 +56,8 @@ pub struct CheckOptions {
     pub max_worlds: usize,
     pub max_tuples: usize,
     pub max_examples: usize,
+    /// Stop additional triage after this many distinct failed parts (at least one).
+    pub max_failures: usize,
     /// Independent advisory work, never charged to required checking.
     pub circular_support: bool,
     pub dead_producers: bool,
@@ -68,6 +70,7 @@ impl Default for CheckOptions {
             max_worlds: 1024,
             max_tuples: 10000,
             max_examples: 8,
+            max_failures: 8,
             circular_support: false,
             dead_producers: false,
             advisory_limits: Limits::default(),

@@ -201,6 +201,7 @@ pub(crate) struct Budget<'a> {
     work: usize,
     charges: Option<WorkCharges>,
     preparation_work: Option<crate::completion_sizes::PreparationWorkMonitor>,
+    query_work: Option<crate::completion_sizes::QueryWork>,
     structural_split_start: Option<usize>,
     charges_until_clock: usize,
     #[cfg(test)]
@@ -237,6 +238,7 @@ impl<'a> Budget<'a> {
             work: 0,
             charges: None,
             preparation_work: None,
+            query_work: None,
             structural_split_start: None,
             charges_until_clock: 0,
             #[cfg(test)]
@@ -406,6 +408,17 @@ impl<'a> Budget<'a> {
             CheckError::limit(phase, "work", self.limits.max_work, None)
         }
     }
+    pub(crate) fn begin_query_work(&mut self) {
+        if self.limits.completion_sizes.is_some() {
+            self.query_work = Some(Default::default());
+        }
+    }
+    pub(crate) fn query_work(&self) -> std::collections::BTreeMap<&'static str, usize> {
+        self.query_work
+            .as_ref()
+            .map(|q| q.snapshot())
+            .unwrap_or_default()
+    }
     pub fn used(&self) -> usize {
         self.work
     }
@@ -511,6 +524,9 @@ impl<'a> Budget<'a> {
         }
         if let Some(monitor) = &mut self.preparation_work {
             monitor.charge(amount, phase);
+        }
+        if let Some(monitor) = &mut self.query_work {
+            monitor.charge(phase, amount);
         }
         #[cfg(any(test, feature = "test-support"))]
         if let Some(profile) = &mut self.profile {

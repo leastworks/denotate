@@ -3,6 +3,7 @@
 use super::*;
 use queries::{Run, checked_assignment};
 
+mod consistency;
 mod existence;
 pub mod planning;
 mod validation;
@@ -998,7 +999,9 @@ impl Engine {
                         let mut retained = 0;
                         let mut previous: Option<Model> = None;
                         let mut queried = false;
-                        for part in &mut property.parts {
+                        let part_count = property.parts.len();
+                        let mut failures = 0;
+                        for (part_index, part) in property.parts.iter_mut().enumerate() {
                             solver.run.budget.tick("completion property tuples")?;
                             // A validated interpretation may witness several
                             // empty failures. Reusing it asserts presence only;
@@ -1033,6 +1036,13 @@ impl Engine {
                                 if retained < options.max_examples {
                                     part.example = Some(model);
                                     retained += 1;
+                                }
+                                failures += 1;
+                                if failures >= options.max_failures.max(1)
+                                    && part_index + 1 < part_count
+                                {
+                                    property.failures_truncated = true;
+                                    break;
                                 }
                             }
                         }

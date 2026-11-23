@@ -107,9 +107,20 @@ impl CheckingProgress {
     }
     pub(crate) fn completion_existence(&self, stats: &crate::CompletionExistenceStats) {
         if let Some(s) = &self.0 {
-            s.current.lock().unwrap().target =
-                Some(CheckingTarget::CompletionExistence(stats.clone()));
-            self.emit("progress", false);
+            let mut frame = s.current.lock().unwrap();
+            let changed = match &frame.target {
+                Some(CheckingTarget::CompletionExistence(previous)) => {
+                    previous
+                        .current_component
+                        .as_ref()
+                        .map(|c| (c.index, c.state))
+                        != stats.current_component.as_ref().map(|c| (c.index, c.state))
+                }
+                _ => true,
+            };
+            frame.target = Some(CheckingTarget::CompletionExistence(stats.clone()));
+            drop(frame);
+            self.emit("progress", changed);
         }
     }
     pub(crate) fn completion_size(

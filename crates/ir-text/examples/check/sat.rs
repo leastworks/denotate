@@ -74,10 +74,16 @@ pub(super) fn run(
         .obligations()
         .map(|o| (o.id, o.name.clone()))
         .collect::<std::collections::BTreeMap<_, _>>();
+    let component_names = presentation::diagnostic_names(&p.corpus);
     let observer = trace.clone();
     limits.progress = denotate_check::CheckingProgress::new(move |e| {
         if let Some(denotate_check::CheckingTarget::CompletionExistence(ref stats)) = e.target {
             observer.message(format!("{} {}: components {}/{}, fallback {}, rounds {}, cubes {}, pins {} (max {}), validation work {}, lifted {}/{}",e.stage,e.state,stats.total_components,stats.components,stats.fallback_components,stats.rounds,stats.cubes,stats.pins,stats.max_pins,stats.validation_work,stats.lifted_pins,stats.lifting_attempts));
+            if let Some(c) = &stats.current_component {
+                observer.message(format!("  component {} {}: {} atoms, {} rules, {} boundary atoms, {} odd-cycle SCCs ({} atoms); relations {}{}",c.index,c.state,c.atoms,c.rules,c.boundary,if c.state=="analysing"{"pending".into()}else{c.odd_components.to_string()},if c.state=="analysing"{"pending".into()}else{c.odd_atoms.to_string()},
+                    c.relations.iter().map(|r| component_names((*r).into())).collect::<Vec<_>>().join(", "),
+                    if c.relation_count>c.relations.len(){format!(" (+{} more)",c.relation_count-c.relations.len())}else{String::new()}));
+            }
         }
         if let Some(denotate_check::CheckingTarget::SatExistence(ref stats)) = e.target {
             observer.message(format!(
@@ -523,6 +529,15 @@ fn write_completion_sizes(
         for search in sizes["searches"].as_array().unwrap() {
             let e = &search["existence"];
             writeln!(output,"  search progress {}: total components {}/{}, fallback {}, rounds {}, cubes {}, pins {} (max {}), validation work {}, lifted {}/{}",search["phase"],e["totalComponents"],e["components"],e["fallbackComponents"],e["rounds"],e["cubes"],e["pins"],e["maxPins"],e["validationWork"],e["liftedPins"],e["liftingAttempts"]).unwrap();
+            writeln!(
+                output,
+                "    cumulative query work by operation: {}",
+                search["workByPhase"]
+            )
+            .unwrap();
+            for c in e["componentDetails"].as_array().into_iter().flatten() {
+                writeln!(output, "    component {} {}: {} atoms, {} rules, {} boundary, {} odd-cycle SCCs; relations {}", c["index"],c["state"],c["atoms"],c["rules"],c["boundary"],c["oddComponents"],c["relations"]).unwrap();
+            }
             for e in search["encodingDetails"].as_array().unwrap() {
                 writeln!(output, "  encoding {} / {} (complete={}): {} inputs; folded {} true, {} false; {} variables, {} clauses", search["phase"], e["purpose"], e["complete"], e["inputAtoms"], e["foldedTrue"], e["foldedFalse"], e["variables"], e["clauses"]).unwrap();
             }
@@ -663,6 +678,10 @@ pub(super) fn completion_inner(
         max_worlds: check.max_worlds,
         max_tuples: check.max_tuples,
         max_examples: match check.examples {
+            denotate_check::EmptinessExamples::Limited(n) => n.get(),
+            denotate_check::EmptinessExamples::All => usize::MAX,
+        },
+        max_failures: match check.examples {
             denotate_check::EmptinessExamples::Limited(n) => n.get(),
             denotate_check::EmptinessExamples::All => usize::MAX,
         },

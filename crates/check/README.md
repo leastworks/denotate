@@ -1350,3 +1350,17 @@ classification exclusions alone are shared. A prior validated model can witness
 another `empty` tuple. Each part retains its SAT allowances, while work, physical
 CNF retention and deadlines remain bounded across the whole obligation. Model
 caches and reader indexes are invocation-local and never survive preparation edits.
+
+Completion existence now tries call-consistency first: signed SCCs without an odd
+negation cycle are total for every boundary assignment. Remaining search is confined
+to odd-cycle cores and their providers. Input-relative signed graph certificates
+may generalize a cube without fixing derived values; they complement, rather than
+replace, the existing model certificates. Local non-totality still requires the
+upstream W/context query before reporting a no-meaning observation.
+
+`CompletionSearchSize.work_by_phase` separates cumulative query costs from the
+operation at which an allowance ran out. `CompletionExistenceStats` retains bounded
+component details and a current component during search, including parity conflicts.
+`CheckOptions.max_failures` bounds completion failure triage separately from retained
+examples. `ObligationResult.failures_truncated` makes counts lower bounds; a confirmed
+failure can be complete as a verdict without enumerating all failed parts.

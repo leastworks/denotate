@@ -490,7 +490,15 @@ fn one_property_encoding_handles_many_parts_without_pooling_the_old_sat_allowanc
     .unwrap() else {
         panic!()
     };
-    let r = e.check(&p.keys, &CheckOptions::default()).unwrap();
+    let r = e
+        .check(
+            &p.keys,
+            &CheckOptions {
+                max_failures: usize::MAX,
+                ..Default::default()
+            },
+        )
+        .unwrap();
     let o = r.obligations.values().next().unwrap();
     assert!(o.complete());
     assert!(o.parts.iter().all(|p| p.failed));
@@ -522,4 +530,61 @@ fn reused_uniqueness_groups_do_not_keep_previous_group_constraints() {
     assert!(o.complete());
     assert_eq!(o.parts.iter().filter(|p| p.failed).count(), 1);
     assert!(o.parts.iter().any(|p| !p.failed));
+}
+
+#[test]
+fn bounded_failure_triage_is_a_decided_failure_with_a_lower_bound_and_other_checks_continue() {
+    let facts = (0..12).map(|i| format!("bad(a{i});")).collect::<String>();
+    let names = (0..12)
+        .map(|i| format!("a{i}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let text = format!(
+        "sort S; const {names}:S; relation bad(x:S); {facts} relation safe(); obligation first:empty(bad); obligation last:empty(safe); verification v{{semantics:completion;assumptions:[];obligations:[first,last];}}"
+    );
+    for cap in [0, 2, 12, usize::MAX] {
+        let (p, r) = checked(
+            &text,
+            CheckOptions {
+                max_failures: cap,
+                max_examples: 0,
+                ..Default::default()
+            },
+        );
+        assert!(!r.is_incomplete());
+        assert!(r.has_failures());
+        let bad = p
+            .corpus
+            .obligations()
+            .find(|o| o.name == "first")
+            .unwrap()
+            .id;
+        let safe = p
+            .corpus
+            .obligations()
+            .find(|o| o.name == "last")
+            .unwrap()
+            .id;
+        assert!(r.obligations[&safe].complete());
+        assert!(!r.obligations[&safe].failed());
+        let o = &r.obligations[&bad];
+        assert!(o.complete());
+        assert_eq!(
+            o.parts.iter().filter(|p| p.failed).count(),
+            cap.max(1).min(12)
+        );
+        assert_eq!(o.failures_truncated, cap.max(1) < 12);
+        let shown = presentation::present_completion(&p, &r).unwrap();
+        let row = shown.status["obligations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|o| o["name"] == "first")
+            .unwrap();
+        assert_eq!(row["state"], "counterexample");
+        assert_eq!(
+            row["failureCountKind"],
+            if cap.max(1) < 12 { "at-least" } else { "exact" }
+        );
+    }
 }

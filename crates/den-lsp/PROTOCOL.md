@@ -1320,3 +1320,12 @@ are not stable replay evidence or an editor capability switch.
   `outside` atoms. There is one bounded example per source rule, without a removal
   edit. `advisories.deadProducers` uses the same state vocabulary as circular support;
   its exhaustion is advisory only.
+
+Completion SAT summaries distinguish a decided obligation from exhaustive failure
+triage: `failureCountKind` is `exact` or `at-least`, and
+`failureEnumerationComplete` is false when the confirmed-failure cap stopped triage.
+`complete: true` can accompany a counterexample and a lower-bound count; this means
+the verdict is decided, not that every failing tuple/group was enumerated. Such
+stopping adds no inconclusive finding. Completion-model evidence uses `countKind: "at-least"` and the diagnostic notes that further failures may exist. Finding
+identities are unchanged. These fields describe the shared completion presenter;
+the .den editor's separate completion integration is still pending.

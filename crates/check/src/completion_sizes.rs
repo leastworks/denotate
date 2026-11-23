@@ -46,9 +46,26 @@ pub struct CompletionEncodingSize {
     pub variables: usize,
     pub clauses: usize,
 }
+#[derive(Debug, Clone, Default)]
+pub struct CompletionComponentStats {
+    pub index: usize,
+    pub atoms: usize,
+    pub rules: usize,
+    pub boundary: usize,
+    pub relations: Vec<RelationId>,
+    pub relation_count: usize,
+    /// Number of signed SCCs with a parity conflict, not an enumeration of cycles.
+    pub odd_components: usize,
+    pub odd_atoms: usize,
+    pub state: &'static str,
+}
+
 /// Operational observations, not proof evidence or policy thresholds.
 #[derive(Debug, Clone, Default)]
 pub struct CompletionExistenceStats {
+    pub current_component: Option<CompletionComponentStats>,
+    pub component_details: Vec<CompletionComponentStats>,
+    pub omitted_components: usize,
     pub components: usize,
     pub total_components: usize,
     pub fallback_components: usize,
@@ -67,6 +84,7 @@ pub struct CompletionSearchSize {
     /// Query-scope work including construction; unavailable if construction failed
     /// before a Run existed. Nested query scopes may overlap; do not sum them.
     pub work: Option<usize>,
+    pub work_by_phase: BTreeMap<&'static str, usize>,
     pub phase: &'static str,
     pub variables: usize,
     pub clauses: usize,
@@ -218,5 +236,39 @@ impl CompletionSizes {
         } else {
             s.omitted_searches += 1;
         }
+    }
+}
+
+/// Optional query accounting: static-string identity in the hot path, text only
+/// when publishing. No string-keyed tree lookup per work unit.
+#[derive(Default)]
+pub(crate) struct QueryWork {
+    phases: Vec<(&'static str, usize)>,
+    ids: HashMap<(usize, usize), usize>,
+    cache: [(usize, usize, usize); 8],
+    next: usize,
+}
+impl QueryWork {
+    pub fn charge(&mut self, phase: &'static str, amount: usize) {
+        let key = (phase.as_ptr() as usize, phase.len());
+        let id = if let Some((_, _, id)) = self.cache.iter().find(|(p, n, _)| (*p, *n) == key) {
+            *id
+        } else {
+            let id = *self.ids.entry(key).or_insert_with(|| {
+                self.phases.push((phase, 0));
+                self.phases.len() - 1
+            });
+            self.cache[self.next] = (key.0, key.1, id);
+            self.next = (self.next + 1) % self.cache.len();
+            id
+        };
+        self.phases[id].1 += amount;
+    }
+    pub fn snapshot(&self) -> BTreeMap<&'static str, usize> {
+        let mut out = BTreeMap::new();
+        for &(p, n) in &self.phases {
+            *out.entry(p).or_default() += n;
+        }
+        out
     }
 }

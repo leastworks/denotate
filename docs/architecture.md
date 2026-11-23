@@ -659,3 +659,11 @@ new assignments with prior independently checked assignments and revisit affecte
 original rules. Property parts share W/equations but pass their own target conditions
 as SAT assumptions. No helper assignment, part condition or validation cache leaks
 into another property, verification, path context or edited preparation.
+
+Completion totality certificates are query-local signed-graph analyses. They certify
+existence for every boundary assignment, independently of W/H and decision projection.
+Only odd-cycle cores and their providers need boundary search; a local failure is
+resolved against upstream equations before it becomes a semantic no-meaning finding.
+Guarding cubes preserve a signed component ordering/colouring while allowing derived
+values to vary. Model cubes still preserve one assignment. The two certificates must
+not share an equation-lifting step, since that step fixes derived values.

@@ -121,7 +121,7 @@ fn known_failure_survives_an_independent_search_cutoff() {
     let p = rel(&mut c, "p", false);
     let q = rel(&mut c, "q", false);
     let bad = rel(&mut c, "bad", false);
-    rule(&mut c, p, &[(q, true), (i, false)]);
+    rule(&mut c, p, &[(p, true), (i, false)]);
     rule(&mut c, q, &[(p, true)]);
     rule(&mut c, bad, &[]);
     let o = c.empty("clean", bad, "").unwrap();
@@ -263,10 +263,10 @@ fn complementary_producers_lift_a_boundary_pin_without_losing_models() {
     let i = rel(&mut c, "i", true);
     let p = rel(&mut c, "p", false);
     let q = rel(&mut c, "q", false);
-    rule(&mut c, p, &[(q, true), (i, false)]);
-    rule(&mut c, p, &[(q, true), (i, true)]);
-    rule(&mut c, q, &[(p, true), (i, false)]);
-    rule(&mut c, q, &[(p, true), (i, true)]);
+    rule(&mut c, p, &[(p, true)]);
+    rule(&mut c, p, &[(i, false)]);
+    rule(&mut c, p, &[(i, true)]);
+    rule(&mut c, q, &[(p, false)]);
     let v = verification(&mut c, None, &[]);
     let mut e = prepare(&c, v, &Domains::new());
     let sizes = crate::CompletionSizes::default();
@@ -316,8 +316,11 @@ fn component_proofs_share_the_search_candidate_allowance() {
     for suffix in ["a", "b"] {
         let p = rel(&mut c, &format!("p_{suffix}"), false);
         let q = rel(&mut c, &format!("q_{suffix}"), false);
-        rule(&mut c, p, &[(q, true)]);
-        rule(&mut c, q, &[(p, true)]);
+        let i = rel(&mut c, &format!("i_{suffix}"), true);
+        rule(&mut c, p, &[(p, true)]);
+        rule(&mut c, p, &[(i, false)]);
+        rule(&mut c, p, &[(i, true)]);
+        rule(&mut c, q, &[(p, false)]);
     }
     let v = verification(&mut c, None, &[]);
     let e = prepare(&c, v, &Domains::new());
@@ -374,4 +377,61 @@ fn eligibility_lifts_many_irrelevant_pins_within_one_candidate_round() {
         .check(&keys(&c), &options)
         .unwrap();
     assert!(!fresh.is_incomplete());
+}
+
+#[test]
+fn call_consistent_components_need_no_boundary_enumeration_and_report_their_shape() {
+    let mut c = Corpus::new();
+    let p = rel(&mut c, "left", false);
+    let q = rel(&mut c, "right", false);
+    for n in 0..80 {
+        let i = rel(&mut c, &format!("guard{n}"), true);
+        rule(&mut c, p, &[(q, true), (i, false)]);
+    }
+    rule(&mut c, q, &[(p, true)]);
+    let v = verification(&mut c, None, &[]);
+    let mut e = prepare(&c, v, &Domains::new());
+    let sizes = crate::CompletionSizes::default();
+    e.limits.completion_sizes = Some(sizes.clone());
+    let events = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let observed = events.clone();
+    e.limits.progress = crate::CheckingProgress::new(move |event| {
+        if let Some(crate::CheckingTarget::CompletionExistence(s)) = event.target {
+            if let Some(c) = s.current_component {
+                observed.lock().unwrap().push(c);
+            }
+        }
+    });
+    let options = CheckOptions {
+        max_worlds: 0,
+        ..Default::default()
+    };
+    let first = e.check(&keys(&c), &options).unwrap();
+    let again = e.check(&keys(&c), &options).unwrap();
+    let fresh = prepare(&c, v, &Domains::new())
+        .check(&keys(&c), &options)
+        .unwrap();
+    same_report(&first, &again);
+    same_report(&first, &fresh);
+    assert!(matches!(first.meaning.no_meaning, Search::None));
+    let events = events.lock().unwrap();
+    assert!(events.iter().any(|c| c.state == "analysing"));
+    assert!(events.iter().any(|c| c.state == "total"
+        && c.odd_components == 0
+        && c.boundary == 80
+        && c.relations.contains(&p)
+        && c.relations.contains(&q)));
+    let snapshot = sizes.snapshot();
+    for search in snapshot.searches {
+        assert_eq!(search.work, Some(search.work_by_phase.values().sum()));
+        if search.phase == "completion processing existence" {
+            assert!(
+                !search
+                    .encoding_details
+                    .iter()
+                    .any(|e| e.purpose == "component-totality"),
+                "parity proof must precede SAT totality search"
+            );
+        }
+    }
 }

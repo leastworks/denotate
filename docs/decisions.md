@@ -2099,3 +2099,44 @@ An existing certified interpretation can witness another present tuple for `empt
 it cannot prove absence. Per-part SAT solve/poll/conflict/propagation allowances are
 preserved using fresh counter windows. The enclosing work allowance, physical CNF
 limits, cancellation and deadline never restart.
+
+## Completion totality uses signed components before boundary enumeration
+
+A finite equation component with no odd-negation cycle has a completion model for
+any assignment of its boundary atoms. Label each signed SCC with two colours so a
+positive edge preserves colour and a negative edge flips it. Complementing the
+atoms in one colour makes the component's equations monotone (including when the
+head is complemented, by De Morgan). A finite monotone Boolean map has a fixed
+point. Compose components in dependency order. This proves existence, not a unique
+answer, and uses neither W nor H. Inputs and fixed facts may remove rules or edges;
+they cannot invalidate the argument for a component already certified this way.
+
+The checker computes signed SCCs and parity labels in linear graph work. Search
+retains only parity-inconsistent SCCs and their upstream dependencies; downstream
+call-consistent components can always extend a model of that retained part. An
+impossible local boundary assignment is not a no-meaning finding: the ordinary
+upstream-cone query must still establish its reachability in W, with the existing
+classification/processing contexts.
+
+Within a searched core, input substitution may remove its odd cycles. A guarding
+cube keeps false only the producers that could violate the resulting signed
+component ordering or colouring. Other rules may switch on and off, and derived
+values may change. This is an existence certificate, not a frozen interpretation.
+The checker keeps the existing model-cube route too and selects the smaller cube;
+equation lifting, which freezes derived values, is never applied to a structural
+cube. This avoids turning a broad model certificate into many narrow guard cubes.
+
+## A decided completion failure does not require exhaustive failure enumeration
+
+Completion obligation checking stops after a bounded number of distinct failed
+parts. The Rust API has separate `max_failures` (default eight) and `max_examples`
+controls; the CLI uses its existing `--empty-examples N|all` selection for both
+(default three). At least one failure is required before early stopping, even when
+an API caller sets a zero cap. `all` requests continued triage under ordinary query
+limits. Other obligations still run, using the remaining shared time.
+
+A confirmed failure decides the obligation even when additional failures have not
+been enumerated. Early stopping is recorded as `failures_truncated`, not a solver
+exhaustion. The failure count is a lower bound, and presentation says more may exist.
+Incomplete input contracts, unavailable property kinds and actual query exhaustion
+remain incomplete as before. Finding identities and stable/BDD checking are unchanged.
