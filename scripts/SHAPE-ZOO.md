@@ -435,3 +435,12 @@ a known guarded negative self-edge beside the family's existing loops. It is
 deliberately not a valid lowerer pattern. The zoo regression checks the closed
 odd witness, its guard and its exact source line in size JSON, live CLI progress
 and verbose human output. The default remains `--schema-odd 0`.
+
+`guarded-schema --schema-typecut 1` introduces an exactly-one `format_tag` input
+and a two-atom odd classification loop per format. Selecting the format tag
+settles that loop by Fitting propagation. The existing workload may still contain
+other ambiguities or no-meaning regions; this is a split regression, not a promise
+that the complete generated program is valid. The default is zero. Compare the
+same shape with splits off and with `-- --completion-split-depth 2`;
+`--completion-split-branches N` bounds the partition (default 512).
+Reports retain split choices, child outcomes, cutoffs and per-unit work/time.

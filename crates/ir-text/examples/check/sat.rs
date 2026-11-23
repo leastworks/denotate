@@ -11,6 +11,8 @@ pub(super) fn run(
     query: QueryLimits,
     mut check: CheckOptions,
     prune: bool,
+    split_depth: usize,
+    split_branches: usize,
     circular_support: bool,
     dead_producers: bool,
     full_models: bool,
@@ -77,6 +79,7 @@ pub(super) fn run(
         .collect::<std::collections::BTreeMap<_, _>>();
     let component_names = presentation::diagnostic_names(&p.corpus);
     let observer = trace.clone();
+    let branch_text = denotate_ir_text::completion_output::branch_formatter(p);
     let pruning_text = denotate_ir_text::completion_output::pruning_formatter(p);
     let odd = (trace.is_enabled()
         && p.corpus
@@ -86,6 +89,9 @@ pub(super) fn run(
     let shown_odd =
         std::sync::Mutex::new(None::<std::sync::Arc<denotate_check::CompletionOddExplanation>>);
     limits.progress = denotate_check::CheckingProgress::new(move |e| {
+        if let Some(denotate_check::CheckingTarget::CompletionBranch(ref stats)) = e.target {
+            observer.message(branch_text(stats));
+        }
         if let Some(denotate_check::CheckingTarget::CompletionPruning(ref stats)) = e.target {
             observer.message(pruning_text(stats));
         }
@@ -163,7 +169,8 @@ pub(super) fn run(
         if !matches!(
             e.target,
             Some(
-                denotate_check::CheckingTarget::CompletionPruning(_)
+                denotate_check::CheckingTarget::CompletionBranch(_)
+                    | denotate_check::CheckingTarget::CompletionPruning(_)
                     | denotate_check::CheckingTarget::SatExistence(_)
                     | denotate_check::CheckingTarget::SatUniqueness(_)
                     | denotate_check::CheckingTarget::CompletionSize { .. }
@@ -207,6 +214,8 @@ pub(super) fn run(
                 &query,
                 &check,
                 prune,
+                split_depth,
+                split_branches,
                 circular_support,
                 dead_producers,
                 full_models,
@@ -422,6 +431,8 @@ fn completion(
     query: &QueryLimits,
     check: &CheckOptions,
     prune: bool,
+    split_depth: usize,
+    split_branches: usize,
     circular_support: bool,
     dead_producers: bool,
     full_models: bool,
@@ -452,6 +463,8 @@ fn completion(
         query,
         check,
         prune,
+        split_depth,
+        split_branches,
         circular_support,
         dead_producers,
         full_models,
@@ -639,6 +652,8 @@ pub(super) fn completion_inner(
     query: &QueryLimits,
     check: &CheckOptions,
     prune: bool,
+    split_depth: usize,
+    split_branches: usize,
     circular_support: bool,
     dead_producers: bool,
     full_models: bool,
@@ -760,6 +775,8 @@ pub(super) fn completion_inner(
             denotate_check::EmptinessExamples::All => usize::MAX,
         },
         prune,
+        split_depth,
+        split_branches,
         circular_support,
         dead_producers,
         advisory_limits: check.attribution.clone(),
@@ -784,6 +801,26 @@ pub(super) fn completion_inner(
     if json {
         stream_results(s, output, flush)?;
     } else {
+        if report.branches.enabled {
+            writeln!(
+                output,
+                "Branch search: {} splits, {} leaves",
+                report.branches.splits, report.branches.leaves
+            )
+            .unwrap();
+            let format = denotate_ir_text::completion_output::branch_formatter(p);
+            for r in &report.branches.records {
+                writeln!(output, "{}", format(r)).unwrap();
+            }
+            if report.branches.omitted_records > 0 {
+                writeln!(
+                    output,
+                    "+{} branch records omitted",
+                    report.branches.omitted_records
+                )
+                .unwrap();
+            }
+        }
         if report.pruning.enabled {
             let text = denotate_ir_text::completion_output::pruning_formatter(p);
             for c in &report.pruning.components {

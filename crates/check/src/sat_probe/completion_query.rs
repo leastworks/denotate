@@ -24,6 +24,7 @@ mod symbolic;
 pub use advisory::*;
 pub use checking::*;
 pub use properties::*;
+pub use symbolic::branches::{BranchRecord, BranchReport};
 pub use symbolic::planning::*;
 #[cfg(test)]
 mod tests;
@@ -234,6 +235,7 @@ pub struct WorldQuery {
 #[derive(Clone)]
 pub struct Engine {
     pruning: Option<Arc<std::sync::Mutex<pruning::Cache>>>,
+    branches: Option<Arc<std::sync::Mutex<BranchReport>>>,
     program: Arc<GroundProgram>,
     original: Arc<crate::ground::OriginalDependencies>,
     assumptions: Arc<Vec<contracts::Assumption>>,
@@ -391,6 +393,7 @@ impl Engine {
         cone.groups.clear();
         Ok(Self {
             pruning: None,
+            branches: None,
             program: Arc::new(program),
             original,
             cone: Arc::new(cone),

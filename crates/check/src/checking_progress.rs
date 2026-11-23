@@ -9,6 +9,7 @@ use std::{
 
 #[derive(Debug, Clone)]
 pub enum CheckingTarget {
+    CompletionBranch(crate::completion_query::BranchRecord),
     CompletionPruning(crate::completion_query::PruningComponent),
     CompletionExistence(crate::CompletionExistenceStats),
     CompletionSize {
@@ -104,6 +105,13 @@ impl CheckingProgress {
             frame.target = Some(CheckingTarget::SatUniqueness(stats.clone()));
             drop(frame);
             self.emit("progress", first);
+        }
+    }
+    pub(crate) fn completion_branch(&self, record: &crate::completion_query::BranchRecord) {
+        if let Some(s) = &self.0 {
+            s.current.lock().unwrap().target =
+                Some(CheckingTarget::CompletionBranch(record.clone()));
+            self.emit("progress", true);
         }
     }
     pub(crate) fn completion_existence(&self, stats: &crate::CompletionExistenceStats) {

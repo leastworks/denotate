@@ -3,6 +3,7 @@
 use super::*;
 use queries::{Run, checked_assignment};
 
+pub(super) mod branches;
 mod consistency;
 mod determinacy;
 mod existence;
@@ -588,7 +589,18 @@ impl Engine {
         options: &CheckOptions,
         shares: usize,
     ) -> Result<Search<Pair>> {
-        self.symbolic_pair_in(&BTreeMap::new(), classification, unique, options, shares)
+        if options.split_depth == 0 {
+            return self.symbolic_pair_in(
+                &BTreeMap::new(),
+                classification,
+                unique,
+                options,
+                shares,
+            );
+        }
+        branches::run(self, classification, false, options, shares, |e, opts| {
+            e.symbolic_pair_in(&BTreeMap::new(), classification, unique, opts, 1)
+        })
     }
     fn symbolic_pair_in(
         &self,
@@ -730,7 +742,18 @@ impl Engine {
         options: &CheckOptions,
         shares: usize,
     ) -> Result<Search<Observation>> {
-        self.symbolic_no_meaning_in(&BTreeMap::new(), classification, unique, options, shares)
+        if options.split_depth == 0 {
+            return self.symbolic_no_meaning_in(
+                &BTreeMap::new(),
+                classification,
+                unique,
+                options,
+                shares,
+            );
+        }
+        branches::run(self, classification, true, options, shares, |e, opts| {
+            e.symbolic_no_meaning_in(&BTreeMap::new(), classification, unique, opts, 1)
+        })
     }
     fn symbolic_no_meaning_in(
         &self,
@@ -1033,15 +1056,23 @@ impl Engine {
     /// particular, a processing contradiction never filters the input universe
     /// or the original classification query.
     pub fn check(&self, keys: &SemanticKeys, options: &CheckOptions) -> Result<Report> {
-        if !options.prune {
+        if !options.prune && options.split_depth == 0 {
             return self.check_unpruned(keys, options);
         }
         let mut invocation = self.clone();
         let cache = Arc::new(std::sync::Mutex::new(pruning::Cache::default()));
-        invocation.pruning = Some(cache.clone());
+        if options.prune {
+            invocation.pruning = Some(cache.clone());
+        }
+        let branches = Arc::new(std::sync::Mutex::new(BranchReport::default()));
+        if options.split_depth > 0 {
+            invocation.branches = Some(branches.clone());
+        }
         let mut report = invocation.check_unpruned(keys, options)?;
         report.pruning = cache.lock().unwrap().report.clone();
-        report.pruning.enabled = true;
+        report.pruning.enabled = options.prune;
+        report.branches = branches.lock().unwrap().clone();
+        report.branches.enabled = options.split_depth > 0;
         Ok(report)
     }
     pub(super) fn check_unpruned(
@@ -1056,6 +1087,7 @@ impl Engine {
         }
         let mut report = Report {
             pruning: Default::default(),
+            branches: Default::default(),
             verification: self.verification,
             hypothesis: self.hypothesis,
             decisions: self.decisions.clone(),

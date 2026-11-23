@@ -1,6 +1,7 @@
 use super::*;
 use crate::test_support::rewrites::{atom, rel, rule};
 use denotate_ir::*;
+mod branches;
 mod contracts;
 mod determinacy;
 mod pruning;

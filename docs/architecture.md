@@ -690,3 +690,13 @@ prepared cones and assumption metadata are shared when creating the invocation.
 Classification no-meaning uses the H view to cover accepted observations before
 trying the W-only view on an observation with no H interpretation. These proofs
 and caches are separate from the availability planner and stable checking.
+
+Completion input partitions are opt-in (`CheckOptions::split_depth > 0`). The driver
+creates invocation-local units from immutable preparation plus explicit input pins.
+Each unit owns its specialized cones, solver, allowances and measurement sink; no
+branch-specific pruning cache is shared. Fitting may substitute values but cannot
+change the frozen classification/property scopes. Child allowances partition the
+remaining parent allowance, and combining results preserves confirmed failures
+and unknown children. The implementation runs sequentially and does not persist
+units; any future cross-edit cache must replace invocation-local handles with
+semantic keys and include equations, scope, W/context, pins and configuration.

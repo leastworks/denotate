@@ -53,6 +53,9 @@ pub struct Meaning {
 pub struct CheckOptions {
     /// Opt-in common-equations pruning and H-first classification existence.
     pub prune: bool,
+    /// Input-partition depth; zero preserves the unsplit query path.
+    pub split_depth: usize,
+    pub split_branches: usize,
     pub meaning: MeaningMode,
     /// Candidate observations per symbolic search; a cube may cover many worlds.
     pub max_worlds: usize,
@@ -69,6 +72,8 @@ impl Default for CheckOptions {
     fn default() -> Self {
         Self {
             prune: false,
+            split_depth: 0,
+            split_branches: 512,
             meaning: MeaningMode::Full,
             max_worlds: 1024,
             max_tuples: 10000,
@@ -83,6 +88,7 @@ impl Default for CheckOptions {
 #[derive(Debug)]
 pub struct Report {
     pub pruning: PruningReport,
+    pub branches: BranchReport,
     pub verification: VerificationId,
     pub hypothesis: Option<RelationId>,
     pub decisions: Option<BTreeSet<RelationId>>,
@@ -181,6 +187,7 @@ impl Engine {
         }
         let mut report = Report {
             pruning: Default::default(),
+            branches: Default::default(),
             verification: self.verification,
             hypothesis: self.hypothesis,
             decisions: self.decisions.clone(),

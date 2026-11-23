@@ -230,3 +230,52 @@ pub fn pruning_formatter(
         text
     }
 }
+
+pub fn branch_line(c: &denotate_check::completion_query::BranchRecord) -> String {
+    let mut line = format!(
+        "{} branch depth {}: {}, {} children, {} work, {:.3}s",
+        c.phase,
+        c.depth,
+        c.state,
+        c.children,
+        c.work,
+        c.elapsed.as_secs_f64()
+    );
+    if let Some(c) = c.cutoff {
+        line.push_str(&format!(
+            "; {}",
+            denotate_presentation::exhaustion_text(c.phase, c.resource, c.details)
+        ));
+    }
+    line
+}
+
+pub fn branch_formatter(
+    p: &LoadedProgram,
+) -> impl Fn(&denotate_check::completion_query::BranchRecord) -> String + Send + Sync + use<> {
+    let names = crate::presentation::diagnostic_names(&p.corpus);
+    move |c| {
+        let mut line = branch_line(c);
+        if let Some(group) = &c.split {
+            line.push_str(&format!(
+                "; split group {}, {} guarded edges",
+                crate::progress::atom_text(group, &names),
+                c.guarded_edges
+            ));
+        }
+        if !c.pins.is_empty() {
+            line.push_str("; inputs ");
+            line.push_str(
+                &c.pins
+                    .iter()
+                    .map(|(a, v)| format!("{}={v}", crate::progress::atom_text(a, &names)))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            );
+            if c.omitted_pins > 0 {
+                line.push_str(&format!(" (+{} pins)", c.omitted_pins));
+            }
+        }
+        line
+    }
+}

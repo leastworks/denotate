@@ -680,6 +680,12 @@ impl AdmissionDetails<'_> {
                 Some(denotate_check::CheckingTarget::SatUniqueness(s)) => {
                     Some(denotate_presentation::stable_uniqueness_stats(&s))
                 }
+                Some(denotate_check::CheckingTarget::CompletionBranch(s)) => Some(
+                    denotate_presentation::completion_branch_record(&s, |a| {
+                        Ok(json!(atom_text(a, &*names)))
+                    })
+                    .unwrap(),
+                ),
                 Some(denotate_check::CheckingTarget::CompletionPruning(s)) => Some(
                     denotate_presentation::completion_pruning_component(&s, |a| {
                         Ok(json!(atom_text(a, &*names)))

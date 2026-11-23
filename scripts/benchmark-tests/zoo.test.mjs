@@ -396,3 +396,28 @@ test('guarded schema identifies its known odd edge, rule location and disabling 
     assert.throws(()=>guardedSchema({odd:2}));
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('guarded schema type-field partition preserves verdicts and reports branch propagation',async()=>{
+  const {guardedSchema}=await import('../guarded-schema.mjs');
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-type-cut-'));
+  try {
+    const schema={depth:1,fanout:1,stmts:1,triggers:0,outs:1,values:1,self:0,typecut:1};
+    const outcomes=[];
+    for(const enabled of [false,true]) {
+      const out=path.join(root,enabled?'on':'off');
+      run({out,binary:'target/debug/examples/bench_schema',family:['guarded-schema'],sizes:[2],repeat:1,schema,
+        limits:enabled?['--completion-split-depth','2','--completion-split-branches','16']:[]});
+      const r=JSON.parse(fs.readFileSync(path.join(out,'guarded-schema-2-0','report.json'),'utf8'));
+      assert.equal(r.checkerFinished,true);
+      outcomes.push(r);
+    }
+    const [before,after]=outcomes;
+    assert.equal(after.checkerExitCode,before.checkerExitCode);
+    const [a,b]=outcomes.map(r=>r.outcomes[0]);
+    assert.equal(b.state,a.state);assert.equal(b.hasFailures,a.hasFailures);
+    assert.ok(b.branches.splits>0);
+    assert.ok(b.branches.records.some(r=>r.state==='proved'&&r.depth>0));
+    assert.ok(b.branches.records.filter(r=>r.state==='split').every(r=>r.children===2));
+    assert.throws(()=>guardedSchema({typecut:2}));
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});

@@ -332,6 +332,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
                 (
                     sink,
                     crate::CompletionSearchSize {
+                        branch_depth: None,
                         existence: Default::default(),
                         elapsed: Duration::ZERO,
                         work: None,
@@ -606,6 +607,31 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         self.cnf = original;
         let validation_work = validation_started.map_or(0, |start| self.budget.used() - start);
         (result, variables, clauses, validation_work)
+    }
+
+    pub(super) fn usage(&self) -> QueryLimits {
+        QueryLimits {
+            max_solves: self.solves,
+            max_solver_polls: self
+                .cnf
+                .solver
+                .cb()
+                .polls
+                .as_ref()
+                .map_or(0, |p| p.used.get()),
+            max_conflicts: self
+                .cnf
+                .solver
+                .num_conflicts()
+                .saturating_add(self.retired_conflicts)
+                .saturating_sub(self.conflict_base),
+            max_propagations: self
+                .cnf
+                .solver
+                .num_propagations()
+                .saturating_add(self.retired_propagations)
+                .saturating_sub(self.propagation_base),
+        }
     }
 
     pub(super) fn raw_solve(&mut self, pins: &[Lit]) -> Result<bool> {

@@ -1421,3 +1421,21 @@ the same fields under `target.kind: completion-pruning`; optional cutoffs are al
 printed in ordinary CLI output. These are optimization records, not semantic
 findings. Determinacy search statistics add `coupledFallbackSkipped`, true only when
 all original downstream closures were proved disjoint and the coupled query omitted.
+
+Opt-in completion partitions (`--completion-split-depth N`, API
+`CheckOptions::split_depth`) add a `branches` object to CLI JSON status:
+`splits`, `leaves`, `records` (at most 256), `omittedRecords`.
+Each record has `kind: "completion-branch"`, `phase`, `depth`, `state`
+(`preparing`, `split`, `searching`, `proved`, `counterexample`, `inconclusive`),
+`pins` (up to 32 atom/value pairs), `omittedPins`, nullable `split`
+(a representative tuple of the selected group), `children`, `guardedEdges`,
+`work`, `elapsedMs` and nullable `cutoff`. Positive pins precede false pins in
+bounded output so the selected value is visible. `guardedEdges` is a structural
+ranking score, not a count of proven edge removals. `proved` means no failure for
+that question in that branch; it is not the whole verification verdict.
+
+Progress carries these fields in `target`; final records retain split and terminal
+states. Completion search-size records add nullable `branchDepth` to identify unit
+queries. These records are telemetry, not finding identities or proof evidence.
+Branch data is absent when splitting is disabled. Editor completion-checking
+integration remains pending; this does not add an editor setting.

@@ -6,6 +6,25 @@ Settled design choices and why they were made. Current behavior is specified in 
 alternatives that were rejected. Revisit a decision only with new evidence, such as a
 real program that the current choice serves badly.
 
+## Completion splits partition inputs, not definitions
+
+Bounded completion branch search starts opt-in. Only declared input exactly-one
+groups or selected input-only exactly-one assumptions justify excluding absent
+and multi-value cases. A proved obligation is not silently promoted to an
+assumption. The permitted domain W is the disjoint union of W restricted to
+each choice. Searching every part therefore preserves existence of a failing
+observation and universal absence of one. Within each partition, Fitting substitutions are
+exact for completion equations; parity proves existence, while a separate local
+pair query is needed for uniqueness. Unknown branches cannot establish a universal
+result, and confirmed failures survive another branch's cutoff.
+
+Each branch owns its specialized cones and solver allowances. Work/query limits
+are divided, not multiplied by the number of children. The original scopes and
+W/H distinction stay intact. Branch-specific SAT pruning proofs are deferred
+until their context can be recorded and reused safely; no mutable pruning cache
+crosses a branch boundary. Default depth zero preserves the existing query path
+while real programs compare the optional strategy.
+
 ## Rejection needs a classification interpretation without the hypothesis
 
 An empty answer under H is not enough to establish rejection: the classification

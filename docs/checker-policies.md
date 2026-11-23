@@ -1972,3 +1972,42 @@ candidate component's downstream closure is disjoint. To keep this add-on cheap,
 it declines scopes with more than 100,000 atoms plus rules plus body occurrences,
 or insufficient remaining work for its charged traversal. Declining leaves the
 existing coupled query in place; this is not a corpus-scale optimization yet.
+
+### Completion input partitions
+
+Input splitting is opt-in: `CheckOptions::split_depth` /
+`--completion-split-depth`, default zero. `split_branches` /
+`--completion-split-branches` defaults to 512 terminal partitions per question.
+A smaller cap than a candidate group's value count declines that split; reaching
+a depth or leaf bound uses the existing residual search. No input choices are
+silently dropped.
+
+Ranking uses structural reachability from input groups to guard literals on odd
+or independently non-unique component edges. It counts distinct guarded edges,
+not guaranteed disabled edges. Only declared and selected input-only exactly-one
+groups qualify; derived cardinality and unchecked obligations supply no partition
+certificate. Fitting is rerun on the branch's full checking, W and classification
+cones. Local uniqueness for ranking is charged, with its query use subtracted
+before children or residual searches run.
+
+Traversal is breadth-first and deterministic. On a split, remaining work, solver
+allowances and observation rounds are divided evenly among children (integer
+remainder discarded). Pending units share the remaining phase deadline. There is
+no fresh full allowance per branch. A cutoff in any child prevents a universal
+success, while a confirmed counterexample can still be returned from another.
+Branch reports retain 256 records per invocation and 32 input pins per record,
+with omitted counts. Report caps never cap search completeness.
+
+This is provisional. Whole-cone Fitting and repeated local uniqueness discovery
+can cost more than splitting saves; pinned units currently use no SAT pruning
+cache. Measure the identical guarded-schema `--schema-typecut 1` workload with
+splits off/on before changing defaults. Cross-unit caching, parallelism and
+branch-context pruning proofs remain future work.
+
+The initial 275-format type-cut measurement (depth 2, default limits) did not
+improve checking: 84.6 s unsplit versus 99.8 s split, both incomplete. Four
+questions each partitioned into 275 leaves; all children exhausted their shares.
+Processing existence was conclusive only in the unsplit run; the same three
+obligation failures remained confirmed. This is evidence for keeping depth zero,
+not for increasing budgets. Reusing or narrowing branch preparation should precede
+any claim that wide partitions help the corpus.

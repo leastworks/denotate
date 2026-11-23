@@ -219,6 +219,8 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
         }
         if flag != "--input-order"
             && flag != "--engine"
+            && flag != "--completion-split-depth"
+            && flag != "--completion-split-branches"
             && !flag.starts_with("--sat-max-")
             && flag != "--sat-probe-timeout-ms"
             && flag != "--sat-probe-refinements"

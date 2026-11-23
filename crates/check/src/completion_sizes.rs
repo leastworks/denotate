@@ -92,6 +92,7 @@ pub struct CompletionExistenceStats {
 }
 #[derive(Debug, Clone)]
 pub struct CompletionSearchSize {
+    pub branch_depth: Option<usize>,
     pub existence: CompletionExistenceStats,
     pub elapsed: Duration,
     /// Query-scope work including construction; unavailable if construction failed

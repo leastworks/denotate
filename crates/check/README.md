@@ -1423,3 +1423,30 @@ After reachable determinacy pairs prove no difference, a cheap conservative chec
 can skip the coupled query when all original downstream closures are disjoint.
 Shared hidden constraints retain the coupled fallback. `coupled_fallback_skipped`
 records this shortcut; large scopes decline it without changing the query path.
+
+### Opt-in completion input partitions
+
+`CheckOptions::split_depth` (default 0) enables branch search for verification-wide
+existence and determinacy. `split_branches` (default 512) bounds the leaf partition
+per question. The CLI exposes `--completion-split-depth N` and
+`--completion-split-branches N` with `--engine sat`. Zero depth takes the existing
+unsplit path. These options do not change obligations, planning queries or W
+construction.
+
+Partitions come only from declared input exactly-one groups and selected
+input-only exactly-one assumptions. Every remaining value gets a branch, with
+other group members false. Ranking counts structural guard-edge reachability in
+odd components (existence) or decision-relevant components independently shown
+non-unique (determinacy). This estimates useful cuts; it does not prove deletion.
+Each child applies Fitting propagation before parity/local uniqueness and residual
+search. Scopes stay frozen. Reaching depth or leaf bounds uses residual search;
+resource exhaustion remains inconclusive. A confirmed failure in one child survives
+another child's cutoff; absence of a failure requires every child to finish.
+
+Units share immutable preparation, but own specialized equations, solver state,
+work/query allowances and size records. Remaining work and query allowances are
+divided among children; the phase deadline is shared fairly among pending units.
+`Report::branches` reports bounded choices, outcomes, work, time and cutoffs.
+Repeated/fresh calls rebuild units. Cross-call caching and parallel execution are
+not implemented. SAT pruning remains available for unsplit questions, but is not
+installed in pinned units: branch-tagged proof reuse is a later increment.

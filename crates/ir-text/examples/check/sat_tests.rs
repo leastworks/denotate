@@ -777,6 +777,8 @@ fn completion_preparation_sizes_are_flushed_before_checking_even_without_progres
         &Default::default(),
         &Default::default(),
         false,
+        0,
+        512,
         false,
         false,
         false,
@@ -967,4 +969,50 @@ fn targeted_pruning_reports_considered_proved_and_optional_cutoffs_without_verbo
         saw_cutoff,
         "resource cutoff must not be hidden in JSON only"
     );
+}
+
+#[test]
+fn completion_branches_are_opt_in_and_report_the_chosen_input_values() {
+    let f = Fixture::new(
+        "sort Tag;const a,b:Tag;input tag(v:Tag) exactly_one(group_by:());relation p();relation q();p():-tag(a);p():-tag(b),q();q():-tag(b);q():-tag(a),!p();verification v{semantics:completion;assumptions:[];obligations:[];}",
+    );
+    let (code, plain) = f.run(&["--engine", "sat", "--json", "--no-progress"]);
+    assert_eq!(code, 0, "{plain}");
+    assert!(!plain.contains("\"branches\""));
+    let (code, shown) = f.run(&[
+        "--engine",
+        "sat",
+        "--completion-split-depth",
+        "2",
+        "--completion-split-branches",
+        "8",
+        "--no-progress",
+    ]);
+    assert_eq!(code, 0, "{shown}");
+    assert!(shown.contains("split group tag(a)"), "{shown}");
+    assert!(shown.contains("tag(a)=true"), "{shown}");
+    assert!(shown.contains("tag(b)=true"), "{shown}");
+    let (code, json) = f.run(&[
+        "--engine",
+        "sat",
+        "--completion-split-depth",
+        "2",
+        "--json",
+        "--no-progress",
+    ]);
+    assert_eq!(code, 0, "{json}");
+    assert!(json.contains("\"branches\""));
+    assert!(json.contains("\"guardedEdges\""));
+    let plain_human = f.run(&["--engine", "sat", "--no-progress"]);
+    assert_eq!(
+        f.run(&[
+            "--engine",
+            "sat",
+            "--completion-split-depth",
+            "0",
+            "--no-progress"
+        ]),
+        plain_human
+    );
+    assert_eq!(f.run(&["--completion-split-depth", "2"]).0, 2);
 }

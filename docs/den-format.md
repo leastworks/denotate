@@ -938,3 +938,15 @@ the last attempted head and any cutoff. The CLI prints these summaries and optio
 pruning cutoffs even without `--verbose`. A cutoff stops optimization, not checking;
 it does not by itself change the semantic verdict. Pruning has its own bounded time
 share. Acyclic or locally unique heads no longer receive these optimization notices.
+
+Completion checks can opt into bounded input partitions with
+`just check-den ROOT --engine sat --completion-split-depth 2`.
+`--completion-split-branches N` bounds leaves per question (default 512); depth
+defaults to zero, retaining unsplit checking. Only declared or selected input
+exactly-one restrictions justify these partitions. All permitted choices remain
+covered; Fitting propagation under each choice may cut a loop before parity and
+uniqueness checks. A split is a search strategy, not an extra assumption or a change
+to meaning. Depth/branch bounds fall back to residual search; solver or deadline
+exhaustion stays inconclusive. The CLI reports chosen input values and branch
+outcomes, work, elapsed time and cutoffs. These are progress/size records, not
+additional source diagnostics.
