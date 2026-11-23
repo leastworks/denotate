@@ -339,3 +339,39 @@ fn component_proofs_share_the_search_candidate_allowance() {
             .unwrap(),
     );
 }
+
+#[test]
+fn eligibility_lifts_many_irrelevant_pins_within_one_candidate_round() {
+    let mut c = Corpus::new();
+    let p = rel(&mut c, "p", false);
+    let q = rel(&mut c, "q", false);
+    let h = rel(&mut c, "h", false);
+    rule(&mut c, p, &[(q, true)]);
+    rule(&mut c, q, &[(p, true)]);
+    rule(&mut c, h, &[(p, false)]);
+    rule(&mut c, h, &[(q, false)]);
+    for n in 0..80 {
+        let i = rel(&mut c, &format!("i{n}"), true);
+        let t = rel(&mut c, &format!("tautology{n}"), false);
+        rule(&mut c, t, &[(i, false)]);
+        rule(&mut c, t, &[(i, true)]);
+        rule(&mut c, h, &[(t, false)]);
+    }
+    let v = verification(&mut c, Some(h), &[]);
+    let e = prepare(&c, v, &Domains::new());
+    let options = CheckOptions {
+        max_worlds: 1,
+        ..Default::default()
+    };
+    for _ in 0..2 {
+        let r = e.check(&keys(&c), &options).unwrap();
+        let class = r.classification.as_ref().unwrap();
+        assert!(class.ambiguous.exists());
+        assert!(matches!(class.accepted, Search::None));
+        assert!(!r.is_incomplete());
+    }
+    let fresh = prepare(&c, v, &Domains::new())
+        .check(&keys(&c), &options)
+        .unwrap();
+    assert!(!fresh.is_incomplete());
+}

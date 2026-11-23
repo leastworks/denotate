@@ -2069,3 +2069,33 @@ display atoms are unknown to the reader, never implicitly false. Validation alwa
 uses the original full interpretation. `--completion-full-models` explicitly opts
 into full scoped interpretations; `--verbose` alone does not. The bound is a display
 policy, not a semantic or cache input.
+
+## Completion eligibility and property queries reuse work within one search
+
+Processing candidates are checked for classification eligibility before validating
+or retaining their complete interpretations. An ineligible observation contributes
+only its independently validated classification pair. If eligibility succeeds,
+re-solve the candidate under that same observation before validating its evidence;
+never pin arbitrary classification helpers or reuse the eligibility solver's model
+as a processing witness.
+
+An ambiguity cube preserves both classification interpretations and H. Lifting
+tries groups of input pins, splitting a group after a failed deletion. Only UNSAT
+of the original-equation violation query permits deletion, under the same W and
+path context. Both lifted cubes are intersected. This uses the existing 64-attempt
+allowance per model and can remove more than 64 pins without increasing it.
+
+Successive models of an immutable cone are independently validated incrementally:
+validate the first fully, then read changed variable values, update truth of their
+original rules, and check affected heads and input restrictions. Reader indexes,
+producer counts and prior assignments are local to that encoding; no state crosses
+an edit, verification or query scope. This is not trusting the encoded equations
+or applying stable-model semantics to completion.
+
+Each obligation now owns one W/property solver and one eligibility pair. Tuple or
+group conditions are assumptions for their own query, never permanent constraints.
+Only ambiguity cubes independent of the property target are shared between parts.
+An existing certified interpretation can witness another present tuple for `empty`;
+it cannot prove absence. Per-part SAT solve/poll/conflict/propagation allowances are
+preserved using fresh counter windows. The enclosing work allowance, physical CNF
+limits, cancellation and deadline never restart.

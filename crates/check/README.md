@@ -1338,3 +1338,15 @@ rounds, cube pins, validation work, total/fallback component counts and lifting.
 These are observations, not certificates or stable identities. When a run deadline
 is configured, completion divides remaining time among remaining required queries;
 a query's local timeout does not restart the run deadline or suppress later work.
+
+Completion processing/property searches establish eligibility before validating a
+candidate's whole model; on success they restore a candidate on the same input
+observation. Eligibility cubes now use block lifting for each model, with H kept
+and the two cubes intersected. Their validation and property-model validation are
+incremental against original rules, scoped to one immutable encoding.
+
+Property parts reuse one W/cone solver. Conditions are temporary assumptions;
+classification exclusions alone are shared. A prior validated model can witness
+another `empty` tuple. Each part retains its SAT allowances, while work, physical
+CNF retention and deadlines remain bounded across the whole obligation. Model
+caches and reader indexes are invocation-local and never survive preparation edits.

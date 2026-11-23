@@ -1797,8 +1797,9 @@ join. The opt-in diagnostic LFP continues to use its own growing delta frontier.
 Existence first proves totality of negative components over free boundary providers;
 positive components need no SAT totality search. A component that is not total is
 retained with its upstream cone for the global search. Model cubes retain one
-interpretation while varying unpinned inputs. SAT lifting attempts to remove up to
-64 pins per cube, in deterministic index order, by checking the original equations.
+interpretation while varying unpinned inputs. SAT lifting attempts up to
+64 deterministic block deletions per cube, checking the original equations and
+splitting blocks whose removal fails.
 All work, solves and deadlines remain charged; the lifting cap never changes a
 verdict, and exhausted required searches remain inconclusive. Component validation
 uses compact arrays. Global validation indexes retain every original producer and
@@ -1818,3 +1819,27 @@ Progress exposes the same running counters. Default completion evidence retains
 64 atoms per model and 64 present/absent inputs each, with omissions explicit;
 retained examples still follow the existing example limit. Full models require
 `--completion-full-models`. Shared model references are local to one report.
+
+### Reusing completion eligibility and obligation searches
+
+Eligibility lifting uses deterministic block deletion within the same 64 SAT trials
+per model: attempt the entire cube, then split blocks whose removal fails. Two
+independently validated models, H and their differing decisions remain valid on
+the intersection of the lifted cubes. Required search limits charge every trial.
+Processing candidates discarded by eligibility need no full processing replay.
+Successful eligibility restores a candidate at the same observation before replay.
+
+Eligibility pairs and property witnesses validate once in full, then maintain
+original-rule truth and producer counts as variable values change. The index and
+previous values are private to one immutable cone/encoding. Work charges include
+index construction, reading variable values and affected-rule/head validation;
+`validationWork` continues to report actual charged validation work. Input
+restrictions are checked on every model. A failed update aborts that query.
+
+One solver encodes W and the property cone per obligation, with incremental tuple
+or group assumptions. Eligibility exclusions can be reused because they describe
+ambiguous classification independently of a property target. One validated model
+may witness multiple present tuples, but never a universal absence claim. SAT
+solve/poll/conflict/propagation windows remain per part as before reuse. Work and
+deadlines remain shared by the obligation; CNF limits now bound the retained solver,
+including definitions accumulated for groups. No limits or CLI defaults increase.

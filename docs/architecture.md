@@ -652,3 +652,10 @@ verification-local model table, with references from diagnostics and summaries,
 explicit omissions and optional full-model expansion. Those references are display
 identifiers, not diagnostic identities or proof keys. The CLI streams formatted
 JSON in chunks; no LSP or IO dependency enters the checker or presenter.
+
+Completion query reuse is within one invocation: classification-pair and property
+validation caches belong to their exact immutable equation encodings. They compare
+new assignments with prior independently checked assignments and revisit affected
+original rules. Property parts share W/equations but pass their own target conditions
+as SAT assumptions. No helper assignment, part condition or validation cache leaks
+into another property, verification, path context or edited preparation.

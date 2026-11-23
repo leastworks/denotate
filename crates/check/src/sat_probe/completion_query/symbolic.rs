@@ -5,6 +5,7 @@ use queries::{Run, checked_assignment};
 
 mod existence;
 pub mod planning;
+mod validation;
 
 type Cube = BTreeMap<usize, bool>;
 #[cfg(test)]
@@ -99,6 +100,10 @@ struct Solver<'a, 'b, 'l> {
     run: Run<'a, 'b, 'l>,
     gates: Vec<Lit>,
     eligibility: Option<(Encoded, Encoded, Lit)>,
+    eligibility_index: Option<validation::Index>,
+    eligibility_states: [validation::State; 2],
+    property_index: Option<validation::Index>,
+    property_state: validation::State,
     stats: crate::CompletionExistenceStats,
 }
 impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
@@ -107,6 +112,10 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
             run: Run::new(engine, budget)?,
             gates: vec![],
             eligibility: None,
+            eligibility_index: None,
+            eligibility_states: Default::default(),
+            property_index: None,
+            property_state: Default::default(),
             stats: Default::default(),
         })
     }
@@ -217,6 +226,30 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
         self.metrics();
         result
     }
+    fn property_values(&mut self, cone: &Cone, encoded: &Encoded) -> Result<Vec<bool>> {
+        if self.property_index.is_none() {
+            self.property_index = Some(validation::Index::new(
+                cone,
+                encoded,
+                self.run.truth,
+                self.run.budget,
+            )?);
+        }
+        let started = self.run.budget.used();
+        let result = self
+            .property_state
+            .update(
+                cone,
+                encoded,
+                self.property_index.as_ref().unwrap(),
+                &self.run.cnf,
+                self.run.budget,
+            )
+            .map(|v| v.to_vec());
+        self.stats.validation_work += self.run.budget.used() - started;
+        self.metrics();
+        result
+    }
     fn world(&mut self) -> Result<Observation> {
         let started = self.run.budget.used();
         let checked = checked_assignment(
@@ -284,14 +317,47 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
         if !self.solve(&active, &pins)? {
             return Ok(None);
         }
-        let (a, b, _) = self.eligibility.as_ref().unwrap();
+        let (a, b, diff) = self.eligibility.take().unwrap();
         let (cone, _, h) = self.run.engine.classification.as_ref().unwrap();
+        if self.eligibility_index.is_none() {
+            self.eligibility_index = Some(validation::Index::new(
+                cone,
+                &a,
+                self.run.truth,
+                self.run.budget,
+            )?);
+        }
         let started = self.run.budget.used();
-        let av = checked_assignment(cone, &a.encoding, &self.run.cnf, self.run.budget)?;
-        let bv = checked_assignment(cone, &b.encoding, &self.run.cnf, self.run.budget)?;
+        let av = self.eligibility_states[0]
+            .update(
+                cone,
+                &a,
+                self.eligibility_index.as_ref().unwrap(),
+                &self.run.cnf,
+                self.run.budget,
+            )?
+            .to_vec();
+        let bv = self.eligibility_states[1]
+            .update(
+                cone,
+                &b,
+                self.eligibility_index.as_ref().unwrap(),
+                &self.run.cnf,
+                self.run.budget,
+            )?
+            .to_vec();
         self.stats.validation_work += self.run.budget.used() - started;
-        let mut cube = cover(cone, &av, Some(*h), self.run.budget)?;
-        cube.extend(cover(cone, &bv, Some(*h), self.run.budget)?);
+        let mut left = cover(cone, &av, Some(*h), self.run.budget)?;
+        existence::lift(cone, &av, &a, &mut left, self)?;
+        let mut right = cover(cone, &bv, Some(*h), self.run.budget)?;
+        existence::lift(cone, &bv, &b, &mut right, self)?;
+        // H can itself be an input. Lifting equations alone cannot remove it.
+        if cone.input[*h] && cone.fixed[*h].is_none() {
+            left.insert(*h, true);
+        }
+        left.extend(right);
+        let cube = left;
+        self.eligibility = Some((a, b, diff));
         Ok(Some(cube))
     }
 }
@@ -445,16 +511,23 @@ impl Engine {
                     s.stats.rounds += 1;
                     s.metrics();
                     let world = s.world()?;
-                    // Retain both original assignments before the eligibility query
-                    // changes the solver's current model.
-                    let first = self.model(s.values(cone, &a)?, scope);
-                    let second = self.model(s.values(cone, &b)?, scope);
-                    if !classification {
+                    if !classification && !unique && self.classification.is_some() {
                         if let Some(cube) = s.eligible(&world, unique)? {
                             s.exclude(selector, &cube)?;
                             continue;
                         }
+                        // Eligibility changed the SAT assignment. Restore a
+                        // candidate on the same certified observation, without
+                        // freezing arbitrary classification helper choices.
+                        let pins = s.pins(&world)?;
+                        if !s.solve(&[a.gate, b.gate, diff, selector], &pins)? {
+                            return Err(CheckError::Internal(
+                                "eligible completion pair disappeared",
+                            ));
+                        }
                     }
+                    let first = self.model(s.values(cone, &a)?, scope);
+                    let second = self.model(s.values(cone, &b)?, scope);
                     return Ok(Some(Pair { first, second }));
                 }
             },
@@ -708,11 +781,10 @@ impl Engine {
         part: &PropertyPart,
         unique: bool,
         options: &CheckOptions,
-        budget: &mut Budget<'_>,
+        s: &mut Solver<'_, '_, '_>,
+        encoded: &Encoded,
+        selector: Lit,
     ) -> Result<Option<Model>> {
-        let mut s = Solver::new(self, budget)?;
-        s.run.label("completion property");
-        let encoded = s.encode(cone, true)?;
         s.run.cnf.gate = Some(encoded.gate);
         let lits: Vec<_> = part
             .tuples
@@ -738,7 +810,6 @@ impl Engine {
             Cardinality::ExactlyOne => unreachable!(),
         };
         s.run.cnf.gate = None;
-        let selector = s.gate()?;
         let mut examined = 0;
         loop {
             if !s.solve(&[encoded.gate, selector], &pins)? {
@@ -754,12 +825,21 @@ impl Engine {
             s.stats.rounds += 1;
             s.metrics();
             let world = s.world()?;
-            let mut model = self.model(s.values(cone, &encoded)?, ModelScope::Property);
-            model.members = Some(members.clone());
-            if let Some(cube) = s.eligible(&world, unique)? {
-                s.exclude(selector, &cube)?;
-                continue;
+            if !unique && self.classification.is_some() {
+                if let Some(cube) = s.eligible(&world, unique)? {
+                    s.exclude(selector, &cube)?;
+                    continue;
+                }
+                let mut restored = s.pins(&world)?;
+                restored.extend_from_slice(&pins);
+                if !s.solve(&[encoded.gate, selector], &restored)? {
+                    return Err(CheckError::Internal(
+                        "eligible completion property disappeared",
+                    ));
+                }
             }
+            let mut model = self.model(s.property_values(cone, encoded)?, ModelScope::Property);
+            model.members = Some(members.clone());
             return Ok(Some(model));
         }
     }
@@ -910,30 +990,57 @@ impl Engine {
                 if let Some(members) = property.members.clone() {
                     let mut cone = self.cone.clone();
                     cone.rules.retain(|r| members.contains(&cone.atoms[r.head]));
-                    let mut retained = 0;
-                    for part in &mut property.parts {
-                        match self.symbolic_property(
-                            &cone,
-                            members.clone(),
-                            part,
-                            globally_unique,
-                            options,
-                            &mut budget,
-                        ) {
-                            Ok(Some(model)) => {
+                    let result: Result<()> = (|| {
+                        let mut solver = Solver::new(self, &mut budget)?;
+                        solver.run.label("completion property");
+                        let encoded = solver.encode(&cone, true)?;
+                        let selector = solver.gate()?;
+                        let mut retained = 0;
+                        let mut previous: Option<Model> = None;
+                        let mut queried = false;
+                        for part in &mut property.parts {
+                            solver.run.budget.tick("completion property tuples")?;
+                            // A validated interpretation may witness several
+                            // empty failures. Reusing it asserts presence only;
+                            // absence still requires its own universal search.
+                            let reuse = part.component == Cardinality::Empty
+                                && previous.as_ref().is_some_and(|m| {
+                                    part.tuples
+                                        .iter()
+                                        .all(|a| m.values[self.program.atom_index[a]])
+                                });
+                            let model = if reuse {
+                                previous.clone()
+                            } else {
+                                if queried {
+                                    solver.run.next_property_part()?;
+                                }
+                                queried = true;
+                                self.symbolic_property(
+                                    &cone,
+                                    members.clone(),
+                                    part,
+                                    globally_unique,
+                                    options,
+                                    &mut solver,
+                                    &encoded,
+                                    selector,
+                                )?
+                            };
+                            if let Some(model) = model {
+                                previous = Some(model.clone());
                                 part.failed = true;
                                 if retained < options.max_examples {
                                     part.example = Some(model);
                                     retained += 1;
                                 }
                             }
-                            Ok(None) => (),
-                            Err(e) => {
-                                property.inconclusive =
-                                    Some(inconclusive(e.in_phase("completion property", None))?);
-                                break;
-                            }
                         }
+                        Ok(())
+                    })();
+                    if let Err(e) = result {
+                        property.inconclusive =
+                            Some(inconclusive(e.in_phase("completion property", None))?);
                     }
                 }
             }

@@ -206,9 +206,9 @@ fn total(c: &Cone, s: &mut Solver<'_, '_, '_>, options: &CheckOptions) -> Result
 /// Existential models can be generalized without fixing every input used by the
 /// first producer. Hold derived values fixed and ask whether *any original
 /// equation* can be violated after dropping a pin. UNSAT alone permits removal.
-/// The deterministic 64-attempt cap bounds optional lifting; retaining a pin is
+/// The deterministic 64-attempt cap bounds optional block lifting; retaining a pin is
 /// always sound. Required search/solver allowances still charge every operation.
-fn lift(
+pub(super) fn lift(
     c: &Cone,
     values: &[bool],
     target: &Encoded,
@@ -267,25 +267,45 @@ fn lift(
     }
     s.run.cnf.clause(bad, s.run.budget)?;
     s.run.cnf.gate = None;
-    for i in cube.keys().copied().take(64).collect::<Vec<_>>() {
+    // Try large deletions first. The same 64 SAT-attempt allowance can
+    // eliminate thousands of irrelevant pins instead of only the first 64.
+    let keys: Vec<_> = cube.keys().copied().collect();
+    let mut pending = vec![(0, keys.len())];
+    let mut attempts = 0;
+    while let Some((start, end)) = pending.pop() {
+        if attempts == 64 {
+            break;
+        }
+        let low = keys[start];
+        let high = keys[end - 1];
+        if cube.range(low..=high).next().is_none() {
+            continue;
+        }
         let pins: Vec<_> = cube
             .iter()
-            .filter(|(j, _)| **j != i)
-            .map(|(j, v)| {
+            .filter(|(i, _)| **i < low || **i > high)
+            .map(|(i, v)| {
                 if *v {
-                    target.encoding.vars[*j]
+                    target.encoding.vars[*i]
                 } else {
-                    !target.encoding.vars[*j]
+                    !target.encoding.vars[*i]
                 }
             })
             .collect();
+        attempts += 1;
         s.stats.lifting_attempts += 1;
         if !s.solve(&[gate], &pins)? {
-            cube.remove(&i);
-            s.stats.lifted_pins += 1;
+            let before = cube.len();
+            cube.retain(|i, _| *i < low || *i > high);
+            s.stats.lifted_pins += before - cube.len();
+        } else if end - start > 1 {
+            let middle = start + (end - start) / 2;
+            pending.push((middle, end));
+            pending.push((start, middle));
         }
         s.metrics();
     }
+
     Ok(())
 }
 

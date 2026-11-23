@@ -11,6 +11,8 @@ pub(super) struct Run<'a, 'b, 'l> {
     pub(super) solve_limit: usize,
     certified: bool,
     work_started: usize,
+    conflict_base: u64,
+    propagation_base: u64,
 }
 
 impl Drop for Run<'_, '_, '_> {
@@ -371,6 +373,8 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             solve_limit: engine.config.max_solves,
             certified: false,
             work_started,
+            conflict_base: 0,
+            propagation_base: 0,
         })
     }
 
@@ -485,6 +489,19 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         }
         Ok(false)
     }
+    /// Preserve the former per-part SAT allowances while retaining clauses.
+    /// The enclosing work/CNF allowances and deadline never restart.
+    pub(super) fn next_property_part(&mut self) -> Result<()> {
+        self.budget.check("completion property")?;
+        self.cnf.solver.cb().check()?;
+        self.solves = 0;
+        self.conflict_base = self.cnf.solver.num_conflicts();
+        self.propagation_base = self.cnf.solver.num_propagations();
+        if let Some(polls) = &self.cnf.solver.cb().polls {
+            polls.used.set(0);
+        }
+        Ok(())
+    }
     fn raw_solve(&mut self, pins: &[Lit]) -> Result<bool> {
         self.budget.tick("completion solve")?;
         self.cnf.solver.cb().check()?;
@@ -495,12 +512,18 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         self.cnf.solver.cb().check()?;
         for (used, limit, resource) in [
             (
-                self.cnf.solver.num_conflicts(),
+                self.cnf
+                    .solver
+                    .num_conflicts()
+                    .saturating_sub(self.conflict_base),
                 self.engine.config.max_conflicts,
                 "conflicts",
             ),
             (
-                self.cnf.solver.num_propagations(),
+                self.cnf
+                    .solver
+                    .num_propagations()
+                    .saturating_sub(self.propagation_base),
                 self.engine.config.max_propagations,
                 "propagations",
             ),

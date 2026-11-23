@@ -421,3 +421,105 @@ fn projected_property_evidence_omits_unrelated_inputs_but_full_models_retain_the
             .contains("unrelated")
     );
 }
+
+#[test]
+fn reused_property_queries_keep_tuple_pins_worlds_and_obligation_scopes_separate() {
+    let (p, r) = checked(
+        "sort S;const a,b,c:S;input i();relation bad(x:S);bad(a):-i();bad(b):-!i();bad(c):-bad(c);relation safe(x:S);obligation clean:empty(bad);obligation fine:empty(safe);verification v{semantics:completion;assumptions:[];obligations:[clean,fine];}",
+        Default::default(),
+    );
+    let bad = p
+        .corpus
+        .obligations()
+        .find(|o| o.name == "clean")
+        .unwrap()
+        .id;
+    let safe = p
+        .corpus
+        .obligations()
+        .find(|o| o.name == "fine")
+        .unwrap()
+        .id;
+    assert!(r.obligations[&bad].complete());
+    assert!(r.obligations[&safe].complete());
+    assert!(!r.obligations[&safe].failed());
+    let i = p.corpus.relations().find(|r| r.name == "i").unwrap().id;
+    let mut worlds = std::collections::BTreeSet::new();
+    for part in &r.obligations[&bad].parts {
+        assert!(part.failed);
+        let m = part.example.as_ref().unwrap();
+        assert_eq!(m.value(&part.tuples[0]), Some(true));
+        worlds.insert(m.value(&denotate_check::GroundAtom::new(i, [])).unwrap());
+    }
+    assert_eq!(
+        worlds.len(),
+        2,
+        "opposite conditions require separate valid observations"
+    );
+}
+
+#[test]
+fn one_property_encoding_handles_many_parts_without_pooling_the_old_sat_allowances() {
+    let text = format!(
+        "sort S;const {}:S;input i();relation bad(x:S);{} obligation clean:empty(bad);verification v{{semantics:completion;assumptions:[];obligations:[clean];}}",
+        (0..160)
+            .map(|i| format!("a{i}"))
+            .collect::<Vec<_>>()
+            .join(","),
+        (0..160)
+            .map(|i| format!("bad(a{i}):-{}i();", if i % 2 == 0 { "" } else { "!" }))
+            .collect::<String>()
+    );
+    let p = loaded(&text);
+    let v = p.corpus.verifications().next().unwrap().id;
+    let sink = denotate_check::CompletionSizes::default();
+    let Preparation::Ready(e) = Engine::prepare(
+        &p.corpus,
+        &p.domains,
+        &p.keys,
+        v,
+        &Limits {
+            completion_sizes: Some(sink.clone()),
+            ..Default::default()
+        },
+        QueryLimits {
+            max_solves: 2,
+            ..Default::default()
+        },
+    )
+    .unwrap() else {
+        panic!()
+    };
+    let r = e.check(&p.keys, &CheckOptions::default()).unwrap();
+    let o = r.obligations.values().next().unwrap();
+    assert!(o.complete());
+    assert!(o.parts.iter().all(|p| p.failed));
+    let snapshot = sink.snapshot();
+    let queries: Vec<_> = snapshot
+        .searches
+        .iter()
+        .filter(|s| s.phase == "completion property")
+        .collect();
+    assert_eq!(queries.len(), 1, "one physical solver per obligation");
+    assert_eq!(
+        queries[0]
+            .encoding_details
+            .iter()
+            .filter(|e| e.purpose == "model")
+            .count(),
+        1,
+        "one property equation copy, regardless of tuple count"
+    );
+}
+
+#[test]
+fn reused_uniqueness_groups_do_not_keep_previous_group_constraints() {
+    let (_p, r) = checked(
+        "sort G;const a,b,c:G;sort V;const x,y:V;input i();relation r(g:G,v:V);r(a,x):-i();r(a,y):-!i();r(b,x);r(b,y);r(c,x);obligation one:at_most_one(r,group_by:(g));verification v{semantics:completion;assumptions:[];obligations:[one];}",
+        Default::default(),
+    );
+    let o = r.obligations.values().next().unwrap();
+    assert!(o.complete());
+    assert_eq!(o.parts.iter().filter(|p| p.failed).count(), 1);
+    assert!(o.parts.iter().any(|p| !p.failed));
+}
