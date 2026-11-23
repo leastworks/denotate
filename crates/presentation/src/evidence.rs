@@ -13,6 +13,7 @@ pub enum Kind {
     AllRejected,
     CircularSupport,
     DeadProducer,
+    CompletionPruning,
     UnvalidatedAssumption,
     InconsistentAssumptions,
     EmptyInputUniverse,
@@ -39,6 +40,7 @@ impl Kind {
             Self::AllRejected => "all-rejected",
             Self::CircularSupport => "circular-support",
             Self::DeadProducer => "dead-producer",
+            Self::CompletionPruning => "completion-pruning",
             Self::InvalidAssumption => "invalid-assumption",
             Self::InvalidInputDomain => "invalid-input-domain",
             Self::UnvalidatedAssumption => "unvalidated-assumption",
@@ -79,6 +81,7 @@ impl Kind {
             | Self::AllRejected
             | Self::CircularSupport
             | Self::DeadProducer
+            | Self::CompletionPruning
             | Self::UnsupportedGroup
             | Self::Inconclusive
             | Self::IncompleteDownstreamWork

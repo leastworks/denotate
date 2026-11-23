@@ -696,6 +696,7 @@ fn finding_identity(
         | Identity::CompletionAssumption(..)
         | Identity::CompletionInputDomain(_)
         | Identity::CompletionDeadProducer(_)
+        | Identity::CompletionPruning(..)
         | Identity::AllRejected
         | Identity::CircularSupport(_) => {
             panic!("test DSL verifications use supported stable semantics")

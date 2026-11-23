@@ -389,7 +389,7 @@ fn local_function_proofs_share_cycles_and_their_acyclic_readers() {
     let mut e = prepare(&c, v, &Domains::new());
     let sizes = crate::CompletionSizes::default();
     e.limits.completion_sizes = Some(sizes.clone());
-    let r = e.check(&keys(&c), &Default::default()).unwrap();
+    let r = e.check_unpruned(&keys(&c), &Default::default()).unwrap();
     super::scale::same_report(
         &r,
         &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
@@ -410,7 +410,7 @@ fn local_function_proofs_share_cycles_and_their_acyclic_readers() {
     );
     // An interrupted local proof must not become a uniqueness certificate.
     e.config.max_solves = 0;
-    let r = e.check(&keys(&c), &Default::default()).unwrap();
+    let r = e.check_unpruned(&keys(&c), &Default::default()).unwrap();
     assert!(!r.meaning.ambiguous.complete());
     assert!(r.is_incomplete());
 }

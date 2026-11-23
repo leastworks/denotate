@@ -1891,3 +1891,37 @@ reachable/coupled sizes describe the retained solver, including inactive clauses
 boundary closure, including inputs and fixed/out-of-scope slots; it is not a count
 of saved SAT variables. Solver sizes are emitted before solving, with elapsed time after
 the component query; reporting bounds remain 64 records and 32 relation names.
+
+### Completion producer pruning
+
+This experiment is opt-in: `CheckOptions::prune` / `--completion-prune`, default off.
+The 275-format double-giving regression became slower with pruning and lost a
+previously conclusive ambiguity result to a deadline. Default checks retain the
+unpruned path. The semantic oracles continue exercising pruning explicitly.
+
+When enabled, before encoding a checking question, try coverage and producer subsumption with
+the target head's equation disabled and the other scope equations unchanged.
+Candidates are unsettled non-input heads with non-fact producers, ordered by
+recursive membership, then multiple producers, then ground atom order. Coverage
+precedes sequential producer removals. Successful changes update subsequent proofs.
+Fitting substitutions for proof setup are computed with all candidate definitions
+abstracted, so they cannot smuggle the disabled equation into a proof.
+
+One incremental proof solver is bounded by the existing checker and query limits
+per original scope/context. Its deadline cannot exceed the enclosing search's
+remaining time; the overall run deadline also applies. Work is reported separately
+under `completion pruning W` or `completion pruning W+H`. Proof work is not charged
+again to the semantic search's work allowance. An optional proof cutoff is reported
+in `simplifications.cutoffs`, not as semantic incompleteness; the subsequent search
+can still finish. Global deadline/cancellation behavior is unchanged.
+
+Views are retained only during that check invocation. Reports keep 64 proof records
+and 32 source instances per record, with omitted counts; these caps do not limit
+installed proofs. Source findings group by head/context and bound primary source
+contributions to 32. Repeated scopes may count the same instance more than once;
+counts describe transformations of solver views, not distinct authored rules.
+
+This is provisional candidate ordering, not a promise that pruning is cheaper than
+the query it precedes. Equation gates and proof pins still scale with scope size.
+Measure the guarded-schema `--schema-double 1` profile/splice shape before changing
+limits or adding path splitting.

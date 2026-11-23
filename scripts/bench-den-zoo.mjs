@@ -497,14 +497,14 @@ if(!process.execArgv.some(a=>a==='-e'||a==='--eval') && process.argv[1] && path.
       if(key==='--samply'){opts.samply=true;continue;}
       if(key==='--sat-probe-candidates'){opts.satProbeCandidates=true;continue;}
       if(key==='--sat-probe'){opts.satProbe=true;continue;}
-      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [--hub-reader split|merged] [--hub-no-routes] [--sat-probe] [--sat-probe-candidates] [--hub-variant pairs|tagged] [--hub-tag-values V] [--hub-writers N] [--hub-readers N] [--hub-values N] [--hub-decoys N] [--hub-decoy-shape full|near-full] [--ring-lanes N] [--ring-relays N] [--ring-readers N] [--schema-axis sets|stmts|depth] [--schema-sets N] [--schema-depth N] [--schema-fanout N] [--schema-stmts N] [--schema-blocks N] [--schema-impossible 0|1] [--schema-wide 0|1] [--check-binary PATH] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
+      if(key==='--help'){console.log('just bench-den-zoo [--family NAME,...] [--sizes 8,16,32] [--repeat 3] [--threshold 1.3] [--out DIR] [--samply] [--input-order key|reverse-key|structural] [--hub-reader split|merged] [--hub-no-routes] [--sat-probe] [--sat-probe-candidates] [--hub-variant pairs|tagged] [--hub-tag-values V] [--hub-writers N] [--hub-readers N] [--hub-values N] [--hub-decoys N] [--hub-decoy-shape full|near-full] [--ring-lanes N] [--ring-relays N] [--ring-readers N] [--schema-axis sets|stmts|depth] [--schema-sets N] [--schema-depth N] [--schema-fanout N] [--schema-stmts N] [--schema-blocks N] [--schema-impossible 0|1] [--schema-wide 0|1] [--schema-double 0|1] [--check-binary PATH] [-- CHECK LIMITS]; --summarize DIR recovers a sweep');process.exit(0);}
       const val=args[++i];
       if(key==='--family')opts.family=val.split(',');else if(key==='--sizes')opts.sizes=val.split(',').map(Number);
       else if(key==='--input-order')opts.inputOrder=val;
       else if(key==='--binary')opts.binary=val;
       else if(key==='--check-binary')opts.checkBinary=val;
       else if(key==='--schema-axis')opts.schemaAxis=val;
-      else if(key.startsWith('--schema-')) { const field=key.slice(9); if(!['sets','depth','fanout','stmts','elements','values','reads','tasks','outs','triggers','splice','self','blocks','impossible','wide'].includes(field))throw Error('unknown schema knob'); (opts.schema??={})[field]=Number(val); }
+      else if(key.startsWith('--schema-')) { const field=key.slice(9); if(!['sets','depth','fanout','stmts','elements','values','reads','tasks','outs','triggers','splice','self','blocks','impossible','wide','double'].includes(field))throw Error('unknown schema knob'); (opts.schema??={})[field]=Number(val); }
       else if(key==='--ring-lanes')opts.ringLanes=Number(val);
       else if(key==='--ring-relays')opts.ringRelays=Number(val);
       else if(key==='--ring-readers')opts.ringReaders=Number(val);

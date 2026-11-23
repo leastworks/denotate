@@ -1373,3 +1373,25 @@ under W/H; coupled choices retain a joint residual fallback. Shared gates preser
 original equations, and both returned models are replayed against them. The query
 retains existing limits and reports local/reachable/coupled component sizes and
 states before each solve. A local `fallback` is not a semantic ambiguity result.
+
+Completion whole-verification checking with `CheckOptions { prune: true,
+..Default::default() }` simplifies solver views with **common-equations proofs**: coverage makes a head true, and subsumption removes a producer implied by
+the remaining producers. The head's own definition is disabled while proving the
+replacement. The current other equations stay present. Proofs are local to the
+original classification, processing or property scope, and to W or W+H; no simplified
+graph defines a scope. W/provider/assumption construction and the stable checker
+are unaffected. Models are still validated against the original scoped equations.
+
+`completion_query::Report::pruning` contains bounded `PruningRecord`s (head, source
+instances, scope and context), aggregate attempts/removals/coverage, omitted counts
+and optional optimization cutoffs. A cutoff does not itself make checking incomplete.
+Views live for one `Engine::check` call; repeated/fresh calls recompute them. The
+unpruned implementation and exhaustive interpretation tests remain independent
+semantic controls. H-model coverage now precedes no-H classification existence
+queries; only confirmed absence of an H-model permits the latter query.
+
+`CheckOptions::prune` defaults to false. The CLI exposes it as
+`--completion-prune` with `--engine sat`. Disabled checks use the original query
+path, without the pruning cache, H-first existence search or extra original-view
+validation indexing. `Report::pruning.enabled` identifies opt-in reports; the shared
+presenter omits `simplifications` entirely when disabled.

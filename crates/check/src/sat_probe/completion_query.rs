@@ -7,7 +7,9 @@ use super::*;
 use denotate_ir::{Corpus, SemanticKeys, Semantics, VerificationId};
 use existence::world_cone;
 mod encoding;
+mod pruning;
 use encoding::{Encoding, encode};
+pub use pruning::{PruningContext, PruningKind, PruningRecord, PruningReport};
 use std::sync::Arc;
 
 mod advisory;
@@ -229,14 +231,16 @@ pub struct WorldQuery {
 /// Immutable preparation. Each query owns its SAT solver; no learned clauses,
 /// partial append or cutoff can contaminate another observation or semantics.
 /// Re-preparing is required for edits to H, W, decisions, domains, eligibility or rules.
+#[derive(Clone)]
 pub struct Engine {
+    pruning: Option<Arc<std::sync::Mutex<pruning::Cache>>>,
     program: Arc<GroundProgram>,
     original: Arc<crate::ground::OriginalDependencies>,
-    assumptions: Vec<contracts::Assumption>,
+    assumptions: Arc<Vec<contracts::Assumption>>,
     ignored_input_domains: Vec<InputDomainIssue>,
-    cone: Cone,
-    world: Cone,
-    classification: Option<(Cone, Arc<BTreeSet<GroundAtom>>, usize)>,
+    cone: Arc<Cone>,
+    world: Arc<Cone>,
+    classification: Option<(Arc<Cone>, Arc<BTreeSet<GroundAtom>>, usize)>,
     input_relations: Arc<BTreeSet<RelationId>>,
     limits: Limits,
     config: QueryLimits,
@@ -349,7 +353,7 @@ impl Engine {
         )?;
         engine.ignored_input_domains = ignored_input_domains;
         b.completion_stage("assumption-contracts");
-        engine.assumptions = contracts::build(&engine, corpus, &mut b)?;
+        engine.assumptions = Arc::new(contracts::build(&engine, corpus, &mut b)?);
         b.completion_stage("classification");
         let cone = &engine.cone;
         let program = &engine.program;
@@ -357,14 +361,14 @@ impl Engine {
             let atom = GroundAtom::new(h, []);
             let closure = program.dependency_cone_with_budget([atom.clone()], &mut b)?;
             let members = Arc::new(closure.facts);
-            let mut c = cone.clone();
+            let mut c = cone.as_ref().clone();
             c.rules.retain(|r| members.contains(&c.atoms[r.head]));
             let index = program
                 .atom_index
                 .get(&atom)
                 .copied()
                 .unwrap_or(cone.atoms.len() + 1);
-            Some((c, members, index))
+            Some((Arc::new(c), members, index))
         } else {
             None
         };
@@ -386,12 +390,13 @@ impl Engine {
         let world = world_cone(&cone, false, b)?;
         cone.groups.clear();
         Ok(Self {
+            pruning: None,
             program: Arc::new(program),
             original,
-            cone,
-            world,
+            cone: Arc::new(cone),
+            world: Arc::new(world),
             classification: None,
-            assumptions: vec![],
+            assumptions: Arc::new(vec![]),
             ignored_input_domains: vec![],
             input_relations: Arc::new(
                 corpus

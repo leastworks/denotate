@@ -23,6 +23,7 @@ impl AssumptionAnalysis {
         matches!(self.ambiguous, Search::None) && matches!(self.no_meaning, Search::None)
     }
 }
+#[derive(Clone)]
 pub(super) struct Assumption {
     pub id: AssumptionId,
     pub kind: Cardinality,
@@ -105,7 +106,7 @@ pub(super) fn build(
             }
         }
         let members = Arc::new(live.facts);
-        let mut cone = engine.cone.clone();
+        let mut cone = engine.cone.as_ref().clone();
         cone.rules.retain(|r| members.contains(&cone.atoms[r.head]));
         let groups = groups(&engine.program, restriction, b)?;
         out.push(Assumption {

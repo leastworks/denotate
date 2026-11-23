@@ -678,3 +678,15 @@ reader cone, and must activate the first encoding's gate. Remaining coupled choi
 use a joint residual pair. Independent validation still checks original equations,
 including shared and unselected atoms. No query-local alias is a semantic key or a
 reusable certificate across edits.
+
+Completion checking optionally uses invocation-local, context-tagged solver views
+(`CheckOptions::prune`, default false; CLI `--completion-prune`). A view
+is keyed by the full set of defining heads in the original question scope and by
+W versus W+H; every original producer for each head belongs to that scope. Only
+original scopes enter this cache. Common-equations proofs simplify the view while
+classification/property membership, contracts and model replay retain the original
+program. No view or proof is reused across preparation, edits or contexts. Immutable
+prepared cones and assumption metadata are shared when creating the invocation.
+Classification no-meaning uses the H view to cover accepted observations before
+trying the W-only view on an observation with no H interpretation. These proofs
+and caches are separate from the availability planner and stable checking.

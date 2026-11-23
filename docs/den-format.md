@@ -906,3 +906,17 @@ obligations (a consistency-only notice alone does not fail the run); **1** for f
 obligations; **3** for filesystem or other operational failures. Incomplete or partial
 status takes precedence over findings. The `.den` editor applies the same policy,
 checking every verification in the background.
+
+Opt-in `just check-den ROOT --engine sat --completion-prune` checks may report
+`completion-pruning` Information findings for
+solver-instance simplifications. They name a grounded head, the source producers,
+the question scope, and the proving context: `W` (the selected input contract) or
+`W+H` (that contract and the hypothesis). Coverage proves the head true in that
+scope/context; subsumption makes a producer redundant there. These findings do not
+change scopes or declare an authored rule globally redundant, and offer no removal
+edit. Detail is bounded with explicit omitted counts; verdicts and exit codes do
+not depend on these advisory findings.
+
+`--completion-prune` is off by default. It enables both common-equations pruning
+and H-first classification existence; without it the earlier query path and output
+are retained. It can cost more than it saves on large programs.

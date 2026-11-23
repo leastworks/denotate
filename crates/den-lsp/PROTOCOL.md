@@ -1342,3 +1342,25 @@ unresolved components. Local SAT sizes describe a temporary solver; reachable an
 joint sizes describe the retained solver. Aggregate `uniqueComponents` and
 `sharedAtoms` are operational counters. The latter includes inputs and fixed slots,
 not just saved variables. No finding identities or verdict fields change.
+
+The shared completion presenter additionally emits Information `completion-pruning`
+findings. Completion remains a SAT CLI/API surface; this does not enable completion
+checking in the editor. Identity adds `notice: "completion-pruning"`, semantic
+`head` and `context: "W" | "W+H"`, under the existing verification identity.
+Evidence kind `completion-pruning` contains the head/context and bounded records:
+`kind: "coverage" | "subsumption"`, `scope: "classification" | "processing" |
+"property"`, `scopeHeads`, `removedInstances`, semantic rule `sources` and
+`omittedSources`. Equivalent scopes may share a view (classification takes naming
+precedence when its equations equal processing's). There is no quick fix.
+
+With `--completion-prune` (API `CheckOptions::prune`), completion JSON status adds
+`simplifications`; disabled checks omit it entirely. Its fields are `attempts`, `removedInstances`,
+`coveredHeads`, `records` (at most 64), `omittedRecords`, and `cutoffs` (at most 64).
+Each record retains at most 32 source instances. Counts concern scoped solver-view
+transformations, so an authored instance may appear in several scopes/contexts.
+A proof cutoff is optional optimization telemetry, not an incomplete verdict.
+
+Classification's H-first existence search retains component shape records with
+`query: "hypothesis-model-coverage"` and parity counts. The query covers the whole
+classification scope; these records are not local totality certificates. Progress
+states distinguish `covering-hypothesis-models` and `searching-without-hypothesis`.

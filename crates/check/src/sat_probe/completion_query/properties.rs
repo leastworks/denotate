@@ -240,7 +240,7 @@ impl Engine {
         let Some(members) = &result.members else {
             return Ok(());
         };
-        let mut cone = self.cone.clone();
+        let mut cone = self.cone.as_ref().clone();
         cone.rules.retain(|r| members.contains(&cone.atoms[r.head]));
         let mut retained = result.parts.iter().filter(|p| p.example.is_some()).count();
         for part in &mut result.parts {

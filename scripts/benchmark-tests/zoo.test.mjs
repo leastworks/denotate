@@ -327,3 +327,29 @@ test('guarded schema completion reports recover stages and control semantics',()
     }
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('guarded schema double-giving retains the profile and adds a guarded splice',async()=>{
+  const {guardedSchema}=await import('../guarded-schema.mjs');
+  const plain=guardedSchema({sets:3,self:100});
+  const doubled=guardedSchema({sets:3,self:100,double:1});
+  assert.equal(doubled.source,guardedSchema({sets:3,self:100,double:1}).source);
+  for(let f=0;f<3;f++) {
+    assert.ok(!plain.source.includes(`accepted_field(element_${f}) :- type_matches(format_${f});`));
+    assert.ok(doubled.source.includes(`accepted_field(element_${f}) :- type_matches(format_${f});`));
+  }
+  assert.equal(doubled.shape.statementRows,plain.shape.statementRows);
+  assert.throws(()=>guardedSchema({double:2}));
+});
+
+test('guarded schema double-giving exercises scoped completion pruning',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-double-giving-'));
+  try {
+    const out=path.join(root,'run');
+    const report=run({out,binary:'target/debug/examples/bench_schema',family:['guarded-schema'],sizes:[2],repeat:1,schema:{depth:1,fanout:1,stmts:1,outs:1,values:1,self:100,double:1,wide:1},limits:['--completion-prune']});
+    const family=report.families['guarded-schema'];
+    const runReport=JSON.parse(fs.readFileSync(path.join(out,'guarded-schema-2-0','report.json'),'utf8'));
+    assert.equal(runReport.checkerFinished,true);
+    assert.ok(runReport.outcomes.some(o=>o.simplifications?.removedInstances>0));
+    assert.ok(family);
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});

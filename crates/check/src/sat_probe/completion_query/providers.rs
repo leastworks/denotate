@@ -168,9 +168,8 @@ pub(super) fn prepare(
                 config.clone(),
                 b,
             )?;
-            e.cone
-                .rules
-                .retain(|r| members.contains(&e.cone.atoms[r.head]));
+            let cone = Arc::make_mut(&mut e.cone);
+            cone.rules.retain(|r| members.contains(&cone.atoms[r.head]));
             let mut run = Run::universe(&e, b)?;
             run.label("completion input provider");
             let encoded = encoding::encode_named(

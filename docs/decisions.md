@@ -2170,3 +2170,36 @@ helper freedom and decision projection without trusting local boundary reachabil
 Local proof solvers are released after each component, with work, solves, polls,
 conflicts, propagations and deadline charged to the enclosing query. There is no
 new allowance or branch-splitting policy. Results and caches remain invocation-local.
+
+### Completion producer pruning uses common equations
+
+This is opt-in (`CheckOptions::prune`, CLI `--completion-prune`), default off.
+The large synthetic run showed a regression despite successful removals, so neither
+pruning nor its H-first classification search enters the default checking path.
+
+Completion checks can remove a producer or replace a head by true within a frozen
+question scope. For a head equation `x <=> (A or B)`, let E contain the current
+unchanged equations for every other head in that scope, and C be W or W and H.
+The proof excludes x's defining equation. If E and C imply `A => B`, replacing
+x's equation by `x <=> B` preserves exactly the same interpretations. If they
+imply `A or B`, replacing it by `x = true` does likewise. This proves both that
+no meaning is lost and that no meaning is introduced, including for circular or
+inconsistent equations. Sequential proofs use the already transformed equations.
+
+E may include dependents of x: their equations are common to both systems.
+Freeing every dependent would unnecessarily prevent, for example, removing
+`accepted :- profile` when `accepted :- type_guard` and
+`profile :- type_guard, accepted`. This argument is specific to completion;
+it does not authorize stable-model rewrites.
+
+Each simplification is confined to its exact original question scope and proving
+context. Processing contradictions must not justify classification or property
+simplifications. H-conditioned changes never enter W, input contracts, providers,
+or a query without H. Classification existence first covers observations with an
+H-model; only an UNSAT H query allows the query without H. A failed or exhausted
+proof installs nothing; a completed prefix remains valid. Scopes still come from
+024.11's live instances, before these solver-only changes.
+
+These simplifications produce bounded Information findings per head and context,
+with source instances and scope labels. They do not offer authored-rule deletion:
+one grounded producer being redundant in one question is insufficient for that edit.

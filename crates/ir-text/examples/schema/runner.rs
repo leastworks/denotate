@@ -213,6 +213,7 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
             || flag == "--sat-probe-candidates"
             || flag == "--profile-conditions"
             || flag == "--completion-size-lfp"
+            || flag == "--completion-prune"
         {
             continue;
         }

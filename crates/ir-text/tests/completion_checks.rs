@@ -588,3 +588,60 @@ fn bounded_failure_triage_is_a_decided_failure_with_a_lower_bound_and_other_chec
         );
     }
 }
+
+#[test]
+fn completion_pruning_reports_head_context_and_source_without_an_edit() {
+    let text = "input tag();\nrelation accepted();\nrelation profile();\naccepted():-tag();\naccepted():-profile();\nprofile():-tag(),accepted();\nverification v{semantics:completion;assumptions:[];obligations:[];}";
+    let (p, r) = checked(
+        text,
+        CheckOptions {
+            prune: true,
+            ..Default::default()
+        },
+    );
+    assert!(!r.has_failures());
+    assert!(!r.is_incomplete());
+    let shown = presentation::present_completion(&p, &r).unwrap();
+    assert!(
+        shown.status["simplifications"]["removedInstances"]
+            .as_u64()
+            .unwrap()
+            > 0
+    );
+    let diagnostic = shown
+        .diagnostics
+        .iter()
+        .find(|d| {
+            d.kind == denotate_presentation::Kind::CompletionPruning
+                && d.message.contains("accepted()")
+        })
+        .unwrap();
+    assert_eq!(
+        diagnostic.kind.severity(),
+        denotate_presentation::Severity::Information
+    );
+    assert_eq!(diagnostic.evidence["context"], "W");
+    assert!(diagnostic.message.contains("subsumption"));
+    assert!(diagnostic.notes.iter().any(|n| n.contains("not edits")));
+    let rule = p
+        .corpus
+        .rules()
+        .find(|r| {
+            p.provenance
+                .origins(r.id)
+                .iter()
+                .any(|o| o.span == diagnostic.primary)
+        })
+        .unwrap();
+    assert_eq!(
+        p.corpus.relation(rule.head.relation()).unwrap().name,
+        "accepted"
+    );
+    assert!(
+        diagnostic.evidence["records"][0]["sources"]
+            .as_array()
+            .unwrap()
+            .len()
+            > 0
+    );
+}

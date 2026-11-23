@@ -571,7 +571,7 @@ fn shrinking_reader_rejoins_are_counted_and_remain_bounded_on_sparse_cycle() {
 #[test]
 fn existence_reports_odd_cores_and_cumulative_work_separately_from_validation() {
     let p = loaded(
-        "input guard(); relation conflict(); conflict():-guard(),!conflict(); relation h(); h():-!conflict(); verification v{semantics:completion;hypothesis:h;assumptions:[];obligations:[];}",
+        "input guard(); relation conflict(); conflict():-guard(),!conflict(); verification v{semantics:completion;assumptions:[];obligations:[];}",
     );
     let sink = CompletionSizes::default();
     let limits = Limits {
@@ -582,14 +582,14 @@ fn existence_reports_odd_cores_and_cumulative_work_separately_from_validation() 
         panic!()
     };
     let r = e.check(&p.keys, &Default::default()).unwrap();
-    assert!(r.classification.as_ref().unwrap().no_meaning.exists());
+    assert!(r.meaning.no_meaning.exists());
     let stats = sink.snapshot();
     let json = denotate_presentation::completion_sizes(&p.keys, &stats).unwrap();
     let search = json["searches"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|s| s["phase"] == "completion classification existence")
+        .find(|s| s["phase"] == "completion processing existence")
         .unwrap();
     let components = search["existence"]["componentDetails"].as_array().unwrap();
     assert!(components.iter().any(|c| c["oddComponents"] == 1
@@ -620,7 +620,7 @@ fn existence_reports_odd_cores_and_cumulative_work_separately_from_validation() 
         )
         .unwrap();
     assert!(matches!(
-        partial.classification.unwrap().no_meaning,
+        partial.meaning.no_meaning,
         Search::Inconclusive(_)
     ));
     let json = denotate_presentation::completion_sizes(&p.keys, &sink.snapshot()).unwrap();
@@ -629,7 +629,7 @@ fn existence_reports_odd_cores_and_cumulative_work_separately_from_validation() 
             .as_array()
             .unwrap()
             .iter()
-            .any(|s| s["phase"] == "completion classification existence"
+            .any(|s| s["phase"] == "completion processing existence"
                 && s["existence"]["currentComponent"]["state"] == "incomplete")
     );
 }
@@ -638,7 +638,7 @@ fn existence_reports_odd_cores_and_cumulative_work_separately_from_validation() 
 fn determinacy_reports_component_queries_before_solving_and_keeps_their_scope() {
     use std::sync::{Arc, Mutex};
     let p = loaded(
-        "input i(); relation p(); p():-i(); p():-p(),i(); relation q(); q():-!p(); verification v{semantics:completion;decisions:[q];assumptions:[];obligations:[];}",
+        "input i(); relation p(); p():-i(),!q(); relation q(); q():-!i(),p(); relation answer();answer():-!p(); verification v{semantics:completion;decisions:[answer];assumptions:[];obligations:[];}",
     );
     let sink = CompletionSizes::default();
     let events = Arc::new(Mutex::new(Vec::new()));
@@ -692,4 +692,44 @@ fn determinacy_reports_component_queries_before_solving_and_keeps_their_scope() 
         .map(|v| v.as_u64().unwrap())
         .sum();
     assert_eq!(search["work"], sum);
+}
+
+#[test]
+fn h_first_existence_still_reports_component_shapes_and_original_sources() {
+    let p = loaded(
+        "input guard(); relation conflict(); conflict():-guard(),!conflict(); relation h();h():-!conflict();verification v{semantics:completion;hypothesis:h;assumptions:[];obligations:[];}",
+    );
+    let sink = CompletionSizes::default();
+    let limits = Limits {
+        completion_sizes: Some(sink.clone()),
+        ..Default::default()
+    };
+    let Preparation::Ready(e) = prepare(&p, &limits) else {
+        panic!()
+    };
+    let r = e
+        .check(
+            &p.keys,
+            &CheckOptions {
+                prune: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(r.classification.unwrap().no_meaning.exists());
+    let json = denotate_presentation::completion_sizes(&p.keys, &sink.snapshot()).unwrap();
+    let search = json["searches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["phase"] == "completion classification existence")
+        .unwrap();
+    assert!(
+        search["existence"]["componentDetails"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["query"] == "hypothesis-model-coverage"
+                && c["relations"].to_string().contains("conflict"))
+    );
 }

@@ -271,7 +271,7 @@ fn complementary_producers_lift_a_boundary_pin_without_losing_models() {
     let mut e = prepare(&c, v, &Domains::new());
     let sizes = crate::CompletionSizes::default();
     e.limits.completion_sizes = Some(sizes.clone());
-    let r = e.check(&keys(&c), &Default::default()).unwrap();
+    let r = e.check_unpruned(&keys(&c), &Default::default()).unwrap();
     same_report(
         &r,
         &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
@@ -325,7 +325,7 @@ fn component_proofs_share_the_search_candidate_allowance() {
     let v = verification(&mut c, None, &[]);
     let e = prepare(&c, v, &Domains::new());
     let short = e
-        .check(
+        .check_unpruned(
             &keys(&c),
             &CheckOptions {
                 max_worlds: 1,
@@ -334,7 +334,9 @@ fn component_proofs_share_the_search_candidate_allowance() {
         )
         .unwrap();
     assert!(matches!(short.meaning.no_meaning, Search::Inconclusive(_)));
-    let complete = e.check(&keys(&c), &CheckOptions::default()).unwrap();
+    let complete = e
+        .check_unpruned(&keys(&c), &CheckOptions::default())
+        .unwrap();
     assert!(matches!(complete.meaning.no_meaning, Search::None));
     same_report(
         &complete,

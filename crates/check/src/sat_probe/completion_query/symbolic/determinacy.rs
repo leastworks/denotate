@@ -180,6 +180,7 @@ fn decompose(
 pub(super) fn search(
     engine: &Engine,
     cone: &Cone,
+    original: &Cone,
     members: Option<&BTreeSet<GroundAtom>>,
     scope: ModelScope,
     classification: bool,
@@ -196,7 +197,7 @@ pub(super) fn search(
     }) {
         return Ok(None);
     }
-    let a = s.encode(cone, true)?;
+    let a = s.encode_view(cone, original, true)?;
     let selector = s.gate()?;
     let mut examined = 0;
     for candidate in &plan.candidates {
@@ -235,7 +236,7 @@ pub(super) fn search(
             let active = [a.gate, b.gate, diff, selector];
             query(
                 engine,
-                cone,
+                original,
                 scope,
                 classification,
                 unique,
@@ -283,7 +284,7 @@ pub(super) fn search(
         let diff = s.difference(cone, &a, &b, members)?;
         query(
             engine,
-            cone,
+            original,
             scope,
             classification,
             unique,

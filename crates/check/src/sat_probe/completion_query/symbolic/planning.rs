@@ -150,10 +150,10 @@ impl Engine {
                 .classification
                 .as_ref()
                 .map_or_else(BTreeSet::new, |(_, m, _)| m.as_ref().clone());
-            let mut cone = self
-                .classification
-                .as_ref()
-                .map_or_else(|| self.cone.clone(), |(c, _, _)| c.clone());
+            let mut cone = self.classification.as_ref().map_or_else(
+                || self.cone.as_ref().clone(),
+                |(c, _, _)| c.as_ref().clone(),
+            );
             if scope == ConstantScope::Classification
                 && !members.contains(target)
                 && !self.input_relations.contains(&target.relation)
@@ -168,7 +168,7 @@ impl Engine {
                         .dependency_cone_with_budget([target.clone()], s.run.budget)?
                         .facts,
                 );
-                cone = self.cone.clone();
+                cone = self.cone.as_ref().clone();
                 cone.rules.retain(|r| members.contains(&cone.atoms[r.head]));
             }
             let encoded = s.encode(&cone, true)?;
@@ -272,7 +272,7 @@ impl Engine {
             self.cone.atoms.len() + self.cone.rules.len(),
             "completion planning scope",
         )?;
-        let mut cone = self.cone.clone();
+        let mut cone = self.cone.as_ref().clone();
         cone.rules.retain(|r| members.contains(&cone.atoms[r.head]));
         answer.members = members.clone();
         answer.no_meaning = self.symbolic_no_meaning_cone(path, false, true, options, 1, &cone)?;

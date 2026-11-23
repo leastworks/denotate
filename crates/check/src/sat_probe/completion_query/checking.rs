@@ -51,6 +51,8 @@ pub struct Meaning {
 }
 #[derive(Debug, Clone)]
 pub struct CheckOptions {
+    /// Opt-in common-equations pruning and H-first classification existence.
+    pub prune: bool,
     pub meaning: MeaningMode,
     /// Candidate observations per symbolic search; a cube may cover many worlds.
     pub max_worlds: usize,
@@ -66,6 +68,7 @@ pub struct CheckOptions {
 impl Default for CheckOptions {
     fn default() -> Self {
         Self {
+            prune: false,
             meaning: MeaningMode::Full,
             max_worlds: 1024,
             max_tuples: 10000,
@@ -79,6 +82,7 @@ impl Default for CheckOptions {
 }
 #[derive(Debug)]
 pub struct Report {
+    pub pruning: PruningReport,
     pub verification: VerificationId,
     pub hypothesis: Option<RelationId>,
     pub decisions: Option<BTreeSet<RelationId>>,
@@ -176,6 +180,7 @@ impl Engine {
             ));
         }
         let mut report = Report {
+            pruning: Default::default(),
             verification: self.verification,
             hypothesis: self.hypothesis,
             decisions: self.decisions.clone(),

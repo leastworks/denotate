@@ -415,3 +415,15 @@ reasons. The original evidence remains in `stdout.txt`. Recovery parses outcomes
 as a stream and skips evidence before allocation, so large interpretations do not
 have to fit in a JavaScript string. The CLI still constructs and writes that
 evidence; its time and disk cost remain part of the whole-process measurement.
+
+`guarded-schema --schema-double 1` adds a direct type-guarded source for each
+format's statement field while retaining the existing profile source. With
+`--schema-self 100`, every format has the profile/splice double-giving pattern;
+`--schema-self 50` keeps the mixed corpus-scale shape. The profile's implication
+of the type guard must come from its unchanged equations, not from the head being
+pruned. Compare against `--schema-double 0` as the control with no added splice.
+Completion reports record scoped producer removals and their W/W+H context.
+
+Pruning is off by default. Keep the generated shape identical and compare the
+normal run with one adding `-- --completion-prune` to the zoo command. Only the
+opt-in run emits pruning records and uses H-first classification existence.

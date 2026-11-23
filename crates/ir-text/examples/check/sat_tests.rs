@@ -779,6 +779,7 @@ fn completion_preparation_sizes_are_flushed_before_checking_even_without_progres
         false,
         false,
         false,
+        false,
         true,
         false,
         &mut output,
@@ -895,4 +896,37 @@ fn completion_full_models_is_explicit_and_not_enabled_by_verbose() {
     }
     let (code, _) = f.run(&["--completion-full-models"]);
     assert_eq!(code, 2);
+}
+
+#[test]
+fn completion_pruning_is_opt_in_and_leaves_default_output_unchanged() {
+    let f = Fixture::new(
+        "input tag();relation accepted();relation profile();accepted():-tag();accepted():-profile();profile():-tag(),!accepted();verification v{semantics:completion;assumptions:[];obligations:[];}",
+    );
+    let flags = ["--engine", "sat", "--no-progress"];
+    let (code, plain) = f.run(&flags);
+    assert_eq!(code, 0, "{plain}");
+    assert!(!plain.contains("completion-pruning"));
+    let (code, enabled) = f.run(&["--engine", "sat", "--no-progress", "--completion-prune"]);
+    assert_eq!(code, 0, "{enabled}");
+    assert!(enabled.contains("completion-pruning"), "{enabled}");
+    assert_eq!(f.run(&flags), (0, plain));
+    for enabled in [false, true] {
+        let mut flags = vec!["--engine", "sat", "--no-progress", "--json"];
+        if enabled {
+            flags.push("--completion-prune");
+        }
+        let (code, out) = f.run(&flags);
+        assert_eq!(code, 0, "{out}");
+        assert_eq!(out.contains("\"simplifications\""), enabled, "{out}");
+        assert_eq!(out.contains("completion pruning W"), enabled, "{out}");
+        if !enabled {
+            assert!(
+                !out.contains("completion original validation index"),
+                "{out}"
+            );
+        }
+    }
+    assert_eq!(f.run(&["--completion-prune"]).0, 2);
+    assert!(options::help().contains("--completion-prune"));
 }

@@ -142,10 +142,17 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
         self.gates.push(gate);
         Ok(gate)
     }
-    fn encode(&mut self, cone: &Cone, h: bool) -> Result<Encoded> {
+    fn simplified<'c>(&mut self, cone: &'c Cone, h: bool) -> Result<pruning::View<'c>> {
+        pruning::view(self.run.engine, cone, h, self.run.budget.remaining_time())
+    }
+    fn encode(&mut self, original: &Cone, h: bool) -> Result<Encoded> {
+        let view = self.simplified(original, h)?;
+        self.encode_view(&view, original, h)
+    }
+    fn encode_view(&mut self, cone: &Cone, original: &Cone, h: bool) -> Result<Encoded> {
         let gate = self.gate()?;
         self.run.cnf.gate = Some(gate);
-        let encoding = encoding::encode_named(
+        let mut encoding = encoding::encode_named(
             cone,
             &mut self.run.cnf,
             self.run.truth,
@@ -165,6 +172,9 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
             }
         }
         self.run.cnf.gate = None;
+        if self.run.engine.pruning.is_some() {
+            original_validation(original, &mut encoding, self.run.budget)?;
+        }
         Ok(Encoded { gate, encoding })
     }
     fn encode_shared(
@@ -176,7 +186,7 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
     ) -> Result<Encoded> {
         let gate = self.gate()?;
         self.run.cnf.gate = Some(gate);
-        let encoding = encoding::encode_shared(
+        let mut encoding = encoding::encode_shared(
             cone,
             &mut self.run.cnf,
             self.run.truth,
@@ -193,6 +203,14 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
             }
         }
         self.run.cnf.gate = None;
+        if self.run.engine.pruning.is_some()
+            && let (Some(to), Some(from)) = (&mut encoding.validation, &first.encoding.validation)
+        {
+            self.run
+                .budget
+                .charge(from.heads.len(), "completion original validation index")?;
+            to.heads.clone_from(&from.heads);
+        }
         Ok(Encoded { gate, encoding })
     }
     /// Both questions are active together: selected outputs differ, and this
@@ -446,6 +464,25 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
     }
 }
 
+fn original_validation(original: &Cone, encoding: &mut Encoding, b: &mut Budget<'_>) -> Result<()> {
+    b.charge(
+        original.rules.len() + original.fixed.len(),
+        "completion original validation index",
+    )?;
+    if let Some(index) = &mut encoding.validation {
+        let mut heads: BTreeSet<_> = original.rules.iter().map(|r| r.head).collect();
+        heads.extend(
+            original
+                .fixed
+                .iter()
+                .enumerate()
+                .filter_map(|(i, v)| v.is_some().then_some(i)),
+        );
+        index.heads = heads.into_iter().collect();
+    }
+    Ok(())
+}
+
 /// Keep the truth of derived atoms under every variation of unpinned inputs.
 /// A true head needs one true producer; a false head needs one blocker for each
 /// producer. Derived literals keep their model values, including circular support:
@@ -579,8 +616,10 @@ impl Engine {
             },
             shares,
             |s| {
+                let view = s.simplified(cone, true)?;
                 determinacy::search(
                     self,
+                    &view,
                     cone,
                     members,
                     scope,
@@ -700,7 +739,82 @@ impl Engine {
         } else {
             &self.cone
         };
+        if classification && self.pruning.is_some() {
+            return self.symbolic_classification_existence(context, options, shares, cone);
+        }
         self.symbolic_no_meaning_cone(context, classification, unique, options, shares, cone)
+    }
+    /// An H-model already proves classification existence at that observation.
+    /// Only an UNSAT H query permits falling back to equations without H.
+    fn symbolic_classification_existence(
+        &self,
+        context: &BTreeMap<GroundAtom, bool>,
+        options: &CheckOptions,
+        shares: usize,
+        original: &Cone,
+    ) -> Result<Search<Observation>> {
+        self.symbolic_search_in(
+            context,
+            "completion classification existence",
+            shares,
+            |s| {
+                // An unconditional structural existence certificate needs no
+                // model query, with or without H.
+                if consistency::analyse(original, None, s.run.budget)?.odd_components == 0 {
+                    return Ok(None);
+                }
+                existence::classification_shape(self, original, s)?;
+                let h = self.classification.as_ref().unwrap().2;
+                let view = s.simplified(original, true)?;
+                let accepted = s.encode_view(&view, original, true)?;
+                let selector = s.gate()?;
+                let mut base = None;
+                loop {
+                    if let Some(d) = &mut s.stats.current_component {
+                        d.state = "covering-hypothesis-models";
+                    }
+                    s.metrics();
+                    if !s.solve(&[selector], &[])? {
+                        return Ok(None);
+                    }
+                    s.run.budget.room(
+                        s.stats.rounds,
+                        options.max_worlds,
+                        "completion classification existence",
+                        "worlds",
+                    )?;
+                    s.stats.rounds += 1;
+                    s.metrics();
+                    let world = s.world()?;
+                    let pins = s.pins(&world)?;
+                    if s.solve(&[accepted.gate], &pins)? {
+                        let values = s.values(original, &accepted)?;
+                        let mut cube = cover(&view, &values, Some(h), s.run.budget)?;
+                        existence::lift(&view, &values, &accepted, &mut cube, s)?;
+                        // A lifted model must still assert H if H is an input.
+                        if view.input[h] && view.fixed[h].is_none() {
+                            cube.insert(h, true);
+                        }
+                        s.exclude(selector, &cube)?;
+                        continue;
+                    }
+                    if let Some(d) = &mut s.stats.current_component {
+                        d.state = "searching-without-hypothesis";
+                    }
+                    s.metrics();
+                    if base.is_none() {
+                        base = Some(s.encode(original, false)?);
+                    }
+                    let base = base.as_ref().unwrap();
+                    if !s.solve(&[base.gate], &pins)? {
+                        return Ok(Some(world));
+                    }
+                    let values = s.values(original, base)?;
+                    let cube = cover(original, &values, None, s.run.budget)?;
+                    s.exclude(selector, &cube)?;
+                }
+            },
+        )
     }
     fn symbolic_no_meaning_cone(
         &self,
@@ -717,7 +831,8 @@ impl Engine {
             "completion processing existence"
         };
         self.symbolic_search_in(context, phase, shares, |s| {
-            let Some(cone) = existence::residual(self, cone, classification, s, options)? else {
+            let view = s.simplified(cone, !classification)?;
+            let Some(cone) = existence::residual(self, &view, classification, s, options)? else {
                 return Ok(None);
             };
             let cone = &cone;
@@ -729,7 +844,7 @@ impl Engine {
             } else {
                 None
             };
-            let target = s.encode(cone, !classification)?;
+            let target = s.encode_view(cone, cone, !classification)?;
             let selector = s.gate()?;
             let mut active = vec![selector];
             if let Some(candidate) = &candidate {
@@ -909,12 +1024,29 @@ impl Engine {
     /// particular, a processing contradiction never filters the input universe
     /// or the original classification query.
     pub fn check(&self, keys: &SemanticKeys, options: &CheckOptions) -> Result<Report> {
+        if !options.prune {
+            return self.check_unpruned(keys, options);
+        }
+        let mut invocation = self.clone();
+        let cache = Arc::new(std::sync::Mutex::new(pruning::Cache::default()));
+        invocation.pruning = Some(cache.clone());
+        let mut report = invocation.check_unpruned(keys, options)?;
+        report.pruning = cache.lock().unwrap().report.clone();
+        report.pruning.enabled = true;
+        Ok(report)
+    }
+    pub(super) fn check_unpruned(
+        &self,
+        keys: &SemanticKeys,
+        options: &CheckOptions,
+    ) -> Result<Report> {
         if options.meaning != MeaningMode::Full {
             return Err(CheckError::InvalidRequest(
                 "completion supports full meaning analysis only",
             ));
         }
         let mut report = Report {
+            pruning: Default::default(),
             verification: self.verification,
             hypothesis: self.hypothesis,
             decisions: self.decisions.clone(),
@@ -1047,7 +1179,7 @@ impl Engine {
             let mut budget = Budget::new(&limits);
             if !vacuous {
                 if let Some(members) = property.members.clone() {
-                    let mut cone = self.cone.clone();
+                    let mut cone = self.cone.as_ref().clone();
                     cone.rules.retain(|r| members.contains(&cone.atoms[r.head]));
                     let result: Result<()> = (|| {
                         let mut solver = Solver::new(self, &mut budget)?;

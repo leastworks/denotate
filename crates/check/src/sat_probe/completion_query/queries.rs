@@ -293,7 +293,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
     }
     pub(super) fn new(engine: &'a Engine, budget: &'b mut Budget<'l>) -> Result<Self> {
         let mut run = Self::universe(engine, budget)?;
-        for a in &engine.assumptions {
+        for a in engine.assumptions.iter() {
             let local;
             let e = if a.cone.rules.is_empty() {
                 // With no defining rules, derived tuples are false, exactly as
@@ -451,7 +451,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             let values =
                 checked_assignment(&self.engine.world, &self.world, &self.cnf, self.budget)?;
             let mut excluded = false;
-            for a in &self.engine.assumptions {
+            for a in self.engine.assumptions.iter() {
                 if !a.recursive {
                     continue;
                 }
@@ -594,7 +594,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         (result, variables, clauses, validation_work)
     }
 
-    fn raw_solve(&mut self, pins: &[Lit]) -> Result<bool> {
+    pub(super) fn raw_solve(&mut self, pins: &[Lit]) -> Result<bool> {
         self.budget.tick("completion solve")?;
         self.cnf.solver.cb().check()?;
         self.budget

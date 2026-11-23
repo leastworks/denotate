@@ -20,6 +20,7 @@ pub enum Identity {
     AllRejected,
     CircularSupport(BTreeSet<GroundAtom>),
     CompletionDeadProducer(RuleId),
+    CompletionPruning(GroundAtom, &'static str),
     Notice(NoticeId),
     SubsumedProducer(RuleId),
     AssumedConclusion(AssumptionId, ObligationId),
@@ -109,6 +110,9 @@ impl Identity {
             }
             Self::SubsumedProducer(id) => {
                 json!({"rule":rule(keys.rule(*id)?),"notice":"subsumed-producer"})
+            }
+            Self::CompletionPruning(head, context) => {
+                json!({"head":atom_data(&AtomKey::from_atom(keys,head)?),"context":context,"notice":"completion-pruning"})
             }
             Self::Notice(id) => json!({"notice":qualified(&keys.notice(*id)?.0)}),
             Self::UnsupportedSemantics => json!({"context":"unsupported-semantics"}),

@@ -41,6 +41,7 @@ fn atom(a: &GroundAtom, keys: &SemanticKeys) -> Result<Value> {
     Ok(atom_data(&AtomKey::from_atom(keys, a)?))
 }
 mod evidence;
+mod pruning;
 pub use evidence::CompletionEvidenceOptions;
 use evidence::Evidence;
 fn observation(w: &Observation, keys: &SemanticKeys, evidence: &Evidence) -> Result<Value> {
@@ -196,13 +197,15 @@ fn summary_using(
             json!({"state":if incomplete.is_some(){"incomplete"}else if findings.is_empty(){"none"}else{"findings"},"findings":findings.len(),"reason":incomplete.map(reason)})
         }
     };
-    Ok(
-        json!({"backend":{"backend":"sat","configuration":"original-completion-v1"},"semantics":"completion","determinacy":determinacy(r,keys)?,"hypothesis":r.hypothesis.map(|h| corpus.relation(h).unwrap().name.clone()),"hypothesisIdentity":r.hypothesis.map(|h|atom(&GroundAtom::new(h,[]),keys)).transpose()?,
+    let mut summary = json!({"backend":{"backend":"sat","configuration":"original-completion-v1"},"semantics":"completion","determinacy":determinacy(r,keys)?,"hypothesis":r.hypothesis.map(|h| corpus.relation(h).unwrap().name.clone()),"hypothesisIdentity":r.hypothesis.map(|h|atom(&GroundAtom::new(h,[]),keys)).transpose()?,
         "verification":[keys.verification(v.id)?.0.namespace.as_ref(),keys.verification(v.id)?.0.name.as_ref()],"activeAssumptions":v.assumptions.iter().map(|id|corpus.assumption(*id).unwrap().name.clone()).collect::<Vec<_>>(),
         "state":if r.is_incomplete(){"incomplete"}else if r.has_failures(){"findings"}else if r.all_rejected(){"all-rejected"}else{"proved"},"hasFailures":r.has_failures(),"incomplete":r.is_incomplete(),"context":context,"classification":classification,"meaning":meaning,"obligations":obligations,
         "inputContract":{"complete":r.assumptions.iter().all(AssumptionAnalysis::certified),"assumptions":r.assumptions.iter().map(|a|assumption_data(a,keys, evidence)).collect::<Result<Vec<_>>>()?,"omittedInputDomains":r.ignored_input_domains.iter().map(|d|input_domain_using(d,keys,evidence)).collect::<Result<Vec<_>>>()?},
-        "incompletePhases":r.incomplete.iter().map(|c|reason(*c)).collect::<Vec<_>>(),"notices":r.notices_not_analysed.iter().map(|id|json!({"name":corpus.notice(*id).unwrap().name,"state":"not-analysed"})).collect::<Vec<_>>(),"advisories":{"circularSupport":advisory,"deadProducers":dead}}),
-    )
+        "incompletePhases":r.incomplete.iter().map(|c|reason(*c)).collect::<Vec<_>>(),"notices":r.notices_not_analysed.iter().map(|id|json!({"name":corpus.notice(*id).unwrap().name,"state":"not-analysed"})).collect::<Vec<_>>(),"advisories":{"circularSupport":advisory,"deadProducers":dead}});
+    if r.pruning.enabled {
+        summary["simplifications"] = pruning::summary(r, keys)?;
+    }
+    Ok(summary)
 }
 
 fn findings_using(
@@ -506,6 +509,9 @@ fn findings_using(
                 vec![location(f.rule.into(),Role::Producer)],
                 json!({"kind":"completion-dead-producer","head":atom(&f.head,keys)?,"missingPremise":atom(&f.missing,keys)?,"outside":f.outside.iter().map(|a|atom(a,keys)).collect::<Result<Vec<_>>>()?}));
         }
+    }
+    if r.pruning.enabled {
+        out.extend(pruning::findings(corpus, keys, r, names)?);
     }
     for finding in &mut out {
         if finding.evidence["kind"] == "completion-ambiguity" {
@@ -935,7 +941,7 @@ pub fn completion_existence_stats(
             json!({"index":c.index,"atoms":c.atoms,"rules":c.rules,"boundary":c.boundary,
             "relations":c.relations.iter().map(|r|relation(*r)).collect::<Result<Vec<_>>>()?,
             "omittedRelations":c.relation_count.saturating_sub(c.relations.len()),
-            "query":if c.query.is_empty(){"existence"}else{c.query},"elapsedMs":c.elapsed.as_secs_f64()*1000.0,"variables":c.variables,"clauses":c.clauses,"duplicatedAtoms":c.duplicated_atoms,"oddComponents":(c.query.is_empty() && c.state != "analysing").then_some(c.odd_components),"oddAtoms":(c.query.is_empty() && c.state != "analysing").then_some(c.odd_atoms),"state":c.state}),
+            "query":if c.query.is_empty(){"existence"}else{c.query},"elapsedMs":c.elapsed.as_secs_f64()*1000.0,"variables":c.variables,"clauses":c.clauses,"duplicatedAtoms":c.duplicated_atoms,"oddComponents":((c.query.is_empty() || c.query == "hypothesis-model-coverage") && c.state != "analysing").then_some(c.odd_components),"oddAtoms":((c.query.is_empty() || c.query == "hypothesis-model-coverage") && c.state != "analysing").then_some(c.odd_atoms),"state":c.state}),
         )
     };
     Ok(

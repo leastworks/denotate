@@ -1,11 +1,11 @@
 // Neutral completion workload: format recognition, guarded blocks and field values.
 export function guardedSchema(options = {}) {
   const cfg = {sets: 8, depth: 2, fanout: 5, stmts: 3, triggers: 1, values: 2, reads: 1,
-    outs: 5, splice: 25, self: 50, impossible: 0, wide: 0, ...options};
+    outs: 5, splice: 25, self: 50, impossible: 0, wide: 0, double: 0, ...options};
   for (const [key, value] of Object.entries(cfg)) {
     if (!Number.isSafeInteger(value) || value < 0) throw Error(`invalid guarded-schema ${key}`);
   }
-  if (!cfg.sets || !cfg.depth || !cfg.fanout || !cfg.values || !cfg.reads || cfg.splice > 100 || cfg.self > 100 || cfg.impossible > 1 || cfg.wide > 1) throw Error('invalid guarded-schema shape');
+  if (!cfg.sets || !cfg.depth || !cfg.fanout || !cfg.values || !cfg.reads || cfg.splice > 100 || cfg.self > 100 || cfg.impossible > 1 || cfg.wide > 1 || cfg.double > 1) throw Error('invalid guarded-schema shape');
   const widths = cfg.blocks === undefined
     ? Array.from({length:cfg.depth},(_,d)=>cfg.fanout ** (d+1))
     : Array.from({length:cfg.depth},(_,d)=>Math.floor(cfg.blocks/cfg.depth)+(d<cfg.blocks%cfg.depth?1:0));
@@ -94,6 +94,10 @@ statement_element(statement_${f},element_${e});statement_value(statement_${f},va
 compared(type_field,tag_${f});type_matches(format_${f}) :- element_value(type_field,tag_${f});`);
     if(f*100<cfg.sets*cfg.self) { globalFields.delete(e);add(`block_expected(block_${root},element_${e});`); }
     else globalFields.add(e);
+    // A direct type-guarded splice and the profile both supply this field.
+    // The profile implies the type guard through unchanged term equations.
+    // Its producer can therefore be pruned without assuming accepted_field.
+    if(cfg.double) add(`accepted_field(element_${e}) :- type_matches(format_${f});`);
     let parents=[root];
     for(let d=0;d<cfg.depth;d++) {
       const next=[];

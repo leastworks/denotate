@@ -478,7 +478,7 @@ mod parity_oracle {
             .chain(heads.iter().copied())
             .collect();
         for shape in 0..512usize {
-            let mut c = e.cone.clone();
+            let mut c = e.cone.as_ref().clone();
             c.rules.clear();
             for (k, head) in heads.iter().enumerate() {
                 let literal = (shape >> (3 * k)) & 7;
@@ -539,4 +539,60 @@ mod parity_oracle {
             );
         }
     }
+}
+
+/// Shape-only records for the H-first classification search. These are not
+/// local totality certificates: the subsequent query uses the full C(H).
+pub(super) fn classification_shape(
+    engine: &Engine,
+    cone: &Cone,
+    s: &mut Solver<'_, '_, '_>,
+) -> Result<()> {
+    let mut producers = vec![Vec::new(); cone.fixed.len()];
+    for (i, r) in cone.rules.iter().enumerate() {
+        s.run.budget.tick("completion component index")?;
+        producers[r.head].push(i);
+    }
+    for c in engine.program.components().filter(|c| c.recursive) {
+        let heads: BTreeSet<_> = c
+            .atoms
+            .iter()
+            .map(|a| engine.program.atom_index[a])
+            .filter(|i| !producers[*i].is_empty())
+            .collect();
+        if heads.is_empty() {
+            continue;
+        }
+        let local = component(cone, &producers, &heads, s.run.budget)?;
+        let core = consistency::analyse(&local, None, s.run.budget)?;
+        let relations: BTreeSet<_> = local
+            .atoms
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !local.input[*i])
+            .map(|(_, a)| a.relation)
+            .collect();
+        let detail = crate::CompletionComponentStats {
+            index: s.stats.components,
+            atoms: heads.len(),
+            rules: local.rules.len(),
+            boundary: local.input.iter().filter(|b| **b).count(),
+            relations: relations.iter().copied().take(32).collect(),
+            relation_count: relations.len(),
+            odd_components: core.odd_components,
+            odd_atoms: core.odd_atoms,
+            query: "hypothesis-model-coverage",
+            state: "pending",
+            ..Default::default()
+        };
+        s.stats.components += 1;
+        s.stats.current_component = Some(detail.clone());
+        if s.stats.component_details.len() < 64 {
+            s.stats.component_details.push(detail);
+        } else {
+            s.stats.omitted_components += 1;
+        }
+        s.metrics();
+    }
+    Ok(())
 }

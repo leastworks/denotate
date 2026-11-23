@@ -206,7 +206,7 @@ impl Cnf {
         Ok(())
     }
 }
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 struct Rule {
     head: usize,
     body: Vec<(usize, bool)>,

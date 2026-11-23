@@ -3,6 +3,7 @@ use crate::test_support::rewrites::{atom, rel, rule};
 use denotate_ir::*;
 mod contracts;
 mod determinacy;
+mod pruning;
 mod reports;
 mod scale;
 
