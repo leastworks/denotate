@@ -213,7 +213,7 @@ impl Engine {
                     .collect(),
             });
         }
-        self.cone.rules = rules;
+        self.cone.rules = rules.into();
         self.cone.source_rules = self.cone.rules.len();
         self.pinned_values
             .extend(values.into_iter().map(|(a, v)| (a, v.value)));
@@ -239,6 +239,7 @@ impl Engine {
             solver: Solver::new(
                 Default::default(),
                 Stop {
+                    deadline: None,
                     polls: None,
                     cancellation: self.limits.cancellation.clone(),
                     start: Instant::now(),

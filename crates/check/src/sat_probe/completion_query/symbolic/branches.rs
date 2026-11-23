@@ -1,9 +1,15 @@
 //! Invocation-local input partitions. Units share only immutable preparation;
 //! their equations, solver, work allowance and results belong to that branch.
 use super::*;
+mod fitting;
+mod groups;
+use groups::{Choice, Group};
 
 #[derive(Debug, Clone)]
 pub struct BranchRecord {
+    pub id: usize,
+    pub parent: Option<usize>,
+    pub closed_children: usize,
     pub phase: &'static str,
     pub depth: usize,
     pub state: &'static str,
@@ -11,6 +17,16 @@ pub struct BranchRecord {
     pub omitted_pins: usize,
     pub split: Option<GroundAtom>,
     pub children: usize,
+    pub split_kind: &'static str,
+    pub assumption: Option<denotate_ir::AssumptionId>,
+    pub values: Vec<GroundAtom>,
+    pub omitted_values: usize,
+    pub mapping: Vec<(GroundAtom, GroundAtom)>,
+    pub omitted_mapping: usize,
+    pub has_rest: bool,
+    pub rest: bool,
+    pub preparation_work: usize,
+    pub search_work: usize,
     /// Structural guard-edge histogram score, not a proof of edge deletion.
     pub guarded_edges: usize,
     pub work: usize,
@@ -22,6 +38,7 @@ pub struct BranchReport {
     pub enabled: bool,
     pub splits: usize,
     pub leaves: usize,
+    pub pending_units: usize,
     pub records: Vec<BranchRecord>,
     pub omitted_records: usize,
 }
@@ -36,44 +53,18 @@ impl BranchReport {
     }
 }
 
-// Only authored input cardinalities and selected input-only exactly-one
-// assumptions justify omitting the all-absent and multiple-present branches.
-fn groups(e: &Engine, b: &mut Budget<'_>) -> Result<Vec<Vec<usize>>> {
-    let mut groups = BTreeSet::new();
-    for (kind, atoms) in &e.world.groups {
-        b.charge(atoms.len() + 1, "completion split groups")?;
-        if *kind == Cardinality::ExactlyOne && atoms.iter().all(|i| e.cone.input[*i]) {
-            groups.insert(atoms.clone());
-        }
-    }
-    for a in e.assumptions.iter() {
-        if a.kind != Cardinality::ExactlyOne {
-            continue;
-        }
-        for (_, atoms) in &a.groups {
-            b.charge(atoms.len() + 1, "completion split groups")?;
-            if atoms.iter().all(|i| e.cone.input[*i]) {
-                groups.insert(atoms.clone());
-            }
-        }
-    }
-    Ok(groups.into_iter().collect())
-}
-
 /// Rank the same structural guard/input dependency shape as the odd-component
 /// histogram. Scores are candidates; Fitting in each child determines actual cuts.
 fn choose(
     e: &Engine,
+    state: &fitting::Bundle,
     classification: bool,
     existence: bool,
     capacity: usize,
     remaining: &mut QueryLimits,
     b: &mut Budget<'_>,
-) -> Result<Option<(Vec<usize>, usize)>> {
-    let groups = groups(e, b)?;
-    if groups.is_empty() {
-        return Ok(None);
-    }
+) -> Result<Option<Choice>> {
+    let groups = groups::groups(e, state, b)?;
     let c = if classification {
         &*e.classification.as_ref().unwrap().0
     } else {
@@ -153,7 +144,7 @@ fn choose(
     if candidates.is_empty() {
         return Ok(None);
     }
-    let mut readers = vec![Vec::new(); c.fixed.len()];
+    let witnesses = witness_edges(c, &graph, b)?;
     let mut guard_edges = Vec::new();
     for r in &c.rules {
         b.charge(r.body.len() + 1, "completion split index")?;
@@ -164,11 +155,6 @@ fn choose(
         {
             continue;
         }
-        for (i, _) in &r.body {
-            if c.fixed[*i].is_none() {
-                readers[*i].push(r.head);
-            }
-        }
         for (i, p) in &r.body {
             if c.input[*i]
                 || c.fixed[*i].is_some()
@@ -177,6 +163,12 @@ fn choose(
                 continue;
             }
             if !candidates.contains(&graph.component[*i]) {
+                continue;
+            }
+            if witnesses
+                .get(&graph.component[*i])
+                .is_some_and(|es| !es.contains(&(r.head, *i, !*p)))
+            {
                 continue;
             }
             // The cyclic literal itself is not a guard for its own edge.
@@ -193,70 +185,193 @@ fn choose(
     if guard_edges.is_empty() {
         return Ok(None);
     }
-    let mut best = None;
-    for group in groups {
-        if group.iter().any(|i| e.cone.fixed[*i] == Some(true)) {
-            continue;
+    // Rank separately for each targeted component. A group's other values stay
+    // symbolic in one rest child; there is no assumed equivalence between them.
+    let mut influence = BTreeMap::<usize, BTreeMap<usize, BTreeSet<(usize, usize, bool)>>>::new();
+    let mut providers = vec![Vec::new(); c.fixed.len()];
+    for r in &c.rules {
+        if c.fixed[r.head].is_none()
+            && !r
+                .body
+                .iter()
+                .any(|(i, p)| c.fixed[*i].is_some_and(|v| v != *p))
+        {
+            providers[r.head].extend(r.body.iter().map(|(i, _)| *i));
         }
-        let choices: Vec<_> = group
-            .iter()
-            .copied()
-            .filter(|i| e.cone.fixed[*i].is_none())
-            .collect();
-        if choices.is_empty() || choices.len() > capacity {
-            continue;
+    }
+    let mut cached = BTreeMap::<usize, BTreeSet<usize>>::new();
+    for (edge, guards) in &guard_edges {
+        for guard in guards {
+            if !cached.contains_key(guard) {
+                let mut pending = vec![*guard];
+                let mut seen = BTreeSet::new();
+                let mut inputs = BTreeSet::new();
+                while let Some(i) = pending.pop() {
+                    b.tick("completion split histogram")?;
+                    if !seen.insert(i) || c.fixed[i].is_some() {
+                        continue;
+                    }
+                    if c.input[i] {
+                        inputs.insert(i);
+                    } else {
+                        b.charge(providers[i].len(), "completion split histogram")?;
+                        pending.extend(providers[i].iter().copied());
+                    }
+                }
+                cached.insert(*guard, inputs);
+            }
+            for i in &cached[guard] {
+                b.tick("completion split histogram")?;
+                influence
+                    .entry(graph.component[edge.0])
+                    .or_default()
+                    .entry(*i)
+                    .or_default()
+                    .insert(*edge);
+            }
         }
-        let mut reached = vec![false; c.fixed.len()];
-        let mut pending = choices;
-        while let Some(i) = pending.pop() {
-            if reached[i] {
+    }
+    let mut best: Option<Choice> = None;
+    for inputs in influence.values() {
+        for group in &groups {
+            if group.atoms.iter().any(|i| c.fixed[*i] == Some(true)) {
                 continue;
             }
-            reached[i] = true;
-            b.charge(readers[i].len() + 1, "completion split histogram")?;
-            pending.extend(readers[i].iter().copied());
-        }
-        let mut edges = BTreeSet::new();
-        for (edge, guards) in &guard_edges {
-            b.charge(guards.len() + 1, "completion split histogram")?;
-            if guards.iter().any(|i| reached[*i]) {
-                edges.insert(*edge);
+            let available: Vec<_> = group
+                .atoms
+                .iter()
+                .copied()
+                .filter(|i| c.fixed[*i].is_none())
+                .collect();
+            let selected: Vec<_> = available
+                .iter()
+                .copied()
+                .filter(|i| inputs.contains_key(i))
+                .collect();
+            if selected.is_empty() {
+                continue;
+            }
+            let rest = !group.exact || selected.len() != available.len();
+            let n = selected.len() + usize::from(rest);
+            if n < 2 || n > capacity {
+                continue;
+            }
+            let score = selected
+                .iter()
+                .flat_map(|i| inputs[i].iter())
+                .collect::<BTreeSet<_>>()
+                .len();
+            let choice = Choice {
+                group: group.clone(),
+                selected,
+                rest,
+                score,
+                binary: false,
+            };
+            if best.as_ref().is_none_or(|old| {
+                n < old.selected.len() + usize::from(old.rest)
+                    || (n == old.selected.len() + usize::from(old.rest) && score > old.score)
+            }) {
+                best = Some(choice);
             }
         }
-        let score = edges.len();
-        if score > 0 && best.as_ref().is_none_or(|(_, old)| score > *old) {
-            best = Some((group, score));
+    }
+    // Without a certified useful partition, true/false on one input is always
+    // exhaustive. In particular repeated elements never imply sibling exclusion.
+    if best.is_none() && capacity >= 2 {
+        let mut all = BTreeMap::<usize, BTreeSet<(usize, usize, bool)>>::new();
+        for inputs in influence.values() {
+            for (i, edges) in inputs {
+                all.entry(*i).or_default().extend(edges.iter().copied());
+            }
+        }
+        if let Some((i, edges)) = all
+            .into_iter()
+            .max_by(|(i, a), (j, b)| a.len().cmp(&b.len()).then_with(|| j.cmp(i)))
+        {
+            best = Some(Choice {
+                group: Group {
+                    atoms: vec![i],
+                    exact: false,
+                    assumption: None,
+                    mapping: vec![],
+                },
+                selected: vec![i],
+                rest: true,
+                score: edges.len(),
+                binary: true,
+            });
         }
     }
     Ok(best)
 }
 
-fn specialize(e: &Engine, pins: &BTreeMap<GroundAtom, bool>, b: &mut Budget<'_>) -> Result<Engine> {
-    b.check("completion branch preparation")?;
-    let mut out = e.clone();
-    // No branch can install a proof into another branch's pruning cache. Branch
-    // rewrites would also need branch-tagged diagnostics, deferred from this stage.
-    out.pruning = None;
-    out.branches = None;
-    let fold = |c: &Cone, b: &mut Budget<'_>| -> Result<Arc<Cone>> {
-        let mut c = c.clone();
-        for (a, v) in pins {
-            c.fixed[e.program.atom_index[a]] = Some(*v);
+// Use the existing parity-doubled witness search on compact per-component arrays.
+fn witness_edges(
+    c: &Cone,
+    g: &consistency::Core,
+    b: &mut Budget<'_>,
+) -> Result<BTreeMap<usize, BTreeSet<(usize, usize, bool)>>> {
+    let mut seeds = BTreeMap::new();
+    for seed in &g.conflicts {
+        seeds.entry(g.component[seed.0]).or_insert(*seed);
+    }
+    let mut edges = BTreeMap::<usize, Vec<(usize, usize, bool)>>::new();
+    for r in &c.rules {
+        b.charge(r.body.len() + 1, "completion split witnesses")?;
+        let id = g.component[r.head];
+        if !seeds.contains_key(&id)
+            || c.fixed[r.head].is_some()
+            || r.body
+                .iter()
+                .any(|(i, p)| c.fixed[*i].is_some_and(|v| v != *p))
+        {
+            continue;
         }
-        c.fixed = encoding::fitting(&c, b)?;
-        Ok(Arc::new(c))
-    };
-    out.cone = fold(&e.cone, b)?;
-    out.world = fold(&e.world, b)?;
-    out.classification = e
-        .classification
-        .as_ref()
-        .map(|(c, m, h)| -> Result<_> { Ok((fold(c, b)?, m.clone(), *h)) })
-        .transpose()?;
+        for (i, p) in &r.body {
+            if !c.input[*i] && c.fixed[*i].is_none() && g.component[*i] == id {
+                edges.entry(id).or_default().push((r.head, *i, !*p));
+            }
+        }
+    }
+    let mut out = BTreeMap::new();
+    for (id, es) in edges {
+        let atoms: Vec<_> = es
+            .iter()
+            .flat_map(|(a, b, _)| [*a, *b])
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect();
+        let index: BTreeMap<_, _> = atoms.iter().enumerate().map(|(i, a)| (*a, i)).collect();
+        let mut adj = vec![vec![]; atoms.len()];
+        for (a, d, p) in es {
+            adj[index[&a]].push((index[&a], index[&d], p));
+        }
+        for es in &mut adj {
+            es.sort_unstable();
+            es.dedup();
+        }
+        let (a, d, p) = seeds[&id];
+        if let Some(mut cycle) = odd::shortest_return((index[&a], index[&d], p), &adj, b)? {
+            odd::simplify_walk(&mut cycle, b)?;
+            out.insert(
+                id,
+                cycle
+                    .into_iter()
+                    .map(|(a, d, p)| (atoms[a], atoms[d], p))
+                    .collect(),
+            );
+        }
+    }
     Ok(out)
 }
 
 struct Unit {
+    id: usize,
+    parent_id: Option<usize>,
+    parent: Option<Arc<fitting::Bundle>>,
+    delta: Vec<(usize, bool)>,
+    rest: bool,
     pins: BTreeMap<GroundAtom, bool>,
     depth: usize,
     work: usize,
@@ -290,8 +405,16 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
         (false, false) => "completion processing ambiguity",
     };
     let limits = e.shared_limits(shares);
-    let deadline = Instant::now() + limits.timeout;
+    let local_deadline = Instant::now() + limits.timeout;
+    let deadline = limits
+        .run_deadline
+        .map_or(local_deadline, |d| d.min(local_deadline));
     let mut queue = std::collections::VecDeque::from([Unit {
+        id: 0,
+        parent_id: None,
+        parent: None,
+        delta: vec![],
+        rest: false,
         pins: BTreeMap::new(),
         depth: 0,
         work: limits.max_work,
@@ -299,12 +422,23 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
         worlds: options.max_worlds,
     }]);
     let mut report = BranchReport::default();
+    let mut next_id = 1;
     let mut unknown = None;
     let mut answer = None;
     while let Some(unit) = queue.pop_front() {
         e.limits.cancellation.check()?;
+        if Instant::now() >= deadline {
+            let cause = CheckError::deadline(phase, limits.timeout);
+            e.limits.progress.failure(&cause);
+            unknown.get_or_insert(inconclusive(cause)?);
+            report.pending_units += queue.len() + 1;
+            break;
+        }
         let started = Instant::now();
         let mut record = BranchRecord {
+            id: unit.id,
+            parent: unit.parent_id,
+            closed_children: 0,
             phase,
             depth: unit.depth,
             state: "preparing",
@@ -319,6 +453,16 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
             omitted_pins: unit.pins.len().saturating_sub(32),
             split: None,
             children: 0,
+            split_kind: "none",
+            assumption: None,
+            values: vec![],
+            omitted_values: 0,
+            mapping: vec![],
+            omitted_mapping: 0,
+            has_rest: false,
+            rest: unit.rest,
+            preparation_work: 0,
+            search_work: 0,
             guarded_edges: 0,
             work: 0,
             elapsed: Duration::ZERO,
@@ -335,42 +479,79 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
         local_limits.timeout =
             deadline.saturating_duration_since(Instant::now()) / (queue.len() + 1) as u32;
         local_limits.max_work = unit.work;
+        local_limits.run_deadline = Some(
+            local_limits
+                .run_deadline
+                .map_or(deadline, |d| d.min(deadline)),
+        );
         let mut budget = Budget::new(&local_limits);
         let mut config = unit.config.clone();
         let result: Result<Option<Engine>> = (|| {
-            let mut branch = specialize(e, &unit.pins, &mut budget)?;
+            let state = Arc::new(match &unit.parent {
+                Some(parent) => parent.child(&unit.delta, &mut budget)?,
+                None => fitting::Bundle::new(e, &mut budget)?,
+            });
+            let mut branch = state.engine(e, &mut budget)?;
             branch.limits = local_limits.clone();
             branch.config = config.clone();
             let capacity = options
                 .split_branches
                 .saturating_sub(report.leaves + queue.len());
             if unit.depth < options.split_depth && capacity > 0 {
-                if let Some((group, score)) = choose(
+                if let Some(choice) = choose(
                     &branch,
+                    &state,
                     classification,
                     existence,
                     capacity,
                     &mut config,
                     &mut budget,
                 )? {
-                    let choices: Vec<_> = group
-                        .iter()
-                        .copied()
-                        .filter(|i| branch.cone.fixed[*i].is_none())
-                        .collect();
-                    let n = choices.len();
+                    let children = choice.children();
+                    let n = children.len();
                     if n > 0 {
                         record.state = "split";
-                        record.split = Some(e.cone.atoms[group[0]].clone());
+                        record.split = Some(e.cone.atoms[choice.selected[0]].clone());
                         record.children = n;
-                        record.guarded_edges = score;
+                        record.guarded_edges = choice.score;
+                        record.split_kind = if choice.binary {
+                            "binary"
+                        } else if choice.group.exact {
+                            "exactly-one"
+                        } else {
+                            "at-most-one"
+                        };
+                        record.assumption = choice.group.assumption;
+                        record.values = choice
+                            .selected
+                            .iter()
+                            .take(32)
+                            .map(|i| e.cone.atoms[*i].clone())
+                            .collect();
+                        record.omitted_values = choice.selected.len().saturating_sub(32);
+                        record.has_rest = choice.rest;
+                        record.mapping = choice
+                            .group
+                            .mapping
+                            .iter()
+                            .take(32)
+                            .map(|(a, i)| (e.cone.atoms[*a].clone(), e.cone.atoms[*i].clone()))
+                            .collect();
+                        record.omitted_mapping = choice.group.mapping.len().saturating_sub(32);
                         report.splits += 1;
-                        for chosen in choices {
+                        for (delta, rest) in children {
                             let mut pins = unit.pins.clone();
-                            for i in &group {
-                                pins.insert(e.cone.atoms[*i].clone(), *i == chosen);
+                            for (i, v) in &delta {
+                                pins.insert(e.cone.atoms[*i].clone(), *v);
                             }
+                            let id = next_id;
+                            next_id += 1;
                             queue.push_back(Unit {
+                                id,
+                                parent_id: Some(unit.id),
+                                parent: Some(state.clone()),
+                                delta,
+                                rest,
                                 pins,
                                 depth: unit.depth + 1,
                                 work: unit.work.saturating_sub(budget.used()) / n,
@@ -389,6 +570,7 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
             }))
         })();
         record.work = budget.used();
+        record.preparation_work = budget.used();
         let result = match result {
             Ok(None) => {
                 forward(e, &sink, unit.depth);
@@ -414,6 +596,8 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
                 let value = leaf(&branch, &opts);
                 for search in sink.snapshot().searches {
                     if search.phase == phase {
+                        record.search_work =
+                            record.search_work.saturating_add(search.work.unwrap_or(0));
                         record.work = record.work.saturating_add(search.work.unwrap_or(0));
                     }
                 }
@@ -431,7 +615,14 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
                 record.state = "counterexample";
                 answer = Some(Search::Exists(value));
             }
-            Search::None => record.state = "proved",
+            Search::None => {
+                record.state = "proved";
+                if let Some(parent) = unit.parent_id {
+                    if let Some(r) = report.records.iter_mut().find(|r| r.id == parent) {
+                        r.closed_children += 1;
+                    }
+                }
+            }
             Search::Inconclusive(cause) => {
                 record.state = "inconclusive";
                 record.cutoff = Some(cause);
@@ -450,6 +641,7 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
         let mut out = sink.lock().unwrap();
         out.splits += report.splits;
         out.leaves += report.leaves;
+        out.pending_units += report.pending_units;
         out.omitted_records += report.omitted_records;
         for record in report.records {
             if out.records.len() < 256 {
@@ -470,3 +662,6 @@ fn forward(e: &Engine, sink: &crate::CompletionSizes, depth: usize) {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

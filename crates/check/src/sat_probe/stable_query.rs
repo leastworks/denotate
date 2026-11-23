@@ -309,6 +309,7 @@ impl Engine {
             solver: Solver::new(
                 Default::default(),
                 Stop {
+                    deadline: None,
                     polls: None,
                     cancellation: limits.cancellation.clone(),
                     start: Instant::now(),

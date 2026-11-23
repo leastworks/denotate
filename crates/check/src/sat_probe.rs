@@ -75,6 +75,7 @@ struct PollLimit {
     max: usize,
 }
 struct Stop {
+    deadline: Option<Instant>,
     polls: Option<PollLimit>,
     cancellation: Cancellation,
     start: Instant,
@@ -85,6 +86,10 @@ struct Stop {
 impl Stop {
     fn check(&self) -> Result<()> {
         self.cancellation.check()?;
+        let now = Instant::now();
+        if self.deadline.is_some_and(|d| now >= d) {
+            return Err(CheckError::deadline("SAT shared deadline", self.timeout));
+        }
         if let Some(p) = &self.polls {
             if p.used.get() > p.max {
                 return Err(CheckError::limit(
@@ -95,7 +100,7 @@ impl Stop {
                 ));
             }
         }
-        if self.start.elapsed() >= self.timeout {
+        if now.saturating_duration_since(self.start) >= self.timeout {
             return Err(CheckError::deadline("SAT probe", self.timeout));
         }
         Ok(())
@@ -222,13 +227,13 @@ impl Eq for Rule {}
 // Named atoms precede anonymous acyclic BDD nodes; all indexed arrays include both.
 #[derive(Clone)]
 struct Cone {
-    atoms: Vec<GroundAtom>,
-    rules: Vec<Rule>,
-    target: Vec<bool>,
-    duplicated: Vec<bool>,
+    atoms: shared::Shared<GroundAtom>,
+    rules: shared::Shared<Rule>,
+    target: shared::Shared<bool>,
+    duplicated: shared::Shared<bool>,
     fixed: Vec<Option<bool>>,
-    input: Vec<bool>,
-    groups: Vec<(Cardinality, Vec<usize>)>,
+    input: shared::Shared<bool>,
+    groups: shared::Shared<(Cardinality, Vec<usize>)>,
     source_rules: usize,
 }
 
@@ -486,12 +491,12 @@ fn cone(
         .collect();
     Ok(Cone {
         source_rules: rules.len(),
-        atoms,
-        rules,
+        atoms: atoms.into(),
+        rules: rules.into(),
         fixed,
         input,
-        target,
-        duplicated,
+        target: target.into(),
+        duplicated: duplicated.into(),
         groups,
     })
 }
@@ -543,6 +548,7 @@ fn probe_built(
         solver: Solver::new(
             Default::default(),
             Stop {
+                deadline: None,
                 polls: None,
                 cancellation: limits.cancellation.clone(),
                 start,
@@ -838,3 +844,5 @@ pub use admission::{SatProbeEvent, SatProbeObserver};
 pub mod completion_query;
 mod program;
 pub mod stable_query;
+
+mod shared;

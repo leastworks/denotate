@@ -185,7 +185,13 @@ fn unselected_exactly_one_never_discards_absent_or_multi_value_worlds() {
         &got,
         &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
     );
-    assert_eq!(got.branches.splits, 0);
+    assert!(
+        got.branches
+            .records
+            .iter()
+            .filter(|r| r.state == "split")
+            .all(|r| r.split_kind == "binary")
+    );
     assert!(got.meaning.no_meaning.exists());
 }
 

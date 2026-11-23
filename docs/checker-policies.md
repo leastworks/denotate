@@ -1978,17 +1978,31 @@ existing coupled query in place; this is not a corpus-scale optimization yet.
 Input splitting is opt-in: `CheckOptions::split_depth` /
 `--completion-split-depth`, default zero. `split_branches` /
 `--completion-split-branches` defaults to 512 terminal partitions per question.
-A smaller cap than a candidate group's value count declines that split; reaching
-a depth or leaf bound uses the existing residual search. No input choices are
+Only partitions whose separate values plus rest fit the remaining cap qualify;
+a binary input split may still fit when a group partition does not. Reaching a
+depth or leaf bound uses the existing residual search. No input choices are
 silently dropped.
 
-Ranking uses structural reachability from input groups to guard literals on odd
-or independently non-unique component edges. It counts distinct guarded edges,
-not guaranteed disabled edges. Only declared and selected input-only exactly-one
-groups qualify; derived cardinality and unchecked obligations supply no partition
-certificate. Fitting is rerun on the branch's full checking, W and classification
-cones. Local uniqueness for ranking is charged, with its query use subtracted
-before children or residual searches run.
+Ranking uses one compact parity witness per odd component, or cyclic edges in
+decision-relevant components independently shown non-unique. Guard-input reachability
+is cached within the ranking pass. Candidate partitions are ranked by fewer
+children first, then more distinct guarded edges; this is a heuristic, not a proof
+of edge deletion. Input at-most-one groups include an absent case. Selected derived
+cardinality groups qualify only through injective one-positive-input equations
+in their own assumption cones. A second live producer disqualifies that shortcut;
+otherwise binary input splitting remains available.
+
+Only values distinguished by the targeted component get separate children. Rest
+pins those distinguished values false, leaving all other values unknown; it stays
+available for deeper splits. Reaching a bound falls back to residual search.
+Closing one component is never taken as a proof for another; parity proves
+existence, while local uniqueness needs a pair query.
+
+Root Fitting builds producer/reader indexes once per scope. Child states use
+copy-on-write pages and propagate changes from the new pins; they share program
+tables and indexes. Dense fixed-value materialization, graph/ranking passes and
+residual encodings still cost work per visited child. Local uniqueness for ranking
+is charged and its query use is subtracted before children or residual searches.
 
 Traversal is breadth-first and deterministic. On a split, remaining work, solver
 allowances and observation rounds are divided evenly among children (integer
@@ -1998,7 +2012,7 @@ success, while a confirmed counterexample can still be returned from another.
 Branch reports retain 256 records per invocation and 32 input pins per record,
 with omitted counts. Report caps never cap search completeness.
 
-This is provisional. Whole-cone Fitting and repeated local uniqueness discovery
+This is provisional. Dense query setup and repeated local uniqueness discovery
 can cost more than splitting saves; pinned units currently use no SAT pruning
 cache. Measure the identical guarded-schema `--schema-typecut 1` workload with
 splits off/on before changing defaults. Cross-unit caching, parallelism and
@@ -2011,3 +2025,30 @@ Processing existence was conclusive only in the unsplit run; the same three
 obligation failures remained confirmed. This is evidence for keeping depth zero,
 not for increasing budgets. Reusing or narrowing branch preparation should precede
 any claim that wide partitions help the corpus.
+
+Value-slice follow-up (2026-11-23), same-build profiling runs of the same
+275-format shape and its `--schema-fieldcut 1` variant, at default limits:
+
+| Shape | Splits off | Depth 2 | Partition result |
+| --- | ---: | ---: | --- |
+| Declared type group | 85.16 s | 92.15 s | 12 binary-sized group splits, 16 leaves |
+| Derived field-value group | 48.23 s | 82.94 s | 12 binary-sized group splits, 16 leaves |
+
+Both split runs closed four leaves and left twelve inconclusive. Processing
+existence stayed conclusive, and the obligation counterexample remained in all
+four runs. The field-value run found classification ambiguity with splits off,
+but exhausted its divided allowances with splits on. These partitions avoid the
+earlier fan-out; they do not yet demonstrate a throughput or completeness gain.
+Keeping splitting opt-in is still warranted. These are single-run observations,
+not regression thresholds; the local handoff records commands and setup costs.
+
+Completion solvers retain an absolute deadline in addition to their local timer.
+Nested solvers inherit it; branch questions use the earlier of the run deadline
+and their allocated question deadline. An elapsed shared deadline takes precedence
+over solver-poll exhaustion in the reported cause. Completion solve intervals
+are reported separately from enclosing query elapsed time; they do not include
+nested solves twice. The deadline remains cooperative: a solver operation between
+callbacks, output or destruction can finish after it. A late observation is recorded
+as an overrun, not treated as a conclusive answer.
+CLI progress also separates preparation, checking, engine cleanup, result output
+and size output, and reports the point at which the shared run deadline starts.

@@ -6,9 +6,9 @@ mod contracts;
 mod determinacy;
 mod pruning;
 mod reports;
-mod scale;
+pub(super) mod scale;
 
-fn keys(c: &Corpus) -> SemanticKeys {
+pub(super) fn keys(c: &Corpus) -> SemanticKeys {
     let mut k = SemanticKeys::default();
     let qualified = |name: &str| QualifiedKey::new("test", name.to_owned());
     for s in c.sorts() {

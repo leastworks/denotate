@@ -157,7 +157,7 @@ pub(super) fn restrict(
     }
     program.rules = kept;
     crate::graph::analyze(program, b)?;
-    cone.rules = sat_rules;
+    cone.rules = sat_rules.into();
     cone.source_rules = cone.rules.len();
     // W owns every restriction. Derived restrictions outside C have independent
     // equations there; imposing them on C's omitted atoms would change meaning.

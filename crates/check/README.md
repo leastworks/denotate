@@ -1433,17 +1433,30 @@ per question. The CLI exposes `--completion-split-depth N` and
 unsplit path. These options do not change obligations, planning queries or W
 construction.
 
-Partitions come only from declared input exactly-one groups and selected
-input-only exactly-one assumptions. Every remaining value gets a branch, with
-other group members false. Ranking counts structural guard-edge reachability in
-odd components (existence) or decision-relevant components independently shown
-non-unique (determinacy). This estimates useful cuts; it does not prove deletion.
+Partitions use declared or selected input at-most-one/exactly-one groups. A
+selected derived assumption also qualifies when its own equations, after Fitting
+under the branch pins, map every unfixed member to exactly one distinct positive
+input literal. There must be one live producer and all other conjuncts must be
+true; fixed-false members contribute nothing. H and processing conclusions cannot
+justify this certificate. Without a useful certified group, split one input into
+true/false cases.
+
+Rank witness-cycle guard influence per odd component, or guard influence per
+decision-relevant component independently shown non-unique. Prefer fewer children,
+then more guarded edges. Only distinguished values receive their own child; one
+rest child pins those values false and leaves other values unknown. At-most-one
+rest includes absence and can be split again later. Exactly-one rest remains
+subject to W's coverage requirement. A value child excludes siblings by the
+certified cardinality, not by Fitting.
 Each child applies Fitting propagation before parity/local uniqueness and residual
 search. Scopes stay frozen. Reaching depth or leaf bounds uses residual search;
 resource exhaustion remains inconclusive. A confirmed failure in one child survives
 another child's cutoff; absence of a failure requires every child to finish.
 
-Units share immutable preparation, but own specialized equations, solver state,
+Units share copy-on-write rule/atom tables and read-only incidence indexes.
+Children inherit paged Fitting state and propagate only newly pinned inputs;
+unchanged pages stay shared. Materializing fixed values for a query still scans
+the value array, but does not copy program rules. Units own solver state,
 work/query allowances and size records. Remaining work and query allowances are
 divided among children; the phase deadline is shared fairly among pending units.
 `Report::branches` reports bounded choices, outcomes, work, time and cutoffs.

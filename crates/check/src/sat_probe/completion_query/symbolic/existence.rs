@@ -213,9 +213,9 @@ pub(super) fn component(
             .iter()
             .map(|i| !heads.contains(i) || c.input[*i])
             .collect(),
-        target: vec![true; members.len()],
-        duplicated: vec![false; members.len()],
-        groups: vec![],
+        target: vec![true; members.len()].into(),
+        duplicated: vec![false; members.len()].into(),
+        groups: vec![].into(),
         source_rules: rules.len(),
     })
 }

@@ -40,7 +40,7 @@ mod cube_tests {
         for left in 0..8 {
             for right in 0..8 {
                 let cone = Cone {
-                    atoms: atoms.clone(),
+                    atoms: atoms.clone().into(),
                     rules: vec![
                         super::super::super::Rule {
                             source: None,
@@ -57,12 +57,13 @@ mod cube_tests {
                             head: 2,
                             body: vec![(0, true), (1, false)],
                         },
-                    ],
-                    target: vec![true; 4],
-                    duplicated: vec![false; 4],
+                    ]
+                    .into(),
+                    target: vec![true; 4].into(),
+                    duplicated: vec![false; 4].into(),
                     fixed: vec![None; 4],
-                    input: vec![true, true, false, false],
-                    groups: vec![],
+                    input: vec![true, true, false, false].into(),
+                    groups: vec![].into(),
                     source_rules: 3,
                 };
                 let valid = |values: &[bool]| {

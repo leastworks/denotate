@@ -700,3 +700,11 @@ remaining parent allowance, and combining results preserves confirmed failures
 and unknown children. The implementation runs sequentially and does not persist
 units; any future cross-edit cache must replace invocation-local handles with
 semantic keys and include equations, scope, W/context, pins and configuration.
+
+Completion cones share rule/atom metadata through copy-on-write arrays. Branch
+Fitting shares immutable incidence indexes and uses paged mutable state: only
+changed pages detach. Queued children retain a parent snapshot plus new pins, not
+copies of the prepared program. The selected assumption's own snapshot supplies
+derived-group certificates; checking/H snapshots cannot justify a W partition.
+No branch cache persists across edits. The solver adapter also retains the absolute
+run/question deadline independently of local solver clocks.

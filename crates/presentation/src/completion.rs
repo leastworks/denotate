@@ -206,8 +206,8 @@ fn summary_using(
         summary["simplifications"] = pruning::summary(r, keys)?;
     }
     if r.branches.enabled {
-        summary["branches"] = json!({"splits":r.branches.splits,"leaves":r.branches.leaves,
-            "records":r.branches.records.iter().map(|c|completion_branch_record(c,|a|atom(a,keys))).collect::<Result<Vec<_>>>()?,
+        summary["branches"] = json!({"splits":r.branches.splits,"leaves":r.branches.leaves,"pendingUnits":r.branches.pending_units,
+            "records":r.branches.records.iter().map(|c|completion_branch_record(c,|a|atom(a,keys),|a|{let k=keys.assumption(a)?;Ok(json!([k.0.namespace.as_ref(),k.0.name.as_ref()]))})).collect::<Result<Vec<_>>>()?,
             "omittedRecords":r.branches.omitted_records});
     }
     Ok(summary)
@@ -881,7 +881,7 @@ pub fn completion_sizes_with_explanations(
         preparations.push(json!({"scope":if p.static_provider {"static-provider"} else {"runtime"},"provider":p.provider.map(relation).transpose()?,"work":p.work,"workByStage":p.work_by_stage,"error":p.error.as_ref().map(ToString::to_string),"complete":p.complete,"atoms":p.atoms,"rules":p.rules,"peakPossibilityAtoms":p.peak_possibility_atoms,"possibilityObserved":p.relations.values().map(|r|r.observed).sum::<usize>(),"possibilityComplete":p.relations.values().all(|r|r.fixed),"countKind":if p.complete {"exact"} else {"at-least"},"leastEnabled":p.least_enabled,"leastComplete":p.least_complete,"leastError":p.least_error.as_ref().map(ToString::to_string),"relations":relations,"omittedRelations":rows.len().saturating_sub(32),"positiveRelationComponents":components.iter().take(32).map(|(_,v)|v).collect::<Vec<_>>(),"omittedComponents":components.len().saturating_sub(32)}));
     }
     Ok(
-        json!({"preparationWork":preparation_work,"preparations":preparations,"searches":sizes.searches.iter().map(|s| -> Result<Value> { Ok(json!({"phase":s.phase,"branchDepth":s.branch_depth,"elapsedMs":s.elapsed.as_secs_f64()*1000.0,"work":s.work,"workByPhase":s.work_by_phase,"variables":s.variables,"clauses":s.clauses,"literals":s.literals,"encodingsStarted":s.encodings,"encodingDetails":s.encoding_details.iter().map(|e|json!({"purpose":e.purpose,"complete":e.complete,"atoms":e.atoms,"inputAtoms":e.input_atoms,"foldedTrue":e.folded_true,"foldedFalse":e.folded_false,"variables":e.variables,"clauses":e.clauses})).collect::<Vec<_>>(),"existence":completion_existence_stats(&s.existence, relation, &explanation)?,"omittedEncodings":s.omitted_encodings})) }).collect::<Result<Vec<_>>>()?,"omittedPreparations":sizes.omitted_preparations,"omittedSearches":sizes.omitted_searches}),
+        json!({"preparationWork":preparation_work,"preparations":preparations,"searches":sizes.searches.iter().map(|s| -> Result<Value> { Ok(json!({"phase":s.phase,"branchDepth":s.branch_depth,"solveMs":s.solve_time.as_secs_f64()*1000.0,"solveTimings":s.solve_timings.iter().map(|t|json!({"remainingMsAtStart":t.remaining_at_start.map(|d|d.as_secs_f64()*1000.0),"elapsedMs":t.elapsed.as_secs_f64()*1000.0,"overrunMs":t.overrun.as_secs_f64()*1000.0})).collect::<Vec<_>>(),"omittedSolveTimings":s.omitted_solve_timings,"elapsedMs":s.elapsed.as_secs_f64()*1000.0,"work":s.work,"workByPhase":s.work_by_phase,"variables":s.variables,"clauses":s.clauses,"literals":s.literals,"encodingsStarted":s.encodings,"encodingDetails":s.encoding_details.iter().map(|e|json!({"purpose":e.purpose,"complete":e.complete,"atoms":e.atoms,"inputAtoms":e.input_atoms,"foldedTrue":e.folded_true,"foldedFalse":e.folded_false,"variables":e.variables,"clauses":e.clauses})).collect::<Vec<_>>(),"existence":completion_existence_stats(&s.existence, relation, &explanation)?,"omittedEncodings":s.omitted_encodings})) }).collect::<Result<Vec<_>>>()?,"omittedPreparations":sizes.omitted_preparations,"omittedSearches":sizes.omitted_searches}),
     )
 }
 
@@ -1029,9 +1029,15 @@ pub fn completion_pruning_component(
 pub fn completion_branch_record(
     c: &denotate_check::completion_query::BranchRecord,
     atom: impl Fn(&GroundAtom) -> Result<Value>,
+    assumption: impl Fn(denotate_ir::AssumptionId) -> Result<Value>,
 ) -> Result<Value> {
     Ok(
-        json!({"kind":"completion-branch","phase":c.phase,"depth":c.depth,"state":c.state,
+        json!({"kind":"completion-branch","id":c.id,"parent":c.parent,"closedChildren":c.closed_children,
+        "splitKind":c.split_kind,"assumption":c.assumption.map(assumption).transpose()?,
+        "values":c.values.iter().map(&atom).collect::<Result<Vec<_>>>()?,"omittedValues":c.omitted_values,
+        "mapping":c.mapping.iter().map(|(a,i)|Ok(json!({"member":atom(a)?,"input":atom(i)?}))).collect::<Result<Vec<_>>>()?,"omittedMapping":c.omitted_mapping,
+        "hasRest":c.has_rest,"rest":c.rest,"preparationWork":c.preparation_work,"searchWork":c.search_work,
+        "phase":c.phase,"depth":c.depth,"state":c.state,
         "pins":c.pins.iter().map(|(a,v)|Ok(json!({"atom":atom(a)?,"value":v}))).collect::<Result<Vec<_>>>()?,
         "omittedPins":c.omitted_pins,"split":c.split.as_ref().map(&atom).transpose()?,
         "children":c.children,"guardedEdges":c.guarded_edges,"work":c.work,

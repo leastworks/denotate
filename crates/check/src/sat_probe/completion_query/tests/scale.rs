@@ -8,7 +8,7 @@ fn state<T>(s: &Search<T>) -> u8 {
         Search::Inconclusive(_) => 3,
     }
 }
-pub(super) fn same_report(a: &Report, b: &Report) {
+pub(in crate::sat_probe::completion_query) fn same_report(a: &Report, b: &Report) {
     assert_eq!(a.context, b.context);
     assert_eq!(a.is_incomplete(), b.is_incomplete());
     assert_eq!(a.has_failures(), b.has_failures());

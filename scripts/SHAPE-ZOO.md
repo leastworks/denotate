@@ -444,3 +444,12 @@ that the complete generated program is valid. The default is zero. Compare the
 same shape with splits off and with `-- --completion-split-depth 2`;
 `--completion-split-branches N` bounds the partition (default 512).
 Reports retain split choices, child outcomes, cutoffs and per-unit work/time.
+
+`--schema-fieldcut 1` uses the same helper loop with `format_tag` derived from
+`observed_value(type_field, tag)` instead of a declared exactly-one input. The
+selected scalar-value at-most-one assumption is expressed through a derived alias
+with a fixed scalar guard. Thus splits require a derived-group certificate and
+retain a rest/absent case. `fieldcut` and `typecut` are mutually exclusive. Compare
+identical shapes off/on (`-- --completion-split-depth 2`), retaining the 275-format
+`typecut` control. Branch preparation/search work and solve intervals remain in
+the reports; no timing thresholds are tests.

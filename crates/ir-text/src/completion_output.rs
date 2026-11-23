@@ -256,11 +256,43 @@ pub fn branch_formatter(
     let names = crate::presentation::diagnostic_names(&p.corpus);
     move |c| {
         let mut line = branch_line(c);
+        line.push_str(&format!(
+            "; preparation work {}, search work {}; unit {}{}",
+            c.preparation_work,
+            c.search_work,
+            c.id,
+            if c.rest { " (rest)" } else { "" }
+        ));
+        if let Some(a) = c.assumption {
+            line.push_str(&format!("; assumption {}", names(a.into())));
+        }
+        if c.children > 0 {
+            line.push_str(&format!(
+                "; {} partition, rest {}, {} children proved",
+                c.split_kind, c.has_rest, c.closed_children
+            ));
+        }
+
         if let Some(group) = &c.split {
             line.push_str(&format!(
                 "; split group {}, {} guarded edges",
                 crate::progress::atom_text(group, &names),
                 c.guarded_edges
+            ));
+        }
+        if !c.values.is_empty() {
+            line.push_str(&format!(
+                "; own values [{}]{}",
+                c.values
+                    .iter()
+                    .map(|a| crate::progress::atom_text(a, &names))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                if c.omitted_values > 0 {
+                    format!(" (+{})", c.omitted_values)
+                } else {
+                    String::new()
+                }
             ));
         }
         if !c.pins.is_empty() {

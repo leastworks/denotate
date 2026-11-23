@@ -91,7 +91,16 @@ pub struct CompletionExistenceStats {
     pub lifted_pins: usize,
 }
 #[derive(Debug, Clone)]
+pub struct CompletionSolveTiming {
+    pub remaining_at_start: Option<Duration>,
+    pub elapsed: Duration,
+    pub overrun: Duration,
+}
+#[derive(Debug, Clone)]
 pub struct CompletionSearchSize {
+    pub solve_timings: Vec<CompletionSolveTiming>,
+    pub omitted_solve_timings: usize,
+    pub solve_time: Duration,
     pub branch_depth: Option<usize>,
     pub existence: CompletionExistenceStats,
     pub elapsed: Duration,

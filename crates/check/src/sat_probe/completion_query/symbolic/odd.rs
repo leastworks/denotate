@@ -415,13 +415,13 @@ mod tests {
                 }
             }
             let c = Cone {
-                atoms: atoms.clone(),
-                rules,
+                atoms: atoms.clone().into(),
+                rules: rules.into(),
                 fixed: vec![None; 3],
-                input: vec![false; 3],
-                target: vec![true; 3],
-                duplicated: vec![false; 3],
-                groups: vec![],
+                input: vec![false; 3].into(),
+                target: vec![true; 3].into(),
+                duplicated: vec![false; 3].into(),
+                groups: vec![].into(),
                 source_rules: 0,
             };
             let mut b = Budget::new(&limits);

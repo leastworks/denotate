@@ -14,6 +14,7 @@ fn cardinality_truth_tables_and_selector_isolation() {
                 solver: Solver::new(
                     Default::default(),
                     Stop {
+                        deadline: None,
                         polls: None,
                         cancellation: limits.cancellation.clone(),
                         start: Instant::now(),
@@ -341,6 +342,7 @@ fn solver_polls_cancellation_during_a_real_search() {
         solver: Solver::new(
             Default::default(),
             Stop {
+                deadline: None,
                 polls: None,
                 cancellation: token.clone(),
                 start: Instant::now(),
@@ -412,4 +414,28 @@ fn unrelated_components_are_not_encoded_or_assumed_settled() {
     let report = run(&c, a, &[]);
     assert_eq!(report.answer, SatProbeAnswer::Unknown);
     assert!(report.reason.unwrap().contains("upstream negative"));
+}
+
+#[test]
+fn absolute_deadline_survives_clock_restart_and_takes_precedence_over_polls() {
+    let mut stop = Stop {
+        deadline: Some(Instant::now()),
+        polls: Some(PollLimit {
+            used: std::cell::Cell::new(100),
+            max: 0,
+        }),
+        cancellation: Default::default(),
+        start: Instant::now(),
+        timeout: Duration::from_secs(120),
+        hook: None,
+    };
+    stop.start = Instant::now();
+    assert!(matches!(
+        stop.check(),
+        Err(CheckError::Deadline {
+            phase: "SAT shared deadline",
+            ..
+        })
+    ));
+    assert!(stop.stop());
 }

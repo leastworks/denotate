@@ -50,12 +50,12 @@ impl Engine {
                 .iter()
                 .map(|i| self.cone.atoms[*i].clone())
                 .collect(),
-            rules: Vec::new(),
+            rules: Vec::new().into(),
             input: global.iter().map(|i| self.cone.input[*i]).collect(),
             fixed: global.iter().map(|i| self.cone.fixed[*i]).collect(),
-            target: vec![false; global.len()],
-            duplicated: vec![false; global.len()],
-            groups: vec![],
+            target: vec![false; global.len()].into(),
+            duplicated: vec![false; global.len()].into(),
+            groups: vec![].into(),
             source_rules: rules.len(),
         };
         for i in rules {

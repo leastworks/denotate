@@ -167,13 +167,13 @@ fn original_cone_with_assumptions(
     let mut fixed = vec![None; n];
     fixed.extend([Some(true), Some(false)]);
     Ok(Cone {
-        atoms,
-        rules,
+        atoms: atoms.into(),
+        rules: rules.into(),
         source_rules: p.core.rules.len(),
-        input,
+        input: input.into(),
         fixed,
-        groups,
-        target: vec![false; n + 2],
-        duplicated: vec![false; n + 2],
+        groups: groups.into(),
+        target: vec![false; n + 2].into(),
+        duplicated: vec![false; n + 2].into(),
     })
 }

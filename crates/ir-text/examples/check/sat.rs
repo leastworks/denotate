@@ -30,6 +30,12 @@ pub(super) fn run(
     let mut run_limits = limits.clone();
     super::sat_policy::start(&mut run_limits);
     let limits = &run_limits;
+    trace.message(format!(
+        "SAT shared deadline starts: {} ms remaining (after loading)",
+        limits.run_deadline.map_or(0, |d| d
+            .saturating_duration_since(std::time::Instant::now())
+            .as_millis())
+    ));
     let mut incomplete = partial || unchecked;
     let mut failure = false;
     if validate_all {
@@ -89,6 +95,13 @@ pub(super) fn run(
     let shown_odd =
         std::sync::Mutex::new(None::<std::sync::Arc<denotate_check::CompletionOddExplanation>>);
     limits.progress = denotate_check::CheckingProgress::new(move |e| {
+        if let Some(denotate_check::CheckingTarget::CompletionSolve { remaining_ms }) = &e.target {
+            observer.message(format!(
+                "completion SAT solve {}: {} ms shared deadline remaining at start",
+                e.state,
+                remaining_ms.map_or("unbounded".into(), |n| n.to_string())
+            ));
+        }
         if let Some(denotate_check::CheckingTarget::CompletionBranch(ref stats)) = e.target {
             observer.message(branch_text(stats));
         }
@@ -170,6 +183,7 @@ pub(super) fn run(
             e.target,
             Some(
                 denotate_check::CheckingTarget::CompletionBranch(_)
+                    | denotate_check::CheckingTarget::CompletionSolve { .. }
                     | denotate_check::CheckingTarget::CompletionPruning(_)
                     | denotate_check::CheckingTarget::SatExistence(_)
                     | denotate_check::CheckingTarget::SatUniqueness(_)
@@ -475,6 +489,7 @@ fn completion(
         flush,
     );
     if let Some(sink) = &limits.completion_sizes {
+        let _sizes = limits.progress.scope("completion size output", None, true);
         let sizes = denotate_ir_text::completion_output::sizes(p, &sink.snapshot())
             .map_err(|e| (2, e.to_string()))?;
         profile_record(
@@ -693,6 +708,7 @@ pub(super) fn completion_inner(
     let mut prepared = None;
     let mut exhausted = None;
     if problem.is_none() {
+        let preparing = limits.progress.scope("completion preparation", None, true);
         let preparation = cq::Engine::prepare(
             &p.corpus,
             &p.domains,
@@ -706,6 +722,7 @@ pub(super) fn completion_inner(
                 max_propagations: query.max_propagations,
             },
         );
+        drop(preparing);
         // Emit before matching even errors: cutoffs and provider failures also
         // carry useful partial counts. Flush before starting checking searches.
         if let Some(sink) = &limits.completion_sizes {
@@ -781,13 +798,22 @@ pub(super) fn completion_inner(
         dead_producers,
         advisory_limits: check.attribution.clone(),
     };
-    let report = prepared
-        .unwrap()
-        .check(&p.keys, &options)
-        .map_err(|e| match e {
-            e @ (CheckError::Internal(_) | CheckError::Cancelled) => (3, e.to_string()),
-            e => checker_failure(e),
-        })?;
+    let engine = prepared.unwrap();
+    let checking = limits.progress.scope("completion checking", None, true);
+    let report = engine.check(&p.keys, &options).map_err(|e| match e {
+        e @ (CheckError::Internal(_) | CheckError::Cancelled) => (3, e.to_string()),
+        e => checker_failure(e),
+    })?;
+    drop(checking);
+    {
+        let _cleanup = limits
+            .progress
+            .scope("completion engine cleanup", None, true);
+        drop(engine);
+    }
+    let _presenting = limits
+        .progress
+        .scope("completion result output", None, true);
     let shown = presentation::present_completion_with_options(
         p,
         &report,
@@ -804,8 +830,8 @@ pub(super) fn completion_inner(
         if report.branches.enabled {
             writeln!(
                 output,
-                "Branch search: {} splits, {} leaves",
-                report.branches.splits, report.branches.leaves
+                "Branch search: {} splits, {} leaves, {} pending units at deadline",
+                report.branches.splits, report.branches.leaves, report.branches.pending_units
             )
             .unwrap();
             let format = denotate_ir_text::completion_output::branch_formatter(p);

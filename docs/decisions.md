@@ -8,9 +8,16 @@ real program that the current choice serves badly.
 
 ## Completion splits partition inputs, not definitions
 
-Bounded completion branch search starts opt-in. Only declared input exactly-one
-groups or selected input-only exactly-one assumptions justify excluding absent
-and multi-value cases. A proved obligation is not silently promoted to an
+Bounded completion branch search starts opt-in. Declared and selected input
+cardinalities justify excluding multi-value cases; only exactly-one also excludes
+absence. Selected derived groups can transfer this restriction to inputs through
+an injective one-positive-input equivalence, proved from their own equations and
+Fitting substitutions under the current pins. H or processing cannot supply that
+equivalence. A second live producer defeats this conservative certificate.
+
+A rest child fixes only the singled-out input values false. Other values stay
+unknown, including absence for at-most-one groups; rest may split again later.
+Without a group certificate, binary input splits preserve all observations. A proved obligation is not silently promoted to an
 assumption. The permitted domain W is the disjoint union of W restricted to
 each choice. Searching every part therefore preserves existence of a failing
 observation and universal absence of one. Within each partition, Fitting substitutions are

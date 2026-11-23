@@ -1439,3 +1439,23 @@ states. Completion search-size records add nullable `branchDepth` to identify un
 queries. These records are telemetry, not finding identities or proof evidence.
 Branch data is absent when splitting is disabled. Editor completion-checking
 integration remains pending; this does not add an editor setting.
+
+Value-slice branch records additionally carry `id`, nullable `parent` (both local
+to the question phase), `closedChildren` (immediate children that proved the
+question), `splitKind` (`none`, `binary`, `at-most-one`, `exactly-one`), nullable
+`assumption` (qualified key), `values` and `omittedValues` (separate value children),
+`mapping` (assumption member/input pairs) and `omittedMapping`, `hasRest`, and
+`rest` (this unit is a rest child). Values/mapping lists are capped at 32.
+`preparationWork` and `searchWork` separate branch setup/ranking from residual
+search; `work` is their sum. Rest does not assert that every input is absent.
+The branch summary also carries `pendingUnits`: queued units left unstarted when
+the shared question deadline expired. They remain inconclusive, not proved leaves.
+
+Completion search sizes add `solveMs`, up to 64 `solveTimings` and
+`omittedSolveTimings`. Each interval records nullable `remainingMsAtStart`,
+`elapsedMs` and `overrunMs` relative to its effective absolute deadline. These
+intervals are individual synchronous SAT calls, including local uniqueness solves;
+they are not overlapping enclosing-query durations. Live CLI progress prints
+solve start/end boundaries and remaining deadline at start, allowing the first
+overdue operation to be located. A `completion-solve` structured progress target
+carries `remainingMsAtStart`. Bounds on telemetry do not change search budgets.

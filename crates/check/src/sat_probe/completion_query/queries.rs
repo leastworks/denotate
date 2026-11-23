@@ -15,11 +15,17 @@ pub(super) struct Run<'a, 'b, 'l> {
     propagation_base: u64,
     retired_conflicts: u64,
     retired_propagations: u64,
+    solve_timings: Vec<crate::CompletionSolveTiming>,
+    omitted_solve_timings: usize,
+    solve_time: Duration,
 }
 
 impl Drop for Run<'_, '_, '_> {
     fn drop(&mut self) {
         if let Some((_, stats)) = &mut self.cnf.measurement {
+            stats.solve_timings = std::mem::take(&mut self.solve_timings);
+            stats.omitted_solve_timings = self.omitted_solve_timings;
+            stats.solve_time = self.solve_time;
             stats.work = Some(self.budget.used().saturating_sub(self.work_started));
             stats.work_by_phase = self.budget.query_work();
         }
@@ -333,6 +339,9 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
                     sink,
                     crate::CompletionSearchSize {
                         branch_depth: None,
+                        solve_timings: vec![],
+                        omitted_solve_timings: 0,
+                        solve_time: Duration::ZERO,
                         existence: Default::default(),
                         elapsed: Duration::ZERO,
                         work: None,
@@ -350,6 +359,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             solver: Solver::new(
                 Default::default(),
                 Stop {
+                    deadline: engine.limits.run_deadline,
                     polls: Some(PollLimit {
                         used: std::cell::Cell::new(0),
                         max: engine.config.max_solver_polls,
@@ -397,6 +407,9 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             propagation_base: 0,
             retired_conflicts: 0,
             retired_propagations: 0,
+            solve_timings: vec![],
+            omitted_solve_timings: 0,
+            solve_time: Duration::ZERO,
         })
     }
 
@@ -537,6 +550,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             solver: Solver::new(
                 Default::default(),
                 Stop {
+                    deadline: self.cnf.solver.cb().deadline,
                     polls: self.cnf.solver.cb().polls.as_ref().map(|p| PollLimit {
                         used: std::cell::Cell::new(p.used.get()),
                         max: p.max,
@@ -640,7 +654,39 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         self.budget
             .room(self.solves, self.solve_limit, "completion solve", "solves")?;
         self.solves += 1;
+        let started = Instant::now();
+        let remaining = self
+            .engine
+            .limits
+            .run_deadline
+            .map(|d| d.saturating_duration_since(started));
+        let _solve_scope = self.engine.limits.progress.scope(
+            "completion SAT solve",
+            Some(crate::CheckingTarget::CompletionSolve {
+                remaining_ms: remaining.map(|d| d.as_millis().min(u64::MAX as u128) as u64),
+            }),
+            true,
+        );
+        // Progress observers are synchronous. Do not enter the solver if output
+        // or an observer consumed the remaining time after the first check.
+        self.budget.check("completion solve")?;
+        self.cnf.solver.cb().check()?;
         let answer = self.cnf.solver.solve_limited(pins);
+        let elapsed = started.elapsed();
+        self.solve_time += elapsed;
+        let overrun = self.engine.limits.run_deadline.map_or(Duration::ZERO, |d| {
+            Instant::now().saturating_duration_since(d)
+        });
+        if self.solve_timings.len() < 64 {
+            self.solve_timings.push(crate::CompletionSolveTiming {
+                remaining_at_start: remaining,
+                elapsed,
+                overrun,
+            });
+        } else {
+            self.omitted_solve_timings += 1;
+        }
+
         self.cnf.solver.cb().check()?;
         for (used, limit, resource) in [
             (

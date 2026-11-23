@@ -421,3 +421,26 @@ test('guarded schema type-field partition preserves verdicts and reports branch 
     assert.throws(()=>guardedSchema({typecut:2}));
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+
+test('guarded schema field-value splits use derived assumptions and retain a rest branch',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-field-cut-'));
+  try {
+    const rows=[];
+    for(const enabled of [false,true]){
+      const out=path.join(root,enabled?'on':'off');
+      run({out,binary:'target/debug/examples/bench_schema',family:['guarded-schema'],sizes:[2],repeat:1,
+        schema:{depth:1,fanout:1,stmts:1,triggers:0,outs:1,values:1,self:0,fieldcut:1},
+        limits:enabled?['--completion-split-depth','3']:[]});
+      rows.push(JSON.parse(fs.readFileSync(path.join(out,'guarded-schema-2-0','report.json'),'utf8')));
+    }
+    assert.equal(rows[0].checkerExitCode,rows[1].checkerExitCode);
+    const [a,b]=rows.map(r=>r.outcomes[0]);assert.equal(a.state,b.state);assert.equal(a.hasFailures,b.hasFailures);
+    for (const question of ['accepted','rejected','noMeaning','ambiguous'])
+      assert.equal(b.classification[question].state,a.classification[question].state,question);
+    for (const question of ['existence','uniqueness'])
+      assert.equal(b.meaning[question].state,a.meaning[question].state,question);
+    assert.deepEqual(b.obligations.map(o=>[o.name,o.state]),a.obligations.map(o=>[o.name,o.state]));
+    assert.ok(b.branches.records.some(r=>r.splitKind==='at-most-one'&&r.assumption&&r.mapping.length&&r.hasRest));
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+});

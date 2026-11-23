@@ -680,10 +680,15 @@ impl AdmissionDetails<'_> {
                 Some(denotate_check::CheckingTarget::SatUniqueness(s)) => {
                     Some(denotate_presentation::stable_uniqueness_stats(&s))
                 }
+                Some(denotate_check::CheckingTarget::CompletionSolve { remaining_ms }) => {
+                    Some(json!({"kind":"completion-solve","remainingMsAtStart":remaining_ms}))
+                }
                 Some(denotate_check::CheckingTarget::CompletionBranch(s)) => Some(
-                    denotate_presentation::completion_branch_record(&s, |a| {
-                        Ok(json!(atom_text(a, &*names)))
-                    })
+                    denotate_presentation::completion_branch_record(
+                        &s,
+                        |a| Ok(json!(atom_text(a, &*names))),
+                        |a| Ok(json!(names(a.into()))),
+                    )
                     .unwrap(),
                 ),
                 Some(denotate_check::CheckingTarget::CompletionPruning(s)) => Some(

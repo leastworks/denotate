@@ -90,8 +90,8 @@ pub(super) fn world_cone(c: &Cone, negative_target: bool, b: &mut Budget<'_>) ->
             })
             .collect(),
         input: c.input.clone(),
-        target: vec![false; c.fixed.len()],
-        duplicated: vec![false; c.fixed.len()],
+        target: vec![false; c.fixed.len()].into(),
+        duplicated: vec![false; c.fixed.len()].into(),
         groups: c.groups.clone(),
     })
 }
@@ -309,6 +309,7 @@ pub(super) fn search_built(
         solver: Solver::new(
             Default::default(),
             Stop {
+                deadline: None,
                 polls: None,
                 cancellation: limits.cancellation.clone(),
                 start,

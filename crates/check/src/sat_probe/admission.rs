@@ -85,13 +85,13 @@ fn compact_cone(
         .ok_or(CheckError::InvalidRequest("unknown SAT probe component"))?;
     b.charge(target.atoms.len(), "SAT probe target")?;
     let mut c = Cone {
-        atoms: target.atoms.clone(),
-        rules: Vec::new(),
+        atoms: target.atoms.clone().into(),
+        rules: Vec::new().into(),
         fixed: vec![None; target.atoms.len()],
-        input: vec![false; target.atoms.len()],
-        target: vec![true; target.atoms.len()],
-        duplicated: vec![true; target.atoms.len()],
-        groups: Vec::new(),
+        input: vec![false; target.atoms.len()].into(),
+        target: vec![true; target.atoms.len()].into(),
+        duplicated: vec![true; target.atoms.len()].into(),
+        groups: Vec::new().into(),
         source_rules: rules.len(),
     };
     let ids = c

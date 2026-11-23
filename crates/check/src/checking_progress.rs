@@ -9,6 +9,9 @@ use std::{
 
 #[derive(Debug, Clone)]
 pub enum CheckingTarget {
+    CompletionSolve {
+        remaining_ms: Option<u64>,
+    },
     CompletionBranch(crate::completion_query::BranchRecord),
     CompletionPruning(crate::completion_query::PruningComponent),
     CompletionExistence(crate::CompletionExistenceStats),
