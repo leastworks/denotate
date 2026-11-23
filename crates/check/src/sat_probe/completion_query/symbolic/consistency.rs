@@ -7,7 +7,7 @@ pub(super) struct Core {
     pub needed: Vec<bool>,
     pub odd_components: usize,
     pub odd_atoms: usize,
-    component: Vec<usize>,
+    pub(super) component: Vec<usize>,
     colour: Vec<Option<bool>>,
 }
 

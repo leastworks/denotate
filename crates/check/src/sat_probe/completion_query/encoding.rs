@@ -16,7 +16,7 @@ pub(super) struct Validation {
     pub heads: Vec<usize>,
 }
 
-fn fitting(c: &Cone, b: &mut Budget<'_>) -> Result<Vec<Option<bool>>> {
+pub(super) fn fitting(c: &Cone, b: &mut Budget<'_>) -> Result<Vec<Option<bool>>> {
     b.charge(c.fixed.len() + c.rules.len(), "completion folding")?;
     let mut values = c.fixed.clone();
     let mut readers = vec![Vec::new(); values.len()];
@@ -154,6 +154,22 @@ pub(super) fn encode_named(
     b: &mut Budget<'_>,
     purpose: &'static str,
 ) -> Result<Encoding> {
+    encode_shared(c, cnf, truth, inputs, b, purpose, None)
+}
+
+/// Shared heads keep the first copy's literal AND its defining gate. The caller
+/// must activate that gate whenever this encoding is active. Only share heads
+/// whose boundary is shared, or use the result as a restricted witness search.
+pub(super) fn encode_shared(
+    c: &Cone,
+    cnf: &mut Cnf,
+    truth: Lit,
+    inputs: Option<&[Lit]>,
+    b: &mut Budget<'_>,
+    purpose: &'static str,
+    shared: Option<(&[Lit], &[bool])>,
+) -> Result<Encoding> {
+    let aliases = |i: usize| shared.is_some_and(|(_, mask)| mask[i]);
     if let Some((_, stats)) = &mut cnf.measurement {
         stats.encodings += 1;
     }
@@ -183,6 +199,7 @@ pub(super) fn encode_named(
             vars.push(match value {
                 Some(true) => truth,
                 Some(false) => !truth,
+                None if aliases(i) => shared.unwrap().0[i],
                 None if c.input[i] && inputs.is_some() => inputs.unwrap()[i],
                 None => cnf.var(b)?,
             });
@@ -191,7 +208,7 @@ pub(super) fn encode_named(
         let mut producers = vec![BTreeSet::new(); vars.len()];
         for r in &c.rules {
             b.charge(r.body.len() + 1, "completion encoding")?;
-            if fixed[r.head].is_some() {
+            if fixed[r.head].is_some() || aliases(r.head) {
                 continue;
             }
             let lits = r
@@ -205,7 +222,7 @@ pub(super) fn encode_named(
         }
         for (i, bodies) in producers.into_iter().enumerate() {
             b.tick("completion encoding equations")?;
-            if c.input[i] || fixed[i].is_some() {
+            if c.input[i] || fixed[i].is_some() || aliases(i) {
                 continue;
             }
             if bodies.len() == 1 {

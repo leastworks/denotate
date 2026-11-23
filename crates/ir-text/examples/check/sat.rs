@@ -78,11 +78,15 @@ pub(super) fn run(
     let observer = trace.clone();
     limits.progress = denotate_check::CheckingProgress::new(move |e| {
         if let Some(denotate_check::CheckingTarget::CompletionExistence(ref stats)) = e.target {
-            observer.message(format!("{} {}: components {}/{}, fallback {}, rounds {}, cubes {}, pins {} (max {}), validation work {}, lifted {}/{}",e.stage,e.state,stats.total_components,stats.components,stats.fallback_components,stats.rounds,stats.cubes,stats.pins,stats.max_pins,stats.validation_work,stats.lifted_pins,stats.lifting_attempts));
+            observer.message(format!("{} {}: components total {} unique {} / {}, shared atoms {}, fallback {}, rounds {}, cubes {}, pins {} (max {}), validation work {}, lifted {}/{}",e.stage,e.state,stats.total_components,stats.unique_components,stats.components,stats.shared_atoms,stats.fallback_components,stats.rounds,stats.cubes,stats.pins,stats.max_pins,stats.validation_work,stats.lifted_pins,stats.lifting_attempts));
             if let Some(c) = &stats.current_component {
-                observer.message(format!("  component {} {}: {} atoms, {} rules, {} boundary atoms, {} odd-cycle SCCs ({} atoms); relations {}{}",c.index,c.state,c.atoms,c.rules,c.boundary,if c.state=="analysing"{"pending".into()}else{c.odd_components.to_string()},if c.state=="analysing"{"pending".into()}else{c.odd_atoms.to_string()},
+                if !c.query.is_empty() {
+                    observer.message(format!("  determinacy component {} {} {}: {} atoms, {} rules, {} boundary, {} variables / {} clauses, {} duplicated atoms, {:.3}s; relations {}", c.index,c.query,c.state,c.atoms,c.rules,c.boundary,c.variables,c.clauses,c.duplicated_atoms,c.elapsed.as_secs_f64(),c.relations.iter().map(|r|component_names((*r).into())).collect::<Vec<_>>().join(", ")));
+                } else {
+                    observer.message(format!("  component {} {}: {} atoms, {} rules, {} boundary atoms, {} odd-cycle SCCs ({} atoms); relations {}{}",c.index,c.state,c.atoms,c.rules,c.boundary,if c.state=="analysing"{"pending".into()}else{c.odd_components.to_string()},if c.state=="analysing"{"pending".into()}else{c.odd_atoms.to_string()},
                     c.relations.iter().map(|r| component_names((*r).into())).collect::<Vec<_>>().join(", "),
                     if c.relation_count>c.relations.len(){format!(" (+{} more)",c.relation_count-c.relations.len())}else{String::new()}));
+                }
             }
         }
         if let Some(denotate_check::CheckingTarget::SatExistence(ref stats)) = e.target {
@@ -536,7 +540,11 @@ fn write_completion_sizes(
             )
             .unwrap();
             for c in e["componentDetails"].as_array().into_iter().flatten() {
-                writeln!(output, "    component {} {}: {} atoms, {} rules, {} boundary, {} odd-cycle SCCs; relations {}", c["index"],c["state"],c["atoms"],c["rules"],c["boundary"],c["oddComponents"],c["relations"]).unwrap();
+                if c["query"] != "existence" {
+                    writeln!(output, "    determinacy component {} {} {}: {} atoms, {} rules, {} boundary, {} variables / {} clauses, {} duplicated atoms, {} ms; relations {}", c["index"],c["query"],c["state"],c["atoms"],c["rules"],c["boundary"],c["variables"],c["clauses"],c["duplicatedAtoms"],c["elapsedMs"],c["relations"]).unwrap();
+                } else {
+                    writeln!(output, "    component {} {}: {} atoms, {} rules, {} boundary, {} odd-cycle SCCs; relations {}", c["index"],c["state"],c["atoms"],c["rules"],c["boundary"],c["oddComponents"],c["relations"]).unwrap();
+                }
             }
             for e in search["encodingDetails"].as_array().unwrap() {
                 writeln!(output, "  encoding {} / {} (complete={}): {} inputs; folded {} true, {} false; {} variables, {} clauses", search["phase"], e["purpose"], e["complete"], e["inputAtoms"], e["foldedTrue"], e["foldedFalse"], e["variables"], e["clauses"]).unwrap();

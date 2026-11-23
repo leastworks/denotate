@@ -2140,3 +2140,33 @@ been enumerated. Early stopping is recorded as `failures_truncated`, not a solve
 exhaustion. The failure count is a lower bound, and presentation says more may exist.
 Incomplete input contracts, unavailable property kinds and actual query exhaustion
 remain incomplete as before. Finding identities and stable/BDD checking are unchanged.
+
+## Completion determinacy shares functions, not unresolved choices
+
+An acyclic equation is a function of its providers. Two interpretations on the
+same input can share its literal when those providers are shared. A cyclic
+component can also be shared after a local two-copy SAT query proves at most one
+assignment to **all** its atoms for arbitrary shared boundary values. This proof
+uses neither W nor H. Local UNSAT proves uniqueness, not existence; parity remains
+an existence certificate only. Even negation cycles and positive self-support can
+have multiple completion models.
+
+A locally non-unique boundary may be unreachable. The checker therefore searches
+under W and the existing classification/processing context, duplicating a candidate
+component and its readers while sharing its upstream and other atoms. Acyclic
+readers of differing atoms require two evaluations. Full equations and independent
+model replay remain necessary: an unselected downstream equation can prevent an
+otherwise valid local assignment from extending to a program model.
+
+Such a restricted pair search finds sound counterexamples, but does not generally
+prove global uniqueness. For example, two independent self-supporting bits may
+have only the full interpretations `00` and `11`, because downstream equations
+forbid differing bits. Sharing either bit would hide the pair. The checker retains
+a joint residual pair query unless the component search already includes every
+unshared atom and the only possible first differing component. Only certified
+functions of shared boundaries are aliased in that final query. This preserves
+helper freedom and decision projection without trusting local boundary reachability.
+
+Local proof solvers are released after each component, with work, solves, polls,
+conflicts, propagations and deadline charged to the enclosing query. There is no
+new allowance or branch-splitting policy. Results and caches remain invocation-local.

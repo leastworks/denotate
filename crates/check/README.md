@@ -1364,3 +1364,12 @@ component details and a current component during search, including parity confli
 `CheckOptions.max_failures` bounds completion failure triage separately from retained
 examples. `ObligationResult.failures_truncated` makes counts lower bounds; a confirmed
 failure can be complete as a verdict without enumerating all failed parts.
+
+Verification-wide completion ambiguity uses componentwise determinacy. Acyclic
+functions of shared providers and locally unique cyclic components share literals across models. Local
+uniqueness is an independent two-copy SAT test with free boundary atoms, not a parity
+test. Non-unique local components are checked for reachable decision differences
+under W/H; coupled choices retain a joint residual fallback. Shared gates preserve
+original equations, and both returned models are replayed against them. The query
+retains existing limits and reports local/reachable/coupled component sizes and
+states before each solve. A local `fallback` is not a semantic ambiguity result.

@@ -667,3 +667,14 @@ resolved against upstream equations before it becomes a semantic no-meaning find
 Guarding cubes preserve a signed component ordering/colouring while allowing derived
 values to vary. Model cubes still preserve one assignment. The two certificates must
 not share an equation-lifting step, since that step fixes derived values.
+
+Verification-wide completion determinacy reuses the signed component graph, but never its totality
+certificate as a uniqueness proof. Provider-first analysis shares constants, inputs,
+acyclic functions of shared providers and locally proved unique components with
+shared boundaries. Local uniqueness solvers use arbitrary boundary values and are
+released after their query. A reachable component pair uses W and full equations;
+its second encoding aliases the first encoding's literals outside the candidate's
+reader cone, and must activate the first encoding's gate. Remaining coupled choices
+use a joint residual pair. Independent validation still checks original equations,
+including shared and unselected atoms. No query-local alias is a semantic key or a
+reusable certificate across edits.

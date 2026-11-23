@@ -4,6 +4,7 @@ use super::*;
 use queries::{Run, checked_assignment};
 
 mod consistency;
+mod determinacy;
 mod existence;
 pub mod planning;
 mod validation;
@@ -166,6 +167,87 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
         self.run.cnf.gate = None;
         Ok(Encoded { gate, encoding })
     }
+    fn encode_shared(
+        &mut self,
+        cone: &Cone,
+        h: bool,
+        first: &Encoded,
+        shared: &[bool],
+    ) -> Result<Encoded> {
+        let gate = self.gate()?;
+        self.run.cnf.gate = Some(gate);
+        let encoding = encoding::encode_shared(
+            cone,
+            &mut self.run.cnf,
+            self.run.truth,
+            Some(&self.run.world.vars),
+            self.run.budget,
+            "shared-pair",
+            Some((&first.encoding.vars, shared)),
+        )?;
+        if h {
+            if let Some((_, _, i)) = &self.run.engine.classification {
+                self.run
+                    .cnf
+                    .clause(vec![encoding.vars[*i]], self.run.budget)?;
+            }
+        }
+        self.run.cnf.gate = None;
+        Ok(Encoded { gate, encoding })
+    }
+    /// Both questions are active together: selected outputs differ, and this
+    /// component differs. Define each atom comparison once under their common
+    /// gate, even when the atom belongs to both sets.
+    fn component_difference(
+        &mut self,
+        cone: &Cone,
+        a: &Encoded,
+        b: &Encoded,
+        members: Option<&BTreeSet<GroundAtom>>,
+        heads: &[usize],
+    ) -> Result<Lit> {
+        let gate = self.gate()?;
+        self.run.cnf.gate = Some(gate);
+        self.run
+            .budget
+            .charge(cone.fixed.len(), "completion pair")?;
+        let mut root = vec![false; cone.fixed.len()];
+        for i in heads {
+            root[*i] = true;
+        }
+        let mut selected = Vec::new();
+        let mut component = Vec::new();
+        for (i, is_root) in root.into_iter().enumerate() {
+            self.run.budget.tick("completion pair")?;
+            if cone.input[i] || a.encoding.vars[i] == b.encoding.vars[i] {
+                continue;
+            }
+            let decision = cone.atoms.get(i).is_some_and(|atom| {
+                self.run.engine.decision(atom) && members.is_none_or(|m| m.contains(atom))
+            });
+            if !decision && !is_root {
+                continue;
+            }
+            let yes = self
+                .run
+                .cnf
+                .and(&[a.encoding.vars[i], !b.encoding.vars[i]], self.run.budget)?;
+            let no = self
+                .run
+                .cnf
+                .and(&[!a.encoding.vars[i], b.encoding.vars[i]], self.run.budget)?;
+            if decision {
+                selected.extend([yes, no]);
+            }
+            if is_root {
+                component.extend([yes, no]);
+            }
+        }
+        self.run.cnf.clause(selected, self.run.budget)?;
+        self.run.cnf.clause(component, self.run.budget)?;
+        self.run.cnf.gate = None;
+        Ok(gate)
+    }
     fn difference(
         &mut self,
         cone: &Cone,
@@ -189,6 +271,7 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
         for (i, atom) in cone.atoms.iter().enumerate() {
             self.run.budget.tick("completion pair")?;
             if cone.input[i]
+                || a.encoding.vars[i] == b.encoding.vars[i]
                 || (declared_only && !self.run.engine.decision(atom))
                 || members.is_some_and(|m| !m.contains(atom))
             {
@@ -496,41 +579,16 @@ impl Engine {
             },
             shares,
             |s| {
-                let a = s.encode(cone, true)?;
-                let b = s.encode(cone, true)?;
-                let diff = s.difference(cone, &a, &b, members)?;
-                let selector = s.gate()?;
-                let mut examined = 0;
-                loop {
-                    if !s.solve(&[a.gate, b.gate, diff, selector], &[])? {
-                        return Ok(None);
-                    }
-                    s.run
-                        .budget
-                        .room(examined, options.max_worlds, "completion pair", "worlds")?;
-                    examined += 1;
-                    s.stats.rounds += 1;
-                    s.metrics();
-                    let world = s.world()?;
-                    if !classification && !unique && self.classification.is_some() {
-                        if let Some(cube) = s.eligible(&world, unique)? {
-                            s.exclude(selector, &cube)?;
-                            continue;
-                        }
-                        // Eligibility changed the SAT assignment. Restore a
-                        // candidate on the same certified observation, without
-                        // freezing arbitrary classification helper choices.
-                        let pins = s.pins(&world)?;
-                        if !s.solve(&[a.gate, b.gate, diff, selector], &pins)? {
-                            return Err(CheckError::Internal(
-                                "eligible completion pair disappeared",
-                            ));
-                        }
-                    }
-                    let first = self.model(s.values(cone, &a)?, scope);
-                    let second = self.model(s.values(cone, &b)?, scope);
-                    return Ok(Some(Pair { first, second }));
-                }
+                determinacy::search(
+                    self,
+                    cone,
+                    members,
+                    scope,
+                    classification,
+                    unique,
+                    options,
+                    s,
+                )
             },
         )
     }

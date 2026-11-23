@@ -48,6 +48,11 @@ pub struct CompletionEncodingSize {
 }
 #[derive(Debug, Clone, Default)]
 pub struct CompletionComponentStats {
+    pub query: &'static str,
+    pub elapsed: Duration,
+    pub variables: usize,
+    pub clauses: usize,
+    pub duplicated_atoms: usize,
     pub index: usize,
     pub atoms: usize,
     pub rules: usize,
@@ -63,6 +68,8 @@ pub struct CompletionComponentStats {
 /// Operational observations, not proof evidence or policy thresholds.
 #[derive(Debug, Clone, Default)]
 pub struct CompletionExistenceStats {
+    pub unique_components: usize,
+    pub shared_atoms: usize,
     pub current_component: Option<CompletionComponentStats>,
     pub component_details: Vec<CompletionComponentStats>,
     pub omitted_components: usize,

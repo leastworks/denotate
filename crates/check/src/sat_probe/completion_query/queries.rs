@@ -13,6 +13,8 @@ pub(super) struct Run<'a, 'b, 'l> {
     work_started: usize,
     conflict_base: u64,
     propagation_base: u64,
+    retired_conflicts: u64,
+    retired_propagations: u64,
 }
 
 impl Drop for Run<'_, '_, '_> {
@@ -378,6 +380,8 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             work_started,
             conflict_base: 0,
             propagation_base: 0,
+            retired_conflicts: 0,
+            retired_propagations: 0,
         })
     }
 
@@ -498,13 +502,98 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         self.budget.check("completion property")?;
         self.cnf.solver.cb().check()?;
         self.solves = 0;
-        self.conflict_base = self.cnf.solver.num_conflicts();
-        self.propagation_base = self.cnf.solver.num_propagations();
+        self.conflict_base = self.cnf.solver.num_conflicts() + self.retired_conflicts;
+        self.propagation_base = self.cnf.solver.num_propagations() + self.retired_propagations;
         if let Some(polls) = &self.cnf.solver.cb().polls {
             polls.used.set(0);
         }
         Ok(())
     }
+    /// Local uniqueness uses arbitrary shared boundary values, with no W/H.
+    /// Release its CNF afterwards, while charging the enclosing query's work,
+    /// solves, polls, conflicts, propagations and deadline (no renewed allowance).
+    pub(super) fn local_unique(
+        &mut self,
+        cone: &Cone,
+        mut solving: impl FnMut(usize, usize),
+    ) -> (Result<bool>, usize, usize, usize) {
+        let local = Cnf {
+            measurement: None,
+            solver: Solver::new(
+                Default::default(),
+                Stop {
+                    polls: self.cnf.solver.cb().polls.as_ref().map(|p| PollLimit {
+                        used: std::cell::Cell::new(p.used.get()),
+                        max: p.max,
+                    }),
+                    cancellation: self.engine.limits.cancellation.clone(),
+                    start: Instant::now(),
+                    timeout: self.budget.remaining_time(),
+                    #[cfg(test)]
+                    hook: None,
+                },
+            ),
+            clauses: 0,
+            literals: 0,
+            gate: None,
+        };
+        let mut validation_started = None;
+        let original = std::mem::replace(&mut self.cnf, local);
+        self.retired_conflicts += original.solver.num_conflicts();
+        self.retired_propagations += original.solver.num_propagations();
+        let result = (|| {
+            let truth = self.cnf.var(self.budget)?;
+            self.cnf.clause(vec![truth], self.budget)?;
+            let a = encoding::encode_named(
+                cone,
+                &mut self.cnf,
+                truth,
+                None,
+                self.budget,
+                "local-uniqueness",
+            )?;
+            let b = encoding::encode_named(
+                cone,
+                &mut self.cnf,
+                truth,
+                Some(&a.vars),
+                self.budget,
+                "local-uniqueness",
+            )?;
+            let mut diff = Vec::new();
+            for i in 0..cone.fixed.len() {
+                self.budget.tick("completion local uniqueness")?;
+                if cone.input[i] || a.vars[i] == b.vars[i] {
+                    continue;
+                }
+                diff.push(self.cnf.and(&[a.vars[i], !b.vars[i]], self.budget)?);
+                diff.push(self.cnf.and(&[!a.vars[i], b.vars[i]], self.budget)?);
+            }
+            self.cnf.clause(diff, self.budget)?;
+            solving(self.cnf.solver.num_vars() as usize, self.cnf.clauses);
+            if !self.raw_solve(&[])? {
+                return Ok(true);
+            }
+            validation_started = Some(self.budget.used());
+            checked_assignment(cone, &a, &self.cnf, self.budget)?;
+            checked_assignment(cone, &b, &self.cnf, self.budget)?;
+            Ok(false)
+        })();
+        let variables = self.cnf.solver.num_vars() as usize;
+        let clauses = self.cnf.clauses;
+        self.retired_conflicts += self.cnf.solver.num_conflicts();
+        self.retired_conflicts -= original.solver.num_conflicts();
+        self.retired_propagations += self.cnf.solver.num_propagations();
+        self.retired_propagations -= original.solver.num_propagations();
+        if let (Some(out), Some(local)) = (&original.solver.cb().polls, &self.cnf.solver.cb().polls)
+        {
+            out.used.set(local.used.get());
+        }
+        self.cnf = original;
+        let validation_work = validation_started.map_or(0, |start| self.budget.used() - start);
+        (result, variables, clauses, validation_work)
+    }
+
     fn raw_solve(&mut self, pins: &[Lit]) -> Result<bool> {
         self.budget.tick("completion solve")?;
         self.cnf.solver.cb().check()?;
@@ -518,6 +607,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
                 self.cnf
                     .solver
                     .num_conflicts()
+                    .saturating_add(self.retired_conflicts)
                     .saturating_sub(self.conflict_base),
                 self.engine.config.max_conflicts,
                 "conflicts",
@@ -526,6 +616,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
                 self.cnf
                     .solver
                     .num_propagations()
+                    .saturating_add(self.retired_propagations)
                     .saturating_sub(self.propagation_base),
                 self.engine.config.max_propagations,
                 "propagations",

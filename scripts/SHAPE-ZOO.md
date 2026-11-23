@@ -383,6 +383,10 @@ just bench-den-zoo --family guarded-schema --schema-axis depth --sizes 1,2,4,8 \
   -- --sat-max-worlds 0
 ```
 
+`--schema-wide 1` widens decisions to recognition, accepted fields, written values,
+violations and task activation. It exercises component determinacy with observable
+processing results; the default (`0`) keeps recognition and accepted fields.
+
 The first command uses unmodified SAT defaults. The two preparation sweeps use
 zero search worlds to avoid spending time on semantic searches after preparation;
 their inconclusive checking outcomes are intentional and are not default-limit

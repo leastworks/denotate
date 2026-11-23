@@ -875,6 +875,14 @@ estimates of final size; unknown solver counts are omitted. VS Code exposes the 
 controls through `denotate.timeoutMs` and `denotate.limits` (see the
 [editor guide](../editors/den/README.md#checker-limits)).
 
+Completion ambiguity progress identifies the current component and whether it is
+checking local uniqueness, reachable decision differences, or coupled unresolved
+components. It reports component/boundary sizes, SAT variables and clauses before
+the solve, and elapsed time afterward. A local `fallback` means that reachability
+must still be checked; it is not an ambiguity finding. Acyclic functions of shared
+providers need no duplicated equations. Parity/absence of odd cycles proves existence
+only, never uniqueness.
+
 `--json` retains the previous per-verification `Results: {...}` status summary
 instead of human diagnostics. Root/verification headers and configuration notices
 remain, so this mode is not a single JSON document. Exit codes are the same in both

@@ -276,3 +276,250 @@ fn hypothesis_stays_required_when_it_is_not_a_selected_decision() {
     assert!(r.obligations[&o].complete());
     assert!(!r.obligations[&o].failed());
 }
+
+// Compare whole-verification answers with the independent world/model enumerator.
+// A repeated query and freshly prepared engine exercise the no-hidden-state contract.
+fn component_oracle(c: &Corpus, v: VerificationId) -> super::super::Report {
+    let e = prepare(c, v, &Domains::new());
+    let options = CheckOptions::default();
+    let expected = e.check_enumerated(&keys(c), &options).unwrap();
+    let actual = e.check(&keys(c), &options).unwrap();
+    super::scale::same_report(&actual, &expected);
+    super::scale::same_report(&actual, &e.check(&keys(c), &options).unwrap());
+    super::scale::same_report(
+        &actual,
+        &prepare(c, v, &Domains::new())
+            .check(&keys(c), &options)
+            .unwrap(),
+    );
+    actual
+}
+
+#[test]
+fn component_pairs_preserve_coupled_loops_outside_the_selected_decisions() {
+    let mut c = Corpus::new();
+    let a = rel(&mut c, "a", false);
+    let b = rel(&mut c, "b", false);
+    let bad = rel(&mut c, "bad", false);
+    rule(&mut c, a, &[(a, false)]);
+    rule(&mut c, b, &[(b, false)]);
+    rule(&mut c, bad, &[(a, false), (b, true), (bad, true)]);
+    rule(&mut c, bad, &[(a, true), (b, false), (bad, true)]);
+    let v = declared(&mut c, None, Some(BTreeSet::from([a])), &[]);
+    let r = component_oracle(&c, v);
+    let Search::Exists(pair) = r.meaning.ambiguous else {
+        panic!("coupled 00/11 must remain ambiguous")
+    };
+    assert_eq!(pair.first.value(&atom(a)), pair.first.value(&atom(b)));
+    assert_eq!(pair.second.value(&atom(a)), pair.second.value(&atom(b)));
+    assert_ne!(pair.first.value(&atom(a)), pair.second.value(&atom(a)));
+}
+
+#[test]
+fn component_totality_is_not_uniqueness_for_even_or_positive_loops() {
+    for even in [false, true] {
+        let mut c = Corpus::new();
+        let a = rel(&mut c, "a", false);
+        let b = rel(&mut c, "b", false);
+        if even {
+            rule(&mut c, a, &[(b, true)]);
+            rule(&mut c, b, &[(a, true)]);
+        } else {
+            rule(&mut c, a, &[(a, false)]);
+        }
+        let v = declared(&mut c, None, Some(BTreeSet::from([a])), &[]);
+        let r = component_oracle(&c, v);
+        assert!(r.meaning.ambiguous.exists());
+        assert!(matches!(r.meaning.no_meaning, Search::None));
+    }
+}
+
+#[test]
+fn local_ambiguity_at_unreachable_boundaries_and_free_helpers_are_not_findings() {
+    for mode in 0..3 {
+        let mut c = Corpus::new();
+        let i = rel(&mut c, "i", true);
+        let guard = rel(&mut c, "guard", false);
+        let p = rel(&mut c, "p", false);
+        let out = rel(&mut c, "out", false);
+        rule(&mut c, guard, &[(i, false), (i, true)]);
+        rule(
+            &mut c,
+            p,
+            &[(p, false), (if mode == 0 { guard } else { i }, false)],
+        );
+        rule(&mut c, out, &[(p, false)]);
+        if mode == 1 {
+            rule(&mut c, out, &[(p, true)]);
+        }
+        let h = (mode == 2).then(|| {
+            let h = rel(&mut c, "h", false);
+            rule(&mut c, h, &[(i, true)]);
+            h
+        });
+        let v = declared(&mut c, h, Some(BTreeSet::from([out])), &[]);
+        let r = component_oracle(&c, v);
+        assert!(matches!(r.meaning.ambiguous, Search::None), "mode {mode}");
+    }
+}
+
+#[test]
+fn pair_search_requires_extension_through_unselected_contradiction() {
+    let mut c = Corpus::new();
+    let p = rel(&mut c, "p", false);
+    let bad = rel(&mut c, "bad", false);
+    rule(&mut c, p, &[(p, false)]);
+    rule(&mut c, bad, &[(bad, true)]);
+    let v = declared(&mut c, None, Some(BTreeSet::from([p])), &[]);
+    let r = component_oracle(&c, v);
+    assert!(r.meaning.no_meaning.exists());
+    assert!(matches!(r.meaning.ambiguous, Search::None));
+}
+
+#[test]
+fn local_function_proofs_share_cycles_and_their_acyclic_readers() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let p = rel(&mut c, "p", false);
+    let q = rel(&mut c, "q", false);
+    rule(&mut c, p, &[(i, false)]);
+    rule(&mut c, p, &[(p, false), (i, false)]);
+    rule(&mut c, q, &[(p, true)]);
+    let v = declared(&mut c, None, Some(BTreeSet::from([q])), &[]);
+    let mut e = prepare(&c, v, &Domains::new());
+    let sizes = crate::CompletionSizes::default();
+    e.limits.completion_sizes = Some(sizes.clone());
+    let r = e.check(&keys(&c), &Default::default()).unwrap();
+    super::scale::same_report(
+        &r,
+        &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
+    );
+    assert!(matches!(r.meaning.ambiguous, Search::None));
+    let snapshot = sizes.snapshot();
+    let s = snapshot
+        .searches
+        .iter()
+        .find(|s| s.phase == "completion processing ambiguity")
+        .unwrap();
+    assert!(s.existence.unique_components > 0);
+    assert!(
+        s.existence
+            .component_details
+            .iter()
+            .all(|d| d.query == "local-uniqueness")
+    );
+    // An interrupted local proof must not become a uniqueness certificate.
+    e.config.max_solves = 0;
+    let r = e.check(&keys(&c), &Default::default()).unwrap();
+    assert!(!r.meaning.ambiguous.complete());
+    assert!(r.is_incomplete());
+}
+
+#[test]
+fn component_determinacy_matches_enumeration_across_signed_three_atom_graphs() {
+    for edges in 0..216 {
+        let mut c = Corpus::new();
+        let i = rel(&mut c, "i", true);
+        let a = rel(&mut c, "a", false);
+        let b = rel(&mut c, "b", false);
+        let d = rel(&mut c, "d", false);
+        let atoms = [i, a, b];
+        let mut code = edges;
+        for head in [a, b, d] {
+            let e = code % 6;
+            code /= 6;
+            rule(&mut c, head, &[(atoms[e / 2], e % 2 != 0)]);
+        }
+        // This extra producer includes a correlated positive guard, so local
+        // boundary freedom differs from reachable inputs in some graph shapes.
+        rule(&mut c, d, &[(a, false), (b, false)]);
+        let v = declared(&mut c, None, Some(BTreeSet::from([d])), &[]);
+        component_oracle(&c, v);
+    }
+}
+
+#[test]
+fn reachable_component_pairs_enforce_selected_assumptions() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let p = rel(&mut c, "p", false);
+    rule(&mut c, p, &[(p, false), (i, false)]);
+    let restriction = c.assume_empty_in(Namespace::default(), "no_i", i).unwrap();
+    let v = verification(&mut c, None, &[restriction]);
+    let r = component_oracle(&c, v);
+    assert!(matches!(r.meaning.ambiguous, Search::None));
+    let v = verification(&mut c, None, &[]);
+    assert!(component_oracle(&c, v).meaning.ambiguous.exists());
+}
+
+#[test]
+fn acyclic_decisions_need_no_second_model() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let p = rel(&mut c, "p", false);
+    let q = rel(&mut c, "q", false);
+    rule(&mut c, p, &[(i, false)]);
+    rule(&mut c, q, &[(p, true)]);
+    let v = declared(&mut c, None, Some(BTreeSet::from([q])), &[]);
+    let mut e = prepare(&c, v, &Domains::new());
+    let sizes = crate::CompletionSizes::default();
+    e.limits.completion_sizes = Some(sizes.clone());
+    let actual = e.check(&keys(&c), &Default::default()).unwrap();
+    super::scale::same_report(
+        &actual,
+        &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
+    );
+    let snapshot = sizes.snapshot();
+    let query = snapshot
+        .searches
+        .iter()
+        .find(|s| s.phase == "completion processing ambiguity")
+        .unwrap();
+    assert!(
+        query
+            .encoding_details
+            .iter()
+            .all(|e| e.purpose != "shared-pair" && e.purpose != "model-under-hypothesis")
+    );
+    assert_eq!(query.existence.shared_atoms, e.cone.atoms.len());
+}
+
+#[test]
+fn local_component_proofs_do_not_restart_the_query_solve_allowance() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let j = rel(&mut c, "j", true);
+    let p = rel(&mut c, "p", false);
+    let q = rel(&mut c, "q", false);
+    for (head, input) in [(p, i), (q, j)] {
+        rule(&mut c, head, &[(input, false)]);
+        rule(&mut c, head, &[(head, false), (input, false)]);
+    }
+    let v = declared(&mut c, None, Some(BTreeSet::from([p, q])), &[]);
+    let mut e = prepare(&c, v, &Domains::new());
+    e.config.max_solves = 1;
+    let sizes = crate::CompletionSizes::default();
+    e.limits.completion_sizes = Some(sizes.clone());
+    let r = e.check(&keys(&c), &Default::default()).unwrap();
+    assert!(matches!(r.meaning.ambiguous, Search::Inconclusive(_)));
+    let snapshot = sizes.snapshot();
+    let query = snapshot
+        .searches
+        .iter()
+        .find(|s| s.phase == "completion processing ambiguity")
+        .unwrap();
+    assert!(
+        query
+            .existence
+            .component_details
+            .iter()
+            .any(|c| c.state == "unique")
+    );
+    assert!(
+        query
+            .existence
+            .component_details
+            .iter()
+            .any(|c| c.state == "incomplete")
+    );
+}

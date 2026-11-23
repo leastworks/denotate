@@ -935,11 +935,11 @@ pub fn completion_existence_stats(
             json!({"index":c.index,"atoms":c.atoms,"rules":c.rules,"boundary":c.boundary,
             "relations":c.relations.iter().map(|r|relation(*r)).collect::<Result<Vec<_>>>()?,
             "omittedRelations":c.relation_count.saturating_sub(c.relations.len()),
-            "oddComponents":(c.state != "analysing").then_some(c.odd_components),"oddAtoms":(c.state != "analysing").then_some(c.odd_atoms),"state":c.state}),
+            "query":if c.query.is_empty(){"existence"}else{c.query},"elapsedMs":c.elapsed.as_secs_f64()*1000.0,"variables":c.variables,"clauses":c.clauses,"duplicatedAtoms":c.duplicated_atoms,"oddComponents":(c.query.is_empty() && c.state != "analysing").then_some(c.odd_components),"oddAtoms":(c.query.is_empty() && c.state != "analysing").then_some(c.odd_atoms),"state":c.state}),
         )
     };
     Ok(
-        json!({"components":s.components,"totalComponents":s.total_components,"fallbackComponents":s.fallback_components,
+        json!({"uniqueComponents":s.unique_components,"sharedAtoms":s.shared_atoms,"components":s.components,"totalComponents":s.total_components,"fallbackComponents":s.fallback_components,
         "rounds":s.rounds,"cubes":s.cubes,"pins":s.pins,"maxPins":s.max_pins,"validationWork":s.validation_work,
         "liftingAttempts":s.lifting_attempts,"liftedPins":s.lifted_pins,
         "currentComponent":s.current_component.as_ref().map(&detail).transpose()?,

@@ -1329,3 +1329,16 @@ the verdict is decided, not that every failing tuple/group was enumerated. Such
 stopping adds no inconclusive finding. Completion-model evidence uses `countKind: "at-least"` and the diagnostic notes that further failures may exist. Finding
 identities are unchanged. These fields describe the shared completion presenter;
 the .den editor's separate completion integration is still pending.
+
+Completion size/progress observations (shared presenter; editor completion
+integration remains pending) reuse the `existence` statistics container for
+component determinacy. `componentDetails` and `currentComponent` add `query`
+(`existence`, `local-uniqueness`, `reachable-decisions`, `coupled-decisions`),
+`elapsedMs`, `variables`, `clauses` and `duplicatedAtoms`. Determinacy reports
+`searching`, `solving`, `unique`, `fallback`, `ambiguous` or `incomplete`;
+`oddComponents`/`oddAtoms` are null for these queries. Local uniqueness ignores W/H;
+`fallback` only requests a reachability check. The joint query covers coupled
+unresolved components. Local SAT sizes describe a temporary solver; reachable and
+joint sizes describe the retained solver. Aggregate `uniqueComponents` and
+`sharedAtoms` are operational counters. The latter includes inputs and fixed slots,
+not just saved variables. No finding identities or verdict fields change.

@@ -101,9 +101,11 @@ fn cutoff_keeps_partial_round_counts_without_claiming_a_final_gfp() {
 }
 #[test]
 fn cnf_cutoff_keeps_the_partial_encoding() {
-    let p = loaded(&format!(
-        "input a();input b();input c();input d();relation h();h():-a();{V}"
-    ));
+    // A property still needs an encoding; empty decisions no longer build an
+    // otherwise unused pair merely to prove determinacy.
+    let p = loaded(
+        "input a();input b();input c();input d();relation h();h():-a();obligation none:empty(h);verification v{semantics:completion;decisions:[];assumptions:[];obligations:[none];}",
+    );
     let sink = CompletionSizes::with_least_analysis();
     let limits = Limits {
         max_atoms: 6,
@@ -630,4 +632,64 @@ fn existence_reports_odd_cores_and_cumulative_work_separately_from_validation() 
             .any(|s| s["phase"] == "completion classification existence"
                 && s["existence"]["currentComponent"]["state"] == "incomplete")
     );
+}
+
+#[test]
+fn determinacy_reports_component_queries_before_solving_and_keeps_their_scope() {
+    use std::sync::{Arc, Mutex};
+    let p = loaded(
+        "input i(); relation p(); p():-i(); p():-p(),i(); relation q(); q():-!p(); verification v{semantics:completion;decisions:[q];assumptions:[];obligations:[];}",
+    );
+    let sink = CompletionSizes::default();
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let out = events.clone();
+    let limits = Limits {
+        completion_sizes: Some(sink.clone()),
+        progress: denotate_check::CheckingProgress::new(move |e| {
+            if let Some(denotate_check::CheckingTarget::CompletionExistence(s)) = e.target {
+                if let Some(c) = s.current_component {
+                    if !c.query.is_empty() {
+                        out.lock().unwrap().push(c);
+                    }
+                }
+            }
+        }),
+        ..Default::default()
+    };
+    let Preparation::Ready(e) = prepare(&p, &limits) else {
+        panic!()
+    };
+    let r = e.check(&p.keys, &Default::default()).unwrap();
+    assert!(matches!(r.meaning.ambiguous, Search::None));
+    let events = events.lock().unwrap();
+    let solving = events
+        .iter()
+        .position(|c| c.query == "local-uniqueness" && c.state == "solving")
+        .unwrap();
+    let unique = events
+        .iter()
+        .position(|c| c.query == "local-uniqueness" && c.state == "unique")
+        .unwrap();
+    assert!(solving < unique);
+    assert!(events[solving].variables > 0 && events[solving].clauses > 0);
+    let json = denotate_presentation::completion_sizes(&p.keys, &sink.snapshot()).unwrap();
+    let search = json["searches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["phase"] == "completion processing ambiguity")
+        .unwrap();
+    let details = search["existence"]["componentDetails"].as_array().unwrap();
+    assert!(details.iter().any(|c| c["query"] == "local-uniqueness"
+        && c["state"] == "unique"
+        && c["oddComponents"].is_null()));
+    assert!(search["existence"]["sharedAtoms"].as_u64().unwrap() > 0);
+    assert!(search["existence"]["uniqueComponents"].as_u64().unwrap() > 0);
+    let sum: u64 = search["workByPhase"]
+        .as_object()
+        .unwrap()
+        .values()
+        .map(|v| v.as_u64().unwrap())
+        .sum();
+    assert_eq!(search["work"], sum);
 }

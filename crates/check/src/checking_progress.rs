@@ -113,8 +113,11 @@ impl CheckingProgress {
                     previous
                         .current_component
                         .as_ref()
-                        .map(|c| (c.index, c.state))
-                        != stats.current_component.as_ref().map(|c| (c.index, c.state))
+                        .map(|c| (c.index, c.query, c.state))
+                        != stats
+                            .current_component
+                            .as_ref()
+                            .map(|c| (c.index, c.query, c.state))
                 }
                 _ => true,
             };

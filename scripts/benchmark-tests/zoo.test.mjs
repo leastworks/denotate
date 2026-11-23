@@ -303,7 +303,8 @@ test('guarded schema is reproducible, scales facts independently and fixes block
   assert.equal(corpus.shape.nestedBlocks,8250);assert.equal(corpus.shape.statementRows,24750);
   assert.doesNotMatch(corpus.source,/message_set|\bgiven\b|\bkept\b|\bmti\b|\bSTIP\b/i);
   assert.match(guardedSchema({...base,impossible:1}).source,/relation control_present\(\);/);
-  for(const cfg of [{depth:0},{self:101},{blocks:2,depth:3},{impossible:2}])assert.throws(()=>guardedSchema(cfg));
+  assert.match(guardedSchema({...base,wide:1}).source,/decisions:\[format_recognized,accepted_field,written_value,violated,task_active\]/);
+  for(const cfg of [{wide:2},{depth:0},{self:101},{blocks:2,depth:3},{impossible:2}])assert.throws(()=>guardedSchema(cfg));
 });
 
 test('guarded schema completion reports recover stages and control semantics',()=>{

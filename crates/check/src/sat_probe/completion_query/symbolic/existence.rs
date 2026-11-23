@@ -160,7 +160,7 @@ pub(super) fn residual(
     Ok(Some(result))
 }
 
-fn component(
+pub(super) fn component(
     c: &Cone,
     producers: &[Vec<usize>],
     heads: &BTreeSet<usize>,

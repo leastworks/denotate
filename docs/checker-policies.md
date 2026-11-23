@@ -1869,3 +1869,25 @@ Completion failure triage stops at `max_failures` distinct failed parts per obli
 not a confirmed verdict. A truncated count is explicitly a lower bound. Ordinary
 solver/time limits still apply, and a real cutoff remains inconclusive. Resource
 measurements and selected examples remain observations, never goldens.
+
+### Completion component determinacy
+
+Uniqueness first probes relevant cyclic components with shared, unconstrained
+boundary values. Acyclic regions and certified local functions share literals when
+their boundaries are shared. Non-unique components use reachable pair searches;
+remaining coupled choices require the joint residual pair described in decisions.
+This reduces duplicate CNF, but a large recursive component may still exhaust its
+query allowance. It does not introduce planner splits or raise limits.
+
+Local probe CNFs are released; their work, solves, polls, conflicts and propagations
+are cumulative within the ambiguity query. Fallback encodings remain gated in the
+query's retained solver and count against its physical CNF limits. No proof or
+encoding is retained across invocations. Size/progress records distinguish
+`local-uniqueness`, `reachable-decisions` and `coupled-decisions`; states include
+`searching`, `solving`, `unique`, `fallback`, `ambiguous` and `incomplete`.
+`fallback` is not an ambiguity finding. Local sizes describe the temporary solver;
+reachable/coupled sizes describe the retained solver, including inactive clauses.
+`uniqueComponents` counts local proofs and `sharedAtoms` counts the resulting shared
+boundary closure, including inputs and fixed/out-of-scope slots; it is not a count
+of saved SAT variables. Solver sizes are emitted before solving, with elapsed time after
+the component query; reporting bounds remain 64 records and 32 relation names.
