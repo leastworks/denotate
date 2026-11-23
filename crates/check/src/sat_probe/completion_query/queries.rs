@@ -317,6 +317,13 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         Ok(run)
     }
     pub(super) fn universe(engine: &'a Engine, budget: &'b mut Budget<'l>) -> Result<Self> {
+        Self::base(engine, budget, true)
+    }
+    /// Local boundary queries need neither W nor an input-universe encoding.
+    pub(super) fn local(engine: &'a Engine, budget: &'b mut Budget<'l>) -> Result<Self> {
+        Self::base(engine, budget, false)
+    }
+    fn base(engine: &'a Engine, budget: &'b mut Budget<'l>, universe: bool) -> Result<Self> {
         let work_started = budget.used();
         budget.begin_query_work();
         budget.check("completion query")?;
@@ -359,14 +366,21 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         };
         let truth = cnf.var(budget)?;
         cnf.clause(vec![truth], budget)?;
-        let world = encoding::encode_named(
-            &engine.world,
-            &mut cnf,
-            truth,
-            None,
-            budget,
-            "input-universe",
-        )?;
+        let world = if universe {
+            encoding::encode_named(
+                &engine.world,
+                &mut cnf,
+                truth,
+                None,
+                budget,
+                "input-universe",
+            )?
+        } else {
+            Encoding {
+                vars: vec![],
+                validation: None,
+            }
+        };
         Ok(Self {
             engine,
             budget,

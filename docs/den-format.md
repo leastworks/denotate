@@ -931,3 +931,10 @@ not depend on these advisory findings.
 `--completion-prune` is off by default. It enables both common-equations pruning
 and H-first classification existence; without it the earlier query path and output
 are retained. It can cost more than it saves on large programs.
+
+Optional pruning targets odd or locally non-unique loop components. It reports
+candidate and considered/proved counts per component, with bounded example heads,
+the last attempted head and any cutoff. The CLI prints these summaries and optional
+pruning cutoffs even without `--verbose`. A cutoff stops optimization, not checking;
+it does not by itself change the semantic verdict. Pruning has its own bounded time
+share. Acyclic or locally unique heads no longer receive these optimization notices.

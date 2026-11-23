@@ -73,6 +73,7 @@ pub struct CompletionComponentStats {
 /// Operational observations, not proof evidence or policy thresholds.
 #[derive(Debug, Clone, Default)]
 pub struct CompletionExistenceStats {
+    pub coupled_fallback_skipped: bool,
     pub unique_components: usize,
     pub shared_atoms: usize,
     pub current_component: Option<CompletionComponentStats>,

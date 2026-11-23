@@ -2203,3 +2203,28 @@ proof installs nothing; a completed prefix remains valid. Scopes still come from
 These simplifications produce bounded Information findings per head and context,
 with source instances and scope labels. They do not offer authored-rule deletion:
 one grounded producer being redundant in one question is insufficient for that edit.
+
+### Optional completion pruning targets unresolved cyclic work
+
+The first implementation spent proof time on acyclic and already locally unique
+heads, and processed every producer of one head before moving on. One exhausted
+candidate ended the pass and retained its prefix, which could leave another covered
+head untouched. There was no one-head cap. We now target odd components for existence
+and independently non-unique cyclic components for determinacy, rank by existing
+cycle witnesses and negative-edge relation histograms, and give multiply-produced
+heads round-robin turns. A subsumption must remove an internal edge. Proven prefixes
+remain valid; candidate cutoffs and considered/proved counters are visible. This
+changes which optional optimization notices appear, not authored scopes or meaning.
+
+Pruning stays opt-in with a bounded time share, including candidate discovery and
+individual SAT calls. H-pruning extends a W-pruned view of the same original scope;
+classification's structural analysis, H-first coverage and no-H fallback consistently
+use those views. H proofs never enter a W query. Common-equations proofs and original
+model validation are unchanged.
+
+A coupled determinacy query can be omitted after individual component queries prove
+no decision difference if their downstream closures are disjoint in the original
+equations. Each component's second-model choices can then replace its first-model
+choices independently, with no shared downstream equation changed. Hidden constraints
+count as readers too: selected outputs alone are insufficient. The initial check is
+conservatively size-bounded; declining it retains the existing coupled fallback.

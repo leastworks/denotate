@@ -16,11 +16,11 @@ fn record(p: &PruningRecord, r: &Report, keys: &SemanticKeys) -> Result<Value> {
     )
 }
 pub(super) fn summary(r: &Report, keys: &SemanticKeys) -> Result<Value> {
-    Ok(
-        json!({"attempts":r.pruning.attempts,"removedInstances":r.pruning.removed,
+    Ok(json!({"elapsedMs":r.pruning.elapsed.as_secs_f64()*1000.0,
+        "components":r.pruning.components.iter().map(|c|completion_pruning_component(c,|a|atom(a,keys))).collect::<Result<Vec<_>>>()?,
+        "omittedComponents":r.pruning.omitted_components,"attempts":r.pruning.attempts,"removedInstances":r.pruning.removed,
         "coveredHeads":r.pruning.covered,"records":r.pruning.records.iter().map(|p|record(p,r,keys)).collect::<Result<Vec<_>>>()?,
-        "omittedRecords":r.pruning.omitted,"cutoffs":r.pruning.incomplete.iter().map(|c|reason(*c)).collect::<Vec<_>>() }),
-    )
+        "omittedRecords":r.pruning.omitted,"cutoffs":r.pruning.incomplete.iter().map(|c|reason(*c)).collect::<Vec<_>>() }))
 }
 pub(super) fn findings(
     corpus: &Corpus,

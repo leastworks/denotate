@@ -77,6 +77,7 @@ pub(super) fn run(
         .collect::<std::collections::BTreeMap<_, _>>();
     let component_names = presentation::diagnostic_names(&p.corpus);
     let observer = trace.clone();
+    let pruning_text = denotate_ir_text::completion_output::pruning_formatter(p);
     let odd = (trace.is_enabled()
         && p.corpus
             .verifications()
@@ -85,6 +86,9 @@ pub(super) fn run(
     let shown_odd =
         std::sync::Mutex::new(None::<std::sync::Arc<denotate_check::CompletionOddExplanation>>);
     limits.progress = denotate_check::CheckingProgress::new(move |e| {
+        if let Some(denotate_check::CheckingTarget::CompletionPruning(ref stats)) = e.target {
+            observer.message(pruning_text(stats));
+        }
         if let Some(denotate_check::CheckingTarget::CompletionExistence(ref stats)) = e.target {
             observer.message(format!("{} {}: components total {} unique {} / {}, shared atoms {}, fallback {}, rounds {}, cubes {}, pins {} (max {}), validation work {}, lifted {}/{}",e.stage,e.state,stats.total_components,stats.unique_components,stats.components,stats.shared_atoms,stats.fallback_components,stats.rounds,stats.cubes,stats.pins,stats.max_pins,stats.validation_work,stats.lifted_pins,stats.lifting_attempts));
             if let Some(c) = &stats.current_component {
@@ -159,7 +163,8 @@ pub(super) fn run(
         if !matches!(
             e.target,
             Some(
-                denotate_check::CheckingTarget::SatExistence(_)
+                denotate_check::CheckingTarget::CompletionPruning(_)
+                    | denotate_check::CheckingTarget::SatExistence(_)
                     | denotate_check::CheckingTarget::SatUniqueness(_)
                     | denotate_check::CheckingTarget::CompletionSize { .. }
                     | denotate_check::CheckingTarget::CompletionExistence(_)
@@ -168,7 +173,17 @@ pub(super) fn run(
             observer.message(format!("{} {}: {}", e.stage, target, e.state));
         }
         if let Some(error) = e.failure {
-            observer.message(checker_failure(error).1);
+            let message = checker_failure(error).1;
+            if e.stage.starts_with("completion pruning") || e.stage == "completion targeted pruning"
+            {
+                observer.message(message.replacen(
+                    "Checking inconclusive:",
+                    "Optional pruning cutoff (checking continues):",
+                    1,
+                ));
+            } else {
+                observer.message(message);
+            }
         }
     });
     if !trace.is_enabled() {
@@ -769,6 +784,28 @@ pub(super) fn completion_inner(
     if json {
         stream_results(s, output, flush)?;
     } else {
+        if report.pruning.enabled {
+            let text = denotate_ir_text::completion_output::pruning_formatter(p);
+            for c in &report.pruning.components {
+                writeln!(output, "{}", text(c)).unwrap();
+            }
+            for c in &report.pruning.incomplete {
+                writeln!(
+                    output,
+                    "Pruning optional cutoff: {}",
+                    denotate_presentation::exhaustion_text(c.phase, c.resource, c.details)
+                )
+                .unwrap();
+            }
+            if report.pruning.omitted_components > 0 {
+                writeln!(
+                    output,
+                    "Pruning: +{} component records omitted",
+                    report.pruning.omitted_components
+                )
+                .unwrap();
+            }
+        }
         if !s["inputContract"]["complete"].as_bool().unwrap() {
             writeln!(
                 output,

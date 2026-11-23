@@ -187,3 +187,46 @@ pub fn odd_lines(o: &Value) -> Vec<String> {
     }
     lines
 }
+
+pub fn pruning_formatter(
+    p: &LoadedProgram,
+) -> impl Fn(&denotate_check::completion_query::PruningComponent) -> String + Send + Sync + use<> {
+    let names = crate::presentation::diagnostic_names(&p.corpus);
+    move |c| {
+        let mut text = format!(
+            "Pruning {} {} component {} ({}; {} atoms): {} candidates considered, {} proved; {} instances removed; last head {}",
+            c.scope,
+            match c.context {
+                denotate_check::completion_query::PruningContext::World => "W",
+                _ => "W+H",
+            },
+            crate::progress::atom_text(&c.representative, &names),
+            c.kind,
+            c.atoms,
+            c.considered,
+            c.proved,
+            c.removed,
+            c.last_head
+                .as_ref()
+                .map(|a| crate::progress::atom_text(a, &names))
+                .unwrap_or_else(|| "(none)".into())
+        );
+        text.push_str(&format!(
+            "; {} candidate heads / {} producers{}",
+            c.candidate_heads,
+            c.candidate_producers,
+            if c.discovery_complete {
+                ""
+            } else {
+                " (discovery incomplete; lower bounds)"
+            }
+        ));
+        if let Some(c) = c.cutoff {
+            text.push_str(&format!(
+                "; optional cutoff: {}",
+                denotate_presentation::exhaustion_text(c.phase, c.resource, c.details)
+            ));
+        }
+        text
+    }
+}

@@ -968,7 +968,7 @@ pub fn completion_existence_stats(
         )
     };
     Ok(
-        json!({"uniqueComponents":s.unique_components,"sharedAtoms":s.shared_atoms,"components":s.components,"totalComponents":s.total_components,"fallbackComponents":s.fallback_components,
+        json!({"coupledFallbackSkipped":s.coupled_fallback_skipped,"uniqueComponents":s.unique_components,"sharedAtoms":s.shared_atoms,"components":s.components,"totalComponents":s.total_components,"fallbackComponents":s.fallback_components,
         "rounds":s.rounds,"cubes":s.cubes,"pins":s.pins,"maxPins":s.max_pins,"validationWork":s.validation_work,
         "liftingAttempts":s.lifting_attempts,"liftedPins":s.lifted_pins,
         "currentComponent":s.current_component.as_ref().map(&detail).transpose()?,
@@ -1001,5 +1001,22 @@ pub fn completion_odd_explanation(
         "histogramsComplete":o.histograms_complete,
         "omittedNegativeRelations":o.omitted_negative_relations,"omittedInputGroups":o.omitted_input_groups,
         "guardMeaning":"Other conjuncts of each producer; falsifying any disables that producer. Cutting an edge requires disabling every producer. Input groups are structural reachability candidates, not certified cuts."
+    }))
+}
+
+pub fn completion_pruning_component(
+    c: &PruningComponent,
+    atom: impl Fn(&GroundAtom) -> Result<Value>,
+) -> Result<Value> {
+    Ok(json!({
+        "kind":"completion-pruning","scope":c.scope,
+        "context":match c.context {PruningContext::World=>"W",PruningContext::Hypothesis=>"W+H"},
+        "representative":atom(&c.representative)?,"atoms":c.atoms,"rules":c.rules,"componentKind":c.kind,
+        "discoveryComplete":c.discovery_complete,"candidateHeads":c.candidate_heads,"candidateProducers":c.candidate_producers,
+        "candidateExamples":c.candidate_examples.iter().map(&atom).collect::<Result<Vec<_>>>()?,
+        "omittedCandidateHeads":c.candidate_heads.saturating_sub(c.candidate_examples.len()),
+        "considered":c.considered,"proved":c.proved,"removedInstances":c.removed,
+        "lastHead":c.last_head.as_ref().map(&atom).transpose()?,
+        "cutoff":c.cutoff.map(reason),"elapsedMs":c.elapsed.as_secs_f64()*1000.0,
     }))
 }

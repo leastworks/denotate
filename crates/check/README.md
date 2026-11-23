@@ -1366,7 +1366,7 @@ examples. `ObligationResult.failures_truncated` makes counts lower bounds; a con
 failure can be complete as a verdict without enumerating all failed parts.
 
 Component records label the reported graph's scope, W/W+H context and pruned/unpruned
-view, including H-first classification's original-graph shape records.
+view, including H-first classification's W-pruned shape records when pruning is enabled.
 Odd component details include bounded structural explanations when progress or
 size recording is enabled: signed cycles, exact source rules, alternative
 producers and their other conjuncts, negative-edge relation histograms, and
@@ -1408,3 +1408,18 @@ queries; only confirmed absence of an H-model permits the latter query.
 path, without the pruning cache, H-first existence search or extra original-view
 validation indexing. `Report::pruning.enabled` identifies opt-in reports; the shared
 presenter omits `simplifications` entirely when disabled.
+
+Optional pruning targets only odd or independently locally non-unique cyclic
+components, using parity witness cycles and negative-edge relation histograms.
+Multi-producer heads get round-robin turns before unary heads; each proof retains
+the common-equations contract above. A bounded invocation/view/candidate time share
+prevents this optional work from taking the entire checking deadline (see checker
+policies). `PruningReport.components` reports candidate, considered, proved and
+removed counts, ranked example heads, last attempted head, elapsed time and cutoff.
+H views extend the W-pruned view; classification's structural check and no-H fallback
+also use it. There is no H-dependent proof in a W view.
+
+After reachable determinacy pairs prove no difference, a cheap conservative check
+can skip the coupled query when all original downstream closures are disjoint.
+Shared hidden constraints retain the coupled fallback. `coupled_fallback_skipped`
+records this shortcut; large scopes decline it without changing the query path.

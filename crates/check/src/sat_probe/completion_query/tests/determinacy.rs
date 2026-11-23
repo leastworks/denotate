@@ -523,3 +523,54 @@ fn local_component_proofs_do_not_restart_the_query_solve_allowance() {
             .any(|c| c.state == "incomplete")
     );
 }
+
+#[test]
+fn disjoint_downstream_equations_avoid_the_coupled_pair_but_shared_constraints_do_not() {
+    for coupled in [false, true] {
+        let mut c = Corpus::new();
+        let a = rel(&mut c, "a", false);
+        let b = rel(&mut c, "b", false);
+        let out_a = rel(&mut c, "out_a", false);
+        let out_b = rel(&mut c, "out_b", false);
+        rule(&mut c, a, &[(a, false)]);
+        rule(&mut c, b, &[(b, false)]);
+        for (h, p) in [(out_a, a), (out_b, b)] {
+            rule(&mut c, h, &[(p, false)]);
+            rule(&mut c, h, &[(p, true)]);
+        }
+        if coupled {
+            let bad = rel(&mut c, "constraint", false);
+            rule(&mut c, bad, &[(a, false), (b, true), (bad, true)]);
+            rule(&mut c, bad, &[(a, true), (b, false), (bad, true)]);
+        }
+        let v = declared(&mut c, None, Some(BTreeSet::from([out_a, out_b])), &[]);
+        let mut e = prepare(&c, v, &Domains::new());
+        let sizes = crate::CompletionSizes::default();
+        e.limits.completion_sizes = Some(sizes.clone());
+        let r = e.check(&keys(&c), &Default::default()).unwrap();
+        super::scale::same_report(
+            &r,
+            &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
+        );
+        assert!(matches!(r.meaning.ambiguous, Search::None));
+        let snapshot = sizes.snapshot();
+        let searches: Vec<_> = snapshot
+            .searches
+            .iter()
+            .filter(|s| s.phase == "completion processing ambiguity")
+            .collect();
+        assert!(
+            searches
+                .iter()
+                .any(|s| s.existence.coupled_fallback_skipped)
+                == !coupled
+        );
+        assert_eq!(
+            searches
+                .iter()
+                .flat_map(|s| &s.existence.component_details)
+                .any(|c| c.query == "coupled-decisions"),
+            coupled
+        );
+    }
+}

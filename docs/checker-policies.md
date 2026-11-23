@@ -1922,21 +1922,40 @@ unpruned path. The semantic oracles continue exercising pruning explicitly.
 
 When enabled, before encoding a checking question, try coverage and producer subsumption with
 the target head's equation disabled and the other scope equations unchanged.
-Candidates are unsettled non-input heads with non-fact producers, ordered by
-recursive membership, then multiple producers, then ground atom order. Coverage
-precedes sequential producer removals. Successful changes update subsequent proofs.
+Candidates are unsettled heads in odd components or cyclic components independently
+shown non-unique with a free boundary. Locally unique and acyclic heads are skipped.
+The existing parity-witness BFS and negative-edge relation histogram rank candidates;
+multiple-producer heads precede unary heads. Heads receive round-robin turns: first
+coverage, then individual subsumption candidates. A subsumption candidate must cut
+an internal edge not supplied by another remaining producer. Successful changes
+update subsequent proofs; target membership/ranking is a snapshot for that scoped
+pass, not recomputed after each removal. This narrows advisory warnings as well as proof work;
+semantic scopes and equations outside the proven transformations remain unchanged.
 Fitting substitutions for proof setup are computed with all candidate definitions
 abstracted, so they cannot smuggle the disabled equation into a proof.
 
 One incremental proof solver is bounded by the existing checker and query limits
-per original scope/context. Its deadline cannot exceed the enclosing search's
-remaining time; the overall run deadline also applies. Work is reported separately
-under `completion pruning W` or `completion pruning W+H`. Proof work is not charged
-again to the semantic search's work allowance. An optional proof cutoff is reported
+per original scope/context. Optional pruning gets at most one tenth of the configured
+run timeout across views. A view gets at most one quarter of its enclosing query's
+remaining time, capped at five seconds and the remaining invocation share. Target
+discovery gets one quarter of that view's remaining time/work, at most 500 ms.
+Each candidate solve gets a fair time slice among active heads (denominator capped
+at 16), at most 250 ms. A candidate-only deadline advances to the next candidate;
+cumulative solver/work exhaustion stops that view. The overall run deadline still
+applies. These shares are provisional, not additional semantic-search allowances.
+Work is reported separately under `completion pruning W` or `completion pruning W+H`.
+Proof work is not charged again to the semantic search's work allowance. An optional proof cutoff is reported
 in `simplifications.cutoffs`, not as semantic incompleteness; the subsequent search
 can still finish. Global deadline/cancellation behavior is unchanged.
 
-Views are retained only during that check invocation. Reports keep 64 proof records
+H views extend the same frozen scope's W-pruned view. Classification parity/shape,
+H-model coverage and the no-H fallback all use the corresponding pruned view;
+returned models still validate against original equations.
+
+Views are retained only during that check invocation. Reports keep 64 component
+summaries (16 ranked candidate examples each), including considered/proved counts,
+last head and optional cutoff. Human output prints cutoffs without `--verbose`.
+Reports keep 64 proof records
 and 32 source instances per record, with omitted counts; these caps do not limit
 installed proofs. Source findings group by head/context and bound primary source
 contributions to 32. Repeated scopes may count the same instance more than once;
@@ -1946,3 +1965,10 @@ This is provisional candidate ordering, not a promise that pruning is cheaper th
 the query it precedes. Equation gates and proof pins still scale with scope size.
 Measure the guarded-schema `--schema-double 1` profile/splice shape before changing
 limits or adding path splitting.
+
+The optional disjoint-downstream determinacy shortcut inspects all original equations,
+including hidden constraining equations. It skips the coupled fallback only if every
+candidate component's downstream closure is disjoint. To keep this add-on cheap,
+it declines scopes with more than 100,000 atoms plus rules plus body occurrences,
+or insufficient remaining work for its charged traversal. Declining leaves the
+existing coupled query in place; this is not a corpus-scale optimization yet.

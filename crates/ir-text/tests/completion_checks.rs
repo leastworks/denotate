@@ -591,7 +591,7 @@ fn bounded_failure_triage_is_a_decided_failure_with_a_lower_bound_and_other_chec
 
 #[test]
 fn completion_pruning_reports_head_context_and_source_without_an_edit() {
-    let text = "input tag();\nrelation accepted();\nrelation profile();\naccepted():-tag();\naccepted():-profile();\nprofile():-tag(),accepted();\nverification v{semantics:completion;assumptions:[];obligations:[];}";
+    let text = "input tag();\nrelation accepted();\nrelation profile();\naccepted():-tag();\naccepted():-profile();\nprofile():-tag(),!accepted();\nverification v{semantics:completion;assumptions:[];obligations:[];}";
     let (p, r) = checked(
         text,
         CheckOptions {

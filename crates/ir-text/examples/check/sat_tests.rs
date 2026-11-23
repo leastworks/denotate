@@ -930,3 +930,41 @@ fn completion_pruning_is_opt_in_and_leaves_default_output_unchanged() {
     assert_eq!(f.run(&["--completion-prune"]).0, 2);
     assert!(options::help().contains("--completion-prune"));
 }
+
+#[test]
+fn targeted_pruning_reports_considered_proved_and_optional_cutoffs_without_verbose() {
+    let mut text = "input tag();relation accepted();accepted():-tag();".to_owned();
+    for n in 0..16 {
+        text.push_str(&format!(
+            "relation profile{n}();accepted():-profile{n}();profile{n}():-tag(),!accepted();"
+        ));
+    }
+    text.push_str("verification v{semantics:completion;assumptions:[];obligations:[];}");
+    let f = Fixture::new(&text);
+    let (code, output) = f.run(&["--engine", "sat", "--no-progress", "--completion-prune"]);
+    assert_eq!(code, 0, "{output}");
+    assert!(
+        output.contains("candidates considered") && output.contains("proved"),
+        "{output}"
+    );
+    let mut saw_cutoff = false;
+    for work in ["500", "1000", "2000", "4000"] {
+        let (_, out) = f.run(&[
+            "--engine",
+            "sat",
+            "--no-progress",
+            "--completion-prune",
+            "--max-work",
+            work,
+        ]);
+        if out.contains("Pruning optional cutoff:") {
+            assert!(out.contains("work"), "{out}");
+            saw_cutoff = true;
+            break;
+        }
+    }
+    assert!(
+        saw_cutoff,
+        "resource cutoff must not be hidden in JSON only"
+    );
+}

@@ -278,7 +278,7 @@ fn build(
     Ok(())
 }
 
-fn shortest_return(
+pub(super) fn shortest_return(
     seed: Edge,
     edges: &[Vec<Edge>],
     b: &mut Budget<'_>,
@@ -319,7 +319,7 @@ fn shortest_return(
     }
     Ok(None)
 }
-fn simplify_walk(cycle: &mut Vec<Edge>, b: &mut Budget<'_>) -> Result<()> {
+pub(super) fn simplify_walk(cycle: &mut Vec<Edge>, b: &mut Budget<'_>) -> Result<()> {
     loop {
         b.charge(cycle.len(), PHASE)?;
         let mut seen = BTreeMap::new();

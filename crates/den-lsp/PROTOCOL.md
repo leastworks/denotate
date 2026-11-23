@@ -1371,10 +1371,10 @@ Every completion component record identifies its reported graph with `scope`
 `W + H`) and `view` (`pruned` or `unpruned`). A pruned view may contain
 zero successful removals. Local uniqueness still frees boundary atoms; context
 labels the view's validity, not an assertion that W/H was encoded in that local
-test. H-first classification's shape records describe the original graph and are
-explicitly classification / W / unpruned, even while the search covers H-models
-using an H-pruned view. These labels apply to both historical and current records,
-including coupled determinacy queries.
+test. With pruning enabled, H-first classification's shape records describe the
+W-pruned graph (classification / W / pruned); H-model coverage extends this with
+H-only proofs, and the no-H fallback retains the W-pruned graph. These labels apply
+to both historical and current records, including coupled determinacy queries.
 
 Completion component size/progress records can also carry `oddExplanation`
 (null when absent). This is advisory telemetry, not finding evidence or a verdict;
@@ -1406,3 +1406,18 @@ the editor's completion-checking integration remains pending.
 These records appear with the current component before its expensive solve,
 and in retained component details. Counts, timestamps and the particular cycle
 chosen are diagnostic data, not semantic identities or golden expectations.
+
+Completion pruning telemetry additionally exposes `simplifications.elapsedMs`,
+`components` (at most 64), and `omittedComponents`. Each component contains `scope`,
+`context` (`W` / `W+H`), `representative`, `atoms`, `rules`, `componentKind`
+(`analysing`, `odd`, `non-unique`, `unique`, `incomplete`), `discoveryComplete`, `candidateHeads`,
+`candidateProducers`, `candidateExamples` (up to 16 ranked heads),
+`omittedCandidateHeads`, `considered`, `proved`, `removedInstances`, `lastHead`,
+`cutoff`, and `elapsedMs`. Considered/proved count attempted/successful queries,
+including coverage; removedInstances counts transformed scoped instances.
+Candidate counts are lower bounds when discoveryComplete is false.
+Component records can repeat for different scopes/contexts. Current progress carries
+the same fields under `target.kind: completion-pruning`; optional cutoffs are also
+printed in ordinary CLI output. These are optimization records, not semantic
+findings. Determinacy search statistics add `coupledFallbackSkipped`, true only when
+all original downstream closures were proved disjoint and the coupled query omitted.

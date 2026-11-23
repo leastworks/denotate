@@ -8,6 +8,7 @@ mod determinacy;
 mod existence;
 mod odd;
 pub mod planning;
+pub(super) mod targets;
 mod validation;
 
 type Cube = BTreeMap<usize, bool>;
@@ -765,10 +766,11 @@ impl Engine {
             |s| {
                 // An unconditional structural existence certificate needs no
                 // model query, with or without H.
-                if consistency::analyse(original, None, s.run.budget)?.odd_components == 0 {
+                let world_view = s.simplified(original, false)?;
+                if consistency::analyse(&world_view, None, s.run.budget)?.odd_components == 0 {
                     return Ok(None);
                 }
-                existence::classification_shape(self, original, s)?;
+                existence::classification_shape(self, &world_view, world_view.label(), s)?;
                 let h = self.classification.as_ref().unwrap().2;
                 let view = s.simplified(original, true)?;
                 let accepted = s.encode_view(&view, original, true)?;
@@ -808,14 +810,14 @@ impl Engine {
                     }
                     s.metrics();
                     if base.is_none() {
-                        base = Some(s.encode(original, false)?);
+                        base = Some(s.encode_view(&world_view, original, false)?);
                     }
                     let base = base.as_ref().unwrap();
                     if !s.solve(&[base.gate], &pins)? {
                         return Ok(Some(world));
                     }
                     let values = s.values(original, base)?;
-                    let cube = cover(original, &values, None, s.run.budget)?;
+                    let cube = cover(&world_view, &values, None, s.run.budget)?;
                     s.exclude(selector, &cube)?;
                 }
             },

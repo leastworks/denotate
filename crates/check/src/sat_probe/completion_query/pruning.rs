@@ -23,9 +23,31 @@ pub struct PruningRecord {
     pub scope_heads: usize,
     pub scope: &'static str,
 }
+#[derive(Debug, Clone)]
+pub struct PruningComponent {
+    pub scope: &'static str,
+    pub context: PruningContext,
+    pub representative: GroundAtom,
+    pub atoms: usize,
+    pub rules: usize,
+    pub kind: &'static str,
+    pub discovery_complete: bool,
+    pub candidate_heads: usize,
+    pub candidate_examples: Vec<GroundAtom>,
+    pub candidate_producers: usize,
+    pub considered: usize,
+    pub proved: usize,
+    pub removed: usize,
+    pub last_head: Option<GroundAtom>,
+    pub cutoff: Option<Inconclusive>,
+    pub elapsed: Duration,
+}
 #[derive(Debug, Clone, Default)]
 pub struct PruningReport {
     pub enabled: bool,
+    pub components: Vec<PruningComponent>,
+    pub omitted_components: usize,
+    pub elapsed: Duration,
     pub attempts: usize,
     pub removed: usize,
     pub covered: usize,
@@ -37,6 +59,7 @@ pub struct PruningReport {
 pub(super) struct Cache {
     views: BTreeMap<(Vec<usize>, PruningContext), Arc<Cone>>,
     pub report: PruningReport,
+    spent: Duration,
 }
 pub(super) enum View<'a> {
     Original(&'a Cone),
@@ -110,19 +133,37 @@ pub(super) fn view<'a>(
     } else {
         "property"
     };
+    // H views extend the same frozen scope's W-pruned view. No H proof
+    // can enter the W cache or a classification query without H.
+    let base_started = Instant::now();
+    let base = if context == PruningContext::Hypothesis {
+        view(engine, cone, false, remaining)?
+    } else {
+        View::Original(cone)
+    };
+    let remaining = remaining.saturating_sub(base_started.elapsed());
     let phase = match context {
         PruningContext::World => "completion pruning W",
         PruningContext::Hypothesis => "completion pruning W+H",
     };
-    let _progress = engine.limits.progress.scope(phase, None, true);
+    let _progress = engine.limits.progress.diagnostic(phase);
     let mut limits = engine.shared_limits(engine.selection.len() + 6);
-    limits.timeout = limits.timeout.min(remaining);
+    // A check invocation spends at most one tenth of its configured time on
+    // optional pruning. Each view gets at most a quarter of the enclosing
+    // query's remaining time, capped at five seconds.
+    let available = (engine.limits.timeout / 10).saturating_sub(cache.lock().unwrap().spent);
+    limits.timeout = limits
+        .timeout
+        .min(remaining / 4)
+        .min(available)
+        .min(Duration::from_secs(5));
+    let started = Instant::now();
     let mut budget = Budget::new(&limits);
-    let mut result = cone.clone();
+    let mut result = (*base).clone();
     let mut report = PruningReport::default();
     let answer = simplify(
         engine,
-        cone,
+        &base,
         &mut result,
         context,
         scope,
@@ -139,7 +180,18 @@ pub(super) fn view<'a>(
             .push(inconclusive(error.in_phase(phase, None))?);
     }
     let result = Arc::new(result);
+    let elapsed = started.elapsed();
     let mut cache = cache.lock().unwrap();
+    cache.spent += elapsed;
+    cache.report.elapsed += elapsed;
+    for row in report.components {
+        if cache.report.components.len() < 64 {
+            cache.report.components.push(row);
+        } else {
+            cache.report.omitted_components += 1;
+        }
+    }
+    cache.report.omitted_components += report.omitted_components;
     cache.report.attempts += report.attempts;
     cache.report.removed += report.removed;
     cache.report.covered += report.covered;
@@ -179,23 +231,25 @@ fn simplify(
     // One producer can be covered under H too. Skip facts and producer-less
     // heads; constants already have a completion-safe Fitting path.
     let settled = encoding::fitting(original, budget)?;
-    let recursive: BTreeSet<_> = engine
-        .program
-        .components()
-        .filter(|c| c.recursive)
-        .flat_map(|c| c.atoms.iter().map(|a| engine.program.atom_index[a]))
-        .collect();
-    let mut candidates: Vec<_> = (0..original.atoms.len())
-        .filter(|h| {
-            !original.input[*h]
-                && settled[*h].is_none()
-                && !producers[*h].is_empty()
-                && producers[*h]
-                    .iter()
-                    .all(|r| !original.rules[*r].body.is_empty())
-        })
-        .collect();
-    candidates.sort_by_key(|h| (!recursive.contains(h), producers[*h].len() < 2, *h));
+    let mut discovery_limits = budget.limits.clone();
+    discovery_limits.timeout = (budget.remaining_time() / 4).min(Duration::from_millis(500));
+    discovery_limits.max_work = budget.limits.max_work.saturating_sub(budget.used()) / 4;
+    let mut discovery_budget = Budget::new(&discovery_limits);
+    let targets = symbolic::targets::discover(
+        engine,
+        original,
+        &settled,
+        scope,
+        context,
+        report,
+        &mut discovery_budget,
+    );
+    budget.charge(
+        discovery_budget.used(),
+        "completion pruning target discovery",
+    )?;
+    let targets = targets?;
+    let candidates = targets.heads.clone();
     if candidates.is_empty() {
         return Ok(());
     }
@@ -256,7 +310,9 @@ fn simplify(
     let mut source = Vec::new();
     let mut cursor = 0;
     for r in &original.rules {
-        while cursor < engine.cone.rules.len() && engine.cone.rules[cursor] != *r {
+        while cursor < engine.cone.rules.len()
+            && (engine.cone.rules[cursor] != *r || engine.cone.rules[cursor].source != r.source)
+        {
             cursor += 1;
         }
         if cursor == engine.cone.rules.len() {
@@ -265,61 +321,174 @@ fn simplify(
         source.push(engine.program.core.rules[cursor].id);
         cursor += 1;
     }
-    let outcome = (|| {
-        for head in candidates {
-            let _progress = engine.limits.progress.sampled(
-                match context {
-                    PruningContext::World => "completion pruning W head",
-                    PruningContext::Hypothesis => "completion pruning W+H head",
-                },
-                true,
-                || crate::CheckingTarget::Atom(original.atoms[head].clone()),
-            );
-            let mut remaining = producers[head].clone();
-            let active = |current: &[Option<usize>], gates: &[Lit], live: &[bool]| {
-                let mut pins: Vec<_> = gates
-                    .iter()
-                    .enumerate()
-                    .map(|(i, g)| {
-                        if live[i] && Some(i) != current[head] {
-                            *g
-                        } else {
-                            !*g
-                        }
-                    })
-                    .collect();
-                if context == PruningContext::Hypothesis {
-                    pins.push(vars[engine.classification.as_ref().unwrap().2]);
-                }
-                pins
+    struct Pending {
+        head: usize,
+        coverage: bool,
+        remaining: Vec<usize>,
+        candidates: std::collections::VecDeque<usize>,
+    }
+    let pending: std::collections::VecDeque<_> = candidates
+        .into_iter()
+        .map(|head| Pending {
+            head,
+            coverage: true,
+            remaining: producers[head].clone(),
+            candidates: targets.rules[&head].clone().into(),
+        })
+        .collect();
+    let (mut pending, mut deferred): (
+        std::collections::VecDeque<_>,
+        std::collections::VecDeque<_>,
+    ) = pending.into_iter().partition(|p| p.remaining.len() > 1);
+    let mut current_row = None;
+    let outcome: Result<()> = (|| {
+        loop {
+            if pending.is_empty() {
+                std::mem::swap(&mut pending, &mut deferred);
+            }
+            let Some(mut item) = pending.pop_front() else {
+                break;
             };
+            let head = item.head;
+            let row = targets.components[&head];
+            current_row = Some(row);
+            let candidate = if item.coverage {
+                None
+            } else {
+                let Some(r) = item.candidates.pop_front() else {
+                    continue;
+                };
+                if item.remaining.len() < 2 {
+                    continue;
+                }
+                // Removing this instance must cut at least one unresolved
+                // internal edge. Parallel producers can keep an edge alive.
+                let cuts = original.rules[r].body.iter().any(|lit| {
+                    targets.components.get(&lit.0) == Some(&row)
+                        && settled[lit.0].is_none()
+                        && item
+                            .remaining
+                            .iter()
+                            .filter(|q| **q != r)
+                            .all(|q| !original.rules[*q].body.contains(lit))
+                });
+                if !cuts {
+                    if !item.candidates.is_empty() {
+                        pending.push_back(item);
+                    }
+                    continue;
+                }
+                Some(r)
+            };
+            let start = Instant::now();
+            report.components[row].last_head = Some(original.atoms[head].clone());
+            report.components[row].considered += 1;
             report.attempts += 1;
+            let _progress =
+                engine
+                    .limits
+                    .progress
+                    .sampled("completion targeted pruning", true, || {
+                        crate::CheckingTarget::CompletionPruning(report.components[row].clone())
+                    });
             let union = logic.or(
-                &remaining.iter().map(|r| bodies[*r]).collect::<Vec<_>>(),
+                &item
+                    .remaining
+                    .iter()
+                    .filter(|r| Some(**r) != candidate)
+                    .map(|r| bodies[*r])
+                    .collect::<Vec<_>>(),
                 &mut run.cnf,
                 run.budget,
             )?;
-            let mut pins = active(&current, &gates, &live_gates);
+            let mut pins: Vec<_> = gates
+                .iter()
+                .enumerate()
+                .map(|(i, g)| {
+                    if live_gates[i] && Some(i) != current[head] {
+                        *g
+                    } else {
+                        !*g
+                    }
+                })
+                .collect();
+            if context == PruningContext::Hypothesis {
+                pins.push(vars[engine.classification.as_ref().unwrap().2]);
+            }
+            if let Some(r) = candidate {
+                pins.push(bodies[r]);
+            }
             pins.push(!union);
             run.budget.charge(pins.len(), "completion pruning pins")?;
-            if !run.raw_solve(&pins)? {
-                let record = PruningRecord {
-                    context,
-                    kind: PruningKind::Coverage,
-                    head: original.atoms[head].clone(),
-                    rules: remaining.iter().take(32).map(|r| source[*r]).collect(),
-                    removed: remaining.len(),
-                    scope_heads,
-                    scope,
-                };
-                for r in &remaining {
-                    enabled[*r] = false;
+            // A hard candidate cannot consume every other head's opportunity.
+            // Solver clauses remain valid after an interrupted limited solve.
+            let slice = (run.budget.remaining_time() / ((pending.len() + 1).min(16) as u32))
+                .min(Duration::from_millis(250));
+            let stop = run.cnf.solver.cb_mut();
+            let old = stop.timeout;
+            stop.timeout = old.min(stop.start.elapsed() + slice);
+            let answer = run.raw_solve(&pins);
+            run.cnf.solver.cb_mut().timeout = old;
+            let proved = match answer {
+                Ok(sat) => !sat,
+                Err(CheckError::Deadline { .. })
+                    if run.budget.check("completion pruning").is_ok() =>
+                {
+                    let cause =
+                        inconclusive(CheckError::deadline("completion pruning candidate", slice))?;
+                    // The component retains its latest candidate cutoff.
+                    // Keep the bounded view-cutoff list available for later
+                    // views instead of filling it with short candidate slices.
+                    report.components[row].cutoff = Some(cause);
+                    false
                 }
-                result.fixed[head] = Some(true);
-
-                report.covered += 1;
-                report.removed += remaining.len();
-                retain(report, record);
+                Err(e) => {
+                    report.components[row].elapsed += start.elapsed();
+                    report.components[row].cutoff = Some(inconclusive(e)?);
+                    return Err(report.components[row].cutoff.unwrap().into());
+                }
+            };
+            if proved {
+                report.components[row].proved += 1;
+                let removed = if candidate.is_some() {
+                    1
+                } else {
+                    item.remaining.len()
+                };
+                report.components[row].removed += removed;
+                let rs = if let Some(r) = candidate {
+                    vec![source[r]]
+                } else {
+                    item.remaining.iter().take(32).map(|r| source[*r]).collect()
+                };
+                retain(
+                    report,
+                    PruningRecord {
+                        context,
+                        kind: if candidate.is_some() {
+                            PruningKind::Subsumption
+                        } else {
+                            PruningKind::Coverage
+                        },
+                        head: original.atoms[head].clone(),
+                        rules: rs,
+                        removed,
+                        scope_heads,
+                        scope,
+                    },
+                );
+                report.removed += removed;
+                if let Some(r) = candidate {
+                    enabled[r] = false;
+                    item.remaining.retain(|q| *q != r);
+                } else {
+                    for r in &item.remaining {
+                        enabled[*r] = false;
+                    }
+                    result.fixed[head] = Some(true);
+                    report.covered += 1;
+                    item.candidates.clear();
+                }
                 let gate = run.cnf.var(run.budget)?;
                 if let Some(old) = current[head] {
                     live_gates[old] = false;
@@ -327,58 +496,37 @@ fn simplify(
                 current[head] = Some(gates.len());
                 gates.push(gate);
                 live_gates.push(true);
-                let truth = run.truth;
-                equation(&mut run, gate, vars[head], truth)?;
-            } else {
-                for candidate in producers[head].iter().copied() {
-                    if remaining.len() < 2 {
-                        break;
-                    }
-                    report.attempts += 1;
-                    let other = logic.or(
-                        &remaining
-                            .iter()
-                            .filter(|r| **r != candidate)
-                            .map(|r| bodies[*r])
-                            .collect::<Vec<_>>(),
-                        &mut run.cnf,
-                        run.budget,
-                    )?;
-                    let mut pins = active(&current, &gates, &live_gates);
-                    pins.extend([bodies[candidate], !other]);
-                    run.budget.charge(pins.len(), "completion pruning pins")?;
-                    if run.raw_solve(&pins)? {
-                        continue;
-                    }
-                    enabled[candidate] = false;
-                    remaining.retain(|r| *r != candidate);
-
-                    report.removed += 1;
-                    retain(
-                        report,
-                        PruningRecord {
-                            context,
-                            kind: PruningKind::Subsumption,
-                            head: original.atoms[head].clone(),
-                            rules: vec![source[candidate]],
-                            removed: 1,
-                            scope_heads,
-                            scope,
-                        },
-                    );
-                    let gate = run.cnf.var(run.budget)?;
-                    if let Some(old) = current[head] {
-                        live_gates[old] = false;
-                    }
-                    current[head] = Some(gates.len());
-                    gates.push(gate);
-                    live_gates.push(true);
-                    equation(&mut run, gate, vars[head], other)?;
-                }
+                let rhs = if candidate.is_none() {
+                    run.truth
+                } else {
+                    union
+                };
+                equation(&mut run, gate, vars[head], rhs)?;
+            }
+            report.components[row].elapsed += start.elapsed();
+            // Publish the completed attempt too, including a local cutoff.
+            drop(_progress);
+            let _progress =
+                engine
+                    .limits
+                    .progress
+                    .sampled("completion targeted pruning", true, || {
+                        crate::CheckingTarget::CompletionPruning(report.components[row].clone())
+                    });
+            item.coverage = false;
+            if !item.candidates.is_empty() {
+                pending.push_back(item);
             }
         }
         Ok(())
     })();
+    // Pin construction and replacement encoding can also exhaust. Attribute
+    // those to the current component, not only failures inside raw_solve.
+    if let (Err(error), Some(row)) = (&outcome, current_row) {
+        if let Ok(cause) = inconclusive(error.clone()) {
+            report.components[row].cutoff = Some(cause);
+        }
+    }
     install_result(original, result, &enabled);
     outcome
 }

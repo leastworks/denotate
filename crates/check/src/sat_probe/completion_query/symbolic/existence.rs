@@ -564,6 +564,7 @@ mod parity_oracle {
 pub(super) fn classification_shape(
     engine: &Engine,
     cone: &Cone,
+    view: &'static str,
     s: &mut Solver<'_, '_, '_>,
 ) -> Result<()> {
     let mut producers = vec![Vec::new(); cone.fixed.len()];
@@ -593,7 +594,7 @@ pub(super) fn classification_shape(
         let detail = crate::CompletionComponentStats {
             scope: "classification",
             context: "W",
-            view: "unpruned",
+            view,
             index: s.stats.components,
             atoms: heads.len(),
             rules: local.rules.len(),

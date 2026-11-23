@@ -294,6 +294,11 @@ pub(super) fn search(
             return Ok(None);
         }
     }
+    if disjoint_downstreams(original, &plan.candidates, s.run.budget)? {
+        s.stats.coupled_fallback_skipped = true;
+        s.metrics();
+        return Ok(None);
+    }
     // Independent loops may need to change together to satisfy downstream
     // equations or H. Only this unrestricted residual pair can close that gap.
     let mut detail = crate::CompletionComponentStats {
@@ -393,4 +398,47 @@ fn query(
         let second = engine.model(s.values(cone, b)?, scope);
         return Ok(Some(Pair { first, second }));
     }
+}
+
+/// Conservative cheap check on ALL original equations, including fixed readers
+/// and equations outside the selected decisions. Intersecting closures may impose
+/// a joint constraint even if their selected outputs never intersect.
+fn disjoint_downstreams(c: &Cone, candidates: &[Candidate], b: &mut Budget<'_>) -> Result<bool> {
+    if candidates.len() < 2 {
+        return Ok(false);
+    }
+    const CAP: usize = 100_000;
+    let mut cost = c.fixed.len();
+    for r in &c.rules {
+        cost = cost.saturating_add(r.body.len() + 1);
+        if cost > CAP {
+            return Ok(false);
+        }
+    }
+    let charged = cost.saturating_mul(3);
+    if charged > b.limits.max_work.saturating_sub(b.used()) {
+        return Ok(false);
+    }
+    b.charge(charged, "completion disjoint closures")?;
+    let mut readers = vec![Vec::new(); c.fixed.len()];
+    for r in &c.rules {
+        for (i, _) in &r.body {
+            readers[*i].push(r.head);
+        }
+    }
+    let mut owner = vec![None; c.fixed.len()];
+    for (group, candidate) in candidates.iter().enumerate() {
+        let mut pending = candidate.heads.clone();
+        while let Some(i) = pending.pop() {
+            if let Some(old) = owner[i] {
+                if old != group {
+                    return Ok(false);
+                }
+                continue;
+            }
+            owner[i] = Some(group);
+            pending.extend(readers[i].iter().copied());
+        }
+    }
+    Ok(true)
 }

@@ -217,8 +217,12 @@ fn every_component_record_identifies_its_scope_graph_context_and_view() {
             if c.query == "hypothesis-model-coverage" {
                 assert_eq!(
                     (c.scope, c.context, c.view),
-                    ("classification", "W", "unpruned"),
-                    "H-first shape records describe the original graph, not its H-pruned solver"
+                    (
+                        "classification",
+                        "W",
+                        if prune { "pruned" } else { "unpruned" }
+                    ),
+                    "H-first shape records describe the W graph, not its H-pruned solver"
                 );
             } else {
                 assert_eq!(c.view, if prune { "pruned" } else { "unpruned" });

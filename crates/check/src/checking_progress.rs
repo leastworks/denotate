@@ -9,6 +9,7 @@ use std::{
 
 #[derive(Debug, Clone)]
 pub enum CheckingTarget {
+    CompletionPruning(crate::completion_query::PruningComponent),
     CompletionExistence(crate::CompletionExistenceStats),
     CompletionSize {
         component: usize,

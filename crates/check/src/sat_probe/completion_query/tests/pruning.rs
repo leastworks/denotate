@@ -36,9 +36,17 @@ fn profile_producer_is_removed_using_its_common_equation() {
         rule(&mut c, profile, &[(input, false), (accepted, negative)]);
         let v = verification(&mut c, None, &[]);
         let r = compare(&c, v);
-        assert!(r.pruning.records.iter().any(|p| p.head == atom(accepted)
-            && p.kind == PruningKind::Subsumption
-            && p.context == PruningContext::World));
+        if negative {
+            assert!(r.pruning.records.iter().any(|p| p.head == atom(accepted)
+                && p.kind == PruningKind::Subsumption
+                && p.context == PruningContext::World));
+        } else {
+            assert!(
+                r.pruning.records.is_empty(),
+                "locally unique positive loop needs no pruning"
+            );
+            assert!(r.pruning.components.iter().any(|c| c.kind == "unique"));
+        }
         assert!(!r.meaning.ambiguous.exists());
         assert!(matches!(r.meaning.no_meaning, Search::None));
     }
@@ -61,9 +69,10 @@ fn h_only_coverage_does_not_erase_rejections_or_classification_no_meaning() {
         let class = r.classification.as_ref().unwrap();
         assert_eq!(class.no_meaning.exists(), contradictory);
         assert_eq!(class.rejected.exists(), !contradictory);
-        assert!(r.pruning.records.iter().any(|p0| p0.head == atom(p)
-            && p0.context == PruningContext::Hypothesis
-            && p0.kind == PruningKind::Coverage));
+        assert!(
+            !r.pruning.records.iter().any(|p0| p0.head == atom(p)),
+            "acyclic property head is not a pruning target"
+        );
         assert!(!r.pruning.records.iter().any(|p0| p0.head == atom(p)
             && p0.context == PruningContext::World
             && p0.kind == PruningKind::Coverage));
@@ -104,10 +113,8 @@ fn coverage_and_sequential_subsumption_preserve_all_questions() {
     let v = verification(&mut c, None, &[]);
     let r = compare(&c, v);
     assert!(
-        r.pruning
-            .records
-            .iter()
-            .any(|p0| p0.head == atom(p) && p0.kind == PruningKind::Coverage)
+        r.pruning.records.is_empty(),
+        "locally unique even cycle needs no pruning"
     );
 }
 #[test]
@@ -248,4 +255,81 @@ fn every_completed_or_interrupted_pruning_prefix_preserves_models_both_ways() {
         }
     }
     assert!(saw_cutoff && saw_proof);
+}
+
+#[test]
+fn targeted_round_robin_reaches_both_wide_heads_and_skips_acyclic_decoys() {
+    let mut c = Corpus::new();
+    let input = rel(&mut c, "type_guard", true);
+    let heads = [
+        rel(&mut c, "accepted_a", false),
+        rel(&mut c, "accepted_b", false),
+    ];
+    for (i, h) in heads.iter().enumerate() {
+        rule(&mut c, *h, &[(input, false)]);
+        for j in 0..32 {
+            let profile = rel(&mut c, &format!("profile_{i}_{j}"), false);
+            rule(&mut c, profile, &[(input, false), (*h, true)]);
+            rule(&mut c, *h, &[(profile, false)]);
+        }
+    }
+    let decoy = rel(&mut c, "acyclic_decoy", false);
+    rule(&mut c, decoy, &[(input, false)]);
+    rule(&mut c, decoy, &[(input, true)]);
+    let v = verification(&mut c, None, &[]);
+    let e = prepare(&c, v, &Domains::new());
+    let opts = CheckOptions {
+        prune: true,
+        ..Default::default()
+    };
+    let r = e.check(&keys(&c), &opts).unwrap();
+    super::scale::same_report(&r, &e.check_unpruned(&keys(&c), &opts).unwrap());
+    for h in heads {
+        assert!(
+            r.pruning
+                .records
+                .iter()
+                .any(|p| p.head == atom(h) && p.kind == PruningKind::Subsumption)
+        );
+        assert!(
+            r.pruning
+                .components
+                .iter()
+                .any(|row| row.candidate_examples.contains(&atom(h)) && row.proved > 0)
+        );
+    }
+    assert!(!r.pruning.records.iter().any(|p| p.head == atom(decoy)));
+    assert!(
+        r.pruning
+            .components
+            .iter()
+            .all(|row| row.considered >= row.proved)
+    );
+    assert!(matches!(r.meaning.no_meaning, Search::None));
+    assert!(matches!(r.meaning.ambiguous, Search::None));
+}
+
+#[test]
+fn locally_nonunique_positive_loop_can_be_pruned_without_becoming_unique() {
+    let mut c = Corpus::new();
+    let p = rel(&mut c, "p", false);
+    let q = rel(&mut c, "q", false);
+    rule(&mut c, p, &[(p, false)]);
+    rule(&mut c, p, &[(q, false)]);
+    rule(&mut c, q, &[(p, false)]);
+    let v = verification(&mut c, None, &[]);
+    let r = compare(&c, v);
+    assert!(r.meaning.ambiguous.exists());
+    assert!(
+        r.pruning
+            .records
+            .iter()
+            .any(|r| r.kind == PruningKind::Subsumption)
+    );
+    assert!(
+        r.pruning
+            .components
+            .iter()
+            .any(|r| r.kind == "non-unique" && r.proved > 0)
+    );
 }

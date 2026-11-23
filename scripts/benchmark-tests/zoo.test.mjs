@@ -350,6 +350,9 @@ test('guarded schema double-giving exercises scoped completion pruning',()=>{
     const runReport=JSON.parse(fs.readFileSync(path.join(out,'guarded-schema-2-0','report.json'),'utf8'));
     assert.equal(runReport.checkerFinished,true);
     assert.ok(runReport.outcomes.some(o=>o.simplifications?.removedInstances>0));
+    const components=runReport.outcomes.flatMap(o=>o.simplifications?.components??[]);
+    assert.ok(components.some(c=>c.considered>0 && c.proved>0 && c.candidateHeads>0));
+    assert.ok(components.filter(c=>c.considered>0).every(c=>['odd','non-unique'].includes(c.componentKind)));
     assert.ok(family);
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
