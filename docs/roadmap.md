@@ -44,8 +44,12 @@ direction for such programs separates meaning from schedule:
   Recursive assumptions require determined restriction truth; static providers require
   determined tuples. Contract errors preserve explicit partial results instead of
   becoming rejection or vacuous success. Symbolic pair queries and generalized
-  input cubes replace exhaustive observation enumeration. Measurement on real
-  programs continues; no throughput claim is made. Straight-line completion plans
+  input cubes replace exhaustive observation enumeration. SAT CLI runs are
+  time-boxed; existence is proved one component at a time, and the shape zoo has
+  a corpus-shaped completion family. On a first real program, grounding, the
+  classification checks and processing existence now complete within the time box;
+  classification no-meaning and processing ambiguity are the remaining bottlenecks.
+  No throughput claim is made. Straight-line completion plans
   now have explicit rejection paths, a reference interpreter and v5 export. Available
   value splits, joins and conditional tasks follow; definition islands inside otherwise
   stable programs remain later work.
