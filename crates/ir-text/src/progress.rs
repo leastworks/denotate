@@ -650,6 +650,12 @@ impl AdmissionDetails<'_> {
         }
         let progress = progress.clone();
         let context = context.clone();
+        let odd = self
+            .program
+            .corpus
+            .verifications()
+            .any(|v| v.options.semantics == denotate_ir::Semantics::Completion)
+            .then(|| crate::completion_output::explanations(self.program));
         denotate_check::CheckingProgress::new(move |e| {
             let target = match e.target {
                 Some(denotate_check::CheckingTarget::Atom(a)) => {
@@ -675,9 +681,11 @@ impl AdmissionDetails<'_> {
                     Some(denotate_presentation::stable_uniqueness_stats(&s))
                 }
                 Some(denotate_check::CheckingTarget::CompletionExistence(s)) => Some(
-                    denotate_presentation::completion_existence_stats(&s, |r| {
-                        Ok(json!(names(r.into())))
-                    })
+                    denotate_presentation::completion_existence_stats(
+                        &s,
+                        |r| Ok(json!(names(r.into()))),
+                        |o| odd.as_ref().map_or(Ok(Value::Null), |f| f(o)),
+                    )
                     .unwrap(),
                 ),
                 Some(denotate_check::CheckingTarget::CompletionSize {
@@ -711,7 +719,7 @@ impl AdmissionDetails<'_> {
         })
     }
 }
-fn atom_text(
+pub(crate) fn atom_text(
     atom: &denotate_check::GroundAtom,
     names: &dyn Fn(denotate_ir::OccurrenceId) -> String,
 ) -> String {

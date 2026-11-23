@@ -800,6 +800,28 @@ pub fn completion_sizes(
     keys: &SemanticKeys,
     sizes: &denotate_check::CompletionSizeSnapshot,
 ) -> Result<Value> {
+    completion_sizes_with_explanations(keys, sizes, |o| {
+        completion_odd_explanation(
+            o,
+            |a| atom(a, keys),
+            |r| Ok(crate::identity::rule(keys.rule(r)?)),
+            |r| Ok(crate::identity::relation(keys.relation(r)?)),
+            |g| {
+                Ok(
+                    json!({"relation":crate::identity::relation(keys.relation(g.relation)?),
+                "values":g.values.iter().map(|v| keys.constant(*v).map(crate::identity::constant)).collect::<std::result::Result<Vec<_>,_>>()?,
+                "assumption":g.assumption.map(|a|keys.assumption(a).map(|k|json!([k.0.namespace.as_ref(),k.0.name.as_ref()]))).transpose()?,
+                "declared":g.declared}),
+                )
+            },
+        )
+    })
+}
+pub fn completion_sizes_with_explanations(
+    keys: &SemanticKeys,
+    sizes: &denotate_check::CompletionSizeSnapshot,
+    explanation: impl Fn(&denotate_check::CompletionOddExplanation) -> Result<Value>,
+) -> Result<Value> {
     let relation =
         |r: RelationId| -> Result<Value> { Ok(crate::identity::relation(keys.relation(r)?)) };
     let preparation_work = sizes.preparation_work.as_ref().map(|w| -> Result<Value> {
@@ -854,7 +876,7 @@ pub fn completion_sizes(
         preparations.push(json!({"scope":if p.static_provider {"static-provider"} else {"runtime"},"provider":p.provider.map(relation).transpose()?,"work":p.work,"workByStage":p.work_by_stage,"error":p.error.as_ref().map(ToString::to_string),"complete":p.complete,"atoms":p.atoms,"rules":p.rules,"peakPossibilityAtoms":p.peak_possibility_atoms,"possibilityObserved":p.relations.values().map(|r|r.observed).sum::<usize>(),"possibilityComplete":p.relations.values().all(|r|r.fixed),"countKind":if p.complete {"exact"} else {"at-least"},"leastEnabled":p.least_enabled,"leastComplete":p.least_complete,"leastError":p.least_error.as_ref().map(ToString::to_string),"relations":relations,"omittedRelations":rows.len().saturating_sub(32),"positiveRelationComponents":components.iter().take(32).map(|(_,v)|v).collect::<Vec<_>>(),"omittedComponents":components.len().saturating_sub(32)}));
     }
     Ok(
-        json!({"preparationWork":preparation_work,"preparations":preparations,"searches":sizes.searches.iter().map(|s| -> Result<Value> { Ok(json!({"phase":s.phase,"elapsedMs":s.elapsed.as_secs_f64()*1000.0,"work":s.work,"workByPhase":s.work_by_phase,"variables":s.variables,"clauses":s.clauses,"literals":s.literals,"encodingsStarted":s.encodings,"encodingDetails":s.encoding_details.iter().map(|e|json!({"purpose":e.purpose,"complete":e.complete,"atoms":e.atoms,"inputAtoms":e.input_atoms,"foldedTrue":e.folded_true,"foldedFalse":e.folded_false,"variables":e.variables,"clauses":e.clauses})).collect::<Vec<_>>(),"existence":completion_existence_stats(&s.existence, relation)?,"omittedEncodings":s.omitted_encodings})) }).collect::<Result<Vec<_>>>()?,"omittedPreparations":sizes.omitted_preparations,"omittedSearches":sizes.omitted_searches}),
+        json!({"preparationWork":preparation_work,"preparations":preparations,"searches":sizes.searches.iter().map(|s| -> Result<Value> { Ok(json!({"phase":s.phase,"elapsedMs":s.elapsed.as_secs_f64()*1000.0,"work":s.work,"workByPhase":s.work_by_phase,"variables":s.variables,"clauses":s.clauses,"literals":s.literals,"encodingsStarted":s.encodings,"encodingDetails":s.encoding_details.iter().map(|e|json!({"purpose":e.purpose,"complete":e.complete,"atoms":e.atoms,"inputAtoms":e.input_atoms,"foldedTrue":e.folded_true,"foldedFalse":e.folded_false,"variables":e.variables,"clauses":e.clauses})).collect::<Vec<_>>(),"existence":completion_existence_stats(&s.existence, relation, &explanation)?,"omittedEncodings":s.omitted_encodings})) }).collect::<Result<Vec<_>>>()?,"omittedPreparations":sizes.omitted_preparations,"omittedSearches":sizes.omitted_searches}),
     )
 }
 
@@ -935,10 +957,11 @@ pub fn completion_input_domain_findings(
 pub fn completion_existence_stats(
     s: &denotate_check::CompletionExistenceStats,
     relation: impl Fn(RelationId) -> Result<Value>,
+    explanation: impl Fn(&denotate_check::CompletionOddExplanation) -> Result<Value>,
 ) -> Result<Value> {
     let detail = |c: &denotate_check::CompletionComponentStats| -> Result<Value> {
         Ok(
-            json!({"index":c.index,"atoms":c.atoms,"rules":c.rules,"boundary":c.boundary,
+            json!({"scope":c.scope,"context":c.context,"view":c.view,"oddExplanation":c.odd_explanation.as_deref().map(&explanation).transpose()?,"index":c.index,"atoms":c.atoms,"rules":c.rules,"boundary":c.boundary,
             "relations":c.relations.iter().map(|r|relation(*r)).collect::<Result<Vec<_>>>()?,
             "omittedRelations":c.relation_count.saturating_sub(c.relations.len()),
             "query":if c.query.is_empty(){"existence"}else{c.query},"elapsedMs":c.elapsed.as_secs_f64()*1000.0,"variables":c.variables,"clauses":c.clauses,"duplicatedAtoms":c.duplicated_atoms,"oddComponents":((c.query.is_empty() || c.query == "hypothesis-model-coverage") && c.state != "analysing").then_some(c.odd_components),"oddAtoms":((c.query.is_empty() || c.query == "hypothesis-model-coverage") && c.state != "analysing").then_some(c.odd_atoms),"state":c.state}),
@@ -951,4 +974,32 @@ pub fn completion_existence_stats(
         "currentComponent":s.current_component.as_ref().map(&detail).transpose()?,
         "componentDetails":s.component_details.iter().map(detail).collect::<Result<Vec<_>>>()?,"omittedComponents":s.omitted_components}),
     )
+}
+
+/// Format structural odd-cycle explanations without introducing source IO.
+pub fn completion_odd_explanation(
+    o: &denotate_check::CompletionOddExplanation,
+    atom: impl Fn(&GroundAtom) -> Result<Value>,
+    source: impl Fn(RuleId) -> Result<Value>,
+    relation: impl Fn(RelationId) -> Result<Value>,
+    group: impl Fn(&denotate_check::CompletionGuardGroup) -> Result<Value>,
+) -> Result<Value> {
+    let cycles = o.cycles.iter().map(|cycle| cycle.iter().map(|e| {
+        let producers=e.producers.iter().map(|p| Ok(json!({
+            "source":p.source.map(&source).transpose()?,
+            "guards":p.guards.iter().map(|(a,negative)| Ok(json!({"atom":atom(a)?,"negative":negative}))).collect::<Result<Vec<_>>>()?,
+            "omittedGuards":p.omitted_guards
+        }))).collect::<Result<Vec<_>>>()?;
+        Ok(json!({"from":atom(&e.from)?,"to":atom(&e.to)?,"negative":e.negative,
+            "producers":producers,"producerCount":e.producer_count,"omittedProducers":e.producer_count-e.producers.len()}))
+    }).collect::<Result<Vec<_>>>()).collect::<Result<Vec<_>>>()?;
+    Ok(json!({
+        "oddComponents":o.odd_components,"componentsWithCyclesFound":o.witnessed_components,"cycles":cycles,"distinctCyclesFound":o.found,"cycleCountKind":"lower-bound","cycleLimit":3,
+        "omittedLongCycles":o.omitted_cycles,"searchIncomplete":o.incomplete,
+        "negativeRelations":o.negative_relations.iter().map(|((a,b),n)|Ok(json!({"consumer":relation(*a)?,"provider":relation(*b)?,"occurrences":n}))).collect::<Result<Vec<_>>>()?,
+        "inputGroups":o.input_groups.iter().map(|(g,n)|Ok(json!({"group":group(g)?,"edges":n}))).collect::<Result<Vec<_>>>()?,
+        "histogramsComplete":o.histograms_complete,
+        "omittedNegativeRelations":o.omitted_negative_relations,"omittedInputGroups":o.omitted_input_groups,
+        "guardMeaning":"Other conjuncts of each producer; falsifying any disables that producer. Cutting an edge requires disabling every producer. Input groups are structural reachability candidates, not certified cuts."
+    }))
 }

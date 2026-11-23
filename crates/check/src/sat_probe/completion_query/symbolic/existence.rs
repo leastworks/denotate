@@ -6,6 +6,7 @@ use super::*;
 pub(super) fn residual(
     engine: &Engine,
     cone: &Cone,
+    view: &'static str,
     classification: bool,
     s: &mut Solver<'_, '_, '_>,
     options: &CheckOptions,
@@ -51,6 +52,19 @@ pub(super) fn residual(
     for heads in components {
         let local = component(cone, &producers, &heads, s.run.budget)?;
         let mut detail = crate::CompletionComponentStats {
+            scope: if classification {
+                "classification"
+            } else if engine.hypothesis.is_some() {
+                "processing"
+            } else {
+                "whole-program"
+            },
+            context: if !classification && engine.hypothesis.is_some() {
+                "W + H"
+            } else {
+                "W"
+            },
+            view,
             index: s.stats.total_components + s.stats.fallback_components,
             atoms: heads.len(),
             rules: local.rules.len(),
@@ -81,6 +95,7 @@ pub(super) fn residual(
         let core = consistency::analyse(&local, None, s.run.budget)?;
         detail.odd_components = core.odd_components;
         detail.odd_atoms = core.odd_atoms;
+        detail.odd_explanation = odd::explain(engine, &local, Some(&core), s.run.budget);
         detail.state = "searching";
         s.stats.current_component = Some(detail.clone());
         s.metrics();
@@ -184,6 +199,7 @@ pub(super) fn component(
         rules: rules
             .iter()
             .map(|r| crate::sat_probe::Rule {
+                source: c.rules[*r].source,
                 head: index[&c.rules[*r].head],
                 body: c.rules[*r]
                     .body
@@ -483,12 +499,14 @@ mod parity_oracle {
             for (k, head) in heads.iter().enumerate() {
                 let literal = (shape >> (3 * k)) & 7;
                 c.rules.push(crate::sat_probe::Rule {
+                    source: None,
                     head: *head,
                     body: vec![(all[literal / 2], literal % 2 == 0)],
                 });
             }
             // Multiple producers and a guarded odd cycle, not only unary rings.
             c.rules.push(crate::sat_probe::Rule {
+                source: None,
                 head: heads[0],
                 body: vec![(input, true), (heads[2], false)],
             });
@@ -573,6 +591,9 @@ pub(super) fn classification_shape(
             .map(|(_, a)| a.relation)
             .collect();
         let detail = crate::CompletionComponentStats {
+            scope: "classification",
+            context: "W",
+            view: "unpruned",
             index: s.stats.components,
             atoms: heads.len(),
             rules: local.rules.len(),
@@ -581,6 +602,7 @@ pub(super) fn classification_shape(
             relation_count: relations.len(),
             odd_components: core.odd_components,
             odd_atoms: core.odd_atoms,
+            odd_explanation: odd::explain(engine, &local, Some(&core), s.run.budget),
             query: "hypothesis-model-coverage",
             state: "pending",
             ..Default::default()

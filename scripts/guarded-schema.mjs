@@ -1,11 +1,11 @@
 // Neutral completion workload: format recognition, guarded blocks and field values.
 export function guardedSchema(options = {}) {
   const cfg = {sets: 8, depth: 2, fanout: 5, stmts: 3, triggers: 1, values: 2, reads: 1,
-    outs: 5, splice: 25, self: 50, impossible: 0, wide: 0, double: 0, ...options};
+    outs: 5, splice: 25, self: 50, impossible: 0, wide: 0, double: 0, odd: 0, ...options};
   for (const [key, value] of Object.entries(cfg)) {
     if (!Number.isSafeInteger(value) || value < 0) throw Error(`invalid guarded-schema ${key}`);
   }
-  if (!cfg.sets || !cfg.depth || !cfg.fanout || !cfg.values || !cfg.reads || cfg.splice > 100 || cfg.self > 100 || cfg.impossible > 1 || cfg.wide > 1 || cfg.double > 1) throw Error('invalid guarded-schema shape');
+  if (!cfg.sets || !cfg.depth || !cfg.fanout || !cfg.values || !cfg.reads || cfg.splice > 100 || cfg.self > 100 || cfg.impossible > 1 || cfg.wide > 1 || cfg.double > 1 || cfg.odd > 1) throw Error('invalid guarded-schema shape');
   const widths = cfg.blocks === undefined
     ? Array.from({length:cfg.depth},(_,d)=>cfg.fanout ** (d+1))
     : Array.from({length:cfg.depth},(_,d)=>Math.floor(cfg.blocks/cfg.depth)+(d<cfg.blocks%cfg.depth?1:0));
@@ -121,6 +121,9 @@ block_active(block_${id}) :- block_active(block_${parent}),$condition_${id}();`)
       parents=next;
     }
   }
+  // Known odd-cycle explanation control: a guarded negative self-edge, next to
+  // the ordinary positive/even cycles. It is deliberately not a valid lowering.
+  if(cfg.odd) add('accepted_field(element_0) :- type_matches(format_0), !accepted_field(element_0);');
   for(const e of [...globalFields].sort((a,b)=>a-b)) add(`block_expected(global,element_${e});`);
   return {source:lines.join('\n')+'\n',shape:{...cfg,totalBlocks:count,nestedBlocks:cfg.sets*nested,conditionSites:cfg.sets*nested,statementRows:cfg.sets*nested*cfg.stmts}};
 }

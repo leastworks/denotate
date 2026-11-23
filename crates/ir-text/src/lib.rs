@@ -2,6 +2,7 @@
 //! cache policy, or diagnostic wording is hidden in the loader.
 mod ast;
 pub mod committed;
+pub mod completion_output;
 pub mod filesystem;
 pub mod index;
 mod load;

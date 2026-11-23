@@ -77,10 +77,44 @@ pub(super) fn run(
         .collect::<std::collections::BTreeMap<_, _>>();
     let component_names = presentation::diagnostic_names(&p.corpus);
     let observer = trace.clone();
+    let odd = (trace.is_enabled()
+        && p.corpus
+            .verifications()
+            .any(|v| v.options.semantics == denotate_ir::Semantics::Completion))
+    .then(|| denotate_ir_text::completion_output::explanations(p));
+    let shown_odd =
+        std::sync::Mutex::new(None::<std::sync::Arc<denotate_check::CompletionOddExplanation>>);
     limits.progress = denotate_check::CheckingProgress::new(move |e| {
         if let Some(denotate_check::CheckingTarget::CompletionExistence(ref stats)) = e.target {
             observer.message(format!("{} {}: components total {} unique {} / {}, shared atoms {}, fallback {}, rounds {}, cubes {}, pins {} (max {}), validation work {}, lifted {}/{}",e.stage,e.state,stats.total_components,stats.unique_components,stats.components,stats.shared_atoms,stats.fallback_components,stats.rounds,stats.cubes,stats.pins,stats.max_pins,stats.validation_work,stats.lifted_pins,stats.lifting_attempts));
             if let Some(c) = &stats.current_component {
+                observer.message(format!(
+                    "  component {}: scope {}, context {}, view {}",
+                    c.index, c.scope, c.context, c.view
+                ));
+                if let Some(explanation) = &c.odd_explanation {
+                    let mut shown = shown_odd.lock().unwrap();
+                    if shown
+                        .as_ref()
+                        .is_none_or(|old| !std::sync::Arc::ptr_eq(old, explanation))
+                    {
+                        *shown = Some(explanation.clone());
+                        observer.message(format!(
+                            "  odd explanation for component {} ({})",
+                            c.index,
+                            if c.query.is_empty() {
+                                "existence"
+                            } else {
+                                c.query
+                            }
+                        ));
+                        if let Ok(value) = odd.as_ref().unwrap()(explanation) {
+                            for line in denotate_ir_text::completion_output::odd_lines(&value) {
+                                observer.message(line);
+                            }
+                        }
+                    }
+                }
                 if !c.query.is_empty() {
                     observer.message(format!("  determinacy component {} {} {}: {} atoms, {} rules, {} boundary, {} variables / {} clauses, {} duplicated atoms, {:.3}s; relations {}", c.index,c.query,c.state,c.atoms,c.rules,c.boundary,c.variables,c.clauses,c.duplicated_atoms,c.elapsed.as_secs_f64(),c.relations.iter().map(|r|component_names((*r).into())).collect::<Vec<_>>().join(", ")));
                 } else {
@@ -137,6 +171,9 @@ pub(super) fn run(
             observer.message(checker_failure(error).1);
         }
     });
+    if !trace.is_enabled() {
+        limits.progress = Default::default();
+    }
     check.attribution.cancellation = limits.cancellation.clone();
     trace.message(format!("SAT limits: worlds={}, tuples={}, solves={}, refinements={}, polls={}, conflicts={}, propagations={}",check.max_worlds,check.max_tuples,query.max_solves,query.max_refinements,query.max_solver_polls,query.max_conflicts,query.max_propagations));
     for (i, (key, request)) in requests.iter().enumerate() {
@@ -410,7 +447,7 @@ fn completion(
         flush,
     );
     if let Some(sink) = &limits.completion_sizes {
-        let sizes = denotate_presentation::completion_sizes(&p.keys, &sink.snapshot())
+        let sizes = denotate_ir_text::completion_output::sizes(p, &sink.snapshot())
             .map_err(|e| (2, e.to_string()))?;
         profile_record(
             profile_file,
@@ -420,7 +457,7 @@ fn completion(
         searches.preparation_work = None;
         searches.preparations.clear();
         searches.omitted_preparations = 0;
-        let sizes = denotate_presentation::completion_sizes(&p.keys, &searches)
+        let sizes = denotate_ir_text::completion_output::sizes(p, &searches)
             .map_err(|e| (2, e.to_string()))?;
         write_completion_sizes(&sizes, json, false, output);
     }
@@ -544,10 +581,19 @@ fn write_completion_sizes(
             )
             .unwrap();
             for c in e["componentDetails"].as_array().into_iter().flatten() {
+                writeln!(
+                    output,
+                    "    scope {}, context {}, view {}",
+                    c["scope"], c["context"], c["view"]
+                )
+                .unwrap();
                 if c["query"] != "existence" {
                     writeln!(output, "    determinacy component {} {} {}: {} atoms, {} rules, {} boundary, {} variables / {} clauses, {} duplicated atoms, {} ms; relations {}", c["index"],c["query"],c["state"],c["atoms"],c["rules"],c["boundary"],c["variables"],c["clauses"],c["duplicatedAtoms"],c["elapsedMs"],c["relations"]).unwrap();
                 } else {
                     writeln!(output, "    component {} {}: {} atoms, {} rules, {} boundary, {} odd-cycle SCCs; relations {}", c["index"],c["state"],c["atoms"],c["rules"],c["boundary"],c["oddComponents"],c["relations"]).unwrap();
+                }
+                for line in denotate_ir_text::completion_output::odd_lines(&c["oddExplanation"]) {
+                    writeln!(output, "    {line}").unwrap();
                 }
             }
             for e in search["encodingDetails"].as_array().unwrap() {
@@ -633,7 +679,7 @@ pub(super) fn completion_inner(
         // Emit before matching even errors: cutoffs and provider failures also
         // carry useful partial counts. Flush before starting checking searches.
         if let Some(sink) = &limits.completion_sizes {
-            let sizes = denotate_presentation::completion_sizes(&p.keys, &sink.snapshot())
+            let sizes = denotate_ir_text::completion_output::sizes(p, &sink.snapshot())
                 .map_err(|e| (2, e.to_string()))?;
             profile_record(
                 profile_file,

@@ -42,6 +42,14 @@ pub(super) enum View<'a> {
     Original(&'a Cone),
     Pruned(Arc<Cone>),
 }
+impl View<'_> {
+    pub(super) fn label(&self) -> &'static str {
+        match self {
+            Self::Original(_) => "unpruned",
+            Self::Pruned(_) => "pruned",
+        }
+    }
+}
 impl std::ops::Deref for View<'_> {
     type Target = Cone;
     fn deref(&self) -> &Cone {

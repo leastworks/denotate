@@ -1365,6 +1365,19 @@ component details and a current component during search, including parity confli
 examples. `ObligationResult.failures_truncated` makes counts lower bounds; a confirmed
 failure can be complete as a verdict without enumerating all failed parts.
 
+Component records label the reported graph's scope, W/W+H context and pruned/unpruned
+view, including H-first classification's original-graph shape records.
+Odd component details include bounded structural explanations when progress or
+size recording is enabled: signed cycles, exact source rules, alternative
+producers and their other conjuncts, negative-edge relation histograms, and
+guard-input groups. The checker retains RuleId provenance through compact
+component views; text adapters resolve locations from immutable source snapshots.
+Parity-doubled BFS finds a shortest odd return walk for each selected conflicting
+edge, then removes closed subwalks to retain a simple odd cycle. This is not a
+global shortest-cycle claim. An odd cycle explains why call-consistency failed;
+it does not prove that the equations have no model. Guard inputs are structural
+reachability candidates, not validated split or pruning recommendations.
+
 Verification-wide completion ambiguity uses componentwise determinacy. Acyclic
 functions of shared providers and locally unique cyclic components share literals across models. Local
 uniqueness is an independent two-copy SAT test with free boundary atoms, not a parity

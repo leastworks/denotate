@@ -62,6 +62,7 @@ impl Engine {
             let r = &self.cone.rules[i];
             b.charge(1 + r.body.len(), "SAT component cone")?;
             cone.rules.push(Rule {
+                source: r.source,
                 head: local[&r.head],
                 body: r.body.iter().map(|(a, p)| (local[a], *p)).collect(),
             });

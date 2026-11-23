@@ -9,6 +9,7 @@ pub(super) struct Core {
     pub odd_atoms: usize,
     pub(super) component: Vec<usize>,
     colour: Vec<Option<bool>>,
+    pub(super) conflicts: Vec<(usize, usize, bool)>,
 }
 
 pub(super) fn analyse(c: &Cone, boundary: Option<&[bool]>, b: &mut Budget<'_>) -> Result<Core> {
@@ -84,12 +85,14 @@ pub(super) fn analyse(c: &Cone, boundary: Option<&[bool]>, b: &mut Budget<'_>) -
     let mut colour = vec![None; n];
     let mut pending: Vec<usize> = Vec::new();
     let mut odd_components = 0;
+    let mut conflicts = Vec::new();
     let mut odd_atoms = 0;
     for (id, members) in groups.iter().enumerate() {
         let root = members[0];
         colour[root] = Some(false);
         let mut queue = vec![root];
         let mut odd = false;
+        let mut examples = 0;
         while let Some(i) = queue.pop() {
             b.charge(edges[i].len() + 1, "completion call consistency")?;
             for &(j, negative) in &edges[i] {
@@ -98,7 +101,15 @@ pub(super) fn analyse(c: &Cone, boundary: Option<&[bool]>, b: &mut Budget<'_>) -
                 }
                 let expected = colour[i].unwrap() ^ negative;
                 match colour[j] {
-                    Some(v) => odd |= v != expected,
+                    Some(v) => {
+                        if v != expected {
+                            odd = true;
+                            if examples < 3 {
+                                conflicts.push((i, j, negative));
+                                examples += 1;
+                            }
+                        }
+                    }
                     None => {
                         colour[j] = Some(expected);
                         queue.push(j);
@@ -129,6 +140,7 @@ pub(super) fn analyse(c: &Cone, boundary: Option<&[bool]>, b: &mut Budget<'_>) -
         odd_atoms,
         component,
         colour,
+        conflicts,
     })
 }
 

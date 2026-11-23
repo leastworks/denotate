@@ -206,11 +206,19 @@ impl Cnf {
         Ok(())
     }
 }
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone)]
 struct Rule {
+    source: Option<denotate_ir::RuleId>,
     head: usize,
     body: Vec<(usize, bool)>,
 }
+// Provenance does not change equation equality used by simplification.
+impl PartialEq for Rule {
+    fn eq(&self, other: &Self) -> bool {
+        self.head == other.head && self.body == other.body
+    }
+}
+impl Eq for Rule {}
 // Named atoms precede anonymous acyclic BDD nodes; all indexed arrays include both.
 #[derive(Clone)]
 struct Cone {
@@ -434,6 +442,7 @@ fn cone(
                 body.insert((index[&l.term.atom], l.polarity == Polarity::Positive));
             }
             Ok(Rule {
+                source: Some(r.source),
                 head: index[&r.head.atom],
                 body: body.into_iter().collect(),
             })

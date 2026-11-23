@@ -353,3 +353,43 @@ test('guarded schema double-giving exercises scoped completion pruning',()=>{
     assert.ok(family);
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('guarded schema identifies its known odd edge, rule location and disabling guard',async()=>{
+  const {guardedSchema}=await import('../guarded-schema.mjs');
+  const {spawnSync}=await import('node:child_process');
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-odd-explanation-'));
+  try {
+    const source=guardedSchema({sets:1,depth:1,fanout:1,stmts:1,triggers:0,outs:1,values:1,self:100,odd:1}).source;
+    const file=path.join(root,'program.den');
+    fs.writeFileSync(file,source);
+    fs.writeFileSync(path.join(root,'den.root'),'{}');
+    const marker='accepted_field(element_0) :- type_matches(format_0), !accepted_field(element_0);';
+    const line=source.split('\n').indexOf(marker)+1;
+    assert.ok(line>0);
+    const profile=path.join(root,'profile.jsonl');
+    const args=[root,'--engine','sat','--json','--profile-memory',profile];
+    const r=spawnSync('target/debug/examples/check',args,{encoding:'utf8',maxBuffer:16*1024*1024});
+    assert.ok([0,1,2].includes(r.status),r.stderr);
+    const records=fs.readFileSync(profile,'utf8').trim().split('\n').map(JSON.parse);
+    const searches=records.filter(r=>r.type==='completion-sizes').flatMap(r=>r.sizes.searches);
+    const details=searches.flatMap(s=>s.existence.componentDetails);
+    assert.ok(details.length>0);
+    assert.ok(details.every(c=>['classification','processing','whole-program'].includes(c.scope) &&
+      ['W','W + H'].includes(c.context) && c.view==='unpruned'));
+    const witnesses=details.flatMap(c=>c.oddExplanation?.cycles??[]);
+    const cycle=witnesses.find(c=>c.length===1 && c[0].from==='accepted_field(element_0)');
+    assert.ok(cycle,JSON.stringify(details));
+    assert.equal(cycle[0].negative,true);
+    assert.equal(cycle[0].to,cycle[0].from);
+    const producer=cycle[0].producers.find(p=>p.source.location.line===line);
+    assert.ok(producer);
+    assert.ok(producer.guards.some(g=>g.atom==='type_matches(format_0)' && g.negative===false));
+    assert.match(r.stderr,/odd cycle 1:/);
+    assert.ok(r.stderr.includes(file+':'+line+':'),r.stderr);
+    const human=spawnSync('target/debug/examples/check',[root,'--engine','sat','--verbose','--no-progress'],{encoding:'utf8',maxBuffer:16*1024*1024});
+    assert.equal(human.status,r.status);
+    assert.match(human.stdout,/odd cycles: at least/);
+    assert.ok(human.stdout.includes(file+':'+line+':'));
+    assert.throws(()=>guardedSchema({odd:2}));
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});

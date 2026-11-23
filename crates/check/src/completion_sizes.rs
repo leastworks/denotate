@@ -48,6 +48,10 @@ pub struct CompletionEncodingSize {
 }
 #[derive(Debug, Clone, Default)]
 pub struct CompletionComponentStats {
+    /// Labels describe the reported graph; local uniqueness still frees its boundary.
+    pub scope: &'static str,
+    pub context: &'static str,
+    pub view: &'static str,
     pub query: &'static str,
     pub elapsed: Duration,
     pub variables: usize,
@@ -62,6 +66,7 @@ pub struct CompletionComponentStats {
     /// Number of signed SCCs with a parity conflict, not an enumeration of cycles.
     pub odd_components: usize,
     pub odd_atoms: usize,
+    pub odd_explanation: Option<Arc<CompletionOddExplanation>>,
     pub state: &'static str,
 }
 
@@ -278,4 +283,41 @@ impl QueryWork {
         }
         out
     }
+}
+
+/// Bounded structural explanation, never a semantic witness or a proof of reachability.
+#[derive(Debug, Clone, Default)]
+pub struct CompletionOddExplanation {
+    pub cycles: Vec<Vec<CompletionOddEdge>>,
+    pub found: usize,
+    pub odd_components: usize,
+    pub witnessed_components: usize,
+    pub omitted_cycles: usize,
+    pub negative_relations: BTreeMap<(RelationId, RelationId), usize>,
+    pub input_groups: BTreeMap<CompletionGuardGroup, usize>,
+    pub histograms_complete: bool,
+    pub omitted_negative_relations: usize,
+    pub omitted_input_groups: usize,
+    pub incomplete: Option<String>,
+}
+#[derive(Debug, Clone)]
+pub struct CompletionOddEdge {
+    pub from: GroundAtom,
+    pub to: GroundAtom,
+    pub negative: bool,
+    pub producers: Vec<CompletionOddProducer>,
+    pub producer_count: usize,
+}
+#[derive(Debug, Clone)]
+pub struct CompletionOddProducer {
+    pub source: Option<RuleId>,
+    pub guards: Vec<(GroundAtom, bool)>,
+    pub omitted_guards: usize,
+}
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct CompletionGuardGroup {
+    pub relation: RelationId,
+    pub values: Vec<denotate_ir::ConstantId>,
+    pub assumption: Option<denotate_ir::AssumptionId>,
+    pub declared: bool,
 }

@@ -1364,3 +1364,45 @@ Classification's H-first existence search retains component shape records with
 `query: "hypothesis-model-coverage"` and parity counts. The query covers the whole
 classification scope; these records are not local totality certificates. Progress
 states distinguish `covering-hypothesis-models` and `searching-without-hypothesis`.
+
+
+Every completion component record identifies its reported graph with `scope`
+(`classification`, `processing`, `whole-program`), `context` (`W` or
+`W + H`) and `view` (`pruned` or `unpruned`). A pruned view may contain
+zero successful removals. Local uniqueness still frees boundary atoms; context
+labels the view's validity, not an assertion that W/H was encoded in that local
+test. H-first classification's shape records describe the original graph and are
+explicitly classification / W / unpruned, even while the search covers H-models
+using an H-pruned view. These labels apply to both historical and current records,
+including coupled determinacy queries.
+
+Completion component size/progress records can also carry `oddExplanation`
+(null when absent). This is advisory telemetry, not finding evidence or a verdict;
+the editor's completion-checking integration remains pending.
+
+- `cycles`: bounded arrays of closed, simple odd-cycle edges. Each edge has
+  `from`, `to`, `negative`, `producerCount`, `omittedProducers` and
+  `producers`. Each producer has `source`, `guards` (atom plus `negative`)
+  and `omittedGuards`. Fixed-true conjuncts are omitted since they cannot cut
+  the producer. The generic presenter uses semantic atom/rule keys;
+  the .den adapter uses qualified atom spellings and
+  `source.location: {uri, line, column}` (one-based scalar coordinates, nullable).
+- `distinctCyclesFound`, `cycleCountKind: "lower-bound"`, `cycleLimit: 3`,
+  `omittedLongCycles`, `oddComponents` and `componentsWithCyclesFound`
+  distinguish cycles found from signed SCCs, and from cycles actually displayed.
+  BFS gives a shortest return walk for a selected conflicting edge, reduced to
+  an odd simple cycle; no global-shortest or exhaustive-count guarantee.
+- `negativeRelations`: consumer/provider relation and negative rule-instance
+  `occurrences`. `inputGroups`: `group` (relation, grouping values, optional
+  assumption name/key, `declared`) and distinct graph `edges`. A group without a
+  declaration or selected assumption is a singleton input tuple.
+- `histogramsComplete`, `omittedNegativeRelations`, `omittedInputGroups`
+  and nullable `searchIncomplete` distinguish completed scans, bounded display
+  and diagnostic exhaustion. At most 32 rows of each histogram are retained.
+  `guardMeaning` states that guards are other producer conjuncts: falsifying
+  one disables that producer; cutting the edge requires disabling all alternatives.
+  Guard-input reachability is structural, not a proof of a usable split.
+
+These records appear with the current component before its expensive solve,
+and in retained component details. Counts, timestamps and the particular cycle
+chosen are diagnostic data, not semantic identities or golden expectations.

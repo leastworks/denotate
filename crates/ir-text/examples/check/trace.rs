@@ -23,6 +23,9 @@ impl Trace {
             phase: Arc::new(Mutex::new(None)),
         }
     }
+    pub fn is_enabled(&self) -> bool {
+        self.enabled
+    }
     pub fn warning(&self, message: impl std::fmt::Display) {
         let mut output = self.output.lock().unwrap();
         let _ = writeln!(output, "[check diagnostic] {message}");

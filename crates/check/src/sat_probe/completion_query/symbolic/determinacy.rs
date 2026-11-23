@@ -25,12 +25,18 @@ fn record(s: &mut Solver<'_, '_, '_>, detail: crate::CompletionComponentStats) {
 
 fn decompose(
     cone: &Cone,
+    view: &'static str,
     members: Option<&BTreeSet<GroundAtom>>,
     s: &mut Solver<'_, '_, '_>,
 ) -> Result<Decomposition> {
     let mut folded = cone.clone();
     folded.fixed = encoding::fitting(cone, s.run.budget)?;
     let graph = consistency::analyse(&folded, None, s.run.budget)?;
+    let odd_ids: BTreeSet<_> = graph
+        .conflicts
+        .iter()
+        .map(|(i, _, _)| graph.component[*i])
+        .collect();
     let n = cone.fixed.len();
     let mut groups = vec![Vec::new(); graph.component.iter().max().map_or(0, |i| i + 1)];
     let mut producers = vec![Vec::new(); n];
@@ -115,7 +121,26 @@ fn decompose(
             .filter_map(|i| cone.atoms.get(*i))
             .map(|a| a.relation)
             .collect();
+        let odd_explanation = if odd_ids.contains(&graph.component[heads[0]]) {
+            odd::explain(s.run.engine, &local, None, s.run.budget)
+        } else {
+            None
+        };
         let mut detail = crate::CompletionComponentStats {
+            odd_explanation,
+            scope: if members.is_some() {
+                "classification"
+            } else if s.run.engine.hypothesis.is_some() {
+                "processing"
+            } else {
+                "whole-program"
+            },
+            context: if s.run.engine.hypothesis.is_some() {
+                "W + H"
+            } else {
+                "W"
+            },
+            view,
             index: number,
             atoms: heads.len(),
             rules: local.rules.len(),
@@ -180,6 +205,7 @@ fn decompose(
 pub(super) fn search(
     engine: &Engine,
     cone: &Cone,
+    view: &'static str,
     original: &Cone,
     members: Option<&BTreeSet<GroundAtom>>,
     scope: ModelScope,
@@ -188,7 +214,7 @@ pub(super) fn search(
     options: &CheckOptions,
     s: &mut Solver<'_, '_, '_>,
 ) -> Result<Option<Pair>> {
-    let plan = decompose(cone, members, s)?;
+    let plan = decompose(cone, view, members, s)?;
     if cone.atoms.iter().enumerate().all(|(i, a)| {
         cone.input[i]
             || !engine.decision(a)
@@ -271,6 +297,19 @@ pub(super) fn search(
     // Independent loops may need to change together to satisfy downstream
     // equations or H. Only this unrestricted residual pair can close that gap.
     let mut detail = crate::CompletionComponentStats {
+        scope: if classification {
+            "classification"
+        } else if engine.hypothesis.is_some() {
+            "processing"
+        } else {
+            "whole-program"
+        },
+        context: if engine.hypothesis.is_some() {
+            "W + H"
+        } else {
+            "W"
+        },
+        view,
         query: "coupled-decisions",
         state: "searching",
         duplicated_atoms: plan.shared.iter().filter(|v| !**v).count(),

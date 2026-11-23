@@ -6,6 +6,7 @@ use queries::{Run, checked_assignment};
 mod consistency;
 mod determinacy;
 mod existence;
+mod odd;
 pub mod planning;
 mod validation;
 
@@ -40,14 +41,17 @@ mod cube_tests {
                     atoms: atoms.clone(),
                     rules: vec![
                         super::super::super::Rule {
+                            source: None,
                             head: 2,
                             body: vec![(left / 2, left % 2 == 0)],
                         },
                         super::super::super::Rule {
+                            source: None,
                             head: 3,
                             body: vec![(right / 2, right % 2 == 0)],
                         },
                         super::super::super::Rule {
+                            source: None,
                             head: 2,
                             body: vec![(0, true), (1, false)],
                         },
@@ -620,6 +624,7 @@ impl Engine {
                 determinacy::search(
                     self,
                     &view,
+                    view.label(),
                     cone,
                     members,
                     scope,
@@ -832,7 +837,9 @@ impl Engine {
         };
         self.symbolic_search_in(context, phase, shares, |s| {
             let view = s.simplified(cone, !classification)?;
-            let Some(cone) = existence::residual(self, &view, classification, s, options)? else {
+            let Some(cone) =
+                existence::residual(self, &view, view.label(), classification, s, options)?
+            else {
                 return Ok(None);
             };
             let cone = &cone;

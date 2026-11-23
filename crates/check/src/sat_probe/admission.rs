@@ -128,6 +128,7 @@ fn compact_cone(
         // Includes settled premises AND already-installed replacement expressions.
         conditions.push(&s.condition);
         bodies.push(Rule {
+            source: Some(s.rule.source),
             head: ids[&s.rule.head.atom],
             body,
         });
@@ -172,6 +173,7 @@ fn compact_cone(
                     // also preserves guards of disabled alternative producers.
                     c.push_rule(
                         Rule {
+                            source: None,
                             head: node,
                             body: vec![(input, false), (lo, true)],
                         },
@@ -179,6 +181,7 @@ fn compact_cone(
                     )?;
                     c.push_rule(
                         Rule {
+                            source: None,
                             head: node,
                             body: vec![(input, true), (hi, true)],
                         },

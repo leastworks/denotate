@@ -883,6 +883,17 @@ must still be checked; it is not an ambiguity finding. Acyclic functions of shar
 providers need no duplicated equations. Parity/absence of odd cycles proves existence
 only, never uniqueness.
 
+Completion component records identify their scope, context (W or W + H), and
+pruned/unpruned view. Completion progress explains odd components with bounded signed cycle paths,
+source rule locations and the other conjuncts of each producer. Final
+`--verbose` and `--json` size reports retain these explanations too.
+Negative-edge relation counts and input groups reaching guards help locate
+potential split or pruning targets. A guard can disable one producer while an
+alternative keeps the edge present. An odd cycle alone is not a no-meaning
+finding: the semantic search still determines whether it can occur under the
+selected assumptions and context. Omitted examples and partial histograms are
+labeled; the number of distinct cycles found is a lower bound.
+
 `--json` retains the previous per-verification `Results: {...}` status summary
 instead of human diagnostics. Root/verification headers and configuration notices
 remain, so this mode is not a single JSON document. Exit codes are the same in both

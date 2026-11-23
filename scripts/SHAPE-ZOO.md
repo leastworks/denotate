@@ -427,3 +427,11 @@ Completion reports record scoped producer removals and their W/W+H context.
 Pruning is off by default. Keep the generated shape identical and compare the
 normal run with one adding `-- --completion-prune` to the zoo command. Only the
 opt-in run emits pruning records and uses H-first classification existence.
+
+
+`guarded-schema --schema-odd 1` is a diagnostic control. It adds
+`accepted_field(element_0) :- type_matches(format_0), !accepted_field(element_0);`,
+a known guarded negative self-edge beside the family's existing loops. It is
+deliberately not a valid lowerer pattern. The zoo regression checks the closed
+odd witness, its guard and its exact source line in size JSON, live CLI progress
+and verbose human output. The default remains `--schema-odd 0`.

@@ -1863,6 +1863,27 @@ and parity-inconsistent SCC count. `oddComponents` counts SCCs, not all cycles.
 Completed records retain at most 64 components and 32 relations each, with omissions;
 the current component remains visible even after that record bound.
 
+Odd-cycle explanation is advisory work with a separate allowance: at most
+1,000,000 work and 100 ms per explained component, further restricted by the
+configured limits. It pauses the enclosing local time allowance and does not
+consume its work; global deadlines and cancellation still apply. No semantic
+result is inferred from explanation exhaustion. It is skipped without progress
+or size recording. Signed parity analysis still precedes optional explanation.
+
+The search retains up to three conflicting-edge seeds per signed SCC, visits
+one seed from each SCC before second seeds, and stops after finding three distinct
+simple odd cycles in the reported component. Rotation deduplicates cycles.
+A cycle longer than 128 edges is omitted whole, with an omitted count. Each edge
+shows at most eight alternative producers and sixteen other conjuncts per
+producer; omissions are explicit. Negative-edge histograms count rule-instance
+occurrences by consumer/provider relation; guard-input histograms count distinct
+graph edges per input group. The latter traverse original producer dependencies
+structurally, including derived guard tests. They do not assert that changing any
+one input disables an edge. Both histograms retain at most 32 rows by descending
+count, with deterministic tie breaking and omitted-row counts. A cutoff labels
+partial counts; the distinct-cycle count is always a lower bound, even after all
+selected seeds have been searched. This policy does not alter pruning or splits.
+
 Completion failure triage stops at `max_failures` distinct failed parts per obligation
 (default eight in the API). The CLI derives that bound from `--empty-examples`
 (default three; `all` disables early triage stopping). This changes enumeration,
