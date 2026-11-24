@@ -306,10 +306,10 @@ pub fn branch_formatter(
                 ));
             }
             for child in &r.child_trials {
-                line.push_str(&format!("; candidate {} child {}{} [{}]: {} pruning attempts, {} proved, {} producers / {} literals removed, {}/{} target atoms settled, {} edges disabled{}; guards: +{} omitted{}",
+                line.push_str(&format!("; candidate {} child {}{} [{}]: {} pruning attempts, {} proved, {} producers / {} literals removed, {}/{} target atoms settled, {} edges disabled, {} witness cycles cut{}; guards: +{} omitted{}",
                     crate::progress::atom_text(&r.split, &names), child.child, if r.formula { if child.rest { " (false)" } else { " (true)" } } else { "" },
                     child.context,child.pruning_attempts,child.pruning_proved,child.removed_producers,child.removed_literals,
-                    child.settled_target_atoms,child.target_atoms,child.disabled_edges,
+                    child.settled_target_atoms,child.target_atoms,child.disabled_edges,child.cycles_cut,
                     if !child.complete || child.cutoff.is_some() { " (trial incomplete)" } else { "" },
                     child.omitted_derived_guards,if child.derived_guards_complete { "" } else { " (inventory incomplete/not sampled)" }));
                 for producer in &child.removed_producer_examples {

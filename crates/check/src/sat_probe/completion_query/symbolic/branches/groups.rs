@@ -89,11 +89,24 @@ pub(super) struct Choice {
     pub binary: bool,
     pub formula: Option<Arc<branch_formula::SettledAtom>>,
     /// Parent components cut by tentative Fitting, per child. Shared membership
-    /// restricts further exploration; it never restricts residual checking.
+    /// records progress, not a whitelist for further exploration.
     pub child_targets: Vec<Vec<Arc<BTreeSet<usize>>>>,
     pub child_states: Vec<Arc<fitting::Bundle>>,
 }
 impl Choice {
+    /// Only a selected target's unchanged side skips recursive exploration.
+    /// Components untouched in every child still get their own ranking attempt.
+    pub fn residual_only(&self, child: usize) -> Vec<Arc<BTreeSet<usize>>> {
+        self.child_targets
+            .iter()
+            .flatten()
+            .filter(|s| !self.child_targets[child].contains(s))
+            .cloned()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
     pub fn child_count(&self) -> usize {
         self.selected.len() + usize::from(self.rest)
     }

@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::VecDeque;
 /// Rank the same structural guard/input dependency shape as the odd-component
 /// histogram. Scores are candidates; Fitting in each child determines actual cuts.
 pub(super) fn choose(
@@ -25,15 +26,15 @@ pub(super) fn choose(
         b,
     )
 }
-/// A child explores only the surviving parts of the parent components it cut.
-/// Other components remain in the residual question, never silently proved.
+/// Unchanged sides of the selected target go to residual checking. Unrelated
+/// components remain eligible; a parent cut is not a whitelist for this path.
 pub(super) fn choose_in(
     e: &Engine,
     bundle: &fitting::Bundle,
     classification: bool,
     existence: bool,
     capacity: usize,
-    allowed: Option<&[Arc<BTreeSet<usize>>]>,
+    deferred: Option<&[Arc<BTreeSet<usize>>]>,
     remaining: &mut QueryLimits,
     telemetry: &mut Vec<SplitCandidate>,
     omitted: &mut usize,
@@ -96,19 +97,23 @@ pub(super) fn choose_in(
         }
         let mut run = queries::Run::local(e, b)?;
         run.label("completion branch local uniqueness");
-        for (id, heads) in sets {
-            if !heads.iter().any(|i| relevant[*i])
-                || allowed
-                    .is_some_and(|sets| !heads.iter().any(|i| sets.iter().any(|s| s.contains(i))))
-            {
-                continue;
+        let discovered: Result<()> = (|| {
+            for (id, heads) in sets {
+                if !heads.iter().any(|i| relevant[*i])
+                    || deferred.is_some_and(|sets| {
+                        heads.iter().any(|i| sets.iter().any(|s| s.contains(i)))
+                    })
+                {
+                    continue;
+                }
+                let local = existence::component(c, &producers, &heads, run.budget)?;
+                let (unique, _, _, _) = run.local_unique(&local, |_, _| {});
+                if !unique? {
+                    candidates.insert(id);
+                }
             }
-            let local = existence::component(c, &producers, &heads, run.budget)?;
-            let (unique, _, _, _) = run.local_unique(&local, |_, _| {});
-            if !unique? {
-                candidates.insert(id);
-            }
-        }
+            Ok(())
+        })();
         let used = run.usage();
         remaining.max_solves = remaining.max_solves.saturating_sub(used.max_solves);
         remaining.max_solver_polls = remaining
@@ -118,8 +123,9 @@ pub(super) fn choose_in(
         remaining.max_propagations = remaining
             .max_propagations
             .saturating_sub(used.max_propagations);
+        discovered?;
     }
-    if let Some(sets) = allowed {
+    if let Some(sets) = deferred {
         let mut surviving = BTreeSet::new();
         for set in sets {
             b.charge(set.len(), "completion split surviving targets")?;
@@ -129,7 +135,7 @@ pub(super) fn choose_in(
                     .map(|i| graph.component[*i]),
             );
         }
-        candidates.retain(|id| surviving.contains(id));
+        candidates.retain(|id| !surviving.contains(id));
     }
     if candidates.is_empty() {
         return Ok(None);
@@ -605,6 +611,25 @@ fn verify(
     b: &mut Budget<'_>,
 ) -> Result<Option<(Choice, Option<Choice>)>> {
     choices.sort_by(|a, b| b.rank(a)); // stable ties retain semantic input order
+    // Neither raw edge scores nor inventory truncation may starve a kind.
+    let mut inputs = VecDeque::new();
+    let mut formulas = VecDeque::new();
+    for c in choices {
+        if c.formula.is_some() {
+            formulas.push_back(c);
+        } else {
+            inputs.push_back(c);
+        }
+    }
+    let mut choices = Vec::new();
+    while !inputs.is_empty() || !formulas.is_empty() {
+        if let Some(c) = inputs.pop_front() {
+            choices.push(c);
+        }
+        if let Some(c) = formulas.pop_front() {
+            choices.push(c);
+        }
+    }
     // Inventory includes candidates not shortlisted; omission is explicit.
     *omitted += choices.len().saturating_sub(64);
     for c in choices.iter().take(64) {
@@ -636,23 +661,34 @@ fn verify(
             derived_guards_complete: false,
         });
     }
-    // Diversify by certified group before trying different subsets of one group.
-    let mut selected = Vec::new();
-    let mut groups = BTreeSet::new();
-    for (i, c) in choices.iter().take(64).enumerate() {
-        if groups.insert(c.group.atoms.clone()) {
-            selected.push(i);
+    // Four slots per kind when both are available. Within each kind, distinct
+    // groups precede alternative subsets; duplicate subsets cannot steal the
+    // other kind's reserved turns. Empty-kind slots pass to the remaining kind.
+    let mut orders = [VecDeque::new(), VecDeque::new()];
+    for (kind, order) in orders.iter_mut().enumerate() {
+        let mut groups = BTreeSet::new();
+        let mut repeated = Vec::new();
+        for (i, c) in choices.iter().take(64).enumerate() {
+            if usize::from(c.formula.is_some()) != kind {
+                continue;
+            }
+            if groups.insert(c.group.atoms.clone()) {
+                order.push_back(i);
+            } else {
+                repeated.push(i);
+            }
         }
-        if selected.len() == 8 {
-            break;
-        }
+        order.extend(repeated);
     }
-    for i in 0..choices.len().min(64) {
-        if selected.len() == 8 {
-            break;
-        }
-        if !selected.contains(&i) {
-            selected.push(i);
+    let mut selected = Vec::new();
+    while selected.len() < 8 && orders.iter().any(|o| !o.is_empty()) {
+        for order in &mut orders {
+            if selected.len() == 8 {
+                break;
+            }
+            if let Some(i) = order.pop_front() {
+                selected.push(i);
+            }
         }
     }
     let mut limits = e.limits.clone();
@@ -668,14 +704,23 @@ fn verify(
             limits.timeout,
         );
     }
-    let mut trial = Budget::new(&limits);
+    let mut trials = Budget::new(&limits);
     let mut completed = Vec::new();
     let heads: BTreeSet<_> = witnesses
         .values()
         .flat_map(|es| es.iter().map(|e| e.0))
         .take(32)
         .collect();
-    for i in selected {
+    let count = selected.len();
+    for (position, i) in selected.into_iter().enumerate() {
+        let mut candidate_limits = limits.clone();
+        candidate_limits.max_work = trials.remaining() / (count - position);
+        candidate_limits.timeout = trials.remaining_time() / (count - position) as u32;
+        candidate_limits.run_deadline = Some(Instant::now() + candidate_limits.timeout);
+        if let Some(end) = limits.run_deadline {
+            candidate_limits.run_deadline = Some(candidate_limits.run_deadline.unwrap().min(end));
+        }
+        let mut trial = Budget::new(&candidate_limits);
         let row = &mut telemetry[i];
         row.state = "trial";
         let mut common: BTreeSet<_> = witnesses.keys().copied().collect();
@@ -696,6 +741,7 @@ fn verify(
                     target_atoms: members.values().map(|s| s.len()).sum(),
                     settled_target_atoms: 0,
                     disabled_edges: 0,
+                    cycles_cut: 0,
                     complete: false,
                     cutoff: None,
                     omitted_derived_guards: 0,
@@ -785,6 +831,7 @@ fn verify(
                         .count();
                 }
                 detail.disabled_edges = disabled;
+                detail.cycles_cut = cuts.len();
                 detail.complete = true;
                 choices[i].child_states.push(Arc::new(child_bundle));
                 choices[i]
@@ -803,8 +850,12 @@ fn verify(
             row.state = "verified";
             Ok(())
         })();
+        b.charge(trial.used(), "completion split trials")?;
+        let ledger_cutoff = trials
+            .charge(trial.used(), "completion split candidate trials")
+            .err();
         match result {
-            Ok(()) if row.disabled_edges > 0 => completed.push(i),
+            Ok(()) if row.child_trials.iter().any(|c| c.cycles_cut > 0) => completed.push(i),
             Ok(()) => (),
             Err(error) => {
                 e.limits.cancellation.check()?;
@@ -813,7 +864,6 @@ fn verify(
                 if let Some(detail) = row.child_trials.last_mut() {
                     detail.cutoff = row.cutoff;
                 }
-                break;
             }
         }
         completed.sort_by(|a, b| compare_trials(*a, *b, telemetry, &choices));
@@ -823,8 +873,11 @@ fn verify(
         if !completed.contains(&i) {
             choices[i].child_states.clear();
         }
+        if let Some(error) = ledger_cutoff {
+            inconclusive(error)?;
+            break;
+        }
     }
-    b.charge(trial.used(), "completion split trials")?;
     completed.sort_by(|a, b| compare_trials(*a, *b, telemetry, &choices));
     if let Some(i) = completed.first().copied() {
         let mut limits = e.limits.clone();
@@ -953,8 +1006,11 @@ fn compare_trials(
 ) -> std::cmp::Ordering {
     let x = &telemetry[a];
     let y = &telemetry[b];
-    y.cycles_cut_every_child
-        .cmp(&x.cycles_cut_every_child)
+    let cuts =
+        |r: &SplitCandidate| r.child_trials.iter().map(|c| c.cycles_cut).sum::<usize>() as u128;
+    (cuts(y) * (x.children - 1) as u128)
+        .cmp(&(cuts(x) * (y.children - 1) as u128))
+        .then_with(|| y.cycles_cut_every_child.cmp(&x.cycles_cut_every_child))
         .then_with(|| {
             ((y.disabled_edges as u128) * (x.children - 1) as u128)
                 .cmp(&((x.disabled_edges as u128) * (y.children - 1) as u128))

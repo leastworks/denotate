@@ -1446,9 +1446,10 @@ justify this certificate. Without a useful certified group, split one input into
 true/false cases.
 
 Follow guard providers only through acyclic atoms. Rank a bounded shortlist by
-structural edge influence, then trial up to eight partitions with incremental
-Fitting. Prefer cycles cut in every child, then actual disabled edges per extra
-child; parallel producers keep their edge alive. Trials have a bounded share of
+structural edge influence within each kind, alternating inputs and formulas in
+the inventory and eight trial slots. Unused slots pass to the other kind. Trial
+allowances are shared, including failed candidates. Prefer total per-child witness
+cuts per extra child, then common cuts and actual disabled edges per extra child; parallel producers keep their edge alive. Trials have a bounded share of
 setup time/work, and incomplete trials leave residual search available. Telemetry
 records up to 64 candidates with context, state, checked children, disabled-edge
 counts and omitted candidates, plus the next verified alternative. Only
@@ -1466,10 +1467,13 @@ Each question ranks before searching. Without a verified witness cut in any chil
 it runs unsplit once with the remaining allowance, including on an inconclusive
 result. Otherwise one unsplit attempt gets half the remaining allocation; only an
 inconclusive result uses the reserved half for the already ranked partition.
-Traversal is depth-first. Uncut children get residual checking without further
-split exploration. Cut children can split again if relevant cycles remain within
-the parent components they cut; unrelated loops stay in residual checking. No
-closed witness implies that other components are solved.
+Traversal is breadth-first, with an absolute per-unit cutoff shared by its nested
+queries and bounded by the outer question deadline. Untouched components remain
+rankable in every path. If a selected target is cut on only one side, explore that
+side and residual-check the unchanged side of that target; other components on
+both sides can still compete. A later split rediscovers components under its new
+pins. No closed witness implies that other components are solved. Child ranking
+leaves time for residual checking when no useful partition is found.
 
 Pruning views are built before these allocations. One aggregate pruning allowance
 is reserved fairly across verifications, scopes and W/H. Saturated classification

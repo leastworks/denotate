@@ -1048,7 +1048,7 @@ fn completion_split_child(
         "prunedHeads":c.pruned_heads.iter().map(atom).collect::<Result<Vec<_>>>()?,
         "omittedPrunedHeads":c.omitted_pruned_heads,
         "targetAtoms":c.target_atoms,"settledTargetAtoms":c.settled_target_atoms,
-        "disabledEdges":c.disabled_edges,"complete":c.complete,"cutoff":c.cutoff.map(reason),
+        "disabledEdges":c.disabled_edges,"cyclesCut":c.cycles_cut,"complete":c.complete,"cutoff":c.cutoff.map(reason),
         "omittedDerivedGuards":c.omitted_derived_guards,"derivedGuardsComplete":c.derived_guards_complete
     }))
 }

@@ -2016,15 +2016,19 @@ silently dropped.
 Ranking uses one compact parity witness per odd component, or a directed cycle
 in each decision-relevant component independently shown non-unique. Guard-input
 reachability stops at every cyclic atom, including positive/even cycles. The top
-64 partitions by affected edges / extra children form a bounded inventory. Up to
-eight are trialled with incremental Fitting, preferring distinct input groups
-before alternate subsets. Trials share one quarter of remaining setup time/work;
-that work is charged back. Incomplete trials do not qualify, and residual search
+64 partitions form a bounded inventory, alternating inputs and formulas in their
+own structural-score order. Up to eight are trialled: each kind has four slots
+when both have enough distinct groups, with unused slots available to the other.
+Distinct groups precede alternate subsets. Trials share one quarter of remaining
+setup time/work; each candidate receives a share of the remaining allowance, and
+failed/discarded trials are charged back. No fresh allowance is added. Incomplete trials do not qualify, and residual search
 remains available when no verified split progresses.
 
-Verified ranking first prefers the number of witness cycles cut in every child,
-then total disabled edges / extra children, then minimum disabled edges in a child,
-then the structural rank and stable order. An edge remains live if any producer
+Verified ranking first prefers the sum of per-child witness cuts / extra children,
+then cycles cut in every child, then total disabled edges / extra children,
+minimum disabled edges, structural rank and stable order. At least one child must
+cut a witness; a one-sided cut is eligible. Per-child `cyclesCut` exposes which
+side progresses; the common-cut count is no longer the primary score. An edge remains live if any producer
 still supplies it. A cut is a graph observation, not proof of existence/uniqueness.
 The bounded inventory distinguishes untried, verified, and incomplete trials;
 additional certified groups can report no acyclic guard or a partition-cap exclusion.
@@ -2054,15 +2058,18 @@ only an inconclusive answer starts partitioning from the already prepared/ranked
 root. Conclusive results return immediately. Ranking is bounded to a quarter of
 the question's time/work; an optional ranking cutoff leaves residual search.
 
-Traversal is deterministic and depth-first. Further split exploration is allowed
-only for children that cut a parent witness; ranking then requires a remaining
-relevant cycle inside those parent components. A closed target does not trigger
-extra split exploration of an unrelated loop. Uncut children still get residual
-checking, as do children without
-a useful further split. Cutting one witness never proves another component safe.
+Traversal is deterministic and breadth-first. Every child ranks its residual
+components; components untouched by the selected split are not excluded. For a
+component cut in some children, its unchanged side goes to residual checking
+rather than recursively exploring that same target. Other components can still
+select a split on that path; after new pins, components are rediscovered. Child
+ranking has a bounded quarter of its unit's remaining setup allowance, with
+residual checking after optional ranking cutoffs. Cutting one witness never proves another component safe.
 Explicit work/solver/round allowances are divided evenly among children, discarding
 integer remainders. Automatic CLI guards retain the run-wide floor described above.
-Pending units share the remaining question deadline. A cutoff in any child prevents
+Pending units share the remaining question deadline. Each unit, including nested
+SAT calls, inherits the earlier of the outer deadline and its own remaining-time
+share; descendants cannot consume the time reserved for queued siblings. A cutoff in any child prevents
 a universal
 success; a confirmed counterexample can still be returned from another.
 Branch reports retain 256 records per invocation and 32 input pins per record,
@@ -2072,10 +2079,12 @@ This is provisional. Dense query setup and repeated local uniqueness discovery
 can cost more than splitting saves. Children inherit both context-tagged ancestor
 views and propagate pins in each: W+H for H-first coverage/processing under H,
 W for no-H fallback/rejection. Ranking uses W+H when available; this never turns
-an H-only result into a no-H result. New branch-relative proofs are not attempted.
+an H-only result into a no-H result. New branch-relative proofs run only in ranking
+trials (024.32); selected children inherit the winning trial's proved views and do
+not start an additional pruning pass merely because they were selected.
 Measure the identical guarded-schema `--schema-typecut 1` workload with
-splits off/on before changing defaults. Cross-unit caching, parallelism and
-branch-context pruning proofs remain future work.
+splits off/on before changing defaults. Cross-unit caching and parallelism remain
+future work.
 
 The initial 275-format type-cut measurement (depth 2, default limits) did not
 improve checking: 84.6 s unsplit versus 99.8 s split, both incomplete. Four

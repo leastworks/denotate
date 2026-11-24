@@ -827,3 +827,42 @@ fn fact_negation_task_shape_and_explicit_facts_have_no_analysis_component() {
         }
     }
 }
+
+#[test]
+fn one_sided_formula_cut_is_visible_per_child_in_json_and_human_output() {
+    let (p, r) = checked(
+        "input a();input b();relation term();term():-a(),!b();term():-!a(),b();relation loop();loop():-term(),!loop();verification v{semantics:completion;assumptions:[];obligations:[];}",
+        CheckOptions {
+            split_depth: 2,
+            ..Default::default()
+        },
+    );
+    let shown = presentation::present_completion(&p, &r).unwrap();
+    let rows: Vec<_> = shown.status["branches"]["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|r| r["candidates"].as_array().unwrap())
+        .filter(|c| c["selected"] == true && c["formula"] == true)
+        .collect();
+    assert!(!rows.is_empty());
+    for row in rows {
+        assert_eq!(row["cyclesCutEveryChild"], 0);
+        assert_eq!(row["childTrials"][0]["cyclesCut"], 0);
+        assert_eq!(row["childTrials"][1]["cyclesCut"], 1);
+    }
+    let format = completion_output::branch_formatter(&p);
+    let lines = r
+        .branches
+        .records
+        .iter()
+        .map(format)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(lines.contains("0 witness cycles cut"));
+    assert!(lines.contains("1 witness cycles cut"));
+    assert!(
+        r.meaning.no_meaning.exists(),
+        "a cut cannot hide the other child's no-meaning"
+    );
+}

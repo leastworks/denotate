@@ -253,18 +253,20 @@ fn emit(
 }
 
 #[test]
-fn branch_solvers_inherit_the_absolute_question_deadline() {
-    let (_, e, _) = fixture(false, false, false);
+fn branch_solvers_inherit_their_sibling_share_deadline() {
+    let (_, mut e, _) = fixture(false, false, false);
     let mut options = CheckOptions::default();
     options.split_depth = 2;
     let seen = std::cell::Cell::new(None);
+    let outer = Instant::now() + e.limits.timeout;
+    e.limits.run_deadline = Some(outer);
     let result = partition(&e, false, true, &options, 1, |branch, _| {
         let deadline = branch.limits.run_deadline.expect("absolute deadline");
         if let Some(old) = seen.get() {
-            assert_eq!(old, deadline);
-        } else {
-            seen.set(Some(deadline));
+            assert!(old < deadline, "later sibling keeps its own share");
         }
+        seen.set(Some(deadline));
+        assert!(deadline <= outer);
         let limits = branch.limits.clone();
         let mut b = Budget::new(&limits);
         let mut q = queries::Run::local(branch, &mut b)?;
@@ -775,7 +777,7 @@ fn automatic_guards_survive_division_but_explicit_caps_and_deadlines_do_not_chan
 }
 
 #[test]
-fn closing_a_target_component_does_not_explore_an_unrelated_loop() {
+fn closing_a_target_component_still_ranks_an_untouched_loop() {
     let mut c = Corpus::new();
     let i = rel(&mut c, "i", true);
     let j = rel(&mut c, "j", true);
@@ -814,14 +816,14 @@ fn closing_a_target_component_does_not_explore_an_unrelated_loop() {
             false,
             true,
             8,
-            Some(&choice.child_targets[n]),
+            Some(&choice.residual_only(n)),
             &mut remaining,
             &mut vec![],
             &mut 0,
             &mut b
         )
         .unwrap()
-        .is_none()
+        .is_some()
     );
     assert!(
         choose(

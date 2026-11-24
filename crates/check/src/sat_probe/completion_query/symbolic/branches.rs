@@ -56,6 +56,8 @@ pub struct SplitChild {
     pub target_atoms: usize,
     pub settled_target_atoms: usize,
     pub disabled_edges: usize,
+    /// Witness cycles cut in this child; not a verdict for the residual question.
+    pub cycles_cut: usize,
     pub complete: bool,
     pub cutoff: Option<Inconclusive>,
     pub omitted_derived_guards: usize,
@@ -140,7 +142,7 @@ struct Unit {
     work: usize,
     config: QueryLimits,
     worlds: usize,
-    targets: Option<Vec<Arc<BTreeSet<usize>>>>,
+    residual_only: Option<Vec<Arc<BTreeSet<usize>>>>,
 }
 fn divided(q: &QueryLimits, n: usize) -> QueryLimits {
     QueryLimits {
@@ -420,7 +422,7 @@ fn partition_from<T>(
         work: limits.max_work,
         config: e.config.clone(),
         worlds: options.max_worlds,
-        targets: None,
+        residual_only: None,
     }]);
     let mut report = BranchReport::default();
     let mut next_id = 2;
@@ -483,11 +485,7 @@ fn partition_from<T>(
         local_limits.timeout =
             deadline.saturating_duration_since(Instant::now()) / (queue.len() + 1) as u32;
         local_limits.max_work = unit.work;
-        local_limits.run_deadline = Some(
-            local_limits
-                .run_deadline
-                .map_or(deadline, |d| d.min(deadline)),
-        );
+        local_limits.run_deadline = Some(deadline.min(Instant::now() + local_limits.timeout));
         let mut allocation = e.clone();
         allocation.limits = local_limits;
         allocation.config = unit.config.clone();
@@ -523,27 +521,38 @@ fn partition_from<T>(
             let capacity = options
                 .split_branches
                 .saturating_sub(report.leaves + queue.len());
-            if unit.targets.as_ref().is_none_or(|t| !t.is_empty())
-                && unit.depth < options.split_depth
-                && capacity > 0
-            {
+            if unit.depth < options.split_depth && capacity > 0 {
                 let chosen = if let Some(r) = preflight {
                     record.candidates = r.candidates;
                     record.omitted_candidates = r.omitted;
                     Some(r.choice)
                 } else {
-                    ranking::choose_in(
+                    // Optional ranking must leave this sibling time for its
+                    // residual question, even when no further split is found.
+                    let mut ranking_limits = local_limits.clone();
+                    ranking_limits.max_work = budget.remaining() / 4;
+                    ranking_limits.timeout = budget.remaining_time() / 4;
+                    let mut ranking = Budget::new(&ranking_limits);
+                    let answer = ranking::choose_in(
                         &branch,
                         &state,
                         classification,
                         existence,
                         capacity,
-                        unit.targets.as_deref(),
+                        unit.residual_only.as_deref(),
                         &mut config,
                         &mut record.candidates,
                         &mut record.omitted_candidates,
-                        &mut budget,
-                    )?
+                        &mut ranking,
+                    );
+                    budget.charge(ranking.used(), "completion child ranking")?;
+                    match answer {
+                        Ok(choice) => choice,
+                        Err(error) => {
+                            inconclusive(error)?;
+                            None
+                        }
+                    }
                 };
                 if let Some((choice, runner_up)) = chosen {
                     let children = choice.children();
@@ -587,7 +596,7 @@ fn partition_from<T>(
                             .collect();
                         record.omitted_mapping = choice.group.mapping.len().saturating_sub(32);
                         report.splits += 1;
-                        for (child_index, (delta, rest)) in children.into_iter().enumerate().rev() {
+                        for (child_index, (delta, rest)) in children.into_iter().enumerate() {
                             let mut pins = unit.pins.clone();
                             for (i, v) in &delta {
                                 pins.insert(e.cone.atoms[*i].clone(), *v);
@@ -599,7 +608,7 @@ fn partition_from<T>(
                                 child.publish(e);
                                 Arc::new(child)
                             });
-                            queue.push_front(Unit {
+                            queue.push_back(Unit {
                                 id,
                                 parent_id: Some(unit.id),
                                 parent: Some(state.clone()),
@@ -612,7 +621,7 @@ fn partition_from<T>(
                                 work: unit.work.saturating_sub(budget.used()) / n,
                                 config: divided(&config, n),
                                 worlds: unit.worlds / n,
-                                targets: Some(choice.child_targets[child_index].clone()),
+                                residual_only: Some(choice.residual_only(child_index)),
                             });
                         }
                         return Ok(None);
@@ -754,3 +763,6 @@ mod pruning_tests;
 
 #[cfg(test)]
 mod formula_tests;
+
+#[cfg(test)]
+mod fairness_tests;

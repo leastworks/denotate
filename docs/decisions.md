@@ -2261,7 +2261,7 @@ conservatively size-bounded; declining it retains the existing coupled fallback.
 Transitive influence through a cyclic component made unrelated inputs tie on every
 witness edge. Split discovery now stops at cyclic atoms; bounded incremental
 Fitting trials measure actual edge deletion, retaining an edge while any parallel
-producer remains live. Prefer a partition that cuts the witness in every child.
+producer remains live. Rank per-child witness cuts; one-sided cuts are useful too.
 This guides search only: every permitted child still needs its semantic query.
 
 An ancestor proof under W is valid under W and pins; an ancestor proof under W+H
@@ -2288,8 +2288,9 @@ W/W+H, so enabling splits cannot silently cache a weaker H view from a half-size
 first attempt. There is no new pruning-time knob. Both optimizations stay opt-in.
 
 Rank first: no verified witness cut means one unsplit attempt with all remaining
-allowance. Otherwise retain an unsplit-first opportunity, then visit cut children
-depth-first. Uncut children still receive residual checks. Removing one witness
+allowance. Otherwise retain an unsplit-first opportunity, then visit children
+breadth-first with per-unit deadlines. Uncut targets still receive residual checks;
+untouched components remain eligible for ranking in each path. Removing one witness
 never settles every component, and no useful partition must not rerun the same
 expensive query.
 
@@ -2424,3 +2425,25 @@ semantic classification membership. Keep original source rule slots and replay
 returned models against the original equations. Fitting does not decide unseeded
 positive recursion: `p :- p` still has two completion models. No well-founded or
 least-fixpoint reduction is substituted for that contract.
+
+
+## Completion partition discovery and traversal must not starve alternatives
+
+Raw edge influence is not comparable across input and formula candidates. Reserve
+fair space for both in the bounded inventory and eight trial slots, alternating
+within each kind's stable score order and transferring unused slots. Share the
+existing trial allowance across remaining candidates; a costly failed trial does
+not entitle itself to all later candidates' time. Completed trials rank by total
+per-child witness cuts per extra child, rather than requiring a common cut.
+
+A parent's cut-component set is evidence of progress, not a whitelist for child
+ranking. Untouched components must get their own opportunity in both paths. For
+one-sided progress on the selected target, the unchanged side of that target
+receives residual checking; unrelated components on that same path remain eligible.
+New pins rediscover the graph. This preserves bounded useful exploration without
+mistaking a cut for a proof or suppressing an untouched loop's independent split.
+
+Use breadth-first pending units and give each an absolute share cutoff, inherited
+by nested SAT work and bounded by the original question deadline. A cutoff remains
+inconclusive, while siblings can still produce confirmed failures. No new limits,
+no changed default split setting, and no change to W/H/formula soundness contracts.

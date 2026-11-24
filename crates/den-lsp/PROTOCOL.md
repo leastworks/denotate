@@ -1482,8 +1482,10 @@ progress-making Fitting trial; `guardedEdges` remains structural influence.
 `disabledEdges` (sum over completed children), `minimumDisabled`,
 `cyclesCutEveryChild`, `selected`, and nullable `cutoff`. `omittedCandidates`
 counts bounded inventory omissions. An incomplete trial never wins. The shortlist
-stops provider traversal at cyclic atoms; verified ranking prefers witness cycles
-cut in every child, then disabled edges per extra child. Counts are within the
+stops provider traversal at cyclic atoms. Input/formula kinds share the inventory
+and trial slots fairly; verified ranking prefers total per-child witness cuts per
+extra child, then common cuts and disabled edges per extra child. One-sided cuts
+are eligible. Counts are within the
 recorded context, not evidence that a no-H query may assume H. Untried groups are
 not failed proofs, and an omitted group must not be treated as ineligible.
 Unsplit-attempt records have ID 0; partition IDs start at 1, within each question.
@@ -1522,6 +1524,7 @@ attempted child: `child`, `context` (actual ranked W/W+H view), `rest`, `pruning
 up to 16 `{atom, positive}` literals, and `omittedBodyLiterals`),
 `omittedProducerExamples`,
 `omittedPrunedHeads`, `targetAtoms`, `settledTargetAtoms`, `disabledEdges`,
+`cyclesCut` (distinct witnessed cycles cut in this child),
 `complete`, nullable `cutoff`, `omittedDerivedGuards`, and `derivedGuardsComplete`.
 The latter distinguishes a complete capped inventory from one interrupted by a
 diagnostic limit (or not sampled). Counts describe the target components, never a
