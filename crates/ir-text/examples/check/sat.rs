@@ -854,11 +854,13 @@ pub(super) fn completion_inner(
             for v in &report.pruning.views {
                 writeln!(
                     output,
-                    "Pruning {} {}: {} after {} round(s); {} considered, {} proved, {} instances removed ({} covered heads)",
+                    "Pruning {} {}: {} after {} round(s); {} considered, {} proved, {} instances removed ({} covered heads); {:.1} ms allocated, {:.1} ms spent, {:.1} ms released; classification-W priority: {} considered, {} proved",
                     v.scope,
                     match v.context { cq::PruningContext::World => "W", cq::PruningContext::Hypothesis => "W+H" },
                     v.stop.label(),
-                    v.rounds, v.attempts, v.proved, v.removed, v.covered
+                    v.rounds, v.attempts, v.proved, v.removed, v.covered,
+                    v.allocated.as_secs_f64()*1000.0, v.elapsed.as_secs_f64()*1000.0,
+                    v.released.as_secs_f64()*1000.0, v.priority_attempts, v.priority_proved
                 )
                 .unwrap();
             }

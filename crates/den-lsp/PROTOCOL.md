@@ -1413,7 +1413,11 @@ Completion pruning telemetry adds `simplifications.views` (up to 64) and
 `saturated`, `candidate-cutoff` or `overall-cutoff`. Saturation requires a complete
 unchanged round with no unresolved attempts; historical candidate cutoffs may
 remain in component records even if a later round finishes. Counts sum work over
-rounds, not unique components. Human CLI output prints these stop reasons.
+rounds, not unique components. Views also contain `allocatedMs`, `elapsedMs`,
+`releasedMs` (unused reservation redistributed to unstarted buckets),
+`priorityAttempts` and `priorityProved` (processing attempts on classification-W
+successful heads, independently re-proved). These are operational telemetry, not
+semantic identities. Human CLI output prints the stop reasons and these metrics.
 
 Completion pruning telemetry additionally exposes `simplifications.elapsedMs`,
 `components` (at most 64), and `omittedComponents`. Each component contains `scope`,

@@ -67,6 +67,11 @@ pub struct PruningView {
     pub removed: usize,
     pub covered: usize,
     pub stop: PruningStop,
+    pub allocated: Duration,
+    pub elapsed: Duration,
+    pub released: Duration,
+    pub priority_attempts: usize,
+    pub priority_proved: usize,
 }
 #[derive(Debug, Clone, Default)]
 pub struct PruningReport {
@@ -87,9 +92,77 @@ pub struct PruningReport {
 pub(super) struct Cache {
     views: BTreeMap<(Vec<usize>, PruningContext), Arc<Cone>>,
     pub report: PruningReport,
-    spent: BTreeMap<(&'static str, PruningContext), Duration>,
-    share: Option<Duration>,
+    reservations: Reservations,
+    // Scheduling hints, independent of capped diagnostic records. Invocation-local
+    // atom indexes; never reused as proofs or across preparations.
+    classification_successes: BTreeSet<usize>,
     pub(super) readonly: bool,
+}
+type Bucket = (&'static str, PruningContext);
+#[derive(Default)]
+struct Reservation {
+    allowance: Duration,
+    spent: Duration,
+    started: bool,
+}
+#[derive(Default)]
+struct Reservations(BTreeMap<Bucket, Reservation>);
+impl Reservations {
+    fn new(allowance: Duration, classification: bool, properties: bool) -> Self {
+        let scopes = std::iter::once("processing")
+            .chain(classification.then_some("classification"))
+            .chain(properties.then_some("property"));
+        let contexts = [PruningContext::World, PruningContext::Hypothesis];
+        let mut slots = BTreeMap::new();
+        for scope in scopes {
+            for &context in &contexts[..if classification { 2 } else { 1 }] {
+                slots.insert((scope, context), Reservation::default());
+            }
+        }
+        let share = allowance / slots.len() as u32;
+        for slot in slots.values_mut() {
+            slot.allowance = share;
+        }
+        Self(slots)
+    }
+    fn start(&mut self, key: Bucket) -> Duration {
+        let slot = self.0.get_mut(&key).expect("planned pruning scope");
+        slot.started = true;
+        slot.allowance.saturating_sub(slot.spent)
+    }
+    fn finish(&mut self, key: Bucket, elapsed: Duration, stop: PruningStop) -> Duration {
+        let slot = self.0.get_mut(&key).unwrap();
+        slot.spent += elapsed;
+        // Property cones share a bucket. Saturating one is not completion of
+        // the others. Root scopes each have one view per context.
+        if stop != PruningStop::Saturated || key.0 == "property" {
+            return Duration::ZERO;
+        }
+        let unused = slot.allowance.saturating_sub(slot.spent);
+        slot.allowance = slot.spent; // release at most once, including cache hits
+        let mut recipients = self
+            .0
+            .values_mut()
+            .filter(|s| !s.started)
+            .collect::<Vec<_>>();
+        if recipients.is_empty() {
+            return Duration::ZERO;
+        }
+        let share = unused / recipients.len() as u32;
+        let mut remaining = unused;
+        for recipient in &mut recipients {
+            recipient.allowance += share;
+            remaining -= share;
+        }
+        recipients.last_mut().unwrap().allowance += remaining;
+        unused
+    }
+}
+#[derive(Default)]
+struct Successes {
+    heads: BTreeSet<usize>,
+    priority_attempts: usize,
+    priority_proved: usize,
 }
 pub(super) type ViewKey = (Vec<usize>, PruningContext);
 pub(super) fn view_key(c: &Cone, context: PruningContext) -> ViewKey {
@@ -105,9 +178,6 @@ pub(super) fn view_key(c: &Cone, context: PruningContext) -> ViewKey {
 }
 impl Cache {
     pub(super) fn for_engine(e: &Engine) -> Self {
-        let scopes =
-            1 + usize::from(e.classification.is_some()) + usize::from(!e.selection.is_empty());
-        let contexts = if e.classification.is_some() { 2 } else { 1 };
         let remaining = e.limits.run_deadline.map_or(e.limits.timeout, |d| {
             d.saturating_duration_since(Instant::now())
                 .min(e.limits.timeout)
@@ -120,7 +190,11 @@ impl Cache {
             .unwrap_or(e.limits.timeout / 3)
             .min(remaining / 3);
         Self {
-            share: Some(allowance / (scopes * contexts) as u32),
+            reservations: Reservations::new(
+                allowance,
+                e.classification.is_some(),
+                !e.selection.is_empty(),
+            ),
             ..Self::default()
         }
     }
@@ -241,11 +315,15 @@ pub(super) fn view<'a>(
     // Reserve independent shares for classification/processing/property, W/H.
     // A W pass cannot consume the later H pass's reservation. The invocation's
     // absolute deadline and this query's remaining time still bound every pass.
-    let available = {
+    let (available, priority) = {
         let mut c = cache.lock().unwrap();
-        let fallback = Cache::for_engine(engine).share.unwrap();
-        let share = *c.share.get_or_insert(fallback);
-        share.saturating_sub(*c.spent.get(&(scope, context)).unwrap_or(&Duration::ZERO))
+        let available = c.reservations.start((scope, context));
+        let priority = if scope == "processing" {
+            c.classification_successes.clone()
+        } else {
+            BTreeSet::new()
+        };
+        (available, priority)
     };
     limits.timeout = limits.timeout.min(remaining).min(available);
     let started = Instant::now();
@@ -253,6 +331,7 @@ pub(super) fn view<'a>(
     let mut result = (*base).clone();
     let mut report = PruningReport::default();
     let mut rounds = 0;
+    let mut successes = Successes::default();
     let mut round_engine = engine.clone();
     let stop = loop {
         let previous = result.clone();
@@ -276,6 +355,8 @@ pub(super) fn view<'a>(
             &mut report,
             &mut budget,
             &mut used,
+            &priority,
+            &mut successes,
         );
         round_engine.config.max_solves = round_engine
             .config
@@ -322,6 +403,12 @@ pub(super) fn view<'a>(
         // A changed equation can make earlier failed proofs succeed and can
         // change the relevant SCCs. Rediscover from the proved prefix.
     };
+    let elapsed = started.elapsed();
+    let mut cache = cache.lock().unwrap();
+    let released = cache.reservations.finish((scope, context), elapsed, stop);
+    if scope == "classification" && context == PruningContext::World {
+        cache.classification_successes.extend(successes.heads);
+    }
     report.views.push(PruningView {
         scope,
         context,
@@ -331,11 +418,13 @@ pub(super) fn view<'a>(
         removed: report.removed,
         covered: report.covered,
         stop,
+        allocated: limits.timeout,
+        elapsed,
+        released,
+        priority_attempts: successes.priority_attempts,
+        priority_proved: successes.priority_proved,
     });
     let result = Arc::new(result);
-    let elapsed = started.elapsed();
-    let mut cache = cache.lock().unwrap();
-    *cache.spent.entry((scope, context)).or_default() += elapsed;
     cache.report.elapsed += elapsed;
     for view in report.views {
         if cache.report.views.len() < 64 {
@@ -397,6 +486,8 @@ fn simplify(
     report: &mut PruningReport,
     budget: &mut Budget<'_>,
     used: &mut QueryLimits,
+    priority: &BTreeSet<usize>,
+    successes: &mut Successes,
 ) -> Result<()> {
     let n = original.fixed.len();
     budget.charge(n + original.rules.len(), "completion pruning index")?;
@@ -522,6 +613,10 @@ fn simplify(
             candidates: targets.rules[&head].clone().into(),
         })
         .collect();
+    let (mut preferred, pending): (std::collections::VecDeque<_>, std::collections::VecDeque<_>) =
+        pending
+            .into_iter()
+            .partition(|p| priority.contains(&p.head));
     let (mut pending, mut deferred): (
         std::collections::VecDeque<_>,
         std::collections::VecDeque<_>,
@@ -532,7 +627,7 @@ fn simplify(
             if pending.is_empty() {
                 std::mem::swap(&mut pending, &mut deferred);
             }
-            let Some(mut item) = pending.pop_front() else {
+            let Some(mut item) = preferred.pop_front().or_else(|| pending.pop_front()) else {
                 break;
             };
             let head = item.head;
@@ -560,7 +655,11 @@ fn simplify(
                 });
                 if !cuts {
                     if !item.candidates.is_empty() {
-                        pending.push_back(item);
+                        if priority.contains(&head) {
+                            preferred.push_back(item);
+                        } else {
+                            pending.push_back(item);
+                        }
                     }
                     continue;
                 }
@@ -570,6 +669,7 @@ fn simplify(
             report.components[row].last_head = Some(original.atoms[head].clone());
             report.components[row].considered += 1;
             report.attempts += 1;
+            successes.priority_attempts += usize::from(priority.contains(&head));
             let _progress =
                 engine
                     .limits
@@ -608,7 +708,8 @@ fn simplify(
             run.budget.charge(pins.len(), "completion pruning pins")?;
             // A hard candidate cannot consume every other head's opportunity.
             // Solver clauses remain valid after an interrupted limited solve.
-            let slice = (run.budget.remaining_time() / ((pending.len() + 1).min(16) as u32))
+            let slice = (run.budget.remaining_time()
+                / ((preferred.len() + pending.len() + 1).min(16) as u32))
                 .min(Duration::from_millis(250));
             let stop = run.cnf.solver.cb_mut();
             let old = stop.timeout;
@@ -635,6 +736,8 @@ fn simplify(
                 }
             };
             if proved {
+                successes.heads.insert(head);
+                successes.priority_proved += usize::from(priority.contains(&head));
                 report.components[row].proved += 1;
                 let removed = if candidate.is_some() {
                     1
@@ -701,7 +804,11 @@ fn simplify(
                     });
             item.coverage = false;
             if !item.candidates.is_empty() {
-                pending.push_back(item);
+                if priority.contains(&head) {
+                    preferred.push_back(item);
+                } else {
+                    pending.push_back(item);
+                }
             }
         }
         Ok(())
@@ -744,6 +851,140 @@ fn equation(run: &mut queries::Run<'_, '_, '_>, gate: Lit, head: Lit, body: Lit)
 #[cfg(test)]
 mod reservation_tests {
     use super::*;
+    #[test]
+    fn only_saturation_releases_time_fairly_to_unstarted_views() {
+        let cw = ("classification", PruningContext::World);
+        let ch = ("classification", PruningContext::Hypothesis);
+        let pw = ("processing", PruningContext::World);
+        let ph = ("processing", PruningContext::Hypothesis);
+        let secs = Duration::from_secs;
+        for stop in [PruningStop::CandidateCutoff, PruningStop::OverallCutoff] {
+            let mut r = Reservations::new(secs(40), true, false);
+            assert_eq!(r.start(cw), secs(10));
+            assert_eq!(r.finish(cw, secs(1), stop), Duration::ZERO);
+            assert_eq!(r.start(pw), secs(10));
+            assert_eq!(r.start(ph), secs(10));
+        }
+        let mut r = Reservations::new(secs(40), true, false);
+        assert_eq!(r.start(cw), secs(10));
+        // Starting a later view cannot borrow from a view still running.
+        assert_eq!(r.start(ch), secs(10));
+        assert_eq!(r.finish(cw, secs(2), PruningStop::Saturated), secs(8));
+        assert_eq!(r.0[&ch].allowance, secs(10));
+        assert_eq!(r.start(pw), secs(14));
+        // A cutoff does not surrender its unused remainder to H.
+        assert_eq!(
+            r.finish(pw, secs(4), PruningStop::CandidateCutoff),
+            Duration::ZERO
+        );
+        assert_eq!(r.start(ph), secs(14));
+        assert_eq!(
+            r.finish(cw, Duration::ZERO, PruningStop::Saturated),
+            Duration::ZERO
+        );
+        assert_eq!(
+            r.0.values().map(|s| s.allowance).sum::<Duration>(),
+            secs(40)
+        );
+    }
+    #[test]
+    fn property_saturation_preserves_other_property_cones_reservation() {
+        let mut r = Reservations::new(Duration::from_secs(60), true, true);
+        let property = ("property", PruningContext::World);
+        assert_eq!(r.start(property), Duration::from_secs(10));
+        assert_eq!(
+            r.finish(property, Duration::from_secs(1), PruningStop::Saturated),
+            Duration::ZERO
+        );
+        assert_eq!(r.start(property), Duration::from_secs(9));
+        assert_eq!(
+            r.start(("processing", PruningContext::World)),
+            Duration::from_secs(10)
+        );
+    }
+    #[test]
+    fn classification_success_hints_survive_the_diagnostic_cap_and_are_reproved() {
+        use crate::sat_probe::completion_query::tests::{prepare, verification};
+        use crate::test_support::rewrites::{rel, rule};
+        let mut c = Corpus::new();
+        let h = rel(&mut c, "recognized", false);
+        let extra = rel(&mut c, "extra", false);
+        rule(&mut c, extra, &[(extra, false)]);
+        rule(&mut c, extra, &[(extra, true)]);
+        let mut heads = Vec::new();
+        for index in 0..70 {
+            let i = rel(&mut c, &format!("input{index}"), true);
+            let p = rel(&mut c, &format!("accepted{index}"), false);
+            let q = rel(&mut c, &format!("profile{index}"), false);
+            rule(&mut c, p, &[(i, false)]);
+            rule(&mut c, p, &[(q, false)]);
+            rule(&mut c, q, &[(i, false), (p, true)]);
+            heads.push((p, false));
+        }
+        rule(&mut c, h, &heads);
+        // Extra keeps processing a different original scope: fresh proofs required.
+        let v = verification(&mut c, Some(h), &[]);
+        let mut e = prepare(&c, v, &Default::default());
+        e.config.max_solves = 2048; // exceed the diagnostic cap, not a scale policy test
+        e.pruning = Some(Arc::new(std::sync::Mutex::new(Cache::for_engine(&e))));
+        view(
+            &e,
+            &e.classification.as_ref().unwrap().0,
+            false,
+            e.limits.timeout,
+        )
+        .unwrap();
+        {
+            let cache = e.pruning.as_ref().unwrap().lock().unwrap();
+            assert_eq!(cache.classification_successes.len(), 70);
+            assert!(cache.report.omitted > 0);
+            assert_eq!(cache.report.views[0].stop, PruningStop::Saturated);
+            assert!(cache.report.views[0].released > Duration::ZERO);
+        }
+        let attempts = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let observed = attempts.clone();
+        e.limits.progress = crate::CheckingProgress::new(move |event| {
+            if let Some(crate::CheckingTarget::CompletionPruning(row)) = event.target {
+                if row.scope == "processing" && row.considered > 0 {
+                    if let Some(head) = row.last_head {
+                        observed.lock().unwrap().push(head);
+                    }
+                }
+            }
+        });
+        view(&e, &e.cone, false, e.limits.timeout).unwrap();
+        let cache = e.pruning.as_ref().unwrap().lock().unwrap();
+        let processing = cache.report.views.last().unwrap();
+        assert_eq!(processing.scope, "processing");
+        let first = attempts.lock().unwrap()[0].clone();
+        assert!(
+            cache
+                .classification_successes
+                .iter()
+                .any(|i| e.cone.atoms[*i] == first)
+        );
+        assert_eq!(processing.priority_proved, 70);
+        assert!(processing.priority_attempts > processing.priority_proved);
+    }
+    #[test]
+    fn priority_hints_never_authorize_a_rewrite() {
+        use crate::sat_probe::completion_query::tests::{prepare, verification};
+        use crate::test_support::rewrites::{rel, rule};
+        let mut c = Corpus::new();
+        let p = rel(&mut c, "contradiction", false);
+        rule(&mut c, p, &[(p, true)]);
+        let v = verification(&mut c, None, &[]);
+        let mut e = prepare(&c, v, &Default::default());
+        let mut cache = Cache::for_engine(&e);
+        cache.classification_successes.extend(0..e.cone.atoms.len());
+        e.pruning = Some(Arc::new(std::sync::Mutex::new(cache)));
+        let result = view(&e, &e.cone, false, e.limits.timeout).unwrap();
+        assert!(*result.rules == *e.cone.rules);
+        assert!(result.fixed == e.cone.fixed);
+        let cache = e.pruning.as_ref().unwrap().lock().unwrap();
+        assert!(cache.report.views[0].priority_attempts > 0);
+        assert_eq!(cache.report.views[0].priority_proved, 0);
+    }
     #[test]
     fn discovery_setup_cutoff_is_not_reported_as_overall_exhaustion() {
         let mut c = Corpus::new();
@@ -804,10 +1045,12 @@ mod reservation_tests {
         let mut e = crate::sat_probe::completion_query::tests::prepare(&c, v, &Default::default());
         let mut cache = Cache::for_engine(&e);
         // A completed W pass used its entire reservation. H must still run.
-        cache.spent.insert(
-            ("classification", PruningContext::World),
-            cache.share.unwrap(),
-        );
+        let slot = cache
+            .reservations
+            .0
+            .get_mut(&("classification", PruningContext::World))
+            .unwrap();
+        slot.spent = slot.allowance;
         e.pruning = Some(Arc::new(std::sync::Mutex::new(cache)));
         let cone = &*e.classification.as_ref().unwrap().0;
         let w = view(&e, cone, false, e.limits.timeout).unwrap();
@@ -821,6 +1064,10 @@ mod reservation_tests {
                 .records
                 .iter()
                 .any(|r| r.context == PruningContext::Hypothesis)
+        );
+        assert!(
+            cache.classification_successes.is_empty(),
+            "H-only proofs are not W hints"
         );
     }
 }

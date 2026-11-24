@@ -1932,7 +1932,11 @@ the target head's equation disabled and the other scope equations unchanged.
 Candidates are unsettled heads in odd components or cyclic components independently
 shown non-unique with a free boundary. Locally unique and acyclic heads are skipped.
 The existing parity-witness BFS and negative-edge relation histogram rank candidates;
-multiple-producer heads precede unary heads. Heads receive round-robin turns: first
+processing first retries heads successfully simplified under classification W,
+re-proving each candidate in processing. This scheduling set includes every successful
+head, independently of capped diagnostic records; H-only successes are excluded.
+Among other heads, multiple-producer heads precede unary heads. Heads receive
+round-robin turns within these priority tiers: first
 coverage, then individual subsumption candidates. A subsumption candidate must cut
 an internal edge not supplied by another remaining producer. Successful changes
 update subsequent proofs. After a changed round, targets and ranking are rebuilt
@@ -1946,7 +1950,11 @@ Each round has an incremental proof solver; all rounds share one view budget.
 Optional pruning reserves at most one third of the invocation timeout, divided
 equally across selected verifications, then classification (when present), processing,
 and property work (when present), then W/W+H. W cannot spend H's reservation;
-property scopes share one bucket. Unused reservations are not borrowed. The CLI
+property scopes share one bucket. When a classification or processing view saturates,
+its unused reservation is divided equally among buckets not yet started in that
+verification. Unfinished views and cutoffs release nothing; started views receive
+no retroactive extension. A single property view cannot release the shared property
+reservation. Separate verifications retain their independent reservations. The CLI
 sets `Limits::pruning_allowance` once per verification; standalone API checks use
 one third of their invocation timeout. A reservation is additionally capped at
 one third of the time remaining when checking starts, preserving search time

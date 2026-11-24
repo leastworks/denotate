@@ -912,6 +912,10 @@ fn completion_pruning_is_opt_in_and_leaves_default_output_unchanged() {
     let (code, enabled) = f.run(&["--engine", "sat", "--no-progress", "--completion-prune"]);
     assert_eq!(code, 0, "{enabled}");
     assert!(enabled.contains("completion-pruning"), "{enabled}");
+    assert!(
+        enabled.contains("ms released; classification-W priority:"),
+        "{enabled}"
+    );
     assert_eq!(f.run(&flags), (0, plain));
     for enabled in [false, true] {
         let mut flags = vec!["--engine", "sat", "--no-progress", "--json"];
@@ -922,6 +926,16 @@ fn completion_pruning_is_opt_in_and_leaves_default_output_unchanged() {
         assert_eq!(code, 0, "{out}");
         assert_eq!(out.contains("\"simplifications\""), enabled, "{out}");
         assert_eq!(out.contains("completion pruning W"), enabled, "{out}");
+        if enabled {
+            for field in [
+                "allocatedMs",
+                "releasedMs",
+                "priorityAttempts",
+                "priorityProved",
+            ] {
+                assert!(out.contains(field), "missing {field}: {out}");
+            }
+        }
         if !enabled {
             assert!(
                 !out.contains("completion original validation index"),

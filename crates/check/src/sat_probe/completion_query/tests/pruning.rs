@@ -271,7 +271,7 @@ fn every_completed_or_interrupted_pruning_prefix_preserves_models_both_ways() {
                 let mut e = prepare(&c, v, &Domains::new());
                 e.limits.max_work = work;
                 e.pruning = Some(Arc::new(std::sync::Mutex::new(
-                    super::super::pruning::Cache::default(),
+                    super::super::pruning::Cache::for_engine(&e),
                 )));
                 let view =
                     super::super::pruning::view(&e, &e.cone, h, std::time::Duration::from_secs(10))

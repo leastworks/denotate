@@ -688,7 +688,11 @@ classification/property membership, contracts and model replay retain the origin
 program. No view or proof is reused across preparations or edits, or in a weaker
 context. Changed pruning rounds rediscover targets from proved prefixes. View
 construction precedes split/unsplit allocation and shares one fair, bounded
-invocation reservation across verifications and W/H. Immutable
+invocation reservation across verifications and W/H. Within a verification, saturated
+root views redistribute unused time to unstarted buckets; unfinished views keep
+their reservations. The invocation also keeps an uncapped, program-bounded set of
+classification-W successful heads as processing priority hints. Every processing
+rewrite is proved anew; neither transformations nor H-only hints cross scopes. Immutable
 prepared cones and assumption metadata are shared when creating the invocation.
 Classification no-meaning uses the H view to cover accepted observations before
 trying the W-only view on an observation with no H interpretation. These proofs

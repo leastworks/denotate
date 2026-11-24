@@ -2299,3 +2299,21 @@ cheaper just because it has many branches. The absolute deadline still binds.
 Explicit limits retain conservative division; structural limits remain separate.
 Library, stable semantics and editor defaults are unchanged. The policy and its
 provisional amounts live in checker-policies.md.
+
+
+## Saturated pruning views return time; successful heads supply hints
+
+Global classification pruning can finish while processing still needs time to
+prove similar removals. A saturated classification or processing view releases
+its unused reservation equally to buckets not yet started in that verification.
+Unfinished views and either kind of cutoff keep their reservations, so one view
+cannot borrow time reserved for W+H. Multiple property cones share a bucket:
+finishing one does not release the others' time. Separate verifications retain
+their reserved allowances; the aggregate bound and absolute deadline are unchanged.
+
+Processing tries classification-W successful heads before other candidates. It
+re-proves each rewrite using processing's common equations; the hint is neither
+a transferred proof nor a permission to prune. H-only successes never enter this
+set. Keep every successful head in an invocation-local, program-bounded set,
+separate from the bounded diagnostic records, so truncating reports cannot change
+search order. Default checking, semantic scopes and model validation are unchanged.

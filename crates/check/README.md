@@ -1471,7 +1471,13 @@ the parent components they cut; unrelated loops stay in residual checking. No
 closed witness implies that other components are solved.
 
 Pruning views are built before these allocations. One aggregate pruning allowance
-is reserved fairly across verifications, scopes and W/H. CLI automatic time-scaled
+is reserved fairly across verifications, scopes and W/H. Saturated classification
+and processing views release unused time equally to unstarted buckets within the
+verification; cutoffs and unfinished views do not. Property cones keep their shared
+reservation. Processing prioritizes classification-W successful heads, re-proving
+their rewrites in its own scope. H-only proofs and capped presentation records are
+not the source of these hints. Per-view telemetry reports allocation, elapsed and
+released time, and prioritized attempts/proofs. CLI automatic time-scaled
 search guards survive branch division, including preparation cost; explicit caps
 still divide, structural caps stay separate, and every child shares the absolute
 run deadline. Library defaults remain unchanged. See checker policies for amounts.
