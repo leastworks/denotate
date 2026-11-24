@@ -43,7 +43,7 @@ pub(super) fn choose_in(
     // H-first coverage and processing rank their stronger inherited view.
     // No-H fallbacks still use the separate W view in the leaf query.
     let (state, context) = bundle.ranking(classification, e.classification.is_some());
-    let materialized = state.cone(b)?;
+    let materialized = state.analysis_cone(b)?;
     let c = &*materialized;
     let graph = consistency::analyse(c, None, b)?;
     let mut candidates: BTreeSet<_> = graph
@@ -368,7 +368,7 @@ pub(super) fn choose_in(
     if capacity >= 2 {
         let formula_h = e.classification.is_some() && !(classification && existence);
         let (formula_state, formula_context) = bundle.ranking(classification, formula_h);
-        let formula_cone = formula_state.cone(b)?;
+        let formula_cone = formula_state.analysis_cone(b)?;
         let mut producers = vec![vec![]; formula_cone.fixed.len()];
         for (j, r) in formula_cone.rules.iter().enumerate() {
             b.charge(r.body.len() + 1, "completion formula candidates")?;
@@ -765,6 +765,7 @@ fn verify(
                 let (child, child_context) =
                     child_bundle.ranking(classification, e.classification.is_some());
                 row.child_trials.last_mut().unwrap().context = child_context;
+                let child = fitting::State::new(child.analysis_cone(&mut trial)?, &mut trial)?;
                 let mut cuts = BTreeSet::new();
                 let mut disabled = 0;
                 for (id, edges) in witnesses {
@@ -890,7 +891,7 @@ pub(super) fn derived_guards(
     row: &mut SplitCandidate,
     b: &mut Budget<'_>,
 ) -> Result<()> {
-    let cone = state.cone(b)?;
+    let cone = state.analysis_cone(b)?;
     let graph = consistency::analyse(&cone, None, b)?;
     let mut providers = vec![vec![]; cone.fixed.len()];
     for r in &cone.rules {

@@ -2240,16 +2240,34 @@ be re-scored.
 ### Implied positive body literals in completion views
 
 With `--completion-prune`, targeted odd/non-unique heads also offer positive
-in-component body literals for removal. First try indexed one-atom supports in
-another head's definition. Structural successes trigger a new root round before
-SAT encoding. Otherwise, share the existing gated common-equations encoding with
+in-component body literals for SAT-proved removal. Search-free one-atom supports
+now run on all live rules before target discovery (see below). For other
+implications, share the existing gated common-equations encoding with
 coverage and producer subsumption; try literal implications after that head's
 coverage attempt and before its producer-removal attempts. Updated bodies receive
 new equation gates, while original scopes and validation stay unchanged.
 
-Both paths use existing pruning work, time, query and candidate-slice allowances;
-there is no new limit or enabled-by-default pass. Branch trials use the same
+The SAT path uses existing pruning work, time, query and candidate-slice allowances;
+there is no new limit. Branch trials use the same
 mechanism and retain their context/assignment boundaries. Telemetry counts
 `removedBodyLiterals` separately at record, component, view and aggregate levels;
 proof records remain bounded and omitted counts explicit. No corpus performance
 improvement is inferred from the lowerer's equivalent rewrite.
+
+
+### Search-free reductions precede completion graph analysis
+
+Fitting and indexed positive-body implications run on all solver views before
+components, odd-cycle explanations and ranking. They use the checking caller's
+existing work/deadline allowance. Initial reduction precedes optional root pruning;
+reductions between proof rounds also count against the enclosing pass's elapsed
+time. After a SAT rewrite changes equations, reduce the changed prefix before the
+next analysis; unchanged cached views do not need another pass. Child propagation keeps
+its persistent indexes; analysis materialization performs the reduction separately
+and tentative ranking pays for it from its existing allowance.
+
+Inactive rule slots remain for source identity and original-model validation.
+Semantic scopes remain fixed by live GFP. This does not introduce stable-model
+unfounded-set reasoning into completion. On reduction exhaustion, keep the supplied
+view and its already-proved prefix; no spent budget is restored. Private corpus
+component-size improvements require a new run, not inference from small controls.

@@ -1,0 +1,32 @@
+namespace example {
+  sort Output;
+  sort Task;
+  const load_whole, derive_subset: Task;
+  const whole_result, subset_result: Output;
+  relation output_of(o: Output, t: Task);
+  output_of(whole_result, load_whole);
+  output_of(subset_result, derive_subset);
+  relation conditional_output(o: Output);
+  conditional_output(whole_result);
+  conditional_output(subset_result);
+  relation unconditional_output(o: Output);       // no facts
+
+  relation whole_output(O: Output, T: Task);
+  whole_output(whole_result, load_whole);                 // the shape stated as a fact
+
+  relation applies(t: Task);
+  applies(load_whole);
+  input emitted();
+  input result_two();
+
+  relation computes();
+  computes() :- whole_output(O, T), unconditional_output(O), applies(T);
+  computes() :- whole_output(O, T), conditional_output(O), applies(T), emitted();
+  relation has_two();
+  has_two() :- computes(), result_two();
+  relation guard();
+  guard() :- !has_two();
+  applies(derive_subset) :- guard();
+
+  verification all { semantics: completion; assumptions: []; obligations: []; }
+}

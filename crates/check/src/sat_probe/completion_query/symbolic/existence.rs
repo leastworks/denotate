@@ -3,6 +3,33 @@
 //! report no meaning. Positive SCCs always extend their providers by a fixpoint.
 use super::*;
 
+/// Analysis components belong to the current solver view, never the frozen
+/// preparation graph. Semantic classification/property membership stays frozen.
+fn components(c: &Cone, b: &mut Budget<'_>) -> Result<(Vec<Vec<usize>>, Vec<BTreeSet<usize>>)> {
+    let graph = consistency::analyse(c, None, b)?;
+    let mut producers = vec![vec![]; c.fixed.len()];
+    for (ri, r) in c.rules.iter().enumerate() {
+        b.charge(r.body.len() + 1, "completion component index")?;
+        if c.input[r.head]
+            || c.fixed[r.head].is_some()
+            || r.body
+                .iter()
+                .any(|(i, p)| c.fixed[*i].is_some_and(|v| v != *p))
+        {
+            continue;
+        }
+        producers[r.head].push(ri);
+    }
+    let mut groups = BTreeMap::<usize, BTreeSet<usize>>::new();
+    for (i, id) in graph.component.iter().enumerate() {
+        b.tick("completion component index")?;
+        if graph.cyclic[i] {
+            groups.entry(*id).or_default().insert(i);
+        }
+    }
+    Ok((producers, groups.into_values().collect()))
+}
+
 pub(super) fn residual(
     engine: &Engine,
     cone: &Cone,
@@ -11,41 +38,12 @@ pub(super) fn residual(
     s: &mut Solver<'_, '_, '_>,
     options: &CheckOptions,
 ) -> Result<Option<Cone>> {
-    let b = &mut *s.run.budget;
-    b.charge(
-        cone.fixed.len() + cone.rules.len(),
-        "completion component index",
-    )?;
-    let mut producers = vec![Vec::new(); cone.fixed.len()];
-    for (i, r) in cone.rules.iter().enumerate() {
-        producers[r.head].push(i);
-    }
+    let (producers, mut components) = components(cone, s.run.budget)?;
     let mut pending = Vec::new();
-    let mut components = Vec::new();
-    for c in engine.program.components() {
-        b.tick("completion component index")?;
-        if c.cycle.is_none() {
-            continue;
+    if !classification {
+        if let Some((_, members, _)) = &engine.classification {
+            components.retain(|heads| !heads.iter().all(|i| members.contains(&cone.atoms[*i])));
         }
-        let heads: BTreeSet<_> = c
-            .atoms
-            .iter()
-            .map(|a| engine.program.atom_index[a])
-            .filter(|i| !producers[*i].is_empty())
-            .collect();
-        // An upstream-closed query either contains the entire SCC or none of it.
-        if heads.is_empty() {
-            continue;
-        }
-        if !classification
-            && engine
-                .classification
-                .as_ref()
-                .is_some_and(|(_, m, _)| c.atoms.iter().all(|a| m.contains(a)))
-        {
-            continue;
-        }
-        components.push(heads);
     }
     s.stats.components = components.len();
     s.metrics();
@@ -570,21 +568,8 @@ pub(super) fn classification_shape(
     view: &'static str,
     s: &mut Solver<'_, '_, '_>,
 ) -> Result<()> {
-    let mut producers = vec![Vec::new(); cone.fixed.len()];
-    for (i, r) in cone.rules.iter().enumerate() {
-        s.run.budget.tick("completion component index")?;
-        producers[r.head].push(i);
-    }
-    for c in engine.program.components().filter(|c| c.recursive) {
-        let heads: BTreeSet<_> = c
-            .atoms
-            .iter()
-            .map(|a| engine.program.atom_index[a])
-            .filter(|i| !producers[*i].is_empty())
-            .collect();
-        if heads.is_empty() {
-            continue;
-        }
+    let (producers, groups) = components(cone, s.run.budget)?;
+    for heads in groups {
         let local = component(cone, &producers, &heads, s.run.budget)?;
         let core = consistency::analyse(&local, None, s.run.budget)?;
         let relations: BTreeSet<_> = local

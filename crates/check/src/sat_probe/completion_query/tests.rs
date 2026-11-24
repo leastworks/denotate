@@ -8,6 +8,7 @@ mod implied_literals;
 mod pruning;
 mod reports;
 pub(super) mod scale;
+mod search_free;
 
 pub(super) fn keys(c: &Corpus) -> SemanticKeys {
     let mut k = SemanticKeys::default();

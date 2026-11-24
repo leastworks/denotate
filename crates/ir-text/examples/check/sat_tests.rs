@@ -987,8 +987,10 @@ fn targeted_pruning_reports_considered_proved_and_optional_cutoffs_without_verbo
 
 #[test]
 fn completion_branches_are_opt_in_and_try_unsplit_before_reporting_input_choices() {
+    // The indirect support keeps a residual cycle after unary-support reduction,
+    // so the bounded run still exercises split output.
     let f = Fixture::new(
-        "sort Tag;const a,b:Tag;input tag(v:Tag) exactly_one(group_by:());relation p();relation q();p():-tag(a);p():-tag(b),q();q():-tag(b);q():-tag(a),!p();verification v{semantics:completion;assumptions:[];obligations:[];}",
+        "sort Tag;const a,b:Tag;input tag(v:Tag) exactly_one(group_by:());relation p();relation q();relation side();side():-tag(b);p():-tag(a);p():-tag(b),q();q():-side();q():-tag(a),!p();verification v{semantics:completion;assumptions:[];obligations:[];}",
     );
     let (code, plain) = f.run(&["--engine", "sat", "--json", "--no-progress"]);
     assert_eq!(code, 0, "{plain}");

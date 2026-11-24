@@ -152,8 +152,14 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
         self.gates.push(gate);
         Ok(gate)
     }
-    fn simplified<'c>(&mut self, cone: &'c Cone, h: bool) -> Result<pruning::View<'c>> {
-        pruning::view(self.run.engine, cone, h, self.run.budget.remaining_time())
+    fn simplified(&mut self, cone: &Cone, h: bool) -> Result<pruning::View> {
+        pruning::view_using(
+            self.run.engine,
+            cone,
+            h,
+            self.run.budget.remaining_time(),
+            self.run.budget,
+        )
     }
     fn encode(&mut self, original: &Cone, h: bool) -> Result<Encoded> {
         let view = self.simplified(original, h)?;
@@ -182,9 +188,7 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
             }
         }
         self.run.cnf.gate = None;
-        if self.run.engine.pruning.is_some() {
-            original_validation(original, &mut encoding, self.run.budget)?;
-        }
+        original_validation(original, &mut encoding, self.run.budget)?;
         Ok(Encoded { gate, encoding })
     }
     fn encode_shared(
@@ -213,9 +217,7 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
             }
         }
         self.run.cnf.gate = None;
-        if self.run.engine.pruning.is_some()
-            && let (Some(to), Some(from)) = (&mut encoding.validation, &first.encoding.validation)
-        {
+        if let (Some(to), Some(from)) = (&mut encoding.validation, &first.encoding.validation) {
             self.run
                 .budget
                 .charge(from.heads.len(), "completion original validation index")?;
@@ -1335,4 +1337,13 @@ impl<T> Unknown for Search<T> {
             None
         }
     }
+}
+
+#[cfg(test)]
+pub(super) fn has_cycle_for_test(c: &Cone) -> bool {
+    consistency::analyse(c, None, &mut Budget::new(&Limits::default()))
+        .unwrap()
+        .cyclic
+        .iter()
+        .any(|v| *v)
 }

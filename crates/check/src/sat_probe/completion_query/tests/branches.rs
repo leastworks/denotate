@@ -107,7 +107,7 @@ fn partition_report(c: &Corpus, e: &Engine, options: &CheckOptions) -> BranchRep
 }
 
 #[test]
-fn fitting_input_branches_cut_an_odd_loop_for_declared_and_selected_groups() {
+fn structural_guard_shortening_can_close_declared_and_selected_groups_without_splitting() {
     for selected in [false, true] {
         for hypothesis in [false, true] {
             let mut c = Corpus::new();
@@ -128,12 +128,15 @@ fn fitting_input_branches_cut_an_odd_loop_for_declared_and_selected_groups() {
                 assert!(!got.is_incomplete());
                 assert!(!got.has_failures());
                 let partitions = partition_report(&c, &e, &options);
-                assert!(partitions.splits > 0);
+                assert_eq!(
+                    partitions.splits, 0,
+                    "unconditional body implication already cuts the loop"
+                );
                 assert!(
                     partitions
                         .records
                         .iter()
-                        .any(|r| r.depth > 0 && r.state == "proved")
+                        .any(|r| r.depth == 0 && r.state == "proved")
                 );
                 super::scale::same_report(&got, &e.check(&keys(&c), &options).unwrap());
                 super::scale::same_report(
@@ -288,7 +291,7 @@ fn nested_partitions_respect_depth_and_preserve_residual_search() {
             partitions
                 .records
                 .iter()
-                .any(|r| r.depth == depth && r.state == "proved")
+                .any(|r| r.depth <= depth && r.state == "proved")
         );
     }
 }

@@ -780,3 +780,50 @@ fn formula_split_telemetry_distinguishes_certificate_and_child_views() {
     assert!(lines.contains("(false) [W+H]"));
     assert!(lines.contains("target atoms settled"));
 }
+
+#[test]
+fn fact_negation_task_shape_and_explicit_facts_have_no_analysis_component() {
+    for text in [
+        include_str!("../../../fixtures/completion-search-free/fact-guards/program.den"),
+        include_str!("../../../fixtures/completion-search-free/explicit-facts/program.den"),
+    ] {
+        let p = loaded(text);
+        let v = p.corpus.verifications().next().unwrap().id;
+        for prune in [false, true] {
+            let sizes = denotate_check::CompletionSizes::default();
+            let Preparation::Ready(e) = Engine::prepare(
+                &p.corpus,
+                &p.domains,
+                &p.keys,
+                v,
+                &Limits {
+                    completion_sizes: Some(sizes.clone()),
+                    ..Default::default()
+                },
+                QueryLimits::default(),
+            )
+            .unwrap() else {
+                panic!()
+            };
+            let r = e
+                .check(
+                    &p.keys,
+                    &CheckOptions {
+                        prune,
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            assert!(!r.is_incomplete());
+            assert!(!r.has_failures());
+            assert!(matches!(r.meaning.no_meaning, Search::None));
+            assert!(matches!(r.meaning.ambiguous, Search::None));
+            let snapshot = sizes.snapshot();
+            assert!(!snapshot.searches.is_empty());
+            for s in snapshot.searches {
+                assert_eq!(s.existence.components, 0, "{}", s.phase);
+                assert!(s.existence.component_details.is_empty());
+            }
+        }
+    }
+}

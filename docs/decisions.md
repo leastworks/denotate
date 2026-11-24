@@ -2351,10 +2351,11 @@ records have their own bounded space so a full root report cannot hide all of th
 
 ## Completion pruning can remove implied positive body literals
 
-Within an opt-in pruning view, a producer `x :- A, L` can become `x :- A`
+A producer `x :- A, L` can become `x :- A`
 when the remaining body implies the positive literal L. This removes a dependency
-edge without removing the producer. Candidate heads retain the existing odd or
+edge without removing the producer. SAT candidates retain the existing odd or
 non-unique component targeting, original scopes, W/W+H contexts and branch pins.
+The search-free structural path below now applies to all live rules.
 
 Let E be all other current equations and C the view's context. The proof asks
 whether `E ∧ C ∧ A ∧ ¬L` is unsatisfiable, with x's equation disabled. Then the
@@ -2399,3 +2400,27 @@ closing a target is not proof of the residual question. The diagnostic 32-guard
 cap belongs to the split, shared across all children with unused shares passed
 forward and per-child omissions. Telemetry limits never change the chosen partition.
 Forcing and model-case splits remain separate work; no default policy changes.
+
+
+## Completion structural analysis sees search-free reductions
+
+A fixed fact can make a negated body false even when the positive-support GFP kept
+that producer. Likewise, `selected :- value, present` need not depend on `present`
+when `present :- value` is one of its definitions. Discovering SCCs before these
+reductions sends spurious cycles to proof search. Restricting structural literal
+removal to optional odd/non-unique pruning targets missed these cases in other
+views, while encoder-only Fitting happened too late for graph analysis.
+
+Apply completion-preserving Fitting and indexed unary-support implications before
+analysis in every solver view. Recompute analysis components from that view,
+rather than retaining preparation SCC membership after edges have disappeared.
+These reductions need no hypothesis or search. Context-dependent reductions remain
+restricted to the W/W+H/pinned view that proves them. Optional SAT pruning remains
+opt-in; the search-free pass is part of ordinary completion checking.
+
+Keep semantic C(H), property and contract scopes frozen by live GFP. A dead edge
+can disappear from an analysis graph without removing its old dependency from
+semantic classification membership. Keep original source rule slots and replay
+returned models against the original equations. Fitting does not decide unseeded
+positive recursion: `p :- p` still has two completion models. No well-founded or
+least-fixpoint reduction is substituted for that contract.

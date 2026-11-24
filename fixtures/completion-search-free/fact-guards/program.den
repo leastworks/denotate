@@ -1,0 +1,33 @@
+namespace example {
+  sort Output;
+  sort Task;
+  const load_whole, derive_subset: Task;
+  const whole_result, subset_result: Output;
+  relation output_of(o: Output, t: Task);
+  output_of(whole_result, load_whole);
+  output_of(subset_result, derive_subset);
+  relation conditional_output(o: Output);
+  conditional_output(whole_result);
+  conditional_output(subset_result);
+  relation partial_output(o: Output);
+  partial_output(subset_result);                          // derive_subset writes a subset
+
+  relation whole_output(O: Output, T: Task);
+  whole_output(O, T) :- output_of(O, T), !partial_output(O);   // false for subset_result, by facts
+
+  relation applies(t: Task);
+  applies(load_whole);                                 // load_whole always runs
+  input emitted();                                // load_whole's conditional emission
+  input result_two();                             // its whole value contains 2
+
+  relation computes();                            // the field's whole value is written
+  computes() :- whole_output(O, T), !conditional_output(O), applies(T);             // dead for both outputs
+  computes() :- whole_output(O, T), conditional_output(O), applies(T), emitted();   // live for whole_result only
+  relation has_two();                             // the field contains 2
+  has_two() :- computes(), result_two();
+  relation guard();                               // when not field contains 2
+  guard() :- !has_two();
+  applies(derive_subset) :- guard();
+
+  verification all { semantics: completion; assumptions: []; obligations: []; }
+}

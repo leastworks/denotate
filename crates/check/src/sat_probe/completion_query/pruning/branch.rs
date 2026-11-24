@@ -201,16 +201,29 @@ pub(in crate::sat_probe::completion_query) fn prove(
     used: &mut QueryLimits,
     report: &mut PruningReport,
 ) -> Result<Arc<Cone>> {
-    let mut result = base.clone();
     let mut successes = Successes::default();
     let original = if scope == "classification" {
         &e.classification.as_ref().unwrap().0
     } else {
         &e.cone
     };
+    let normalized = reduce_view(
+        base,
+        scope,
+        context,
+        original
+            .rules
+            .iter()
+            .map(|r| r.head)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        report,
+        budget,
+    )?;
+    let mut result = normalized.clone();
     let answer = simplify(
         e,
-        base,
+        &normalized,
         &mut result,
         context,
         scope,

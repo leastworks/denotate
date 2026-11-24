@@ -297,36 +297,54 @@ impl Cache {
             .collect()
     }
 }
-pub(super) enum View<'a> {
-    Original(&'a Cone),
+pub(super) enum View {
     Pruned(Arc<Cone>),
+    Reduced(Arc<Cone>),
 }
-impl View<'_> {
+impl View {
     pub(super) fn label(&self) -> &'static str {
         match self {
-            Self::Original(_) => "unpruned",
+            Self::Reduced(_) => "unpruned",
             Self::Pruned(_) => "pruned",
         }
     }
 }
-impl std::ops::Deref for View<'_> {
+impl std::ops::Deref for View {
     type Target = Cone;
     fn deref(&self) -> &Cone {
         match self {
-            Self::Original(c) => c,
-            Self::Pruned(c) => c,
+            Self::Pruned(c) | Self::Reduced(c) => c,
         }
     }
 }
 
-pub(super) fn view<'a>(
+pub(super) fn view(
     engine: &Engine,
-    cone: &'a Cone,
+    cone: &Cone,
     hypothesis: bool,
     remaining: std::time::Duration,
-) -> Result<View<'a>> {
+) -> Result<View> {
+    let mut limits = engine.limits.clone();
+    limits.timeout = limits.timeout.min(remaining);
+    view_using(
+        engine,
+        cone,
+        hypothesis,
+        remaining,
+        &mut Budget::new(&limits),
+    )
+}
+pub(super) fn view_using(
+    engine: &Engine,
+    cone: &Cone,
+    hypothesis: bool,
+    remaining: Duration,
+    caller_budget: &mut Budget<'_>,
+) -> Result<View> {
     let Some(cache) = &engine.pruning else {
-        return Ok(View::Original(cone));
+        return Ok(View::Reduced(Arc::new(
+            search_free::optional(cone, caller_budget)?.0.cone,
+        )));
     };
     // All callers supply a frozen scope with every original producer of its
     // heads. The program, domains and W are fixed for this invocation.
@@ -351,7 +369,9 @@ pub(super) fn view<'a>(
         // A branch may reuse only proofs made in its ancestor's exact scope.
         // Computing new pin-relative proofs belongs to the next increment.
         if cache.readonly {
-            return Ok(View::Original(cone));
+            return Ok(View::Reduced(Arc::new(
+                search_free::optional(cone, caller_budget)?.0.cone,
+            )));
         }
     }
     let classification_heads = engine
@@ -380,10 +400,18 @@ pub(super) fn view<'a>(
     // H views extend the same frozen scope's W-pruned view. No H proof
     // can enter the W cache or a classification query without H.
     let base_started = Instant::now();
+    let mut structural_report = PruningReport::default();
     let base = if context == PruningContext::Hypothesis {
-        view(engine, cone, false, remaining)?
+        view_using(engine, cone, false, remaining, caller_budget)?
     } else {
-        View::Original(cone)
+        View::Reduced(Arc::new(reduce_view(
+            cone,
+            scope,
+            context,
+            key.0.len(),
+            &mut structural_report,
+            caller_budget,
+        )?))
     };
     let remaining = remaining.saturating_sub(base_started.elapsed());
     let phase = match context {
@@ -409,11 +437,22 @@ pub(super) fn view<'a>(
     let started = Instant::now();
     let mut budget = Budget::new(&limits);
     let mut result = (*base).clone();
-    let mut report = PruningReport::default();
+    let mut report = structural_report;
     let mut rounds = 0;
     let mut successes = Successes::default();
     let mut round_engine = engine.clone();
+    let mut needs_reduction = false;
     let stop = loop {
+        if needs_reduction {
+            result = reduce_view(
+                &result,
+                scope,
+                context,
+                key.0.len(),
+                &mut report,
+                caller_budget,
+            )?;
+        }
         let previous = result.clone();
         let removed = (report.removed, report.removed_literals);
         let first_row = report.components.len();
@@ -455,6 +494,7 @@ pub(super) fn view<'a>(
             .config
             .max_propagations
             .saturating_sub(used.max_propagations);
+        needs_reduction = (report.removed, report.removed_literals) != removed;
         if let Err(error) = answer {
             // Keep every proved prefix. Optimization exhaustion is not a verdict.
             limits.cancellation.check()?;
@@ -485,6 +525,16 @@ pub(super) fn view<'a>(
         // change the relevant SCCs. Rediscover from the proved prefix.
     };
     let elapsed = started.elapsed();
+    if needs_reduction {
+        result = reduce_view(
+            &result,
+            scope,
+            context,
+            key.0.len(),
+            &mut report,
+            caller_budget,
+        )?;
+    }
     let mut cache = cache.lock().unwrap();
     let released = cache.reservations.finish((scope, context), elapsed, stop);
     if let Some(pool) = cache.trials.clone() {
@@ -546,6 +596,42 @@ pub(super) fn add_query(q: &mut QueryLimits, used: QueryLimits) {
     q.max_conflicts = q.max_conflicts.saturating_add(used.max_conflicts);
     q.max_propagations = q.max_propagations.saturating_add(used.max_propagations);
 }
+fn reduce_view(
+    c: &Cone,
+    scope: &'static str,
+    context: PruningContext,
+    scope_heads: usize,
+    report: &mut PruningReport,
+    b: &mut Budget<'_>,
+) -> Result<Cone> {
+    let (result, cutoff) = search_free::optional(c, b)?;
+    if let Some(cutoff) = cutoff {
+        report.incomplete.push(cutoff);
+    }
+    report.attempts += result.removed;
+    report.removed_literals += result.removed;
+    report.omitted += result.removed.saturating_sub(result.examples.len());
+    for r in result.examples {
+        retain(
+            report,
+            PruningRecord {
+                context,
+                kind: PruningKind::ImpliedBodyLiteral,
+                head: c.atoms[r.head].clone(),
+                rules: vec![r.rule],
+                removed: 0,
+                removed_literals: 1,
+                scope_heads,
+                scope,
+                pins: vec![],
+                omitted_pins: 0,
+                literal: Some(c.atoms[r.literal].clone()),
+                structural: true,
+            },
+        );
+    }
+    Ok(result.cone)
+}
 fn simplify(
     engine: &Engine,
     original: &Cone,
@@ -601,19 +687,6 @@ fn simplify(
     };
     let candidates = targets.heads.clone();
     if candidates.is_empty() {
-        return Ok(());
-    }
-    if literals::structural(
-        original,
-        result,
-        &targets,
-        scope,
-        context,
-        scope_heads,
-        report,
-        budget,
-        successes,
-    )? {
         return Ok(());
     }
     // Fold only consequences independent of ALL candidate definitions. Those
@@ -1230,7 +1303,8 @@ mod reservation_tests {
         let cone = &*e.classification.as_ref().unwrap().0;
         let w = view(&e, cone, false, e.limits.timeout).unwrap();
         let h = view(&e, cone, true, e.limits.timeout).unwrap();
-        assert!(*w.rules == *cone.rules);
+        let reduced = search_free::reduce(cone, &mut Budget::new(&e.limits)).unwrap();
+        assert!(*w.rules == *reduced.cone.rules);
         assert!(h.rules.len() < w.rules.len() || h.fixed != w.fixed);
         let cache = e.pruning.as_ref().unwrap().lock().unwrap();
         assert!(

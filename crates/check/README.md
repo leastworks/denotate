@@ -1408,8 +1408,9 @@ queries; only confirmed absence of an H-model permits the latter query.
 
 `CheckOptions::prune` defaults to false. The CLI exposes it as
 `--completion-prune` with `--engine sat`. Disabled checks use the original query
-path, without the pruning cache, H-first existence search or extra original-view
-validation indexing. `Report::pruning.enabled` identifies opt-in reports; the shared
+path without the pruning cache or H-first existence search. All completion views
+receive the search-free reductions described below, and original-equation
+validation applies in both modes. `Report::pruning.enabled` identifies opt-in reports; the shared
 presenter omits `simplifications` entirely when disabled.
 
 Optional pruning targets only odd or independently locally non-unique cyclic
@@ -1518,12 +1519,39 @@ shares pass forward. Child records include omissions/completeness, pruning
 removals, bounded pruned heads, settled target atoms and witness cuts. A closed
 target still receives the full residual question.
 
-Completion pruning also shortens bodies in targeted odd/non-unique components.
+Completion proof-based pruning also shortens bodies in targeted odd/non-unique components.
 A positive literal L is removable from `x :- A, L` when the other equations and
 recorded context imply `A -> L`. A one-atom producer for L whose atom is in A
 provides an indexed structural proof (L must differ from x). Otherwise the shared
 SAT proof disables x's equation, tests the implication, and updates its gated
-replacement. All later proofs use current equations. This is opt-in under the
-existing pruning option; no source scopes, input contracts or validation rules
-change. Literal removals have separate counts and evidence from producer removals,
+replacement. All later proofs use current equations. The SAT proof path is opt-in
+under the existing pruning option; the structural path runs on all rules before
+analysis. No source scopes, input contracts or validation rules change. Literal removals have separate counts and evidence from producer removals,
 and shortened instances retain their original ground-rule source identity.
+
+
+### Search-free completion views
+
+Before structural analysis, each classification, processing and property solver
+view propagates facts using Fitting's three-valued fixpoint. Fixed heads have no
+active producers; a false body has no active edges; known-true body literals can
+be dropped. An indexed worklist then removes positive body literals implied by
+another conjunct through a unary positive producer, across all live rules rather
+than only optional pruning targets. Newly unary producers wake their readers.
+This requires neither H nor a SAT proof, and also runs with pruning disabled.
+
+Components, odd witnesses, existence shortcuts and branch ranking use the reduced
+view. Branches inherit the reductions allowed by their W/W+H context and pins;
+materializing an analysis view does not change incremental child propagation.
+Original source rule slots remain for identity and replay. Frozen live-GFP scopes
+(C(H), properties and contracts) do not shrink. Returned models are checked against
+the original scoped equations. Positive self-support is not forced false: this is
+completion-preserving Fitting, not least-model or well-founded evaluation.
+
+Reduction work uses the caller's existing budget. Initial reduction precedes the
+optional root SAT-pruning pass; reductions between proof rounds also remain subject
+to that pass's elapsed-time bound. A cutoff keeps the supplied equations, with spent work still charged;
+cancellation propagates. Optional pruning retains structural removal evidence;
+pruning-off runs do not acquire new optimization findings. The public
+[fact-guard pair](../../fixtures/completion-search-free/README.md) exercises an odd
+cycle that exists only before these reductions.

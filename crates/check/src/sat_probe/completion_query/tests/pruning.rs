@@ -76,10 +76,10 @@ fn profile_producer_is_removed_using_its_common_equation() {
                 && p.context == PruningContext::World));
         } else {
             assert!(
-                r.pruning.records.is_empty(),
-                "locally unique positive loop needs no pruning"
+                r.pruning.records.iter().all(|p| p.structural),
+                "search-free shortening needs no SAT pruning"
             );
-            assert!(r.pruning.components.iter().any(|c| c.kind == "unique"));
+            assert!(r.pruning.components.iter().all(|c| c.kind == "unique"));
         }
         assert!(!r.meaning.ambiguous.exists());
         assert!(matches!(r.meaning.no_meaning, Search::None));

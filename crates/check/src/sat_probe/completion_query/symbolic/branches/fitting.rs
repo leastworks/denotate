@@ -194,6 +194,9 @@ impl State {
         }
         Ok(Arc::new(c))
     }
+    pub fn analysis_cone(&self, b: &mut Budget<'_>) -> Result<Arc<Cone>> {
+        Ok(Arc::new(search_free::reduce(&*self.cone(b)?, b)?.cone))
+    }
     pub fn cone(&self, b: &mut Budget<'_>) -> Result<Arc<Cone>> {
         b.charge(self.values.len, "completion branch values")?;
         let c = &self.index.cone;
@@ -521,7 +524,7 @@ impl Bundle {
             let views = self
                 .views
                 .iter()
-                .map(|(k, s)| Ok((k.clone(), s.cone(b)?)))
+                .map(|(k, s)| Ok((k.clone(), s.analysis_cone(b)?)))
                 .collect::<Result<_>>()?;
             Some(Arc::new(std::sync::Mutex::new(pruning::Cache::inherited(
                 views,
