@@ -682,3 +682,59 @@ fn conditional_pruning_evidence_names_assignments_without_changing_identity() {
     assert_eq!(d.evidence["records"][0]["omittedPins"], 0);
     assert_eq!(shown.status["simplifications"]["trialAttempts"], 0);
 }
+
+#[test]
+fn implied_body_findings_name_the_literal_and_keep_ground_rule_provenance() {
+    let text = "sort S;const a,b:S;relation member(s:S);member(a);member(b);input value(s:S);relation present(s:S);relation selected(s:S);present(X):-value(X);present(X):-member(X),!selected(X);selected(X):-value(X),present(X);verification v{semantics:completion;assumptions:[];obligations:[];}";
+    let (p, r) = checked(
+        text,
+        CheckOptions {
+            prune: true,
+            ..Default::default()
+        },
+    );
+    let selected = p
+        .corpus
+        .relations()
+        .find(|r| r.name == "selected")
+        .unwrap()
+        .id;
+    let records: Vec<_> = r
+        .pruning
+        .records
+        .iter()
+        .filter(|r| {
+            r.kind == denotate_check::completion_query::PruningKind::ImpliedBodyLiteral
+                && r.head.relation == selected
+        })
+        .collect();
+    assert_eq!(records.len(), 2);
+    assert_ne!(
+        records[0].rules, records[1].rules,
+        "different ground instances of the same authored rule"
+    );
+    let shown = presentation::present_completion(&p, &r).unwrap();
+    let findings: Vec<_> = shown
+        .diagnostics
+        .iter()
+        .filter(|d| d.message.contains("implied positive body literal"))
+        .collect();
+    assert_eq!(findings.len(), 2);
+    for d in findings {
+        assert!(
+            d.notes
+                .iter()
+                .any(|n| n.contains("present(") && n.contains("remaining body"))
+        );
+        assert_eq!(d.evidence["records"][0]["kind"], "implied-body-literal");
+        assert_eq!(d.evidence["records"][0]["proof"], "structural");
+        assert_eq!(d.evidence["records"][0]["removedInstances"], 0);
+        assert_eq!(d.evidence["records"][0]["removedBodyLiterals"], 1);
+    }
+    assert!(
+        shown.status["simplifications"]["removedBodyLiterals"]
+            .as_u64()
+            .unwrap()
+            >= 2
+    );
+}

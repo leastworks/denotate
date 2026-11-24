@@ -968,3 +968,10 @@ proofs stay in their branch and descendants. Selected partitions may add
 (with explicit omissions). Discarded trials are telemetry only. A bounded inventory
 of surviving derived guards reports whether their whole upstream is acyclic in that
 branch; these guards are not yet split candidates.
+
+With completion pruning enabled, an implied positive body condition may be removed
+from a solver view even when its producer remains. The `completion-pruning`
+finding names the implied condition and the W/W+H or branch context in which the
+proof holds. This changes neither authored rules nor scope membership, and offers
+no source edit. The structured report distinguishes removed body literals from
+removed producer instances.

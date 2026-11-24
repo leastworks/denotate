@@ -43,16 +43,19 @@ mod cube_tests {
                     atoms: atoms.clone().into(),
                     rules: vec![
                         super::super::super::Rule {
+                            ground: None,
                             source: None,
                             head: 2,
                             body: vec![(left / 2, left % 2 == 0)],
                         },
                         super::super::super::Rule {
+                            ground: None,
                             source: None,
                             head: 3,
                             body: vec![(right / 2, right % 2 == 0)],
                         },
                         super::super::super::Rule {
+                            ground: None,
                             source: None,
                             head: 2,
                             body: vec![(0, true), (1, false)],

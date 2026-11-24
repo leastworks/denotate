@@ -732,3 +732,11 @@ copies of the prepared program. The selected assumption's own snapshot supplies
 derived-group certificates; checking/H snapshots cannot justify a W partition.
 No branch cache persists across edits. The solver adapter also retains the absolute
 run/question deadline independently of local solver clocks.
+
+Completion solver views may also shorten positive rule bodies. Their
+common-equations proof excludes the rewritten head's equation; a structural
+one-atom support uses another unchanged definition. Replacements and subsequent
+proofs stay in the same original scope/context/assignment key. The solver rule
+carries its original ground-rule identity through shortening; presentation uses
+that provenance rather than reconstructing it from a modified body. Neither this
+identity nor advisory counts alter equation equality or semantic scopes.

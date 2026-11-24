@@ -213,6 +213,7 @@ impl Cnf {
 }
 #[derive(Clone)]
 struct Rule {
+    ground: Option<GroundRuleId>,
     source: Option<denotate_ir::RuleId>,
     head: usize,
     body: Vec<(usize, bool)>,
@@ -447,6 +448,7 @@ fn cone(
                 body.insert((index[&l.term.atom], l.polarity == Polarity::Positive));
             }
             Ok(Rule {
+                ground: None,
                 source: Some(r.source),
                 head: index[&r.head.atom],
                 body: body.into_iter().collect(),

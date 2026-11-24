@@ -467,3 +467,13 @@ regression forces ranking and checks actual cuts. For scale, compare the same
 275-format shape with `--completion-prune` in both modes and split depth 0/2.
 Candidate telemetry reports context, influence, completed Fitting children,
 actual disabled edges, cycles cut in every child, and inventory omissions.
+
+`guarded-schema --schema-presence 1` adds redundant presence tests beside value
+reads in statement bodies. It also includes one independent presence/selection
+control per format: a value implies presence, an alternative presence producer
+reads the selection negatively, and the selection redundantly reads presence
+alongside the value. The extra conjunct closes an odd dependency cycle; removing
+it retains the producer and all completion models. The control is included in
+the decision interface. Compare pruning off/on: verdicts must agree and on-mode
+reports `implied-body-literal` evidence with zero removed instances. The option is
+off by default and adds no timing or solver-witness goldens.

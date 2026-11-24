@@ -52,6 +52,7 @@ fn original_cone_with_assumptions(
         body.sort_unstable();
         body.dedup();
         rules.push(Rule {
+            ground: Some(r.id),
             source: Some(r.source),
             head: index[&r.head.atom],
             body,

@@ -1020,7 +1020,7 @@ pub fn completion_pruning_component(
         "discoveryComplete":c.discovery_complete,"candidateHeads":c.candidate_heads,"candidateProducers":c.candidate_producers,
         "candidateExamples":c.candidate_examples.iter().map(&atom).collect::<Result<Vec<_>>>()?,
         "omittedCandidateHeads":c.candidate_heads.saturating_sub(c.candidate_examples.len()),
-        "considered":c.considered,"proved":c.proved,"removedInstances":c.removed,
+        "considered":c.considered,"proved":c.proved,"removedInstances":c.removed,"removedBodyLiterals":c.removed_literals,
         "lastHead":c.last_head.as_ref().map(&atom).transpose()?,
         "cutoff":c.cutoff.map(reason),"elapsedMs":c.elapsed.as_secs_f64()*1000.0,
     }))

@@ -9,8 +9,8 @@ fn context(c: PruningContext) -> &'static str {
 fn record(p: &PruningRecord, r: &Report, keys: &SemanticKeys) -> Result<Value> {
     Ok(
         json!({"head":atom(&p.head,keys)?,"context":context(p.context),
-        "kind":match p.kind {PruningKind::Subsumption=>"subsumption",PruningKind::Coverage=>"coverage"},
-        "removedInstances":p.removed,"scopeHeads":p.scope_heads,"scope":p.scope,
+        "kind":match p.kind {PruningKind::Subsumption=>"subsumption",PruningKind::Coverage=>"coverage",PruningKind::ImpliedBodyLiteral=>"implied-body-literal"},
+        "removedInstances":p.removed,"removedBodyLiterals":p.removed_literals,"literal":p.literal.as_ref().map(|a|atom(a,keys)).transpose()?,"proof":if p.structural {"structural"} else {"common-equations"},"scopeHeads":p.scope_heads,"scope":p.scope,
         "sources":p.rules.iter().map(|id|Ok(crate::identity::rule(keys.rule(r.program().original_rule(*id).unwrap().source)?))).collect::<Result<Vec<_>>>()?,
         "omittedSources":p.removed.saturating_sub(p.rules.len()),
         "pins":p.pins.iter().map(|(a,v)|Ok(json!({"atom":atom(a,keys)?,"value":v}))).collect::<Result<Vec<_>>>()?,"omittedPins":p.omitted_pins}),
@@ -19,10 +19,10 @@ fn record(p: &PruningRecord, r: &Report, keys: &SemanticKeys) -> Result<Value> {
 pub(super) fn summary(r: &Report, keys: &SemanticKeys) -> Result<Value> {
     Ok(json!({"elapsedMs":r.pruning.elapsed.as_secs_f64()*1000.0,
         "trialReleasedMs":r.pruning.trial_released.as_secs_f64()*1000.0,"trialAttempts":r.pruning.trial_attempts,"trialProved":r.pruning.trial_proved,"trialElapsedMs":r.pruning.trial_elapsed.as_secs_f64()*1000.0,
-        "views":r.pruning.views.iter().map(|v|json!({"scope":v.scope,"context":context(v.context),"rounds":v.rounds,"attempts":v.attempts,"proved":v.proved,"removedInstances":v.removed,"coveredHeads":v.covered,"stop":v.stop.label(),"allocatedMs":v.allocated.as_secs_f64()*1000.0,"elapsedMs":v.elapsed.as_secs_f64()*1000.0,"releasedMs":v.released.as_secs_f64()*1000.0,"priorityAttempts":v.priority_attempts,"priorityProved":v.priority_proved})).collect::<Vec<_>>(),
+        "views":r.pruning.views.iter().map(|v|json!({"scope":v.scope,"context":context(v.context),"rounds":v.rounds,"attempts":v.attempts,"proved":v.proved,"removedInstances":v.removed,"removedBodyLiterals":v.removed_literals,"coveredHeads":v.covered,"stop":v.stop.label(),"allocatedMs":v.allocated.as_secs_f64()*1000.0,"elapsedMs":v.elapsed.as_secs_f64()*1000.0,"releasedMs":v.released.as_secs_f64()*1000.0,"priorityAttempts":v.priority_attempts,"priorityProved":v.priority_proved})).collect::<Vec<_>>(),
         "omittedViews":r.pruning.omitted_views,
         "components":r.pruning.components.iter().map(|c|completion_pruning_component(c,|a|atom(a,keys))).collect::<Result<Vec<_>>>()?,
-        "omittedComponents":r.pruning.omitted_components,"attempts":r.pruning.attempts,"removedInstances":r.pruning.removed,
+        "omittedComponents":r.pruning.omitted_components,"attempts":r.pruning.attempts,"removedInstances":r.pruning.removed,"removedBodyLiterals":r.pruning.removed_literals,
         "coveredHeads":r.pruning.covered,"records":r.pruning.records.iter().chain(&r.pruning.branch_records).map(|p|record(p,r,keys)).collect::<Result<Vec<_>>>()?,
         "omittedRecords":r.pruning.omitted+r.pruning.omitted_branch_records,"cutoffs":r.pruning.incomplete.iter().map(|c|reason(*c)).collect::<Vec<_>>() }))
 }
@@ -68,14 +68,20 @@ pub(super) fn findings(
             notes.push(format!("Conditional proof under {label}, when {text}."));
         }
         if conditions.len()>8 {notes.push(format!("{} additional branch conditions omitted.",conditions.len()-8));}
+        let literals: BTreeSet<_> = records.iter().filter_map(|p|p.literal.as_ref()).collect();
+        for l in literals.iter().take(8) {
+            notes.push(format!("Positive condition {} is implied by the remaining body in the recorded context.",crate::evidence::atom_name(corpus,names,l)?));
+        }
+        if literals.len()>8 {notes.push(format!("{} additional implied conditions omitted.",literals.len()-8));}
         let removed: usize = records.iter().map(|p| p.removed).sum();
+        let removed_literals: usize = records.iter().map(|p|p.removed_literals).sum();
         let coverage = records.iter().any(|p| p.kind == PruningKind::Coverage);
         let explanation = if coverage { "; coverage proves the head true" } else { " by subsumption" };
         let qualifier = if conditions.is_empty() {""} else {" and the recorded branch conditions"};
-        let message = format!(
-            "Completion simplification for {} under {label}{qualifier}: {removed} producer instance(s) removed{explanation}.",
-            crate::evidence::atom_name(corpus, names, head)?,
-        );
+        let change = if removed_literals == 0 { format!("{removed} producer instance(s) removed{explanation}") }
+            else if removed == 0 { format!("{removed_literals} implied positive body literal(s) removed") }
+            else { format!("{removed} producer instance(s) removed{explanation}; {removed_literals} implied positive body literal(s) removed") };
+        let message = format!("Completion simplification for {} under {label}{qualifier}: {change}.", crate::evidence::atom_name(corpus, names, head)?);
         let evidence = json!({
             "kind": "completion-pruning", "context": label, "head": atom(head, keys)?,
             "records": records.iter().map(|p| record(p,r,keys)).collect::<Result<Vec<_>>>()?,

@@ -204,6 +204,7 @@ impl Engine {
                 None => program.core.atom_index.get(a).copied().unwrap_or(n + 1),
             };
             rules.push(Rule {
+                ground: None,
                 source: Some(r.source),
                 head: program.core.atom_index[&r.head.atom],
                 body: r

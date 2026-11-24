@@ -2348,3 +2348,30 @@ Every child still receives residual checking; cutting a witness never proves the
 whole question. Source findings describe only selected partitions and explicitly
 name their branch conditions; discarded proofs remain telemetry. Conditional
 records have their own bounded space so a full root report cannot hide all of them.
+
+## Completion pruning can remove implied positive body literals
+
+Within an opt-in pruning view, a producer `x :- A, L` can become `x :- A`
+when the remaining body implies the positive literal L. This removes a dependency
+edge without removing the producer. Candidate heads retain the existing odd or
+non-unique component targeting, original scopes, W/W+H contexts and branch pins.
+
+Let E be all other current equations and C the view's context. The proof asks
+whether `E ∧ C ∧ A ∧ ¬L` is unsatisfiable, with x's equation disabled. Then the
+old and new right-hand sides agree in every model of E and C, so replacing x's
+equation neither loses nor creates models in that context. Each later proof sees
+the updated equations. Exhaustion keeps only proved prefixes. Using x's old
+equation in this implication would be circular and could conceal contradictions.
+
+A structural fast path needs no SAT call: if L differs from x and its current
+definition includes a one-positive-atom producer `L :- a`, with a in A, the
+unchanged equation for L gives the implication. Index these one-atom supports;
+update the index when a shortening creates another. Transitive implications and
+context-dependent cases use the common-equations proof instead.
+
+Shortened rules retain their original ground-rule provenance explicitly; matching
+them back by body would fail after editing or confuse distinct groundings of one
+source rule. Provenance does not participate in equation equality. Evidence names
+the removed literal and proof path, with literal counts separate from removed
+producer counts. Finding identity remains head/context. These are scoped solver
+simplifications; no authored-source quick fix is offered.

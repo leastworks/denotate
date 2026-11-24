@@ -221,32 +221,39 @@ fn h_only_branch_proofs_never_enter_no_h_queries() {
 }
 #[test]
 fn successful_prefix_survives_a_later_query_cutoff_and_is_conditional() {
-    let (_, e, g, p) = fixture(false);
-    let mut b = Budget::new(&e.limits);
-    let mut config = e.config.clone();
-    config.max_solves = 2;
-    let root = fitting::Bundle::new(&e, &mut b).unwrap();
-    let mut child = root.child(&[(g, true)], &mut b).unwrap();
-    let heads = e.cone.rules.iter().map(|r| r.head).collect();
-    let (_, proved, cutoff) = child.prune(&e, false, &heads, &mut config, &mut b).unwrap();
-    assert!(proved > 0);
-    assert!(cutoff.is_some());
-    let (state, _) = child.ranking(false, false);
-    assert!(
-        !consistency::analyse(&state.cone(&mut b).unwrap(), None, &mut b)
-            .unwrap()
-            .cyclic[p]
-    );
-    child.publish(&e);
-    let cache = e.pruning.as_ref().unwrap().lock().unwrap();
-    assert!(
-        cache
-            .report
-            .branch_records
-            .iter()
-            .all(|r| r.pins == vec![(e.cone.atoms[g].clone(), true)])
-    );
-    assert!(!cache.report.branch_records.is_empty());
+    // Search a small range for an interrupted successful prefix. The exact
+    // candidate/solver-call order is not a contract.
+    for solves in 1..=16 {
+        let (_, e, g, p) = fixture(false);
+        let mut b = Budget::new(&e.limits);
+        let mut config = e.config.clone();
+        config.max_solves = solves;
+        let root = fitting::Bundle::new(&e, &mut b).unwrap();
+        let mut child = root.child(&[(g, true)], &mut b).unwrap();
+        let heads = e.cone.rules.iter().map(|r| r.head).collect();
+        let (_, proved, cutoff) = child.prune(&e, false, &heads, &mut config, &mut b).unwrap();
+        if proved == 0 || cutoff.is_none() {
+            continue;
+        }
+        let (state, _) = child.ranking(false, false);
+        assert!(
+            !consistency::analyse(&state.cone(&mut b).unwrap(), None, &mut b)
+                .unwrap()
+                .cyclic[p]
+        );
+        child.publish(&e);
+        let cache = e.pruning.as_ref().unwrap().lock().unwrap();
+        assert!(
+            cache
+                .report
+                .branch_records
+                .iter()
+                .all(|r| r.pins == vec![(e.cone.atoms[g].clone(), true)])
+        );
+        assert!(!cache.report.branch_records.is_empty());
+        return;
+    }
+    panic!("no successful prefix followed by cutoff");
 }
 #[test]
 fn impossible_branch_pruning_does_not_filter_the_parent_worlds() {

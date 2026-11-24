@@ -1,11 +1,11 @@
 // Neutral completion workload: format recognition, guarded blocks and field values.
 export function guardedSchema(options = {}) {
   const cfg = {sets: 8, depth: 2, fanout: 5, stmts: 3, triggers: 1, values: 2, reads: 1,
-    outs: 5, splice: 25, self: 50, impossible: 0, wide: 0, double: 0, odd: 0, typecut: 0, fieldcut: 0, decoycut: 0, ...options};
+    outs: 5, splice: 25, self: 50, impossible: 0, wide: 0, double: 0, odd: 0, typecut: 0, fieldcut: 0, decoycut: 0, presence: 0, ...options};
   for (const [key, value] of Object.entries(cfg)) {
     if (!Number.isSafeInteger(value) || value < 0) throw Error(`invalid guarded-schema ${key}`);
   }
-  if (!cfg.sets || !cfg.depth || !cfg.fanout || !cfg.values || !cfg.reads || cfg.splice > 100 || cfg.self > 100 || cfg.impossible > 1 || cfg.wide > 1 || cfg.double > 1 || cfg.odd > 1 || cfg.typecut > 1 || cfg.fieldcut > 1 || cfg.decoycut > 1 || (cfg.decoycut && !(cfg.typecut || cfg.fieldcut)) || (cfg.typecut && cfg.fieldcut)) throw Error('invalid guarded-schema shape');
+  if (!cfg.sets || !cfg.depth || !cfg.fanout || !cfg.values || !cfg.reads || cfg.splice > 100 || cfg.self > 100 || cfg.impossible > 1 || cfg.wide > 1 || cfg.double > 1 || cfg.odd > 1 || cfg.typecut > 1 || cfg.fieldcut > 1 || cfg.decoycut > 1 || cfg.presence > 1 || (cfg.decoycut && !(cfg.typecut || cfg.fieldcut)) || (cfg.typecut && cfg.fieldcut)) throw Error('invalid guarded-schema shape');
   const widths = cfg.blocks === undefined
     ? Array.from({length:cfg.depth},(_,d)=>cfg.fanout ** (d+1))
     : Array.from({length:cfg.depth},(_,d)=>Math.floor(cfg.blocks/cfg.depth)+(d<cfg.blocks%cfg.depth?1:0));
@@ -58,7 +58,7 @@ computes(E) :- task_output(T,O,E),task_active(T);
 relation task_active(t:Task);
 task_active(T) :- block_task(B,T),block_active(B);
 relation statement_satisfied(c:Statement);
-statement_satisfied(C) :- statement_element(C,E),statement_value(C,V),element_value(E,V);
+statement_satisfied(C) :- statement_element(C,E),statement_value(C,V),element_value(E,V)${cfg.presence ? ",element_present(E)" : ""};
 relation term_holds(f:Format);
 term_holds(F) :- engaged(),format_statement(F,C),statement_satisfied(C),type_matches(F);
 relation type_matches(f:Format);
@@ -78,7 +78,16 @@ violated(C) :- statement_block(C,B),block_active(B),!statement_satisfied(C);
 assumption unique_observed: at_most_one(${cfg.fieldcut ? "scalar_observed" : "observed_value"},group_by:(e));
 assumption unique_results: at_most_one(result_value,group_by:(e));
 obligation no_violations: empty(violated);
-verification checks {semantics:completion;hypothesis:recognized;decisions:[${cfg.wide ? "format_recognized,accepted_field,written_value,violated,task_active" : "format_recognized,accepted_field"}];assumptions:[unique_observed,unique_results];obligations:[no_violations];}`);
+verification checks {semantics:completion;hypothesis:recognized;decisions:[${cfg.wide ? "format_recognized,accepted_field,written_value,violated,task_active" : "format_recognized,accepted_field"}${cfg.presence ? ",presence_ready" : ""}];assumptions:[unique_observed,unique_results];obligations:[no_violations];}`);
+  // Presence read in addition to a value read, with a derived alternative that
+  // closes an odd loop. Removing the implied conjunct cuts that edge, retaining
+  // the producer and every completion model. One independent copy per format.
+  if(cfg.presence) add(`input presence_value(f:Format);
+relation has_presence(f:Format);
+relation presence_ready(f:Format);
+has_presence(F) :- presence_value(F);
+has_presence(F) :- leaf(F),!presence_ready(F);
+presence_ready(F) :- presence_value(F),has_presence(F);`);
   if(cfg.fieldcut) {
     add(`relation scalar(e:Element); relation scalar_observed(e:Element,v:Value); scalar_observed(E,V) :- scalar(E),observed_value(E,V); relation format_tag(f:Format); scalar(type_field);`);
     for(let e=0;e<cfg.elements;e++)add(`scalar(element_${e});`);

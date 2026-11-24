@@ -1517,3 +1517,13 @@ candidate's context is W/W+H; parent assignments are on the branch record.
 Only the selected candidate receives this bounded advisory inventory (at most four
 children and 32 guards). Acyclic means its whole upstream in the child's view;
 this is eligibility telemetry, not a new derived-atom split or semantic finding.
+
+Completion pruning records additionally accept `kind: "implied-body-literal"`.
+`literal` names the positive ground atom removed, and `proof` is `"structural"`
+or `"common-equations"`. Other pruning records have `literal: null` and use
+`"common-equations"`. `removedBodyLiterals` is separate from `removedInstances`
+on records, component rows, view rows and the aggregate simplification summary;
+a literal-only record removes zero instances. Source rules and context/pin fields
+follow the existing conventions. The head/context finding identity is unchanged;
+notes bound the distinct implied-condition names to eight, with an omitted count.
+No quick fix is offered for these scoped ground-instance simplifications.

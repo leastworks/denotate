@@ -1,5 +1,5 @@
 use super::*;
-fn compare(c: &Corpus, v: VerificationId) -> Report {
+pub(super) fn compare(c: &Corpus, v: VerificationId) -> Report {
     let e = prepare(c, v, &Domains::new());
     let options = CheckOptions {
         prune: true,

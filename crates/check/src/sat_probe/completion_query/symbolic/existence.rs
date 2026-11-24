@@ -199,6 +199,7 @@ pub(super) fn component(
         rules: rules
             .iter()
             .map(|r| crate::sat_probe::Rule {
+                ground: None,
                 source: c.rules[*r].source,
                 head: index[&c.rules[*r].head],
                 body: c.rules[*r]
@@ -499,6 +500,7 @@ mod parity_oracle {
             for (k, head) in heads.iter().enumerate() {
                 let literal = (shape >> (3 * k)) & 7;
                 c.rules.push(crate::sat_probe::Rule {
+                    ground: None,
                     source: None,
                     head: *head,
                     body: vec![(all[literal / 2], literal % 2 == 0)],
@@ -506,6 +508,7 @@ mod parity_oracle {
             }
             // Multiple producers and a guarded odd cycle, not only unary rings.
             c.rules.push(crate::sat_probe::Rule {
+                ground: None,
                 source: None,
                 head: heads[0],
                 body: vec![(input, true), (heads[2], false)],

@@ -3,6 +3,7 @@
 //! programs. No scope is ever computed from these solver-instance rewrites.
 use super::*;
 mod branch;
+mod literals;
 pub(super) use branch::{TrialPool, prove, trial};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -14,6 +15,7 @@ pub enum PruningContext {
 pub enum PruningKind {
     Subsumption,
     Coverage,
+    ImpliedBodyLiteral,
 }
 #[derive(Debug, Clone)]
 pub struct PruningRecord {
@@ -22,10 +24,13 @@ pub struct PruningRecord {
     pub head: GroundAtom,
     pub rules: Vec<GroundRuleId>,
     pub removed: usize,
+    pub removed_literals: usize,
     pub scope_heads: usize,
     pub scope: &'static str,
     pub pins: Vec<(GroundAtom, bool)>,
     pub omitted_pins: usize,
+    pub literal: Option<GroundAtom>,
+    pub structural: bool,
 }
 #[derive(Debug, Clone)]
 pub struct PruningComponent {
@@ -42,6 +47,7 @@ pub struct PruningComponent {
     pub considered: usize,
     pub proved: usize,
     pub removed: usize,
+    pub removed_literals: usize,
     pub last_head: Option<GroundAtom>,
     pub cutoff: Option<Inconclusive>,
     pub elapsed: Duration,
@@ -69,6 +75,7 @@ pub struct PruningView {
     pub attempts: usize,
     pub proved: usize,
     pub removed: usize,
+    pub removed_literals: usize,
     pub covered: usize,
     pub stop: PruningStop,
     pub allocated: Duration,
@@ -87,6 +94,7 @@ pub struct PruningReport {
     pub elapsed: Duration,
     pub attempts: usize,
     pub removed: usize,
+    pub removed_literals: usize,
     pub covered: usize,
     pub records: Vec<PruningRecord>,
     pub omitted: usize,
@@ -215,6 +223,7 @@ impl Cache {
         self.report.omitted_components += report.omitted_components;
         self.report.attempts += report.attempts;
         self.report.removed += report.removed;
+        self.report.removed_literals += report.removed_literals;
         self.report.covered += report.covered;
         for record in report.records.into_iter().chain(report.branch_records) {
             let conditional = !record.pins.is_empty() || record.omitted_pins > 0;
@@ -406,7 +415,7 @@ pub(super) fn view<'a>(
     let mut round_engine = engine.clone();
     let stop = loop {
         let previous = result.clone();
-        let removed = report.removed;
+        let removed = (report.removed, report.removed_literals);
         let first_row = report.components.len();
         let first_cutoff = report.incomplete.len();
         rounds += 1;
@@ -454,7 +463,7 @@ pub(super) fn view<'a>(
                 .push(inconclusive(error.in_phase(phase, None))?);
             break PruningStop::OverallCutoff;
         }
-        if report.removed == removed {
+        if (report.removed, report.removed_literals) == removed {
             break if report.incomplete.len() != first_cutoff
                 || report.components[first_row..]
                     .iter()
@@ -492,6 +501,7 @@ pub(super) fn view<'a>(
         attempts: report.attempts,
         proved: report.records.len() + report.omitted,
         removed: report.removed,
+        removed_literals: report.removed_literals,
         covered: report.covered,
         stop,
         allocated: limits.timeout,
@@ -593,6 +603,19 @@ fn simplify(
     if candidates.is_empty() {
         return Ok(());
     }
+    if literals::structural(
+        original,
+        result,
+        &targets,
+        scope,
+        context,
+        scope_heads,
+        report,
+        budget,
+        successes,
+    )? {
+        return Ok(());
+    }
     // Fold only consequences independent of ALL candidate definitions. Those
     // constants remain valid whichever single equation the proof disables.
     let mut abstracted = original.clone();
@@ -645,29 +668,27 @@ fn simplify(
         live_gates.push(true);
         equation(&mut run, gate, vars[h], body)?;
     }
-    // Original-cone producers preserve GroundProgram order. Scope filtering
-    // never renumbers the source instances retained in reports.
-    run.budget
-        .charge(engine.cone.rules.len(), "completion pruning sources")?;
-    let mut source = Vec::new();
-    let mut cursor = 0;
-    for r in &original.rules {
-        while cursor < engine.cone.rules.len()
-            && (engine.cone.rules[cursor] != *r || engine.cone.rules[cursor].source != r.source)
-        {
-            cursor += 1;
-        }
-        if cursor == engine.cone.rules.len() {
-            return Err(CheckError::Internal("pruning scope is not original"));
-        }
-        source.push(engine.program.core.rules[cursor].id);
-        cursor += 1;
+    let source: Vec<_> = original
+        .rules
+        .iter()
+        .map(|r| {
+            r.ground
+                .ok_or(CheckError::Internal("pruning rule has no ground source"))
+        })
+        .collect::<Result<_>>()?;
+    let mut working = original.clone();
+    #[derive(Clone, Copy)]
+    enum Attempt {
+        Coverage,
+        Producer(usize),
+        Literal(usize, usize),
     }
     struct Pending {
         head: usize,
         coverage: bool,
         remaining: Vec<usize>,
         candidates: std::collections::VecDeque<usize>,
+        literals: std::collections::VecDeque<(usize, usize)>,
     }
     let pending: std::collections::VecDeque<_> = candidates
         .into_iter()
@@ -676,6 +697,19 @@ fn simplify(
             coverage: true,
             remaining: producers[head].clone(),
             candidates: targets.rules[&head].clone().into(),
+            literals: targets.rules[&head]
+                .iter()
+                .flat_map(|r| {
+                    original.rules[*r]
+                        .body
+                        .iter()
+                        .filter(|(i, p)| {
+                            *p && settled[*i].is_none()
+                                && targets.components.get(i) == targets.components.get(&head)
+                        })
+                        .map(move |(i, _)| (*r, *i))
+                })
+                .collect(),
         })
         .collect();
     let (mut preferred, pending): (std::collections::VecDeque<_>, std::collections::VecDeque<_>) =
@@ -698,8 +732,13 @@ fn simplify(
             let head = item.head;
             let row = targets.components[&head];
             current_row = Some(row);
-            let candidate = if item.coverage {
-                None
+            let attempt = if item.coverage {
+                Attempt::Coverage
+            } else if let Some((r, lit)) = item.literals.pop_front() {
+                if !enabled[r] || !working.rules[r].body.contains(&(lit, true)) {
+                    continue;
+                }
+                Attempt::Literal(r, lit)
             } else {
                 let Some(r) = item.candidates.pop_front() else {
                     continue;
@@ -709,14 +748,14 @@ fn simplify(
                 }
                 // Removing this instance must cut at least one unresolved
                 // internal edge. Parallel producers can keep an edge alive.
-                let cuts = original.rules[r].body.iter().any(|lit| {
+                let cuts = working.rules[r].body.iter().any(|lit| {
                     targets.components.get(&lit.0) == Some(&row)
                         && settled[lit.0].is_none()
                         && item
                             .remaining
                             .iter()
                             .filter(|q| **q != r)
-                            .all(|q| !original.rules[*q].body.contains(lit))
+                            .all(|q| !working.rules[*q].body.contains(lit))
                 });
                 if !cuts {
                     if !item.candidates.is_empty() {
@@ -728,7 +767,11 @@ fn simplify(
                     }
                     continue;
                 }
-                Some(r)
+                Attempt::Producer(r)
+            };
+            let candidate = match attempt {
+                Attempt::Producer(r) => Some(r),
+                _ => None,
             };
             let start = Instant::now();
             report.components[row].last_head = Some(original.atoms[head].clone());
@@ -766,10 +809,21 @@ fn simplify(
             if context == PruningContext::Hypothesis {
                 pins.push(vars[engine.classification.as_ref().unwrap().2]);
             }
-            if let Some(r) = candidate {
-                pins.push(bodies[r]);
+            if let Attempt::Literal(r, lit) = attempt {
+                pins.extend(
+                    working.rules[r]
+                        .body
+                        .iter()
+                        .filter(|(i, p)| !(*i == lit && *p))
+                        .map(|(i, p)| if *p { vars[*i] } else { !vars[*i] }),
+                );
+                pins.push(!vars[lit]);
+            } else {
+                if let Some(r) = candidate {
+                    pins.push(bodies[r]);
+                }
+                pins.push(!union);
             }
-            pins.push(!union);
             run.budget.charge(pins.len(), "completion pruning pins")?;
             // A hard candidate cannot consume every other head's opportunity.
             // Solver clauses remain valid after an interrupted limited solve.
@@ -804,46 +858,71 @@ fn simplify(
                 successes.heads.insert(head);
                 successes.priority_proved += usize::from(priority.contains(&head));
                 report.components[row].proved += 1;
-                let removed = if candidate.is_some() {
-                    1
-                } else {
-                    item.remaining.len()
-                };
-                report.components[row].removed += removed;
-                let rs = if let Some(r) = candidate {
-                    vec![source[r]]
-                } else {
-                    item.remaining.iter().take(32).map(|r| source[*r]).collect()
-                };
-                retain(
-                    report,
-                    PruningRecord {
+                if let Attempt::Literal(r, lit) = attempt {
+                    literals::record(
+                        original,
+                        report,
+                        row,
                         context,
-                        kind: if candidate.is_some() {
-                            PruningKind::Subsumption
-                        } else {
-                            PruningKind::Coverage
-                        },
-                        head: original.atoms[head].clone(),
-                        rules: rs,
-                        removed,
-                        scope_heads,
                         scope,
-                        pins: vec![],
-                        omitted_pins: 0,
-                    },
-                );
-                report.removed += removed;
-                if let Some(r) = candidate {
-                    enabled[r] = false;
-                    item.remaining.retain(|q| *q != r);
+                        scope_heads,
+                        source[r],
+                        head,
+                        lit,
+                        false,
+                    );
+                    working.rules[r].body.retain(|l| *l != (lit, true));
+                    let lits: Vec<_> = working.rules[r]
+                        .body
+                        .iter()
+                        .map(|(i, p)| if *p { vars[*i] } else { !vars[*i] })
+                        .collect();
+                    bodies[r] = logic.and(&lits, &mut run.cnf, run.budget)?;
                 } else {
-                    for r in &item.remaining {
-                        enabled[*r] = false;
+                    let removed = if candidate.is_some() {
+                        1
+                    } else {
+                        item.remaining.len()
+                    };
+                    report.components[row].removed += removed;
+                    let rs = if let Some(r) = candidate {
+                        vec![source[r]]
+                    } else {
+                        item.remaining.iter().take(32).map(|r| source[*r]).collect()
+                    };
+                    retain(
+                        report,
+                        PruningRecord {
+                            context,
+                            kind: if candidate.is_some() {
+                                PruningKind::Subsumption
+                            } else {
+                                PruningKind::Coverage
+                            },
+                            head: original.atoms[head].clone(),
+                            rules: rs,
+                            removed,
+                            removed_literals: 0,
+                            literal: None,
+                            structural: false,
+                            scope_heads,
+                            scope,
+                            pins: vec![],
+                            omitted_pins: 0,
+                        },
+                    );
+                    report.removed += removed;
+                    if let Some(r) = candidate {
+                        enabled[r] = false;
+                        item.remaining.retain(|q| *q != r);
+                    } else {
+                        for r in &item.remaining {
+                            enabled[*r] = false;
+                        }
+                        result.fixed[head] = Some(true);
+                        report.covered += 1;
+                        item.candidates.clear();
                     }
-                    result.fixed[head] = Some(true);
-                    report.covered += 1;
-                    item.candidates.clear();
                 }
                 let gate = run.cnf.var(run.budget)?;
                 if let Some(old) = current[head] {
@@ -852,10 +931,18 @@ fn simplify(
                 current[head] = Some(gates.len());
                 gates.push(gate);
                 live_gates.push(true);
-                let rhs = if candidate.is_none() {
-                    run.truth
-                } else {
-                    union
+                let rhs = match attempt {
+                    Attempt::Coverage => run.truth,
+                    Attempt::Producer(_) => union,
+                    Attempt::Literal(_, _) => logic.or(
+                        &item
+                            .remaining
+                            .iter()
+                            .map(|r| bodies[*r])
+                            .collect::<Vec<_>>(),
+                        &mut run.cnf,
+                        run.budget,
+                    )?,
                 };
                 equation(&mut run, gate, vars[head], rhs)?;
             }
@@ -870,7 +957,7 @@ fn simplify(
                         crate::CheckingTarget::CompletionPruning(report.components[row].clone())
                     });
             item.coverage = false;
-            if !item.candidates.is_empty() {
+            if !item.candidates.is_empty() || !item.literals.is_empty() {
                 if priority.contains(&head) {
                     preferred.push_back(item);
                 } else {
@@ -888,7 +975,7 @@ fn simplify(
         }
     }
     add_query(used, run.usage());
-    install_result(original, result, &enabled);
+    install_result(&working, result, &enabled);
     outcome
 }
 fn retain(report: &mut PruningReport, record: PruningRecord) {

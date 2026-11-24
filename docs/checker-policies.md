@@ -2213,3 +2213,20 @@ Root pruning used 39.03 s (about 6.49 s allocated per view); trials used 3.90 s,
 No leftover root time was transferred. This establishes recovery on the public
 control, not a scale benefit from branch pruning. The private corpus remains to
 be re-scored.
+
+### Implied positive body literals in completion views
+
+With `--completion-prune`, targeted odd/non-unique heads also offer positive
+in-component body literals for removal. First try indexed one-atom supports in
+another head's definition. Structural successes trigger a new root round before
+SAT encoding. Otherwise, share the existing gated common-equations encoding with
+coverage and producer subsumption; try literal implications after that head's
+coverage attempt and before its producer-removal attempts. Updated bodies receive
+new equation gates, while original scopes and validation stay unchanged.
+
+Both paths use existing pruning work, time, query and candidate-slice allowances;
+there is no new limit or enabled-by-default pass. Branch trials use the same
+mechanism and retain their context/assignment boundaries. Telemetry counts
+`removedBodyLiterals` separately at record, component, view and aggregate levels;
+proof records remain bounded and omitted counts explicit. No corpus performance
+improvement is inferred from the lowerer's equivalent rewrite.

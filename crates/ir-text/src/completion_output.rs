@@ -194,7 +194,7 @@ pub fn pruning_formatter(
     let names = crate::presentation::diagnostic_names(&p.corpus);
     move |c| {
         let mut text = format!(
-            "Pruning {} {} component {} ({}; {} atoms): {} candidates considered, {} proved; {} instances removed; last head {}",
+            "Pruning {} {} component {} ({}; {} atoms): {} candidates considered, {} proved; {} instances removed, {} implied body literals removed; last head {}",
             c.scope,
             match c.context {
                 denotate_check::completion_query::PruningContext::World => "W",
@@ -206,6 +206,7 @@ pub fn pruning_formatter(
             c.considered,
             c.proved,
             c.removed,
+            c.removed_literals,
             c.last_head
                 .as_ref()
                 .map(|a| crate::progress::atom_text(a, &names))

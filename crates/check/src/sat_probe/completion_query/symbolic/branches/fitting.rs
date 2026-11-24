@@ -379,7 +379,7 @@ impl Bundle {
                     let result = pruning::prove(
                         &branch, &base, scope, context, &self.pins, heads, local, used, report,
                     )?;
-                    if report.removed > 0 {
+                    if report.removed > 0 || report.removed_literals > 0 {
                         State::new(result, local).map(Some)
                     } else {
                         Ok(None)

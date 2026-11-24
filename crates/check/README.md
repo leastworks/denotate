@@ -1506,3 +1506,13 @@ Conditional source records are published only for selected partitions; all trial
 attempts/proofs/time remain telemetry. Original scopes and residual queries remain
 unchanged. Derived guards get bounded acyclic-upstream telemetry for the selected
 partition; splitting on derived atoms is not implemented.
+
+Completion pruning also shortens bodies in targeted odd/non-unique components.
+A positive literal L is removable from `x :- A, L` when the other equations and
+recorded context imply `A -> L`. A one-atom producer for L whose atom is in A
+provides an indexed structural proof (L must differ from x). Otherwise the shared
+SAT proof disables x's equation, tests the implication, and updates its gated
+replacement. All later proofs use current equations. This is opt-in under the
+existing pruning option; no source scopes, input contracts or validation rules
+change. Literal removals have separate counts and evidence from producer removals,
+and shortened instances retain their original ground-rule source identity.

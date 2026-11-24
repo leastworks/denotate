@@ -406,6 +406,7 @@ mod tests {
                         if sign > 0 {
                             edges[i].push((i, j, sign == 2));
                             rules.push(crate::sat_probe::Rule {
+                                ground: None,
                                 source: None,
                                 head: i,
                                 body: vec![(j, sign == 1)],

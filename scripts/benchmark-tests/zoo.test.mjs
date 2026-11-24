@@ -466,3 +466,26 @@ test('guarded schema catch-all control stays conditional through its cyclic guar
     assert.deepEqual(a.obligations.map(o=>[o.name,o.state]),b.obligations.map(o=>[o.name,o.state]));
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+
+test('guarded schema implied presence removes a body edge without changing verdicts',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-implied-presence-'));
+  try {
+    const rows=[];
+    for(const enabled of [false,true]) {
+      const out=path.join(root,enabled?'on':'off');
+      run({out,binary:'target/debug/examples/bench_schema',family:['guarded-schema'],sizes:[2],repeat:1,
+        schema:{depth:1,fanout:1,stmts:1,triggers:0,outs:1,values:1,self:0,presence:1},
+        limits:enabled?['--completion-prune']:[]});
+      rows.push(JSON.parse(fs.readFileSync(path.join(out,'guarded-schema-2-0','report.json'),'utf8')));
+    }
+    const [a,b]=rows.map(r=>r.outcomes[0]);
+    assert.equal(a.state,b.state); assert.equal(a.hasFailures,b.hasFailures);
+    for(const key of ['accepted','rejected','noMeaning','ambiguous']) assert.equal(a.classification[key].state,b.classification[key].state,key);
+    for(const key of ['existence','uniqueness']) assert.equal(a.meaning[key].state,b.meaning[key].state,key);
+    assert.deepEqual(a.obligations.map(o=>[o.name,o.state]),b.obligations.map(o=>[o.name,o.state]));
+    const proofs=b.simplifications.records.filter(r=>r.kind==='implied-body-literal' && r.head.relation.named?.[1]==='presence_ready');
+    assert.ok(proofs.length>0); assert.ok(proofs.every(r=>r.proof==='structural' && r.removedInstances===0 && r.removedBodyLiterals===1));
+    assert.ok(b.simplifications.removedBodyLiterals>0);
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});

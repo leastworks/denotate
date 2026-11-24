@@ -86,6 +86,7 @@ pub(in crate::sat_probe::completion_query) fn discover(
             considered: 0,
             proved: 0,
             removed: 0,
+            removed_literals: 0,
             last_head: None,
             cutoff: None,
             elapsed: Duration::ZERO,
