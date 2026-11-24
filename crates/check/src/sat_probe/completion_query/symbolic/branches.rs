@@ -31,6 +31,17 @@ pub struct SplitCandidate {
     pub cycles_cut_every_child: usize,
     pub selected: bool,
     pub cutoff: Option<Inconclusive>,
+    pub pruning_attempts: usize,
+    pub pruning_proved: usize,
+    pub derived_guards: Vec<DerivedGuard>,
+    pub omitted_derived_guards: usize,
+    pub derived_guards_complete: bool,
+}
+#[derive(Debug, Clone)]
+pub struct DerivedGuard {
+    pub atom: GroundAtom,
+    pub child: usize,
+    pub acyclic_upstream: bool,
 }
 #[derive(Debug, Clone)]
 pub struct BranchRecord {
@@ -87,6 +98,7 @@ struct Unit {
     id: usize,
     parent_id: Option<usize>,
     parent: Option<Arc<fitting::Bundle>>,
+    prepared: Option<Arc<fitting::Bundle>>,
     delta: Vec<(usize, bool)>,
     rest: bool,
     pins: BTreeMap<GroundAtom, bool>,
@@ -161,6 +173,14 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
     // when preparing a shortlist or a local uniqueness trial is expensive.
     let mut ranking_limits = limits.clone();
     ranking_limits.timeout /= 4;
+    if let Some(cache) = &e.pruning {
+        if let Some(pool) = &cache.lock().unwrap().trials {
+            // Even donated time must leave at least half this question for
+            // its unsplit/residual search. Unused credit stays in the ledger.
+            let extra = pool.lock().unwrap().take_released(ranking_limits.timeout);
+            ranking_limits.timeout += extra;
+        }
+    }
     ranking_limits.max_work /= 4;
     let mut budget = Budget::new(&ranking_limits);
     let mut config = e.config.clone();
@@ -357,6 +377,7 @@ fn partition_from<T>(
         id: 1,
         parent_id: None,
         parent: None,
+        prepared: None,
         delta: vec![],
         rest: false,
         pins: BTreeMap::new(),
@@ -449,6 +470,8 @@ fn partition_from<T>(
             };
             let state = if let Some(r) = &preflight {
                 r.state.clone()
+            } else if let Some(prepared) = &unit.prepared {
+                prepared.clone()
             } else {
                 Arc::new(match &unit.parent {
                     Some(parent) => parent.child(&unit.delta, &mut budget)?,
@@ -530,10 +553,16 @@ fn partition_from<T>(
                             }
                             let id = next_id;
                             next_id += 1;
+                            let prepared = choice.child_states.get(child_index).map(|s| {
+                                let mut child = (**s).clone();
+                                child.publish(e);
+                                Arc::new(child)
+                            });
                             queue.push_front(Unit {
                                 id,
                                 parent_id: Some(unit.id),
                                 parent: Some(state.clone()),
+                                prepared,
                                 delta,
                                 rest,
                                 pins,
@@ -677,3 +706,6 @@ pub(in crate::sat_probe::completion_query) fn test_partition(
         }
     })
 }
+
+#[cfg(test)]
+mod pruning_tests;

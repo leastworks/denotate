@@ -181,6 +181,19 @@ impl State {
     pub fn source(&self) -> &Cone {
         &self.index.cone
     }
+    /// Only ancestor-proved constants and explicit assignments enter a proof.
+    /// Ordinary propagation is for ranking/execution, not a common-equations premise.
+    fn proof_cone(&self, pins: &[(usize, bool)], b: &mut Budget<'_>) -> Result<Arc<Cone>> {
+        b.charge(
+            self.index.cone.fixed.len() + pins.len(),
+            "completion branch proof inputs",
+        )?;
+        let mut c = (*self.index.cone).clone();
+        for (i, v) in pins {
+            c.fixed[*i] = Some(*v);
+        }
+        Ok(Arc::new(c))
+    }
     pub fn cone(&self, b: &mut Budget<'_>) -> Result<Arc<Cone>> {
         b.charge(self.values.len, "completion branch values")?;
         let c = &self.index.cone;
@@ -205,6 +218,9 @@ pub(super) struct Bundle {
     views: BTreeMap<pruning::ViewKey, State>,
     cone_key: pruning::ViewKey,
     classification_key: Option<pruning::ViewKey>,
+    pub pins: Vec<(usize, bool)>,
+    pub trials: Option<Arc<std::sync::Mutex<pruning::TrialPool>>>,
+    pub proofs: Vec<PruningReport>,
 }
 impl Bundle {
     pub fn new(e: &Engine, b: &mut Budget<'_>) -> Result<Self> {
@@ -214,6 +230,16 @@ impl Bundle {
             .map(|c| c.lock().unwrap().branch_views(e))
             .unwrap_or_default();
         Ok(Self {
+            pins: e
+                .pruning
+                .as_ref()
+                .map(|c| c.lock().unwrap().pins.clone())
+                .unwrap_or_default(),
+            proofs: vec![],
+            trials: e
+                .pruning
+                .as_ref()
+                .and_then(|c| c.lock().unwrap().trials.clone()),
             views: views
                 .into_iter()
                 .map(|(k, c)| Ok((k, State::new(c, b)?)))
@@ -238,11 +264,25 @@ impl Bundle {
         })
     }
     pub fn child(&self, pins: &[(usize, bool)], b: &mut Budget<'_>) -> Result<Self> {
+        let mut assignments: BTreeMap<_, _> = self.pins.iter().copied().collect();
+        for (i, v) in pins {
+            if assignments.insert(*i, *v).is_some_and(|old| old != *v) {
+                return Err(CheckError::Internal("conflicting branch context"));
+            }
+        }
+        let assignments: Vec<_> = assignments.into_iter().collect();
         Ok(Self {
+            pins: assignments.clone(),
+            trials: self.trials.clone(),
+            proofs: vec![],
             views: self
                 .views
                 .iter()
-                .map(|(k, s)| Ok((k.clone(), s.child(pins, b)?)))
+                .map(|(k, s)| {
+                    let mut k = k.clone();
+                    k.2 = assignments.clone();
+                    Ok((k, s.child(pins, b)?))
+                })
                 .collect::<Result<_>>()?,
             cone_key: self.cone_key.clone(),
             classification_key: self.classification_key.clone(),
@@ -271,6 +311,7 @@ impl Bundle {
         } else {
             self.cone_key.clone()
         };
+        key.2 = self.pins.clone();
         if hypothesis {
             key.1 = PruningContext::Hypothesis;
             if let Some(s) = self.views.get(&key) {
@@ -279,6 +320,111 @@ impl Bundle {
         }
         key.1 = PruningContext::World;
         (self.views.get(&key).unwrap_or(base), "W")
+    }
+    pub fn prune(
+        &mut self,
+        e: &Engine,
+        classification: bool,
+        heads: &BTreeSet<usize>,
+        config: &mut QueryLimits,
+        b: &mut Budget<'_>,
+    ) -> Result<(usize, usize, Option<Inconclusive>)> {
+        let Some(pool) = self.trials.clone() else {
+            return Ok((0, 0, None));
+        };
+        let scope = if classification {
+            "classification"
+        } else {
+            "processing"
+        };
+        if ![PruningContext::World, PruningContext::Hypothesis]
+            .into_iter()
+            .any(|c| pool.lock().unwrap().available(scope, c))
+        {
+            let pool = pool.lock().unwrap();
+            let error = pool
+                .cutoff(scope, PruningContext::World)
+                .or_else(|| pool.cutoff(scope, PruningContext::Hypothesis));
+            return Ok((0, 0, error.map(inconclusive).transpose()?));
+        }
+        let mut attempts = 0;
+        let mut proved = 0;
+        let mut cutoff = None;
+        for context in [PruningContext::World, PruningContext::Hypothesis] {
+            if context == PruningContext::Hypothesis && e.classification.is_none() {
+                continue;
+            }
+            if !pool.lock().unwrap().available(scope, context) {
+                cutoff = cutoff.or(pool
+                    .lock()
+                    .unwrap()
+                    .cutoff(scope, context)
+                    .map(inconclusive)
+                    .transpose()?);
+                continue;
+            }
+            let hypothesis = context == PruningContext::Hypothesis;
+            let (state, _) = self.ranking(classification, hypothesis);
+            let answer = pruning::trial(
+                e,
+                scope,
+                context,
+                &pool,
+                b,
+                config,
+                |local, query, used, report| {
+                    let mut branch = self.engine(e, local)?;
+                    branch.config = query.clone();
+                    let base = state.proof_cone(&self.pins, local)?;
+                    let result = pruning::prove(
+                        &branch, &base, scope, context, &self.pins, heads, local, used, report,
+                    )?;
+                    if report.removed > 0 {
+                        State::new(result, local).map(Some)
+                    } else {
+                        Ok(None)
+                    }
+                },
+            );
+            let (state, report) = match answer {
+                Ok(Some(v)) => v,
+                Ok(None) => continue,
+                Err(error) => {
+                    e.limits.cancellation.check()?;
+                    cutoff = Some(inconclusive(error)?);
+                    continue;
+                }
+            };
+            attempts += report.attempts;
+            proved += report.records.len() + report.omitted;
+            cutoff = cutoff
+                .or_else(|| report.incomplete.first().copied())
+                .or_else(|| report.components.iter().find_map(|c| c.cutoff));
+            if let Some(state) = state {
+                let mut key = if classification {
+                    self.classification_key.as_ref().unwrap().clone()
+                } else {
+                    self.cone_key.clone()
+                };
+                key.1 = context;
+                key.2 = self.pins.clone();
+                self.views.insert(key, state);
+                self.proofs.push(report);
+            }
+        }
+        Ok((attempts, proved, cutoff))
+    }
+    pub fn publish(&mut self, e: &Engine) {
+        if let Some(cache) = &e.pruning {
+            let mut cache = cache.lock().unwrap();
+            for mut report in self.proofs.drain(..) {
+                // Trial details live with the candidate's branch context. Source
+                // findings only come from selected partitions, never lost trials.
+                report.components.clear();
+                report.incomplete.clear();
+                cache.merge(report);
+            }
+        }
     }
     pub fn engine(&self, e: &Engine, b: &mut Budget<'_>) -> Result<Engine> {
         let mut out = e.clone();
@@ -290,6 +436,7 @@ impl Bundle {
                 .collect::<Result<_>>()?;
             Some(Arc::new(std::sync::Mutex::new(pruning::Cache::inherited(
                 views,
+                self.pins.clone(),
             ))))
         } else {
             None

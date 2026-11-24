@@ -1062,6 +1062,9 @@ impl Engine {
         }
         let mut invocation = self.clone();
         let cache = Arc::new(std::sync::Mutex::new(pruning::Cache::for_engine(self)));
+        if options.prune && options.split_depth > 0 {
+            cache.lock().unwrap().enable_trials(self);
+        }
         if options.prune {
             invocation.pruning = Some(cache.clone());
         }
@@ -1077,6 +1080,9 @@ impl Engine {
         }
         let mut report = invocation.check_unpruned(keys, options)?;
         report.pruning = cache.lock().unwrap().report.clone();
+        if let Some(pool) = &cache.lock().unwrap().trials {
+            pool.lock().unwrap().summarize(&mut report.pruning);
+        }
         report.pruning.enabled = options.prune;
         report.branches = branches.lock().unwrap().clone();
         report.branches.enabled = options.split_depth > 0;

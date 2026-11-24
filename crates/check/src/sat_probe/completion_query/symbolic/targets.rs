@@ -16,6 +16,8 @@ pub(in crate::sat_probe::completion_query) fn discover(
     context: PruningContext,
     report: &mut PruningReport,
     b: &mut Budget<'_>,
+    only: Option<&BTreeSet<usize>>,
+    used: &mut QueryLimits,
 ) -> Result<Targets> {
     let mut folded = cone.clone();
     folded.fixed = fixed.to_vec();
@@ -65,6 +67,9 @@ pub(in crate::sat_probe::completion_query) fn discover(
     let mut groups: Vec<_> = groups.into_iter().collect();
     groups.sort_by_key(|(id, _)| (!odd_ids.contains(id), *id));
     for (id, heads) in groups {
+        if only.is_some_and(|wanted| !heads.iter().any(|h| wanted.contains(h))) {
+            continue;
+        }
         let start = Instant::now();
         let row = report.components.len();
         report.components.push(PruningComponent {
@@ -91,9 +96,17 @@ pub(in crate::sat_probe::completion_query) fn discover(
                 true
             } else {
                 let local = existence::component(&folded, &producers, &heads, b)?;
-                let mut run = queries::Run::local(engine, b)?;
+                let mut local_engine = engine.clone();
+                if only.is_some() {
+                    local_engine.config =
+                        super::super::pruning::subtract_query(&engine.config, used);
+                }
+                let mut run = queries::Run::local(&local_engine, b)?;
                 run.label("completion pruning local uniqueness");
                 let (unique, _, _, _) = run.local_unique(&local, |_, _| {});
+                if only.is_some() {
+                    super::super::pruning::add_query(used, run.usage());
+                }
                 let unique = unique?;
                 report.components[row].kind = if unique { "unique" } else { "non-unique" };
                 !unique
@@ -132,6 +145,10 @@ pub(in crate::sat_probe::completion_query) fn discover(
                 }
             }
             for head in &heads {
+                selected.components.insert(*head, row);
+                if only.is_some_and(|wanted| !wanted.contains(head)) {
+                    continue;
+                }
                 b.charge(
                     producers[*head].len() + edges[*head].len() + 1,
                     "completion pruning rank",

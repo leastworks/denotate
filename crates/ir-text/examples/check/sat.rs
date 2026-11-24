@@ -851,6 +851,18 @@ pub(super) fn completion_inner(
             }
         }
         if report.pruning.enabled {
+            if !report.pruning.trial_released.is_zero() {
+                writeln!(
+                    output,
+                    "  branch ranking: {:.1} ms of leftover root time transferred",
+                    report.pruning.trial_released.as_secs_f64() * 1000.0
+                )
+                .unwrap();
+            }
+            if report.pruning.trial_attempts > 0 {
+                writeln!(output,"Branch pruning trials (including discarded candidates): {} attempts, {} proved, {:.1} ms",
+                    report.pruning.trial_attempts,report.pruning.trial_proved,report.pruning.trial_elapsed.as_secs_f64()*1000.0).unwrap();
+            }
             for v in &report.pruning.views {
                 writeln!(
                     output,

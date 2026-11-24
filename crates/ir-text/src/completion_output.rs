@@ -295,6 +295,38 @@ pub fn branch_formatter(
                 if r.selected { " selected" } else { "" },
                 if r.cutoff.is_some() { " trial incomplete" } else { "" }));
         }
+        for r in &c.candidates {
+            if r.pruning_attempts > 0 {
+                line.push_str(&format!(
+                    "; candidate {}: {} conditional pruning attempts, {} proved",
+                    crate::progress::atom_text(&r.split, &names),
+                    r.pruning_attempts,
+                    r.pruning_proved
+                ));
+            }
+            for g in &r.derived_guards {
+                line.push_str(&format!(
+                    "; child {} [{}] derived guard {}: upstream {}",
+                    g.child,
+                    r.context,
+                    crate::progress::atom_text(&g.atom, &names),
+                    if g.acyclic_upstream {
+                        "acyclic"
+                    } else {
+                        "cyclic"
+                    }
+                ));
+            }
+            if r.selected && !r.derived_guards_complete && r.pruning_attempts > 0 {
+                line.push_str("; derived guard inventory incomplete");
+            }
+            if r.omitted_derived_guards > 0 {
+                line.push_str(&format!(
+                    "; +{} omitted derived guards",
+                    r.omitted_derived_guards
+                ));
+            }
+        }
         if c.omitted_candidates > 0 {
             line.push_str(&format!("; +{} omitted candidates", c.omitted_candidates));
         }

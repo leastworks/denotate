@@ -1350,12 +1350,24 @@ checking in the editor. Identity adds `notice: "completion-pruning"`, semantic
 Evidence kind `completion-pruning` contains the head/context and bounded records:
 `kind: "coverage" | "subsumption"`, `scope: "classification" | "processing" |
 "property"`, `scopeHeads`, `removedInstances`, semantic rule `sources` and
-`omittedSources`. Equivalent scopes may share a view (classification takes naming
+`omittedSources`, plus `pins` (`{atom, value}`) and `omittedPins`. Empty pins denote
+an unconditional proof in W/W+H. Conditional records retain at most 32 assignments;
+the complete set remains in internal cache identity. Grouped notes display at most
+eight distinct conditions with omissions. The finding identity remains head/context.
+Equivalent scopes may share a view (classification takes naming
 precedence when its equations equal processing's). There is no quick fix.
 
 With `--completion-prune` (API `CheckOptions::prune`), completion JSON status adds
 `simplifications`; disabled checks omit it entirely. Its fields are `attempts`, `removedInstances`,
-`coveredHeads`, `records` (at most 64), `omittedRecords`, and `cutoffs` (at most 64).
+`coveredHeads`, `records` (at most 64 root and 64 conditional records),
+`omittedRecords`, and `cutoffs` (at most 64). `trialAttempts`, `trialProved`, and
+`trialElapsedMs` count all branch trials, including discarded ones. Conditional
+source records come only from selected partitions. `attempts` counts root-view
+work plus published selected-branch work, so it overlaps `trialAttempts`; do not
+add those counts. `elapsedMs` covers root pruning, while `trialElapsedMs` covers
+the separate branch trials, including their setup and propagation.
+`trialReleasedMs` records root time transferred once into ranking, after unstarted
+root views have received redistribution priority; zero means no such transfer.
 Each record retains at most 32 source instances. Counts concern scoped solver-view
 transformations, so an authored instance may appear in several scopes/contexts.
 A proof cutoff is optional optimization telemetry, not an incomplete verdict.
@@ -1494,3 +1506,14 @@ they are not overlapping enclosing-query durations. Live CLI progress prints
 solve start/end boundaries and remaining deadline at start, allowing the first
 overdue operation to be located. A `completion-solve` structured progress target
 carries `remainingMsAtStart`. Bounds on telemetry do not change search budgets.
+
+
+Completion split candidate telemetry additionally includes `pruningAttempts` and
+`pruningProved`, and `derivedGuards: [{atom, child, acyclicUpstream}]`. `child` is
+the zero-based partition child (selected values, then rest). The surrounding
+candidate's context is W/W+H; parent assignments are on the branch record.
+`omittedDerivedGuards` counts omitted inventoried guards, and
+`derivedGuardsComplete` is false for unexamined children or diagnostic cutoffs.
+Only the selected candidate receives this bounded advisory inventory (at most four
+children and 32 guards). Acyclic means its whole upstream in the child's view;
+this is eligibility telemetry, not a new derived-atom split or semantic finding.

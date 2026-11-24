@@ -2,6 +2,8 @@
 //! definition is disabled in every proof. Other equations are unchanged in both
 //! programs. No scope is ever computed from these solver-instance rewrites.
 use super::*;
+mod branch;
+pub(super) use branch::{TrialPool, prove, trial};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PruningContext {
@@ -22,6 +24,8 @@ pub struct PruningRecord {
     pub removed: usize,
     pub scope_heads: usize,
     pub scope: &'static str,
+    pub pins: Vec<(GroundAtom, bool)>,
+    pub omitted_pins: usize,
 }
 #[derive(Debug, Clone)]
 pub struct PruningComponent {
@@ -86,17 +90,25 @@ pub struct PruningReport {
     pub covered: usize,
     pub records: Vec<PruningRecord>,
     pub omitted: usize,
+    pub branch_records: Vec<PruningRecord>,
+    pub omitted_branch_records: usize,
     pub incomplete: Vec<Inconclusive>,
+    pub trial_attempts: usize,
+    pub trial_proved: usize,
+    pub trial_elapsed: Duration,
+    pub trial_released: Duration,
 }
 #[derive(Default)]
 pub(super) struct Cache {
-    views: BTreeMap<(Vec<usize>, PruningContext), Arc<Cone>>,
+    views: BTreeMap<ViewKey, Arc<Cone>>,
     pub report: PruningReport,
     reservations: Reservations,
     // Scheduling hints, independent of capped diagnostic records. Invocation-local
     // atom indexes; never reused as proofs or across preparations.
     classification_successes: BTreeSet<usize>,
     pub(super) readonly: bool,
+    pub(super) pins: Vec<(usize, bool)>,
+    pub(super) trials: Option<Arc<std::sync::Mutex<TrialPool>>>,
 }
 type Bucket = (&'static str, PruningContext);
 #[derive(Default)]
@@ -106,7 +118,10 @@ struct Reservation {
     started: bool,
 }
 #[derive(Default)]
-struct Reservations(BTreeMap<Bucket, Reservation>);
+struct Reservations {
+    slots: BTreeMap<Bucket, Reservation>,
+    leftover: Duration,
+}
 impl Reservations {
     fn new(allowance: Duration, classification: bool, properties: bool) -> Self {
         let scopes = std::iter::once("processing")
@@ -123,15 +138,18 @@ impl Reservations {
         for slot in slots.values_mut() {
             slot.allowance = share;
         }
-        Self(slots)
+        Self {
+            slots,
+            leftover: Duration::ZERO,
+        }
     }
     fn start(&mut self, key: Bucket) -> Duration {
-        let slot = self.0.get_mut(&key).expect("planned pruning scope");
+        let slot = self.slots.get_mut(&key).expect("planned pruning scope");
         slot.started = true;
         slot.allowance.saturating_sub(slot.spent)
     }
     fn finish(&mut self, key: Bucket, elapsed: Duration, stop: PruningStop) -> Duration {
-        let slot = self.0.get_mut(&key).unwrap();
+        let slot = self.slots.get_mut(&key).unwrap();
         slot.spent += elapsed;
         // Property cones share a bucket. Saturating one is not completion of
         // the others. Root scopes each have one view per context.
@@ -141,11 +159,12 @@ impl Reservations {
         let unused = slot.allowance.saturating_sub(slot.spent);
         slot.allowance = slot.spent; // release at most once, including cache hits
         let mut recipients = self
-            .0
+            .slots
             .values_mut()
             .filter(|s| !s.started)
             .collect::<Vec<_>>();
         if recipients.is_empty() {
+            self.leftover += unused;
             return Duration::ZERO;
         }
         let share = unused / recipients.len() as u32;
@@ -164,7 +183,7 @@ struct Successes {
     priority_attempts: usize,
     priority_proved: usize,
 }
-pub(super) type ViewKey = (Vec<usize>, PruningContext);
+pub(super) type ViewKey = (Vec<usize>, PruningContext, Vec<(usize, bool)>);
 pub(super) fn view_key(c: &Cone, context: PruningContext) -> ViewKey {
     (
         c.rules
@@ -174,9 +193,58 @@ pub(super) fn view_key(c: &Cone, context: PruningContext) -> ViewKey {
             .into_iter()
             .collect(),
         context,
+        vec![],
     )
 }
 impl Cache {
+    pub(super) fn merge(&mut self, report: PruningReport) {
+        for view in report.views {
+            if self.report.views.len() < 64 {
+                self.report.views.push(view);
+            } else {
+                self.report.omitted_views += 1;
+            }
+        }
+        for row in report.components {
+            if self.report.components.len() < 64 {
+                self.report.components.push(row);
+            } else {
+                self.report.omitted_components += 1;
+            }
+        }
+        self.report.omitted_components += report.omitted_components;
+        self.report.attempts += report.attempts;
+        self.report.removed += report.removed;
+        self.report.covered += report.covered;
+        for record in report.records.into_iter().chain(report.branch_records) {
+            let conditional = !record.pins.is_empty() || record.omitted_pins > 0;
+            let (records, omitted) = if conditional {
+                (
+                    &mut self.report.branch_records,
+                    &mut self.report.omitted_branch_records,
+                )
+            } else {
+                (&mut self.report.records, &mut self.report.omitted)
+            };
+            if records.len() < 64 {
+                records.push(record);
+            } else {
+                *omitted += 1;
+            }
+        }
+        self.report.omitted_branch_records += report.omitted_branch_records;
+        self.report.omitted += report.omitted;
+        let room = 64 - self.report.incomplete.len().min(64);
+        self.report
+            .incomplete
+            .extend(report.incomplete.into_iter().take(room));
+    }
+    pub(super) fn enable_trials(&mut self, e: &Engine) {
+        self.trials = Some(Arc::new(std::sync::Mutex::new(TrialPool::new(
+            &self.reservations,
+            e,
+        ))));
+    }
     pub(super) fn for_engine(e: &Engine) -> Self {
         let remaining = e.limits.run_deadline.map_or(e.limits.timeout, |d| {
             d.saturating_duration_since(Instant::now())
@@ -198,9 +266,10 @@ impl Cache {
             ..Self::default()
         }
     }
-    pub(super) fn inherited(views: BTreeMap<ViewKey, Arc<Cone>>) -> Self {
+    pub(super) fn inherited(views: BTreeMap<ViewKey, Arc<Cone>>, pins: Vec<(usize, bool)>) -> Self {
         Self {
             views,
+            pins,
             readonly: true,
             ..Self::default()
         }
@@ -209,7 +278,9 @@ impl Cache {
         let mut keys = BTreeSet::new();
         for c in std::iter::once(&e.cone).chain(e.classification.as_ref().map(|(c, _, _)| c)) {
             for context in [PruningContext::World, PruningContext::Hypothesis] {
-                keys.insert(view_key(c, context));
+                let mut key = view_key(c, context);
+                key.2 = self.pins.clone();
+                keys.insert(key);
             }
         }
         keys.into_iter()
@@ -262,7 +333,7 @@ pub(super) fn view<'a>(
     } else {
         PruningContext::World
     };
-    let key = (heads, context);
+    let key = (heads, context, cache.lock().unwrap().pins.clone());
     {
         let cache = cache.lock().unwrap();
         if let Some(v) = cache.views.get(&key).cloned() {
@@ -357,6 +428,7 @@ pub(super) fn view<'a>(
             &mut used,
             &priority,
             &mut successes,
+            None,
         );
         round_engine.config.max_solves = round_engine
             .config
@@ -406,6 +478,10 @@ pub(super) fn view<'a>(
     let elapsed = started.elapsed();
     let mut cache = cache.lock().unwrap();
     let released = cache.reservations.finish((scope, context), elapsed, stop);
+    if let Some(pool) = cache.trials.clone() {
+        let leftover = std::mem::take(&mut cache.reservations.leftover);
+        pool.lock().unwrap().release(leftover);
+    }
     if scope == "classification" && context == PruningContext::World {
         cache.classification_successes.extend(successes.heads);
     }
@@ -426,37 +502,7 @@ pub(super) fn view<'a>(
     });
     let result = Arc::new(result);
     cache.report.elapsed += elapsed;
-    for view in report.views {
-        if cache.report.views.len() < 64 {
-            cache.report.views.push(view);
-        } else {
-            cache.report.omitted_views += 1;
-        }
-    }
-    for row in report.components {
-        if cache.report.components.len() < 64 {
-            cache.report.components.push(row);
-        } else {
-            cache.report.omitted_components += 1;
-        }
-    }
-    cache.report.omitted_components += report.omitted_components;
-    cache.report.attempts += report.attempts;
-    cache.report.removed += report.removed;
-    cache.report.covered += report.covered;
-    for record in report.records {
-        if cache.report.records.len() < 64 {
-            cache.report.records.push(record);
-        } else {
-            cache.report.omitted += 1;
-        }
-    }
-    cache.report.omitted += report.omitted;
-    let room = 64 - cache.report.incomplete.len().min(64);
-    cache
-        .report
-        .incomplete
-        .extend(report.incomplete.into_iter().take(room));
+    cache.merge(report);
     cache.views.insert(key, result.clone());
     Ok(View::Pruned(result))
 }
@@ -476,6 +522,20 @@ pub(super) fn prepare(e: &Engine, classification: bool) -> Result<()> {
     Ok(())
 }
 
+pub(super) fn subtract_query(q: &QueryLimits, used: &QueryLimits) -> QueryLimits {
+    QueryLimits {
+        max_solves: q.max_solves.saturating_sub(used.max_solves),
+        max_solver_polls: q.max_solver_polls.saturating_sub(used.max_solver_polls),
+        max_conflicts: q.max_conflicts.saturating_sub(used.max_conflicts),
+        max_propagations: q.max_propagations.saturating_sub(used.max_propagations),
+    }
+}
+pub(super) fn add_query(q: &mut QueryLimits, used: QueryLimits) {
+    q.max_solves = q.max_solves.saturating_add(used.max_solves);
+    q.max_solver_polls = q.max_solver_polls.saturating_add(used.max_solver_polls);
+    q.max_conflicts = q.max_conflicts.saturating_add(used.max_conflicts);
+    q.max_propagations = q.max_propagations.saturating_add(used.max_propagations);
+}
 fn simplify(
     engine: &Engine,
     original: &Cone,
@@ -488,6 +548,7 @@ fn simplify(
     used: &mut QueryLimits,
     priority: &BTreeSet<usize>,
     successes: &mut Successes,
+    only: Option<&BTreeSet<usize>>,
 ) -> Result<()> {
     let n = original.fixed.len();
     budget.charge(n + original.rules.len(), "completion pruning index")?;
@@ -510,6 +571,8 @@ fn simplify(
         context,
         report,
         &mut discovery_budget,
+        only,
+        used,
     );
     budget.charge(
         discovery_budget.used(),
@@ -538,7 +601,9 @@ fn simplify(
     }
     abstracted.rules.retain(|r| !abstracted.input[r.head]);
     let fixed = encoding::fitting(&abstracted, budget)?;
-    let mut run = queries::Run::new(engine, budget)?;
+    let mut proof_engine = engine.clone();
+    proof_engine.config = subtract_query(&engine.config, used);
+    let mut run = queries::Run::new(&proof_engine, budget)?;
     run.label(match context {
         PruningContext::World => "completion pruning W",
         PruningContext::Hypothesis => "completion pruning W+H",
@@ -764,6 +829,8 @@ fn simplify(
                         removed,
                         scope_heads,
                         scope,
+                        pins: vec![],
+                        omitted_pins: 0,
                     },
                 );
                 report.removed += removed;
@@ -820,7 +887,7 @@ fn simplify(
             report.components[row].cutoff = Some(cause);
         }
     }
-    *used = run.usage();
+    add_query(used, run.usage());
     install_result(original, result, &enabled);
     outcome
 }
@@ -852,6 +919,27 @@ fn equation(run: &mut queries::Run<'_, '_, '_>, gate: Lit, head: Lit, body: Lit)
 mod reservation_tests {
     use super::*;
     #[test]
+    fn leftover_is_released_once_only_after_unstarted_roots_have_priority() {
+        let cw = ("classification", PruningContext::World);
+        let ch = ("classification", PruningContext::Hypothesis);
+        let pw = ("processing", PruningContext::World);
+        let ph = ("processing", PruningContext::Hypothesis);
+        let mut r = Reservations::new(Duration::from_secs(40), true, false);
+        r.start(cw);
+        assert_eq!(
+            r.finish(cw, Duration::from_secs(1), PruningStop::Saturated),
+            Duration::from_secs(9)
+        );
+        assert_eq!(r.leftover, Duration::ZERO);
+        assert_eq!(r.start(ch), Duration::from_secs(13));
+        assert_eq!(r.start(pw), Duration::from_secs(13));
+        assert_eq!(r.start(ph), Duration::from_secs(13));
+        r.finish(ph, Duration::from_secs(2), PruningStop::Saturated);
+        assert_eq!(std::mem::take(&mut r.leftover), Duration::from_secs(11));
+        r.finish(ph, Duration::ZERO, PruningStop::Saturated);
+        assert_eq!(r.leftover, Duration::ZERO);
+    }
+    #[test]
     fn only_saturation_releases_time_fairly_to_unstarted_views() {
         let cw = ("classification", PruningContext::World);
         let ch = ("classification", PruningContext::Hypothesis);
@@ -870,7 +958,7 @@ mod reservation_tests {
         // Starting a later view cannot borrow from a view still running.
         assert_eq!(r.start(ch), secs(10));
         assert_eq!(r.finish(cw, secs(2), PruningStop::Saturated), secs(8));
-        assert_eq!(r.0[&ch].allowance, secs(10));
+        assert_eq!(r.slots[&ch].allowance, secs(10));
         assert_eq!(r.start(pw), secs(14));
         // A cutoff does not surrender its unused remainder to H.
         assert_eq!(
@@ -883,7 +971,7 @@ mod reservation_tests {
             Duration::ZERO
         );
         assert_eq!(
-            r.0.values().map(|s| s.allowance).sum::<Duration>(),
+            r.slots.values().map(|s| s.allowance).sum::<Duration>(),
             secs(40)
         );
     }
@@ -1047,7 +1135,7 @@ mod reservation_tests {
         // A completed W pass used its entire reservation. H must still run.
         let slot = cache
             .reservations
-            .0
+            .slots
             .get_mut(&("classification", PruningContext::World))
             .unwrap();
         slot.spent = slot.allowance;

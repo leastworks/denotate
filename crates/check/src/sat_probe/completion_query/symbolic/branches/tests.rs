@@ -156,6 +156,7 @@ fn rest_preserves_other_values_and_absence_and_can_split_again() {
             score: 0,
             binary: false,
             child_targets: vec![],
+            child_states: vec![],
         }
         .children()
         .pop()
@@ -334,6 +335,7 @@ fn ranking_uses_edges_per_extra_child_with_deterministic_ties() {
             score: edges,
             binary: false,
             child_targets: vec![],
+            child_states: vec![],
         }
     }
     assert!(candidate(12, 3).rank(&candidate(5, 2)).is_gt());

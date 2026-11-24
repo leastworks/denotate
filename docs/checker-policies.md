@@ -1984,7 +1984,9 @@ Views are retained only during that check invocation. Reports keep 64 component
 summaries (16 ranked candidate examples each), including considered/proved counts,
 last head and optional cutoff. Human output prints cutoffs without `--verbose`.
 Reports keep 64 proof records
-and 32 source instances per record, with omitted counts; these caps do not limit
+and 32 source instances per record, with omitted counts; conditional branch
+records have a separate 64-record allowance so root findings cannot crowd them out.
+These caps do not limit
 installed proofs. Source findings group by head/context and bound primary source
 contributions to 32. Repeated scopes may count the same instance more than once;
 counts describe transformations of solver views, not distinct authored rules.
@@ -2145,3 +2147,69 @@ deadlines. Split mode used three split decisions and five residual leaves.
 All six pruning views reached their overall time allowance in round 1: this is
 not evidence of saturation. Small oracle tests cover completed pruning rounds.
 There is no speed improvement claim; the private corpus still needs re-scoring.
+
+
+### Completion pruning under branch assignments
+
+Enabled only by combining pruning and input splitting. Root pruning keeps its
+full reservations and redistribution policy regardless of split mode. Trials are
+funded from the existing split-ranking allowance (at most a quarter of the
+question); each ranking pass credits its available trial time fairly to W and
+W+H, without replenishing explicit work/query counters. Candidates and children
+share these counters. Setup, unsuccessful queries and discarded candidates are
+charged too. An individual attempt uses at most half the caller's remaining
+time/work, leaving room to propagate and rank its proved prefix.
+
+Saturated root views first redistribute unused time to unstarted root buckets.
+Only a remainder with no such recipient can supplement ranking, transferred once
+and reported as `trialReleasedMs`. Property reservations stay with their other
+property cones. A transfer can at most double the normal ranking time, leaving
+at least half the question for unsplit/residual search; unused credit remains
+available to later questions. Extra time stays inside the original deadline;
+the overall run deadline and explicit limits still bind. No root reservation is
+reduced to fund trials, and no fresh allowance is created per candidate or child.
+
+Discovery follows alternative producers for at most 32 witness heads, inspecting
+at most 32 producers and retaining 32 guard atoms per head. Upstream traversal
+still stops at cyclic atoms. The existing eight-candidate trial shortlist is used.
+For each child, try one common-equations pass on those witness heads under W and
+W+H separately, then rank actual edge cuts in the resulting Fitting view. This
+is bounded proof search, not a pruning fixed-point claim. Keep candidate child
+views only for the best two completed trials; discarded views are released. The
+selected trial's views are reused without proving them again. Uncut children and
+children whose targeted cycle closes still receive the full residual question.
+
+Conditional findings retain up to 32 assignments per proof with an omitted count;
+cache identity always uses the complete assignment set. Grouped findings display
+at most eight distinct branch conditions. Discarded trials publish no source
+findings. Trial telemetry counts all work independently of these presentation caps.
+
+After selection, sample surviving witness guards for at most four children and
+32 guards total. Acyclic eligibility means the entire upstream is cycle-free in
+that branch/context, not just the guard's own component. This advisory inventory
+gets at most 1/16 of remaining ranking work/time and 50 ms; incompleteness is
+explicit and cannot discard the selected partition. It does not enable derived
+formula splits.
+
+Before restoring root shares, on the 275-format guarded-schema field-value control
+(`self=50`, `double=1`,
+`wide=1`, `depth=2`, `fanout=5`, `stmts=3`, `triggers=1`, `fieldcut=1`), two
+default-limit profiling runs with pruning and depth-2 splits finished in about
+107.5 s. Both retained the emptiness counterexample and proved processing
+existence, but classification ambiguity became inconclusive where the saved
+prior run confirmed a counterexample. Classification existence and processing
+uniqueness remained inconclusive. Trials took about 4.2 s and proved 53–57
+simplifications, none retained by a selected partition. Root pruning used about
+32.6 s, with all six views cut off in round 1. Reserving trial time reduced root
+classification-W successes from 284 to 281; the contribution of that reduction
+versus changed query costs has not been isolated. This is evidence of an
+allocation trade-off, not a scale improvement. This motivated restoring root
+shares and funding trials from ranking instead.
+
+With root shares restored, the same default-limit control recovered confirmed
+classification ambiguity and matched the prior run's other verdicts in 107.35 s.
+Root pruning used 39.03 s (about 6.49 s allocated per view); trials used 3.90 s,
+212 attempts / 47 proofs, again with none retained by a selected partition.
+No leftover root time was transferred. This establishes recovery on the public
+control, not a scale benefit from branch pruning. The private corpus remains to
+be re-scored.

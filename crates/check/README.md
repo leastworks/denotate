@@ -1492,5 +1492,17 @@ divided among children; the phase deadline is shared fairly among pending units.
 Repeated/fresh calls rebuild units. Cross-call caching and parallel execution are
 not implemented. When pruning is enabled, pinned units inherit the ancestor's
 W view for no-H queries and its stronger W+H view for H-context queries. These
-read-only, context-tagged caches perform no new branch-relative proofs. W and H
-pruning receive independent reserved shares; a W pass cannot spend H's share.
+context-tagged caches also accept branch-local common-equations proofs when both
+pruning and splits are enabled. Bounded discovery includes alternative-producer
+guards of witness heads. Trial views retain complete canonical assignments and are
+handed to selected children; siblings and weaker contexts cannot reuse them.
+Proof setup uses explicit assignments and ancestor proofs, not ordinary Fitting
+conclusions. Failed/discarded attempts consume the shared trial ledger, including
+setup and local uniqueness queries. W and H have independent reservations funded
+by ranking; root shares and redistribution priority are unchanged. Only genuinely
+leftover released root time can supplement ranking, transferred once inside the
+question deadline.
+Conditional source records are published only for selected partitions; all trial
+attempts/proofs/time remain telemetry. Original scopes and residual queries remain
+unchanged. Derived guards get bounded acyclic-upstream telemetry for the selected
+partition; splitting on derived atoms is not implemented.

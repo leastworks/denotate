@@ -645,3 +645,40 @@ fn completion_pruning_reports_head_context_and_source_without_an_edit() {
             > 0
     );
 }
+
+#[test]
+fn conditional_pruning_evidence_names_assignments_without_changing_identity() {
+    let text = "input tag();relation accepted();relation profile();accepted():-tag();accepted():-profile();profile():-tag(),!accepted();verification v{semantics:completion;assumptions:[];obligations:[];}";
+    let (p, mut r) = checked(
+        text,
+        CheckOptions {
+            prune: true,
+            ..Default::default()
+        },
+    );
+    let original = presentation::present_completion(&p, &r).unwrap();
+    let identity = original
+        .diagnostics
+        .iter()
+        .find(|d| d.kind == denotate_presentation::Kind::CompletionPruning)
+        .unwrap()
+        .identity
+        .clone();
+    let tag = p.corpus.relations().find(|r| r.name == "tag").unwrap().id;
+    // A proof valid under W is also valid under this stronger branch context.
+    r.pruning.branch_records = std::mem::take(&mut r.pruning.records);
+    for record in &mut r.pruning.branch_records {
+        record.pins = vec![(denotate_check::GroundAtom::new(tag, []), true)];
+    }
+    let shown = presentation::present_completion(&p, &r).unwrap();
+    let d = shown
+        .diagnostics
+        .iter()
+        .find(|d| d.identity == identity)
+        .unwrap();
+    assert!(d.message.contains("recorded branch conditions"));
+    assert!(d.notes.iter().any(|n| n.contains("when tag() = true")));
+    assert_eq!(d.evidence["records"][0]["pins"][0]["value"], true);
+    assert_eq!(d.evidence["records"][0]["omittedPins"], 0);
+    assert_eq!(shown.status["simplifications"]["trialAttempts"], 0);
+}

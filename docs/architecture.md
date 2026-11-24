@@ -682,7 +682,8 @@ reusable certificate across edits.
 Completion checking optionally uses invocation-local, context-tagged solver views
 (`CheckOptions::prune`, default false; CLI `--completion-prune`). A view
 is keyed by the full set of defining heads in the original question scope and by
-W versus W+H; every original producer for each head belongs to that scope. Only
+W versus W+H, and the complete canonical branch assignments (empty at the root);
+every original producer for each head belongs to that scope. Only
 original scopes enter this cache. Common-equations proofs simplify the view while
 classification/property membership, contracts and model replay retain the original
 program. No view or proof is reused across preparations or edits, or in a weaker
@@ -702,10 +703,19 @@ Completion input partitions are opt-in (`CheckOptions::split_depth > 0`). The dr
 creates invocation-local units from immutable preparation plus explicit input pins.
 Each unit owns its specialized cones, solver, allowances and measurement sink; no
 mutable pruning cache is shared. Units inherit immutable ancestor W/W+H views
-under original scope keys, specialize each independently, and select the view for
+under original scope/context/assignment keys, specialize each independently, and select the view for
 the actual solver question. H-first coverage and processing under H use W+H;
-no-H fallback/rejection use W. Cache misses keep original equations; branches
-perform no new pruning proofs. Fitting may substitute values but cannot
+no-H fallback/rejection use W. With both pruning and splits enabled, bounded trial
+proofs use the branch assignments and common equations to simplify witness heads.
+Proof setup retains only ancestor-proved constants and explicit assignments;
+ordinary Fitting conclusions cannot stand in for a disabled head equation.
+The winning trial transfers its immutable views to matching children and descendants,
+never siblings or weaker contexts. Only selected partitions publish conditional
+source findings. Failed/discarded trials consume a shared accounting ledger, whose
+W/H reservations are separate and funded by ranking, preserving root allocations
+and redistribution priority. Only leftover releases can supplement ranking, once
+and within the question deadline. Solver state and proof caches remain branch-local.
+Fitting may substitute values but cannot
 change the frozen classification/property scopes. Child allowances partition the
 remaining explicit parent allowance; automatic CLI runaway guards retain enough
 room for child setup while the shared absolute deadline remains binding. Ranking

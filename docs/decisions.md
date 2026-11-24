@@ -2317,3 +2317,34 @@ a transferred proof nor a permission to prune. H-only successes never enter this
 set. Keep every successful head in an invocation-local, program-bounded set,
 separate from the bounded diagnostic records, so truncating reports cannot change
 search order. Default checking, semantic scopes and model validation are unchanged.
+
+
+## Branch-relative pruning keeps proof context and trial ownership explicit
+
+A producer can be redundant under a resolved input guard even when neither
+global pruning nor Fitting alone removes its cycle edge. Input split discovery
+therefore includes bounded guards from alternative producers of witness heads.
+Each tentative child can prove common-equations replacements under W and its
+assignments, or W+H and its assignments. The target equation remains disabled in
+the proof. Ordinary Fitting consequences are not independent premises: proof
+setup uses only explicit assignments and already-proved ancestor constants.
+
+The selected trial transfers proved views to its matching children. Keys contain
+the original scope, W/W+H and complete canonical assignments; descendants may
+inherit, siblings and weaker contexts may not. The assignment carrier is not
+restricted to a particular split-group syntax, but this increment constructs only
+input splits. Derived-guard acyclic-upstream reporting is advisory; formula splits
+remain separate work.
+
+Root pruning keeps its full shares and first claim on time released by saturated
+views. Fund trials from existing split-ranking time, with independent W/H shares.
+Only genuinely leftover root time can supplement ranking, transferred once within
+the question's deadline. Reserving a quarter of root shares for trials lost a
+confirmed result on the scale control, so optional trials do not tax root pruning.
+All attempts, including setup, failed queries and discarded candidates,
+consume it. Sharing an accounting ledger does not share solver state or mutable
+proof caches. Partial proof prefixes remain valid after later candidate cutoffs.
+Every child still receives residual checking; cutting a witness never proves the
+whole question. Source findings describe only selected partitions and explicitly
+name their branch conditions; discarded proofs remain telemetry. Conditional
+records have their own bounded space so a full root report cannot hide all of them.

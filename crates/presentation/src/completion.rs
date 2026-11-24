@@ -1040,7 +1040,10 @@ pub fn completion_branch_record(
             "context":r.context,"state":r.state,"children":r.children,"guardedEdges":r.guarded_edges,
             "checkedChildren":r.checked_children,"disabledEdges":r.disabled_edges,
             "minimumDisabled":r.minimum_disabled,"cyclesCutEveryChild":r.cycles_cut_every_child,
-            "selected":r.selected,"cutoff":r.cutoff.map(reason)
+            "selected":r.selected,"cutoff":r.cutoff.map(reason),
+            "pruningAttempts":r.pruning_attempts,"pruningProved":r.pruning_proved,
+            "derivedGuards":r.derived_guards.iter().map(|g|Ok(json!({"atom":atom(&g.atom)?,"child":g.child,"acyclicUpstream":g.acyclic_upstream}))).collect::<Result<Vec<_>>>()?,
+            "omittedDerivedGuards":r.omitted_derived_guards,"derivedGuardsComplete":r.derived_guards_complete
         })) }).collect::<Result<Vec<_>>>()?,"omittedCandidates":c.omitted_candidates,
         "values":c.values.iter().map(&atom).collect::<Result<Vec<_>>>()?,"omittedValues":c.omitted_values,
         "mapping":c.mapping.iter().map(|(a,i)|Ok(json!({"member":atom(a)?,"input":atom(i)?}))).collect::<Result<Vec<_>>>()?,"omittedMapping":c.omitted_mapping,

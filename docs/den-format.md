@@ -959,6 +959,12 @@ uniqueness checks. A split is a search strategy, not an extra assumption or a ch
 to meaning. Depth/branch bounds fall back to residual search; solver or deadline
 exhaustion stays inconclusive. The CLI reports chosen input values and branch
 outcomes, work, elapsed time, cutoffs, and a bounded inventory of candidate splits
-with actual edge cuts from tentative Fitting. With pruning enabled, branches reuse
-W+H proofs only for H-context questions and W proofs for no-H questions. These are progress/size records, not
-additional source diagnostics.
+with actual edge cuts from tentative Fitting and, when pruning is also enabled,
+common-equations proofs under the child assignments. Alternative-producer guards
+can therefore suggest a split even when Fitting alone cuts nothing. Branches reuse
+W+H proofs only for H-context questions and W proofs for no-H questions; conditional
+proofs stay in their branch and descendants. Selected partitions may add
+`completion-pruning` findings whose notes and evidence name the branch assignments
+(with explicit omissions). Discarded trials are telemetry only. A bounded inventory
+of surviving derived guards reports whether their whole upstream is acyclic in that
+branch; these guards are not yet split candidates.
