@@ -14,6 +14,40 @@ fn compare(c: &Corpus, v: VerificationId) -> Report {
     super::scale::same_report(&actual, &original);
     super::scale::same_report(&default, &original);
     assert!(actual.pruning.enabled);
+    // Force partitions even on tiny questions that unsplit-first answers quickly.
+    // Each branch must reuse the right proof context, never H in a no-H query.
+    let mut branched = e.clone();
+    branched.pruning = Some(Arc::new(std::sync::Mutex::new(
+        crate::sat_probe::completion_query::pruning::Cache::for_engine(&e),
+    )));
+    let split = CheckOptions {
+        split_depth: 2,
+        prune: true,
+        ..Default::default()
+    };
+    for class in [false, true] {
+        if class && e.classification.is_none() {
+            continue;
+        }
+        for exists in [false, true] {
+            let got = symbolic::branches::test_partition(&branched, class, exists, &split).unwrap();
+            let expected = if class {
+                let c = actual.classification.as_ref().unwrap();
+                if exists {
+                    c.no_meaning.exists()
+                } else {
+                    c.ambiguous.exists()
+                }
+            } else if exists {
+                actual.meaning.no_meaning.exists()
+            } else {
+                actual.meaning.ambiguous.exists()
+            };
+            assert_eq!(got.exists(), expected);
+            assert!(matches!(got, Search::Exists(()) | Search::None));
+        }
+    }
+
     super::scale::same_report(&actual, &expected);
     super::scale::same_report(&actual, &e.check(&keys(c), &options).unwrap());
     super::scale::same_report(

@@ -1061,7 +1061,7 @@ impl Engine {
             return self.check_unpruned(keys, options);
         }
         let mut invocation = self.clone();
-        let cache = Arc::new(std::sync::Mutex::new(pruning::Cache::default()));
+        let cache = Arc::new(std::sync::Mutex::new(pruning::Cache::for_engine(self)));
         if options.prune {
             invocation.pruning = Some(cache.clone());
         }

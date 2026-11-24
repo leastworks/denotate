@@ -2254,3 +2254,21 @@ equations. Each component's second-model choices can then replace its first-mode
 choices independently, with no shared downstream equation changed. Hidden constraints
 count as readers too: selected outputs alone are insufficient. The initial check is
 conservatively size-bounded; declining it retains the existing coupled fallback.
+
+
+## Completion splits use verified local cuts and inherit context-tagged views
+
+Transitive influence through a cyclic component made unrelated inputs tie on every
+witness edge. Split discovery now stops at cyclic atoms; bounded incremental
+Fitting trials measure actual edge deletion, retaining an edge while any parallel
+producer remains live. Prefer a partition that cuts the witness in every child.
+This guides search only: every permitted child still needs its semantic query.
+
+An ancestor proof under W is valid under W and pins; an ancestor proof under W+H
+is valid under W+H and pins. Children therefore inherit both views separately,
+keyed by the original scope. H-first classification coverage and processing under
+H use the stronger view, while no-H classification fallback and rejection use W.
+Original scopes and validation equations remain unchanged. Branch-relative proof
+search is deferred. Separate pruning time reservations prevent W work from
+consuming all the allowance intended for H-context coverage; global deadlines
+still apply. Splitting and pruning remain opt-in.

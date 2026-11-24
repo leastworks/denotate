@@ -953,5 +953,7 @@ covered; Fitting propagation under each choice may cut a loop before parity and
 uniqueness checks. A split is a search strategy, not an extra assumption or a change
 to meaning. Depth/branch bounds fall back to residual search; solver or deadline
 exhaustion stays inconclusive. The CLI reports chosen input values and branch
-outcomes, work, elapsed time and cutoffs. These are progress/size records, not
+outcomes, work, elapsed time, cutoffs, and a bounded inventory of candidate splits
+with actual edge cuts from tentative Fitting. With pruning enabled, branches reuse
+W+H proofs only for H-context questions and W proofs for no-H questions. These are progress/size records, not
 additional source diagnostics.

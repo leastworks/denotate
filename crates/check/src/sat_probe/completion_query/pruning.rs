@@ -59,7 +59,50 @@ pub struct PruningReport {
 pub(super) struct Cache {
     views: BTreeMap<(Vec<usize>, PruningContext), Arc<Cone>>,
     pub report: PruningReport,
-    spent: Duration,
+    spent: BTreeMap<(&'static str, PruningContext), Duration>,
+    share: Option<Duration>,
+    pub(super) readonly: bool,
+}
+pub(super) type ViewKey = (Vec<usize>, PruningContext);
+pub(super) fn view_key(c: &Cone, context: PruningContext) -> ViewKey {
+    (
+        c.rules
+            .iter()
+            .map(|r| r.head)
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
+        context,
+    )
+}
+impl Cache {
+    pub(super) fn for_engine(e: &Engine) -> Self {
+        let scopes =
+            1 + usize::from(e.classification.is_some()) + usize::from(!e.selection.is_empty());
+        let contexts = if e.classification.is_some() { 2 } else { 1 };
+        Self {
+            share: Some(e.limits.timeout / 10 / (scopes * contexts) as u32),
+            ..Self::default()
+        }
+    }
+    pub(super) fn inherited(views: BTreeMap<ViewKey, Arc<Cone>>) -> Self {
+        Self {
+            views,
+            readonly: true,
+            ..Self::default()
+        }
+    }
+    pub(super) fn branch_views(&self, e: &Engine) -> Vec<(ViewKey, Arc<Cone>)> {
+        let mut keys = BTreeSet::new();
+        for c in std::iter::once(&e.cone).chain(e.classification.as_ref().map(|(c, _, _)| c)) {
+            for context in [PruningContext::World, PruningContext::Hypothesis] {
+                keys.insert(view_key(c, context));
+            }
+        }
+        keys.into_iter()
+            .filter_map(|k| self.views.get(&k).map(|v| (k, v.clone())))
+            .collect()
+    }
 }
 pub(super) enum View<'a> {
     Original(&'a Cone),
@@ -107,8 +150,16 @@ pub(super) fn view<'a>(
         PruningContext::World
     };
     let key = (heads, context);
-    if let Some(v) = cache.lock().unwrap().views.get(&key).cloned() {
-        return Ok(View::Pruned(v));
+    {
+        let cache = cache.lock().unwrap();
+        if let Some(v) = cache.views.get(&key).cloned() {
+            return Ok(View::Pruned(v));
+        }
+        // A branch may reuse only proofs made in its ancestor's exact scope.
+        // Computing new pin-relative proofs belongs to the next increment.
+        if cache.readonly {
+            return Ok(View::Original(cone));
+        }
     }
     let classification_heads = engine
         .classification
@@ -148,10 +199,15 @@ pub(super) fn view<'a>(
     };
     let _progress = engine.limits.progress.diagnostic(phase);
     let mut limits = engine.shared_limits(engine.selection.len() + 6);
-    // A check invocation spends at most one tenth of its configured time on
-    // optional pruning. Each view gets at most a quarter of the enclosing
-    // query's remaining time, capped at five seconds.
-    let available = (engine.limits.timeout / 10).saturating_sub(cache.lock().unwrap().spent);
+    // Reserve independent shares for classification/processing/property, W/H.
+    // A W pass cannot consume the later H pass's reservation. The invocation's
+    // absolute deadline and this query's remaining time still bound every pass.
+    let available = {
+        let mut c = cache.lock().unwrap();
+        let fallback = Cache::for_engine(engine).share.unwrap();
+        let share = *c.share.get_or_insert(fallback);
+        share.saturating_sub(*c.spent.get(&(scope, context)).unwrap_or(&Duration::ZERO))
+    };
     limits.timeout = limits
         .timeout
         .min(remaining / 4)
@@ -182,7 +238,7 @@ pub(super) fn view<'a>(
     let result = Arc::new(result);
     let elapsed = started.elapsed();
     let mut cache = cache.lock().unwrap();
-    cache.spent += elapsed;
+    *cache.spent.entry((scope, context)).or_default() += elapsed;
     cache.report.elapsed += elapsed;
     for row in report.components {
         if cache.report.components.len() < 64 {
@@ -552,4 +608,44 @@ fn equation(run: &mut queries::Run<'_, '_, '_>, gate: Lit, head: Lit, body: Lit)
     run.cnf.clause(vec![head, !body], run.budget)?;
     run.cnf.gate = None;
     Ok(())
+}
+
+#[cfg(test)]
+mod reservation_tests {
+    use super::*;
+    #[test]
+    fn w_spending_cannot_consume_the_h_reservation() {
+        let mut c = Corpus::new();
+        use crate::test_support::rewrites::{rel, rule};
+        let i = rel(&mut c, "i", true);
+        let h = rel(&mut c, "h", false);
+        let p = rel(&mut c, "p", false);
+        let q = rel(&mut c, "q", false);
+        rule(&mut c, p, &[(i, false)]);
+        rule(&mut c, p, &[(q, false)]);
+        rule(&mut c, q, &[(p, true)]);
+        rule(&mut c, h, &[(i, false), (p, false)]);
+        let v = crate::sat_probe::completion_query::tests::verification(&mut c, Some(h), &[]);
+        let mut e = crate::sat_probe::completion_query::tests::prepare(&c, v, &Default::default());
+        let mut cache = Cache::for_engine(&e);
+        // A completed W pass used its entire reservation. H must still run.
+        cache.spent.insert(
+            ("classification", PruningContext::World),
+            cache.share.unwrap(),
+        );
+        e.pruning = Some(Arc::new(std::sync::Mutex::new(cache)));
+        let cone = &*e.classification.as_ref().unwrap().0;
+        let w = view(&e, cone, false, e.limits.timeout).unwrap();
+        let h = view(&e, cone, true, e.limits.timeout).unwrap();
+        assert!(*w.rules == *cone.rules);
+        assert!(h.rules.len() < w.rules.len() || h.fixed != w.fixed);
+        let cache = e.pruning.as_ref().unwrap().lock().unwrap();
+        assert!(
+            cache
+                .report
+                .records
+                .iter()
+                .any(|r| r.context == PruningContext::Hypothesis)
+        );
+    }
 }

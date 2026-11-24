@@ -159,6 +159,25 @@ impl State {
         let r = rs.next()?;
         rs.next().is_none().then_some(r)
     }
+    pub fn edge_live(
+        &self,
+        head: usize,
+        target: usize,
+        negative: bool,
+        b: &mut Budget<'_>,
+    ) -> Result<bool> {
+        if self.value(head).is_some() || self.value(target).is_some() {
+            return Ok(false);
+        }
+        for r in &self.index.producers[head] {
+            let rule = &self.index.cone.rules[*r];
+            b.charge(rule.body.len() + 1, "completion split trial edges")?;
+            if !self.dead[*r] && rule.body.contains(&(target, !negative)) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
     pub fn source(&self) -> &Cone {
         &self.index.cone
     }
@@ -183,10 +202,27 @@ pub(super) struct Bundle {
     pub world: State,
     pub classification: Option<State>,
     pub assumptions: Vec<State>,
+    views: BTreeMap<pruning::ViewKey, State>,
+    cone_key: pruning::ViewKey,
+    classification_key: Option<pruning::ViewKey>,
 }
 impl Bundle {
     pub fn new(e: &Engine, b: &mut Budget<'_>) -> Result<Self> {
+        let views = e
+            .pruning
+            .as_ref()
+            .map(|c| c.lock().unwrap().branch_views(e))
+            .unwrap_or_default();
         Ok(Self {
+            views: views
+                .into_iter()
+                .map(|(k, c)| Ok((k, State::new(c, b)?)))
+                .collect::<Result<_>>()?,
+            cone_key: pruning::view_key(&e.cone, PruningContext::World),
+            classification_key: e
+                .classification
+                .as_ref()
+                .map(|(c, _, _)| pruning::view_key(c, PruningContext::World)),
             cone: State::new(e.cone.clone(), b)?,
             world: State::new(e.world.clone(), b)?,
             classification: e
@@ -203,6 +239,13 @@ impl Bundle {
     }
     pub fn child(&self, pins: &[(usize, bool)], b: &mut Budget<'_>) -> Result<Self> {
         Ok(Self {
+            views: self
+                .views
+                .iter()
+                .map(|(k, s)| Ok((k.clone(), s.child(pins, b)?)))
+                .collect::<Result<_>>()?,
+            cone_key: self.cone_key.clone(),
+            classification_key: self.classification_key.clone(),
             cone: self.cone.child(pins, b)?,
             world: self.world.child(pins, b)?,
             classification: self
@@ -217,9 +260,40 @@ impl Bundle {
                 .collect::<Result<_>>()?,
         })
     }
+    pub fn ranking(&self, classification: bool, hypothesis: bool) -> (&State, &'static str) {
+        let base = if classification {
+            self.classification.as_ref().unwrap()
+        } else {
+            &self.cone
+        };
+        let mut key = if classification {
+            self.classification_key.as_ref().unwrap().clone()
+        } else {
+            self.cone_key.clone()
+        };
+        if hypothesis {
+            key.1 = PruningContext::Hypothesis;
+            if let Some(s) = self.views.get(&key) {
+                return (s, "W+H");
+            }
+        }
+        key.1 = PruningContext::World;
+        (self.views.get(&key).unwrap_or(base), "W")
+    }
     pub fn engine(&self, e: &Engine, b: &mut Budget<'_>) -> Result<Engine> {
         let mut out = e.clone();
-        out.pruning = None;
+        out.pruning = if e.pruning.is_some() {
+            let views = self
+                .views
+                .iter()
+                .map(|(k, s)| Ok((k.clone(), s.cone(b)?)))
+                .collect::<Result<_>>()?;
+            Some(Arc::new(std::sync::Mutex::new(pruning::Cache::inherited(
+                views,
+            ))))
+        } else {
+            None
+        };
         out.branches = None;
         out.cone = self.cone.cone(b)?;
         out.world = self.world.cone(b)?;

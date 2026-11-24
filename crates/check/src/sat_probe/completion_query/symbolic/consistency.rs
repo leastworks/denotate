@@ -8,6 +8,7 @@ pub(super) struct Core {
     pub odd_components: usize,
     pub odd_atoms: usize,
     pub(super) component: Vec<usize>,
+    pub(super) cyclic: Vec<bool>,
     colour: Vec<Option<bool>>,
     pub(super) conflicts: Vec<(usize, usize, bool)>,
 }
@@ -82,6 +83,13 @@ pub(super) fn analyse(c: &Cone, boundary: Option<&[bool]>, b: &mut Budget<'_>) -
         }
         groups.push(members);
     }
+    let mut cyclic = vec![false; n];
+    for members in &groups {
+        let is_cycle = members.len() > 1 || edges[members[0]].iter().any(|(j, _)| *j == members[0]);
+        for i in members {
+            cyclic[*i] = is_cycle;
+        }
+    }
     let mut colour = vec![None; n];
     let mut pending: Vec<usize> = Vec::new();
     let mut odd_components = 0;
@@ -139,6 +147,7 @@ pub(super) fn analyse(c: &Cone, boundary: Option<&[bool]>, b: &mut Budget<'_>) -
         odd_components,
         odd_atoms,
         component,
+        cyclic,
         colour,
         conflicts,
     })

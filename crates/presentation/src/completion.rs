@@ -1035,6 +1035,13 @@ pub fn completion_branch_record(
         json!({"kind":"completion-branch","id":c.id,"parent":c.parent,"closedChildren":c.closed_children,
         "splitKind":c.split_kind,"assumption":c.assumption.map(&assumption).transpose()?,
         "runnerUp":c.runner_up.as_ref().map(|r| -> Result<Value> { Ok(json!({"split":atom(&r.split)?,"assumption":r.assumption.map(&assumption).transpose()?,"children":r.children,"guardedEdges":r.guarded_edges,"hasRest":r.has_rest})) }).transpose()?,
+        "candidates":c.candidates.iter().map(|r| -> Result<Value> { Ok(json!({
+            "split":atom(&r.split)?, "assumption":r.assumption.map(&assumption).transpose()?,
+            "context":r.context,"state":r.state,"children":r.children,"guardedEdges":r.guarded_edges,
+            "checkedChildren":r.checked_children,"disabledEdges":r.disabled_edges,
+            "minimumDisabled":r.minimum_disabled,"cyclesCutEveryChild":r.cycles_cut_every_child,
+            "selected":r.selected,"cutoff":r.cutoff.map(reason)
+        })) }).collect::<Result<Vec<_>>>()?,"omittedCandidates":c.omitted_candidates,
         "values":c.values.iter().map(&atom).collect::<Result<Vec<_>>>()?,"omittedValues":c.omitted_values,
         "mapping":c.mapping.iter().map(|(a,i)|Ok(json!({"member":atom(a)?,"input":atom(i)?}))).collect::<Result<Vec<_>>>()?,"omittedMapping":c.omitted_mapping,
         "hasRest":c.has_rest,"rest":c.rest,"preparationWork":c.preparation_work,"searchWork":c.search_work,

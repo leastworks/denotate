@@ -1,11 +1,11 @@
 // Neutral completion workload: format recognition, guarded blocks and field values.
 export function guardedSchema(options = {}) {
   const cfg = {sets: 8, depth: 2, fanout: 5, stmts: 3, triggers: 1, values: 2, reads: 1,
-    outs: 5, splice: 25, self: 50, impossible: 0, wide: 0, double: 0, odd: 0, typecut: 0, fieldcut: 0, ...options};
+    outs: 5, splice: 25, self: 50, impossible: 0, wide: 0, double: 0, odd: 0, typecut: 0, fieldcut: 0, decoycut: 0, ...options};
   for (const [key, value] of Object.entries(cfg)) {
     if (!Number.isSafeInteger(value) || value < 0) throw Error(`invalid guarded-schema ${key}`);
   }
-  if (!cfg.sets || !cfg.depth || !cfg.fanout || !cfg.values || !cfg.reads || cfg.splice > 100 || cfg.self > 100 || cfg.impossible > 1 || cfg.wide > 1 || cfg.double > 1 || cfg.odd > 1 || cfg.typecut > 1 || cfg.fieldcut > 1 || (cfg.typecut && cfg.fieldcut)) throw Error('invalid guarded-schema shape');
+  if (!cfg.sets || !cfg.depth || !cfg.fanout || !cfg.values || !cfg.reads || cfg.splice > 100 || cfg.self > 100 || cfg.impossible > 1 || cfg.wide > 1 || cfg.double > 1 || cfg.odd > 1 || cfg.typecut > 1 || cfg.fieldcut > 1 || cfg.decoycut > 1 || (cfg.decoycut && !(cfg.typecut || cfg.fieldcut)) || (cfg.typecut && cfg.fieldcut)) throw Error('invalid guarded-schema shape');
   const widths = cfg.blocks === undefined
     ? Array.from({length:cfg.depth},(_,d)=>cfg.fanout ** (d+1))
     : Array.from({length:cfg.depth},(_,d)=>Math.floor(cfg.blocks/cfg.depth)+(d<cfg.blocks%cfg.depth?1:0));
@@ -90,9 +90,15 @@ relation type_ready(f:Format);
 relation other_type(f:Format);
 other_type(F) :- leaf(F),!format_tag(F);
 type_accept(F) :- format_tag(F);
-type_accept(F) :- other_type(F),type_ready(F);
+type_accept(F) :- other_type(F),type_ready(F)${cfg.decoycut ? ",cyclic_guard(F)" : ""};
 type_ready(F) :- other_type(F);
-type_ready(F) :- format_tag(F),!type_accept(F);`);
+type_ready(F) :- format_tag(F),!type_accept(F)${cfg.decoycut ? ",cyclic_guard(F)" : ""};`);
+  // A catch-all input is upstream only through the type cycle. Pinning it
+  // cannot cut that cycle; pinning the format value can.
+  if(cfg.decoycut) add(`sort Auxiliary; const other,unused: Auxiliary;
+input catch_all(v:Auxiliary) at_most_one(group_by:()); relation cyclic_guard(f:Format);
+cyclic_guard(F) :- type_accept(F),catch_all(other);
+cyclic_guard(F) :- type_accept(F),!catch_all(other);`);
   for(let e=0;e<cfg.elements;e++) for(let v=0;v<cfg.values;v++)add(`compared(element_${e},value_${e}_${v});`);
   for(let t=0;t<cfg.tasks;t++) for(let o=0;o<cfg.outs;o++) {
     const e=(t*cfg.outs+o)%cfg.elements;

@@ -1450,10 +1450,18 @@ question), `splitKind` (`none`, `binary`, `at-most-one`, `exactly-one`), nullabl
 `preparationWork` and `searchWork` separate branch setup/ranking from residual
 search; `work` is their sum. Rest does not assert that every input is absent.
 A split record's nullable `runnerUp` contains `split` (representative input),
-nullable `assumption`, `children`, `guardedEdges`, and `hasRest`. Both candidates
-are scored by `guardedEdges / (children - 1)`, counting distinct affected edges
-across targeted components. Equal ratios favor more edges, then fewer children,
-then stable order. No alternative is reported when none fits the cap.
+nullable `assumption`, `children`, `guardedEdges`, and `hasRest`. The runner-up is the next completed,
+progress-making Fitting trial; `guardedEdges` remains structural influence.
+`candidates` (up to 64) adds `split`, nullable `assumption`, `context` (`W`/`W+H`),
+`state` (`not-shortlisted`, `verified`, `incomplete`, `no-acyclic-guard`,
+`outside-partition-cap`), `children`, `guardedEdges`, `checkedChildren`,
+`disabledEdges` (sum over completed children), `minimumDisabled`,
+`cyclesCutEveryChild`, `selected`, and nullable `cutoff`. `omittedCandidates`
+counts bounded inventory omissions. An incomplete trial never wins. The shortlist
+stops provider traversal at cyclic atoms; verified ranking prefers witness cycles
+cut in every child, then disabled edges per extra child. Counts are within the
+recorded context, not evidence that a no-H query may assume H. Untried groups are
+not failed proofs, and an omitted group must not be treated as ineligible.
 Unsplit-attempt records have ID 0; partition IDs start at 1, within each question.
 An unsplit proof/counterexample finishes that question without any partition leaves.
 Its size records have null `branchDepth`; a fallback still shares the original

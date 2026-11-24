@@ -445,3 +445,24 @@ test('guarded schema field-value checking preserves each result with an unsplit 
     assert.equal(b.branches.splits,0);
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
+
+
+test('guarded schema catch-all control stays conditional through its cyclic guard',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-decoy-cut-'));
+  try {
+    const rows=[];
+    for(const enabled of [false,true]) {
+      const out=path.join(root,enabled?'on':'off');
+      run({out,binary:'target/debug/examples/bench_schema',family:['guarded-schema'],sizes:[2],repeat:1,
+        schema:{depth:1,fanout:1,stmts:1,triggers:0,outs:1,values:1,self:0,fieldcut:1,decoycut:1},
+        limits:enabled?['--completion-prune','--completion-split-depth','3']:[]});
+      rows.push(JSON.parse(fs.readFileSync(path.join(out,'guarded-schema-2-0','report.json'),'utf8')));
+    }
+    assert.equal(rows[0].checkerExitCode,rows[1].checkerExitCode);
+    const [a,b]=rows.map(r=>r.outcomes[0]);
+    for(const question of ['accepted','rejected','noMeaning','ambiguous'])
+      assert.equal(a.classification[question].state,b.classification[question].state,question);
+    for(const question of ['existence','uniqueness'])assert.equal(a.meaning[question].state,b.meaning[question].state,question);
+    assert.deepEqual(a.obligations.map(o=>[o.name,o.state]),b.obligations.map(o=>[o.name,o.state]));
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});

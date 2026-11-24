@@ -399,6 +399,7 @@ fn ranking_counts_edges_across_components_and_reports_the_runner_up_within_the_c
         let mut b = Budget::new(&e.limits);
         let state = fitting::Bundle::new(&e, &mut b).unwrap();
         let branch = state.engine(&e, &mut b).unwrap();
+        let mut telemetry = vec![];
         let (winner, runner) = choose(
             &branch,
             &state,
@@ -406,15 +407,25 @@ fn ranking_counts_edges_across_components_and_reports_the_runner_up_within_the_c
             true,
             cap,
             &mut e.config.clone(),
+            &mut telemetry,
+            &mut 0,
             &mut b,
         )
         .unwrap()
         .unwrap();
-        assert_eq!(winner.child_count(), cap);
+        assert!(winner.child_count() <= cap);
+        let chosen = telemetry.iter().find(|t| t.selected).unwrap();
+        assert_eq!(chosen.checked_children, winner.child_count());
+        assert!(chosen.disabled_edges > 0);
         if cap == 3 {
-            let runner = runner.expect("competing single-value cut");
-            assert!(winner.rank(&runner).is_gt());
-            assert!(winner.score > runner.score);
+            assert!(runner.is_some());
+            // Influence alone used to prefer three children; verified cuts can
+            // prefer the cheaper two-child partition instead.
+            assert!(
+                telemetry
+                    .iter()
+                    .any(|r| r.children == 3 && r.checked_children == 3)
+            );
         }
     }
 }
@@ -448,4 +459,183 @@ fn unsplit_progress_does_not_leak_into_the_following_question() {
             .any(|e| matches!(e.target, Some(crate::CheckingTarget::CompletionBranch(_))))
     );
     assert!(events.last().unwrap().target.is_none());
+}
+
+#[test]
+fn cyclic_provider_decoy_cannot_beat_a_guard_that_cuts_every_child() {
+    let mut c = Corpus::new();
+    let decoy = rel(&mut c, "a_catch_all", true);
+    let real = rel(&mut c, "z_format", true);
+    let guard = rel(&mut c, "guard", false);
+    let p = rel(&mut c, "accepted", false);
+    let q = rel(&mut c, "ready", false);
+    // Old provider traversal reached catch_all via guard -> accepted, but
+    // catch_all alone cannot settle any member of this cycle.
+    rule(&mut c, guard, &[(p, false), (decoy, false)]);
+    rule(&mut c, guard, &[(p, false), (decoy, true)]);
+    rule(&mut c, p, &[(real, false)]);
+    rule(&mut c, p, &[(real, true), (q, false), (guard, false)]);
+    rule(&mut c, q, &[(real, true)]);
+    rule(&mut c, q, &[(real, false), (p, true), (guard, false)]);
+    let v = verification(&mut c, None, &[]);
+    let e = prepare(&c, v, &Default::default());
+    let mut b = Budget::new(&e.limits);
+    let state = fitting::Bundle::new(&e, &mut b).unwrap();
+    let ix = |r| e.program.atom_index[&GroundAtom::new(r, [])];
+    for value in [false, true] {
+        let child = state.cone.child(&[(ix(decoy), value)], &mut b).unwrap();
+        assert!(child.edge_live(ix(p), ix(q), false, &mut b).unwrap());
+        assert!(child.edge_live(ix(q), ix(p), true, &mut b).unwrap());
+    }
+    let mut rows = vec![];
+    let (winner, _) = choose(
+        &e,
+        &state,
+        false,
+        true,
+        16,
+        &mut e.config.clone(),
+        &mut rows,
+        &mut 0,
+        &mut b,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(e.cone.atoms[winner.selected[0]].relation, real);
+    let chosen = rows.iter().find(|r| r.selected).unwrap();
+    assert!(chosen.cycles_cut_every_child > 0);
+    assert!(rows.iter().all(|r| r.split.relation != decoy));
+    let opts = CheckOptions {
+        split_depth: 3,
+        ..Default::default()
+    };
+    crate::sat_probe::completion_query::tests::scale::same_report(
+        &e.check(&keys(&c), &opts).unwrap(),
+        &e.check_enumerated(&keys(&c), &opts).unwrap(),
+    );
+    assert!(matches!(
+        test_partition(&e, false, true, &opts).unwrap(),
+        Search::None
+    ));
+}
+
+#[test]
+fn parallel_producer_preserves_an_edge_until_all_its_guards_die() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let j = rel(&mut c, "j", true);
+    let p = rel(&mut c, "p", false);
+    rule(&mut c, p, &[(i, false), (p, true)]);
+    rule(&mut c, p, &[(j, false), (p, true)]);
+    let v = verification(&mut c, None, &[]);
+    let e = prepare(&c, v, &Default::default());
+    let ix = |r| e.program.atom_index[&GroundAtom::new(r, [])];
+    let mut b = Budget::new(&e.limits);
+    let state = fitting::State::new(e.cone.clone(), &mut b).unwrap();
+    let first = state.child(&[(ix(i), false)], &mut b).unwrap();
+    assert!(first.edge_live(ix(p), ix(p), true, &mut b).unwrap());
+    let both = first.child(&[(ix(j), false)], &mut b).unwrap();
+    assert!(!both.edge_live(ix(p), ix(p), true, &mut b).unwrap());
+}
+
+#[test]
+fn inherited_h_view_never_replaces_w_in_classification_fallback() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let h = rel(&mut c, "h", false);
+    let p = rel(&mut c, "p", false);
+    let q = rel(&mut c, "q", false);
+    rule(&mut c, p, &[(i, false)]);
+    rule(&mut c, p, &[(q, false)]);
+    rule(&mut c, q, &[(p, true)]);
+    rule(&mut c, h, &[(i, false), (p, false)]);
+    let v = verification(&mut c, Some(h), &[]);
+    let mut e = prepare(&c, v, &Default::default());
+    e.pruning = Some(Arc::new(std::sync::Mutex::new(pruning::Cache::for_engine(
+        &e,
+    ))));
+    let class = &*e.classification.as_ref().unwrap().0;
+    let w = pruning::view(&e, class, false, e.limits.timeout).unwrap();
+    let hview = pruning::view(&e, class, true, e.limits.timeout).unwrap();
+    assert!(hview.rules.len() < w.rules.len() || hview.fixed != w.fixed);
+    let mut b = Budget::new(&e.limits);
+    let root = fitting::Bundle::new(&e, &mut b).unwrap();
+    let ix = e.program.atom_index[&GroundAtom::new(i, [])];
+    for value in [false, true] {
+        let state = root.child(&[(ix, value)], &mut b).unwrap();
+        assert_eq!(state.ranking(true, true).1, "W+H");
+        let branch = state.engine(&e, &mut b).unwrap();
+        let cone = &*branch.classification.as_ref().unwrap().0;
+        let actual_w = pruning::view(&branch, cone, false, Duration::ZERO).unwrap();
+        let actual_h = pruning::view(&branch, cone, true, Duration::ZERO).unwrap();
+        assert!(*actual_w.rules == *w.rules);
+        assert!(*actual_h.rules == *hview.rules);
+        assert!(
+            branch
+                .pruning
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .report
+                .records
+                .is_empty()
+        );
+    }
+    let opts = CheckOptions {
+        prune: true,
+        split_depth: 3,
+        ..Default::default()
+    };
+    assert!(matches!(
+        test_partition(&e, true, true, &opts).unwrap(),
+        Search::Exists(())
+    ));
+    crate::sat_probe::completion_query::tests::scale::same_report(
+        &e.check(&keys(&c), &opts).unwrap(),
+        &e.check_enumerated(&keys(&c), &opts).unwrap(),
+    );
+}
+
+#[test]
+fn tentative_fitting_rejects_a_high_influence_tautological_guard() {
+    let mut c = Corpus::new();
+    let decoy = rel(&mut c, "a_input", true);
+    let real = rel(&mut c, "z_input", true);
+    let guard = rel(&mut c, "tautology", false);
+    rule(&mut c, guard, &[(decoy, false)]);
+    rule(&mut c, guard, &[(decoy, true)]);
+    for n in 0..4 {
+        let p = rel(&mut c, &format!("self_support{n}"), false);
+        rule(&mut c, p, &[(guard, false), (p, false)]);
+    }
+    // Positive cycle: locally nonunique, but i=false breaks it.
+    let p = rel(&mut c, "p", false);
+    let q = rel(&mut c, "q", false);
+    rule(&mut c, p, &[(real, false), (q, false)]);
+    rule(&mut c, q, &[(p, false)]);
+    let v = verification(&mut c, None, &[]);
+    let e = prepare(&c, v, &Default::default());
+    let mut b = Budget::new(&e.limits);
+    let state = fitting::Bundle::new(&e, &mut b).unwrap();
+    let mut rows = vec![];
+    let (winner, _) = choose(
+        &e,
+        &state,
+        false,
+        false,
+        16,
+        &mut e.config.clone(),
+        &mut rows,
+        &mut 0,
+        &mut b,
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(e.cone.atoms[winner.selected[0]].relation, real);
+    let decoy = rows.iter().find(|r| r.split.relation == decoy).unwrap();
+    assert_eq!(decoy.checked_children, decoy.children);
+    assert_eq!(decoy.disabled_edges, 0);
+    assert!(!decoy.selected);
+    assert!(rows.iter().find(|r| r.selected).unwrap().disabled_edges > 0);
 }

@@ -1441,12 +1441,14 @@ true; fixed-false members contribute nothing. H and processing conclusions canno
 justify this certificate. Without a useful certified group, split one input into
 true/false cases.
 
-Rank witness-cycle guard influence per odd component, or guard influence per
-decision-relevant component independently shown non-unique. Count distinct affected
-edges across all targeted components and rank by `edges / (children - 1)`. Compare
-ratios exactly; ties favor more edges, then fewer children, then stable iteration
-order. The leaf cap still excludes oversized candidates. Telemetry records the
-runner-up. Only distinguished values receive their own child; one
+Follow guard providers only through acyclic atoms. Rank a bounded shortlist by
+structural edge influence, then trial up to eight partitions with incremental
+Fitting. Prefer cycles cut in every child, then actual disabled edges per extra
+child; parallel producers keep their edge alive. Trials have a bounded share of
+setup time/work, and incomplete trials leave residual search available. Telemetry
+records up to 64 candidates with context, state, checked children, disabled-edge
+counts and omitted candidates, plus the next verified alternative. Only
+distinguished values receive their own child; one
 rest child pins those values false and leaves other values unknown. At-most-one
 rest includes absence and can be split again later. Exactly-one rest remains
 subject to W's coverage requirement. A value child excludes siblings by the
@@ -1471,5 +1473,7 @@ work/query allowances and size records. Remaining work and query allowances are
 divided among children; the phase deadline is shared fairly among pending units.
 `Report::branches` reports bounded choices, outcomes, work, time and cutoffs.
 Repeated/fresh calls rebuild units. Cross-call caching and parallel execution are
-not implemented. SAT pruning remains available for unsplit questions, but is not
-installed in pinned units: branch-tagged proof reuse is a later increment.
+not implemented. When pruning is enabled, pinned units inherit the ancestor's
+W view for no-H queries and its stronger W+H view for H-context queries. These
+read-only, context-tagged caches perform no new branch-relative proofs. W and H
+pruning receive independent reserved shares; a W pass cannot spend H's share.

@@ -685,7 +685,8 @@ is keyed by the full set of defining heads in the original question scope and by
 W versus W+H; every original producer for each head belongs to that scope. Only
 original scopes enter this cache. Common-equations proofs simplify the view while
 classification/property membership, contracts and model replay retain the original
-program. No view or proof is reused across preparation, edits or contexts. Immutable
+program. No view or proof is reused across preparations or edits, or in a weaker
+context. Immutable
 prepared cones and assumption metadata are shared when creating the invocation.
 Classification no-meaning uses the H view to cover accepted observations before
 trying the W-only view on an observation with no H interpretation. These proofs
@@ -694,7 +695,11 @@ and caches are separate from the availability planner and stable checking.
 Completion input partitions are opt-in (`CheckOptions::split_depth > 0`). The driver
 creates invocation-local units from immutable preparation plus explicit input pins.
 Each unit owns its specialized cones, solver, allowances and measurement sink; no
-branch-specific pruning cache is shared. Fitting may substitute values but cannot
+mutable pruning cache is shared. Units inherit immutable ancestor W/W+H views
+under original scope keys, specialize each independently, and select the view for
+the actual solver question. H-first coverage and processing under H use W+H;
+no-H fallback/rejection use W. Cache misses keep original equations; branches
+perform no new pruning proofs. Fitting may substitute values but cannot
 change the frozen classification/property scopes. Child allowances partition the
 remaining parent allowance, and combining results preserves confirmed failures
 and unknown children. The implementation runs sequentially and does not persist

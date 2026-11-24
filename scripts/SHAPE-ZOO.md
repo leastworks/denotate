@@ -453,3 +453,17 @@ retain a rest/absent case. `fieldcut` and `typecut` are mutually exclusive. Comp
 identical shapes off/on (`-- --completion-split-depth 2`), retaining the 275-format
 `typecut` control. Branch preparation/search work and solve intervals remain in
 the reports; no timing thresholds are tests.
+
+
+`--schema-decoycut 1` (with `fieldcut` or `typecut`) adds a two-value at-most-one `catch_all` group through
+`cyclic_guard`, inside the type loop. Following providers through that loop makes
+the catch-all look relevant to the same witness edges as the real format value.
+Its `other` value competes as a certified two-child partition, just like a field
+value. Pinning the catch-all alone cuts none of the witness edges: both truth values
+feed the same cyclic guard. Format-value pins do cut
+the witness in both branches, although other positive ambiguity may remain.
+The small semantic control compares pruning/splits on and off; the checker unit
+regression forces ranking and checks actual cuts. For scale, compare the same
+275-format shape with `--completion-prune` in both modes and split depth 0/2.
+Candidate telemetry reports context, influence, completed Fitting children,
+actual disabled edges, cycles cut in every child, and inventory omissions.

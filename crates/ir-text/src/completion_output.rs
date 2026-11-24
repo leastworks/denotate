@@ -288,6 +288,16 @@ pub fn branch_formatter(
                 r.children - 1
             ));
         }
+        for r in &c.candidates {
+            line.push_str(&format!("; candidate {} [{}; {}]: {} guard edges, {}/{} children tried, {} disabled edges (min {}), {} cycles cut in every child{}{}",
+                crate::progress::atom_text(&r.split, &names),r.context,r.state,r.guarded_edges,
+                r.checked_children,r.children,r.disabled_edges,r.minimum_disabled,r.cycles_cut_every_child,
+                if r.selected { " selected" } else { "" },
+                if r.cutoff.is_some() { " trial incomplete" } else { "" }));
+        }
+        if c.omitted_candidates > 0 {
+            line.push_str(&format!("; +{} omitted candidates", c.omitted_candidates));
+        }
         if !c.values.is_empty() {
             line.push_str(&format!(
                 "; own values [{}]{}",

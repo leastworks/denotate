@@ -1936,8 +1936,11 @@ abstracted, so they cannot smuggle the disabled equation into a proof.
 
 One incremental proof solver is bounded by the existing checker and query limits
 per original scope/context. Optional pruning gets at most one tenth of the configured
-run timeout across views. A view gets at most one quarter of its enclosing query's
-remaining time, capped at five seconds and the remaining invocation share. Target
+run timeout across views, reserved equally across classification (when present),
+processing, and property work (when present), and separately for W and W+H.
+W cannot spend the H reservation. Each property scope draws from the property
+bucket. A view gets at most one quarter of its enclosing query's remaining time,
+capped at five seconds and its bucket's remaining share. Target
 discovery gets one quarter of that view's remaining time/work, at most 500 ms.
 Each candidate solve gets a fair time slice among active heads (denominator capped
 at 16), at most 250 ms. A candidate-only deadline advances to the next candidate;
@@ -1983,13 +1986,23 @@ a binary input split may still fit when a group partition does not. Reaching a
 depth or leaf bound uses the existing residual search. No input choices are
 silently dropped.
 
-Ranking uses one compact parity witness per odd component, or cyclic edges in
-decision-relevant components independently shown non-unique. Guard-input reachability
-is cached within the ranking pass. Candidate partitions are ranked by distinct
-affected edges across all targeted components divided by extra children
-(`children - 1`). Ratios use integer cross-products, with ties broken by more
-edges, fewer children, then stable iteration order. The best alternative is
-reported beside the winner. This is a heuristic, not a proof of edge deletion. Input at-most-one groups include an absent case. Selected derived
+Ranking uses one compact parity witness per odd component, or a directed cycle
+in each decision-relevant component independently shown non-unique. Guard-input
+reachability stops at every cyclic atom, including positive/even cycles. The top
+64 partitions by affected edges / extra children form a bounded inventory. Up to
+eight are trialled with incremental Fitting, preferring distinct input groups
+before alternate subsets. Trials share one quarter of remaining setup time/work;
+that work is charged back. Incomplete trials do not qualify, and residual search
+remains available when no verified split progresses.
+
+Verified ranking first prefers the number of witness cycles cut in every child,
+then total disabled edges / extra children, then minimum disabled edges in a child,
+then the structural rank and stable order. An edge remains live if any producer
+still supplies it. A cut is a graph observation, not proof of existence/uniqueness.
+The bounded inventory distinguishes untried, verified, and incomplete trials;
+additional certified groups can report no acyclic guard or a partition-cap exclusion.
+The best verified alternative is reported beside the winner.
+Input at-most-one groups include an absent case. Selected derived
 cardinality groups qualify only through injective one-positive-input equations
 in their own assumption cones. A second live producer disqualifies that shortcut;
 otherwise binary input splitting remains available.
@@ -2023,8 +2036,11 @@ Branch reports retain 256 records per invocation and 32 input pins per record,
 with omitted counts. Report caps never cap search completeness.
 
 This is provisional. Dense query setup and repeated local uniqueness discovery
-can cost more than splitting saves; pinned units currently use no SAT pruning
-cache. Measure the identical guarded-schema `--schema-typecut 1` workload with
+can cost more than splitting saves. Children inherit both context-tagged ancestor
+views and propagate pins in each: W+H for H-first coverage/processing under H,
+W for no-H fallback/rejection. Ranking uses W+H when available; this never turns
+an H-only result into a no-H result. New branch-relative proofs are not attempted.
+Measure the identical guarded-schema `--schema-typecut 1` workload with
 splits off/on before changing defaults. Cross-unit caching, parallelism and
 branch-context pruning proofs remain future work.
 
@@ -2073,3 +2089,17 @@ callbacks, output or destruction can finish after it. A late observation is reco
 as an overrun, not treated as a conclusive answer.
 CLI progress also separates preparation, checking, engine cleanup, result output
 and size output, and reports the point at which the shared run deadline starts.
+
+
+Verified-cut follow-up (2026-11-23), pruning enabled in both modes, the same
+275-format fieldcut shape: 73.93 s off / 78.69 s depth two, equal outcomes and
+incomplete overall. Classification-existence selects type-field values and cuts
+its witness in every child; ambiguity still needs partial cuts and residual search.
+The certified catch-all control (`--schema-decoycut 1`) takes 93.71 / 85.13 s;
+all three hard questions select the type field at root, never the catch-all.
+Splitting confirms a classification ambiguity that off leaves inconclusive;
+classification no-meaning and processing ambiguity remain inconclusive. These
+single runs are not a speed claim. Peak RSS rises from 2.69 to 2.85 GiB for fieldcut
+and 2.76 to 2.95 GiB for the decoy, including inherited views and branch setup.
+W+H now receives nonzero proof time independently of W; time-limited proven
+prefixes and optional optimization notices can differ between modes.
