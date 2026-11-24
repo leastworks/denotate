@@ -45,11 +45,18 @@ direction for such programs separates meaning from schedule:
   determined tuples. Contract errors preserve explicit partial results instead of
   becoming rejection or vacuous success. Symbolic pair queries and generalized
   input cubes replace exhaustive observation enumeration. SAT CLI runs are
-  time-boxed; existence is proved one component at a time, and the shape zoo has
-  a corpus-shaped completion family. On a first real program, grounding, the
-  classification checks and processing existence now complete within the time box;
-  classification no-meaning and processing ambiguity are the remaining bottlenecks.
-  No throughput claim is made. Straight-line completion plans
+  time-boxed; existence is proved one component at a time (call-consistency parity,
+  odd-cycle cores with bounded witness explanations), uniqueness componentwise with a
+  coupled fallback, and the shape zoo has a corpus-shaped completion family. Two
+  opt-in search aids exist: producer pruning by common-equations proofs in W and
+  W + H views, repeated in rounds that report whether they saturated, and bounded
+  input partitions over declared or certified field-value groups, chosen by verified
+  loop cuts after an unsplit attempt. On a first real program, grounding,
+  classification ambiguity and processing existence complete within the time box,
+  and processing ambiguity is proved with a longer one. Classification no-meaning
+  remains open: its odd loop survives global pruning passes and every single-input
+  split, so the next steps are pruning under a branch's pins and, under review,
+  staged checking (below). No throughput claim is made. Straight-line completion plans
   now have explicit rejection paths, a reference interpreter and v5 export. Available
   value splits, joins and conditional tasks follow; definition islands inside otherwise
   stable programs remain later work.
@@ -66,7 +73,10 @@ direction for such programs separates meaning from schedule:
   meaning remains a prerequisite. Rust task descriptors additionally schedule pure
   one-shot callbacks and produced inputs; task branches conservatively retain their
   continuation in each arm. Slots, writer proofs, tracing, local BDD strategies and
-  sharing the partition with meaning/checking remain next.
+  sharing the partition with meaning/checking remain next. Under review: run the
+  driver first and use checking to diagnose where it gets stuck, splitting only on
+  values determined on the path (derived ones included, keeping inputs without a
+  model for existence), with model and UNSAT-core caches over one shared encoding.
 - **Smaller encodings generically.** Structural sharing of identical definitions,
   constant folding, dead-premise removal and syntactic subsumption over acyclic parts
   shrank the program's CNF about threefold; SAT-based sweeping (simulation, then
