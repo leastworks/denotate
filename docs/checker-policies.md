@@ -2184,12 +2184,35 @@ cache identity always uses the complete assignment set. Grouped findings display
 at most eight distinct branch conditions. Discarded trials publish no source
 findings. Trial telemetry counts all work independently of these presentation caps.
 
-After selection, sample surviving witness guards for at most four children and
-32 guards total. Acyclic eligibility means the entire upstream is cycle-free in
-that branch/context, not just the guard's own component. This advisory inventory
-gets at most 1/16 of remaining ranking work/time and 50 ms; incompleteness is
-explicit and cannot discard the selected partition. It does not enable derived
-formula splits.
+Derived guards with wholly acyclic upstream in the current branch view also
+enter the candidate pool as two-child formula partitions. Inspect at most 64
+derived guards in edge-score/key order, within the existing ranking allowance;
+input and formula candidates share the 64-entry inventory and eight-candidate
+trial shortlist. A compact input-formula DAG travels with each derived pin and is
+asserted in every branch search; independent local/assumption certificate queries
+remain unrestricted. The DAG is independently evaluated on returned input models.
+A direct complementary pair is skipped as a useless constant partition; this does
+not install a forced atom. No other forcing or cyclic cutset splitting is added.
+
+Formula certificates retain original scope and W/W+H. Mixed H-first/no-H
+classification existence currently admits W-valid formulas only; questions wholly
+under H may use the stronger view. H-only formula branches do not attempt W
+pruning. Parent formulas remain constraints in descendants, so later formulas may
+use their settled values. Root pruning shares, unsplit-first policy and residual
+checking are unchanged.
+
+After selection, sample surviving witness guards in every child, with 32 guards
+shared across the split. Each child receives a share of the remaining slots;
+unused slots pass forward. Record omissions and completeness per child (with zero
+slots, an inventory may consist entirely of omissions). The diagnostic pass shares
+at most 1/16 of remaining ranking work/time and 50 ms, divided among the remaining
+children as well. Diagnostic cutoffs cannot discard the selected partition.
+Per-trial child records separately report pruning attempts/proofs, removed producers
+and literals, at most eight pruned heads, target-atom settlement and witness cuts.
+To identify removed self-admitting producers, each child also keeps up to eight
+original ground bodies with up to 16 literals each, their proof context and omitted
+counts. These source examples are distinct from the shared 32-guard inventory.
+Settlement is a count for the targeted components, not a verdict for the child.
 
 Before restoring root shares, on the 275-format guarded-schema field-value control
 (`self=50`, `double=1`,

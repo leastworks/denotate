@@ -219,6 +219,7 @@ pub(super) struct Bundle {
     cone_key: pruning::ViewKey,
     classification_key: Option<pruning::ViewKey>,
     pub pins: Vec<(usize, bool)>,
+    pub formulas: Vec<branch_formula::Pin>,
     pub trials: Option<Arc<std::sync::Mutex<pruning::TrialPool>>>,
     pub proofs: Vec<PruningReport>,
 }
@@ -230,6 +231,7 @@ impl Bundle {
             .map(|c| c.lock().unwrap().branch_views(e))
             .unwrap_or_default();
         Ok(Self {
+            formulas: e.formula_pins.clone(),
             pins: e
                 .pruning
                 .as_ref()
@@ -273,6 +275,7 @@ impl Bundle {
         let assignments: Vec<_> = assignments.into_iter().collect();
         Ok(Self {
             pins: assignments.clone(),
+            formulas: self.formulas.clone(),
             trials: self.trials.clone(),
             proofs: vec![],
             views: self
@@ -299,6 +302,68 @@ impl Bundle {
                 .map(|s| s.child(pins, b))
                 .collect::<Result<_>>()?,
         })
+    }
+    pub fn scope(&self, classification: bool) -> Vec<usize> {
+        if classification {
+            self.classification_key.as_ref().unwrap().0.clone()
+        } else {
+            self.cone_key.0.clone()
+        }
+    }
+    /// Typed derived pins keep their input formula and original proof context.
+    /// They never overwrite the assumption/universe equations or unrelated scopes.
+    pub fn child_with_formula(
+        &self,
+        pins: &[(usize, bool)],
+        formula: Option<&Arc<branch_formula::SettledAtom>>,
+        b: &mut Budget<'_>,
+    ) -> Result<Self> {
+        let Some(formula) = formula else {
+            return self.child(pins, b);
+        };
+        let mut out = self.child(&[], b)?;
+        let [(atom, value)] = pins else {
+            return Err(CheckError::Internal("formula branch needs one pin"));
+        };
+        if *atom != formula.atom {
+            return Err(CheckError::Internal(
+                "formula pin does not match certificate",
+            ));
+        }
+        let value = *value;
+        let mut assignments: BTreeMap<_, _> = self.pins.iter().copied().collect();
+        if assignments
+            .insert(formula.atom, value)
+            .is_some_and(|v| v != value)
+        {
+            return Err(CheckError::Internal("conflicting formula pins"));
+        }
+        out.pins = assignments.into_iter().collect();
+        out.views = out
+            .views
+            .into_iter()
+            .map(|(mut k, s)| {
+                k.2 = out.pins.clone();
+                (k, s)
+            })
+            .collect();
+        for context in [PruningContext::World, PruningContext::Hypothesis] {
+            if formula.context == PruningContext::Hypothesis && context == PruningContext::World {
+                continue;
+            }
+            let classification = self
+                .classification_key
+                .as_ref()
+                .is_some_and(|k| k.0 == *formula.scope);
+            let (state, _) = self.ranking(classification, context == PruningContext::Hypothesis);
+            let key = ((*formula.scope).clone(), context, out.pins.clone());
+            out.views.insert(key, state.child(pins, b)?);
+        }
+        out.formulas.push(branch_formula::Pin {
+            certificate: formula.clone(),
+            value,
+        });
+        Ok(out)
     }
     pub fn ranking(&self, classification: bool, hypothesis: bool) -> (&State, &'static str) {
         let base = if classification {
@@ -351,6 +416,14 @@ impl Bundle {
         let mut proved = 0;
         let mut cutoff = None;
         for context in [PruningContext::World, PruningContext::Hypothesis] {
+            if context == PruningContext::World
+                && self
+                    .formulas
+                    .iter()
+                    .any(|p| p.certificate.context == PruningContext::Hypothesis)
+            {
+                continue;
+            }
             if context == PruningContext::Hypothesis && e.classification.is_none() {
                 continue;
             }
@@ -375,7 +448,22 @@ impl Bundle {
                 |local, query, used, report| {
                     let mut branch = self.engine(e, local)?;
                     branch.config = query.clone();
-                    let base = state.proof_cone(&self.pins, local)?;
+                    let scope_key = self.scope(classification);
+                    let applicable: Vec<_> = self
+                        .pins
+                        .iter()
+                        .copied()
+                        .filter(|(i, _)| {
+                            e.cone.input[*i]
+                                || self.formulas.iter().any(|p| {
+                                    p.certificate.atom == *i
+                                        && *p.certificate.scope == scope_key
+                                        && (p.certificate.context == PruningContext::World
+                                            || context == PruningContext::Hypothesis)
+                                })
+                        })
+                        .collect();
+                    let base = state.proof_cone(&applicable, local)?;
                     let result = pruning::prove(
                         &branch, &base, scope, context, &self.pins, heads, local, used, report,
                     )?;
@@ -428,7 +516,8 @@ impl Bundle {
     }
     pub fn engine(&self, e: &Engine, b: &mut Budget<'_>) -> Result<Engine> {
         let mut out = e.clone();
-        out.pruning = if e.pruning.is_some() {
+        out.formula_pins = self.formulas.clone();
+        out.pruning = if e.pruning.is_some() || !self.formulas.is_empty() {
             let views = self
                 .views
                 .iter()

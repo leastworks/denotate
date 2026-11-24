@@ -1504,8 +1504,19 @@ leftover released root time can supplement ranking, transferred once inside the
 question deadline.
 Conditional source records are published only for selected partitions; all trial
 attempts/proofs/time remain telemetry. Original scopes and residual queries remain
-unchanged. Derived guards get bounded acyclic-upstream telemetry for the selected
-partition; splitting on derived atoms is not implemented.
+unchanged. Derived guards with wholly acyclic upstream are also two-child formula
+candidates. `SettledAtom` certificates retain original scope, W/W+H and a compact
+input formula; `Pin` carries its branch value. Fitting substitutes the atom only
+in matching views, while each residual solver also asserts and independently
+replays the input formula. This prevents substitution from dropping the atom's
+meaning and admitting spurious inputs. Assumption/universe equations remain intact.
+H-only certificates cannot split no-H work: mixed classification-existence questions
+use W-valid formulas only. No forcing is implemented.
+
+Selected candidates share a 32-guard diagnostic cap across every child; unused
+shares pass forward. Child records include omissions/completeness, pruning
+removals, bounded pruned heads, settled target atoms and witness cuts. A closed
+target still receives the full residual question.
 
 Completion pruning also shortens bodies in targeted odd/non-unique components.
 A positive literal L is removable from `x :- A, L` when the other equations and

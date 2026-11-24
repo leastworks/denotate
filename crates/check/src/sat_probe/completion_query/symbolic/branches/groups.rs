@@ -87,6 +87,7 @@ pub(super) struct Choice {
     pub rest: bool,
     pub score: usize,
     pub binary: bool,
+    pub formula: Option<Arc<branch_formula::SettledAtom>>,
     /// Parent components cut by tentative Fitting, per child. Shared membership
     /// restricts further exploration; it never restricts residual checking.
     pub child_targets: Vec<Vec<Arc<BTreeSet<usize>>>>,

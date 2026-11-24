@@ -34,8 +34,41 @@ pub struct SplitCandidate {
     pub pruning_attempts: usize,
     pub pruning_proved: usize,
     pub derived_guards: Vec<DerivedGuard>,
+    pub child_trials: Vec<SplitChild>,
+    pub formula: bool,
     pub omitted_derived_guards: usize,
     pub derived_guards_complete: bool,
+}
+/// Every attempted child has its own outcome; guard sampling shares one cap.
+#[derive(Debug, Clone)]
+pub struct SplitChild {
+    pub child: usize,
+    pub context: &'static str,
+    pub rest: bool,
+    pub pruning_attempts: usize,
+    pub pruning_proved: usize,
+    pub removed_producers: usize,
+    pub removed_producer_examples: Vec<PrunedProducer>,
+    pub omitted_producer_examples: usize,
+    pub removed_literals: usize,
+    pub pruned_heads: Vec<GroundAtom>,
+    pub omitted_pruned_heads: usize,
+    pub target_atoms: usize,
+    pub settled_target_atoms: usize,
+    pub disabled_edges: usize,
+    pub complete: bool,
+    pub cutoff: Option<Inconclusive>,
+    pub omitted_derived_guards: usize,
+    pub derived_guards_complete: bool,
+}
+/// Bounded original ground bodies identify which self-admitting producer a
+/// trial removed, even when the trial is discarded and publishes no finding.
+#[derive(Debug, Clone)]
+pub struct PrunedProducer {
+    pub context: &'static str,
+    pub head: GroundAtom,
+    pub original_body: Vec<(GroundAtom, bool)>,
+    pub omitted_body_literals: usize,
 }
 #[derive(Debug, Clone)]
 pub struct DerivedGuard {
@@ -100,6 +133,7 @@ struct Unit {
     parent: Option<Arc<fitting::Bundle>>,
     prepared: Option<Arc<fitting::Bundle>>,
     delta: Vec<(usize, bool)>,
+    formula: Option<Arc<branch_formula::SettledAtom>>,
     rest: bool,
     pins: BTreeMap<GroundAtom, bool>,
     depth: usize,
@@ -379,6 +413,7 @@ fn partition_from<T>(
         parent: None,
         prepared: None,
         delta: vec![],
+        formula: None,
         rest: false,
         pins: BTreeMap::new(),
         depth: 0,
@@ -474,7 +509,11 @@ fn partition_from<T>(
                 prepared.clone()
             } else {
                 Arc::new(match &unit.parent {
-                    Some(parent) => parent.child(&unit.delta, &mut budget)?,
+                    Some(parent) => parent.child_with_formula(
+                        &unit.delta,
+                        unit.formula.as_ref(),
+                        &mut budget,
+                    )?,
                     None => fitting::Bundle::new(e, &mut budget)?,
                 })
             };
@@ -521,7 +560,9 @@ fn partition_from<T>(
                         record.split = Some(e.cone.atoms[choice.selected[0]].clone());
                         record.children = n;
                         record.guarded_edges = choice.score;
-                        record.split_kind = if choice.binary {
+                        record.split_kind = if choice.formula.is_some() {
+                            "formula"
+                        } else if choice.binary {
                             "binary"
                         } else if choice.group.exact {
                             "exactly-one"
@@ -564,6 +605,7 @@ fn partition_from<T>(
                                 parent: Some(state.clone()),
                                 prepared,
                                 delta,
+                                formula: choice.formula.clone(),
                                 rest,
                                 pins,
                                 depth: unit.depth + 1,
@@ -709,3 +751,6 @@ pub(in crate::sat_probe::completion_query) fn test_partition(
 
 #[cfg(test)]
 mod pruning_tests;
+
+#[cfg(test)]
+mod formula_tests;

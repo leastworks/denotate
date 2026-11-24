@@ -6,6 +6,7 @@
 use super::*;
 use denotate_ir::{Corpus, SemanticKeys, Semantics, VerificationId};
 use existence::world_cone;
+mod branch_formula;
 mod encoding;
 mod pruning;
 use encoding::{Encoding, encode};
@@ -28,7 +29,8 @@ pub use advisory::*;
 pub use checking::*;
 pub use properties::*;
 pub use symbolic::branches::{
-    BranchRecord, BranchReport, DerivedGuard, SplitAlternative, SplitCandidate,
+    BranchRecord, BranchReport, DerivedGuard, PrunedProducer, SplitAlternative, SplitCandidate,
+    SplitChild,
 };
 pub use symbolic::planning::*;
 #[cfg(test)]
@@ -241,6 +243,7 @@ pub struct WorldQuery {
 pub struct Engine {
     pruning: Option<Arc<std::sync::Mutex<pruning::Cache>>>,
     branches: Option<Arc<std::sync::Mutex<BranchReport>>>,
+    formula_pins: Vec<branch_formula::Pin>,
     program: Arc<GroundProgram>,
     original: Arc<crate::ground::OriginalDependencies>,
     assumptions: Arc<Vec<contracts::Assumption>>,
@@ -399,6 +402,7 @@ impl Engine {
         Ok(Self {
             pruning: None,
             branches: None,
+            formula_pins: vec![],
             program: Arc::new(program),
             original,
             cone: Arc::new(cone),

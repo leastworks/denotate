@@ -738,3 +738,45 @@ fn implied_body_findings_name_the_literal_and_keep_ground_rule_provenance() {
             >= 2
     );
 }
+
+#[test]
+fn formula_split_telemetry_distinguishes_certificate_and_child_views() {
+    let (p, r) = checked(
+        "input a();input b();relation term();term():-a(),!b();term():-!a(),b();relation selected();relation profile();selected():-term(),profile();profile():-!term(),!selected();relation h();h():-!selected();verification v{semantics:completion;hypothesis:h;assumptions:[];obligations:[];}",
+        CheckOptions {
+            split_depth: 2,
+            ..Default::default()
+        },
+    );
+    let shown = presentation::present_completion(&p, &r).unwrap();
+    let rows: Vec<_> = shown.status["branches"]["records"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|r| r["candidates"].as_array().unwrap())
+        .filter(|c| c["selected"] == true && c["formula"] == true)
+        .collect();
+    assert!(!rows.is_empty());
+    for row in rows {
+        assert_eq!(row["context"], "W");
+        let children = row["childTrials"].as_array().unwrap();
+        assert_eq!(children.len(), 2);
+        for child in children {
+            assert_eq!(child["context"], "W+H");
+            assert_eq!(child["complete"], true);
+            assert!(child["disabledEdges"].as_u64().unwrap() > 0);
+            assert!(child["omittedDerivedGuards"].is_u64());
+        }
+    }
+    let format = completion_output::branch_formatter(&p);
+    let lines = r
+        .branches
+        .records
+        .iter()
+        .map(format)
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(lines.contains("(true) [W+H]"));
+    assert!(lines.contains("(false) [W+H]"));
+    assert!(lines.contains("target atoms settled"));
+}

@@ -305,11 +305,56 @@ pub fn branch_formatter(
                     r.pruning_proved
                 ));
             }
+            for child in &r.child_trials {
+                line.push_str(&format!("; candidate {} child {}{} [{}]: {} pruning attempts, {} proved, {} producers / {} literals removed, {}/{} target atoms settled, {} edges disabled{}; guards: +{} omitted{}",
+                    crate::progress::atom_text(&r.split, &names), child.child, if r.formula { if child.rest { " (false)" } else { " (true)" } } else { "" },
+                    child.context,child.pruning_attempts,child.pruning_proved,child.removed_producers,child.removed_literals,
+                    child.settled_target_atoms,child.target_atoms,child.disabled_edges,
+                    if !child.complete || child.cutoff.is_some() { " (trial incomplete)" } else { "" },
+                    child.omitted_derived_guards,if child.derived_guards_complete { "" } else { " (inventory incomplete/not sampled)" }));
+                for producer in &child.removed_producer_examples {
+                    let body = producer
+                        .original_body
+                        .iter()
+                        .map(|(a, positive)| {
+                            format!(
+                                "{}{}",
+                                if *positive { "" } else { "!" },
+                                crate::progress::atom_text(a, &names)
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    line.push_str(&format!(
+                        "; removed producer [{}] {} :- {}{}",
+                        producer.context,
+                        crate::progress::atom_text(&producer.head, &names),
+                        body,
+                        if producer.omitted_body_literals > 0 {
+                            format!(", +{} body literals", producer.omitted_body_literals)
+                        } else {
+                            String::new()
+                        }
+                    ));
+                }
+                if child.omitted_producer_examples > 0 {
+                    line.push_str(&format!(
+                        "; +{} omitted producer examples",
+                        child.omitted_producer_examples
+                    ));
+                }
+                for head in &child.pruned_heads {
+                    line.push_str(&format!(
+                        "; pruned head {}",
+                        crate::progress::atom_text(head, &names)
+                    ));
+                }
+            }
             for g in &r.derived_guards {
                 line.push_str(&format!(
                     "; child {} [{}] derived guard {}: upstream {}",
                     g.child,
-                    r.context,
+                    r.child_trials.get(g.child).map_or(r.context, |c| c.context),
                     crate::progress::atom_text(&g.atom, &names),
                     if g.acyclic_upstream {
                         "acyclic"

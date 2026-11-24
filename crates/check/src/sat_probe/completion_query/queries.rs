@@ -10,6 +10,7 @@ pub(super) struct Run<'a, 'b, 'l> {
     pub(super) solves: usize,
     pub(super) solve_limit: usize,
     certified: bool,
+    formula_pins: bool,
     work_started: usize,
     conflict_base: u64,
     propagation_base: u64,
@@ -319,6 +320,14 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             let truth = a.formula(e, &mut run.cnf, run.truth, run.budget)?;
             run.cnf.clause(vec![truth], run.budget)?;
         }
+        for pin in &engine.formula_pins {
+            let l = pin
+                .certificate
+                .encode(&run.world.vars, run.truth, &mut run.cnf, run.budget)?;
+            run.cnf
+                .clause(vec![if pin.value { l } else { !l }], run.budget)?;
+        }
+        run.formula_pins = true;
         run.certified = true;
         Ok(run)
     }
@@ -402,6 +411,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             solves: 0,
             solve_limit: engine.config.max_solves,
             certified: false,
+            formula_pins: false,
             work_started,
             conflict_base: 0,
             propagation_base: 0,
@@ -568,6 +578,8 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         };
         let mut validation_started = None;
         let original = std::mem::replace(&mut self.cnf, local);
+        // This solver has free boundary values, not the branch's input universe.
+        let formula_pins = std::mem::replace(&mut self.formula_pins, false);
         self.retired_conflicts += original.solver.num_conflicts();
         self.retired_propagations += original.solver.num_propagations();
         let result = (|| {
@@ -619,6 +631,7 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             out.used.set(local.used.get());
         }
         self.cnf = original;
+        self.formula_pins = formula_pins;
         let validation_work = validation_started.map_or(0, |start| self.budget.used() - start);
         (result, variables, clauses, validation_work)
     }
@@ -719,6 +732,17 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         }
         self.budget.check("completion solve")?;
         if answer == lbool::TRUE {
+            if self.formula_pins {
+                for pin in &self.engine.formula_pins {
+                    let value = pin.certificate.evaluate(
+                        |i| self.cnf.solver.value_lit(self.world.vars[i]) == lbool::TRUE,
+                        self.budget,
+                    )?;
+                    if value != pin.value {
+                        return Err(CheckError::Internal("branch formula replay disagrees"));
+                    }
+                }
+            }
             Ok(true)
         } else if answer == lbool::FALSE {
             Ok(false)

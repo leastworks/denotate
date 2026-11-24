@@ -1026,6 +1026,33 @@ pub fn completion_pruning_component(
     }))
 }
 
+fn completion_pruned_producer(
+    p: &denotate_check::completion_query::PrunedProducer,
+    atom: &impl Fn(&GroundAtom) -> Result<Value>,
+) -> Result<Value> {
+    Ok(json!({"context":p.context,"head":atom(&p.head)?,
+        "originalBody":p.original_body.iter().map(|(a,positive)| -> Result<Value> {Ok(json!({"atom":atom(a)?,"positive":positive}))}).collect::<Result<Vec<_>>>()?,
+        "omittedBodyLiterals":p.omitted_body_literals}))
+}
+
+fn completion_split_child(
+    c: &denotate_check::completion_query::SplitChild,
+    atom: &impl Fn(&GroundAtom) -> Result<Value>,
+) -> Result<Value> {
+    Ok(json!({
+        "child":c.child,"context":c.context,"rest":c.rest,
+        "pruningAttempts":c.pruning_attempts,"pruningProved":c.pruning_proved,
+        "removedProducers":c.removed_producers,"removedLiterals":c.removed_literals,
+        "removedProducerExamples":c.removed_producer_examples.iter().map(|p|completion_pruned_producer(p,atom)).collect::<Result<Vec<_>>>()?,
+        "omittedProducerExamples":c.omitted_producer_examples,
+        "prunedHeads":c.pruned_heads.iter().map(atom).collect::<Result<Vec<_>>>()?,
+        "omittedPrunedHeads":c.omitted_pruned_heads,
+        "targetAtoms":c.target_atoms,"settledTargetAtoms":c.settled_target_atoms,
+        "disabledEdges":c.disabled_edges,"complete":c.complete,"cutoff":c.cutoff.map(reason),
+        "omittedDerivedGuards":c.omitted_derived_guards,"derivedGuardsComplete":c.derived_guards_complete
+    }))
+}
+
 pub fn completion_branch_record(
     c: &denotate_check::completion_query::BranchRecord,
     atom: impl Fn(&GroundAtom) -> Result<Value>,
@@ -1041,7 +1068,8 @@ pub fn completion_branch_record(
             "checkedChildren":r.checked_children,"disabledEdges":r.disabled_edges,
             "minimumDisabled":r.minimum_disabled,"cyclesCutEveryChild":r.cycles_cut_every_child,
             "selected":r.selected,"cutoff":r.cutoff.map(reason),
-            "pruningAttempts":r.pruning_attempts,"pruningProved":r.pruning_proved,
+            "pruningAttempts":r.pruning_attempts,"pruningProved":r.pruning_proved,"formula":r.formula,
+            "childTrials":r.child_trials.iter().map(|c| completion_split_child(c, &atom)).collect::<Result<Vec<_>>>()?,
             "derivedGuards":r.derived_guards.iter().map(|g|Ok(json!({"atom":atom(&g.atom)?,"child":g.child,"acyclicUpstream":g.acyclic_upstream}))).collect::<Result<Vec<_>>>()?,
             "omittedDerivedGuards":r.omitted_derived_guards,"derivedGuardsComplete":r.derived_guards_complete
         })) }).collect::<Result<Vec<_>>>()?,"omittedCandidates":c.omitted_candidates,

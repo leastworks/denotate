@@ -2332,9 +2332,9 @@ setup uses only explicit assignments and already-proved ancestor constants.
 The selected trial transfers proved views to its matching children. Keys contain
 the original scope, W/W+H and complete canonical assignments; descendants may
 inherit, siblings and weaker contexts may not. The assignment carrier is not
-restricted to a particular split-group syntax, but this increment constructs only
-input splits. Derived-guard acyclic-upstream reporting is advisory; formula splits
-remain separate work.
+restricted to a particular split-group syntax. The initial increment constructed
+only input splits; formula partitions and their retained input predicates are
+covered by the later decision below.
 
 Root pruning keeps its full shares and first claim on time released by saturated
 views. Fund trials from existing split-ranking time, with independent W/H shares.
@@ -2375,3 +2375,27 @@ source rule. Provenance does not participate in equation equality. Evidence name
 the removed literal and proof path, with literal counts separate from removed
 producer counts. Finding identity remains head/context. These are scoped solver
 simplifications; no authored-source quick fix is offered.
+
+
+## Formula splits retain an input predicate after substituting a derived atom
+
+An atom with wholly acyclic upstream in a branch's current solver view is a total
+Boolean function of inputs, including observations for which the remaining
+program has no model. True/false cases therefore partition inputs, unlike guesses
+about a cyclic atom, which partition models and can conceal ambiguity or absence
+of meaning. Admit these formula candidates to the existing opt-in split ranking;
+one live cyclic upstream producer still disqualifies a candidate.
+
+Keep a compact formula DAG with the pin. Substituting the atom alone would erase
+its defining equation and invent input cases. Each branch search asserts the
+retained formula's chosen value and independently replays it on returned inputs.
+Carry original scope and W/W+H with the certificate; inherited pins retain their
+formulas in descendants. H-only certificates never enter no-H questions. For now,
+classification existence's mixed H-first/no-H search uses only W-valid formulas.
+Independent assumption and free-boundary certificates remain unrestricted.
+
+Per-child trial records distinguish producer removals from target settlement;
+closing a target is not proof of the residual question. The diagnostic 32-guard
+cap belongs to the split, shared across all children with unused shares passed
+forward and per-child omissions. Telemetry limits never change the chosen partition.
+Forcing and model-case splits remain separate work; no default policy changes.

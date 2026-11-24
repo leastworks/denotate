@@ -967,7 +967,17 @@ proofs stay in their branch and descendants. Selected partitions may add
 `completion-pruning` findings whose notes and evidence name the branch assignments
 (with explicit omissions). Discarded trials are telemetry only. A bounded inventory
 of surviving derived guards reports whether their whole upstream is acyclic in that
-branch; these guards are not yet split candidates.
+branch. A derived guard with wholly acyclic upstream in that view can also
+be split into true/false cases. Its defining input formula remains a constraint
+in each child, even when propagation substitutes the guard. Thus the cases cover
+inputs with no completion model too. H-only formulas are used only for H-context
+questions; classification existence, which also checks without H, uses W-valid
+formulas. A cyclic upstream makes a guard ineligible, including positive cycles.
+Per-child trial records report producer/literal removals, pruned heads, settled
+target atoms and cut witness edges. The 32-guard telemetry cap is shared among all
+children, passing unused slots forward and recording each child's omissions and
+inventory completeness. Formula splitting uses the existing opt-in depth/branch
+limits; it adds neither forced-atom proofs nor a new semantic assumption.
 
 With completion pruning enabled, an implied positive body condition may be removed
 from a solver view even when its producer remains. The `completion-pruning`

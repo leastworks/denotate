@@ -1514,9 +1514,27 @@ the zero-based partition child (selected values, then rest). The surrounding
 candidate's context is W/W+H; parent assignments are on the branch record.
 `omittedDerivedGuards` counts omitted inventoried guards, and
 `derivedGuardsComplete` is false for unexamined children or diagnostic cutoffs.
-Only the selected candidate receives this bounded advisory inventory (at most four
-children and 32 guards). Acyclic means its whole upstream in the child's view;
-this is eligibility telemetry, not a new derived-atom split or semantic finding.
+Only the selected candidate receives the guard inventory: 32 guards shared across
+all children, with unused shares passed forward. `childTrials` records each
+attempted child: `child`, `context` (actual ranked W/W+H view), `rest`, `pruningAttempts`, `pruningProved`,
+`removedProducers`, `removedLiterals`, `prunedHeads` (at most eight),
+`removedProducerExamples` (at most eight: `context`, `head`, `originalBody` with
+up to 16 `{atom, positive}` literals, and `omittedBodyLiterals`),
+`omittedProducerExamples`,
+`omittedPrunedHeads`, `targetAtoms`, `settledTargetAtoms`, `disabledEdges`,
+`complete`, nullable `cutoff`, `omittedDerivedGuards`, and `derivedGuardsComplete`.
+The latter distinguishes a complete capped inventory from one interrupted by a
+diagnostic limit (or not sampled). Counts describe the target components, never a
+whole-child verdict. The aggregate omitted count sums child omissions.
+
+Candidate `formula: true` and branch `splitKind: "formula"` denote a derived-atom
+true/false partition (`rest: false` is true, `rest: true` is false). The candidate
+context names the formula certificate's W/W+H scope; child `context` names the
+view used for cuts and guard eligibility, which may be stronger. Acyclic means the whole
+upstream is acyclic in that branch view; the pin retains its input formula so it
+also partitions inputs with no model. H-only formulas never split no-H work.
+These remain CLI/checker progress records; editor finding identities and the
+editor's default BDD checking are unchanged.
 
 Completion pruning records additionally accept `kind: "implied-body-literal"`.
 `literal` names the positive ground atom removed, and `proof` is `"structural"`

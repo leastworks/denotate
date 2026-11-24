@@ -489,3 +489,27 @@ test('guarded schema implied presence removes a body edge without changing verdi
     assert.ok(b.simplifications.removedBodyLiterals>0);
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('guarded schema formula partition cuts both children and preserves outcomes',()=>{
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-formula-splits-'));
+  try {
+    const rows=[];
+    for(const enabled of [false,true]) {
+      const out=path.join(root,enabled?'on':'off');
+      run({out,binary:'target/debug/examples/bench_schema',family:['guarded-schema'],sizes:[2],repeat:1,
+        schema:{depth:1,fanout:1,stmts:1,triggers:0,outs:1,values:1,self:0,formulacut:1},
+        limits:enabled?['--completion-split-depth','2']:[]});
+      rows.push(JSON.parse(fs.readFileSync(path.join(out,'guarded-schema-2-0','report.json'),'utf8')));
+    }
+    const [a,b]=rows.map(r=>r.outcomes[0]);
+    assert.equal(a.state,b.state); assert.equal(a.hasFailures,b.hasFailures);
+    for(const key of ['accepted','rejected','noMeaning','ambiguous']) assert.equal(a.classification[key].state,b.classification[key].state,key);
+    for(const key of ['existence','uniqueness']) assert.equal(a.meaning[key].state,b.meaning[key].state,key);
+    assert.deepEqual(a.obligations.map(o=>[o.name,o.state]),b.obligations.map(o=>[o.name,o.state]));
+    const candidates=b.branches.records.flatMap(r=>r.candidates);
+    const selected=candidates.filter(r=>r.selected && r.formula && r.split.relation.named?.[1]==='formula_term');
+    assert.ok(selected.length>0);
+    assert.ok(selected.every(r=>r.childTrials.length===2 && r.childTrials.every(c=>c.complete && c.disabledEdges>0 && ['W','W+H'].includes(c.context))));
+    assert.ok(selected.every(r=>r.derivedGuards.length<=32));
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});

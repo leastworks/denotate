@@ -71,21 +71,16 @@ fn alternative_guard_discovers_a_partition_with_a_pruning_only_cut() {
     )
     .unwrap()
     .expect("pin-relative proof makes a partition useful");
-    assert_eq!(choice.selected, vec![g]);
+    // Formula candidates may now win. The original input guard must still
+    // reach a pruning trial and cut an edge; pin it directly to inspect its view.
     assert!(
         rows.iter()
-            .any(|r| r.selected && r.pruning_proved > 0 && r.disabled_edges > 0)
+            .any(|r| r.split == e.cone.atoms[g] && r.pruning_proved > 0 && r.disabled_edges > 0)
     );
-    assert!(
-        rows.iter()
-            .filter(|r| r.selected)
-            .flat_map(|r| &r.derived_guards)
-            .any(|g| g.acyclic_upstream)
-    );
-    let true_child = choice
-        .child_states
-        .iter()
-        .find(|s| s.pins.contains(&(g, true)))
+    assert!(!choice.child_states.is_empty());
+    let mut true_child = root.child(&[(g, true)], &mut b).unwrap();
+    true_child
+        .prune(&e, false, &BTreeSet::from([p]), &mut config, &mut b)
         .unwrap();
     let (s, _) = true_child.ranking(false, false);
     let graph = consistency::analyse(&s.cone(&mut b).unwrap(), None, &mut b).unwrap();
@@ -436,7 +431,6 @@ fn derived_guard_eligibility_checks_the_whole_upstream_not_just_its_own_scc() {
     .unwrap()
     .unwrap();
     let mut row = rows.into_iter().find(|r| r.selected).unwrap();
-    assert!(row.derived_guards.iter().any(|g| g.acyclic_upstream));
     row.derived_guards.clear();
     let mut c = Corpus::new();
     let p = rel(&mut c, "p", false);
@@ -461,6 +455,7 @@ fn derived_guard_eligibility_checks_the_whole_upstream_not_just_its_own_scc() {
         state,
         &BTreeMap::from([(0, BTreeSet::from([(pi, pi, true)]))]),
         0,
+        32,
         &mut row,
         &mut b,
     )

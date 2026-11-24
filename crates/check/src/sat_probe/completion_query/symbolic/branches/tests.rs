@@ -155,6 +155,7 @@ fn rest_preserves_other_values_and_absence_and_can_split_again() {
             rest: true,
             score: 0,
             binary: false,
+            formula: None,
             child_targets: vec![],
             child_states: vec![],
         }
@@ -334,6 +335,7 @@ fn ranking_uses_edges_per_extra_child_with_deterministic_ties() {
             rest: false,
             score: edges,
             binary: false,
+            formula: None,
             child_targets: vec![],
             child_states: vec![],
         }

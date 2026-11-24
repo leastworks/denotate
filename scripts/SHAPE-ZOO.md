@@ -477,3 +477,10 @@ it retains the producer and all completion models. The control is included in
 the decision interface. Compare pruning off/on: verdicts must agree and on-mode
 reports `implied-body-literal` evidence with zero removed instances. The option is
 off by default and adds no timing or solver-witness goldens.
+
+
+`--schema-formulacut 1` adds an acyclic XOR term per format and a loop whose two
+edges use opposite term values. Neither raw bit alone settles the term; splitting
+the term cuts the loop in both children. This is a completion formula-partition
+control for `--completion-split-depth`, with the same off/on semantic outcomes.
+It makes no performance claim.

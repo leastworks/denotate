@@ -329,6 +329,7 @@ pub(super) fn choose_in(
                 rest,
                 score,
                 binary: false,
+                formula: None,
                 child_targets: vec![],
                 child_states: vec![],
             };
@@ -358,9 +359,70 @@ pub(super) fn choose_in(
                 rest: true,
                 score: edges.len(),
                 binary: true,
+                formula: None,
                 child_targets: vec![],
                 child_states: vec![],
             });
+        }
+    }
+    if capacity >= 2 {
+        let formula_h = e.classification.is_some() && !(classification && existence);
+        let (formula_state, formula_context) = bundle.ranking(classification, formula_h);
+        let formula_cone = formula_state.cone(b)?;
+        let mut producers = vec![vec![]; formula_cone.fixed.len()];
+        for (j, r) in formula_cone.rules.iter().enumerate() {
+            b.charge(r.body.len() + 1, "completion formula candidates")?;
+            if formula_cone.fixed[r.head].is_none()
+                && !r
+                    .body
+                    .iter()
+                    .any(|(i, p)| formula_cone.fixed[*i].is_some_and(|v| v != *p))
+            {
+                producers[r.head].push(j);
+            }
+        }
+        let mut derived = BTreeMap::<usize, BTreeSet<(usize, usize, bool)>>::new();
+        for (edge, guards) in &guard_edges {
+            for g in guards {
+                if !c.input[*g] && c.fixed[*g].is_none() {
+                    derived.entry(*g).or_default().insert(*edge);
+                }
+            }
+        }
+        let mut derived: Vec<_> = derived.into_iter().collect();
+        derived.sort_by(|(i, a), (j, b)| b.len().cmp(&a.len()).then_with(|| i.cmp(j)));
+        *omitted += derived.len().saturating_sub(64);
+        let formula_scope = Arc::new(bundle.scope(classification));
+        for (atom, edges) in derived.into_iter().take(64) {
+            let context = if formula_context == "W+H" {
+                PruningContext::Hypothesis
+            } else {
+                PruningContext::World
+            };
+            if let Some(formula) = branch_formula::SettledAtom::build(
+                &formula_cone,
+                &producers,
+                atom,
+                formula_scope.clone(),
+                context,
+                b,
+            )? {
+                choices.push(Choice {
+                    group: Group {
+                        atoms: vec![atom],
+                        exact: false,
+                        assumption: None,
+                        mapping: vec![],
+                    },
+                    selected: vec![atom],
+                    rest: true,
+                    score: edges.len(),
+                    binary: false,
+                    formula: Some(formula),
+                    child_targets: vec![],
+                    child_states: vec![],
+                });
+            }
         }
     }
     let result = verify(
@@ -416,6 +478,8 @@ pub(super) fn choose_in(
             pruning_attempts: 0,
             pruning_proved: 0,
             derived_guards: vec![],
+            child_trials: vec![],
+            formula: false,
             omitted_derived_guards: 0,
             derived_guards_complete: false,
         });
@@ -547,7 +611,13 @@ fn verify(
         telemetry.push(SplitCandidate {
             split: e.cone.atoms[c.selected[0]].clone(),
             assumption: c.group.assumption,
-            context,
+            context: c.formula.as_ref().map_or(context, |f| {
+                if f.context == PruningContext::Hypothesis {
+                    "W+H"
+                } else {
+                    "W"
+                }
+            }),
             state: "not-shortlisted",
             children: c.child_count(),
             guarded_edges: c.score,
@@ -560,6 +630,8 @@ fn verify(
             pruning_attempts: 0,
             pruning_proved: 0,
             derived_guards: vec![],
+            child_trials: vec![],
+            formula: c.formula.is_some(),
             omitted_derived_guards: 0,
             derived_guards_complete: false,
         });
@@ -608,14 +680,91 @@ fn verify(
         row.state = "trial";
         let mut common: BTreeSet<_> = witnesses.keys().copied().collect();
         let result: Result<()> = (|| {
-            for (pins, _) in choices[i].children() {
-                let mut child_bundle = bundle.child(&pins, &mut trial)?;
+            for (child_index, (pins, rest)) in choices[i].children().into_iter().enumerate() {
+                row.child_trials.push(SplitChild {
+                    child: child_index,
+                    context,
+                    rest,
+                    pruning_attempts: 0,
+                    pruning_proved: 0,
+                    removed_producers: 0,
+                    removed_producer_examples: vec![],
+                    omitted_producer_examples: 0,
+                    removed_literals: 0,
+                    pruned_heads: vec![],
+                    omitted_pruned_heads: 0,
+                    target_atoms: members.values().map(|s| s.len()).sum(),
+                    settled_target_atoms: 0,
+                    disabled_edges: 0,
+                    complete: false,
+                    cutoff: None,
+                    omitted_derived_guards: 0,
+                    derived_guards_complete: false,
+                });
+                let mut child_bundle =
+                    bundle.child_with_formula(&pins, choices[i].formula.as_ref(), &mut trial)?;
                 let (attempts, proved, cutoff) =
                     child_bundle.prune(e, classification, &heads, remaining, &mut trial)?;
                 row.pruning_attempts += attempts;
                 row.pruning_proved += proved;
                 row.cutoff = row.cutoff.or(cutoff);
-                let (child, _) = child_bundle.ranking(classification, e.classification.is_some());
+                let detail = row.child_trials.last_mut().unwrap();
+                detail.pruning_attempts = attempts;
+                detail.pruning_proved = proved;
+                detail.cutoff = cutoff;
+                detail.removed_producers = child_bundle.proofs.iter().map(|p| p.removed).sum();
+                detail.removed_literals =
+                    child_bundle.proofs.iter().map(|p| p.removed_literals).sum();
+                let heads: BTreeSet<_> = child_bundle
+                    .proofs
+                    .iter()
+                    .flat_map(|p| p.records.iter().map(|r| r.head.clone()))
+                    .collect();
+                detail.omitted_pruned_heads = heads.len().saturating_sub(8);
+                detail.pruned_heads = heads.into_iter().take(8).collect();
+                for record in child_bundle
+                    .proofs
+                    .iter()
+                    .flat_map(|p| &p.records)
+                    .filter(|r| r.removed > 0)
+                {
+                    for id in &record.rules {
+                        if detail.removed_producer_examples.len() == 8 {
+                            break;
+                        }
+                        let rule = e
+                            .program
+                            .rule(*id)
+                            .ok_or(CheckError::Internal("missing trial source rule"))?;
+                        trial.charge(
+                            rule.body.len().min(16) + 1,
+                            "completion split trial evidence",
+                        )?;
+                        detail.removed_producer_examples.push(PrunedProducer {
+                            context: if record.context == PruningContext::World {
+                                "W"
+                            } else {
+                                "W+H"
+                            },
+                            head: rule.head.atom.clone(),
+                            original_body: rule
+                                .body
+                                .iter()
+                                .take(16)
+                                .map(|l| {
+                                    (l.term.atom.clone(), l.polarity == crate::Polarity::Positive)
+                                })
+                                .collect(),
+                            omitted_body_literals: rule.body.len().saturating_sub(16),
+                        });
+                    }
+                }
+                detail.omitted_producer_examples = detail
+                    .removed_producers
+                    .saturating_sub(detail.removed_producer_examples.len());
+                let (child, child_context) =
+                    child_bundle.ranking(classification, e.classification.is_some());
+                row.child_trials.last_mut().unwrap().context = child_context;
                 let mut cuts = BTreeSet::new();
                 let mut disabled = 0;
                 for (id, edges) in witnesses {
@@ -626,6 +775,16 @@ fn verify(
                         }
                     }
                 }
+                let detail = row.child_trials.last_mut().unwrap();
+                for members in members.values() {
+                    trial.charge(members.len(), "completion split target settlement")?;
+                    detail.settled_target_atoms += members
+                        .iter()
+                        .filter(|i| child.value(**i).is_some())
+                        .count();
+                }
+                detail.disabled_edges = disabled;
+                detail.complete = true;
                 choices[i].child_states.push(Arc::new(child_bundle));
                 choices[i]
                     .child_targets
@@ -650,6 +809,9 @@ fn verify(
                 e.limits.cancellation.check()?;
                 row.state = "incomplete";
                 row.cutoff = Some(inconclusive(error)?);
+                if let Some(detail) = row.child_trials.last_mut() {
+                    detail.cutoff = row.cutoff;
+                }
                 break;
             }
         }
@@ -663,29 +825,51 @@ fn verify(
     }
     b.charge(trial.used(), "completion split trials")?;
     completed.sort_by(|a, b| compare_trials(*a, *b, telemetry, &choices));
-    if bundle.trials.is_some() {
-        if let Some(i) = completed.first().copied() {
-            let mut limits = e.limits.clone();
-            limits.timeout = (b.remaining_time() / 16).min(Duration::from_millis(50));
-            limits.max_work = b.remaining() / 16;
-            let mut diagnostic = Budget::new(&limits);
-            telemetry[i].derived_guards_complete = choices[i].child_states.len() <= 4;
-            for (child, state) in choices[i].child_states.iter().take(4).enumerate() {
-                let (state, _) = state.ranking(classification, e.classification.is_some());
-                if let Err(error) =
-                    derived_guards(state, witnesses, child, &mut telemetry[i], &mut diagnostic)
-                {
-                    e.limits.cancellation.check()?;
-                    inconclusive(error)?;
-                    telemetry[i].derived_guards_complete = false;
-                    break;
-                }
-            }
-            if let Err(error) = b.charge(diagnostic.used(), "completion branch guard telemetry") {
+    if let Some(i) = completed.first().copied() {
+        let mut limits = e.limits.clone();
+        limits.timeout = (b.remaining_time() / 16).min(Duration::from_millis(50));
+        limits.max_work = b.remaining() / 16;
+        let started = Instant::now();
+        let mut used = 0usize;
+        let mut room = 32usize;
+        let n = choices[i].child_states.len();
+        telemetry[i].derived_guards_complete = true;
+        for (child, bundle) in choices[i].child_states.iter().enumerate() {
+            // Fair shares, with unused capacity/time/work passed to later children.
+            let remaining = n - child;
+            let share = room.div_ceil(remaining);
+            let mut child_limits = limits.clone();
+            child_limits.timeout =
+                limits.timeout.saturating_sub(started.elapsed()) / remaining as u32;
+            child_limits.max_work = limits.max_work.saturating_sub(used) / remaining;
+            let mut diagnostic = Budget::new(&child_limits);
+            let (state, _) = bundle.ranking(classification, e.classification.is_some());
+            let before = telemetry[i].derived_guards.len();
+            let omitted_before = telemetry[i].omitted_derived_guards;
+            let result = derived_guards(
+                state,
+                witnesses,
+                child,
+                share,
+                &mut telemetry[i],
+                &mut diagnostic,
+            );
+            used += diagnostic.used();
+            room -= telemetry[i].derived_guards.len() - before;
+            let omissions = telemetry[i].omitted_derived_guards - omitted_before;
+            let detail = &mut telemetry[i].child_trials[child];
+            detail.omitted_derived_guards = omissions;
+            detail.derived_guards_complete = result.is_ok();
+            if let Err(error) = result {
                 e.limits.cancellation.check()?;
                 inconclusive(error)?;
                 telemetry[i].derived_guards_complete = false;
             }
+        }
+        if let Err(error) = b.charge(used, "completion branch guard telemetry") {
+            e.limits.cancellation.check()?;
+            inconclusive(error)?;
+            telemetry[i].derived_guards_complete = false;
         }
     }
     Ok(completed.first().map(|i| {
@@ -697,11 +881,12 @@ fn verify(
     }))
 }
 
-// Diagnostic eligibility for 024.32b only: no derived split is constructed.
+// Bounded post-trial inventory. Sampling never changes candidate eligibility.
 pub(super) fn derived_guards(
     state: &fitting::State,
     witnesses: &BTreeMap<usize, BTreeSet<(usize, usize, bool)>>,
     child: usize,
+    room: usize,
     row: &mut SplitCandidate,
     b: &mut Budget<'_>,
 ) -> Result<()> {
@@ -733,8 +918,7 @@ pub(super) fn derived_guards(
             );
         }
     }
-    let room = 32usize.saturating_sub(row.derived_guards.len());
-    row.omitted_derived_guards += guards.len().saturating_sub(room);
+    row.omitted_derived_guards += guards.len();
     for atom in guards.into_iter().take(room) {
         let mut pending = vec![atom];
         let mut seen = BTreeSet::new();
@@ -750,6 +934,7 @@ pub(super) fn derived_guards(
             }
             pending.extend(providers[i].iter().copied());
         }
+        row.omitted_derived_guards -= 1;
         row.derived_guards.push(DerivedGuard {
             atom: cone.atoms[atom].clone(),
             child,

@@ -700,7 +700,14 @@ trying the W-only view on an observation with no H interpretation. These proofs
 and caches are separate from the availability planner and stable checking.
 
 Completion input partitions are opt-in (`CheckOptions::split_depth > 0`). The driver
-creates invocation-local units from immutable preparation plus explicit input pins.
+creates invocation-local units from immutable preparation plus explicit input or
+certified formula pins. A formula certificate contains the original scope,
+W/W+H and an acyclic input DAG, retained after derived-atom substitution. Branch
+solvers assert the DAG's selected value and replay it on returned input models;
+local uniqueness and assumption certification remain independent. Matching views
+may substitute the derived atom, but assumption/universe cones are not overwritten.
+Mixed H-first/no-H questions currently accept W-formulas only. This carrier leaves
+room for future settled-atom certificates; forcing is not implemented.
 Each unit owns its specialized cones, solver, allowances and measurement sink; no
 mutable pruning cache is shared. Units inherit immutable ancestor W/W+H views
 under original scope/context/assignment keys, specialize each independently, and select the view for
