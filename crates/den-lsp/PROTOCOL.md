@@ -1407,6 +1407,14 @@ These records appear with the current component before its expensive solve,
 and in retained component details. Counts, timestamps and the particular cycle
 chosen are diagnostic data, not semantic identities or golden expectations.
 
+Completion pruning telemetry adds `simplifications.views` (up to 64) and
+`omittedViews`. Each view has `scope`, `context` (`W`/`W+H`), `rounds`,
+`attempts`, `proved`, `removedInstances`, `coveredHeads`, and `stop`:
+`saturated`, `candidate-cutoff` or `overall-cutoff`. Saturation requires a complete
+unchanged round with no unresolved attempts; historical candidate cutoffs may
+remain in component records even if a later round finishes. Counts sum work over
+rounds, not unique components. Human CLI output prints these stop reasons.
+
 Completion pruning telemetry additionally exposes `simplifications.elapsedMs`,
 `components` (at most 64), and `omittedComponents`. Each component contains `scope`,
 `context` (`W` / `W+H`), `representative`, `atoms`, `rules`, `componentKind`
@@ -1466,6 +1474,10 @@ Unsplit-attempt records have ID 0; partition IDs start at 1, within each questio
 An unsplit proof/counterexample finishes that question without any partition leaves.
 Its size records have null `branchDepth`; a fallback still shares the original
 question deadline. Records and omitted counts include the unsplit attempt.
+Unsplit records also carry the initial ranking inventory and preparation work.
+Without a verified useful partition, that attempt gets the full remaining allowance
+and is never rerun. Uncut children have ordinary residual-result records; no cut
+is itself a successful verdict.
 
 The branch summary also carries `pendingUnits`: queued units left unstarted when
 the shared question deadline expired. They remain inconclusive, not proved leaves.

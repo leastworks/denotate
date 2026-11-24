@@ -269,6 +269,8 @@ fn completed_plan_survives_outer_interruption_without_caching_interruption() {
     store.plans.begin(128, 1024 * 1024);
     let operations = OperationalLimits {
         run_deadline: None,
+        search_guards: None,
+        pruning_allowance: None,
         progress: Default::default(),
         profile: Default::default(),
         cancellation: Cancellation::default(),

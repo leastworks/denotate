@@ -104,6 +104,19 @@ fn rest_preserves_other_values_and_absence_and_can_split_again() {
         emit(&mut c, p, &[(input, Some(vs[0]), false), (q, None, true)]);
         emit(&mut c, q, &[(input, Some(vs[0]), false)]);
         emit(&mut c, q, &[(input, Some(vs[0]), true), (p, None, false)]);
+        // Keep the residual value-c loop inside the original targeted SCC. A
+        // rest child may split it again; unrelated loops are residual-checked.
+        let cycle = c.relations().find(|r| r.name == "p").unwrap().id;
+        emit(
+            &mut c,
+            p,
+            &[(input, Some(vs[0]), true), (cycle, None, true)],
+        );
+        emit(
+            &mut c,
+            cycle,
+            &[(input, Some(vs[0]), true), (p, None, true)],
+        );
         if absent {
             let bad = rel(&mut c, "absent_bad", false);
             let mut body: Vec<_> = vs.iter().map(|v| (input, Some(*v), false)).collect();
@@ -129,16 +142,41 @@ fn rest_preserves_other_values_and_absence_and_can_split_again() {
             test_partition(&forced, false, true, &options).unwrap(),
             Search::Exists(())
         ));
+        // A real search may return the first failing value before visiting rest.
+        // Exercise rest directly without pinning which witness ranking chooses.
+        let mut budget = Budget::new(&e.limits);
+        let state = fitting::Bundle::new(&e, &mut budget).unwrap();
+        let group = groups::groups(&e, &state, &mut budget).unwrap().remove(0);
+        let first = e.program.atom_index
+            [&GroundAtom::new(input, [c.constants().find(|x| x.name == "a").unwrap().id])];
+        let rest = Choice {
+            group,
+            selected: vec![first],
+            rest: true,
+            score: 0,
+            binary: false,
+            child_targets: vec![],
+        }
+        .children()
+        .pop()
+        .unwrap()
+        .0;
+        let child = state.child(&rest, &mut budget).unwrap();
+        assert_eq!(child.cone.value(first), Some(false));
         assert!(
-            forced
-                .branches
-                .as_ref()
-                .unwrap()
-                .lock()
-                .unwrap()
-                .records
-                .iter()
-                .any(|r| r.rest && r.state == "split")
+            choose(
+                &e,
+                &child,
+                false,
+                true,
+                16,
+                &mut e.config.clone(),
+                &mut vec![],
+                &mut 0,
+                &mut budget
+            )
+            .unwrap()
+            .is_some()
         );
     }
 }
@@ -295,6 +333,7 @@ fn ranking_uses_edges_per_extra_child_with_deterministic_ties() {
             rest: false,
             score: edges,
             binary: false,
+            child_targets: vec![],
         }
     }
     assert!(candidate(12, 3).rank(&candidate(5, 2)).is_gt());
@@ -638,4 +677,170 @@ fn tentative_fitting_rejects_a_high_influence_tautological_guard() {
     assert_eq!(decoy.disabled_edges, 0);
     assert!(!decoy.selected);
     assert!(rows.iter().find(|r| r.selected).unwrap().disabled_edges > 0);
+}
+
+#[test]
+fn no_useful_partition_runs_an_inconclusive_question_only_once() {
+    let mut c = Corpus::new();
+    let p = rel(&mut c, "input_independent_cycle", false);
+    rule(&mut c, p, &[(p, true)]);
+    let v = verification(&mut c, None, &[]);
+    let e = prepare(&c, v, &Default::default());
+    let calls = std::cell::Cell::new(0);
+    let options = CheckOptions {
+        split_depth: 3,
+        ..Default::default()
+    };
+    let cause = inconclusive(CheckError::deadline("test query", Duration::ZERO)).unwrap();
+    let answer: Search<()> = run(&e, false, true, &options, 1, |_, _| {
+        calls.set(calls.get() + 1);
+        Ok(Search::Inconclusive(cause))
+    })
+    .unwrap();
+    assert!(matches!(answer, Search::Inconclusive(_)));
+    assert_eq!(
+        calls.get(),
+        1,
+        "no fallback reruns the same unsplit question"
+    );
+}
+
+#[test]
+fn uncut_child_is_residual_checked_and_retains_its_real_failure() {
+    let (c, mut e, _) = fixture(false, false, false);
+    e.branches = Some(Arc::new(std::sync::Mutex::new(BranchReport::default())));
+    let options = CheckOptions {
+        split_depth: 4,
+        ..Default::default()
+    };
+    let answer = test_partition(&e, false, true, &options).unwrap();
+    assert!(answer.exists());
+    assert!(
+        e.check_enumerated(&keys(&c), &options)
+            .unwrap()
+            .meaning
+            .no_meaning
+            .exists()
+    );
+    let report = e.branches.as_ref().unwrap().lock().unwrap();
+    assert!(report.records.iter().any(|r| r.state == "split"));
+    assert!(
+        report
+            .records
+            .iter()
+            .any(|r| r.depth == 1 && r.state == "counterexample"),
+        "the child retaining the self-negative cycle is checked, not discarded or recursively explored"
+    );
+}
+
+#[test]
+fn automatic_guards_survive_division_but_explicit_caps_and_deadlines_do_not_change() {
+    let (_, mut e, _) = fixture(false, false, false);
+    let end = Instant::now() + Duration::from_secs(1);
+    e.limits.run_deadline = Some(end);
+    e.limits.max_work = 7;
+    e.config = QueryLimits {
+        max_solves: 3,
+        max_solver_polls: 5,
+        max_conflicts: 7,
+        max_propagations: 11,
+    };
+    let mut options = CheckOptions {
+        max_worlds: 2,
+        ..Default::default()
+    };
+    e.limits.search_guards = Some(crate::SearchGuards {
+        work: Some(100_000),
+        polls: Some(200_000),
+        worlds: Some(100),
+        ..Default::default()
+    });
+    guards(&mut e, &mut options);
+    assert_eq!(e.limits.max_work, 100_000);
+    assert_eq!(e.config.max_solver_polls, 200_000);
+    assert_eq!(options.max_worlds, 100);
+    assert_eq!(e.config.max_solves, 3);
+    assert_eq!(e.config.max_conflicts, 7);
+    assert_eq!(e.config.max_propagations, 11);
+    assert_eq!(e.limits.run_deadline, Some(end));
+    // A public/API caller with no automatic policy keeps every divided cap.
+    e.limits.search_guards = None;
+    e.config = divided(&e.config, 1000);
+    guards(&mut e, &mut options);
+    assert_eq!(e.config.max_solves, 0);
+}
+
+#[test]
+fn closing_a_target_component_does_not_explore_an_unrelated_loop() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let j = rel(&mut c, "j", true);
+    let p = rel(&mut c, "p", false);
+    let q = rel(&mut c, "q", false);
+    rule(&mut c, p, &[(i, false), (p, true)]);
+    rule(&mut c, q, &[(j, false), (q, true)]);
+    let v = verification(&mut c, None, &[]);
+    let e = prepare(&c, v, &Default::default());
+    let mut b = Budget::new(&e.limits);
+    let state = fitting::Bundle::new(&e, &mut b).unwrap();
+    let mut remaining = e.config.clone();
+    let (choice, _) = choose(
+        &e,
+        &state,
+        false,
+        true,
+        8,
+        &mut remaining,
+        &mut vec![],
+        &mut 0,
+        &mut b,
+    )
+    .unwrap()
+    .unwrap();
+    let n = choice
+        .child_targets
+        .iter()
+        .position(|t| !t.is_empty())
+        .unwrap();
+    let child = state.child(&choice.children()[n].0, &mut b).unwrap();
+    assert!(
+        ranking::choose_in(
+            &e,
+            &child,
+            false,
+            true,
+            8,
+            Some(&choice.child_targets[n]),
+            &mut remaining,
+            &mut vec![],
+            &mut 0,
+            &mut b
+        )
+        .unwrap()
+        .is_none()
+    );
+    assert!(
+        choose(
+            &e,
+            &child,
+            false,
+            true,
+            8,
+            &mut remaining,
+            &mut vec![],
+            &mut 0,
+            &mut b
+        )
+        .unwrap()
+        .is_some(),
+        "the unrelated loop still exists"
+    );
+    let branch = child.engine(&e, &mut b).unwrap();
+    assert!(
+        branch
+            .symbolic_no_meaning_in(&BTreeMap::new(), false, false, &CheckOptions::default(), 1)
+            .unwrap()
+            .exists(),
+        "residual checking still reports its failure"
+    );
 }

@@ -1734,13 +1734,20 @@ the remaining time. Loading, rendering and uninterruptible allocations are outsi
 hard preemption; this is an exploration time box, not a real-time guarantee.
 BDD/editor defaults and the Rust API's default limits are unchanged.
 
-CLI runaway guards are 5M atoms/CNF variables, 7M rules/CNF clauses, 50M dependencies
-and 2B logical work per operation. These are rounded margins around the observed
-433k atoms / 615k rules and the reported 182M join-work episode, not new evidence
-that every workload fits. Per-search defaults are 100k solves and refinements,
-100M solver polls, 1B conflicts and 10B propagations; world/cube and tuple inspection
-caps are 100k and 5M. Explicit flags override each cap, regardless of argument order.
-Structural/CNF/output guards can still stop a runaway before the deadline.
+Structural CLI guards remain 5M atoms/CNF variables, 7M rules/CNF clauses and
+50M dependencies. Automatic search guards scale with the configured time box
+(rounded up to whole seconds): per second, 1B work, 100k solves/refinements,
+100M polls, 1B conflicts and 10B propagations. These are generous runaway guards,
+not throughput estimates. World/cube and tuple inspection caps remain 100k and
+5M. Explicit flags override each corresponding cap, regardless of argument order.
+
+Completion partitioning retains the whole run's automatic guard as a floor for
+each child, including setup. This deliberately avoids dividing a large program's
+fixed folding/encoding cost by its branch count. The absolute deadline and fair
+child time reservations still bind; no time is added. Explicit logical caps keep
+conservative division and can still exhaust early. `Limits::search_guards` carries
+this opt-in operational policy; it is absent from default library/editor limits.
+Structural/CNF/output guards remain separate and can stop a runaway early.
 
 Re-scoring evidence: a real program's runtime-grounding sample (at cde4fd1) spent most time in
 joins, phase-accounting maps and the optional diagnostic LFP. The new selective-join
@@ -1928,24 +1935,34 @@ The existing parity-witness BFS and negative-edge relation histogram rank candid
 multiple-producer heads precede unary heads. Heads receive round-robin turns: first
 coverage, then individual subsumption candidates. A subsumption candidate must cut
 an internal edge not supplied by another remaining producer. Successful changes
-update subsequent proofs; target membership/ranking is a snapshot for that scoped
-pass, not recomputed after each removal. This narrows advisory warnings as well as proof work;
+update subsequent proofs. After a changed round, targets and ranking are rebuilt
+from the proved prefix, and earlier failed candidates are retried. This narrows
+advisory warnings as well as proof work;
 semantic scopes and equations outside the proven transformations remain unchanged.
 Fitting substitutions for proof setup are computed with all candidate definitions
 abstracted, so they cannot smuggle the disabled equation into a proof.
 
-One incremental proof solver is bounded by the existing checker and query limits
-per original scope/context. Optional pruning gets at most one tenth of the configured
-run timeout across views, reserved equally across classification (when present),
-processing, and property work (when present), and separately for W and W+H.
-W cannot spend the H reservation. Each property scope draws from the property
-bucket. A view gets at most one quarter of its enclosing query's remaining time,
-capped at five seconds and its bucket's remaining share. Target
-discovery gets one quarter of that view's remaining time/work, at most 500 ms.
-Each candidate solve gets a fair time slice among active heads (denominator capped
-at 16), at most 250 ms. A candidate-only deadline advances to the next candidate;
-cumulative solver/work exhaustion stops that view. The overall run deadline still
-applies. These shares are provisional, not additional semantic-search allowances.
+Each round has an incremental proof solver; all rounds share one view budget.
+Optional pruning reserves at most one third of the invocation timeout, divided
+equally across selected verifications, then classification (when present), processing,
+and property work (when present), then W/W+H. W cannot spend H's reservation;
+property scopes share one bucket. Unused reservations are not borrowed. The CLI
+sets `Limits::pruning_allowance` once per verification; standalone API checks use
+one third of their invocation timeout. A reservation is additionally capped at
+one third of the time remaining when checking starts, preserving search time
+when preparation was expensive. Classification and processing views are
+built before semantic searches, independently of splitting. There is no five-second
+view cap or extra quarter-query cap. The absolute run deadline still applies.
+
+Target discovery gets one quarter of the view's remaining time/work, at most
+500 ms. Each candidate solve gets a fair slice among active heads (denominator
+capped at 16), at most 250 ms. A candidate-only deadline advances to the next
+candidate. A changed round retries candidates using refreshed targets. Stop
+reasons are `saturated` (a complete unchanged round without unresolved attempts),
+`candidate-cutoff` (an unchanged round with unresolved proof/discovery attempts),
+and `overall-cutoff` (the view's cumulative work/time/query budget stops it).
+A completed candidate queue alone is not saturation. Proven prefixes survive all
+optional cutoffs. These allocations are provisional.
 Work is reported separately under `completion pruning W` or `completion pruning W+H`.
 Proof work is not charged again to the semantic search's work allowance. An optional proof cutoff is reported
 in `simplifications.cutoffs`, not as semantic incompleteness; the subsequent search
@@ -2019,19 +2036,25 @@ tables and indexes. Dense fixed-value materialization, graph/ranking passes and
 residual encodings still cost work per visited child. Local uniqueness for ranking
 is charged and its query use is subtracted before children or residual searches.
 
-Before partitioning, an enabled question gets one unsplit attempt with half its
-time, work, solver and observation-round allowances. Conclusive results return
-immediately. An inconclusive attempt leaves the reserved logical half and the
-remaining time until the original question deadline for splitting; unused logical
-allowances are not reclaimed. There is no extra full-budget retry. This protects
-witnesses found in the first attempt; it cannot guarantee every witness that a
-full-allowance unsplit run could find. Depth zero keeps the original path.
+Before searching, an enabled question prepares its ancestor views and ranks
+partitions. If none cuts a witness cycle in any child, run the question once with
+all remaining time/allowance. An inconclusive result does not trigger a duplicate
+unsplit search. If a verified partition exists, reserve half for one unsplit attempt;
+only an inconclusive answer starts partitioning from the already prepared/ranked
+root. Conclusive results return immediately. Ranking is bounded to a quarter of
+the question's time/work; an optional ranking cutoff leaves residual search.
 
-Traversal is breadth-first and deterministic. On a split, remaining work, solver
-allowances and observation rounds are divided evenly among children (integer
-remainder discarded). Pending units share the remaining phase deadline. There is
-no fresh full allowance per branch. A cutoff in any child prevents a universal
-success, while a confirmed counterexample can still be returned from another.
+Traversal is deterministic and depth-first. Further split exploration is allowed
+only for children that cut a parent witness; ranking then requires a remaining
+relevant cycle inside those parent components. A closed target does not trigger
+extra split exploration of an unrelated loop. Uncut children still get residual
+checking, as do children without
+a useful further split. Cutting one witness never proves another component safe.
+Explicit work/solver/round allowances are divided evenly among children, discarding
+integer remainders. Automatic CLI guards retain the run-wide floor described above.
+Pending units share the remaining question deadline. A cutoff in any child prevents
+a universal
+success; a confirmed counterexample can still be returned from another.
 Branch reports retain 256 records per invocation and 32 input pins per record,
 with omitted counts. Report caps never cap search completeness.
 
@@ -2103,3 +2126,14 @@ single runs are not a speed claim. Peak RSS rises from 2.69 to 2.85 GiB for fiel
 and 2.76 to 2.95 GiB for the decoy, including inherited views and branch setup.
 W+H now receives nonzero proof time independently of W; time-limited proven
 prefixes and optional optimization notices can differ between modes.
+
+Pruning-round/split-hygiene follow-up (2026-11-23): the same-build 275-format
+fieldcut control, pruning enabled and default time-box policy, took 104.4 s with
+splits off and 106.5 s at depth 2. W+H removals were comparable (873 / 870), rather
+than disappearing in split mode. Classification ambiguity and three property
+failures remained confirmed in both; processing existence was proved, while
+classification existence and processing uniqueness remained inconclusive on
+deadlines. Split mode used three split decisions and five residual leaves.
+All six pruning views reached their overall time allowance in round 1: this is
+not evidence of saturation. Small oracle tests cover completed pruning rounds.
+There is no speed improvement claim; the private corpus still needs re-scoring.

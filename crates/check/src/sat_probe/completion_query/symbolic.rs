@@ -1069,6 +1069,12 @@ impl Engine {
         if options.split_depth > 0 {
             invocation.branches = Some(branches.clone());
         }
+        if options.prune {
+            if invocation.classification.is_some() {
+                pruning::prepare(&invocation, true)?;
+            }
+            pruning::prepare(&invocation, false)?;
+        }
         let mut report = invocation.check_unpruned(keys, options)?;
         report.pruning = cache.lock().unwrap().report.clone();
         report.pruning.enabled = options.prune;

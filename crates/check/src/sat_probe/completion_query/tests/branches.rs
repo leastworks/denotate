@@ -247,14 +247,20 @@ fn nested_partitions_respect_depth_and_preserve_residual_search() {
         .unwrap();
     c.constrain_input(other, Cardinality::ExactlyOne, [])
         .unwrap();
-    for (i, input, values) in [(0, tag, v), (1, other, vec![x, y])] {
+    let mut heads = vec![];
+    for (i, input, values) in [(0, tag, v.clone()), (1, other, vec![x, y])] {
         let p = rel(&mut c, &format!("p{i}"), false);
         let q = rel(&mut c, &format!("q{i}"), false);
+        heads.push(p);
         guarded(&mut c, p, input, values[0], &[]);
         guarded(&mut c, p, input, values[1], &[(q, false)]);
         guarded(&mut c, q, input, values[1], &[]);
         guarded(&mut c, q, input, values[0], &[(p, true)]);
     }
+    // One parent component, with a surviving subloop after a tag cut. Independent
+    // loops now go directly to residual checking instead of deeper exploration.
+    guarded(&mut c, heads[0], tag, v[0], &[(heads[1], false)]);
+    guarded(&mut c, heads[1], tag, v[0], &[(heads[0], false)]);
     let verification = verification(&mut c, None, &a);
     let e = prepare(&c, verification, &domains(&c));
     let expected = e.check_enumerated(&keys(&c), &Default::default()).unwrap();

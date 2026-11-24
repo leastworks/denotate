@@ -29,6 +29,9 @@ pub(super) fn run(
 ) -> Result<u8, Failure> {
     let mut run_limits = limits.clone();
     super::sat_policy::start(&mut run_limits);
+    // Equal reservations across verifications, then scopes and W/H views. Their
+    // sum is bounded even if every optional pass consumes its full reservation.
+    run_limits.pruning_allowance = Some(run_limits.timeout / 3 / requests.len().max(1) as u32);
     let limits = &run_limits;
     trace.message(format!(
         "SAT shared deadline starts: {} ms remaining (after loading)",
@@ -848,6 +851,17 @@ pub(super) fn completion_inner(
             }
         }
         if report.pruning.enabled {
+            for v in &report.pruning.views {
+                writeln!(
+                    output,
+                    "Pruning {} {}: {} after {} round(s); {} considered, {} proved, {} instances removed ({} covered heads)",
+                    v.scope,
+                    match v.context { cq::PruningContext::World => "W", cq::PruningContext::Hypothesis => "W+H" },
+                    v.stop.label(),
+                    v.rounds, v.attempts, v.proved, v.removed, v.covered
+                )
+                .unwrap();
+            }
             let text = denotate_ir_text::completion_output::pruning_formatter(p);
             for c in &report.pruning.components {
                 writeln!(output, "{}", text(c)).unwrap();

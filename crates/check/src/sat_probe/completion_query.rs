@@ -9,7 +9,10 @@ use existence::world_cone;
 mod encoding;
 mod pruning;
 use encoding::{Encoding, encode};
-pub use pruning::{PruningComponent, PruningContext, PruningKind, PruningRecord, PruningReport};
+pub use pruning::{
+    PruningComponent, PruningContext, PruningKind, PruningRecord, PruningReport, PruningStop,
+    PruningView,
+};
 use std::sync::Arc;
 
 mod advisory;

@@ -12,6 +12,33 @@ pub(super) fn choose(
     omitted: &mut usize,
     b: &mut Budget<'_>,
 ) -> Result<Option<(Choice, Option<Choice>)>> {
+    choose_in(
+        e,
+        state,
+        classification,
+        existence,
+        capacity,
+        None,
+        remaining,
+        telemetry,
+        omitted,
+        b,
+    )
+}
+/// A child explores only the surviving parts of the parent components it cut.
+/// Other components remain in the residual question, never silently proved.
+pub(super) fn choose_in(
+    e: &Engine,
+    state: &fitting::Bundle,
+    classification: bool,
+    existence: bool,
+    capacity: usize,
+    allowed: Option<&[Arc<BTreeSet<usize>>]>,
+    remaining: &mut QueryLimits,
+    telemetry: &mut Vec<SplitCandidate>,
+    omitted: &mut usize,
+    b: &mut Budget<'_>,
+) -> Result<Option<(Choice, Option<Choice>)>> {
     let groups = groups::groups(e, state, b)?;
     // H-first coverage and processing rank their stronger inherited view.
     // No-H fallbacks still use the separate W view in the leaf query.
@@ -70,7 +97,10 @@ pub(super) fn choose(
         let mut run = queries::Run::local(e, b)?;
         run.label("completion branch local uniqueness");
         for (id, heads) in sets {
-            if !heads.iter().any(|i| relevant[*i]) {
+            if !heads.iter().any(|i| relevant[*i])
+                || allowed
+                    .is_some_and(|sets| !heads.iter().any(|i| sets.iter().any(|s| s.contains(i))))
+            {
                 continue;
             }
             let local = existence::component(c, &producers, &heads, run.budget)?;
@@ -89,9 +119,32 @@ pub(super) fn choose(
             .max_propagations
             .saturating_sub(used.max_propagations);
     }
+    if let Some(sets) = allowed {
+        let mut surviving = BTreeSet::new();
+        for set in sets {
+            b.charge(set.len(), "completion split surviving targets")?;
+            surviving.extend(
+                set.iter()
+                    .filter(|i| graph.cyclic[**i])
+                    .map(|i| graph.component[*i]),
+            );
+        }
+        candidates.retain(|id| surviving.contains(id));
+    }
     if candidates.is_empty() {
         return Ok(None);
     }
+    b.charge(graph.component.len(), "completion split target members")?;
+    let mut members = BTreeMap::<usize, BTreeSet<usize>>::new();
+    for (i, id) in graph.component.iter().enumerate() {
+        if graph.cyclic[i] && candidates.contains(id) {
+            members.entry(*id).or_default().insert(i);
+        }
+    }
+    let members: BTreeMap<_, _> = members
+        .into_iter()
+        .map(|(id, set)| (id, Arc::new(set)))
+        .collect();
     let witnesses = witness_edges(c, &graph, &candidates, b)?;
     let mut guard_edges = Vec::new();
     for r in &c.rules {
@@ -233,6 +286,7 @@ pub(super) fn choose(
                 rest,
                 score,
                 binary: false,
+                child_targets: vec![],
             };
             choices.push(choice);
             choices.sort_by(|a, b| b.rank(a));
@@ -260,11 +314,12 @@ pub(super) fn choose(
                 rest: true,
                 score: edges.len(),
                 binary: true,
+                child_targets: vec![],
             });
         }
     }
     let result = verify(
-        e, state, &witnesses, choices, context, telemetry, omitted, b,
+        e, state, &witnesses, &members, choices, context, telemetry, omitted, b,
     )?;
     // Include certified groups that did not reach the shortlist, so absence of
     // a trial is distinguishable from an ineligible mapping or a report cap.
@@ -416,6 +471,7 @@ fn verify(
     e: &Engine,
     state: &fitting::State,
     witnesses: &BTreeMap<usize, BTreeSet<(usize, usize, bool)>>,
+    members: &BTreeMap<usize, Arc<BTreeSet<usize>>>,
     mut choices: Vec<Choice>,
     context: &'static str,
     telemetry: &mut Vec<SplitCandidate>,
@@ -482,6 +538,9 @@ fn verify(
                         }
                     }
                 }
+                choices[i]
+                    .child_targets
+                    .push(cuts.iter().map(|id| members[id].clone()).collect());
                 common.retain(|id| cuts.contains(id));
                 row.minimum_disabled = if row.checked_children == 0 {
                     disabled

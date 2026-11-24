@@ -70,6 +70,8 @@ impl Config {
     pub fn checker_limits(&self) -> Limits {
         self.limits.with_operations(&OperationalLimits {
             run_deadline: None,
+            search_guards: None,
+            pruning_allowance: None,
             profile: Default::default(),
             progress: Default::default(),
             cancellation: Default::default(),

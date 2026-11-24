@@ -317,6 +317,8 @@ fn interrupted_queries_return_no_accounted_result_and_recovery_is_fresh() {
     };
     let interrupted = OperationalLimits {
         run_deadline: None,
+        search_guards: None,
+        pruning_allowance: None,
         progress: Default::default(),
         profile: Default::default(),
         cancellation: Cancellation::default(),

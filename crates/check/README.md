@@ -1397,7 +1397,10 @@ are unaffected. Models are still validated against the original scoped equations
 
 `completion_query::Report::pruning` contains bounded `PruningRecord`s (head, source
 instances, scope and context), aggregate attempts/removals/coverage, omitted counts
-and optional optimization cutoffs. A cutoff does not itself make checking incomplete.
+and optional optimization cutoffs. `views` reports scope/context, round count and
+`saturated`, `candidate-cutoff` or `overall-cutoff`. Changed rounds rediscover targets
+and retry earlier failed candidates. Saturation requires a complete unchanged round
+without unresolved attempts. A cutoff does not itself make checking incomplete.
 Views live for one `Engine::check` call; repeated/fresh calls recompute them. The
 unpruned implementation and exhaustive interpretation tests remain independent
 semantic controls. H-model coverage now precedes no-H classification existence
@@ -1458,18 +1461,26 @@ search. Scopes stay frozen. Reaching depth or leaf bounds uses residual search;
 resource exhaustion remains inconclusive. A confirmed failure in one child survives
 another child's cutoff; absence of a failure requires every child to finish.
 
-Each question first tries unsplit search with half its time and logical allowances.
-A proof or counterexample returns immediately; only an inconclusive attempt starts
-partitioning. The reserved half of work/query/round allowances remains for splitting,
-along with time left before the original question deadline. Unused logical allowance
-from the first attempt is conservatively not reclaimed. Splitting is still opt-in;
-this policy cannot guarantee finding every witness an unrestricted unsplit run finds.
+Each question ranks before searching. Without a verified witness cut in any child,
+it runs unsplit once with the remaining allowance, including on an inconclusive
+result. Otherwise one unsplit attempt gets half the remaining allocation; only an
+inconclusive result uses the reserved half for the already ranked partition.
+Traversal is depth-first. Uncut children get residual checking without further
+split exploration. Cut children can split again if relevant cycles remain within
+the parent components they cut; unrelated loops stay in residual checking. No
+closed witness implies that other components are solved.
+
+Pruning views are built before these allocations. One aggregate pruning allowance
+is reserved fairly across verifications, scopes and W/H. CLI automatic time-scaled
+search guards survive branch division, including preparation cost; explicit caps
+still divide, structural caps stay separate, and every child shares the absolute
+run deadline. Library defaults remain unchanged. See checker policies for amounts.
 
 Units share copy-on-write rule/atom tables and read-only incidence indexes.
 Children inherit paged Fitting state and propagate only newly pinned inputs;
 unchanged pages stay shared. Materializing fixed values for a query still scans
 the value array, but does not copy program rules. Units own solver state,
-work/query allowances and size records. Remaining work and query allowances are
+work/query allowances and size records. Explicit work and query allowances are
 divided among children; the phase deadline is shared fairly among pending units.
 `Report::branches` reports bounded choices, outcomes, work, time and cutoffs.
 Repeated/fresh calls rebuild units. Cross-call caching and parallel execution are

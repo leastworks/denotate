@@ -937,14 +937,19 @@ candidate and considered/proved counts per component, with bounded example heads
 the last attempted head and any cutoff. The CLI prints these summaries and optional
 pruning cutoffs even without `--verbose`. A cutoff stops optimization, not checking;
 it does not by itself change the semantic verdict. Pruning has its own bounded time
-share. Acyclic or locally unique heads no longer receive these optimization notices.
+share, reserved fairly across verifications, scopes and W/W+H. Changed rounds
+refresh targets and retry proofs. The summary distinguishes `saturated` from
+`candidate-cutoff` and `overall-cutoff`; a single completed pass is not saturation.
+Acyclic or locally unique heads no longer receive these optimization notices.
 
 Completion checks can opt into bounded input partitions with
 `just check-den ROOT --engine sat --completion-split-depth 2`.
 `--completion-split-branches N` bounds leaves per question (default 512); depth
 defaults to zero, retaining unsplit checking. When enabled, each question first
-tries unsplit search with a reserved share of its allowances and partitions only
-if that attempt is inconclusive. Declared or selected at-most-one and
+ranks candidate partitions. Without a verified witness cut it runs unsplit once
+with its remaining allowance. Otherwise an unsplit attempt gets a reserved share,
+and only an inconclusive result starts the partition. Uncut children still get
+residual checking, without further split exploration. Declared or selected at-most-one and
 exactly-one input restrictions support value partitions, including derived selected
 restrictions with certified one-to-one input equations. Otherwise binary input
 splits are available. A rest child keeps other values unknown, and includes absence

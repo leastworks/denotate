@@ -196,6 +196,8 @@ fn request_context_and_scoped_results_are_owned_and_distinguish_reasons() {
     assert!(matches!(g.verify(&cancelled), Err(CheckError::Cancelled)));
     let deadline = OperationalLimits {
         run_deadline: None,
+        search_guards: None,
+        pruning_allowance: None,
         progress: Default::default(),
         profile: Default::default(),
         cancellation: Cancellation::default(),

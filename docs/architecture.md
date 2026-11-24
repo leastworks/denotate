@@ -686,7 +686,9 @@ W versus W+H; every original producer for each head belongs to that scope. Only
 original scopes enter this cache. Common-equations proofs simplify the view while
 classification/property membership, contracts and model replay retain the original
 program. No view or proof is reused across preparations or edits, or in a weaker
-context. Immutable
+context. Changed pruning rounds rediscover targets from proved prefixes. View
+construction precedes split/unsplit allocation and shares one fair, bounded
+invocation reservation across verifications and W/H. Immutable
 prepared cones and assumption metadata are shared when creating the invocation.
 Classification no-meaning uses the H view to cover accepted observations before
 trying the W-only view on an observation with no H interpretation. These proofs
@@ -701,7 +703,10 @@ the actual solver question. H-first coverage and processing under H use W+H;
 no-H fallback/rejection use W. Cache misses keep original equations; branches
 perform no new pruning proofs. Fitting may substitute values but cannot
 change the frozen classification/property scopes. Child allowances partition the
-remaining parent allowance, and combining results preserves confirmed failures
+remaining explicit parent allowance; automatic CLI runaway guards retain enough
+room for child setup while the shared absolute deadline remains binding. Ranking
+precedes the unsplit search; no useful partition means one unsplit attempt. Uncut
+children are residual-checked, not discarded. Combining results preserves confirmed failures
 and unknown children. The implementation runs sequentially and does not persist
 units; any future cross-edit cache must replace invocation-local handles with
 semantic keys and include equations, scope, W/context, pins and configuration.

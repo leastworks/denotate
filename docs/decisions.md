@@ -2272,3 +2272,30 @@ Original scopes and validation equations remain unchanged. Branch-relative proof
 search is deferred. Separate pruning time reservations prevent W work from
 consuming all the allowance intended for H-context coverage; global deadlines
 still apply. Splitting and pruning remain opt-in.
+
+
+## Completion pruning saturation and useful split fallback
+
+Optional completion pruning repeats common-equations proof rounds after changes,
+refreshing targets from the proved prefix. A completed candidate queue is not a
+fixed point: earlier proofs may become possible, and a timed-out candidate remains
+unresolved. Reports distinguish saturation, candidate cutoff and overall cutoff.
+Original scopes, validation equations and context tags remain unchanged.
+
+Views are built before dividing the question between unsplit and branch searches.
+One aggregate time reservation is divided fairly across verifications, scopes and
+W/W+H, so enabling splits cannot silently cache a weaker H view from a half-sized
+first attempt. There is no new pruning-time knob. Both optimizations stay opt-in.
+
+Rank first: no verified witness cut means one unsplit attempt with all remaining
+allowance. Otherwise retain an unsplit-first opportunity, then visit cut children
+depth-first. Uncut children still receive residual checks. Removing one witness
+never settles every component, and no useful partition must not rerun the same
+expensive query.
+
+Automatic SAT CLI search guards scale with the time box and retain a whole-run
+floor after branch division: folding and encoding a large program do not become
+cheaper just because it has many branches. The absolute deadline still binds.
+Explicit limits retain conservative division; structural limits remain separate.
+Library, stable semantics and editor defaults are unchanged. The policy and its
+provisional amounts live in checker-policies.md.

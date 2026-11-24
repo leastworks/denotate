@@ -87,6 +87,9 @@ pub(super) struct Choice {
     pub rest: bool,
     pub score: usize,
     pub binary: bool,
+    /// Parent components cut by tentative Fitting, per child. Shared membership
+    /// restricts further exploration; it never restricts residual checking.
+    pub child_targets: Vec<Vec<Arc<BTreeSet<usize>>>>,
 }
 impl Choice {
     pub fn child_count(&self) -> usize {

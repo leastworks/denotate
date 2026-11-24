@@ -53,11 +53,15 @@ pub struct OperationalLimits {
     pub progress: CheckingProgress,
     pub cancellation: Cancellation,
     pub timeout: Duration,
+    pub search_guards: Option<crate::SearchGuards>,
+    pub pruning_allowance: Option<Duration>,
 }
 impl From<&Limits> for OperationalLimits {
     fn from(l: &Limits) -> Self {
         Self {
             run_deadline: l.run_deadline,
+            search_guards: l.search_guards.clone(),
+            pruning_allowance: l.pruning_allowance,
             cancellation: l.cancellation.clone(),
             profile: l.profile.clone(),
             progress: l.progress.clone(),
@@ -69,6 +73,8 @@ impl DeterministicLimits {
     pub fn with_operations(&self, o: &OperationalLimits) -> Limits {
         Limits {
             run_deadline: o.run_deadline,
+            search_guards: o.search_guards.clone(),
+            pruning_allowance: o.pruning_allowance,
             completion_sizes: None,
             cancellation: o.cancellation.clone(),
             profile: o.profile.clone(),

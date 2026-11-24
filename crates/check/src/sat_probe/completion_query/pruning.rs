@@ -42,9 +42,37 @@ pub struct PruningComponent {
     pub cutoff: Option<Inconclusive>,
     pub elapsed: Duration,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PruningStop {
+    Saturated,
+    CandidateCutoff,
+    OverallCutoff,
+}
+impl PruningStop {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Saturated => "saturated",
+            Self::CandidateCutoff => "candidate-cutoff",
+            Self::OverallCutoff => "overall-cutoff",
+        }
+    }
+}
+#[derive(Debug, Clone)]
+pub struct PruningView {
+    pub scope: &'static str,
+    pub context: PruningContext,
+    pub rounds: usize,
+    pub attempts: usize,
+    pub proved: usize,
+    pub removed: usize,
+    pub covered: usize,
+    pub stop: PruningStop,
+}
 #[derive(Debug, Clone, Default)]
 pub struct PruningReport {
     pub enabled: bool,
+    pub views: Vec<PruningView>,
+    pub omitted_views: usize,
     pub components: Vec<PruningComponent>,
     pub omitted_components: usize,
     pub elapsed: Duration,
@@ -80,8 +108,19 @@ impl Cache {
         let scopes =
             1 + usize::from(e.classification.is_some()) + usize::from(!e.selection.is_empty());
         let contexts = if e.classification.is_some() { 2 } else { 1 };
+        let remaining = e.limits.run_deadline.map_or(e.limits.timeout, |d| {
+            d.saturating_duration_since(Instant::now())
+                .min(e.limits.timeout)
+        });
+        // Preparation can consume most of the run. Preserve search time even
+        // then; independent verification reservations still bound the total.
+        let allowance = e
+            .limits
+            .pruning_allowance
+            .unwrap_or(e.limits.timeout / 3)
+            .min(remaining / 3);
         Self {
-            share: Some(e.limits.timeout / 10 / (scopes * contexts) as u32),
+            share: Some(allowance / (scopes * contexts) as u32),
             ..Self::default()
         }
     }
@@ -198,7 +237,7 @@ pub(super) fn view<'a>(
         PruningContext::Hypothesis => "completion pruning W+H",
     };
     let _progress = engine.limits.progress.diagnostic(phase);
-    let mut limits = engine.shared_limits(engine.selection.len() + 6);
+    let mut limits = engine.limits.clone();
     // Reserve independent shares for classification/processing/property, W/H.
     // A W pass cannot consume the later H pass's reservation. The invocation's
     // absolute deadline and this query's remaining time still bound every pass.
@@ -208,38 +247,103 @@ pub(super) fn view<'a>(
         let share = *c.share.get_or_insert(fallback);
         share.saturating_sub(*c.spent.get(&(scope, context)).unwrap_or(&Duration::ZERO))
     };
-    limits.timeout = limits
-        .timeout
-        .min(remaining / 4)
-        .min(available)
-        .min(Duration::from_secs(5));
+    limits.timeout = limits.timeout.min(remaining).min(available);
     let started = Instant::now();
     let mut budget = Budget::new(&limits);
     let mut result = (*base).clone();
     let mut report = PruningReport::default();
-    let answer = simplify(
-        engine,
-        &base,
-        &mut result,
-        context,
+    let mut rounds = 0;
+    let mut round_engine = engine.clone();
+    let stop = loop {
+        let previous = result.clone();
+        let removed = report.removed;
+        let first_row = report.components.len();
+        let first_cutoff = report.incomplete.len();
+        rounds += 1;
+        let mut used = QueryLimits {
+            max_solves: 0,
+            max_solver_polls: 0,
+            max_conflicts: 0,
+            max_propagations: 0,
+        };
+        let answer = simplify(
+            &round_engine,
+            &previous,
+            &mut result,
+            context,
+            scope,
+            key.0.len(),
+            &mut report,
+            &mut budget,
+            &mut used,
+        );
+        round_engine.config.max_solves = round_engine
+            .config
+            .max_solves
+            .saturating_sub(used.max_solves);
+        round_engine.config.max_solver_polls = round_engine
+            .config
+            .max_solver_polls
+            .saturating_sub(used.max_solver_polls);
+        round_engine.config.max_conflicts = round_engine
+            .config
+            .max_conflicts
+            .saturating_sub(used.max_conflicts);
+        round_engine.config.max_propagations = round_engine
+            .config
+            .max_propagations
+            .saturating_sub(used.max_propagations);
+        if let Err(error) = answer {
+            // Keep every proved prefix. Optimization exhaustion is not a verdict.
+            limits.cancellation.check()?;
+            report
+                .incomplete
+                .push(inconclusive(error.in_phase(phase, None))?);
+            break PruningStop::OverallCutoff;
+        }
+        if report.removed == removed {
+            break if report.incomplete.len() != first_cutoff
+                || report.components[first_row..]
+                    .iter()
+                    .any(|c| c.cutoff.is_some() || !c.discovery_complete)
+            {
+                PruningStop::CandidateCutoff
+            } else {
+                PruningStop::Saturated
+            };
+        }
+        if report.components.len() > 64 {
+            report.omitted_components += report.components.len() - 64;
+            report.components.truncate(64);
+        }
+        if report.incomplete.len() > 64 {
+            report.incomplete.truncate(64);
+        }
+        // A changed equation can make earlier failed proofs succeed and can
+        // change the relevant SCCs. Rediscover from the proved prefix.
+    };
+    report.views.push(PruningView {
         scope,
-        key.0.len(),
-        &mut report,
-        &mut budget,
-    );
-    if let Err(error) = answer {
-        // Optimization exhaustion cannot establish a proof or invalidate an
-        // already installed proof. Cancellation still ends the invocation.
-        limits.cancellation.check()?;
-        report
-            .incomplete
-            .push(inconclusive(error.in_phase(phase, None))?);
-    }
+        context,
+        rounds,
+        attempts: report.attempts,
+        proved: report.records.len() + report.omitted,
+        removed: report.removed,
+        covered: report.covered,
+        stop,
+    });
     let result = Arc::new(result);
     let elapsed = started.elapsed();
     let mut cache = cache.lock().unwrap();
     *cache.spent.entry((scope, context)).or_default() += elapsed;
     cache.report.elapsed += elapsed;
+    for view in report.views {
+        if cache.report.views.len() < 64 {
+            cache.report.views.push(view);
+        } else {
+            cache.report.omitted_views += 1;
+        }
+    }
     for row in report.components {
         if cache.report.components.len() < 64 {
             cache.report.components.push(row);
@@ -268,6 +372,21 @@ pub(super) fn view<'a>(
     Ok(View::Pruned(result))
 }
 
+/// Build the reusable views before any question divides its search allowance.
+/// The reservation is independent of split mode and bounded across all views.
+pub(super) fn prepare(e: &Engine, classification: bool) -> Result<()> {
+    if e.pruning.is_none() {
+        return Ok(());
+    }
+    let cone = if classification {
+        &*e.classification.as_ref().unwrap().0
+    } else {
+        &*e.cone
+    };
+    view(e, cone, e.classification.is_some(), e.limits.timeout)?;
+    Ok(())
+}
+
 fn simplify(
     engine: &Engine,
     original: &Cone,
@@ -277,6 +396,7 @@ fn simplify(
     scope_heads: usize,
     report: &mut PruningReport,
     budget: &mut Budget<'_>,
+    used: &mut QueryLimits,
 ) -> Result<()> {
     let n = original.fixed.len();
     budget.charge(n + original.rules.len(), "completion pruning index")?;
@@ -304,7 +424,17 @@ fn simplify(
         discovery_budget.used(),
         "completion pruning target discovery",
     )?;
-    let targets = targets?;
+    let targets = match targets {
+        Ok(targets) => targets,
+        Err(error) => {
+            // Discovery has a smaller local allowance than the view. Failure
+            // before its first component is still an unresolved discovery attempt,
+            // not exhaustion of the aggregate view budget.
+            engine.limits.cancellation.check()?;
+            report.incomplete.push(inconclusive(error)?);
+            return Ok(());
+        }
+    };
     let candidates = targets.heads.clone();
     if candidates.is_empty() {
         return Ok(());
@@ -583,6 +713,7 @@ fn simplify(
             report.components[row].cutoff = Some(cause);
         }
     }
+    *used = run.usage();
     install_result(original, result, &enabled);
     outcome
 }
@@ -613,6 +744,50 @@ fn equation(run: &mut queries::Run<'_, '_, '_>, gate: Lit, head: Lit, body: Lit)
 #[cfg(test)]
 mod reservation_tests {
     use super::*;
+    #[test]
+    fn discovery_setup_cutoff_is_not_reported_as_overall_exhaustion() {
+        let mut c = Corpus::new();
+        use crate::test_support::rewrites::{rel, rule};
+        let p = rel(&mut c, "p", false);
+        let q = rel(&mut c, "q", false);
+        rule(&mut c, p, &[(q, true)]);
+        rule(&mut c, q, &[(p, false)]);
+        let v = crate::sat_probe::completion_query::tests::verification(&mut c, None, &[]);
+        let base = crate::sat_probe::completion_query::tests::prepare(&c, v, &Default::default());
+        let mut saw_local_cutoff = false;
+        for work in (20..500).step_by(10) {
+            let mut e = base.clone();
+            e.limits.max_work = work;
+            e.pruning = Some(Arc::new(std::sync::Mutex::new(Cache::for_engine(&e))));
+            view(&e, &e.cone, false, e.limits.timeout).unwrap();
+            let cache = e.pruning.as_ref().unwrap().lock().unwrap();
+            if cache.report.components.is_empty()
+                && cache.report.views[0].stop == PruningStop::CandidateCutoff
+            {
+                assert!(!cache.report.incomplete.is_empty());
+                saw_local_cutoff = true;
+            }
+        }
+        assert!(
+            saw_local_cutoff,
+            "the sweep exercises discovery before any component record exists"
+        );
+    }
+    #[test]
+    fn unresolved_discovery_is_a_candidate_cutoff_not_saturation() {
+        let mut c = Corpus::new();
+        use crate::test_support::rewrites::{rel, rule};
+        let p = rel(&mut c, "p", false);
+        rule(&mut c, p, &[(p, false)]);
+        let v = crate::sat_probe::completion_query::tests::verification(&mut c, None, &[]);
+        let mut e = crate::sat_probe::completion_query::tests::prepare(&c, v, &Default::default());
+        e.config.max_solves = 0; // the local uniqueness question cannot finish
+        e.pruning = Some(Arc::new(std::sync::Mutex::new(Cache::for_engine(&e))));
+        view(&e, &e.cone, false, e.limits.timeout).unwrap();
+        let cache = e.pruning.as_ref().unwrap().lock().unwrap();
+        assert_eq!(cache.report.views[0].stop, PruningStop::CandidateCutoff);
+        assert!(cache.report.records.is_empty());
+    }
     #[test]
     fn w_spending_cannot_consume_the_h_reservation() {
         let mut c = Corpus::new();

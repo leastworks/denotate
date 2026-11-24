@@ -94,6 +94,7 @@ struct Unit {
     work: usize,
     config: QueryLimits,
     worlds: usize,
+    targets: Option<Vec<Arc<BTreeSet<usize>>>>,
 }
 fn divided(q: &QueryLimits, n: usize) -> QueryLimits {
     QueryLimits {
@@ -104,8 +105,39 @@ fn divided(q: &QueryLimits, n: usize) -> QueryLimits {
     }
 }
 
-/// Try the original whole question before dividing it into partitions. Reserve
-/// half of each logical allowance; retries never reset the original allowance.
+/// Automatic guards survive partitioning; explicitly configured caps have no
+/// floor and keep the existing conservative division. No deadline is restarted.
+fn guards(e: &mut Engine, options: &mut CheckOptions) {
+    if let Some(g) = &e.limits.search_guards {
+        if let Some(v) = g.work {
+            e.limits.max_work = e.limits.max_work.max(v);
+        }
+        if let Some(v) = g.solves {
+            e.config.max_solves = e.config.max_solves.max(v);
+        }
+        if let Some(v) = g.polls {
+            e.config.max_solver_polls = e.config.max_solver_polls.max(v);
+        }
+        if let Some(v) = g.conflicts {
+            e.config.max_conflicts = e.config.max_conflicts.max(v);
+        }
+        if let Some(v) = g.propagations {
+            e.config.max_propagations = e.config.max_propagations.max(v);
+        }
+        if let Some(v) = g.worlds {
+            options.max_worlds = options.max_worlds.max(v);
+        }
+    }
+}
+struct Root {
+    state: Arc<fitting::Bundle>,
+    choice: (Choice, Option<Choice>),
+    candidates: Vec<SplitCandidate>,
+    omitted: usize,
+}
+
+/// Rank once, then try the whole question. Only a verified useful partition
+/// reserves a second attempt. Explicit logical allowances are never reset.
 pub(in crate::sat_probe::completion_query) fn run<T>(
     e: &Engine,
     classification: bool,
@@ -117,24 +149,67 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
     if options.split_depth == 0 {
         return leaf(e, options);
     }
-    let limits = e.shared_limits(shares);
+    pruning::prepare(e, classification)?;
+    let mut limits = e.shared_limits(shares);
     if let Err(error) = Budget::new(&limits).check("completion unsplit attempt") {
         return Ok(Search::Inconclusive(inconclusive(error)?));
     }
     let started = Instant::now();
     let end = started + limits.timeout;
     let end = limits.run_deadline.map_or(end, |d| d.min(end));
+    // Ranking is optional exploration. Keep time for the actual question even
+    // when preparing a shortlist or a local uniqueness trial is expensive.
+    let mut ranking_limits = limits.clone();
+    ranking_limits.timeout /= 4;
+    ranking_limits.max_work /= 4;
+    let mut budget = Budget::new(&ranking_limits);
+    let mut config = e.config.clone();
+    let mut candidates = vec![];
+    let mut omitted = 0;
+    let ranked: Result<_> = (|| {
+        let state = Arc::new(fitting::Bundle::new(e, &mut budget)?);
+        let choice = choose(
+            e,
+            &state,
+            classification,
+            existence,
+            options.split_branches,
+            &mut config,
+            &mut candidates,
+            &mut omitted,
+            &mut budget,
+        )?;
+        Ok(choice.map(|choice| Root {
+            state,
+            choice,
+            candidates: candidates.clone(),
+            omitted,
+        }))
+    })();
+    let root = match ranked {
+        Ok(root) => root,
+        Err(error) => {
+            e.limits.cancellation.check()?;
+            inconclusive(error)?; // only optional resource cutoffs are recoverable
+            None
+        }
+    };
+    limits.max_work = limits.max_work.saturating_sub(budget.used());
+    limits.timeout = end.saturating_duration_since(Instant::now());
+    let ranking_work = budget.used();
+    let divisor = if root.is_some() { 2 } else { 1 };
     let mut first = e.clone();
     first.limits = limits.clone();
-    first.limits.timeout /= 2;
-    first.limits.run_deadline = Some(end.min(started + first.limits.timeout));
-    first.limits.max_work /= 2;
-    first.config = divided(&e.config, 2);
+    first.limits.timeout /= divisor;
+    first.limits.run_deadline = Some(end.min(Instant::now() + first.limits.timeout));
+    first.limits.max_work /= divisor as usize;
+    first.config = divided(&config, divisor as usize);
     let sink = crate::CompletionSizes::default();
     first.limits.completion_sizes = Some(sink.clone());
     let mut opts = options.clone();
     opts.split_depth = 0;
-    opts.max_worlds /= 2;
+    opts.max_worlds /= divisor as usize;
+    guards(&mut first, &mut opts);
     let phase = question_phase(classification, existence);
     let progress = e
         .limits
@@ -165,8 +240,8 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
         omitted_pins: 0,
         split: None,
         runner_up: None,
-        candidates: vec![],
-        omitted_candidates: 0,
+        candidates,
+        omitted_candidates: omitted,
         children: 0,
         split_kind: "none",
         assumption: None,
@@ -176,10 +251,10 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
         omitted_mapping: 0,
         has_rest: false,
         rest: false,
-        preparation_work: 0,
+        preparation_work: ranking_work,
         search_work: work,
         guarded_edges: 0,
-        work,
+        work: work.saturating_add(ranking_work),
         elapsed: started.elapsed(),
         cutoff,
     };
@@ -198,23 +273,30 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
         }
     }
     drop(progress);
-    if !matches!(result, Search::Inconclusive(_)) {
+    if root.is_none() || !matches!(result, Search::Inconclusive(_)) {
         return Ok(result);
     }
     let mut rest = e.clone();
     rest.limits = limits;
     rest.limits.timeout = end.saturating_duration_since(Instant::now());
     rest.limits.run_deadline = Some(end);
-    rest.limits.max_work -= first.limits.max_work;
+    rest.limits.max_work = rest.limits.max_work.saturating_sub(first.limits.max_work);
     rest.config = QueryLimits {
-        max_solves: e.config.max_solves - first.config.max_solves,
-        max_solver_polls: e.config.max_solver_polls - first.config.max_solver_polls,
-        max_conflicts: e.config.max_conflicts - first.config.max_conflicts,
-        max_propagations: e.config.max_propagations - first.config.max_propagations,
+        max_solves: config.max_solves.saturating_sub(first.config.max_solves),
+        max_solver_polls: config
+            .max_solver_polls
+            .saturating_sub(first.config.max_solver_polls),
+        max_conflicts: config
+            .max_conflicts
+            .saturating_sub(first.config.max_conflicts),
+        max_propagations: config
+            .max_propagations
+            .saturating_sub(first.config.max_propagations),
     };
     opts = options.clone();
     opts.max_worlds -= options.max_worlds / 2;
-    partition(&rest, classification, existence, &opts, 1, leaf)
+    guards(&mut rest, &mut opts);
+    partition_from(&rest, classification, existence, &opts, 1, root, leaf)
 }
 fn question_phase(classification: bool, existence: bool) -> &'static str {
     match (classification, existence) {
@@ -225,12 +307,24 @@ fn question_phase(classification: bool, existence: bool) -> &'static str {
     }
 }
 
+#[cfg(test)]
 pub(in crate::sat_probe::completion_query) fn partition<T>(
     e: &Engine,
     classification: bool,
     existence: bool,
     options: &CheckOptions,
     shares: usize,
+    leaf: impl Fn(&Engine, &CheckOptions) -> Result<Search<T>>,
+) -> Result<Search<T>> {
+    partition_from(e, classification, existence, options, shares, None, leaf)
+}
+fn partition_from<T>(
+    e: &Engine,
+    classification: bool,
+    existence: bool,
+    options: &CheckOptions,
+    shares: usize,
+    mut root: Option<Root>,
     leaf: impl Fn(&Engine, &CheckOptions) -> Result<Search<T>>,
 ) -> Result<Search<T>> {
     if options.split_depth == 0 {
@@ -270,6 +364,7 @@ pub(in crate::sat_probe::completion_query) fn partition<T>(
         work: limits.max_work,
         config: e.config.clone(),
         worlds: options.max_worlds,
+        targets: None,
     }]);
     let mut report = BranchReport::default();
     let mut next_id = 2;
@@ -337,31 +432,58 @@ pub(in crate::sat_probe::completion_query) fn partition<T>(
                 .run_deadline
                 .map_or(deadline, |d| d.min(deadline)),
         );
+        let mut allocation = e.clone();
+        allocation.limits = local_limits;
+        allocation.config = unit.config.clone();
+        let mut allocated_options = options.clone();
+        allocated_options.max_worlds = unit.worlds;
+        guards(&mut allocation, &mut allocated_options);
+        let local_limits = allocation.limits;
         let mut budget = Budget::new(&local_limits);
-        let mut config = unit.config.clone();
+        let mut config = allocation.config;
         let result: Result<Option<Engine>> = (|| {
-            let state = Arc::new(match &unit.parent {
-                Some(parent) => parent.child(&unit.delta, &mut budget)?,
-                None => fitting::Bundle::new(e, &mut budget)?,
-            });
+            let preflight = if unit.parent.is_none() {
+                root.take()
+            } else {
+                None
+            };
+            let state = if let Some(r) = &preflight {
+                r.state.clone()
+            } else {
+                Arc::new(match &unit.parent {
+                    Some(parent) => parent.child(&unit.delta, &mut budget)?,
+                    None => fitting::Bundle::new(e, &mut budget)?,
+                })
+            };
             let mut branch = state.engine(e, &mut budget)?;
             branch.limits = local_limits.clone();
             branch.config = config.clone();
             let capacity = options
                 .split_branches
                 .saturating_sub(report.leaves + queue.len());
-            if unit.depth < options.split_depth && capacity > 0 {
-                if let Some((choice, runner_up)) = choose(
-                    &branch,
-                    &state,
-                    classification,
-                    existence,
-                    capacity,
-                    &mut config,
-                    &mut record.candidates,
-                    &mut record.omitted_candidates,
-                    &mut budget,
-                )? {
+            if unit.targets.as_ref().is_none_or(|t| !t.is_empty())
+                && unit.depth < options.split_depth
+                && capacity > 0
+            {
+                let chosen = if let Some(r) = preflight {
+                    record.candidates = r.candidates;
+                    record.omitted_candidates = r.omitted;
+                    Some(r.choice)
+                } else {
+                    ranking::choose_in(
+                        &branch,
+                        &state,
+                        classification,
+                        existence,
+                        capacity,
+                        unit.targets.as_deref(),
+                        &mut config,
+                        &mut record.candidates,
+                        &mut record.omitted_candidates,
+                        &mut budget,
+                    )?
+                };
+                if let Some((choice, runner_up)) = chosen {
                     let children = choice.children();
                     let n = children.len();
                     if n > 0 {
@@ -401,14 +523,14 @@ pub(in crate::sat_probe::completion_query) fn partition<T>(
                             .collect();
                         record.omitted_mapping = choice.group.mapping.len().saturating_sub(32);
                         report.splits += 1;
-                        for (delta, rest) in children {
+                        for (child_index, (delta, rest)) in children.into_iter().enumerate().rev() {
                             let mut pins = unit.pins.clone();
                             for (i, v) in &delta {
                                 pins.insert(e.cone.atoms[*i].clone(), *v);
                             }
                             let id = next_id;
                             next_id += 1;
-                            queue.push_back(Unit {
+                            queue.push_front(Unit {
                                 id,
                                 parent_id: Some(unit.id),
                                 parent: Some(state.clone()),
@@ -419,6 +541,7 @@ pub(in crate::sat_probe::completion_query) fn partition<T>(
                                 work: unit.work.saturating_sub(budget.used()) / n,
                                 config: divided(&config, n),
                                 worlds: unit.worlds / n,
+                                targets: Some(choice.child_targets[child_index].clone()),
                             });
                         }
                         return Ok(None);
@@ -444,11 +567,12 @@ pub(in crate::sat_probe::completion_query) fn partition<T>(
                 report.leaves += 1;
                 branch.limits = local_limits.clone();
                 branch.limits.timeout = budget.remaining_time();
-                branch.limits.max_work = unit.work.saturating_sub(budget.used());
+                branch.limits.max_work = local_limits.max_work.saturating_sub(budget.used());
                 branch.config = config;
                 let mut opts = options.clone();
                 opts.split_depth = 0;
-                opts.max_worlds = unit.worlds;
+                opts.max_worlds = allocated_options.max_worlds;
+                guards(&mut branch, &mut opts);
                 record.state = "searching";
                 let _progress = e.limits.progress.scope(
                     phase,

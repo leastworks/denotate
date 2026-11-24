@@ -17,6 +17,8 @@ fn record(p: &PruningRecord, r: &Report, keys: &SemanticKeys) -> Result<Value> {
 }
 pub(super) fn summary(r: &Report, keys: &SemanticKeys) -> Result<Value> {
     Ok(json!({"elapsedMs":r.pruning.elapsed.as_secs_f64()*1000.0,
+        "views":r.pruning.views.iter().map(|v|json!({"scope":v.scope,"context":context(v.context),"rounds":v.rounds,"attempts":v.attempts,"proved":v.proved,"removedInstances":v.removed,"coveredHeads":v.covered,"stop":v.stop.label()})).collect::<Vec<_>>(),
+        "omittedViews":r.pruning.omitted_views,
         "components":r.pruning.components.iter().map(|c|completion_pruning_component(c,|a|atom(a,keys))).collect::<Result<Vec<_>>>()?,
         "omittedComponents":r.pruning.omitted_components,"attempts":r.pruning.attempts,"removedInstances":r.pruning.removed,
         "coveredHeads":r.pruning.covered,"records":r.pruning.records.iter().map(|p|record(p,r,keys)).collect::<Result<Vec<_>>>()?,

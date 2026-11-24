@@ -367,3 +367,44 @@ fn locally_nonunique_positive_loop_can_be_pruned_without_becoming_unique() {
             .any(|r| r.kind == "non-unique" && r.proved > 0)
     );
 }
+
+#[test]
+fn pruning_refreshes_targets_until_a_complete_unchanged_round() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let p = rel(&mut c, "p", false);
+    let q = rel(&mut c, "q", false);
+    rule(&mut c, p, &[(i, false)]);
+    rule(&mut c, p, &[(q, false)]);
+    rule(&mut c, q, &[(i, false), (p, true)]);
+    let v = verification(&mut c, None, &[]);
+    let report = compare(&c, v);
+    assert!(!report.pruning.records.is_empty());
+    assert!(
+        report
+            .pruning
+            .views
+            .iter()
+            .any(|v| v.rounds > 1 && v.stop == PruningStop::Saturated)
+    );
+    let e = prepare(&c, v, &Domains::new());
+    let mut limited = e.clone();
+    limited.limits.pruning_allowance = Some(Duration::ZERO);
+    let report = limited
+        .check(
+            &keys(&c),
+            &CheckOptions {
+                prune: true,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(
+        report
+            .pruning
+            .views
+            .iter()
+            .any(|v| v.stop == PruningStop::OverallCutoff)
+    );
+    super::scale::same_report(&report, &e.check(&keys(&c), &Default::default()).unwrap());
+}

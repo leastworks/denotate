@@ -132,6 +132,20 @@ impl Cancellation {
 }
 
 /// Per checker operation, including preparation, evaluation and Boolean queries.
+/// Optional automatic runaway guards for time-boxed search. These floors are
+/// operational only: child allocation may divide explicit caps, but must not
+/// divide automatic guards below the cost of preparing a useful search. The
+/// original absolute deadline remains authoritative. Structural caps are absent.
+#[derive(Debug, Clone, Default)]
+pub struct SearchGuards {
+    pub work: Option<usize>,
+    pub solves: Option<usize>,
+    pub polls: Option<usize>,
+    pub conflicts: Option<u64>,
+    pub propagations: Option<u64>,
+    pub worlds: Option<usize>,
+}
+
 /// Low-level operations return LimitExceeded; reporting APIs preserve completed
 /// scopes and label unfinished work Inconclusive. Deadlines are checked
 /// cooperatively between work items, not a promise of hard real-time preemption.
@@ -150,6 +164,10 @@ pub struct Limits {
     /// Optional cooperative deadline shared across operations/queries. Operational
     /// only; never part of semantic identity. CLI SAT runs set it after loading.
     pub run_deadline: Option<Instant>,
+    pub search_guards: Option<SearchGuards>,
+    /// This verification's reservation from the invocation's aggregate optional
+    /// pruning allowance. None uses one third of this invocation's timeout.
+    pub pruning_allowance: Option<Duration>,
     pub max_bdd_variables: usize,
     pub max_bdd_nodes: usize,
     pub max_bdd_tasks: usize,
@@ -181,6 +199,8 @@ impl Default for Limits {
             max_work: 20_000_000,
             timeout: Duration::from_secs(10),
             run_deadline: None,
+            search_guards: None,
+            pruning_allowance: None,
             max_bdd_variables: 10_000,
             max_bdd_nodes: 100_000,
             max_bdd_tasks: 100_000,
