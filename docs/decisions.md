@@ -2447,3 +2447,28 @@ Use breadth-first pending units and give each an absolute share cutoff, inherite
 by nested SAT work and bounded by the original question deadline. A cutoff remains
 inconclusive, while siblings can still produce confirmed failures. No new limits,
 no changed default split setting, and no change to W/H/formula soundness contracts.
+
+
+## Completion existence can project acyclic equations without shrinking semantic scope
+
+Removing a redundant presence premise can disconnect many value equations from H
+while they remain in the frozen classification scope. Fixing every derived value
+in an existence cube then pins inputs for those disconnected equations, even when
+they are acyclic and would simply recompute. Set-valued elements cannot be given a
+scalar assumption to suppress that variation.
+
+For existence only, encode and fix the upstream closure of every remaining cyclic
+SCC, H and restriction targets in the reduced view. Include positive self-loops as
+well as negative cycles. Every omitted unknown head is acyclic, so its equation
+has exactly one value once its providers are assigned; topological evaluation
+extends every retained model. Restricting a full model gives a retained model, and
+extending a retained model gives a full one. Thus existence is preserved both ways.
+Reconstruct and replay the original equations before accepting a model certificate.
+Context-dependent reductions remain local to their W, W+H or pinned view; the
+independent W/formula constraints are not projected away.
+
+This does not change classification membership, decisions, assumptions, obligations
+or ambiguity queries. Existing total-component certificates still justify any
+prior existence-residual reduction. Source-rule slots remain for validation and
+provenance: a producer contradicted by a formula pin is inactive in analysis and
+encoding without needing a covered-producer proof.

@@ -542,3 +542,73 @@ fn formula_branch_keeps_free_boundary_local_uniqueness_independent() {
             .exists()
     );
 }
+
+#[test]
+fn formula_pin_removes_contradicted_producers_without_coverage_proofs() {
+    // Neither source producer is redundant at the root. Each is impossible in
+    // one child solely because of the formula pin, before any SAT pruning.
+    let (c, e, g, _) = fixture(false, false);
+    let p = c
+        .relations()
+        .find(|r| r.name.as_str() == "selected")
+        .unwrap()
+        .id;
+    let q = c
+        .relations()
+        .find(|r| r.name.as_str() == "profile")
+        .unwrap()
+        .id;
+    let p = e.program.atom_index[&atom(p)];
+    let q = e.program.atom_index[&atom(q)];
+    let mut budget = Budget::new(&e.limits);
+    let root = fitting::Bundle::new(&e, &mut budget).unwrap();
+    let source = root.cone.cone(&mut budget).unwrap();
+    let f = formula(
+        &source,
+        g,
+        root.scope(false),
+        PruningContext::World,
+        &mut budget,
+    )
+    .unwrap();
+    for value in [false, true] {
+        let child = root
+            .child_with_formula(&[(g, value)], Some(&f), &mut budget)
+            .unwrap();
+        let contradicted = if value { q } else { p };
+        let branch = child.engine(&e, &mut budget).unwrap();
+        for hypothesis in [false, true] {
+            let view = pruning::view_using(
+                &branch,
+                &branch.cone,
+                hypothesis,
+                e.limits.timeout,
+                &mut budget,
+            )
+            .unwrap();
+            assert_eq!(view.fixed[contradicted], Some(false));
+            // Source slots are retained for replay, but no producer is active.
+            assert!(
+                view.rules
+                    .iter()
+                    .filter(|r| r.head == contradicted)
+                    .all(|r| r
+                        .body
+                        .iter()
+                        .any(|(i, p)| view.fixed[*i].is_some_and(|v| v != *p)))
+            );
+            assert!(
+                !consistency::analyse(&view, None, &mut budget)
+                    .unwrap()
+                    .cyclic[contradicted]
+            );
+            assert_eq!(
+                encoding::fitting(&view, &mut budget).unwrap()[contradicted],
+                Some(false)
+            );
+        }
+        // Rules in the source and its sibling were never mutated.
+        assert!(source.rules.iter().any(|r| r.head == contradicted));
+        assert!(child.proofs.is_empty(), "no coverage proof was needed");
+    }
+}

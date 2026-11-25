@@ -876,12 +876,22 @@ pub(super) fn checked_assignment(
             values[i] = cnf.solver.value_lit(*l) == lbool::TRUE;
         }
     }
+    validate_assignment(cone, &values, e.validation.as_ref(), b)?;
+    Ok(values)
+}
+
+pub(super) fn validate_assignment(
+    cone: &Cone,
+    values: &[bool],
+    index: Option<&encoding::Validation>,
+    b: &mut Budget<'_>,
+) -> Result<()> {
     let mut produced = vec![false; values.len()];
     for r in &cone.rules {
         b.charge(r.body.len() + 1, "completion model validation")?;
         produced[r.head] |= r.body.iter().all(|(a, pos)| values[*a] == *pos);
     }
-    let heads: Box<dyn Iterator<Item = usize>> = if let Some(index) = &e.validation {
+    let heads: Box<dyn Iterator<Item = usize>> = if let Some(index) = index {
         Box::new(index.heads.iter().copied())
     } else {
         Box::new(0..values.len())
@@ -910,5 +920,5 @@ pub(super) fn checked_assignment(
             ));
         }
     }
-    Ok(values)
+    Ok(())
 }

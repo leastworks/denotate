@@ -7,6 +7,7 @@ pub(super) mod branches;
 mod consistency;
 mod determinacy;
 mod existence;
+mod existence_slice;
 mod odd;
 pub mod planning;
 pub(super) mod targets;
@@ -336,6 +337,37 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
     fn values(&mut self, cone: &Cone, encoded: &Encoded) -> Result<Vec<bool>> {
         let started = self.run.budget.used();
         let result = checked_assignment(cone, &encoded.encoding, &self.run.cnf, self.run.budget);
+        self.stats.validation_work += self.run.budget.used() - started;
+        self.metrics();
+        result
+    }
+    fn existence_values(
+        &mut self,
+        slice: &existence_slice::Slice,
+        original: &Cone,
+        encoded: &Encoded,
+    ) -> Result<Vec<bool>> {
+        let started = self.run.budget.used();
+        let result = (|| {
+            let core = checked_assignment(
+                &slice.core,
+                &encoded.encoding,
+                &self.run.cnf,
+                self.run.budget,
+            )?;
+            self.run
+                .budget
+                .charge(core.len(), "completion existence extension")?;
+            let mut full = core.clone();
+            slice.extend(&mut full, self.run.budget)?;
+            queries::validate_assignment(
+                original,
+                &full,
+                encoded.encoding.validation.as_ref(),
+                self.run.budget,
+            )?;
+            Ok(core)
+        })();
         self.stats.validation_work += self.run.budget.used() - started;
         self.metrics();
         result
@@ -802,7 +834,8 @@ impl Engine {
                 existence::classification_shape(self, &world_view, world_view.label(), s)?;
                 let h = self.classification.as_ref().unwrap().2;
                 let view = s.simplified(original, true)?;
-                let accepted = s.encode_view(&view, original, true)?;
+                let slice = existence_slice::Slice::new(&view, Some(h), s.run.budget)?;
+                let accepted = s.encode_view(&slice.core, original, true)?;
                 let selector = s.gate()?;
                 let mut base = None;
                 loop {
@@ -824,9 +857,9 @@ impl Engine {
                     let world = s.world()?;
                     let pins = s.pins(&world)?;
                     if s.solve(&[accepted.gate], &pins)? {
-                        let values = s.values(original, &accepted)?;
-                        let mut cube = cover(&view, &values, Some(h), s.run.budget)?;
-                        existence::lift(&view, &values, &accepted, &mut cube, s)?;
+                        let values = s.existence_values(&slice, original, &accepted)?;
+                        let mut cube = cover(&slice.core, &values, Some(h), s.run.budget)?;
+                        existence::lift(&slice.core, &values, &accepted, &mut cube, s)?;
                         // A lifted model must still assert H if H is an input.
                         if view.input[h] && view.fixed[h].is_none() {
                             cube.insert(h, true);
@@ -839,14 +872,17 @@ impl Engine {
                     }
                     s.metrics();
                     if base.is_none() {
-                        base = Some(s.encode_view(&world_view, original, false)?);
+                        let slice =
+                            existence_slice::Slice::new(&world_view, Some(h), s.run.budget)?;
+                        let encoded = s.encode_view(&slice.core, original, false)?;
+                        base = Some((slice, encoded));
                     }
-                    let base = base.as_ref().unwrap();
+                    let (base_slice, base) = base.as_ref().unwrap();
                     if !s.solve(&[base.gate], &pins)? {
                         return Ok(Some(world));
                     }
-                    let values = s.values(original, base)?;
-                    let cube = cover(&world_view, &values, None, s.run.budget)?;
+                    let values = s.existence_values(base_slice, original, base)?;
+                    let cube = cover(&base_slice.core, &values, None, s.run.budget)?;
                     s.exclude(selector, &cube)?;
                 }
             },
@@ -877,12 +913,18 @@ impl Engine {
             let candidate = if !classification {
                 self.classification
                     .as_ref()
-                    .map(|(c, _, _)| s.encode(c, true))
+                    .map(|(c, _, h)| {
+                        let view = s.simplified(c, true)?;
+                        let slice = existence_slice::Slice::new(&view, Some(*h), s.run.budget)?;
+                        s.encode_view(&slice.core, c, true)
+                    })
                     .transpose()?
             } else {
                 None
             };
-            let target = s.encode_view(cone, cone, !classification)?;
+            let h = self.classification.as_ref().map(|(_, _, h)| *h);
+            let slice = existence_slice::Slice::new(cone, h, s.run.budget)?;
+            let target = s.encode_view(&slice.core, cone, !classification)?;
             let selector = s.gate()?;
             let mut active = vec![selector];
             if let Some(candidate) = &candidate {
@@ -908,11 +950,11 @@ impl Engine {
                 if !s.solve(&[target.gate], &pins)? {
                     return Ok(Some(world));
                 }
-                let values = s.values(cone, &target)?;
+                let values = s.existence_values(&slice, cone, &target)?;
                 let h = (!classification)
                     .then(|| self.classification.as_ref().map(|(_, _, h)| *h))
                     .flatten();
-                let cube = cover(cone, &values, h, s.run.budget)?;
+                let cube = cover(&slice.core, &values, h, s.run.budget)?;
                 s.exclude(selector, &cube)?;
             }
         })
@@ -1347,3 +1389,6 @@ pub(super) fn has_cycle_for_test(c: &Cone) -> bool {
         .iter()
         .any(|v| *v)
 }
+
+#[cfg(test)]
+mod lifting_scope_tests;

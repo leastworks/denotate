@@ -1803,10 +1803,23 @@ join. The opt-in diagnostic LFP continues to use its own growing delta frontier.
 
 Existence first proves totality of negative components over free boundary providers;
 positive components need no SAT totality search. A component that is not total is
-retained with its upstream cone for the global search. Model cubes retain one
-interpretation while varying unpinned inputs. SAT lifting attempts up to
-64 deterministic block deletions per cube, checking the original equations and
-splitting blocks whose removal fails.
+retained with its upstream cone for the global search. Before existence encoding
+and cube construction, retain the reduced view's cyclic SCCs (positive as well
+as negative), H, restriction targets, and their upstream closure. The omitted
+acyclic equations have a unique topological extension for each retained model and
+input observation. Reconstruct that extension before original-equation replay;
+semantic classification membership does not shrink. Existing total-component
+certificates still justify the earlier residual reduction.
+
+Model cubes fix only the retained interpretation, allowing the acyclic remainder
+to vary with unpinned inputs. SAT lifting attempts up to 64 deterministic block
+deletions against those retained equations. H-coverage, its no-H fallback, and the
+ordinary residual existence query use the same boundary for CNF and cubes. W and
+formula-pin constraints retain their independent encoding and context. This is
+an existence optimization, not a determinacy or obligation scope reduction.
+The [presence repro](../fixtures/completion-lifting-scope/README.md) compares the
+old fixed-model cubes with this extension certificate and a source-level rewrite,
+including set-valued endpoints where a scalar restriction would be incorrect.
 All work, solves and deadlines remain charged; the lifting cap never changes a
 verdict, and exhausted required searches remain inconclusive. Component validation
 uses compact arrays. Global validation indexes retain every original producer and

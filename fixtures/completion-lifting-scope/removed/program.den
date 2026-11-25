@@ -1,0 +1,40 @@
+// One endpoint, three representative candidate values.
+sort Element;
+const item: Element;
+sort Value;
+const v0, v1, v2: Value;
+input received(element: Element, value: Value);
+input written(element: Element, value: Value);
+input readable(element: Element);
+relation value(element: Element, value: Value);
+value(E, V) :- received(E, V), readable(E);
+value(E, V) :- written(E, V);
+relation present(element: Element);
+present(E) :- value(E, V);
+relation matched();
+matched() :- value(item, v0);
+relation accepted();
+accepted() :- matched();
+
+assumption scalar: at_most_one(value, group_by: (element));
+verification unrestricted {
+  semantics: completion;
+  hypothesis: accepted;
+  assumptions: [];
+  obligations: [];
+}
+verification one_value {
+  semantics: completion;
+  hypothesis: accepted;
+  assumptions: [scalar];
+  obligations: [];
+}
+
+relation unmatched();
+unmatched() :- !matched();
+verification absent_case {
+  semantics: completion;
+  hypothesis: unmatched;
+  assumptions: [];
+  obligations: [];
+}

@@ -1328,10 +1328,14 @@ separate; see [checker policies](../../docs/checker-policies.md#sat-cli-explorat
 Completion existence checks totality per negative SCC over unconstrained provider
 atoms. Positive SCCs always extend their providers. A failed local check retains
 that component and its upstream cone for the global W search; it cannot itself
-produce a no-meaning finding. Processing keeps C and H in that fallback. Successful
-model cubes are lifted only after a SAT check rules out violations of the original
-equations with the proposed pin removed. Validation indexes are constructed once
-per encoding and still check every original rule, including folded producers.
+produce a no-meaning finding. Processing keeps C and H in that fallback. The
+existence encodings and cubes keep the reduced view's cyclic SCCs, H, restriction
+targets and their upstream closure. The remaining acyclic equations are recomputed
+in topological order before original-equation validation; they may vary with inputs
+outside the cube. Lifting still requires a SAT proof that the retained equations
+hold after removing a pin. This preserves the frozen semantic scope; determinacy
+and property encodings do not use this projection. See the
+[presence repro](../../fixtures/completion-lifting-scope/README.md).
 
 `CompletionSearchSize::existence` and `CheckingTarget::CompletionExistence` expose
 rounds, cube pins, validation work, total/fallback component counts and lifting.
