@@ -3,6 +3,7 @@ use crate::test_support::rewrites::{atom, rel, rule};
 use denotate_ir::*;
 mod branches;
 mod contracts;
+mod cover_lifting;
 mod determinacy;
 mod exploration;
 mod implied_literals;

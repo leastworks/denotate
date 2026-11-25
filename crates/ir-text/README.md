@@ -700,7 +700,7 @@ just check-den ROOT --engine sat --completion-explore --completion-prune --compl
 The explicit timeout is one invocation-wide safety net, including preparation and
 all verifications; without it the CLI still uses 120 seconds. Explicit resource
 limits and structural/split bounds remain authoritative. Exploration first tries
-an unsplit probe capped by `--completion-probe-work N` (default 32000000; 0 disables).
+an unsplit probe capped by `--completion-probe-work N` (default 256000000; 0 disables).
 A conclusive probe skips structural trials. The probe is the ordinary unsplit
 search, covers included, under that cap; an exhausted probe is charged and never a
 proof. After cutoff, each unit reduces, prunes and forces

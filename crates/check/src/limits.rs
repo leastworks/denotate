@@ -217,7 +217,7 @@ impl Default for Limits {
     fn default() -> Self {
         Self {
             completion_exploration: false,
-            completion_probe_work: 32_000_000,
+            completion_probe_work: 256_000_000,
             completion_sizes: None,
             cancellation: Cancellation::default(),
             profile: Default::default(),

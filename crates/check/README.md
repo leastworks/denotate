@@ -1612,7 +1612,7 @@ last question does not change its verdict or the aggregate status.
 
 With splits enabled, the root and every child first try a bounded unsplit probe.
 `Limits::completion_probe_work` / `--completion-probe-work N` sets its deterministic
-work cap (32,000,000 by default; 0 disables it). Work includes SAT callback polls.
+work cap (256,000,000 by default; 0 disables it). Work includes SAT callback polls.
 A conclusive probe skips pruning, forcing and ranking. The probe runs the ordinary
 unsplit search, covers and lifting included, under that cap, reusing existing views
 without starting pruning, forcing or ranking. An exhausted probe stays charged and

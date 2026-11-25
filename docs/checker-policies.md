@@ -1814,7 +1814,11 @@ certificates still justify the earlier residual reduction.
 Model cubes fix only the retained interpretation, allowing the acyclic remainder
 to vary with unpinned inputs. SAT lifting attempts up to 64 deterministic block
 deletions against those retained equations. H-coverage, its no-H fallback, and the
-ordinary residual existence query use the same boundary for CNF and cubes. W and
+ordinary residual existence query use the same boundary for CNF and cubes, and all
+three lift their cubes: the no-H fallback lifts against the no-H encoding (on a first
+real program, one leaf whose inputs mostly had no H model ran 94,940 unlifted
+rounds). Rejection also lifts its H-model cubes, keeping the H pin when H is an
+input. W and
 formula-pin constraints retain their independent encoding and context. Pair
 (uniqueness) queries use the same boundary with the compared decision atoms as
 additional roots: both copies encode only the retained equations, every compared
@@ -2361,9 +2365,11 @@ and aggregate effect are unchanged. Default mode retains a bounded question shar
 and reports the active component, cover progress and cutoff resource.
 
 With splits enabled, each exploration unit first gets a deterministic unsplit
-probe: `--completion-probe-work N`, provisionally 32,000,000 work units including
-SAT callback polls (0 disables it). This allowance fits the existing public
-control's cheap encodings; it is not a timing target. A conclusive probe bypasses
+probe: `--completion-probe-work N`, provisionally 256,000,000 work units including
+SAT callback polls (0 disables it). On the first real program the cheap questions
+needed 17M-83.5M; a hard question's probe at 1,000,000,000 took about 7 s. The
+default leaves about three times the largest measured need; it is not a timing
+target. A conclusive probe bypasses
 forcing/ranking. The probe runs the ordinary unsplit search, including existence,
 rejection and eligibility covers and lifting, under that cap; it reuses existing
 views and never starts pruning, forcing or ranking. Exhausting the cap is charged,
@@ -2375,7 +2381,7 @@ queries run only at leaves. Both cut and uncut children rank surviving component
 Ordinary mode changes only classification existence's order: enabled forcing/splits
 precede its covers. Processing existence and ambiguity keep their established first
 attempt, and rejection/acceptance keep their direct unsplit searches. The
-32,000,000-work probe and the new rejection/acceptance driver are exploration-only. Incomplete trials never justify omitted
+256,000,000-work probe and the new rejection/acceptance driver are exploration-only. Incomplete trials never justify omitted
 children or proofs. W/H boundaries, residual constraints, validation and confirmed
 finding aggregation are unchanged.
 

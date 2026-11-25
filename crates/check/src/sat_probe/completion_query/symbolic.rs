@@ -842,7 +842,12 @@ impl Engine {
                     return Ok(Some(model));
                 }
                 let values = s.values(cone, &base)?;
-                let cube = cover(cone, &values, Some(*h), s.run.budget)?;
+                let mut cube = cover(cone, &values, Some(*h), s.run.budget)?;
+                existence::lift(cone, &values, &base, &mut cube, s)?;
+                // A lifted H model must still assert H if H is an input.
+                if cone.input[*h] && cone.fixed[*h].is_none() {
+                    cube.insert(*h, true);
+                }
                 s.exclude(selector, &cube)?;
             }
         })
@@ -958,7 +963,10 @@ impl Engine {
                         return Ok(Some(world));
                     }
                     let values = s.existence_values(base_slice, original, base)?;
-                    let cube = cover(&base_slice.core, &values, None, s.run.budget)?;
+                    let mut cube = cover(&base_slice.core, &values, None, s.run.budget)?;
+                    // Inputs without an H model are covered like H models: the
+                    // same equation lifting, against the no-H encoding.
+                    existence::lift(&base_slice.core, &values, base, &mut cube, s)?;
                     s.exclude(selector, &cube)?;
                 }
             },
