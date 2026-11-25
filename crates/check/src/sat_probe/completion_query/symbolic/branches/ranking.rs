@@ -40,6 +40,61 @@ pub(super) fn choose_in(
     omitted: &mut usize,
     b: &mut Budget<'_>,
 ) -> Result<Option<(Choice, Option<Choice>)>> {
+    choose_noting(
+        e,
+        bundle,
+        classification,
+        existence,
+        capacity,
+        deferred,
+        remaining,
+        telemetry,
+        omitted,
+        &mut None,
+        b,
+    )
+}
+
+fn gap(
+    reason: &'static str,
+    targets: usize,
+    witnesses: &BTreeMap<usize, BTreeSet<(usize, usize, bool)>>,
+    c: &Cone,
+    counts: (usize, usize, usize),
+) -> RankingGap {
+    let atoms: BTreeSet<_> = witnesses
+        .values()
+        .next()
+        .into_iter()
+        .flatten()
+        .flat_map(|(a, d, _)| [*a, *d])
+        .collect();
+    RankingGap {
+        reason,
+        targets,
+        witness: atoms.iter().take(16).map(|i| c.atoms[*i].clone()).collect(),
+        omitted_witness: atoms.len().saturating_sub(16),
+        guarded_edges: counts.0,
+        inputs: counts.1,
+        formulas: counts.2,
+    }
+}
+
+/// `choose_in`, also reporting why no partition was found.
+#[allow(clippy::too_many_arguments)]
+pub(super) fn choose_noting(
+    e: &Engine,
+    bundle: &fitting::Bundle,
+    classification: bool,
+    existence: bool,
+    capacity: usize,
+    deferred: Option<&[Arc<BTreeSet<usize>>]>,
+    remaining: &mut QueryLimits,
+    telemetry: &mut Vec<SplitCandidate>,
+    omitted: &mut usize,
+    noted: &mut Option<RankingGap>,
+    b: &mut Budget<'_>,
+) -> Result<Option<(Choice, Option<Choice>)>> {
     let groups = groups::groups(e, bundle, b)?;
     // H-first coverage and processing rank their stronger inherited view.
     // No-H fallbacks still use the separate W view in the leaf query.
@@ -138,6 +193,7 @@ pub(super) fn choose_in(
         candidates.retain(|id| !surviving.contains(id));
     }
     if candidates.is_empty() {
+        *noted = Some(gap("no-target", 0, &BTreeMap::new(), c, (0, 0, 0)));
         return Ok(None);
     }
     b.charge(graph.component.len(), "completion split target members")?;
@@ -233,6 +289,13 @@ pub(super) fn choose_in(
         }
     }
     if guard_edges.is_empty() {
+        *noted = Some(gap(
+            "no-guarded-witness-edge",
+            candidates.len(),
+            &witnesses,
+            c,
+            (0, 0, 0),
+        ));
         return Ok(None);
     }
     // Rank separately for each targeted component. A group's other values stay
@@ -290,6 +353,8 @@ pub(super) fn choose_in(
     }
     let mut choices = Vec::new();
     let mut seen = BTreeSet::new();
+    // Candidates dropped only because the partition exceeds the leaf capacity.
+    let mut bounded = capacity < 2;
     for inputs in influence.values() {
         for group in &groups {
             b.charge(group.atoms.len() + 1, "completion split ranking")?;
@@ -313,6 +378,7 @@ pub(super) fn choose_in(
             let rest = !group.exact || selected.len() != available.len();
             let n = selected.len() + usize::from(rest);
             if n < 2 || n > capacity {
+                bounded |= n > capacity;
                 continue;
             }
             if !seen.insert((group.atoms.as_slice(), selected.clone(), rest)) {
@@ -446,6 +512,9 @@ pub(super) fn choose_in(
                 .insert(graph.component[edge.0]);
         }
     }
+    let formulas = choices.iter().filter(|c| c.formula.is_some()).count();
+    let counts = (guard_edges.len(), all.len(), formulas);
+    let empty = choices.is_empty();
     let result = verify(
         e,
         bundle,
@@ -505,6 +574,16 @@ pub(super) fn choose_in(
             omitted_derived_guards: 0,
             derived_guards_complete: false,
         });
+    }
+    if result.is_none() {
+        let reason = if !empty {
+            "no-verified-cut"
+        } else if bounded {
+            "partition-bounds"
+        } else {
+            "no-input-or-formula"
+        };
+        *noted = Some(gap(reason, candidates.len(), &witnesses, c, counts));
     }
     Ok(result)
 }

@@ -32,8 +32,8 @@ pub use advisory::*;
 pub use checking::*;
 pub use properties::*;
 pub use symbolic::branches::{
-    BranchRecord, BranchReport, DerivedGuard, ForcingRecord, PrunedProducer, SplitAlternative,
-    SplitCandidate, SplitChild,
+    BranchRecord, BranchReport, DerivedGuard, ForcingRecord, PrunedProducer, RankingGap,
+    SplitAlternative, SplitCandidate, SplitChild,
 };
 pub use symbolic::planning::*;
 #[cfg(test)]

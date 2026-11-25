@@ -113,6 +113,25 @@ pub struct BranchRecord {
     pub work: usize,
     pub elapsed: Duration,
     pub cutoff: Option<Inconclusive>,
+    /// Why ranking found no partition here, when it ran and found none.
+    pub ranking_gap: Option<RankingGap>,
+}
+/// A unit whose ranking produced no partition: which witness cycle it used and
+/// where candidate discovery stopped. Diagnostic only; never a verdict.
+#[derive(Debug, Clone)]
+pub struct RankingGap {
+    /// `no-target`, `no-guarded-witness-edge`, `no-input-or-formula`,
+    /// `partition-bounds` (candidates exceeded the leaf capacity) or
+    /// `no-verified-cut`.
+    pub reason: &'static str,
+    pub targets: usize,
+    /// Atoms on the first targeted component's witness cycle, at most 16.
+    pub witness: Vec<GroundAtom>,
+    pub omitted_witness: usize,
+    pub guarded_edges: usize,
+    /// Inputs reached from witness guards through acyclic providers.
+    pub inputs: usize,
+    pub formulas: usize,
 }
 #[derive(Debug, Clone, Default)]
 pub struct BranchReport {
@@ -343,6 +362,7 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
         work: work.saturating_add(ranking_work),
         elapsed: started.elapsed(),
         cutoff,
+        ranking_gap: None,
     };
     e.limits.progress.completion_branch(&record);
     if let Some(sink) = &e.branches {
@@ -516,6 +536,7 @@ fn partition_from<T>(
             work: 0,
             elapsed: Duration::ZERO,
             cutoff: None,
+            ranking_gap: None,
         };
         let _progress = e.limits.progress.scope(
             phase,
@@ -646,7 +667,7 @@ fn partition_from<T>(
                     let mut ranking = Budget::new(&ranking_limits);
                     let ranking_started = Instant::now();
                     e.exploration("completion split ranking", "started", 0, Duration::ZERO);
-                    let answer = ranking::choose_in(
+                    let answer = ranking::choose_noting(
                         &branch,
                         &state,
                         classification,
@@ -660,6 +681,7 @@ fn partition_from<T>(
                         &mut config,
                         &mut record.candidates,
                         &mut record.omitted_candidates,
+                        &mut record.ranking_gap,
                         &mut ranking,
                     );
                     e.exploration(

@@ -1096,6 +1096,10 @@ pub fn completion_branch_record(
         "pins":c.pins.iter().map(|(a,v)|Ok(json!({"atom":atom(a)?,"value":v}))).collect::<Result<Vec<_>>>()?,
         "omittedPins":c.omitted_pins,"split":c.split.as_ref().map(&atom).transpose()?,
         "children":c.children,"guardedEdges":c.guarded_edges,"work":c.work,
-        "elapsedMs":c.elapsed.as_secs_f64()*1000.0,"cutoff":c.cutoff.map(reason)}),
+        "elapsedMs":c.elapsed.as_secs_f64()*1000.0,"cutoff":c.cutoff.map(reason),
+        "rankingGap":c.ranking_gap.as_ref().map(|g| -> Result<Value> { Ok(json!({
+            "reason":g.reason,"targets":g.targets,
+            "witness":g.witness.iter().map(&atom).collect::<Result<Vec<_>>>()?,"omittedWitness":g.omitted_witness,
+            "guardedEdges":g.guarded_edges,"inputs":g.inputs,"formulas":g.formulas})) }).transpose()?}),
     )
 }

@@ -298,6 +298,26 @@ pub fn branch_formatter(
                 c.guarded_edges
             ));
         }
+        if let Some(g) = &c.ranking_gap {
+            line.push_str(&format!(
+                "; no partition ({}): {} target components, {} guarded witness edges, {} inputs, {} formulas; witness {}{}",
+                g.reason,
+                g.targets,
+                g.guarded_edges,
+                g.inputs,
+                g.formulas,
+                g.witness
+                    .iter()
+                    .map(|a| crate::progress::atom_text(a, &names))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                if g.omitted_witness > 0 {
+                    format!(" +{} omitted", g.omitted_witness)
+                } else {
+                    String::new()
+                }
+            ));
+        }
         if let Some(r) = &c.runner_up {
             line.push_str(&format!(
                 "; runner-up {}: {} edges / {} extra children",

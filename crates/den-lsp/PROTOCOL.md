@@ -1473,6 +1473,14 @@ question), `splitKind` (`none`, `binary`, `at-most-one`, `exactly-one`), nullabl
 `rest` (this unit is a rest child). Values/mapping lists are capped at 32.
 `preparationWork` and `searchWork` separate branch setup/ranking from residual
 search; `work` is their sum. Rest does not assert that every input is absent.
+Nullable `rankingGap` explains a unit whose ranking ran and found no partition:
+`reason` (`no-target`, `no-guarded-witness-edge`, `no-input-or-formula`,
+`partition-bounds`: candidates existed but exceeded the remaining leaf capacity,
+`no-verified-cut`), `targets` (components ranked), `witness` (atoms on the first
+targeted component's witness cycle, at most 16) and `omittedWitness`,
+`guardedEdges` (witness edges with a guard), `inputs` (inputs reached from those
+guards through acyclic providers) and `formulas` (formula candidates built). It is
+diagnostic telemetry, never a verdict.
 A split record's nullable `runnerUp` contains `split` (representative input),
 nullable `assumption`, `children`, `guardedEdges`, and `hasRest`. The runner-up is the next completed,
 progress-making Fitting trial; `guardedEdges` remains structural influence.
