@@ -51,12 +51,22 @@ direction for such programs separates meaning from schedule:
   opt-in search aids exist: producer pruning by common-equations proofs in W and
   W + H views, repeated in rounds that report whether they saturated, and bounded
   input partitions over declared or certified field-value groups, chosen by verified
-  loop cuts after an unsplit attempt. On a first real program, grounding,
-  classification ambiguity and processing existence complete within the time box,
-  and processing ambiguity is proved with a longer one. Classification no-meaning
-  remains open: its odd loop survives global pruning passes and every single-input
-  split, so the next steps are pruning under a branch's pins and, under review,
-  staged checking (below). No throughput claim is made. Straight-line completion plans
+  loop cuts after an unsplit attempt. Further opt-in aids: pruning under a branch's
+  pins; splits on derived guards that are input formulas in the branch view, with the
+  formula retained as an input constraint; fair trials ranked by cycles cut per child; and
+  forcing of atoms that are constant on a path, whose defining equations stay as
+  residual constraints so inputs without a model stay visible. Model and UNSAT-core
+  caches run in shadow mode. Search-free reductions (propagation from facts, implied
+  body literals) apply to every view before analysis, and existence queries keep only
+  the cyclic part and what it reads, rebuilding the acyclic rest. On a first real
+  program every gating verdict is conclusive at default limits: classification
+  ambiguity, acceptance and rejection, processing existence and uniqueness.
+  Classification no-meaning stays a diagnostic; formula splits prove parts of the input
+  space and the remaining loop is under study. Next: an exploration mode that runs each
+  mechanism to completion without implicit allowance subdivision, then simpler budgets
+  (no phase-local deadlines for linear passes, deterministic limits enforced in the
+  solver, one owner per allowance) and one encoding per scope with pins as assumptions.
+  No throughput claim is made. Straight-line completion plans
   now have explicit rejection paths, a reference interpreter and v5 export. Available
   value splits, joins and conditional tasks follow; definition islands inside otherwise
   stable programs remain later work.
@@ -77,6 +87,7 @@ direction for such programs separates meaning from schedule:
   driver first and use checking to diagnose where it gets stuck, splitting only on
   values determined on the path (derived ones included, keeping inputs without a
   model for existence), with model and UNSAT-core caches over one shared encoding.
+  Path forcing and shadow-mode caches now exist as opt-in checking aids.
 - **Smaller encodings generically.** Structural sharing of identical definitions,
   constant folding, dead-premise removal and syntactic subsumption over acyclic parts
   shrank the program's CNF about threefold; SAT-based sweeping (simulation, then
