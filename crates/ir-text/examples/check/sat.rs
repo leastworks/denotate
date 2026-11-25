@@ -99,6 +99,23 @@ pub(super) fn run(
     let shown_odd =
         std::sync::Mutex::new(None::<std::sync::Arc<denotate_check::CompletionOddExplanation>>);
     limits.progress = denotate_check::CheckingProgress::new(move |e| {
+        if let Some(denotate_check::CheckingTarget::CompletionExploration {
+            resource,
+            used,
+            elapsed,
+        }) = &e.target
+        {
+            if *resource == "status" {
+                observer.message(format!("exploration {}: {}", e.stage, e.state));
+            } else {
+                observer.message(format!(
+                    "exploration {}: {} ({used} {resource}, {:.3} s)",
+                    e.stage,
+                    e.state,
+                    elapsed.as_secs_f64()
+                ));
+            }
+        }
         if let Some(denotate_check::CheckingTarget::CompletionSolve { remaining_ms }) = &e.target {
             observer.message(format!(
                 "completion SAT solve {}: {} ms shared deadline remaining at start",
@@ -186,7 +203,8 @@ pub(super) fn run(
         if !matches!(
             e.target,
             Some(
-                denotate_check::CheckingTarget::CompletionBranch(_)
+                denotate_check::CheckingTarget::CompletionExploration { .. }
+                    | denotate_check::CheckingTarget::CompletionBranch(_)
                     | denotate_check::CheckingTarget::CompletionSolve { .. }
                     | denotate_check::CheckingTarget::CompletionPruning(_)
                     | denotate_check::CheckingTarget::SatExistence(_)
@@ -688,6 +706,13 @@ pub(super) fn completion_inner(
 ) -> Result<(bool, bool), Failure> {
     use denotate_check::completion_query as cq;
     writeln!(output, "Semantics: completion").unwrap();
+    if limits.completion_exploration {
+        writeln!(
+            output,
+            "Scheduling: exploration (shared invocation deadline; no implicit slices)"
+        )
+        .unwrap();
+    }
     if let Some(h) = v.options.hypothesis {
         writeln!(
             output,
@@ -823,7 +848,7 @@ pub(super) fn completion_inner(
     let _presenting = limits
         .progress
         .scope("completion result output", None, true);
-    let shown = presentation::present_completion_with_options(
+    let mut shown = presentation::present_completion_with_options(
         p,
         &report,
         denotate_presentation::CompletionEvidenceOptions {
@@ -832,6 +857,10 @@ pub(super) fn completion_inner(
         },
     )
     .map_err(|e| (2, e.to_string()))?;
+    if limits.completion_exploration {
+        shown.status["scheduling"] = serde_json::json!("exploration");
+        shown.status["probeWorkLimit"] = serde_json::json!(limits.completion_probe_work);
+    }
     let s = &shown.status;
     if json {
         stream_results(s, output, flush)?;

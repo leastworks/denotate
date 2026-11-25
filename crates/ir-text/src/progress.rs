@@ -658,6 +658,13 @@ impl AdmissionDetails<'_> {
             .then(|| crate::completion_output::explanations(self.program));
         denotate_check::CheckingProgress::new(move |e| {
             let target = match e.target {
+                Some(denotate_check::CheckingTarget::CompletionExploration {
+                    resource,
+                    used,
+                    elapsed,
+                }) => Some(
+                    json!({"kind":"completion-exploration", "resource":resource, "used":used, "elapsedMs":elapsed.as_millis()}),
+                ),
                 Some(denotate_check::CheckingTarget::Atom(a)) => {
                     let name = atom_text(&a, &*names);
                     Some(json!({"kind":"atom","atom":name,"name":name}))

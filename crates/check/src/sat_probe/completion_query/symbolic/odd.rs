@@ -17,8 +17,12 @@ pub(super) fn explain(
         return None;
     }
     let mut limits = engine.limits.clone();
-    limits.max_work = limits.max_work.min(1_000_000);
-    limits.timeout = limits.timeout.min(Duration::from_millis(100));
+    limits.max_work = if limits.completion_exploration {
+        b.remaining()
+    } else {
+        limits.max_work.min(1_000_000)
+    };
+    limits.timeout = limits.completion_slice(limits.timeout, 1, Duration::from_millis(100));
     limits.completion_sizes = None;
     // This advisory work has its own work/time allowance. The enclosing run's
     // global deadline and cancellation still apply.

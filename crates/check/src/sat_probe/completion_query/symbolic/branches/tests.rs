@@ -354,36 +354,43 @@ fn ranking_uses_edges_per_extra_child_with_deterministic_ties() {
 #[test]
 fn unsplit_proofs_and_counterexamples_return_without_partitioning() {
     let (_, e, _) = fixture(false, false, false);
-    for counterexample in [false, true] {
-        let calls = std::cell::Cell::new(0);
-        let got = run(
-            &e,
-            false,
-            true,
-            &CheckOptions {
-                split_depth: 3,
-                ..Default::default()
-            },
-            1,
-            |b, o| {
-                calls.set(calls.get() + 1);
-                assert_eq!(o.split_depth, 0);
-                assert!(b.limits.run_deadline.is_some());
-                Ok(if counterexample {
-                    Search::Exists("confirmed")
-                } else {
-                    Search::None
-                })
-            },
-        )
-        .unwrap();
-        assert_eq!(calls.get(), 1);
-        assert_eq!(got.exists(), counterexample);
+    for existence in [false, true] {
+        for counterexample in [false, true] {
+            let calls = std::cell::Cell::new(0);
+            let got = run(
+                &e,
+                false,
+                existence,
+                &CheckOptions {
+                    split_depth: 3,
+                    ..Default::default()
+                },
+                1,
+                |b, o| {
+                    calls.set(calls.get() + 1);
+                    assert_eq!(o.split_depth, 0);
+                    assert!(b.limits.run_deadline.is_some());
+                    Ok(if counterexample {
+                        Search::Exists("confirmed")
+                    } else {
+                        Search::None
+                    })
+                },
+            )
+            .unwrap();
+            assert_eq!(calls.get(), 1);
+            assert_eq!(got.exists(), counterexample);
+        }
     }
 }
 #[test]
 fn inconclusive_unsplit_attempt_reserves_allowances_and_keeps_the_outer_deadline() {
-    let (_, mut e, _) = fixture(false, false, false);
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let p = rel(&mut c, "p", false);
+    rule(&mut c, p, &[(i, false), (p, false)]);
+    let v = verification(&mut c, None, &[]);
+    let mut e = prepare(&c, v, &Default::default());
     let calls = std::cell::Cell::new(0);
     let first = std::cell::Cell::new(None);
     let end = Instant::now() + e.limits.timeout;
@@ -391,7 +398,7 @@ fn inconclusive_unsplit_attempt_reserves_allowances_and_keeps_the_outer_deadline
     let got = run(
         &e,
         false,
-        true,
+        false,
         &CheckOptions {
             split_depth: 3,
             ..Default::default()
@@ -849,4 +856,263 @@ fn closing_a_target_component_still_ranks_an_untouched_loop() {
             .exists(),
         "residual checking still reports its failure"
     );
+}
+
+#[test]
+fn exploration_finishes_shortlisted_trials_without_the_wall_clock_floor() {
+    let (c, mut e, _) = fixture(false, false, false);
+    // The normal ranking quarter is below its 500 ms trial-start floor.
+    // This is an eligibility check, not a timing/performance assertion.
+    e.limits.timeout = Duration::from_secs(1);
+    let state = fitting::Bundle::new(&e, &mut Budget::new(&e.limits)).unwrap();
+    let normal = choose(
+        &e,
+        &state,
+        false,
+        true,
+        512,
+        &mut e.config.clone(),
+        &mut vec![],
+        &mut 0,
+        &mut Budget::new(&e.limits),
+    )
+    .unwrap();
+    assert!(normal.is_none());
+    e.limits.completion_exploration = true;
+    e.limits.completion_probe_work = 0;
+    let state = fitting::Bundle::new(&e, &mut Budget::new(&e.limits)).unwrap();
+    let mut telemetry = vec![];
+    let mut omitted = 0;
+    let selected = choose(
+        &e,
+        &state,
+        false,
+        true,
+        512,
+        &mut e.config.clone(),
+        &mut telemetry,
+        &mut omitted,
+        &mut Budget::new(&e.limits),
+    )
+    .unwrap();
+    assert!(selected.is_some());
+    assert!(telemetry.iter().any(|t| t.state == "verified"));
+    assert!(
+        telemetry
+            .iter()
+            .all(|t| t.state == "verified" || t.state == "not-shortlisted")
+    );
+    let opts = CheckOptions {
+        split_depth: 3,
+        prune: false,
+        force: false,
+        ..Default::default()
+    };
+    let got = e.check(&keys(&c), &opts).unwrap();
+    crate::sat_probe::completion_query::tests::scale::same_report(
+        &got,
+        &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
+    );
+    assert!(got.branches.splits > 0);
+    // Neither an initial solve nor earlier branches may silently erase the
+    // confirmed no-meaning observation in the remaining child.
+    assert!(got.meaning.no_meaning.exists());
+}
+
+#[test]
+fn exploration_ranks_the_root_and_both_subtrees_before_residual_search() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let j = rel(&mut c, "j", true);
+    let p = rel(&mut c, "p", false);
+    let q = rel(&mut c, "q", false);
+    rule(&mut c, p, &[(i, false), (p, true)]);
+    rule(&mut c, q, &[(j, false), (q, true)]);
+    let v = verification(&mut c, None, &[]);
+    let mut e = prepare(&c, v, &Default::default());
+    e.limits.completion_exploration = true;
+    e.limits.completion_probe_work = 0;
+    e.branches = Some(Arc::new(std::sync::Mutex::new(BranchReport::default())));
+    let seen = std::cell::Cell::new(0);
+    let options = CheckOptions {
+        split_depth: 2,
+        ..Default::default()
+    };
+    // Test the scheduler separately from leaf semantics: do not stop at the
+    // first failing observation, so both one-sided subtrees must be ranked.
+    let result: Search<()> = run(&e, false, true, &options, 1, |b, _| {
+        let ii = b.program.atom_index[&GroundAtom::new(i, [])];
+        let jj = b.program.atom_index[&GroundAtom::new(j, [])];
+        assert!(
+            b.cone.fixed[ii].is_some() && b.cone.fixed[jj].is_some(),
+            "a residual search ran before a useful split"
+        );
+        seen.set(seen.get() + 1);
+        Ok(Search::None)
+    })
+    .unwrap();
+    assert!(matches!(result, Search::None));
+    assert_eq!(seen.get(), 4);
+    assert_eq!(
+        e.branches
+            .as_ref()
+            .unwrap()
+            .lock()
+            .unwrap()
+            .records
+            .iter()
+            .filter(|r| r.depth == 1 && r.state == "split")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn exploration_probe_closes_questions_before_ranking_or_forcing() {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let x = rel(&mut c, "x", false);
+    rule(&mut c, x, &[(i, false)]);
+    let v = verification(&mut c, None, &[]);
+    let mut e = prepare(&c, v, &Default::default());
+    e.limits.completion_exploration = true;
+    let options = CheckOptions {
+        prune: true,
+        force: true,
+        split_depth: 3,
+        ..Default::default()
+    };
+    let expected = e.check_enumerated(&keys(&c), &Default::default()).unwrap();
+    let got = e.check(&keys(&c), &options).unwrap();
+    crate::sat_probe::completion_query::tests::scale::same_report(&got, &expected);
+    assert!(
+        got.branches
+            .records
+            .iter()
+            .any(|r| r.phase == "completion unsplit probe" && r.state == "completed")
+    );
+    assert_eq!(got.branches.splits, 0);
+    assert!(
+        got.branches
+            .records
+            .iter()
+            .all(|r| r.candidates.is_empty() && r.forcing.is_empty())
+    );
+}
+
+#[test]
+fn exploration_probe_cutoff_is_charged_and_leaves_the_structural_driver_available() {
+    let (c, mut e, _) = fixture(false, false, false);
+    e.limits.completion_exploration = true;
+    e.limits.completion_probe_work = 1;
+    let got = e
+        .check(
+            &keys(&c),
+            &CheckOptions {
+                split_depth: 3,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    crate::sat_probe::completion_query::tests::scale::same_report(
+        &got,
+        &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
+    );
+    assert!(
+        got.branches
+            .records
+            .iter()
+            .any(|r| r.phase == "completion unsplit probe" && r.state == "cut-off")
+    );
+    assert!(got.branches.splits > 0);
+    assert!(got.meaning.no_meaning.exists());
+}
+
+#[test]
+fn default_classification_existence_splits_before_cover_search() {
+    let (mut c, _, _) = fixture(false, false, false);
+    let p = c.relations().find(|r| r.name == "p").unwrap().id;
+    let input = c.relations().find(|r| r.name == "value").unwrap().id;
+    let values: Vec<_> = c.constants().map(|v| v.id).collect();
+    let sort = c.constants().next().unwrap().sort;
+    let assumption = c.assumptions().next().unwrap().id;
+    let v = verification(&mut c, Some(p), &[assumption]);
+    let e = prepare(&c, v, &[(sort, values.clone())].into());
+    let third = e.program.atom_index[&GroundAtom::new(input, [values[2]])];
+    let options = CheckOptions {
+        split_depth: 2,
+        ..Default::default()
+    };
+    let result: Search<()> = run(&e, true, true, &options, 1, |branch, _| {
+        assert!(
+            branch.cone.fixed[third].is_some(),
+            "cover ran before its cutting split"
+        );
+        Ok(Search::None)
+    })
+    .unwrap();
+    assert!(matches!(result, Search::None));
+}
+
+#[test]
+fn exploration_existence_probe_never_enumerates_an_odd_cover() {
+    let (_, mut e, _) = fixture(false, false, false);
+    e.limits.completion_exploration = true;
+    e.probe = true;
+    let sizes = crate::CompletionSizes::default();
+    e.limits.completion_sizes = Some(sizes.clone());
+    let result = e
+        .symbolic_no_meaning(false, true, &Default::default(), 1)
+        .unwrap();
+    assert!(
+        matches!(result, Search::Inconclusive(c) if c.resource == "cover enumeration deferred")
+    );
+    assert!(
+        sizes
+            .snapshot()
+            .searches
+            .iter()
+            .all(|s| s.existence.rounds == 0)
+    );
+}
+
+#[test]
+fn exploration_rejection_probe_yields_before_covering_hypothesis_models() {
+    let mut c = Corpus::new();
+    let h = rel(&mut c, "h", false);
+    rule(&mut c, h, &[(h, false)]);
+    let v = verification(&mut c, Some(h), &[]);
+    let mut e = prepare(&c, v, &Default::default());
+    e.limits.completion_exploration = true;
+    e.probe = true;
+    let sizes = crate::CompletionSizes::default();
+    e.limits.completion_sizes = Some(sizes.clone());
+    let result = e.symbolic_rejected(&Default::default(), 1).unwrap();
+    assert!(
+        matches!(result, Search::Inconclusive(c) if c.resource == "cover enumeration deferred")
+    );
+    assert!(
+        sizes
+            .snapshot()
+            .searches
+            .iter()
+            .all(|s| s.existence.cubes == 0)
+    );
+    e.probe = false;
+    let got = e
+        .check(
+            &keys(&c),
+            &CheckOptions {
+                force: true,
+                prune: true,
+                split_depth: 2,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    crate::sat_probe::completion_query::tests::scale::same_report(
+        &got,
+        &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
+    );
+    assert!(matches!(got.classification.unwrap().rejected, Search::None));
 }

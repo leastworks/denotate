@@ -533,6 +533,61 @@ impl Bundle {
         }
         Ok((attempts, proved, cutoff))
     }
+    /// Exploration runs the whole current unit before considering a split.
+    /// The ordinary trial path keeps its bounded target subset and one pass.
+    fn prune_to_fixed_point(
+        &mut self,
+        e: &Engine,
+        classification: bool,
+        config: &mut QueryLimits,
+        b: &mut Budget<'_>,
+    ) -> Result<usize> {
+        if self.trials.is_none() {
+            return Ok(0);
+        }
+        let started = Instant::now();
+        let before = b.used();
+        let phase = "completion unit pruning";
+        e.exploration(phase, "started", 0, Duration::ZERO);
+        let mut total = 0;
+        loop {
+            let mut heads = BTreeSet::new();
+            for hypothesis in [false, true] {
+                if hypothesis && e.classification.is_none() {
+                    continue;
+                }
+                let (state, _) = self.ranking(classification, hypothesis);
+                let view = state.cone(b)?;
+                let graph = consistency::analyse(&view, None, b)?;
+                heads.extend(
+                    graph
+                        .cyclic
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, c)| (*c && view.fixed[i].is_none()).then_some(i)),
+                );
+            }
+            if heads.is_empty() {
+                e.exploration(phase, "completed", b.used() - before, started.elapsed());
+                return Ok(total);
+            }
+            let (_, proved, cutoff) = self.prune(e, classification, &heads, config, b)?;
+            total += proved;
+            if cutoff.is_some() || proved == 0 {
+                e.exploration(
+                    phase,
+                    if cutoff.is_some() {
+                        "cut-off"
+                    } else {
+                        "completed"
+                    },
+                    b.used() - before,
+                    started.elapsed(),
+                );
+                return Ok(total);
+            }
+        }
+    }
     /// Optional work inside the caller's existing ranking allocation. Contexts
     /// receive equal shares; failures leave the previous equivalent view intact.
     pub fn settle(
@@ -542,6 +597,12 @@ impl Bundle {
         config: &mut QueryLimits,
         b: &mut Budget<'_>,
     ) -> Result<()> {
+        if e.limits.completion_exploration {
+            if self.prune_to_fixed_point(e, classification, config, b)? > 0 {
+                let scope = self.scope(classification);
+                self.forced_scopes.retain(|(s, _)| *s != scope);
+            }
+        }
         if !e.forcing {
             return Ok(());
         }
@@ -565,10 +626,27 @@ impl Bundle {
             .collect();
         for (position, context) in contexts.iter().copied().enumerate() {
             let mut limits = e.limits.clone();
-            limits.timeout = b.remaining_time() / (contexts.len() - position) as u32 / 2;
-            limits.max_work = b.remaining() / (contexts.len() - position) / 2;
-            limits.run_deadline = Some(Instant::now() + limits.timeout);
-            let mut allowance = super::divided(config, 2 * (contexts.len() - position));
+            limits.timeout = b.remaining_time()
+                / e.limits.completion_share(2 * (contexts.len() - position)) as u32;
+            limits.max_work =
+                b.remaining() / e.limits.completion_share(2 * (contexts.len() - position));
+            let end = Instant::now() + limits.timeout;
+            limits.run_deadline = Some(if e.limits.completion_exploration {
+                e.limits.run_deadline.map_or(end, |d| d.min(end))
+            } else {
+                end
+            });
+            let started = Instant::now();
+            let phase = if context == PruningContext::World {
+                "completion branch forcing W"
+            } else {
+                "completion branch forcing W+H"
+            };
+            e.exploration(phase, "started", 0, Duration::ZERO);
+            let mut allowance = super::divided(
+                config,
+                e.limits.completion_share(2 * (contexts.len() - position)),
+            );
             let before = allowance.clone();
             let mut local = Budget::new(&limits);
             let result: Result<()> = (|| {
@@ -607,24 +685,29 @@ impl Bundle {
                     if cutoff {
                         break;
                     }
-                    // Rewrites and propagation preserve these equations. Their
-                    // newly acyclic dependents enter the ordinary formula pool.
-                    let (state, _) =
-                        self.ranking(classification, context == PruningContext::Hypothesis);
-                    let view = state.cone(&mut local)?;
-                    let graph = consistency::analyse(&view, None, &mut local)?;
-                    let heads: BTreeSet<_> = graph
-                        .cyclic
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(i, cyclic)| (*cyclic && view.fixed[i].is_none()).then_some(i))
-                        .take(32)
-                        .collect();
-                    let proved = if !heads.is_empty() {
-                        self.prune(e, classification, &heads, &mut allowance, &mut local)?
-                            .1
+                    // Newly acyclic dependents enter the ordinary formula pool.
+                    let proved = if e.limits.completion_exploration {
+                        self.prune_to_fixed_point(e, classification, &mut allowance, &mut local)?
                     } else {
-                        0
+                        let (state, _) =
+                            self.ranking(classification, context == PruningContext::Hypothesis);
+                        let view = state.cone(&mut local)?;
+                        let graph = consistency::analyse(&view, None, &mut local)?;
+                        let heads: BTreeSet<_> = graph
+                            .cyclic
+                            .iter()
+                            .enumerate()
+                            .filter_map(|(i, cyclic)| {
+                                (*cyclic && view.fixed[i].is_none()).then_some(i)
+                            })
+                            .take(32)
+                            .collect();
+                        if heads.is_empty() {
+                            0
+                        } else {
+                            self.prune(e, classification, &heads, &mut allowance, &mut local)?
+                                .1
+                        }
                     };
                     if !changed && proved == 0 {
                         break;
@@ -632,6 +715,16 @@ impl Bundle {
                 }
                 Ok(())
             })();
+            e.exploration(
+                phase,
+                if result.is_err() || self.forcing.last().is_some_and(|r| r.cutoff.is_some()) {
+                    "cut-off"
+                } else {
+                    "completed"
+                },
+                local.used(),
+                started.elapsed(),
+            );
             config.max_solves = config
                 .max_solves
                 .saturating_sub(before.max_solves - allowance.max_solves);

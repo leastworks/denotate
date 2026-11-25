@@ -4,6 +4,7 @@ use denotate_ir::*;
 mod branches;
 mod contracts;
 mod determinacy;
+mod exploration;
 mod implied_literals;
 mod pruning;
 mod reports;

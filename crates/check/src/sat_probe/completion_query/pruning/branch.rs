@@ -7,6 +7,7 @@ struct Allowance {
     query: QueryLimits,
 }
 pub(in crate::sat_probe::completion_query) struct TrialPool {
+    exploration: bool,
     slots: BTreeMap<Bucket, Allowance>,
     elapsed: Duration,
     attempts: usize,
@@ -29,18 +30,24 @@ impl TrialPool {
             slots.insert(
                 *key,
                 Allowance {
-                    time: Duration::ZERO,
-                    work: e.limits.max_work / 4 / n,
+                    time: if e.limits.completion_exploration {
+                        e.limits.timeout
+                    } else {
+                        Duration::ZERO
+                    },
+                    work: e.limits.max_work / e.limits.completion_share(4 * n),
                     query: QueryLimits {
-                        max_solves: e.config.max_solves / n,
-                        max_solver_polls: e.config.max_solver_polls / n,
-                        max_conflicts: e.config.max_conflicts / n as u64,
-                        max_propagations: e.config.max_propagations / n as u64,
+                        max_solves: e.config.max_solves / e.limits.completion_share(n),
+                        max_solver_polls: e.config.max_solver_polls / e.limits.completion_share(n),
+                        max_conflicts: e.config.max_conflicts / e.limits.completion_share(n) as u64,
+                        max_propagations: e.config.max_propagations
+                            / e.limits.completion_share(n) as u64,
                     },
                 },
             );
         }
         Self {
+            exploration: e.limits.completion_exploration,
             slots,
             elapsed: Duration::ZERO,
             attempts: 0,
@@ -56,6 +63,9 @@ impl TrialPool {
         scope: &'static str,
         time: Duration,
     ) {
+        if self.exploration {
+            return;
+        }
         let n = self.slots.keys().filter(|(s, _)| *s == scope).count();
         if n == 0 {
             return;
@@ -156,8 +166,12 @@ pub(in crate::sat_probe::completion_query) fn trial<T>(
     }
     let mut limits = e.limits.clone();
     // Leave room for ranking the installed prefix and subsequent children.
-    limits.timeout = slot.time.min(outer.remaining_time() / 2);
-    limits.max_work = slot.work.min(outer.remaining() / 2);
+    limits.timeout = slot
+        .time
+        .min(outer.remaining_time() / e.limits.completion_share(2) as u32);
+    limits.max_work = slot
+        .work
+        .min(outer.remaining() / e.limits.completion_share(2));
     let query = QueryLimits {
         max_solves: slot.query.max_solves.min(config.max_solves),
         max_solver_polls: slot.query.max_solver_polls.min(config.max_solver_polls),

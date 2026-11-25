@@ -151,6 +151,11 @@ pub struct SearchGuards {
 /// cooperatively between work items, not a promise of hard real-time preemption.
 #[derive(Debug, Clone)]
 pub struct Limits {
+    /// Completion exploration: no implicit scheduling subdivisions. Off by default.
+    /// Explicit resource caps and the shared invocation deadline still apply.
+    pub completion_exploration: bool,
+    /// Work for the exploration unsplit probe, including solver polls; zero skips it.
+    pub completion_probe_work: usize,
     /// Opt-in completion measurement, excluded from semantic/cache configuration.
     pub completion_sizes: Option<crate::CompletionSizes>,
     pub profile: crate::Profile,
@@ -186,9 +191,33 @@ pub struct Limits {
     pub max_structural_split_work: usize,
     pub max_structural_split_scoring_work: usize,
 }
+impl Limits {
+    pub(crate) fn completion_share(&self, shares: usize) -> usize {
+        if self.completion_exploration {
+            1
+        } else {
+            shares.max(1)
+        }
+    }
+    pub(crate) fn completion_slice(
+        &self,
+        remaining: Duration,
+        shares: usize,
+        cap: Duration,
+    ) -> Duration {
+        if self.completion_exploration {
+            remaining
+        } else {
+            (remaining / shares.max(1).min(u32::MAX as usize) as u32).min(cap)
+        }
+    }
+}
+
 impl Default for Limits {
     fn default() -> Self {
         Self {
+            completion_exploration: false,
+            completion_probe_work: 32_000_000,
             completion_sizes: None,
             cancellation: Cancellation::default(),
             profile: Default::default(),
@@ -455,6 +484,15 @@ impl<'a> Budget<'a> {
         result
     }
     pub fn check(&self, phase: &'static str) -> Result<()> {
+        if self.limits.completion_exploration {
+            self.limits.progress.exploration(
+                phase,
+                "progress",
+                "work",
+                self.work,
+                self.start.elapsed(),
+            );
+        }
         self.limits.cancellation.check()?;
         if self.elapsed() >= self.limits.timeout
             || self

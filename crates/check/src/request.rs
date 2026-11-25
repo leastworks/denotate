@@ -72,6 +72,8 @@ impl From<&Limits> for OperationalLimits {
 impl DeterministicLimits {
     pub fn with_operations(&self, o: &OperationalLimits) -> Limits {
         Limits {
+            completion_exploration: false,
+            completion_probe_work: Limits::default().completion_probe_work,
             run_deadline: o.run_deadline,
             search_guards: o.search_guards.clone(),
             pruning_allowance: o.pruning_allowance,

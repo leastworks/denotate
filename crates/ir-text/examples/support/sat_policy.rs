@@ -22,7 +22,15 @@ pub fn apply(l: &mut Limits, q: &mut QueryLimits, explicit: &BTreeSet<String>) {
         .as_secs()
         .saturating_add(u64::from(l.timeout.subsec_nanos() != 0))
         .max(1);
-    let scale = |rate: u64| rate.saturating_mul(seconds);
+    // Exploration measures algorithms independently of the wall-clock box.
+    // These generous runaway guards are fixed, not nested or time-scaled.
+    let scale = |rate: u64| {
+        if l.completion_exploration {
+            1_000_000_000_000
+        } else {
+            rate.saturating_mul(seconds)
+        }
+    };
     let work = usize::try_from(scale(1_000_000_000)).unwrap_or(usize::MAX);
     set!(max_work, "--max-work", work);
     macro_rules! query {
@@ -143,4 +151,38 @@ mod tests {
         );
         assert!(Limits::default().run_deadline.is_none());
     }
+}
+
+#[cfg(test)]
+#[test]
+fn exploration_guards_do_not_depend_on_timeout_and_explicit_caps_win() {
+    let mut a = Limits {
+        completion_exploration: true,
+        timeout: Duration::from_secs(1),
+        ..Default::default()
+    };
+    let mut b = Limits {
+        completion_exploration: true,
+        timeout: Duration::from_secs(3600),
+        ..Default::default()
+    };
+    let mut aq = QueryLimits::default();
+    let mut bq = aq.clone();
+    let explicit = BTreeSet::from(["--timeout-ms".into()]);
+    apply(&mut a, &mut aq, &explicit);
+    apply(&mut b, &mut bq, &explicit);
+    assert_eq!(a.max_work, b.max_work);
+    assert_eq!(aq.max_solver_polls, bq.max_solver_polls);
+    assert_eq!(aq.max_solves, bq.max_solves);
+    assert_eq!(aq.max_conflicts, bq.max_conflicts);
+    assert_eq!(aq.max_propagations, bq.max_propagations);
+    a.max_work = 23;
+    aq.max_solver_polls = 17;
+    apply(
+        &mut a,
+        &mut aq,
+        &BTreeSet::from(["--max-work".into(), "--sat-max-polls".into()]),
+    );
+    assert_eq!(a.max_work, 23);
+    assert_eq!(aq.max_solver_polls, 17);
 }

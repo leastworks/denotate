@@ -75,6 +75,7 @@ struct PollLimit {
     max: usize,
 }
 struct Stop {
+    exploration: Option<crate::CheckingProgress>,
     deadline: Option<Instant>,
     polls: Option<PollLimit>,
     cancellation: Cancellation,
@@ -108,6 +109,17 @@ impl Stop {
 }
 impl Callbacks for Stop {
     fn stop(&self) -> bool {
+        if let Some(progress) = &self.exploration {
+            if self.polls.as_ref().is_none_or(|p| p.used.get() % 1024 == 0) {
+                progress.exploration(
+                    "completion SAT solve",
+                    "progress",
+                    "polls",
+                    self.polls.as_ref().map_or(0, |p| p.used.get()),
+                    self.start.elapsed(),
+                );
+            }
+        }
         if let Some(p) = &self.polls {
             p.used.set(p.used.get().saturating_add(1));
         }
@@ -558,6 +570,7 @@ fn probe_built(
         solver: Solver::new(
             Default::default(),
             Stop {
+                exploration: None,
                 deadline: None,
                 polls: None,
                 cancellation: limits.cancellation.clone(),

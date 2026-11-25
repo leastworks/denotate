@@ -727,8 +727,8 @@ fn verify(
             .len()
     };
     let mut limits = e.limits.clone();
-    limits.max_work = b.remaining() / 4;
-    limits.timeout = b.remaining_time() / 4;
+    limits.max_work = b.remaining() / e.limits.completion_share(4);
+    limits.timeout = b.remaining_time() / e.limits.completion_share(4) as u32;
     if let Some(pool) = &bundle.trials {
         pool.lock().unwrap().fund_ranking(
             if classification {
@@ -739,7 +739,12 @@ fn verify(
             limits.timeout,
         );
     }
-    if funded_trials(selected.len(), limits.timeout) == 0 {
+    if (if e.limits.completion_exploration {
+        selected.len()
+    } else {
+        funded_trials(selected.len(), limits.timeout)
+    }) == 0
+    {
         return Ok(None);
     }
     let mut trials = Budget::new(&limits);
@@ -761,23 +766,51 @@ fn verify(
         .collect();
     // A floor limits the number of attempts; it never increases the allowance.
     // Unused shares pass forward. Do not launch another near-zero-time setup.
-    let count = funded_trials(selected.len(), trials.remaining_time());
+    let count = if e.limits.completion_exploration {
+        selected.len()
+    } else {
+        funded_trials(selected.len(), trials.remaining_time())
+    };
     selected.truncate(count);
     selected.sort_by_key(|i| std::cmp::Reverse(cycles(*i)));
+    if e.limits.completion_exploration {
+        for i in &selected {
+            telemetry[*i].state = "not-started";
+        }
+    }
     for (position, i) in selected.into_iter().enumerate() {
         let mut candidate_limits = limits.clone();
-        candidate_limits.max_work = trials.remaining() / (count - position);
-        candidate_limits.timeout = trials.remaining_time() / (count - position) as u32;
+        candidate_limits.max_work =
+            trials.remaining() / e.limits.completion_share(count - position);
+        candidate_limits.timeout =
+            trials.remaining_time() / e.limits.completion_share(count - position) as u32;
         candidate_limits.run_deadline = Some(Instant::now() + candidate_limits.timeout);
         if let Some(end) = limits.run_deadline {
             candidate_limits.run_deadline = Some(candidate_limits.run_deadline.unwrap().min(end));
         }
-        if candidate_limits.timeout < MIN_TRIAL {
+        if !e.limits.completion_exploration && candidate_limits.timeout < MIN_TRIAL {
             break;
         }
+        let trial_started = Instant::now();
+        e.exploration("completion split trial", "started", 0, Duration::ZERO);
         let mut trial = Budget::new(&candidate_limits);
         let row = &mut telemetry[i];
         row.state = "trial";
+        let _trial_scope = e.limits.completion_exploration.then(|| {
+            e.limits.progress.scope(
+                "completion split trial candidate",
+                Some(crate::CheckingTarget::CompletionBranch(BranchRecord {
+                    id: i,
+                    phase: "completion split trial candidate",
+                    state: "started",
+                    split: Some(row.split.clone()),
+                    candidates: vec![row.clone()],
+                    split_kind: if row.formula { "formula" } else { "input" },
+                    ..Default::default()
+                })),
+                true,
+            )
+        });
         let mut common: BTreeSet<_> = witnesses.keys().copied().collect();
         let result: Result<()> = (|| {
             for (child_index, (pins, rest)) in choices[i].children().into_iter().enumerate() {
@@ -910,6 +943,16 @@ fn verify(
             row.state = "verified";
             Ok(())
         })();
+        e.exploration(
+            "completion split trial",
+            if result.is_ok() {
+                "completed"
+            } else {
+                "cut-off"
+            },
+            trial.used(),
+            trial_started.elapsed(),
+        );
         b.charge(trial.used(), "completion split trials")?;
         let ledger_cutoff = trials
             .charge(trial.used(), "completion split candidate trials")
@@ -950,8 +993,10 @@ fn verify(
     completed.sort_by(|a, b| compare_trials(*a, *b, telemetry, &choices));
     if let Some(i) = completed.first().copied() {
         let mut limits = e.limits.clone();
-        limits.timeout = (b.remaining_time() / 16).min(Duration::from_millis(50));
-        limits.max_work = b.remaining() / 16;
+        limits.timeout =
+            e.limits
+                .completion_slice(b.remaining_time(), 16, Duration::from_millis(50));
+        limits.max_work = b.remaining() / e.limits.completion_share(16);
         let started = Instant::now();
         let mut used = 0usize;
         let mut room = 32usize;
@@ -962,9 +1007,10 @@ fn verify(
             let remaining = n - child;
             let share = room.div_ceil(remaining);
             let mut child_limits = limits.clone();
-            child_limits.timeout =
-                limits.timeout.saturating_sub(started.elapsed()) / remaining as u32;
-            child_limits.max_work = limits.max_work.saturating_sub(used) / remaining;
+            child_limits.timeout = limits.timeout.saturating_sub(started.elapsed())
+                / e.limits.completion_share(remaining) as u32;
+            child_limits.max_work =
+                limits.max_work.saturating_sub(used) / e.limits.completion_share(remaining);
             let mut diagnostic = Budget::new(&child_limits);
             let (state, _) = bundle.ranking(classification, e.classification.is_some());
             let before = telemetry[i].derived_guards.len();

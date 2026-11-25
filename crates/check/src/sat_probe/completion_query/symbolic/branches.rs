@@ -5,6 +5,7 @@ mod fitting;
 mod forcing;
 pub use forcing::ForcingRecord;
 mod groups;
+mod probe;
 mod ranking;
 use groups::{Choice, Group};
 use ranking::choose;
@@ -81,7 +82,7 @@ pub struct DerivedGuard {
     pub child: usize,
     pub acyclic_upstream: bool,
 }
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BranchRecord {
     pub forcing: Vec<ForcingRecord>,
     pub id: usize,
@@ -160,6 +161,9 @@ fn divided(q: &QueryLimits, n: usize) -> QueryLimits {
 /// Automatic guards survive partitioning; explicitly configured caps have no
 /// floor and keep the existing conservative division. No deadline is restarted.
 fn guards(e: &mut Engine, options: &mut CheckOptions) {
+    if e.limits.completion_exploration {
+        return;
+    }
     if let Some(g) = &e.limits.search_guards {
         if let Some(v) = g.work {
             e.limits.max_work = e.limits.max_work.max(v);
@@ -200,6 +204,21 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
 ) -> Result<Search<T>> {
     if options.split_depth == 0 {
         return leaf(e, options);
+    }
+    if e.limits.completion_exploration {
+        e.exploration(
+            "completion unsplit attempt",
+            "not-started-unbounded",
+            0,
+            Duration::ZERO,
+        );
+        return partition_from(e, classification, existence, options, shares, None, leaf);
+    }
+    // Only classification existence changes ordinary scheduling: its cover
+    // follows structural cuts. Processing keeps the established first attempt,
+    // so a cheap proof is not delayed by forcing or partitioning.
+    if classification && existence {
+        return partition_from(e, classification, existence, options, shares, None, leaf);
     }
     pruning::prepare(e, classification)?;
     let mut limits = e.shared_limits(shares);
@@ -276,7 +295,7 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
     opts.split_depth = 0;
     opts.max_worlds /= divisor as usize;
     guards(&mut first, &mut opts);
-    let phase = question_phase(classification, existence);
+    let phase = question_phase(e, classification, existence);
     let progress = e
         .limits
         .progress
@@ -365,7 +384,10 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
     guards(&mut rest, &mut opts);
     partition_from(&rest, classification, existence, &opts, 1, root, leaf)
 }
-fn question_phase(classification: bool, existence: bool) -> &'static str {
+fn question_phase(e: &Engine, classification: bool, existence: bool) -> &'static str {
+    if let Some(phase) = e.branch_phase {
+        return phase;
+    }
     match (classification, existence) {
         (true, true) => "completion classification existence",
         (true, false) => "completion classification ambiguity",
@@ -397,7 +419,7 @@ fn partition_from<T>(
     if options.split_depth == 0 {
         return leaf(e, options);
     }
-    let phase = question_phase(classification, existence);
+    let phase = question_phase(e, classification, existence);
     let limits = e.shared_limits(shares);
     let local_deadline = Instant::now() + limits.timeout;
     let deadline = limits
@@ -436,6 +458,15 @@ fn partition_from<T>(
         residual_only: None,
     }]);
     let mut report = BranchReport::default();
+    let usage = e.limits.completion_exploration.then(|| {
+        Arc::new(std::sync::Mutex::new(QueryLimits {
+            max_solves: 0,
+            max_solver_polls: 0,
+            max_conflicts: 0,
+            max_propagations: 0,
+        }))
+    });
+    let mut remaining_work = limits.max_work;
     let mut next_id = 2;
     let mut unknown = None;
     let mut answer = None;
@@ -494,20 +525,66 @@ fn partition_from<T>(
         let sink = crate::CompletionSizes::default();
         let mut local_limits = limits.clone();
         local_limits.completion_sizes = Some(sink.clone());
-        local_limits.timeout =
-            deadline.saturating_duration_since(Instant::now()) / (queue.len() + 1) as u32;
-        local_limits.max_work = unit.work;
+        local_limits.timeout = deadline.saturating_duration_since(Instant::now())
+            / e.limits.completion_share(queue.len() + 1) as u32;
+        local_limits.max_work = if e.limits.completion_exploration {
+            remaining_work.min(unit.work)
+        } else {
+            unit.work
+        };
         local_limits.run_deadline = Some(deadline.min(Instant::now() + local_limits.timeout));
         let mut allocation = e.clone();
         allocation.limits = local_limits;
         allocation.config = unit.config.clone();
+        allocation.exploration_usage = usage.clone();
+        if let Some(usage) = &usage {
+            let u = usage.lock().unwrap();
+            allocation.config.max_solves = allocation
+                .config
+                .max_solves
+                .min(e.config.max_solves.saturating_sub(u.max_solves));
+            allocation.config.max_solver_polls = allocation
+                .config
+                .max_solver_polls
+                .min(e.config.max_solver_polls.saturating_sub(u.max_solver_polls));
+            allocation.config.max_conflicts = allocation
+                .config
+                .max_conflicts
+                .min(e.config.max_conflicts.saturating_sub(u.max_conflicts));
+            allocation.config.max_propagations = allocation
+                .config
+                .max_propagations
+                .min(e.config.max_propagations.saturating_sub(u.max_propagations));
+        }
         let mut allocated_options = options.clone();
         allocated_options.max_worlds = unit.worlds;
         guards(&mut allocation, &mut allocated_options);
+        let leaf_work = e
+            .limits
+            .completion_exploration
+            .then(|| Arc::new(std::sync::atomic::AtomicUsize::new(0)));
+        allocation.exploration_work = leaf_work.clone();
+        let unit_engine = e.limits.completion_exploration.then(|| allocation.clone());
+        let e = unit_engine.as_ref().unwrap_or(e);
         let local_limits = allocation.limits;
         let mut budget = Budget::new(&local_limits);
         let mut config = allocation.config;
+        let mut probe_answer = None;
         let result: Result<Option<Engine>> = (|| {
+            if e.limits.completion_exploration && unit.parent.is_none() {
+                probe_answer = probe::run(
+                    e,
+                    &allocated_options,
+                    &mut budget,
+                    &mut config,
+                    unit.id,
+                    unit.depth,
+                    &leaf,
+                )?;
+                if probe_answer.is_some() {
+                    return Ok(None);
+                }
+            }
             let preflight = if unit.parent.is_none() {
                 root.take()
             } else {
@@ -527,6 +604,23 @@ fn partition_from<T>(
                     None => fitting::Bundle::new(e, &mut budget)?,
                 })
             };
+            if e.limits.completion_exploration && unit.parent.is_some() {
+                let mut ready = state.engine(e, &mut budget)?;
+                ready.branches = e.branches.clone();
+                ready.config = config.clone();
+                probe_answer = probe::run(
+                    &ready,
+                    &allocated_options,
+                    &mut budget,
+                    &mut config,
+                    unit.id,
+                    unit.depth,
+                    &leaf,
+                )?;
+                if probe_answer.is_some() {
+                    return Ok(None);
+                }
+            }
             let mut settled = (*state).clone();
             settled.settle(e, classification, &mut config, &mut budget)?;
             record.forcing = settled.forcing.clone();
@@ -546,20 +640,37 @@ fn partition_from<T>(
                     // Optional ranking must leave this sibling time for its
                     // residual question, even when no further split is found.
                     let mut ranking_limits = local_limits.clone();
-                    ranking_limits.max_work = budget.remaining() / 4;
-                    ranking_limits.timeout = budget.remaining_time() / 4;
+                    ranking_limits.max_work = budget.remaining() / e.limits.completion_share(4);
+                    ranking_limits.timeout =
+                        budget.remaining_time() / e.limits.completion_share(4) as u32;
                     let mut ranking = Budget::new(&ranking_limits);
+                    let ranking_started = Instant::now();
+                    e.exploration("completion split ranking", "started", 0, Duration::ZERO);
                     let answer = ranking::choose_in(
                         &branch,
                         &state,
                         classification,
                         existence,
                         capacity,
-                        unit.residual_only.as_deref(),
+                        if e.limits.completion_exploration || (classification && existence) {
+                            None
+                        } else {
+                            unit.residual_only.as_deref()
+                        },
                         &mut config,
                         &mut record.candidates,
                         &mut record.omitted_candidates,
                         &mut ranking,
+                    );
+                    e.exploration(
+                        "completion split ranking",
+                        if answer.is_ok() && record.candidates.iter().all(|c| c.cutoff.is_none()) {
+                            "completed"
+                        } else {
+                            "cut-off"
+                        },
+                        ranking.used(),
+                        ranking_started.elapsed(),
                     );
                     budget.charge(ranking.used(), "completion child ranking")?;
                     match answer {
@@ -634,9 +745,10 @@ fn partition_from<T>(
                                 rest,
                                 pins,
                                 depth: unit.depth + 1,
-                                work: unit.work.saturating_sub(budget.used()) / n,
-                                config: divided(&config, n),
-                                worlds: unit.worlds / n,
+                                work: unit.work.saturating_sub(budget.used())
+                                    / e.limits.completion_share(n),
+                                config: divided(&config, e.limits.completion_share(n)),
+                                worlds: unit.worlds / e.limits.completion_share(n),
                                 residual_only: Some(choice.residual_only(child_index)),
                             });
                         }
@@ -644,52 +756,65 @@ fn partition_from<T>(
                     }
                 }
             }
-            Ok(Some(if unit.pins.is_empty() && !e.forcing {
-                e.clone()
-            } else {
-                branch
-            }))
+            Ok(Some(
+                if unit.pins.is_empty() && !e.forcing && !e.limits.completion_exploration {
+                    e.clone()
+                } else {
+                    branch
+                },
+            ))
         })();
         record.work = budget.used();
         record.preparation_work = budget.used();
-        let result = match result {
-            Ok(None) => {
-                forward(e, &sink, unit.depth);
-                record.elapsed = started.elapsed();
-                report.record(e, record);
-                continue;
-            }
-            Ok(Some(mut branch)) => {
-                report.leaves += 1;
-                branch.limits = local_limits.clone();
-                branch.limits.timeout = budget.remaining_time();
-                branch.limits.max_work = local_limits.max_work.saturating_sub(budget.used());
-                branch.config = config;
-                let mut opts = options.clone();
-                opts.split_depth = 0;
-                opts.max_worlds = allocated_options.max_worlds;
-                guards(&mut branch, &mut opts);
-                record.state = "searching";
-                let _progress = e.limits.progress.scope(
-                    phase,
-                    Some(crate::CheckingTarget::CompletionBranch(record.clone())),
-                    true,
-                );
-                let value = leaf(&branch, &opts);
-                for search in sink.snapshot().searches {
-                    if search.phase == phase {
-                        record.search_work =
-                            record.search_work.saturating_add(search.work.unwrap_or(0));
-                        record.work = record.work.saturating_add(search.work.unwrap_or(0));
-                    }
+        let result = if let Some(answer) = probe_answer {
+            report.leaves += 1;
+            Ok(answer)
+        } else {
+            match result {
+                Ok(None) => {
+                    remaining_work = remaining_work.saturating_sub(record.work);
+                    forward(e, &sink, unit.depth);
+                    record.elapsed = started.elapsed();
+                    report.record(e, record);
+                    continue;
                 }
-                value
-            }
-            Err(error) => {
-                report.leaves += 1;
-                Ok(Search::Inconclusive(inconclusive(error)?))
+                Ok(Some(mut branch)) => {
+                    report.leaves += 1;
+                    branch.limits = local_limits.clone();
+                    branch.limits.timeout = budget.remaining_time();
+                    branch.limits.max_work = local_limits.max_work.saturating_sub(budget.used());
+                    branch.config = config;
+                    let mut opts = options.clone();
+                    opts.split_depth = 0;
+                    opts.max_worlds = allocated_options.max_worlds;
+                    guards(&mut branch, &mut opts);
+                    record.state = "searching";
+                    let _progress = e.limits.progress.scope(
+                        phase,
+                        Some(crate::CheckingTarget::CompletionBranch(record.clone())),
+                        true,
+                    );
+                    let value = leaf(&branch, &opts);
+                    for search in sink.snapshot().searches {
+                        if search.phase == phase {
+                            record.search_work =
+                                record.search_work.saturating_add(search.work.unwrap_or(0));
+                            record.work = record.work.saturating_add(search.work.unwrap_or(0));
+                        }
+                    }
+                    value
+                }
+                Err(error) => {
+                    report.leaves += 1;
+                    Ok(Search::Inconclusive(inconclusive(error)?))
+                }
             }
         }?;
+        remaining_work = remaining_work.saturating_sub(budget.used()).saturating_sub(
+            leaf_work
+                .as_ref()
+                .map_or(0, |w| w.load(std::sync::atomic::Ordering::Relaxed)),
+        );
         forward(e, &sink, unit.depth);
         record.elapsed = started.elapsed();
         match result {

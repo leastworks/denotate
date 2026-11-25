@@ -214,12 +214,15 @@ pub fn run(args: Vec<String>) -> Result<(), String> {
             || flag == "--profile-conditions"
             || flag == "--completion-size-lfp"
             || flag == "--completion-prune"
+            || flag == "--completion-force"
+            || flag == "--completion-explore"
         {
             continue;
         }
         if flag != "--input-order"
             && flag != "--engine"
             && flag != "--completion-split-depth"
+            && flag != "--completion-probe-work"
             && flag != "--completion-split-branches"
             && !flag.starts_with("--sat-max-")
             && flag != "--sat-probe-timeout-ms"

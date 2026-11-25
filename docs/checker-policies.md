@@ -2070,18 +2070,21 @@ tables and indexes. Dense fixed-value materialization, graph/ranking passes and
 residual encodings still cost work per visited child. Local uniqueness for ranking
 is charged and its query use is subtracted before children or residual searches.
 
-Before searching, an enabled question prepares its ancestor views and ranks
-partitions. If none cuts a witness cycle in any child, run the question once with
+For ordinary processing-existence and ambiguity searches, an enabled question
+prepares its ancestor views and ranks partitions. If none cuts a witness cycle in any child, run the question once with
 all remaining time/allowance. An inconclusive result does not trigger a duplicate
 unsplit search. If a verified partition exists, reserve half for one unsplit attempt;
 only an inconclusive answer starts partitioning from the already prepared/ranked
 root. Conclusive results return immediately. Ranking is bounded to a quarter of
 the question's time/work; an optional ranking cutoff leaves residual search.
+Classification existence instead enters the structural driver before its cover,
+within its bounded question share. Exploration uses the probe-first policy below.
 
 Traversal is deterministic and breadth-first. Every child ranks its residual
 components; components untouched by the selected split are not excluded. For a
-component cut in some children, its unchanged side goes to residual checking
-rather than recursively exploring that same target. Other components can still
+component cut in some children, ordinary processing/ambiguity sends its unchanged
+side to residual checking rather than recursively exploring that same target.
+Classification existence and exploration re-rank all surviving targets. Other components can still
 select a split on that path; after new pins, components are rediscovered. Child
 ranking has a bounded quarter of its unit's remaining setup allowance, with
 residual checking after optional ranking cutoffs. Cutting one witness never proves another component safe.
@@ -2322,8 +2325,9 @@ before subset indexing. Enforcing hits is a separate future switch.
 ### Optional per-path completion forcing
 
 `--completion-force` / `CheckOptions::force` defaults off and requires positive
-split depth. It runs in funded child trials and residual branch units, with no
-extra root forcing pass ahead of the existing unsplit attempt. Within the existing
+split depth. In ordinary mode it runs in funded child trials and branch units.
+Processing existence and ambiguity retain their initial unsplit attempt;
+classification existence reaches covers only after the structural driver. Within the existing
 ranking allocation, forcing receives half the available time/work/query allowance,
 shared across applicable W and W+H views. Unused work passes on; explicit logical
 limits and the run deadline still bind. This does not reserve time from root
@@ -2337,3 +2341,49 @@ iteration with propagation and pruning stops at a fixed point or cutoff. Queries
 failed work, shadow-cache work and installation are charged. Cutoffs leave the
 last successfully installed equivalent view. No node, time or selected-witness
 golden is introduced; compare outcomes and inspect per-path telemetry.
+
+### Opt-in completion exploration scheduling
+
+`--completion-explore` (`Limits::completion_exploration`, default false) removes
+implicit time/work/SAT-query subdivision from completion pruning, discovery,
+ranking, child trials, forcing, siblings and search questions. The 500 ms trial
+floor and per-candidate pruning timeout do not apply in this mode. All shortlisted
+trials are attempted in deterministic order unless an explicit resource limit or
+the invocation deadline stops them. Existing candidate/output caps remain.
+
+Mechanism switches are independent. Exploration schedules classification existence
+last, after the gating questions, obligations and optional advisories. Its verdict
+and aggregate effect are unchanged. Default mode retains a bounded question share
+and reports the active component, cover progress and cutoff resource.
+
+With splits enabled, each exploration unit first gets a deterministic unsplit
+probe: `--completion-probe-work N`, provisionally 32,000,000 work units including
+SAT callback polls (0 disables it). This allowance fits the existing public
+control's cheap encodings; it is not a timing target. A conclusive probe bypasses
+forcing/ranking. Existence probes use structural certificates only. All probes defer cover
+enumeration, including rejection and eligibility covers. A cutoff proceeds to reductions, requested pruning to
+saturation, forcing, complete shortlisted trials, then a verified split. Residual
+queries run only at leaves. Both cut and uncut children rank surviving components.
+Ordinary mode changes only classification existence's order: enabled forcing/splits
+precede its covers. Processing existence and ambiguity keep their established first
+attempt, and rejection/acceptance keep their direct unsplit searches. The
+32,000,000-work probe and the new rejection/acceptance driver are exploration-only. Incomplete trials never justify omitted
+children or proofs. W/H boundaries, residual constraints, validation and confirmed
+finding aggregation are unchanged.
+
+The CLI's whole-run timeout still starts after loading and covers preparation and
+all selected verifications (120 s unless explicitly changed). Every mechanism
+honors that deadline and cancellation. Automatic CLI work/solve/poll/conflict/
+propagation runaway guards use a fixed 10^12 rather than a timeout-derived value;
+explicit flags win. These generous exploration guards are not proposed defaults
+for normal checking. Structural limits stay independent. Existing per-search,
+per-view and property-part ownership remains; siblings debit actual question
+usage rather than reserved fractions. Work/counter snapshots are inclusive in
+nested scopes, not additive across every progress event.
+
+Live progress shows current work and SAT polls, starts, completion, cutoffs and
+not-started stages. Emission is throttled, but throttling never decides how much
+work runs. A slow early phase can consume the whole invocation and leave later
+questions incomplete; that is visible, not evidence that they are intrinsically
+hard. Use the measurements to design deterministic production allowances later.
+No timing/counter goldens or performance claim accompanies this scheduling mode.

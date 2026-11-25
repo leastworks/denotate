@@ -9,6 +9,11 @@ use std::{
 
 #[derive(Debug, Clone)]
 pub enum CheckingTarget {
+    CompletionExploration {
+        resource: &'static str,
+        used: usize,
+        elapsed: Duration,
+    },
     CompletionSolve {
         remaining_ms: Option<u64>,
     },
@@ -161,6 +166,40 @@ impl CheckingProgress {
             s.current.lock().unwrap().deadline_recovers = true;
         }
         scope
+    }
+    /// Exploration counters are observations only. Throttling never selects work.
+    pub(crate) fn exploration(
+        &self,
+        stage: &'static str,
+        state: &'static str,
+        resource: &'static str,
+        used: usize,
+        elapsed: Duration,
+    ) {
+        let Some(s) = &self.0 else {
+            return;
+        };
+        let mut last = s.last.lock().unwrap();
+        if state == "progress"
+            && last
+                .0
+                .is_some_and(|t| t.elapsed() < Duration::from_millis(500))
+        {
+            return;
+        }
+        last.0 = Some(Instant::now());
+        drop(last);
+        (s.send)(CheckingEvent {
+            stage,
+            state,
+            target: Some(CheckingTarget::CompletionExploration {
+                resource,
+                used,
+                elapsed,
+            }),
+            failure: None,
+            continues: true,
+        });
     }
     pub fn enabled(&self) -> bool {
         self.0.is_some()

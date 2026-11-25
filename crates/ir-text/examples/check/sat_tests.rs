@@ -1080,3 +1080,119 @@ fn completion_forcing_is_opt_in_and_reports_shadow_queries_without_hiding_no_mea
         }
     }
 }
+
+#[test]
+fn completion_exploration_is_opt_in_and_keeps_counterexamples_and_explicit_limits() {
+    let f = Fixture::new(
+        "input i();relation x();x():-i(),!x();verification v{semantics:completion;assumptions:[];obligations:[];}",
+    );
+    assert_eq!(f.run(&["--completion-explore"]).0, 2);
+    let baseline = f.run(&["--engine", "sat", "--no-progress"]);
+    assert_eq!(baseline.0, 1, "{}", baseline.1);
+    for switches in [
+        vec![],
+        vec![
+            "--completion-prune",
+            "--completion-force",
+            "--completion-split-depth",
+            "2",
+        ],
+    ] {
+        let mut flags = vec!["--engine", "sat", "--completion-explore", "--no-progress"];
+        flags.extend(switches);
+        let (code, text) = f.run(&flags);
+        assert_eq!(code, baseline.0, "{text}");
+        assert!(text.contains("no-meaning"), "{text}");
+    }
+    assert_eq!(
+        f.run(&[
+            "--engine",
+            "sat",
+            "--completion-explore",
+            "--max-work",
+            "0",
+            "--no-progress"
+        ])
+        .0,
+        2
+    );
+    assert_eq!(
+        f.run(&[
+            "--engine",
+            "sat",
+            "--completion-explore",
+            "--timeout-ms",
+            "0",
+            "--no-progress"
+        ])
+        .0,
+        2
+    );
+}
+
+#[test]
+fn exploration_cli_progress_reports_units_and_completion_and_can_be_disabled() {
+    let f = Fixture::new(
+        "input i();relation x();x():-i(),!x();verification v{semantics:completion;assumptions:[];obligations:[];}",
+    );
+    let args = [
+        "--engine",
+        "sat",
+        "--completion-explore",
+        "--completion-probe-work",
+        "0",
+        "--completion-split-depth",
+        "2",
+    ];
+    let (exit, _, trace) = f.traced(&args);
+    assert_eq!(exit.unwrap(), 1, "{trace}");
+    assert!(
+        trace.contains("exploration completion split trial: started"),
+        "{trace}"
+    );
+    assert!(
+        trace.contains("exploration completion split trial: completed"),
+        "{trace}"
+    );
+    assert!(trace.contains("not-started-disabled"), "{trace}");
+    assert!(trace.contains("work"), "{trace}");
+    let mut quiet = args.to_vec();
+    quiet.push("--no-progress");
+    let (exit, _, trace) = f.traced(&quiet);
+    assert_eq!(exit.unwrap(), 1);
+    assert!(trace.is_empty(), "{trace}");
+}
+
+#[test]
+fn exploration_cli_probe_closes_fast_questions_without_structural_trials() {
+    let f = Fixture::new(
+        "input i();relation x();x():-i();verification v{semantics:completion;assumptions:[];obligations:[];}",
+    );
+    assert_eq!(
+        f.run(&["--engine", "sat", "--completion-probe-work", "10"])
+            .0,
+        2
+    );
+    let (exit, out, trace) = f.traced(&[
+        "--engine",
+        "sat",
+        "--completion-explore",
+        "--completion-force",
+        "--completion-prune",
+        "--completion-split-depth",
+        "2",
+    ]);
+    assert_eq!(exit.unwrap(), 0, "{out} {trace}");
+    assert!(
+        trace.contains("exploration completion unsplit probe: completed"),
+        "{trace}"
+    );
+    assert!(
+        !trace.contains("completion split trial: started"),
+        "{trace}"
+    );
+    assert!(
+        !trace.contains("completion branch forcing W: started"),
+        "{trace}"
+    );
+}

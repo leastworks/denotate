@@ -2490,3 +2490,35 @@ lifting certify them, and replay checks them. A structural totality shortcut is
 not sufficient while such constraints remain. H-dependent constants never enter
 no-H views. Shadow SAT-cache hits are always checked by the solver; enabling hits
 to answer queries is a separate decision.
+
+## Completion exploration separates algorithm measurements from scheduling shares
+
+Nested local time and work shares can prevent a useful proof or split trial from
+finishing. Reallocating those shares repeatedly makes it difficult to distinguish
+an expensive algorithm from an algorithm that was never given enough opportunity.
+
+Provide an opt-in exploration scheduler using the same completion algorithms,
+proofs and validation. It removes implicit allowance subdivisions while retaining
+explicit limits, structural bounds, cancellation and a shared invocation deadline.
+Pruning runs to saturation or cutoff; ranking attempts its finite shortlist;
+verified partitions are explored before residual leaf queries. With no useful
+partition, the question is checked unsplit.
+Pruning, forcing and splitting remain separate opt-ins.
+
+The exploration order may spend a long time in an early mechanism. Report live
+work and whether mechanisms completed, stopped or were not started, rather than
+promise that all questions receive time. A cutoff cannot justify a proof or erase
+a confirmed finding. Production budget simplification is a separate decision,
+to be informed by these measurements; no new default performance policy is implied.
+
+Exploration first gives each split-enabled unit a small, explicitly bounded work
+probe, so easy pair queries do not pay for structural trials. Probes may certify
+existence structurally but may not enumerate covers. Exploration runs enabled
+forcing and splits before covers, and classification existence last: its universal
+cover can consume the entire invocation otherwise. Ordinary mode retains its
+previous scheduling except for classification existence, which runs enabled
+splits before covers within a bounded question share. In particular, processing
+existence keeps its cheap first attempt: forcing it through structural work first
+lost a public control's conclusive proof. Rejection and acceptance's new branch
+driver remains exploration-only.
+This scheduling decision does not demote no-meaning findings or change verdicts.

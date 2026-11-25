@@ -240,6 +240,7 @@ impl Engine {
             solver: Solver::new(
                 Default::default(),
                 Stop {
+                    exploration: None,
                     deadline: None,
                     polls: None,
                     cancellation: self.limits.cancellation.clone(),

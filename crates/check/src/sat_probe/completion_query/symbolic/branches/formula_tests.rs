@@ -491,6 +491,37 @@ fn formula_eligible_only_under_h_is_not_offered_to_mixed_existence() {
             assert_eq!(offered.unwrap().context, "W+H");
         }
     }
+
+    // Rejection is a no-H question too, even though it can use an H model to
+    // exclude an accepted observation. Its wrapper must choose the W inventory.
+    e.limits.completion_exploration = true;
+    e.limits.completion_probe_work = 0;
+    e.branches = Some(Arc::new(std::sync::Mutex::new(BranchReport::default())));
+    let result = e
+        .symbolic_rejected(
+            &CheckOptions {
+                split_depth: 2,
+                ..Default::default()
+            },
+            1,
+        )
+        .unwrap();
+    let expected = e.check_enumerated(&keys(&c), &Default::default()).unwrap();
+    assert_eq!(
+        result.exists(),
+        expected.classification.unwrap().rejected.exists()
+    );
+    let rows = e.branches.as_ref().unwrap().lock().unwrap();
+    assert!(
+        rows.records
+            .iter()
+            .any(|r| r.phase == "completion rejection")
+    );
+    assert!(rows.records.iter().filter(|r| r.depth == 0).all(|r| {
+        r.candidates
+            .iter()
+            .all(|candidate| !candidate.formula || candidate.context != "W+H")
+    }));
 }
 
 #[test]

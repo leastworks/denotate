@@ -462,7 +462,7 @@ mod tests {
         );
     }
     #[test]
-    fn initial_unsplit_counterexample_precedes_installing_any_forced_view() {
+    fn ordinary_processing_first_attempt_precedes_installing_any_forced_view() {
         let mut c = Corpus::new();
         let i = rel(&mut c, "i", true);
         let x = rel(&mut c, "x", false);
@@ -470,23 +470,25 @@ mod tests {
         let v = verification(&mut c, None, &[]);
         let mut e = prepare(&c, v, &Default::default());
         e.forcing = true;
-        let calls = std::cell::Cell::new(0);
-        let options = CheckOptions {
-            force: true,
-            split_depth: 2,
-            ..Default::default()
-        };
-        let answer = super::super::run(&e, false, true, &options, 1, |first, _| {
-            calls.set(calls.get() + 1);
-            assert!(
-                first.pruning.is_none(),
-                "root forcing must not install a preflight view"
-            );
-            assert_eq!(first.cone.fixed, e.cone.fixed);
-            Ok(Search::Exists(()))
-        })
-        .unwrap();
-        assert!(answer.exists());
-        assert_eq!(calls.get(), 1);
+        for existence in [false, true] {
+            let calls = std::cell::Cell::new(0);
+            let options = CheckOptions {
+                force: true,
+                split_depth: 2,
+                ..Default::default()
+            };
+            let answer = super::super::run(&e, false, existence, &options, 1, |first, _| {
+                calls.set(calls.get() + 1);
+                assert!(
+                    first.pruning.is_none(),
+                    "root forcing must not install a preflight view"
+                );
+                assert_eq!(first.cone.fixed, e.cone.fixed);
+                Ok(Search::Exists(()))
+            })
+            .unwrap();
+            assert!(answer.exists());
+            assert_eq!(calls.get(), 1);
+        }
     }
 }

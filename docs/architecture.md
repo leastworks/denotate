@@ -747,3 +747,14 @@ proofs stay in the same original scope/context/assignment key. The solver rule
 carries its original ground-rule identity through shortening; presentation uses
 that provenance rather than reconstructing it from a modified body. Neither this
 identity nor advisory counts alter equation equality or semantic scopes.
+
+
+### Completion exploration policy
+
+Completion's opt-in exploration scheduling is an explicit `Limits` input, not a
+second semantic engine. It changes allocation/order in the existing pruning,
+forcing and split driver. Proof contexts, immutable branch views, residual equations
+and replay stay shared. Invocation-local usage ledgers and progress are never
+reused as proofs; no process-global scheduling state is introduced. This option
+has no effect on default BDD/editor scheduling. See the checker README and checker
+policies for its invocation deadline and per-search accounting boundaries.

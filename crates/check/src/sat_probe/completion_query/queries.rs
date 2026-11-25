@@ -23,6 +23,14 @@ pub(super) struct Run<'a, 'b, 'l> {
 
 impl Drop for Run<'_, '_, '_> {
     fn drop(&mut self) {
+        if let Some(usage) = &self.engine.exploration_usage {
+            let used = self.usage();
+            let mut total = usage.lock().unwrap();
+            total.max_solves = total.max_solves.saturating_add(used.max_solves);
+            total.max_solver_polls = total.max_solver_polls.saturating_add(used.max_solver_polls);
+            total.max_conflicts = total.max_conflicts.saturating_add(used.max_conflicts);
+            total.max_propagations = total.max_propagations.saturating_add(used.max_propagations);
+        }
         if let Some((_, stats)) = &mut self.cnf.measurement {
             stats.solve_timings = std::mem::take(&mut self.solve_timings);
             stats.omitted_solve_timings = self.omitted_solve_timings;
@@ -368,6 +376,10 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             solver: Solver::new(
                 Default::default(),
                 Stop {
+                    exploration: engine
+                        .limits
+                        .completion_exploration
+                        .then(|| engine.limits.progress.clone()),
                     deadline: engine.limits.run_deadline,
                     polls: Some(PollLimit {
                         used: std::cell::Cell::new(0),
@@ -560,6 +572,11 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             solver: Solver::new(
                 Default::default(),
                 Stop {
+                    exploration: self
+                        .engine
+                        .limits
+                        .completion_exploration
+                        .then(|| self.engine.limits.progress.clone()),
                     deadline: self.cnf.solver.cb().deadline,
                     polls: self.cnf.solver.cb().polls.as_ref().map(|p| PollLimit {
                         used: std::cell::Cell::new(p.used.get()),
@@ -684,7 +701,38 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         // or an observer consumed the remaining time after the first check.
         self.budget.check("completion solve")?;
         self.cnf.solver.cb().check()?;
+        // A probe work cap must also bound a single long solver call. Count
+        // callback polls as work only in the probe; production accounting stays
+        // unchanged until the separate deterministic-budget increment.
+        let before_polls = self
+            .cnf
+            .solver
+            .cb()
+            .polls
+            .as_ref()
+            .map_or(0, |p| p.used.get());
+        if self.engine.probe {
+            if let Some(p) = &mut self.cnf.solver.cb_mut().polls {
+                p.max = self.engine.config.max_solver_polls.min(
+                    before_polls
+                        .saturating_add(self.budget.remaining())
+                        .saturating_sub(1),
+                );
+            }
+        }
         let answer = self.cnf.solver.solve_limited(pins);
+        if self.engine.probe {
+            let polls = self
+                .cnf
+                .solver
+                .cb()
+                .polls
+                .as_ref()
+                .map_or(0, |p| p.used.get())
+                .saturating_sub(before_polls);
+            self.budget
+                .charge(polls, "completion unsplit probe solver work")?;
+        }
         let elapsed = started.elapsed();
         self.solve_time += elapsed;
         let overrun = self.engine.limits.run_deadline.map_or(Duration::ZERO, |d| {

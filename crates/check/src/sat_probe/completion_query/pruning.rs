@@ -127,6 +127,7 @@ struct Reservation {
 }
 #[derive(Default)]
 struct Reservations {
+    exploration: bool,
     slots: BTreeMap<Bucket, Reservation>,
     leftover: Duration,
 }
@@ -148,6 +149,7 @@ impl Reservations {
         }
         Self {
             slots,
+            exploration: false,
             leftover: Duration::ZERO,
         }
     }
@@ -159,6 +161,9 @@ impl Reservations {
     fn finish(&mut self, key: Bucket, elapsed: Duration, stop: PruningStop) -> Duration {
         let slot = self.slots.get_mut(&key).unwrap();
         slot.spent += elapsed;
+        if self.exploration {
+            return Duration::ZERO;
+        }
         // Property cones share a bucket. Saturating one is not completion of
         // the others. Root scopes each have one view per context.
         if stop != PruningStop::Saturated || key.0 == "property" {
@@ -266,14 +271,24 @@ impl Cache {
             .pruning_allowance
             .unwrap_or(e.limits.timeout / 3)
             .min(remaining / 3);
+        let mut reservations = Reservations::new(
+            allowance,
+            e.classification.is_some(),
+            !e.selection.is_empty(),
+        );
+        reservations.exploration = e.limits.completion_exploration;
+        if reservations.exploration {
+            for slot in reservations.slots.values_mut() {
+                slot.allowance = remaining;
+            }
+        }
         Self {
-            reservations: Reservations::new(
-                allowance,
-                e.classification.is_some(),
-                !e.selection.is_empty(),
-            ),
+            reservations,
             ..Self::default()
         }
+    }
+    pub(super) fn frozen(&self) -> Self {
+        Self::inherited(self.views.clone(), self.pins.clone())
     }
     pub(super) fn inherited(views: BTreeMap<ViewKey, Arc<Cone>>, pins: Vec<(usize, bool)>) -> Self {
         Self {
@@ -433,7 +448,13 @@ pub(super) fn view_using(
         };
         (available, priority)
     };
-    limits.timeout = limits.timeout.min(remaining).min(available);
+    limits.timeout = limits.timeout.min(remaining);
+    if limits.completion_exploration {
+        limits.max_work = limits.max_work.min(caller_budget.remaining());
+    }
+    if !limits.completion_exploration {
+        limits.timeout = limits.timeout.min(available);
+    }
     let started = Instant::now();
     let mut budget = Budget::new(&limits);
     let mut result = (*base).clone();
@@ -525,6 +546,16 @@ pub(super) fn view_using(
         // change the relevant SCCs. Rediscover from the proved prefix.
     };
     let elapsed = started.elapsed();
+    engine.exploration(
+        phase,
+        if stop == PruningStop::Saturated {
+            "completed"
+        } else {
+            "cut-off"
+        },
+        budget.used(),
+        elapsed,
+    );
     if needs_reduction {
         result = reduce_view(
             &result,
@@ -656,8 +687,11 @@ fn simplify(
     // heads; constants already have a completion-safe Fitting path.
     let settled = encoding::fitting(original, budget)?;
     let mut discovery_limits = budget.limits.clone();
-    discovery_limits.timeout = (budget.remaining_time() / 4).min(Duration::from_millis(500));
-    discovery_limits.max_work = budget.limits.max_work.saturating_sub(budget.used()) / 4;
+    discovery_limits.timeout =
+        budget
+            .limits
+            .completion_slice(budget.remaining_time(), 4, Duration::from_millis(500));
+    discovery_limits.max_work = budget.remaining() / budget.limits.completion_share(4);
     let mut discovery_budget = Budget::new(&discovery_limits);
     let targets = symbolic::targets::discover(
         engine,
@@ -900,9 +934,11 @@ fn simplify(
             run.budget.charge(pins.len(), "completion pruning pins")?;
             // A hard candidate cannot consume every other head's opportunity.
             // Solver clauses remain valid after an interrupted limited solve.
-            let slice = (run.budget.remaining_time()
-                / ((preferred.len() + pending.len() + 1).min(16) as u32))
-                .min(Duration::from_millis(250));
+            let slice = engine.limits.completion_slice(
+                run.budget.remaining_time(),
+                (preferred.len() + pending.len() + 1).min(16),
+                Duration::from_millis(250),
+            );
             let stop = run.cnf.solver.cb_mut();
             let old = stop.timeout;
             stop.timeout = old.min(stop.start.elapsed() + slice);

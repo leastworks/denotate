@@ -1467,10 +1467,13 @@ search. Scopes stay frozen. Reaching depth or leaf bounds uses residual search;
 resource exhaustion remains inconclusive. A confirmed failure in one child survives
 another child's cutoff; absence of a failure requires every child to finish.
 
-Each question ranks before searching. Without a verified witness cut in any child,
+Ordinary processing-existence and ambiguity questions rank before searching.
+Without a verified witness cut in any child,
 it runs unsplit once with the remaining allowance, including on an inconclusive
 result. Otherwise one unsplit attempt gets half the remaining allocation; only an
 inconclusive result uses the reserved half for the already ranked partition.
+Classification existence instead runs the structural driver before its cover.
+Exploration uses the probe-first policy described below.
 Traversal is breadth-first, with an absolute per-unit cutoff shared by its nested
 queries and bounded by the outer question deadline. Untouched components remain
 rankable in every path. If a selected target is cut on only one side, explore that
@@ -1569,8 +1572,9 @@ cycle that exists only before these reductions.
 `CheckOptions::force` / `check-den --engine sat --completion-split-depth 2 --completion-force` enables
 path-local constant proofs for verification existence/determinacy searches. It
 runs in funded split trials and residual branch units; it requires positive
-split depth and is off by default. No extra root forcing pass delays the existing
-unsplit attempt. After Fitting
+split depth and is off by default. In ordinary mode, no extra root forcing pass
+delays processing existence or ambiguity's established first attempt. Classification
+existence uses the structural driver first. After Fitting
 and applicable pruning, one fixed encoding per view answers both polarities of
 remaining witness/loop atoms using SAT assumptions. Proven constants feed back
 into propagation and pruning; newly acyclic dependents may become formula split
@@ -1592,3 +1596,56 @@ telemetry reports forced constants (32 named examples per pass), forced witness
 atoms, candidate attempts, cache claims/checks/mismatches and cutoffs. A cache
 claim interrupted before solving is not a checked hit. See checker policies for
 storage and accounting limits.
+
+### Completion exploration scheduling
+
+`Limits::completion_exploration` / `just check-den ROOT --engine sat
+--completion-explore` opts into exploration scheduling. It does not enable
+pruning, forcing or splits: select those separately. BDD/editor defaults are unchanged.
+
+Exploration removes implicit time/work/query subdivisions and the trial-start
+floor. Questions run in this order: contracts/world, rejection, classification
+ambiguity, accepted observations, processing existence, processing ambiguity,
+obligations and optional advisories, then classification existence. Moving the
+last question does not change its verdict or the aggregate status.
+
+With splits enabled, the root and every child first try a bounded unsplit probe.
+`Limits::completion_probe_work` / `--completion-probe-work N` sets its deterministic
+work cap (32,000,000 by default; 0 disables it). Work includes SAT callback polls.
+A conclusive probe skips pruning, forcing and ranking. Existence probes may use
+structural totality certificates. Rejection and acceptance probes may return a
+direct answer; all probes yield before covering or excluding models. On probe cutoff:
+reductions, requested pruning to saturation, requested forcing over all remaining
+candidates, then ranking every shortlisted trial. Split on a verified cut;
+residual search runs only at leaves (no useful split or a configured split bound).
+Both cut and uncut children rank their surviving components. Traversal is breadth
+first. Without splits the ordinary unsplit question remains the only search.
+
+In ordinary mode classification existence keeps its bounded share of the remaining
+question time, with component/cover progress and an explicit cutoff cause. When
+splits are enabled, classification existence runs forcing and splits before cover
+enumeration. Ordinary processing existence and ambiguity retain their established
+first attempt before installing a forced branch view. Rejection and acceptance
+keep their direct unsplit searches; their new branch driver is exploration-only.
+
+Explicit resource limits, grounding/CNF/storage bounds, split depth/leaves and
+cancellation still apply. A CLI invocation retains its shared timeout, 120 seconds
+by default, across preparation and every selected verification. Use an explicit
+larger `--timeout-ms` for a long exploration. Automatic search guards are fixed
+at a generous value independent of that timeout; they are not calibrated performance
+policies. API callers retain the limits they supplied. Without an API invocation
+deadline, `Engine::check` establishes one shared deadline for that check.
+
+The existing budget scopes remain: preparation and independent searches have their
+own work limits, pruning views have their own proof allowances, and property parts
+retain their existing query limits. Exploration siblings consume actual remaining
+question work/SAT usage rather than receiving fractions or renewed allowances.
+Trial ledgers retain spent work, including discarded children. This does not yet
+replace solver limits with deterministic in-solve conflict/propagation interrupts.
+
+Progress includes live work/solver-poll counters, trial and forcing completion or
+cutoff, pruning stop reasons, and not-started/disabled stages. Counter snapshots are
+local to the reported operation: nested scopes overlap and must not be summed.
+Logging does not select candidates. The finite inventory/shortlist and bounded
+witness/output caps are unchanged; completing exploration is not a completeness
+claim about every possible rewrite or split.

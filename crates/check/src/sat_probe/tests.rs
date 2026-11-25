@@ -14,6 +14,7 @@ fn cardinality_truth_tables_and_selector_isolation() {
                 solver: Solver::new(
                     Default::default(),
                     Stop {
+                        exploration: None,
                         deadline: None,
                         polls: None,
                         cancellation: limits.cancellation.clone(),
@@ -342,6 +343,7 @@ fn solver_polls_cancellation_during_a_real_search() {
         solver: Solver::new(
             Default::default(),
             Stop {
+                exploration: None,
                 deadline: None,
                 polls: None,
                 cancellation: token.clone(),
@@ -419,6 +421,7 @@ fn unrelated_components_are_not_encoded_or_assumed_settled() {
 #[test]
 fn absolute_deadline_survives_clock_restart_and_takes_precedence_over_polls() {
     let mut stop = Stop {
+        exploration: None,
         deadline: Some(Instant::now()),
         polls: Some(PollLimit {
             used: std::cell::Cell::new(100),
@@ -438,4 +441,41 @@ fn absolute_deadline_survives_clock_restart_and_takes_precedence_over_polls() {
         })
     ));
     assert!(stop.stop());
+}
+
+#[test]
+fn exploration_solver_heartbeat_is_live_and_cancellation_stops_the_solve() {
+    let cancellation = Cancellation::default();
+    let cancel = cancellation.clone();
+    let seen = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = seen.clone();
+    let progress = crate::CheckingProgress::new(move |event| {
+        if event.state == "progress"
+            && matches!(
+                event.target,
+                Some(crate::CheckingTarget::CompletionExploration {
+                    resource: "polls",
+                    ..
+                })
+            )
+        {
+            flag.store(true, std::sync::atomic::Ordering::Relaxed);
+            cancel.cancel();
+        }
+    });
+    let stop = Stop {
+        exploration: Some(progress),
+        deadline: None,
+        polls: Some(PollLimit {
+            used: std::cell::Cell::new(0),
+            max: usize::MAX,
+        }),
+        cancellation,
+        start: Instant::now(),
+        timeout: Duration::from_secs(60),
+        hook: None,
+    };
+    assert!(stop.stop());
+    assert!(seen.load(std::sync::atomic::Ordering::Relaxed));
+    assert!(matches!(stop.check(), Err(CheckError::Cancelled)));
 }

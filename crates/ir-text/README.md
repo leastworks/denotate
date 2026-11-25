@@ -685,6 +685,31 @@ validation work and lifting counts.
 Completion's optional path forcing is available as `just check-den ROOT --engine
 sat --completion-split-depth 2 --completion-force`. It requires positive split
 depth and is off by default; forcing stays within funded trials and residual
-branch units, preserving the initial unsplit attempt. Human branch output and JSON include per-context forced constants and
+branch units. Ordinary processing existence and ambiguity keep their initial
+unsplit attempt; classification existence follows forcing and splits. Human branch output and JSON include per-context forced constants and
 shadow-cache model/core claims, checked claims, mismatches and cutoffs. Residual
 constraints preserve no-model inputs; enabling forcing does not assume existence.
+
+For algorithm measurements, add `--completion-explore`. It removes implicit local
+time/work/query slices without enabling other mechanisms. For example:
+
+```sh
+just check-den ROOT --engine sat --completion-explore --completion-prune --completion-force --completion-split-depth 4 --timeout-ms 3600000
+```
+
+The explicit timeout is one invocation-wide safety net, including preparation and
+all verifications; without it the CLI still uses 120 seconds. Explicit resource
+limits and structural/split bounds remain authoritative. Exploration first tries
+an unsplit probe capped by `--completion-probe-work N` (default 32000000; 0 disables).
+A conclusive probe skips structural trials. Existence probes use structural
+certificates only. All probes yield before covers (including rejection/eligibility). After cutoff, each unit reduces, prunes and forces
+before ranking and taking a verified partition; only leaves run residual searches.
+Classification existence runs last in exploration. Default mode gives it a bounded
+question share and runs enabled forcing/splits before classification existence
+covers. Ordinary processing existence and ambiguity keep their first attempt;
+rejection and acceptance keep direct unsplit searches.
+Progress goes to stderr, including live work/poll counters and completed/cut-off/
+not-started stages; `--no-progress` disables it. JSON/human semantic results and
+exit-code meanings are unchanged. See the checker README for ordering and accounting
+boundaries. Later questions may remain unfinished if an earlier phase consumes the
+whole deadline; no speed or universal-conclusiveness claim is made.

@@ -464,6 +464,7 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
         if !self.solve(&active, &pins)? {
             return Ok(None);
         }
+        self.run.engine.defer_probe_cover()?;
         let (a, b, diff) = self.eligibility.take().unwrap();
         let (cone, _, h) = self.run.engine.classification.as_ref().unwrap();
         if self.eligibility_index.is_none() {
@@ -615,7 +616,7 @@ impl Engine {
         if let Some(deadline) = limits.run_deadline {
             limits.timeout = limits.timeout.min(
                 deadline.saturating_duration_since(Instant::now())
-                    / shares.max(1).min(u32::MAX as usize) as u32,
+                    / self.limits.completion_share(shares).min(u32::MAX as usize) as u32,
             );
         }
         limits
@@ -642,6 +643,13 @@ impl Engine {
             }
             f(&mut solver)
         })();
+        if let Some(work) = &self.exploration_work {
+            let _ = work.fetch_update(
+                std::sync::atomic::Ordering::Relaxed,
+                std::sync::atomic::Ordering::Relaxed,
+                |n| Some(n.saturating_add(budget.used())),
+            );
+        }
         match answer {
             Ok(Some(value)) => Ok(Search::Exists(value)),
             Ok(None) => Ok(Search::None),
@@ -723,7 +731,14 @@ impl Engine {
         options: &CheckOptions,
         shares: usize,
     ) -> Result<Search<Model>> {
-        self.symbolic_accepted_in(&BTreeMap::new(), unique, options, shares)
+        if !self.limits.completion_exploration || options.split_depth == 0 {
+            return self.symbolic_accepted_in(&BTreeMap::new(), unique, options, shares);
+        }
+        let mut question = self.clone();
+        question.branch_phase = Some("completion accepted observations");
+        branches::run(&question, true, false, options, shares, |e, opts| {
+            e.symbolic_accepted_in(&BTreeMap::new(), unique, opts, 1)
+        })
     }
     fn symbolic_accepted_in(
         &self,
@@ -761,7 +776,16 @@ impl Engine {
         })
     }
     fn symbolic_rejected(&self, options: &CheckOptions, shares: usize) -> Result<Search<Model>> {
-        self.symbolic_rejected_in(&BTreeMap::new(), options, shares)
+        if !self.limits.completion_exploration || options.split_depth == 0 {
+            return self.symbolic_rejected_in(&BTreeMap::new(), options, shares);
+        }
+        let mut question = self.clone();
+        question.branch_phase = Some("completion rejection");
+        // Like classification existence, rejection searches no-H models and
+        // therefore permits only W-certified formula partitions.
+        branches::run(&question, true, true, options, shares, |e, opts| {
+            e.symbolic_rejected_in(&BTreeMap::new(), opts, 1)
+        })
     }
     fn symbolic_rejected_in(
         &self,
@@ -797,6 +821,7 @@ impl Engine {
                 if !s.solve(&[base.gate], &pins)? {
                     return Ok(Some(model));
                 }
+                self.defer_probe_cover()?;
                 let values = s.values(cone, &base)?;
                 let cube = cover(cone, &values, Some(*h), s.run.budget)?;
                 s.exclude(selector, &cube)?;
@@ -863,6 +888,7 @@ impl Engine {
                 {
                     return Ok(None);
                 }
+                self.defer_probe_cover()?;
                 existence::classification_shape(self, &world_view, world_view.label(), s)?;
                 let h = self.classification.as_ref().unwrap().2;
                 let view = s.simplified(original, true)?;
@@ -920,6 +946,19 @@ impl Engine {
             },
         )
     }
+    // Probes may certify totality structurally, but must never spend their
+    // allowance enumerating covers before the unit has tried structural cuts.
+    fn defer_probe_cover(&self) -> Result<()> {
+        if self.probe {
+            return Err(CheckError::limit(
+                "completion unsplit probe",
+                "cover enumeration deferred",
+                0,
+                None,
+            ));
+        }
+        Ok(())
+    }
     fn symbolic_no_meaning_cone(
         &self,
         context: &BTreeMap<GroundAtom, bool>,
@@ -936,6 +975,14 @@ impl Engine {
         };
         self.symbolic_search_in(context, phase, shares, |s| {
             let view = s.simplified(cone, !classification)?;
+            if self.probe {
+                if view.retained.is_empty()
+                    && consistency::analyse(&view, None, s.run.budget)?.odd_components == 0
+                {
+                    return Ok(None);
+                }
+                self.defer_probe_cover()?;
+            }
             let Some(cone) =
                 existence::residual(self, &view, view.label(), classification, s, options)?
             else {
@@ -1136,6 +1183,96 @@ impl Engine {
     /// particular, a processing contradiction never filters the input universe
     /// or the original classification query.
     pub fn check(&self, keys: &SemanticKeys, options: &CheckOptions) -> Result<Report> {
+        if !self.limits.completion_exploration {
+            return self.check_scheduled(keys, options);
+        }
+        let mut invocation = self.clone();
+        // API callers get one deadline across this verification, not a fresh
+        // timeout per mechanism. CLI preparation already set the run deadline.
+        if invocation.limits.run_deadline.is_none() {
+            invocation.limits.run_deadline = Instant::now().checked_add(invocation.limits.timeout);
+        }
+        for (stage, enabled) in [
+            ("completion exploration pruning", options.prune),
+            ("completion exploration forcing", options.force),
+            ("completion exploration splits", options.split_depth > 0),
+        ] {
+            invocation.exploration(
+                stage,
+                if enabled {
+                    "not-started"
+                } else {
+                    "not-started-disabled"
+                },
+                0,
+                Duration::ZERO,
+            );
+        }
+        let started = Instant::now();
+        let result = invocation.check_scheduled(keys, options);
+        if let Ok(report) = &result {
+            fn state<T>(s: &Search<T>) -> &'static str {
+                match s {
+                    Search::NotAnalysed => "not-started",
+                    Search::Inconclusive(_) => "cut-off",
+                    _ => "completed",
+                }
+            }
+            if let Some(c) = &report.classification {
+                for (phase, status) in [
+                    ("completion accepted observations", state(&c.accepted)),
+                    ("completion rejection", state(&c.rejected)),
+                    ("completion classification existence", state(&c.no_meaning)),
+                    ("completion classification ambiguity", state(&c.ambiguous)),
+                ] {
+                    invocation.limits.progress.exploration(
+                        phase,
+                        status,
+                        "status",
+                        0,
+                        Duration::ZERO,
+                    );
+                }
+            }
+            invocation.exploration(
+                "completion processing existence",
+                state(&report.meaning.no_meaning),
+                0,
+                started.elapsed(),
+            );
+            invocation.exploration(
+                "completion processing ambiguity",
+                state(&report.meaning.ambiguous),
+                0,
+                started.elapsed(),
+            );
+        }
+        invocation.exploration(
+            "completion exploration",
+            if result.is_ok() {
+                "finished"
+            } else {
+                "cut-off"
+            },
+            0,
+            started.elapsed(),
+        );
+        result
+    }
+    pub(super) fn exploration(
+        &self,
+        phase: &'static str,
+        state: &'static str,
+        work: usize,
+        elapsed: Duration,
+    ) {
+        if self.limits.completion_exploration {
+            self.limits
+                .progress
+                .exploration(phase, state, "work", work, elapsed);
+        }
+    }
+    fn check_scheduled(&self, keys: &SemanticKeys, options: &CheckOptions) -> Result<Report> {
         if !options.prune && !options.force && options.split_depth == 0 {
             return self.check_unpruned(keys, options);
         }
@@ -1144,6 +1281,11 @@ impl Engine {
         let cache = Arc::new(std::sync::Mutex::new(pruning::Cache::for_engine(self)));
         if options.prune && options.split_depth > 0 {
             cache.lock().unwrap().enable_trials(self);
+            // Exploration proves reductions in the unit, after its cheap probe.
+            // Raw questions may reuse views but never initiate root proof search.
+            if self.limits.completion_exploration {
+                cache.lock().unwrap().readonly = true;
+            }
         }
         if options.prune {
             invocation.pruning = Some(cache.clone());
@@ -1152,7 +1294,7 @@ impl Engine {
         if options.split_depth > 0 || options.force {
             invocation.branches = Some(branches.clone());
         }
-        if options.prune {
+        if options.prune && !(self.limits.completion_exploration && options.split_depth > 0) {
             if invocation.classification.is_some() {
                 pruning::prepare(&invocation, true)?;
             }
@@ -1249,13 +1391,15 @@ impl Engine {
                 0
             };
         if let Some(c) = &mut report.classification {
-            // Rejection and component existence often finish cheaply. Every
-            // search receives a fair part of the remaining *shared* deadline;
-            // unused time automatically remains available to later searches.
+            // Ordinary searches receive a bounded part of the remaining
+            // shared deadline. Exploration moves the potentially expensive
+            // classification cover behind the gating questions below.
             c.rejected = self.symbolic_rejected(options, remaining)?;
             remaining -= 1;
-            c.no_meaning = self.symbolic_no_meaning(true, true, options, remaining)?;
-            remaining -= 1;
+            if !self.limits.completion_exploration {
+                c.no_meaning = self.symbolic_no_meaning(true, true, options, remaining)?;
+                remaining -= 1;
+            }
             c.ambiguous = self.symbolic_pair(true, true, options, remaining)?;
             remaining -= 1;
             globally_unique = matches!(c.ambiguous, Search::None);
@@ -1391,6 +1535,17 @@ impl Engine {
         }
         if options.circular_support {
             report.advisory = self.symbolic_advisory(globally_unique, options, keys)?;
+        }
+        // Classification existence is independent of the gating questions.
+        // Its universal cover can be the hardest search, so exploration spends
+        // only the invocation's remaining time here. Its verdict is unchanged.
+        if self.limits.completion_exploration {
+            if let Some(c) = &mut report.classification {
+                c.no_meaning = self.symbolic_no_meaning(true, true, options, remaining)?;
+                if let Some(cause) = c.no_meaning.unknown() {
+                    report.incomplete.push(cause);
+                }
+            }
         }
         if contract_incomplete {
             report.mark_partial_contract();

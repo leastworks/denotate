@@ -397,7 +397,7 @@ test('guarded schema identifies its known odd edge, rule location and disabling 
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
 
-test('guarded schema type-field checking preserves verdicts with an unsplit first attempt',async()=>{
+test('guarded schema type-field preserves verdicts and ordinary first attempts',async()=>{
   const {guardedSchema}=await import('../guarded-schema.mjs');
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-type-cut-'));
   try {
@@ -417,32 +417,46 @@ test('guarded schema type-field checking preserves verdicts with an unsplit firs
     assert.equal(b.state,a.state);assert.equal(b.hasFailures,a.hasFailures);
     assert.ok(b.branches.records.some(r=>r.state==='unsplit-proved'));
     assert.equal(b.branches.splits,0);
+    assert.ok(b.branches.records.filter(r=>r.state.startsWith('unsplit-')).every(r=>r.phase!=='completion classification existence'));
     assert.ok(b.branches.records.filter(r=>r.state==='split').every(r=>r.children===2));
     assert.throws(()=>guardedSchema({typecut:2}));
   } finally {fs.rmSync(root,{recursive:true,force:true});}
 });
 
 
-test('guarded schema field-value checking preserves each result with an unsplit first attempt',()=>{
+test('guarded schema field-value checking preserves results and exploration probes skip structural work',()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'den-field-cut-'));
   try {
     const rows=[];
-    for(const enabled of [false,true]){
-      const out=path.join(root,enabled?'on':'off');
+    for(const mode of ['off','split','explore']){
+      const out=path.join(root,mode);
       run({out,binary:'target/debug/examples/bench_schema',family:['guarded-schema'],sizes:[2],repeat:1,
         schema:{depth:1,fanout:1,stmts:1,triggers:0,outs:1,values:1,self:0,fieldcut:1},
-        limits:enabled?['--completion-split-depth','3']:[]});
+        limits:mode==='off'?[]:['--completion-split-depth','3',...(mode==='explore'?['--completion-explore','--completion-force','--completion-prune']:[])]});
       rows.push(JSON.parse(fs.readFileSync(path.join(out,'guarded-schema-2-0','report.json'),'utf8')));
     }
-    assert.equal(rows[0].checkerExitCode,rows[1].checkerExitCode);
-    const [a,b]=rows.map(r=>r.outcomes[0]);assert.equal(a.state,b.state);assert.equal(a.hasFailures,b.hasFailures);
+    const a=rows[0].outcomes[0];
+    for(const row of rows.slice(1)) {
+    assert.equal(rows[0].checkerExitCode,row.checkerExitCode);
+    const b=row.outcomes[0];assert.equal(a.state,b.state);assert.equal(a.hasFailures,b.hasFailures);
     for (const question of ['accepted','rejected','noMeaning','ambiguous'])
       assert.equal(b.classification[question].state,a.classification[question].state,question);
     for (const question of ['existence','uniqueness'])
       assert.equal(b.meaning[question].state,a.meaning[question].state,question);
     assert.deepEqual(b.obligations.map(o=>[o.name,o.state]),a.obligations.map(o=>[o.name,o.state]));
-    assert.ok(b.branches.records.some(r=>r.state==='unsplit-proved'));
-    assert.equal(b.branches.splits,0);
+    }
+    const ordinary=rows[1].outcomes[0];
+    assert.ok(ordinary.branches.records.every(r=>!['completion rejection','completion accepted observations'].includes(r.phase)));
+    assert.ok(ordinary.branches.records.some(r=>r.state==='unsplit-proved' && r.phase.includes('ambiguity')));
+    const explored=rows[2].outcomes[0].branches.records;
+    const probes=explored.flatMap((r,i)=>r.phase==='completion unsplit probe' && r.state==='completed'?[i]:[]);
+    assert.ok(probes.length>0);
+    for(const i of probes){
+      const question=explored[i+1];
+      assert.ok(['proved','counterexample'].includes(question.state));
+      assert.equal(question.candidates.length,0);
+      assert.equal(question.forcing.length,0);
+    }
   }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
 
