@@ -1451,7 +1451,10 @@ Opt-in completion partitions (`--completion-split-depth N`, API
 `splits`, `leaves`, `records` (at most 256), `omittedRecords`.
 Each record has `kind: "completion-branch"`, `phase`, `depth`, `state`
 (`preparing`, `split`, `searching`, `proved`, `counterexample`, `inconclusive`,
-`unsplit-proved`, `unsplit-counterexample`, `unsplit-inconclusive`),
+`unsplit-proved`, `unsplit-counterexample`, `unsplit-inconclusive`, and in
+exploration `leaf-deferred`: structural work finished without a split, and the
+residual search waits until every pending unit has been ranked and split; the
+same unit later has a second record for its search),
 `pins` (up to 32 atom/value pairs), `omittedPins`, nullable `split`
 (a representative tuple of the selected group), `children`, `guardedEdges`,
 `work`, `elapsedMs` and nullable `cutoff`. Positive pins precede false pins in

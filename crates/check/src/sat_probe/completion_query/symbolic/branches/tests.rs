@@ -968,6 +968,149 @@ fn exploration_ranks_the_root_and_both_subtrees_before_residual_search() {
 }
 
 #[test]
+fn exploration_defers_leaf_searches_until_structural_work_is_done() {
+    // `p :- i, !p` and `q :- j, !i, !q`: splitting on i leaves the i-true child
+    // with only p's loop and nothing to split (a leaf at depth 1), while the
+    // i-false child still splits on j. The early leaf must not search first.
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let j = rel(&mut c, "j", true);
+    let p = rel(&mut c, "p", false);
+    let q = rel(&mut c, "q", false);
+    rule(&mut c, p, &[(i, false), (p, true)]);
+    rule(&mut c, q, &[(j, false), (i, true), (q, true)]);
+    let v = verification(&mut c, None, &[]);
+    let mut e = prepare(&c, v, &Default::default());
+    e.limits.completion_exploration = true;
+    e.limits.completion_probe_work = 0;
+    e.branches = Some(Arc::new(std::sync::Mutex::new(BranchReport::default())));
+    let calls = std::cell::RefCell::new(vec![]);
+    let options = CheckOptions {
+        split_depth: 2,
+        ..Default::default()
+    };
+    let result: Search<()> = run(&e, false, true, &options, 1, |b, _| {
+        let ii = b.program.atom_index[&GroundAtom::new(i, [])];
+        let jj = b.program.atom_index[&GroundAtom::new(j, [])];
+        calls
+            .borrow_mut()
+            .push((b.cone.fixed[ii], b.cone.fixed[jj]));
+        Ok(Search::None)
+    })
+    .unwrap();
+    assert!(matches!(result, Search::None));
+    let calls = calls.into_inner();
+    let early = (Some(true), None);
+    assert!(
+        calls.contains(&early),
+        "the i-true child is a depth-1 leaf: {calls:?}"
+    );
+    assert_ne!(
+        calls[0], early,
+        "a leaf searched before structural work ended"
+    );
+    let report = e.branches.as_ref().unwrap().lock().unwrap();
+    let deferred: Vec<_> = report
+        .records
+        .iter()
+        .filter(|r| r.state == "leaf-deferred")
+        .collect();
+    assert!(!deferred.is_empty());
+    // Ranking ran there and found nothing: the record says why and which cycle.
+    let gap = deferred[0].ranking_gap.as_ref().expect("ranking gap");
+    assert!(gap.targets > 0 || gap.reason == "no-target");
+    assert!(
+        gap.witness.contains(&GroundAtom::new(p, [])),
+        "witness {:?} ({})",
+        gap.witness,
+        gap.reason
+    );
+    assert!(
+        report
+            .records
+            .iter()
+            .any(|r| r.depth == 1 && r.state == "split")
+    );
+}
+
+#[test]
+fn deferred_leaves_stay_inconclusive_when_the_deadline_arrives_first() {
+    // Same shape as the deferral test: two leaves wait while the last structural
+    // unit searches. That search outlasts the deadline, so the waiting leaves
+    // are never checked and the question stays inconclusive.
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let j = rel(&mut c, "j", true);
+    let p = rel(&mut c, "p", false);
+    let q = rel(&mut c, "q", false);
+    rule(&mut c, p, &[(i, false), (p, true)]);
+    rule(&mut c, q, &[(j, false), (i, true), (q, true)]);
+    let v = verification(&mut c, None, &[]);
+    let mut e = prepare(&c, v, &Default::default());
+    e.limits.completion_exploration = true;
+    e.limits.completion_probe_work = 0;
+    e.limits.timeout = Duration::from_millis(1000);
+    e.branches = Some(Arc::new(std::sync::Mutex::new(BranchReport::default())));
+    let calls = std::cell::Cell::new(0);
+    let options = CheckOptions {
+        split_depth: 2,
+        ..Default::default()
+    };
+    let result: Search<()> = run(&e, false, true, &options, 1, |_, _| {
+        calls.set(calls.get() + 1);
+        std::thread::sleep(Duration::from_millis(1300));
+        Ok(Search::None)
+    })
+    .unwrap();
+    assert!(matches!(result, Search::Inconclusive(_)));
+    assert_eq!(calls.get(), 1, "deferred leaves ran after the deadline");
+    let report = e.branches.as_ref().unwrap().lock().unwrap();
+    assert!(report.pending_units > 0);
+    assert!(report.records.iter().any(|r| r.state == "leaf-deferred"));
+}
+
+#[test]
+fn resumed_leaf_work_reduces_the_next_leaf_allowance() {
+    // Three leaves (one searched at once, two resumed). Each search charges
+    // 100,000 work to its counter; every later leaf must see that consumed.
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let j = rel(&mut c, "j", true);
+    let p = rel(&mut c, "p", false);
+    let q = rel(&mut c, "q", false);
+    rule(&mut c, p, &[(i, false), (p, true)]);
+    rule(&mut c, q, &[(j, false), (i, true), (q, true)]);
+    let v = verification(&mut c, None, &[]);
+    let mut e = prepare(&c, v, &Default::default());
+    e.limits.completion_exploration = true;
+    e.limits.completion_probe_work = 0;
+    e.limits.max_work = 1_000_000;
+    let allowances = std::cell::RefCell::new(vec![]);
+    let options = CheckOptions {
+        split_depth: 2,
+        ..Default::default()
+    };
+    let result: Search<()> = run(&e, false, true, &options, 1, |b, _| {
+        allowances.borrow_mut().push(b.limits.max_work);
+        b.exploration_work
+            .as_ref()
+            .expect("leaf work counter")
+            .fetch_add(100_000, std::sync::atomic::Ordering::Relaxed);
+        Ok(Search::None)
+    })
+    .unwrap();
+    assert!(matches!(result, Search::None));
+    let allowances = allowances.into_inner();
+    assert_eq!(allowances.len(), 3, "{allowances:?}");
+    for pair in allowances.windows(2) {
+        assert!(
+            pair[1] + 100_000 <= pair[0],
+            "a leaf reused work an earlier leaf consumed: {allowances:?}"
+        );
+    }
+}
+
+#[test]
 fn exploration_probe_closes_questions_before_ranking_or_forcing() {
     let mut c = Corpus::new();
     let i = rel(&mut c, "i", true);

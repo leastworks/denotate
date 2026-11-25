@@ -167,6 +167,9 @@ struct Unit {
     config: QueryLimits,
     worlds: usize,
     residual_only: Option<Vec<Arc<BTreeSet<usize>>>>,
+    /// Exploration: a leaf whose structural work is done, waiting for its
+    /// residual search until every pending unit has been ranked and split.
+    leaf: Option<Engine>,
 }
 fn divided(q: &QueryLimits, n: usize) -> QueryLimits {
     QueryLimits {
@@ -476,7 +479,9 @@ fn partition_from<T>(
         config: e.config.clone(),
         worlds: options.max_worlds,
         residual_only: None,
+        leaf: None,
     }]);
+    let mut leaves = std::collections::VecDeque::new();
     let mut report = BranchReport::default();
     let usage = e.limits.completion_exploration.then(|| {
         Arc::new(std::sync::Mutex::new(QueryLimits {
@@ -490,13 +495,13 @@ fn partition_from<T>(
     let mut next_id = 2;
     let mut unknown = None;
     let mut answer = None;
-    while let Some(unit) = queue.pop_front() {
+    while let Some(unit) = queue.pop_front().or_else(|| leaves.pop_front()) {
         e.limits.cancellation.check()?;
         if Instant::now() >= deadline {
             let cause = CheckError::deadline(phase, limits.timeout);
             e.limits.progress.failure(&cause);
             unknown.get_or_insert(inconclusive(cause)?);
-            report.pending_units += queue.len() + 1;
+            report.pending_units += queue.len() + leaves.len() + 1;
             break;
         }
         let started = Instant::now();
@@ -592,6 +597,9 @@ fn partition_from<T>(
         let mut config = allocation.config;
         let mut probe_answer = None;
         let result: Result<Option<Engine>> = (|| {
+            if let Some(branch) = &unit.leaf {
+                return Ok(Some(branch.clone()));
+            }
             if e.limits.completion_exploration && unit.parent.is_none() {
                 probe_answer = probe::run(
                     e,
@@ -651,7 +659,7 @@ fn partition_from<T>(
             branch.config = config.clone();
             let capacity = options
                 .split_branches
-                .saturating_sub(report.leaves + queue.len());
+                .saturating_sub(report.leaves + queue.len() + leaves.len());
             if unit.depth < options.split_depth && capacity > 0 {
                 let chosen = if let Some(r) = preflight.filter(|_| !e.forcing) {
                     record.candidates = r.candidates;
@@ -772,6 +780,7 @@ fn partition_from<T>(
                                 config: divided(&config, e.limits.completion_share(n)),
                                 worlds: unit.worlds / e.limits.completion_share(n),
                                 residual_only: Some(choice.residual_only(child_index)),
+                                leaf: None,
                             });
                         }
                         return Ok(None);
@@ -800,8 +809,35 @@ fn partition_from<T>(
                     report.record(e, record);
                     continue;
                 }
+                Ok(Some(branch))
+                    if e.limits.completion_exploration
+                        && unit.leaf.is_none()
+                        && !queue.is_empty() =>
+                {
+                    // One unbounded leaf search must not starve units that
+                    // still have structural work; leaves run after all of it.
+                    remaining_work = remaining_work.saturating_sub(record.work);
+                    let prepared = record.work;
+                    forward(e, &sink, unit.depth);
+                    record.state = "leaf-deferred";
+                    record.elapsed = started.elapsed();
+                    report.record(e, record);
+                    // Preparation is charged once: the search later gets only
+                    // what this unit's allowance has left.
+                    leaves.push_back(Unit {
+                        leaf: Some(branch),
+                        work: unit.work.saturating_sub(prepared),
+                        ..unit
+                    });
+                    continue;
+                }
                 Ok(Some(mut branch)) => {
                     report.leaves += 1;
+                    // A resumed leaf's saved engine still points at its first
+                    // visit's counter; its search must charge this visit's.
+                    if e.limits.completion_exploration {
+                        branch.exploration_work = leaf_work.clone();
+                    }
                     branch.limits = local_limits.clone();
                     branch.limits.timeout = budget.remaining_time();
                     branch.limits.max_work = local_limits.max_work.saturating_sub(budget.used());

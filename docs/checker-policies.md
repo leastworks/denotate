@@ -2375,7 +2375,12 @@ rejection and eligibility covers and lifting, under that cap; it reuses existing
 views and never starts pruning, forcing or ranking. Exhausting the cap is charged,
 is never a proof, and leaves the remaining allowance to the structural driver; a
 counterexample found inside the probe is reported as one. This does not promise
-that every ordinary unsplit proof fits the cap. A cutoff proceeds to reductions, requested pruning to
+that every ordinary unsplit proof fits the cap. In exploration, a unit that finishes
+its structural work without a split is recorded as `leaf-deferred`; its residual
+search runs only after every pending unit has been ranked and split, so one
+unbounded leaf search cannot starve sibling units. A unit whose ranking finds no
+partition records why (`rankingGap`: the witness cycle used and where candidate
+discovery stopped). A cutoff proceeds to reductions, requested pruning to
 saturation, forcing, complete shortlisted trials, then a verified split. Residual
 queries run only at leaves. Both cut and uncut children rank surviving components.
 Ordinary mode changes only classification existence's order: enabled forcing/splits
