@@ -69,6 +69,7 @@ mod cube_tests {
                     input: vec![true, true, false, false].into(),
                     groups: vec![].into(),
                     source_rules: 3,
+                    retained: vec![].into(),
                 };
                 let valid = |values: &[bool]| {
                     (2..4).all(|head| {
@@ -570,6 +571,35 @@ pub(super) fn cover(
             }
         }
     }
+    for eq in &c.retained {
+        b.charge(
+            eq.bodies.iter().map(|body| body.len() + 1).sum(),
+            "completion retained cube",
+        )?;
+        if values[eq.head] {
+            let body = eq
+                .bodies
+                .iter()
+                .find(|body| body.iter().all(|(i, p)| values[*i] == *p))
+                .ok_or(CheckError::Internal("invalid forced true cube"))?;
+            for (i, _) in body {
+                if free(*i) {
+                    cube.insert(*i, values[*i]);
+                }
+            }
+        } else {
+            for body in &eq.bodies {
+                let (i, _) = body
+                    .iter()
+                    .filter(|(i, p)| values[*i] != *p)
+                    .min_by_key(|(i, _)| (free(*i) && !cube.contains_key(i), *i))
+                    .ok_or(CheckError::Internal("invalid forced false cube"))?;
+                if free(*i) {
+                    cube.insert(*i, values[*i]);
+                }
+            }
+        }
+    }
     for i in 0..c.fixed.len() {
         b.tick("completion model cube")?;
         if !c.input[i] && c.fixed[i].is_none() && values[i] && !supported[i] {
@@ -828,7 +858,9 @@ impl Engine {
                 // An unconditional structural existence certificate needs no
                 // model query, with or without H.
                 let world_view = s.simplified(original, false)?;
-                if consistency::analyse(&world_view, None, s.run.budget)?.odd_components == 0 {
+                if world_view.retained.is_empty()
+                    && consistency::analyse(&world_view, None, s.run.budget)?.odd_components == 0
+                {
                     return Ok(None);
                 }
                 existence::classification_shape(self, &world_view, world_view.label(), s)?;
@@ -1104,10 +1136,11 @@ impl Engine {
     /// particular, a processing contradiction never filters the input universe
     /// or the original classification query.
     pub fn check(&self, keys: &SemanticKeys, options: &CheckOptions) -> Result<Report> {
-        if !options.prune && options.split_depth == 0 {
+        if !options.prune && !options.force && options.split_depth == 0 {
             return self.check_unpruned(keys, options);
         }
         let mut invocation = self.clone();
+        invocation.forcing = options.force && options.split_depth > 0;
         let cache = Arc::new(std::sync::Mutex::new(pruning::Cache::for_engine(self)));
         if options.prune && options.split_depth > 0 {
             cache.lock().unwrap().enable_trials(self);
@@ -1116,7 +1149,7 @@ impl Engine {
             invocation.pruning = Some(cache.clone());
         }
         let branches = Arc::new(std::sync::Mutex::new(BranchReport::default()));
-        if options.split_depth > 0 {
+        if options.split_depth > 0 || options.force {
             invocation.branches = Some(branches.clone());
         }
         if options.prune {
@@ -1132,7 +1165,7 @@ impl Engine {
         }
         report.pruning.enabled = options.prune;
         report.branches = branches.lock().unwrap().clone();
-        report.branches.enabled = options.split_depth > 0;
+        report.branches.enabled = options.split_depth > 0 || options.force;
         Ok(report)
     }
     pub(super) fn check_unpruned(

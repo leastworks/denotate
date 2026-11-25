@@ -93,6 +93,7 @@ fn compact_cone(
         duplicated: vec![true; target.atoms.len()].into(),
         groups: Vec::new().into(),
         source_rules: rules.len(),
+        retained: vec![].into(),
     };
     let ids = c
         .atoms

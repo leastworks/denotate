@@ -2318,3 +2318,22 @@ claim. Model reads are disabled while removable clauses are active; this slice
 also declines all core writes in that case, rather than trying to retain selector
 conditions. Batsat's conflict literals are negated back into assumption literals
 before subset indexing. Enforcing hits is a separate future switch.
+
+### Optional per-path completion forcing
+
+`--completion-force` / `CheckOptions::force` defaults off and requires positive
+split depth. It runs in funded child trials and residual branch units, with no
+extra root forcing pass ahead of the existing unsplit attempt. Within the existing
+ranking allocation, forcing receives half the available time/work/query allowance,
+shared across applicable W and W+H views. Unused work passes on; explicit logical
+limits and the run deadline still bind. This does not reserve time from root
+pruning. Trial ranking counts forced witness atoms before the existing verified
+cut scores, while requiring at least one actual cut to select a partition.
+
+Each pass builds one immutable encoding, checks context satisfiability, and then
+queries positive/negative literals as assumptions. No-model contexts install no
+constants. Every retained constant has a residual defining-equation constraint;
+iteration with propagation and pruning stops at a fixed point or cutoff. Queries,
+failed work, shadow-cache work and installation are charged. Cutoffs leave the
+last successfully installed equivalent view. No node, time or selected-witness
+golden is introduced; compare outcomes and inspect per-path telemetry.

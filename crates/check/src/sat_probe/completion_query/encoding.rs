@@ -249,6 +249,20 @@ pub(super) fn encode_shared(
                 logic.clause(std::iter::once(!vars[i]).chain(terms).collect(), cnf, b)?;
             }
         }
+        for eq in &c.retained {
+            let mut bodies = Vec::new();
+            for body in &eq.bodies {
+                b.charge(body.len() + 1, "completion retained equations")?;
+                let lits: Vec<_> = body
+                    .iter()
+                    .map(|(i, p)| if *p { vars[*i] } else { !vars[*i] })
+                    .collect();
+                bodies.push(logic.and(&lits, cnf, b)?);
+            }
+            let rhs = logic.or(&bodies, cnf, b)?;
+            logic.clause(vec![!vars[eq.head], rhs], cnf, b)?;
+            logic.clause(vec![vars[eq.head], !rhs], cnf, b)?;
+        }
         for (kind, group) in &c.groups {
             b.charge(group.len() + 1, "completion encoding groups")?;
             let lits = group.iter().map(|i| vars[*i]).collect::<Vec<_>>();

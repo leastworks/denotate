@@ -226,6 +226,12 @@ impl PartialEq for Rule {
 }
 impl Eq for Rule {}
 // Named atoms precede anonymous acyclic BDD nodes; all indexed arrays include both.
+#[derive(Debug, Clone)]
+struct RetainedEquation {
+    head: usize,
+    bodies: Vec<Vec<(usize, bool)>>,
+}
+
 #[derive(Clone)]
 struct Cone {
     atoms: shared::Shared<GroundAtom>,
@@ -236,6 +242,7 @@ struct Cone {
     input: shared::Shared<bool>,
     groups: shared::Shared<(Cardinality, Vec<usize>)>,
     source_rules: usize,
+    retained: shared::Shared<RetainedEquation>,
 }
 
 impl PreparedCheck<'_> {
@@ -493,6 +500,7 @@ fn cone(
         .collect();
     Ok(Cone {
         source_rules: rules.len(),
+        retained: vec![].into(),
         atoms: atoms.into(),
         rules: rules.into(),
         fixed,

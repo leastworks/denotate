@@ -232,6 +232,22 @@ pub fn pruning_formatter(
     }
 }
 
+fn forcing_text(records: &[denotate_check::completion_query::ForcingRecord]) -> String {
+    let mut text = String::new();
+    for r in records {
+        text.push_str(&format!("; forcing [{}]: {} constants ({} witness atoms), {}/{} candidates; shadow cache {} model / {} core claims, {} checked, {} mismatches{}",
+            r.context,r.forced,r.forced_witnesses,r.attempted,r.candidates,r.cache.model_hits,r.cache.core_hits,r.cache.checked_hits,r.cache.mismatches,
+            if r.no_model { "; context has no model; no constants installed" } else { "" }));
+        if let Some(c) = r.cutoff {
+            text.push_str(&format!(
+                "; {}",
+                denotate_presentation::exhaustion_text(c.phase, c.resource, c.details)
+            ));
+        }
+    }
+    text
+}
+
 pub fn branch_line(c: &denotate_check::completion_query::BranchRecord) -> String {
     let mut line = format!(
         "{} branch depth {}: {}, {} children, {} work, {:.3}s",
@@ -248,6 +264,7 @@ pub fn branch_line(c: &denotate_check::completion_query::BranchRecord) -> String
             denotate_presentation::exhaustion_text(c.phase, c.resource, c.details)
         ));
     }
+    line.push_str(&forcing_text(&c.forcing));
     line
 }
 
@@ -312,6 +329,7 @@ pub fn branch_formatter(
                     child.settled_target_atoms,child.target_atoms,child.disabled_edges,child.cycles_cut,
                     if !child.complete || child.cutoff.is_some() { " (trial incomplete)" } else { "" },
                     child.omitted_derived_guards,if child.derived_guards_complete { "" } else { " (inventory incomplete/not sampled)" }));
+                line.push_str(&forcing_text(&child.forcing));
                 for producer in &child.removed_producer_examples {
                     let body = producer
                         .original_body

@@ -681,3 +681,10 @@ omitted counts; property tuple lists and input observations are bounded too.
 checking or verdicts. `--verbose` continues to control source-location detail only.
 Completion size records and progress include component existence rounds, cube pins,
 validation work and lifting counts.
+
+Completion's optional path forcing is available as `just check-den ROOT --engine
+sat --completion-split-depth 2 --completion-force`. It requires positive split
+depth and is off by default; forcing stays within funded trials and residual
+branch units, preserving the initial unsplit attempt. Human branch output and JSON include per-context forced constants and
+shadow-cache model/core claims, checked claims, mismatches and cutoffs. Residual
+constraints preserve no-model inputs; enabling forcing does not assume existence.

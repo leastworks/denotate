@@ -137,7 +137,16 @@ pub(super) fn residual(
         }
         s.metrics();
     }
-    if pending.is_empty() {
+    for eq in &cone.retained {
+        pending.push(eq.head);
+        for body in &eq.bodies {
+            s.run
+                .budget
+                .charge(body.len() + 1, "completion retained existence")?;
+            pending.extend(body.iter().map(|(i, _)| *i));
+        }
+    }
+    if pending.is_empty() && cone.retained.is_empty() {
         return Ok(None);
     }
     // All discarded SCCs are total for *every* provider assignment. Retaining
@@ -216,6 +225,7 @@ pub(super) fn component(
         duplicated: vec![false; members.len()].into(),
         groups: vec![].into(),
         source_rules: rules.len(),
+        retained: vec![].into(),
     })
 }
 
@@ -363,6 +373,42 @@ pub(super) fn lift(
             s.run.cnf.or(bodies, s.run.budget)?
         };
         bad.push(if values[i] { !produced } else { produced });
+    }
+    for eq in &c.retained {
+        let mut terms = Vec::new();
+        for body in &eq.bodies {
+            s.run
+                .budget
+                .charge(body.len() + 1, "completion retained lifting")?;
+            if body
+                .iter()
+                .any(|(i, p)| (!c.input[*i] || c.fixed[*i].is_some()) && values[*i] != *p)
+            {
+                continue;
+            }
+            let lits: Vec<_> = body
+                .iter()
+                .filter(|(i, _)| c.input[*i] && c.fixed[*i].is_none())
+                .map(|(i, p)| {
+                    if *p {
+                        target.encoding.vars[*i]
+                    } else {
+                        !target.encoding.vars[*i]
+                    }
+                })
+                .collect();
+            terms.push(if lits.is_empty() {
+                s.run.truth
+            } else {
+                s.run.cnf.and(&lits, s.run.budget)?
+            });
+        }
+        let rhs = if terms.is_empty() {
+            !s.run.truth
+        } else {
+            s.run.cnf.or(&terms, s.run.budget)?
+        };
+        bad.push(if values[eq.head] { !rhs } else { rhs });
     }
     s.run.cnf.clause(bad, s.run.budget)?;
     s.run.cnf.gate = None;

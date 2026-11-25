@@ -16,6 +16,7 @@ pub use pruning::{
     PruningComponent, PruningContext, PruningKind, PruningRecord, PruningReport, PruningStop,
     PruningView,
 };
+pub use shadow_cache::Stats as ShadowCacheStats;
 use std::sync::Arc;
 
 mod advisory;
@@ -31,8 +32,8 @@ pub use advisory::*;
 pub use checking::*;
 pub use properties::*;
 pub use symbolic::branches::{
-    BranchRecord, BranchReport, DerivedGuard, PrunedProducer, SplitAlternative, SplitCandidate,
-    SplitChild,
+    BranchRecord, BranchReport, DerivedGuard, ForcingRecord, PrunedProducer, SplitAlternative,
+    SplitCandidate, SplitChild,
 };
 pub use symbolic::planning::*;
 #[cfg(test)]
@@ -246,6 +247,7 @@ pub struct Engine {
     pruning: Option<Arc<std::sync::Mutex<pruning::Cache>>>,
     branches: Option<Arc<std::sync::Mutex<BranchReport>>>,
     formula_pins: Vec<branch_formula::Pin>,
+    forcing: bool,
     program: Arc<GroundProgram>,
     original: Arc<crate::ground::OriginalDependencies>,
     assumptions: Arc<Vec<contracts::Assumption>>,
@@ -405,6 +407,7 @@ impl Engine {
             pruning: None,
             branches: None,
             formula_pins: vec![],
+            forcing: false,
             program: Arc::new(program),
             original,
             cone: Arc::new(cone),

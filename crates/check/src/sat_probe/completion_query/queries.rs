@@ -908,6 +908,7 @@ pub(super) fn validate_assignment(
             ));
         }
     }
+    validate_retained(cone, values, b)?;
     for (kind, group) in &cone.groups {
         b.charge(group.len() + 1, "completion model validation")?;
         let n = group.iter().filter(|i| values[**i]).count();
@@ -917,6 +918,26 @@ pub(super) fn validate_assignment(
         {
             return Err(CheckError::Internal(
                 "SAT interpretation violates input restriction",
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn validate_retained(cone: &Cone, values: &[bool], b: &mut Budget<'_>) -> Result<()> {
+    for eq in &cone.retained {
+        b.charge(
+            eq.bodies.iter().map(|body| body.len() + 1).sum(),
+            "completion retained validation",
+        )?;
+        if values[eq.head]
+            != eq
+                .bodies
+                .iter()
+                .any(|body| body.iter().all(|(i, p)| values[*i] == *p))
+        {
+            return Err(CheckError::Internal(
+                "forced definition violates original completion",
             ));
         }
     }

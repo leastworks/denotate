@@ -777,6 +777,7 @@ fn completion_preparation_sizes_are_flushed_before_checking_even_without_progres
         &Default::default(),
         &Default::default(),
         false,
+        false,
         0,
         512,
         false,
@@ -1043,4 +1044,39 @@ fn completion_branches_are_opt_in_and_try_unsplit_before_reporting_input_choices
         plain_human
     );
     assert_eq!(f.run(&["--completion-split-depth", "2"]).0, 2);
+}
+
+#[test]
+fn completion_forcing_is_opt_in_and_reports_shadow_queries_without_hiding_no_meaning() {
+    let f = Fixture::new(
+        "input i();relation x();x():-i(),!x();verification v{semantics:completion;assumptions:[];obligations:[];}",
+    );
+    assert_eq!(f.run(&["--completion-force"]).0, 2);
+    let (code, plain) = f.run(&["--engine", "sat", "--no-progress"]);
+    assert_eq!(code, 1, "{plain}");
+    assert!(!plain.contains("forcing ["));
+    for json in [false, true] {
+        let mut flags = vec![
+            "--engine",
+            "sat",
+            "--completion-force",
+            "--completion-split-depth",
+            "2",
+            "--verbose",
+            "--no-progress",
+        ];
+        if json {
+            flags.push("--json");
+        }
+        let (forced_code, out) = f.run(&flags);
+        assert_eq!(forced_code, code, "{out}");
+        if json {
+            assert!(out.contains("\"shadowCache\""), "{out}");
+            assert!(out.contains("\"forced\""), "{out}");
+            assert!(out.contains("\"mismatches\": 0"), "{out}");
+        } else {
+            assert!(out.contains("forcing [W]:"), "{out}");
+            assert!(out.contains("0 mismatches"), "{out}");
+        }
+    }
 }

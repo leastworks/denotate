@@ -2472,3 +2472,21 @@ or ambiguity queries. Existing total-component certificates still justify any
 prior existence-residual reduction. Source-rule slots remain for validation and
 provenance: a producer contradicted by a formula pin is inactive in analysis and
 encoding without needing a covered-producer proof.
+
+## Path-local constants retain their defining equations
+
+Completion forcing is opt-in and preserves the model set within the question's
+W or W+H context and its path pins. A proof that all models assign an atom a
+constant does not prove that each input has a model. Replacing only the head's
+equation would lose this distinction: `x() :- i(), !x();` forces false where a
+model exists, yet `i=true` must remain a no-meaning input.
+
+Keep both the forced constant and its old equation, with substitutions, as a
+residual constraint. The constant is entailed by the old equations; conversely,
+any new model still satisfies the retained equation and the unchanged equations.
+Fitting and subsequent context-tagged pruning preserve this equality. Existence
+projection retains residual constraints and their dependencies, cube coverage and
+lifting certify them, and replay checks them. A structural totality shortcut is
+not sufficient while such constraints remain. H-dependent constants never enter
+no-H views. Shadow SAT-cache hits are always checked by the solver; enabling hits
+to answer queries is a separate decision.

@@ -53,6 +53,8 @@ pub struct Meaning {
 pub struct CheckOptions {
     /// Opt-in common-equations pruning and H-first classification existence.
     pub prune: bool,
+    /// Opt-in path-local SAT constants; retained equations preserve existence.
+    pub force: bool,
     /// Input-partition depth; zero preserves the unsplit query path.
     pub split_depth: usize,
     pub split_branches: usize,
@@ -72,6 +74,7 @@ impl Default for CheckOptions {
     fn default() -> Self {
         Self {
             prune: false,
+            force: false,
             split_depth: 0,
             split_branches: 512,
             meaning: MeaningMode::Full,

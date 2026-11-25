@@ -40,6 +40,13 @@ impl Slice {
             .filter_map(|(i, cyclic)| cyclic.then_some(i))
             .collect();
         pending.extend(h);
+        for eq in &source.retained {
+            pending.push(eq.head);
+            for body in &eq.bodies {
+                b.charge(body.len() + 1, "completion existence slice")?;
+                pending.extend(body.iter().map(|(i, _)| *i));
+            }
+        }
         for (_, group) in &source.groups {
             b.charge(group.len(), "completion existence slice")?;
             pending.extend(group);
@@ -168,6 +175,7 @@ mod tests {
             duplicated: vec![false; 4].into(),
             groups: vec![].into(),
             source_rules: 4,
+            retained: vec![].into(),
         };
         let bodies = [
             vec![],

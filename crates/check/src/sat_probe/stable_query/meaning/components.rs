@@ -57,6 +57,7 @@ impl Engine {
             duplicated: vec![false; global.len()].into(),
             groups: vec![].into(),
             source_rules: rules.len(),
+            retained: vec![].into(),
         };
         for i in rules {
             let r = &self.cone.rules[i];

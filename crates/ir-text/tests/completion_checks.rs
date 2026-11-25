@@ -5,6 +5,13 @@ fn loaded(text: &str) -> LoadedProgram {
     load(&ProgramMembership::single("root", [s.uri.clone()]), &[s]).unwrap()
 }
 fn checked(text: &str, options: CheckOptions) -> (LoadedProgram, Report) {
+    checked_with_limits(text, options, Limits::default())
+}
+fn checked_with_limits(
+    text: &str,
+    options: CheckOptions,
+    limits: Limits,
+) -> (LoadedProgram, Report) {
     let p = loaded(text);
     let v = p.corpus.verifications().next().unwrap().id;
     let Preparation::Ready(e) = Engine::prepare(
@@ -12,7 +19,7 @@ fn checked(text: &str, options: CheckOptions) -> (LoadedProgram, Report) {
         &p.domains,
         &p.keys,
         v,
-        &Limits::default(),
+        &limits,
         QueryLimits::default(),
     )
     .unwrap() else {
@@ -741,10 +748,16 @@ fn implied_body_findings_name_the_literal_and_keep_ground_rule_provenance() {
 
 #[test]
 fn formula_split_telemetry_distinguishes_certificate_and_child_views() {
-    let (p, r) = checked(
+    let (p, r) = checked_with_limits(
         "input a();input b();relation term();term():-a(),!b();term():-!a(),b();relation selected();relation profile();selected():-term(),profile();profile():-!term(),!selected();relation h();h():-!selected();verification v{semantics:completion;hypothesis:h;assumptions:[];obligations:[];}",
         CheckOptions {
             split_depth: 2,
+            ..Default::default()
+        },
+        // This fixture verifies trial presentation. The plain 10-second API
+        // allowance can deliberately leave less than the minimum trial slice.
+        Limits {
+            timeout: std::time::Duration::from_secs(120),
             ..Default::default()
         },
     );
@@ -830,10 +843,16 @@ fn fact_negation_task_shape_and_explicit_facts_have_no_analysis_component() {
 
 #[test]
 fn one_sided_formula_cut_is_visible_per_child_in_json_and_human_output() {
-    let (p, r) = checked(
+    let (p, r) = checked_with_limits(
         "input a();input b();relation term();term():-a(),!b();term():-!a(),b();relation loop();loop():-term(),!loop();verification v{semantics:completion;assumptions:[];obligations:[];}",
         CheckOptions {
             split_depth: 2,
+            ..Default::default()
+        },
+        // This fixture verifies trial presentation. The plain 10-second API
+        // allowance can deliberately leave less than the minimum trial slice.
+        Limits {
+            timeout: std::time::Duration::from_secs(120),
             ..Default::default()
         },
     );

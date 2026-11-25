@@ -2,6 +2,8 @@
 //! their equations, solver, work allowance and results belong to that branch.
 use super::*;
 mod fitting;
+mod forcing;
+pub use forcing::ForcingRecord;
 mod groups;
 mod ranking;
 use groups::{Choice, Group};
@@ -42,6 +44,7 @@ pub struct SplitCandidate {
 /// Every attempted child has its own outcome; guard sampling shares one cap.
 #[derive(Debug, Clone)]
 pub struct SplitChild {
+    pub forcing: Vec<ForcingRecord>,
     pub child: usize,
     pub context: &'static str,
     pub rest: bool,
@@ -80,6 +83,7 @@ pub struct DerivedGuard {
 }
 #[derive(Debug, Clone)]
 pub struct BranchRecord {
+    pub forcing: Vec<ForcingRecord>,
     pub id: usize,
     pub parent: Option<usize>,
     pub closed_children: usize,
@@ -223,7 +227,13 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
     let mut candidates = vec![];
     let mut omitted = 0;
     let ranked: Result<_> = (|| {
+        // Preserve the established unsplit attempt. Forcing belongs to the
+        // already-funded child trials and to residual branch units, not a new
+        // root preflight pass that takes time from the first SAT search.
         let state = Arc::new(fitting::Bundle::new(e, &mut budget)?);
+        if options.split_depth == 0 {
+            return Ok(None);
+        }
         let choice = choose(
             e,
             &state,
@@ -286,6 +296,7 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
         Search::NotAnalysed => return Err(CheckError::Internal("unanalysed unsplit attempt")),
     };
     let record = BranchRecord {
+        forcing: vec![],
         id: 0,
         parent: None,
         closed_children: 0,
@@ -439,6 +450,7 @@ fn partition_from<T>(
         }
         let started = Instant::now();
         let mut record = BranchRecord {
+            forcing: vec![],
             id: unit.id,
             parent: unit.parent_id,
             closed_children: 0,
@@ -515,6 +527,10 @@ fn partition_from<T>(
                     None => fitting::Bundle::new(e, &mut budget)?,
                 })
             };
+            let mut settled = (*state).clone();
+            settled.settle(e, classification, &mut config, &mut budget)?;
+            record.forcing = settled.forcing.clone();
+            let state = Arc::new(settled);
             let mut branch = state.engine(e, &mut budget)?;
             branch.limits = local_limits.clone();
             branch.config = config.clone();
@@ -522,7 +538,7 @@ fn partition_from<T>(
                 .split_branches
                 .saturating_sub(report.leaves + queue.len());
             if unit.depth < options.split_depth && capacity > 0 {
-                let chosen = if let Some(r) = preflight {
+                let chosen = if let Some(r) = preflight.filter(|_| !e.forcing) {
                     record.candidates = r.candidates;
                     record.omitted_candidates = r.omitted;
                     Some(r.choice)
@@ -628,7 +644,7 @@ fn partition_from<T>(
                     }
                 }
             }
-            Ok(Some(if unit.pins.is_empty() {
+            Ok(Some(if unit.pins.is_empty() && !e.forcing {
                 e.clone()
             } else {
                 branch

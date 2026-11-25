@@ -424,6 +424,7 @@ mod tests {
                 duplicated: vec![false; 3].into(),
                 groups: vec![].into(),
                 source_rules: 0,
+                retained: vec![].into(),
             };
             let mut b = Budget::new(&limits);
             let core = consistency::analyse(&c, None, &mut b).unwrap();

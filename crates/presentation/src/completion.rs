@@ -1035,12 +1035,27 @@ fn completion_pruned_producer(
         "omittedBodyLiterals":p.omitted_body_literals}))
 }
 
+fn completion_forcing(
+    records: &[denotate_check::completion_query::ForcingRecord],
+    atom: &impl Fn(&GroundAtom) -> Result<Value>,
+) -> Result<Vec<Value>> {
+    records.iter().map(|r| Ok(json!({
+        "context":r.context,"candidates":r.candidates,"attempted":r.attempted,
+        "forced":r.forced,"forcedWitnesses":r.forced_witnesses,"noModel":r.no_model,
+        "examples":r.examples.iter().map(|(a,v)|Ok(json!({"atom":atom(a)?,"value":v}))).collect::<Result<Vec<_>>>()?,
+        "omitted":r.omitted,"cutoff":r.cutoff.map(reason),
+        "shadowCache":{"queries":r.cache.queries,"modelHits":r.cache.model_hits,"coreHits":r.cache.core_hits,
+            "checkedHits":r.cache.checked_hits,"mismatches":r.cache.mismatches,"models":r.cache.models,"cores":r.cache.cores,
+            "skippedModels":r.cache.skipped_models,"skippedCores":r.cache.skipped_cores}
+    }))).collect()
+}
+
 fn completion_split_child(
     c: &denotate_check::completion_query::SplitChild,
     atom: &impl Fn(&GroundAtom) -> Result<Value>,
 ) -> Result<Value> {
     Ok(json!({
-        "child":c.child,"context":c.context,"rest":c.rest,
+        "child":c.child,"context":c.context,"rest":c.rest,"forcing":completion_forcing(&c.forcing,atom)?,
         "pruningAttempts":c.pruning_attempts,"pruningProved":c.pruning_proved,
         "removedProducers":c.removed_producers,"removedLiterals":c.removed_literals,
         "removedProducerExamples":c.removed_producer_examples.iter().map(|p|completion_pruned_producer(p,atom)).collect::<Result<Vec<_>>>()?,
@@ -1060,6 +1075,7 @@ pub fn completion_branch_record(
 ) -> Result<Value> {
     Ok(
         json!({"kind":"completion-branch","id":c.id,"parent":c.parent,"closedChildren":c.closed_children,
+        "forcing":completion_forcing(&c.forcing,&atom)?,
         "splitKind":c.split_kind,"assumption":c.assumption.map(&assumption).transpose()?,
         "runnerUp":c.runner_up.as_ref().map(|r| -> Result<Value> { Ok(json!({"split":atom(&r.split)?,"assumption":r.assumption.map(&assumption).transpose()?,"children":r.children,"guardedEdges":r.guarded_edges,"hasRest":r.has_rest})) }).transpose()?,
         "candidates":c.candidates.iter().map(|r| -> Result<Value> { Ok(json!({

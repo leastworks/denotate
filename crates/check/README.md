@@ -1563,3 +1563,32 @@ cancellation propagates. Optional pruning retains structural removal evidence;
 pruning-off runs do not acquire new optimization findings. The public
 [fact-guard pair](../../fixtures/completion-search-free/README.md) exercises an odd
 cycle that exists only before these reductions.
+
+### Opt-in completion forcing
+
+`CheckOptions::force` / `check-den --engine sat --completion-split-depth 2 --completion-force` enables
+path-local constant proofs for verification existence/determinacy searches. It
+runs in funded split trials and residual branch units; it requires positive
+split depth and is off by default. No extra root forcing pass delays the existing
+unsplit attempt. After Fitting
+and applicable pruning, one fixed encoding per view answers both polarities of
+remaining witness/loop atoms using SAT assumptions. Proven constants feed back
+into propagation and pruning; newly acyclic dependents may become formula split
+candidates. Trial ranking prefers witness atoms forced by the children, followed
+by existing verified-cut ranking. No cut still means no partition.
+
+The original defining equation of each forced atom remains a residual constraint.
+For example, `x() :- i(), !x();` entails false for `x` wherever a model exists,
+but still has no model when `i` is true. Encoding, replay, existence projection
+and cube certification retain that constraint; having no remaining cyclic SCC
+is insufficient to bypass it. H-context constants stay in H views. W construction,
+obligations and planning are unchanged.
+
+Forcing uses part of the existing optional ranking allocation and shares it
+between applicable W/H contexts; residual searches retain their allocation.
+Every query still runs the solver. Encoding-local model/core caches are shadow
+only, with claimed hits compared to actual answers. Branch and trial-child
+telemetry reports forced constants (32 named examples per pass), forced witness
+atoms, candidate attempts, cache claims/checks/mismatches and cutoffs. A cache
+claim interrupted before solving is not a checked hit. See checker policies for
+storage and accounting limits.

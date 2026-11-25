@@ -208,6 +208,7 @@ impl State {
             duplicated: c.duplicated.clone(),
             groups: c.groups.clone(),
             source_rules: c.source_rules,
+            retained: c.retained.clone(),
             fixed: self.values.values(),
         }))
     }
@@ -225,6 +226,8 @@ pub(super) struct Bundle {
     pub formulas: Vec<branch_formula::Pin>,
     pub trials: Option<Arc<std::sync::Mutex<pruning::TrialPool>>>,
     pub proofs: Vec<PruningReport>,
+    pub forcing: Vec<forcing::ForcingRecord>,
+    forced_scopes: BTreeSet<(Vec<usize>, PruningContext)>,
 }
 impl Bundle {
     pub fn new(e: &Engine, b: &mut Budget<'_>) -> Result<Self> {
@@ -241,6 +244,8 @@ impl Bundle {
                 .map(|c| c.lock().unwrap().pins.clone())
                 .unwrap_or_default(),
             proofs: vec![],
+            forcing: vec![],
+            forced_scopes: BTreeSet::new(),
             trials: e
                 .pruning
                 .as_ref()
@@ -281,6 +286,8 @@ impl Bundle {
             formulas: self.formulas.clone(),
             trials: self.trials.clone(),
             proofs: vec![],
+            forcing: vec![],
+            forced_scopes: BTreeSet::new(),
             views: self
                 .views
                 .iter()
@@ -526,6 +533,136 @@ impl Bundle {
         }
         Ok((attempts, proved, cutoff))
     }
+    /// Optional work inside the caller's existing ranking allocation. Contexts
+    /// receive equal shares; failures leave the previous equivalent view intact.
+    pub fn settle(
+        &mut self,
+        e: &Engine,
+        classification: bool,
+        config: &mut QueryLimits,
+        b: &mut Budget<'_>,
+    ) -> Result<()> {
+        if !e.forcing {
+            return Ok(());
+        }
+        let contexts: Vec<_> = [PruningContext::World, PruningContext::Hypothesis]
+            .into_iter()
+            .filter(|c| {
+                !self
+                    .forced_scopes
+                    .contains(&(self.scope(classification), *c))
+            })
+            .filter(|c| {
+                if *c == PruningContext::World {
+                    !self
+                        .formulas
+                        .iter()
+                        .any(|p| p.certificate.context == PruningContext::Hypothesis)
+                } else {
+                    e.classification.is_some()
+                }
+            })
+            .collect();
+        for (position, context) in contexts.iter().copied().enumerate() {
+            let mut limits = e.limits.clone();
+            limits.timeout = b.remaining_time() / (contexts.len() - position) as u32 / 2;
+            limits.max_work = b.remaining() / (contexts.len() - position) / 2;
+            limits.run_deadline = Some(Instant::now() + limits.timeout);
+            let mut allowance = super::divided(config, 2 * (contexts.len() - position));
+            let before = allowance.clone();
+            let mut local = Budget::new(&limits);
+            let result: Result<()> = (|| {
+                loop {
+                    let mut engine = self.engine(e, &mut local)?;
+                    engine.config = allowance.clone();
+                    let (state, _) =
+                        self.ranking(classification, context == PruningContext::Hypothesis);
+                    let cone = state.cone(&mut local)?;
+                    let (forced, mut report) = forcing::force(
+                        &engine,
+                        cone,
+                        context,
+                        &self.pins,
+                        &mut local,
+                        &mut allowance,
+                    )?;
+                    let changed = report.forced > 0;
+                    let cutoff = report.cutoff.is_some();
+                    if changed {
+                        let state = match State::new(forced, &mut local) {
+                            Ok(state) => state,
+                            Err(error) => {
+                                e.limits.cancellation.check()?;
+                                report.not_installed(error)?;
+                                self.forcing.push(report);
+                                break;
+                            }
+                        };
+                        self.views.insert(
+                            (self.scope(classification), context, self.pins.clone()),
+                            state,
+                        );
+                    }
+                    self.forcing.push(report);
+                    if cutoff {
+                        break;
+                    }
+                    // Rewrites and propagation preserve these equations. Their
+                    // newly acyclic dependents enter the ordinary formula pool.
+                    let (state, _) =
+                        self.ranking(classification, context == PruningContext::Hypothesis);
+                    let view = state.cone(&mut local)?;
+                    let graph = consistency::analyse(&view, None, &mut local)?;
+                    let heads: BTreeSet<_> = graph
+                        .cyclic
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, cyclic)| (*cyclic && view.fixed[i].is_none()).then_some(i))
+                        .take(32)
+                        .collect();
+                    let proved = if !heads.is_empty() {
+                        self.prune(e, classification, &heads, &mut allowance, &mut local)?
+                            .1
+                    } else {
+                        0
+                    };
+                    if !changed && proved == 0 {
+                        break;
+                    }
+                }
+                Ok(())
+            })();
+            config.max_solves = config
+                .max_solves
+                .saturating_sub(before.max_solves - allowance.max_solves);
+            config.max_solver_polls = config
+                .max_solver_polls
+                .saturating_sub(before.max_solver_polls - allowance.max_solver_polls);
+            config.max_conflicts = config
+                .max_conflicts
+                .saturating_sub(before.max_conflicts - allowance.max_conflicts);
+            config.max_propagations = config
+                .max_propagations
+                .saturating_sub(before.max_propagations - allowance.max_propagations);
+            self.forced_scopes
+                .insert((self.scope(classification), context));
+            if let Err(error) = result {
+                e.limits.cancellation.check()?;
+                self.forcing.push(forcing::ForcingRecord {
+                    context: if context == PruningContext::World {
+                        "W"
+                    } else {
+                        "W+H"
+                    },
+                    cutoff: Some(inconclusive(error)?),
+                    ..Default::default()
+                });
+            }
+            b.charge(local.used(), "completion forcing work")?;
+        }
+        Ok(())
+    }
+
     pub fn publish(&mut self, e: &Engine) {
         if let Some(cache) = &e.pruning {
             let mut cache = cache.lock().unwrap();
@@ -541,7 +678,7 @@ impl Bundle {
     pub fn engine(&self, e: &Engine, b: &mut Budget<'_>) -> Result<Engine> {
         let mut out = e.clone();
         out.formula_pins = self.formulas.clone();
-        out.pruning = if e.pruning.is_some() || !self.formulas.is_empty() {
+        out.pruning = if e.pruning.is_some() || e.forcing || !self.formulas.is_empty() {
             let views = self
                 .views
                 .iter()

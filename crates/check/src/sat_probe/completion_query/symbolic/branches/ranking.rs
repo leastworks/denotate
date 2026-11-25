@@ -510,7 +510,7 @@ pub(super) fn choose_in(
 }
 
 // Use the existing parity-doubled witness search on compact per-component arrays.
-fn witness_edges(
+pub(super) fn witness_edges(
     c: &Cone,
     g: &consistency::Core,
     candidates: &BTreeSet<usize>,
@@ -782,6 +782,7 @@ fn verify(
         let result: Result<()> = (|| {
             for (child_index, (pins, rest)) in choices[i].children().into_iter().enumerate() {
                 row.child_trials.push(SplitChild {
+                    forcing: vec![],
                     child: child_index,
                     context,
                     rest,
@@ -806,6 +807,8 @@ fn verify(
                     bundle.child_with_formula(&pins, choices[i].formula.as_ref(), &mut trial)?;
                 let (attempts, proved, cutoff) =
                     child_bundle.prune(e, classification, &heads, remaining, &mut trial)?;
+                child_bundle.settle(e, classification, remaining, &mut trial)?;
+                row.child_trials.last_mut().unwrap().forcing = child_bundle.forcing.clone();
                 row.pruning_attempts += attempts;
                 row.pruning_proved += proved;
                 row.cutoff = row.cutoff.or(cutoff);
@@ -1079,15 +1082,31 @@ fn compare_trials(
     let y = &telemetry[b];
     let cuts =
         |r: &SplitCandidate| r.child_trials.iter().map(|c| c.cycles_cut).sum::<usize>() as u128;
-    (cuts(y) * (x.children - 1) as u128)
-        .cmp(&(cuts(x) * (y.children - 1) as u128))
-        .then_with(|| y.cycles_cut_every_child.cmp(&x.cycles_cut_every_child))
-        .then_with(|| {
-            ((y.disabled_edges as u128) * (x.children - 1) as u128)
-                .cmp(&((x.disabled_edges as u128) * (y.children - 1) as u128))
-        })
-        .then_with(|| y.minimum_disabled.cmp(&x.minimum_disabled))
-        .then_with(|| choices[b].rank(&choices[a]))
+    let forced = |r: &SplitCandidate| {
+        r.child_trials
+            .iter()
+            .flat_map(|c| &c.forcing)
+            .map(|r| r.forced_witnesses)
+            .sum::<usize>() as u128
+    };
+    let forcing = x
+        .child_trials
+        .iter()
+        .chain(&y.child_trials)
+        .any(|c| !c.forcing.is_empty());
+    (if forcing {
+        (forced(y) * (x.children - 1) as u128).cmp(&(forced(x) * (y.children - 1) as u128))
+    } else {
+        std::cmp::Ordering::Equal
+    })
+    .then_with(|| (cuts(y) * (x.children - 1) as u128).cmp(&(cuts(x) * (y.children - 1) as u128)))
+    .then_with(|| y.cycles_cut_every_child.cmp(&x.cycles_cut_every_child))
+    .then_with(|| {
+        ((y.disabled_edges as u128) * (x.children - 1) as u128)
+            .cmp(&((x.disabled_edges as u128) * (y.children - 1) as u128))
+    })
+    .then_with(|| y.minimum_disabled.cmp(&x.minimum_disabled))
+    .then_with(|| choices[b].rank(&choices[a]))
 }
 
 #[cfg(test)]

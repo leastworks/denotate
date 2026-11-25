@@ -113,6 +113,7 @@ impl State {
                 ));
             }
         }
+        queries::validate_retained(c, values, b)?;
         for (kind, group) in &c.groups {
             b.charge(group.len() + 1, "completion model validation")?;
             let n = group.iter().filter(|i| values[**i]).count();

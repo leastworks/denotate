@@ -32,6 +32,40 @@ pub(super) fn optional(c: &Cone, b: &mut Budget<'_>) -> Result<(Reduced, Option<
 pub(super) fn reduce(original: &Cone, b: &mut Budget<'_>) -> Result<Reduced> {
     let mut cone = original.clone();
     cone.fixed = encoding::fitting(original, b)?;
+    let mut retained = Vec::new();
+    for eq in &original.retained {
+        let mut bodies = Vec::new();
+        for body in &eq.bodies {
+            b.charge(body.len() + 1, "completion retained reduction")?;
+            if body
+                .iter()
+                .any(|(i, p)| cone.fixed[*i].is_some_and(|v| v != *p))
+            {
+                continue;
+            }
+            bodies.push(
+                body.iter()
+                    .copied()
+                    .filter(|(i, _)| cone.fixed[*i].is_none())
+                    .collect::<Vec<_>>(),
+            );
+        }
+        let known = if bodies.iter().any(Vec::is_empty) {
+            Some(true)
+        } else if bodies.is_empty() {
+            Some(false)
+        } else {
+            None
+        };
+        if known.is_some() && known == cone.fixed[eq.head] {
+            continue;
+        }
+        retained.push(RetainedEquation {
+            head: eq.head,
+            bodies,
+        });
+    }
+    cone.retained = retained.into();
     let mut supports = vec![BTreeSet::new(); cone.fixed.len()];
     let mut readers = vec![Vec::new(); cone.fixed.len()];
     let mut queue = VecDeque::new();

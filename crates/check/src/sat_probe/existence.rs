@@ -75,6 +75,7 @@ pub(super) fn world_cone(c: &Cone, negative_target: bool, b: &mut Budget<'_>) ->
     b.charge(c.fixed.len() + c.rules.len(), "SAT existence world cone")?;
     Ok(Cone {
         source_rules: c.source_rules,
+        retained: vec![].into(),
         atoms: c.atoms.clone(),
         rules: c.rules.iter().filter(|r| needed[r.head]).cloned().collect(),
         fixed: c

@@ -171,6 +171,7 @@ fn original_cone_with_assumptions(
         atoms: atoms.into(),
         rules: rules.into(),
         source_rules: p.core.rules.len(),
+        retained: vec![].into(),
         input: input.into(),
         fixed,
         groups: groups.into(),
