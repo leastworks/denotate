@@ -97,10 +97,21 @@ impl Choice {
     /// Only a selected target's unchanged side skips recursive exploration.
     /// Components untouched in every child still get their own ranking attempt.
     pub fn residual_only(&self, child: usize) -> Vec<Arc<BTreeSet<usize>>> {
+        let Some(verified) = self.child_targets.get(child) else {
+            // No trial evidence about this child: residual checking is mandatory.
+            return self
+                .child_targets
+                .iter()
+                .flatten()
+                .cloned()
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect();
+        };
         self.child_targets
             .iter()
             .flatten()
-            .filter(|s| !self.child_targets[child].contains(s))
+            .filter(|s| !verified.contains(s))
             .cloned()
             .collect::<BTreeSet<_>>()
             .into_iter()

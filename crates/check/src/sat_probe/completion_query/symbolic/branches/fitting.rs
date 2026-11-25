@@ -389,6 +389,27 @@ impl Bundle {
         key.1 = PruningContext::World;
         (self.views.get(&key).unwrap_or(base), "W")
     }
+    /// Reduce each applicable parent view once, then share its incidence index
+    /// with all trial children. Child propagation remains copy-on-write.
+    pub fn trial_base(
+        &self,
+        classification: bool,
+        hypothesis: bool,
+        b: &mut Budget<'_>,
+    ) -> Result<Self> {
+        let mut out = self.clone();
+        for context in [PruningContext::World, PruningContext::Hypothesis] {
+            if context == PruningContext::Hypothesis && !hypothesis {
+                continue;
+            }
+            let (state, _) = self.ranking(classification, context == PruningContext::Hypothesis);
+            let reduced = state.analysis_cone(b)?;
+            let key = (self.scope(classification), context, self.pins.clone());
+            out.views.insert(key, State::new(reduced, b)?);
+        }
+        Ok(out)
+    }
+
     pub fn prune(
         &mut self,
         e: &Engine,
@@ -524,7 +545,7 @@ impl Bundle {
             let views = self
                 .views
                 .iter()
-                .map(|(k, s)| Ok((k.clone(), s.analysis_cone(b)?)))
+                .map(|(k, s)| Ok((k.clone(), s.cone(b)?)))
                 .collect::<Result<_>>()?;
             Some(Arc::new(std::sync::Mutex::new(pruning::Cache::inherited(
                 views,

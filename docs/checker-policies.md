@@ -2030,12 +2030,19 @@ Ranking uses one compact parity witness per odd component, or a directed cycle
 in each decision-relevant component independently shown non-unique. Guard-input
 reachability stops at every cyclic atom, including positive/even cycles. The top
 64 partitions form a bounded inventory, alternating inputs and formulas in their
-own structural-score order. Up to eight are trialled: each kind has four slots
+own witness-involvement order (structural score breaks ties). Up to eight are trialled: each kind has four slots
 when both have enough distinct groups, with unused slots available to the other.
 Distinct groups precede alternate subsets. Trials share one quarter of remaining
 setup time/work; each candidate receives a share of the remaining allowance, and
-failed/discarded trials are charged back. No fresh allowance is added. Incomplete trials do not qualify, and residual search
-remains available when no verified split progresses.
+failed/discarded trials are charged back. Before trials, the parent views are
+reduced once; children share their incidence indices and propagate changed pins.
+Trials are ordered by the number of witness cycles their guards involve. Equal
+shares have a provisional 500 ms floor: reduce the number of trials to fit that
+floor and stop starting trials when it cannot be met. Unused shares pass on;
+there is no new allowance. A partial trial with verified cuts remains eligible
+and ranks by its observed cuts, without credit for unchecked children. Those
+children still receive residual checking. With no verified cut, use the unsplit
+query.
 
 Verified ranking first prefers the sum of per-child witness cuts / extra children,
 then cycles cut in every child, then total disabled edges / extra children,
@@ -2197,7 +2204,7 @@ still stops at cyclic atoms. The existing eight-candidate trial shortlist is use
 For each child, try one common-equations pass on those witness heads under W and
 W+H separately, then rank actual edge cuts in the resulting Fitting view. This
 is bounded proof search, not a pruning fixed-point claim. Keep candidate child
-views only for the best two completed trials; discarded views are released. The
+views only for the best two trials with verified cuts; discarded views are released. The
 selected trial's views are reused without proving them again. Uncut children and
 children whose targeted cycle closes still receive the full residual question.
 

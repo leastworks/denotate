@@ -431,12 +431,28 @@ pub(super) fn choose_in(
             }
         }
     }
+    let mut involvement = BTreeMap::<usize, BTreeSet<usize>>::new();
+    for (atom, edges) in &all {
+        involvement
+            .entry(*atom)
+            .or_default()
+            .extend(edges.iter().map(|e| graph.component[e.0]));
+    }
+    for (edge, guards) in &guard_edges {
+        for guard in guards {
+            involvement
+                .entry(*guard)
+                .or_default()
+                .insert(graph.component[edge.0]);
+        }
+    }
     let result = verify(
         e,
         bundle,
         classification,
         &witnesses,
         &members,
+        &involvement,
         choices,
         context,
         remaining,
@@ -603,6 +619,7 @@ fn verify(
     classification: bool,
     witnesses: &BTreeMap<usize, BTreeSet<(usize, usize, bool)>>,
     members: &BTreeMap<usize, Arc<BTreeSet<usize>>>,
+    involvement: &BTreeMap<usize, BTreeSet<usize>>,
     mut choices: Vec<Choice>,
     context: &'static str,
     remaining: &mut QueryLimits,
@@ -610,7 +627,14 @@ fn verify(
     omitted: &mut usize,
     b: &mut Budget<'_>,
 ) -> Result<Option<(Choice, Option<Choice>)>> {
-    choices.sort_by(|a, b| b.rank(a)); // stable ties retain semantic input order
+    let cycles = |c: &Choice| {
+        c.selected
+            .iter()
+            .flat_map(|a| involvement.get(a).into_iter().flatten().copied())
+            .collect::<BTreeSet<_>>()
+            .len()
+    };
+    choices.sort_by(|a, b| cycles(b).cmp(&cycles(a)).then_with(|| b.rank(a)));
     // Neither raw edge scores nor inventory truncation may starve a kind.
     let mut inputs = VecDeque::new();
     let mut formulas = VecDeque::new();
@@ -691,6 +715,17 @@ fn verify(
             }
         }
     }
+    // Reserve fair inventory slots for both kinds, then spend them on the
+    // candidates involved in the most witness cycles. Stable ties retain the
+    // interleaving above, rather than letting source order choose a kind.
+    let cycles = |i: usize| {
+        choices[i]
+            .selected
+            .iter()
+            .flat_map(|a| involvement.get(a).into_iter().flatten().copied())
+            .collect::<BTreeSet<_>>()
+            .len()
+    };
     let mut limits = e.limits.clone();
     limits.max_work = b.remaining() / 4;
     limits.timeout = b.remaining_time() / 4;
@@ -704,14 +739,31 @@ fn verify(
             limits.timeout,
         );
     }
+    if funded_trials(selected.len(), limits.timeout) == 0 {
+        return Ok(None);
+    }
     let mut trials = Budget::new(&limits);
+    let setup = bundle.trial_base(classification, e.classification.is_some(), &mut trials);
+    b.charge(trials.used(), "completion trial parent setup")?;
+    let bundle = match setup {
+        Ok(bundle) => bundle,
+        Err(error) => {
+            e.limits.cancellation.check()?;
+            inconclusive(error)?;
+            return Ok(None);
+        }
+    };
     let mut completed = Vec::new();
     let heads: BTreeSet<_> = witnesses
         .values()
         .flat_map(|es| es.iter().map(|e| e.0))
         .take(32)
         .collect();
-    let count = selected.len();
+    // A floor limits the number of attempts; it never increases the allowance.
+    // Unused shares pass forward. Do not launch another near-zero-time setup.
+    let count = funded_trials(selected.len(), trials.remaining_time());
+    selected.truncate(count);
+    selected.sort_by_key(|i| std::cmp::Reverse(cycles(*i)));
     for (position, i) in selected.into_iter().enumerate() {
         let mut candidate_limits = limits.clone();
         candidate_limits.max_work = trials.remaining() / (count - position);
@@ -719,6 +771,9 @@ fn verify(
         candidate_limits.run_deadline = Some(Instant::now() + candidate_limits.timeout);
         if let Some(end) = limits.run_deadline {
             candidate_limits.run_deadline = Some(candidate_limits.run_deadline.unwrap().min(end));
+        }
+        if candidate_limits.timeout < MIN_TRIAL {
+            break;
         }
         let mut trial = Budget::new(&candidate_limits);
         let row = &mut telemetry[i];
@@ -811,7 +866,9 @@ fn verify(
                 let (child, child_context) =
                     child_bundle.ranking(classification, e.classification.is_some());
                 row.child_trials.last_mut().unwrap().context = child_context;
-                let child = fitting::State::new(child.analysis_cone(&mut trial)?, &mut trial)?;
+                // The parent already owns a reduced incidence index. Forks
+                // propagate only changed literals; do not fold/reindex the
+                // whole cone again merely to count witness cuts.
                 let mut cuts = BTreeSet::new();
                 let mut disabled = 0;
                 for (id, edges) in witnesses {
@@ -863,6 +920,15 @@ fn verify(
                 row.cutoff = Some(inconclusive(error)?);
                 if let Some(detail) = row.child_trials.last_mut() {
                     detail.cutoff = row.cutoff;
+                }
+                // Verified children remain evidence even if a later child
+                // exhausts. Missing children are reconstructed and checked.
+                if row
+                    .child_trials
+                    .iter()
+                    .any(|c| c.complete && c.cycles_cut > 0)
+                {
+                    completed.push(i);
                 }
             }
         }
@@ -998,6 +1064,11 @@ pub(super) fn derived_guards(
     Ok(())
 }
 
+const MIN_TRIAL: Duration = Duration::from_millis(500);
+fn funded_trials(candidates: usize, remaining: Duration) -> usize {
+    candidates.min((remaining.as_nanos() / MIN_TRIAL.as_nanos()) as usize)
+}
+
 fn compare_trials(
     a: usize,
     b: usize,
@@ -1017,4 +1088,95 @@ fn compare_trials(
         })
         .then_with(|| y.minimum_disabled.cmp(&x.minimum_disabled))
         .then_with(|| choices[b].rank(&choices[a]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::sat_probe::completion_query::tests::{prepare, verification};
+    use crate::test_support::rewrites::{rel, rule};
+
+    #[test]
+    fn partial_cut_beats_weaker_finished_trial_and_unchecked_child_is_residual() {
+        let mut c = Corpus::new();
+        let i = rel(&mut c, "i", true);
+        for name in ["p", "q"] {
+            let p = rel(&mut c, name, false);
+            rule(&mut c, p, &[(i, false), (p, true)]);
+        }
+        let v = verification(&mut c, None, &[]);
+        let e = prepare(&c, v, &Default::default());
+        let mut b = Budget::new(&e.limits);
+        let root = fitting::Bundle::new(&e, &mut b).unwrap();
+        let mut rows = vec![];
+        let (choice, _) = choose(
+            &e,
+            &root,
+            false,
+            true,
+            8,
+            &mut e.config.clone(),
+            &mut rows,
+            &mut 0,
+            &mut b,
+        )
+        .unwrap()
+        .unwrap();
+        let mut partial = rows.iter().find(|r| r.selected).unwrap().clone();
+        let mut finished = partial.clone();
+        // Retain only the verified cutting side: no timings or solver choices.
+        partial.child_trials.retain(|c| c.cycles_cut > 0);
+        partial.checked_children = 1;
+        partial.state = "incomplete";
+        partial.cycles_cut_every_child = 0;
+        for child in &mut finished.child_trials {
+            child.cycles_cut = usize::from(child.cycles_cut > 0);
+        }
+        assert!(
+            compare_trials(
+                0,
+                1,
+                &[partial, finished],
+                &[choice.clone(), choice.clone()]
+            )
+            .is_lt()
+        );
+        let mut interrupted = choice;
+        interrupted.child_targets = vec![interrupted.child_targets.into_iter().flatten().collect()];
+        interrupted.child_states.truncate(1);
+        assert!(!interrupted.residual_only(1).is_empty());
+    }
+
+    #[test]
+    fn insufficient_trial_time_starts_no_setup_and_unused_time_can_fund_another() {
+        assert_eq!(funded_trials(8, Duration::ZERO), 0);
+        assert_eq!(funded_trials(8, MIN_TRIAL / 2), 0);
+        assert!(funded_trials(8, MIN_TRIAL * 2) > funded_trials(8, MIN_TRIAL));
+    }
+
+    #[test]
+    fn trial_children_share_reduced_parent_index_and_keep_sibling_values_separate() {
+        let mut c = Corpus::new();
+        let i = rel(&mut c, "i", true);
+        let p = rel(&mut c, "p", false);
+        rule(&mut c, p, &[(i, false), (p, true)]);
+        let v = verification(&mut c, None, &[]);
+        let e = prepare(&c, v, &Default::default());
+        let mut b = Budget::new(&e.limits);
+        let root = fitting::Bundle::new(&e, &mut b)
+            .unwrap()
+            .trial_base(false, false, &mut b)
+            .unwrap();
+        let i = e.cone.atoms.iter().position(|a| a.relation == i).unwrap();
+        let yes = root.child(&[(i, true)], &mut b).unwrap();
+        let no = root.child(&[(i, false)], &mut b).unwrap();
+        let parent = root.ranking(false, false).0;
+        let yes = yes.ranking(false, false).0;
+        let no = no.ranking(false, false).0;
+        assert!(Arc::ptr_eq(&parent.index_for_test(), &yes.index_for_test()));
+        assert!(Arc::ptr_eq(&parent.index_for_test(), &no.index_for_test()));
+        assert_eq!(parent.value(i), None);
+        assert_eq!(yes.value(i), Some(true));
+        assert_eq!(no.value(i), Some(false));
+    }
 }
