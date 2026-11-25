@@ -10,6 +10,7 @@ mod branch_formula;
 mod encoding;
 mod pruning;
 mod search_free;
+mod shadow_cache;
 use encoding::{Encoding, encode};
 pub use pruning::{
     PruningComponent, PruningContext, PruningKind, PruningRecord, PruningReport, PruningStop,

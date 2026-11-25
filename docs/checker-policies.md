@@ -2300,3 +2300,21 @@ Semantic scopes remain fixed by live GFP. This does not introduce stable-model
 unfounded-set reasoning into completion. On reduction exhaustion, keep the supplied
 view and its already-proved prefix; no spent budget is restored. Private corpus
 component-size improvements require a new run, not inference from small controls.
+
+### Completion SAT shadow caches
+
+A fixed-query family owns its immutable CNF and its W/H context exclusively.
+Models are indexed by per-variable bit columns; cores use one watched literal,
+a signature prefilter and exact subset checking. Core insertion skips a core
+subsumed by an existing one. The first implementation retains at most 4,096
+models and 16,384 cores, with separate 8 MiB storage allowances; full caches skip
+insertion rather than evicting or changing a solver answer. There is no global
+cache or reuse between encodings, contexts, workers or invocations yet.
+
+Shadow lookups always run the actual SAT query and compare the claimed result.
+Telemetry distinguishes model/core claims, checked claims, mismatches and skipped
+insertions. A resource cutoff can leave a claim unchecked; it cannot validate the
+claim. Model reads are disabled while removable clauses are active; this slice
+also declines all core writes in that case, rather than trying to retain selector
+conditions. Batsat's conflict literals are negated back into assumption literals
+before subset indexing. Enforcing hits is a separate future switch.
