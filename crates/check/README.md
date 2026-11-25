@@ -1613,9 +1613,10 @@ last question does not change its verdict or the aggregate status.
 With splits enabled, the root and every child first try a bounded unsplit probe.
 `Limits::completion_probe_work` / `--completion-probe-work N` sets its deterministic
 work cap (32,000,000 by default; 0 disables it). Work includes SAT callback polls.
-A conclusive probe skips pruning, forcing and ranking. Existence probes may use
-structural totality certificates. Rejection and acceptance probes may return a
-direct answer; all probes yield before covering or excluding models. On probe cutoff:
+A conclusive probe skips pruning, forcing and ranking. The probe runs the ordinary
+unsplit search, covers and lifting included, under that cap, reusing existing views
+without starting pruning, forcing or ranking. An exhausted probe stays charged and
+is never a proof. On probe cutoff:
 reductions, requested pruning to saturation, requested forcing over all remaining
 candidates, then ranking every shortlisted trial. Split on a verified cut;
 residual search runs only at leaves (no useful split or a configured split bound).

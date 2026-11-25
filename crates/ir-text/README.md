@@ -701,8 +701,9 @@ The explicit timeout is one invocation-wide safety net, including preparation an
 all verifications; without it the CLI still uses 120 seconds. Explicit resource
 limits and structural/split bounds remain authoritative. Exploration first tries
 an unsplit probe capped by `--completion-probe-work N` (default 32000000; 0 disables).
-A conclusive probe skips structural trials. Existence probes use structural
-certificates only. All probes yield before covers (including rejection/eligibility). After cutoff, each unit reduces, prunes and forces
+A conclusive probe skips structural trials. The probe is the ordinary unsplit
+search, covers included, under that cap; an exhausted probe is charged and never a
+proof. After cutoff, each unit reduces, prunes and forces
 before ranking and taking a verified partition; only leaves run residual searches.
 Classification existence runs last in exploration. Default mode gives it a bounded
 question share and runs enabled forcing/splits before classification existence

@@ -1,5 +1,8 @@
-//! A bounded unsplit attempt before the structural driver. Work includes SAT
-//! callback polls, so one difficult solve cannot consume the whole invocation.
+//! A bounded unsplit attempt before the structural driver: the ordinary search,
+//! cover loops and lifting included, under a deterministic work cap. Work includes
+//! SAT callback polls, so one difficult solve cannot consume the whole invocation.
+//! Only an exhausted cap hands the question to the structural driver; it never
+//! counts as a proof, and the consumed work stays charged.
 use super::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 

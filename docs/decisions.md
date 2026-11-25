@@ -2520,10 +2520,15 @@ a confirmed finding. Production budget simplification is a separate decision,
 to be informed by these measurements; no new default performance policy is implied.
 
 Exploration first gives each split-enabled unit a small, explicitly bounded work
-probe, so easy pair queries do not pay for structural trials. Probes may certify
-existence structurally but may not enumerate covers. Exploration runs enabled
-forcing and splits before covers, and classification existence last: its universal
-cover can consume the entire invocation otherwise. Ordinary mode retains its
+probe, so easy questions do not pay for structural trials. The probe is the
+ordinary unsplit search, cover loops and lifting included, under that deterministic
+cap; it reuses existing context-correct views and never starts pruning, forcing or
+ranking. Only an unbounded cover is harmful: on an odd core it can consume the
+invocation (a corpus run spent 365 s there), whereas forbidding covers in the probe
+sent a question that ordinarily proves in 0.35 s into minutes of structural trials.
+An exhausted probe stays charged, hands the question to the structural driver and
+never counts as a proof. After it, exploration runs enabled forcing and splits
+before any unbounded cover, and classification existence last. Ordinary mode retains its
 previous scheduling except for classification existence, which runs enabled
 splits before covers within a bounded question share. In particular, processing
 existence keeps its cheap first attempt: forcing it through structural work first

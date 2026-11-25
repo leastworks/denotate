@@ -485,7 +485,6 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
         if !self.solve(&active, &pins)? {
             return Ok(None);
         }
-        self.run.engine.defer_probe_cover()?;
         let (a, b, diff) = self.eligibility.take().unwrap();
         let (cone, _, h) = self.run.engine.classification.as_ref().unwrap();
         if self.eligibility_index.is_none() {
@@ -842,7 +841,6 @@ impl Engine {
                 if !s.solve(&[base.gate], &pins)? {
                     return Ok(Some(model));
                 }
-                self.defer_probe_cover()?;
                 let values = s.values(cone, &base)?;
                 let cube = cover(cone, &values, Some(*h), s.run.budget)?;
                 s.exclude(selector, &cube)?;
@@ -909,7 +907,6 @@ impl Engine {
                 {
                     return Ok(None);
                 }
-                self.defer_probe_cover()?;
                 existence::classification_shape(self, &world_view, world_view.label(), s)?;
                 let h = self.classification.as_ref().unwrap().2;
                 let view = s.simplified(original, true)?;
@@ -967,19 +964,6 @@ impl Engine {
             },
         )
     }
-    // Probes may certify totality structurally, but must never spend their
-    // allowance enumerating covers before the unit has tried structural cuts.
-    fn defer_probe_cover(&self) -> Result<()> {
-        if self.probe {
-            return Err(CheckError::limit(
-                "completion unsplit probe",
-                "cover enumeration deferred",
-                0,
-                None,
-            ));
-        }
-        Ok(())
-    }
     fn symbolic_no_meaning_cone(
         &self,
         context: &BTreeMap<GroundAtom, bool>,
@@ -996,14 +980,6 @@ impl Engine {
         };
         self.symbolic_search_in(context, phase, shares, |s| {
             let view = s.simplified(cone, !classification)?;
-            if self.probe {
-                if view.retained.is_empty()
-                    && consistency::analyse(&view, None, s.run.budget)?.odd_components == 0
-                {
-                    return Ok(None);
-                }
-                self.defer_probe_cover()?;
-            }
             let Some(cone) =
                 existence::residual(self, &view, view.label(), classification, s, options)?
             else {

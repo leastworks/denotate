@@ -2364,8 +2364,12 @@ With splits enabled, each exploration unit first gets a deterministic unsplit
 probe: `--completion-probe-work N`, provisionally 32,000,000 work units including
 SAT callback polls (0 disables it). This allowance fits the existing public
 control's cheap encodings; it is not a timing target. A conclusive probe bypasses
-forcing/ranking. Existence probes use structural certificates only. All probes defer cover
-enumeration, including rejection and eligibility covers. A cutoff proceeds to reductions, requested pruning to
+forcing/ranking. The probe runs the ordinary unsplit search, including existence,
+rejection and eligibility covers and lifting, under that cap; it reuses existing
+views and never starts pruning, forcing or ranking. Exhausting the cap is charged,
+is never a proof, and leaves the remaining allowance to the structural driver; a
+counterexample found inside the probe is reported as one. This does not promise
+that every ordinary unsplit proof fits the cap. A cutoff proceeds to reductions, requested pruning to
 saturation, forcing, complete shortlisted trials, then a verified split. Residual
 queries run only at leaves. Both cut and uncut children rank surviving components.
 Ordinary mode changes only classification existence's order: enabled forcing/splits

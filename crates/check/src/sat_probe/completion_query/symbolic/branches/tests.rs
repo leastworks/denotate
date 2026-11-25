@@ -1055,7 +1055,7 @@ fn default_classification_existence_splits_before_cover_search() {
 }
 
 #[test]
-fn exploration_existence_probe_never_enumerates_an_odd_cover() {
+fn exploration_existence_probe_reports_a_counterexample_found_by_its_cover() {
     let (_, mut e, _) = fixture(false, false, false);
     e.limits.completion_exploration = true;
     e.probe = true;
@@ -1064,20 +1064,175 @@ fn exploration_existence_probe_never_enumerates_an_odd_cover() {
     let result = e
         .symbolic_no_meaning(false, true, &Default::default(), 1)
         .unwrap();
-    assert!(
-        matches!(result, Search::Inconclusive(c) if c.resource == "cover enumeration deferred")
-    );
+    assert!(matches!(result, Search::Exists(_)));
+}
+
+/// `p :- value(c), !p` and `p :- value(c)`: the negative self-loop keeps an odd
+/// component, so no structural certificate applies, yet p = value(c) always has a
+/// model. A short cover proves existence inside the probe.
+fn covered_odd_loop() -> (Corpus, Engine) {
+    let (mut c, _, _) = fixture(false, false, false);
+    let p = c.relations().find(|r| r.name == "p").unwrap().id;
+    let input = c.relations().find(|r| r.name == "value").unwrap().id;
+    let third = c.constants().nth(2).unwrap().id;
+    let head = c.atom(p, []).unwrap();
+    let source = c.atom(input, [Term::Constant(third)]).unwrap();
+    c.add_rule(head, [Literal::Positive(source)]).unwrap();
+    let values: Vec<_> = c.constants().map(|v| v.id).collect();
+    let sort = c.constants().next().unwrap().sort;
+    let assumption = c.assumptions().next().unwrap().id;
+    let v = verification(&mut c, None, &[assumption]);
+    let e = prepare(&c, v, &[(sort, values)].into());
+    (c, e)
+}
+
+#[test]
+fn exploration_existence_probe_proves_a_short_cover_and_skips_structure() {
+    let (c, mut e) = covered_odd_loop();
+    let mut probe = e.clone();
+    probe.limits.completion_exploration = true;
+    probe.probe = true;
+    let sizes = crate::CompletionSizes::default();
+    probe.limits.completion_sizes = Some(sizes.clone());
+    let result = probe
+        .symbolic_no_meaning(false, true, &Default::default(), 1)
+        .unwrap();
+    assert!(matches!(result, Search::None));
     assert!(
         sizes
             .snapshot()
             .searches
             .iter()
-            .all(|s| s.existence.rounds == 0)
+            .any(|s| s.existence.rounds > 0),
+        "the odd component needed a cover"
+    );
+    e.limits.completion_exploration = true;
+    let options = CheckOptions {
+        force: true,
+        prune: true,
+        split_depth: 2,
+        ..Default::default()
+    };
+    let got = e.check(&keys(&c), &options).unwrap();
+    crate::sat_probe::completion_query::tests::scale::same_report(
+        &got,
+        &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
+    );
+    assert!(!got.meaning.no_meaning.exists());
+    assert_eq!(got.branches.splits, 0, "a completed probe skips structure");
+    assert!(
+        got.branches
+            .records
+            .iter()
+            .filter(|r| r.phase == "completion unsplit probe")
+            .all(|r| r.state == "completed")
     );
 }
 
 #[test]
-fn exploration_rejection_probe_yields_before_covering_hypothesis_models() {
+fn exhausted_existence_probe_is_charged_and_never_a_proof() {
+    let (c, mut e) = covered_odd_loop();
+    e.limits.completion_exploration = true;
+    e.limits.completion_probe_work = 1;
+    let got = e
+        .check(
+            &keys(&c),
+            &CheckOptions {
+                split_depth: 2,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    crate::sat_probe::completion_query::tests::scale::same_report(
+        &got,
+        &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
+    );
+    let probes: Vec<_> = got
+        .branches
+        .records
+        .iter()
+        .filter(|r| r.phase == "completion unsplit probe")
+        .collect();
+    assert!(!probes.is_empty());
+    assert!(probes.iter().all(|r| r.state == "cut-off" && r.work > 0));
+}
+
+/// Probe existence with an explicit work cap: the answer, cover rounds started,
+/// and the work charged to the probe's question.
+fn capped_existence_probe(e: &Engine, cap: usize) -> (Search<Observation>, usize, usize) {
+    let mut probe = e.clone();
+    probe.limits.completion_exploration = true;
+    probe.probe = true;
+    probe.limits.max_work = cap;
+    let sizes = crate::CompletionSizes::default();
+    probe.limits.completion_sizes = Some(sizes.clone());
+    let work = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    probe.exploration_work = Some(work.clone());
+    let result = probe
+        .symbolic_no_meaning(false, true, &Default::default(), 1)
+        .unwrap();
+    let rounds = sizes
+        .snapshot()
+        .searches
+        .iter()
+        .map(|s| s.existence.rounds)
+        .sum();
+    (
+        result,
+        rounds,
+        work.load(std::sync::atomic::Ordering::Relaxed),
+    )
+}
+
+#[test]
+fn probe_exhausted_inside_its_cover_stays_inconclusive_and_charged() {
+    let (c, e) = covered_odd_loop();
+    let (complete, rounds, full) = capped_existence_probe(&e, usize::MAX);
+    assert!(matches!(complete, Search::None) && rounds > 0);
+    // Work is deterministic, so cover progress is monotone in the cap. Find the
+    // smallest cap that starts covering; no work count is asserted.
+    let (mut lo, mut hi) = (1, full);
+    while lo < hi {
+        let mid = lo + (hi - lo) / 2;
+        if capped_existence_probe(&e, mid).1 > 0 {
+            hi = mid;
+        } else {
+            lo = mid + 1;
+        }
+    }
+    let (result, started, charged) = capped_existence_probe(&e, lo);
+    assert!(started > 0);
+    assert!(
+        matches!(result, Search::Inconclusive(_)),
+        "the cover finished within its first round; the fixture needs more rounds"
+    );
+    assert!(charged > 0);
+    let mut explore = e.clone();
+    explore.limits.completion_exploration = true;
+    explore.limits.completion_probe_work = lo;
+    let got = explore
+        .check(
+            &keys(&c),
+            &CheckOptions {
+                split_depth: 2,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    crate::sat_probe::completion_query::tests::scale::same_report(
+        &got,
+        &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
+    );
+    assert!(
+        got.branches
+            .records
+            .iter()
+            .any(|r| r.phase == "completion unsplit probe" && r.state == "cut-off" && r.work > 0)
+    );
+}
+
+#[test]
+fn exploration_rejection_probe_covers_hypothesis_models_within_its_cap() {
     let mut c = Corpus::new();
     let h = rel(&mut c, "h", false);
     rule(&mut c, h, &[(h, false)]);
@@ -1088,15 +1243,14 @@ fn exploration_rejection_probe_yields_before_covering_hypothesis_models() {
     let sizes = crate::CompletionSizes::default();
     e.limits.completion_sizes = Some(sizes.clone());
     let result = e.symbolic_rejected(&Default::default(), 1).unwrap();
-    assert!(
-        matches!(result, Search::Inconclusive(c) if c.resource == "cover enumeration deferred")
-    );
+    assert!(matches!(result, Search::None));
     assert!(
         sizes
             .snapshot()
             .searches
             .iter()
-            .all(|s| s.existence.cubes == 0)
+            .any(|s| s.existence.cubes > 0),
+        "the probe settles rejection with its own cover"
     );
     e.probe = false;
     let got = e
