@@ -435,3 +435,151 @@ fn cyclic_existence_search_preserves_no_meaning_and_source_rewrite_results() {
         }
     }
 }
+
+/// Pair questions: a positive loop makes `matched` ambiguous, so the pair query
+/// encodes both copies. Presence and every other value are acyclic and read by
+/// no decision, cycle or H, so the sliced pair must not grow with n.
+fn pair_fixture(n: usize, form: Form, decided: bool) -> (Engine, denotate_ir::SemanticKeys) {
+    let mut c = Corpus::new();
+    let es = c.declare_sort("Element").unwrap();
+    let item = c.declare_constant("item", es).unwrap();
+    let vs = c.declare_sort("Value").unwrap();
+    let values: Vec<_> = (0..n)
+        .map(|i| c.declare_constant(format!("v{i}"), vs).unwrap())
+        .collect();
+    let params = |c: &mut Corpus, name: &str, input: bool, element_only: bool| {
+        let mut p = vec![Parameter::new("element", es)];
+        if !element_only {
+            p.push(Parameter::new("value", vs));
+        }
+        c.declare_relation(
+            name,
+            if input {
+                RelationRole::Input
+            } else {
+                RelationRole::Derived
+            },
+            p,
+        )
+        .unwrap()
+    };
+    let received = params(&mut c, "received", true, false);
+    let written = params(&mut c, "written", true, false);
+    let readable = params(&mut c, "readable", true, true);
+    let value = params(&mut c, "value", false, false);
+    let presence = params(&mut c, "present", false, true);
+    let presence = GroundAtom::new(presence, [item]);
+    let readable = GroundAtom::new(readable, [item]);
+    for v in &values {
+        let target = GroundAtom::new(value, [item, *v]);
+        emit(
+            &mut c,
+            &target,
+            &[
+                (&GroundAtom::new(received, [item, *v]), true),
+                (&readable, true),
+            ],
+        );
+        emit(
+            &mut c,
+            &target,
+            &[(&GroundAtom::new(written, [item, *v]), true)],
+        );
+        emit(&mut c, &presence, &[(&target, true)]);
+    }
+    let free = rel(&mut c, "free", true);
+    let looped = rel(&mut c, "looped", false);
+    rule(&mut c, looped, &[(looped, false), (free, false)]);
+    let matched = rel(&mut c, "matched", false);
+    let selected = GroundAtom::new(value, [item, values[0]]);
+    let looped = atom(looped);
+    let mut body = vec![(&selected, true), (&looped, true)];
+    if matches!(form, Form::Redundant) {
+        body.insert(0, (&presence, true));
+    }
+    emit(&mut c, &atom(matched), &body);
+    let v = c
+        .verification_with_options_in(
+            Namespace::new(["test"]).unwrap(),
+            "pair",
+            [],
+            [],
+            [],
+            denotate_ir::VerificationOptions {
+                semantics: denotate_ir::Semantics::Completion,
+                hypothesis: None,
+                decisions: decided.then(|| BTreeSet::from([matched])),
+            },
+        )
+        .unwrap();
+    let engine = prepare(&c, v, &[(es, vec![item]), (vs, values)].into());
+    (engine, keys(&c))
+}
+
+fn pair_cnf(e: &Engine) -> ((usize, usize), bool) {
+    let original = e.cone.clone();
+    let mut budget = Budget::new(&e.limits);
+    let mut s = Solver::new(e, &mut budget).unwrap();
+    let view = s.simplified(&original, true).unwrap();
+    let before = (s.run.cnf.solver.num_vars() as usize, s.run.cnf.clauses);
+    let pair = determinacy::search(
+        e,
+        &view,
+        view.label(),
+        &original,
+        None,
+        ModelScope::WholeProgram,
+        false,
+        true,
+        &CheckOptions::default(),
+        &mut s,
+    )
+    .unwrap();
+    (
+        (
+            s.run.cnf.solver.num_vars() as usize - before.0,
+            s.run.cnf.clauses - before.1,
+        ),
+        pair.is_some(),
+    )
+}
+
+#[test]
+fn pair_slice_does_not_grow_with_unread_acyclic_values() {
+    let mut sizes = BTreeSet::new();
+    for n in [3, 297] {
+        for form in [Form::Redundant, Form::Removed] {
+            let (e, _) = pair_fixture(n, form, true);
+            let (cnf, found) = pair_cnf(&e);
+            assert!(found, "{n} {form:?}: the loop makes matched ambiguous");
+            sizes.insert(cnf);
+        }
+    }
+    assert_eq!(
+        sizes.len(),
+        1,
+        "pair CNF depends on unread values: {sizes:?}"
+    );
+}
+
+#[test]
+fn sliced_pairs_agree_with_enumeration() {
+    use crate::sat_probe::completion_query::tests::scale::same_report;
+    for decided in [true, false] {
+        for form in [Form::Redundant, Form::Removed] {
+            let (e, keys) = pair_fixture(3, form, decided);
+            let expected = e.check_enumerated(&keys, &Default::default()).unwrap();
+            assert!(expected.meaning.ambiguous.exists());
+            for options in [
+                CheckOptions::default(),
+                CheckOptions {
+                    prune: true,
+                    ..Default::default()
+                },
+            ] {
+                let actual = e.check(&keys, &options).unwrap();
+                same_report(&actual, &expected);
+            }
+        }
+    }
+}

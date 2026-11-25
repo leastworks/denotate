@@ -459,6 +459,13 @@ impl Engine {
             .is_none_or(|relations| relations.contains(&atom.relation))
     }
 
+    /// Atoms a pair question compares: selected decisions, inside the
+    /// classification members when there are any. Inputs are never compared;
+    /// callers exclude them, along with encoding-specific cases.
+    fn compared(&self, atom: &GroundAtom, members: Option<&BTreeSet<GroundAtom>>) -> bool {
+        self.decision(atom) && members.is_none_or(|m| m.contains(atom))
+    }
+
     fn model(&self, values: Vec<bool>, scope: ModelScope) -> Model {
         Model {
             program: self.program.clone(),

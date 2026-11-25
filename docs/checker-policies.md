@@ -1815,8 +1815,12 @@ Model cubes fix only the retained interpretation, allowing the acyclic remainder
 to vary with unpinned inputs. SAT lifting attempts up to 64 deterministic block
 deletions against those retained equations. H-coverage, its no-H fallback, and the
 ordinary residual existence query use the same boundary for CNF and cubes. W and
-formula-pin constraints retain their independent encoding and context. This is
-an existence optimization, not a determinacy or obligation scope reduction.
+formula-pin constraints retain their independent encoding and context. Pair
+(uniqueness) queries use the same boundary with the compared decision atoms as
+additional roots: both copies encode only the retained equations, every compared
+difference lies on a retained atom, and each reported pair is reconstructed and
+replayed in full. Without declared decisions every derived atom is compared, so
+nothing is omitted. Semantic scopes and obligations are unchanged.
 The [presence repro](../fixtures/completion-lifting-scope/README.md) compares the
 old fixed-model cubes with this extension certificate and a source-level rewrite,
 including set-valued endpoints where a scalar restriction would be incorrect.

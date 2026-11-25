@@ -254,9 +254,10 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
             if cone.input[i] || a.encoding.vars[i] == b.encoding.vars[i] {
                 continue;
             }
-            let decision = cone.atoms.get(i).is_some_and(|atom| {
-                self.run.engine.decision(atom) && members.is_none_or(|m| m.contains(atom))
-            });
+            let decision = cone
+                .atoms
+                .get(i)
+                .is_some_and(|atom| self.run.engine.compared(atom, members));
             if !decision && !is_root {
                 continue;
             }
@@ -348,6 +349,26 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
         original: &Cone,
         encoded: &Encoded,
     ) -> Result<Vec<bool>> {
+        self.slice_values(slice, original, encoded)
+            .map(|(core, _)| core)
+    }
+    /// Pair witnesses report full interpretations: the reconstructed remainder,
+    /// replayed against the original equations like every other model.
+    fn full_values(
+        &mut self,
+        slice: &existence_slice::Slice,
+        original: &Cone,
+        encoded: &Encoded,
+    ) -> Result<Vec<bool>> {
+        self.slice_values(slice, original, encoded)
+            .map(|(_, full)| full)
+    }
+    fn slice_values(
+        &mut self,
+        slice: &existence_slice::Slice,
+        original: &Cone,
+        encoded: &Encoded,
+    ) -> Result<(Vec<bool>, Vec<bool>)> {
         let started = self.run.budget.used();
         let result = (|| {
             let core = checked_assignment(
@@ -367,7 +388,7 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
                 encoded.encoding.validation.as_ref(),
                 self.run.budget,
             )?;
-            Ok(core)
+            Ok((core, full))
         })();
         self.stats.validation_work += self.run.budget.used() - started;
         self.metrics();

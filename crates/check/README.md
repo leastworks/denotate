@@ -1333,8 +1333,9 @@ existence encodings and cubes keep the reduced view's cyclic SCCs, H, restrictio
 targets and their upstream closure. The remaining acyclic equations are recomputed
 in topological order before original-equation validation; they may vary with inputs
 outside the cube. Lifting still requires a SAT proof that the retained equations
-hold after removing a pin. This preserves the frozen semantic scope; determinacy
-and property encodings do not use this projection. See the
+hold after removing a pin. This preserves the frozen semantic scope. Ambiguity pair
+queries use the same projection with the compared decision atoms as extra roots and
+replay reported pairs in full; property encodings do not use it. See the
 [presence repro](../../fixtures/completion-lifting-scope/README.md).
 
 `CompletionSearchSize::existence` and `CheckingTarget::CompletionExistence` expose

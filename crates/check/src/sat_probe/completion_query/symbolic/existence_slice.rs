@@ -15,6 +15,16 @@ pub(super) struct Slice {
 }
 impl Slice {
     pub fn new(view: &Cone, h: Option<usize>, b: &mut Budget<'_>) -> Result<Self> {
+        Self::with_roots(view, h, &[], b)
+    }
+    /// Pair questions also retain the compared atoms and their upstream: the
+    /// omitted remainder still extends uniquely, and every difference is kept.
+    pub fn with_roots(
+        view: &Cone,
+        h: Option<usize>,
+        roots: &[usize],
+        b: &mut Budget<'_>,
+    ) -> Result<Self> {
         let mut source = view.clone();
         source.fixed = encoding::fitting(view, b)?;
         let graph = consistency::analyse(&source, None, b)?;
@@ -40,6 +50,8 @@ impl Slice {
             .filter_map(|(i, cyclic)| cyclic.then_some(i))
             .collect();
         pending.extend(h);
+        b.charge(roots.len(), "completion existence slice")?;
+        pending.extend(roots);
         for eq in &source.retained {
             pending.push(eq.head);
             for body in &eq.bodies {

@@ -69,10 +69,7 @@ fn decompose(
         .atoms
         .iter()
         .enumerate()
-        .filter_map(|(i, a)| {
-            (s.run.engine.decision(a) && members.is_none_or(|m| m.contains(a)) && !cone.input[i])
-                .then_some(i)
-        })
+        .filter_map(|(i, a)| (s.run.engine.compared(a, members) && !cone.input[i]).then_some(i))
         .collect();
     while let Some(i) = pending.pop() {
         if relevant[i] {
@@ -214,13 +211,28 @@ pub(super) fn search(
     options: &CheckOptions,
     s: &mut Solver<'_, '_, '_>,
 ) -> Result<Option<Pair>> {
+    // Both copies need only the compared decisions, H, every cycle and their
+    // upstream. Each core pair extends uniquely through the omitted acyclic
+    // remainder, and every difference lies on a retained decision.
+    s.run
+        .budget
+        .charge(cone.atoms.len(), "completion pair slice")?;
+    let roots: Vec<_> = cone
+        .atoms
+        .iter()
+        .enumerate()
+        .filter_map(|(i, a)| (!cone.input[i] && engine.compared(a, members)).then_some(i))
+        .collect();
+    let h = engine.classification.as_ref().map(|(_, _, h)| *h);
+    let slice = existence_slice::Slice::with_roots(cone, h, &roots, s.run.budget)?;
+    let cone = &slice.core;
     let plan = decompose(cone, view, members, s)?;
-    if cone.atoms.iter().enumerate().all(|(i, a)| {
-        cone.input[i]
-            || !engine.decision(a)
-            || members.is_some_and(|m| !m.contains(a))
-            || plan.shared[i]
-    }) {
+    if cone
+        .atoms
+        .iter()
+        .enumerate()
+        .all(|(i, a)| cone.input[i] || !engine.compared(a, members) || plan.shared[i])
+    {
         return Ok(None);
     }
     let a = s.encode_view(cone, original, true)?;
@@ -263,6 +275,7 @@ pub(super) fn search(
             query(
                 engine,
                 original,
+                &slice,
                 scope,
                 classification,
                 unique,
@@ -329,6 +342,7 @@ pub(super) fn search(
         query(
             engine,
             original,
+            &slice,
             scope,
             classification,
             unique,
@@ -356,6 +370,7 @@ pub(super) fn search(
 fn query(
     engine: &Engine,
     cone: &Cone,
+    slice: &existence_slice::Slice,
     scope: ModelScope,
     classification: bool,
     unique: bool,
@@ -394,8 +409,8 @@ fn query(
                 return Err(CheckError::Internal("eligible completion pair disappeared"));
             }
         }
-        let first = engine.model(s.values(cone, a)?, scope);
-        let second = engine.model(s.values(cone, b)?, scope);
+        let first = engine.model(s.full_values(slice, cone, a)?, scope);
+        let second = engine.model(s.full_values(slice, cone, b)?, scope);
         return Ok(Some(Pair { first, second }));
     }
 }

@@ -2467,11 +2467,19 @@ Reconstruct and replay the original equations before accepting a model certifica
 Context-dependent reductions remain local to their W, W+H or pinned view; the
 independent W/formula constraints are not projected away.
 
-This does not change classification membership, decisions, assumptions, obligations
-or ambiguity queries. Existing total-component certificates still justify any
+This does not change classification membership, decisions, assumptions or
+obligations. Existing total-component certificates still justify any
 prior existence-residual reduction. Source-rule slots remain for validation and
 provenance: a producer contradicted by a formula pin is inactive in analysis and
 encoding without needing a covered-producer proof.
+
+Ambiguity queries use the same projection with the compared decision atoms as
+additional roots. A pair of retained models extends uniquely to a pair of full
+models with the same inputs, and a full pair restricts to a retained one; every
+compared difference lies on a retained atom, so ambiguity is preserved both ways.
+Reported pairs are reconstructed and replayed against the original equations.
+Without declared decisions every derived atom is compared and nothing is omitted;
+the saving needs a decision selection narrower than the scope.
 
 ## Path-local constants retain their defining equations
 
