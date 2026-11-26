@@ -13,6 +13,7 @@ members = [
     "crates/den-lsp",
     "crates/lsp-tests",
 ]
+exclude = ["third_party"]
 resolver = "2"
 
 [workspace.dependencies]
@@ -27,3 +28,7 @@ lto = "thin"
 [profile.profiling]
 inherits = "release"
 debug = "line-tables-only"
+
+# batsat 0.6.0 with one public setter for its internal budgets (third_party/batsat/PATCHES.md).
+[patch.crates-io]
+batsat = { path = "third_party/batsat" }

@@ -1225,7 +1225,16 @@ impl Engine {
             }
         })
     }
+    /// One cumulative SAT allowance for the advisory (its runs share it).
     fn symbolic_advisory(
+        &self,
+        unique: bool,
+        options: &CheckOptions,
+        keys: &SemanticKeys,
+    ) -> Result<Advisory> {
+        self.scoped().symbolic_advisory_in(unique, options, keys)
+    }
+    fn symbolic_advisory_in(
         &self,
         unique: bool,
         options: &CheckOptions,

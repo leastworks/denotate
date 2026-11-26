@@ -125,6 +125,7 @@ and tiny CLI smoke; it is included in `just verify`.
 | `grammars/` | Tree-sitter grammars `den` and `test-dsl` (generated parsers committed) |
 | `fixtures/` | Shared `.den` workspaces for editor tests |
 | `docs/` | Architecture, `.den` format, decisions, checker policies, roadmap |
+| `third_party/` | Vendored dependencies with local patches: `batsat` (SAT solver; changes in its `PATCHES.md`) |
 
 ## Documentation
 

@@ -1947,6 +1947,33 @@ not a confirmed verdict. A truncated count is explicitly a lower bound. Ordinary
 solver/time limits still apply, and a real cutoff remains inconclusive. Resource
 measurements and selected examples remain observations, never goldens.
 
+### Completion SAT allowances
+
+Each completion question owns one cumulative allowance of solves, solver polls,
+conflicts and propagations (`--sat-max-solves`, `--sat-max-polls`,
+`--sat-max-conflicts`, `--sat-max-propagations`). Every solve the question issues
+debits it: repeated solves on one solver, temporary local-uniqueness solvers,
+certification runs, ranking trials, probes, branch units and resumed deferred
+leaves. Replacing, nesting or resuming a solver never refreshes it. Narrower caps
+(a unit's share, a trial's or probe's cap, each run's own `config`) form a chain
+below the question's: a solve debits every level once and may use only the
+smallest remaining balance, so ordinary-mode floors for units stay clamped by what
+the question has left. Standalone passes (observations, world queries, assumption
+analysis, advisories, planning queries, provider preparation, pruning passes) own
+one allowance per call across their runs. Obligation parts keep their per-part
+reset of the run's allowance.
+
+`used > limit` exhausts a resource, so a zero conflict limit still allows a
+conflict-free solve. A solve is refused before it starts when no solve remains or
+an earlier call already overshot; during a solve, conflicts, propagations and polls
+interrupt it at the solver's next checkpoint (batsat checks between decisions, so a
+run of consecutive conflicts can overshoot by a few; cooperative, not an exact cap).
+An interrupted solve is inconclusive, naming the resource; a solve that proves SAT
+or UNSAT at the crossing checkpoint keeps its answer. Cancellation and deadlines
+take precedence over allowances, and an unsplit probe's work cap is reported as
+work. The checker uses batsat 0.6.0 with one added setter for its internal budgets
+(`third_party/batsat/PATCHES.md`); the stable path's limits are unchanged.
+
 ### Completion component determinacy
 
 Uniqueness first probes relevant cyclic components with shared, unconstrained

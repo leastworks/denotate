@@ -237,6 +237,10 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
     shares: usize,
     leaf: impl Fn(&Engine, &CheckOptions) -> Result<Search<T>>,
 ) -> Result<Search<T>> {
+    // The question's one cumulative SAT allowance: every unit, trial, probe,
+    // leaf and resumption below debits it, and nothing below refreshes it.
+    let scoped = e.scoped();
+    let e = &*scoped;
     if options.split_depth == 0 {
         return leaf(e, options);
     }
@@ -403,18 +407,9 @@ pub(in crate::sat_probe::completion_query) fn run<T>(
     rest.limits.timeout = end.saturating_duration_since(Instant::now());
     rest.limits.run_deadline = Some(end);
     rest.limits.max_work = rest.limits.max_work.saturating_sub(first.limits.max_work);
-    rest.config = QueryLimits {
-        max_solves: config.max_solves.saturating_sub(first.config.max_solves),
-        max_solver_polls: config
-            .max_solver_polls
-            .saturating_sub(first.config.max_solver_polls),
-        max_conflicts: config
-            .max_conflicts
-            .saturating_sub(first.config.max_conflicts),
-        max_propagations: config
-            .max_propagations
-            .saturating_sub(first.config.max_propagations),
-    };
+    // What the first attempt and ranking used is already debited from the
+    // question's ledger; the rest gets the remainder, floors included.
+    rest.config = config;
     opts = options.clone();
     opts.max_worlds -= options.max_worlds / 2;
     guards(&mut rest, &mut opts);
@@ -452,6 +447,8 @@ fn partition_from<T>(
     mut root: Option<Root>,
     leaf: impl Fn(&Engine, &CheckOptions) -> Result<Search<T>>,
 ) -> Result<Search<T>> {
+    let scoped = e.scoped();
+    let e = &*scoped;
     if options.split_depth == 0 {
         return leaf(e, options);
     }
@@ -499,14 +496,6 @@ fn partition_from<T>(
     let mut leaves: Vec<(usize, usize, Unit)> = Vec::new();
     let mut leaf_seq = 0;
     let mut report = BranchReport::default();
-    let usage = e.limits.completion_exploration.then(|| {
-        Arc::new(std::sync::Mutex::new(QueryLimits {
-            max_solves: 0,
-            max_solver_polls: 0,
-            max_conflicts: 0,
-            max_propagations: 0,
-        }))
-    });
     let mut remaining_work = limits.max_work;
     let mut next_id = 2;
     let mut unknown = None;
@@ -578,26 +567,6 @@ fn partition_from<T>(
         let mut allocation = e.clone();
         allocation.limits = local_limits;
         allocation.config = unit.config.clone();
-        allocation.exploration_usage = usage.clone();
-        if let Some(usage) = &usage {
-            let u = usage.lock().unwrap();
-            allocation.config.max_solves = allocation
-                .config
-                .max_solves
-                .min(e.config.max_solves.saturating_sub(u.max_solves));
-            allocation.config.max_solver_polls = allocation
-                .config
-                .max_solver_polls
-                .min(e.config.max_solver_polls.saturating_sub(u.max_solver_polls));
-            allocation.config.max_conflicts = allocation
-                .config
-                .max_conflicts
-                .min(e.config.max_conflicts.saturating_sub(u.max_conflicts));
-            allocation.config.max_propagations = allocation
-                .config
-                .max_propagations
-                .min(e.config.max_propagations.saturating_sub(u.max_propagations));
-        }
         let mut allocated_options = options.clone();
         allocated_options.max_worlds = unit.worlds;
         guards(&mut allocation, &mut allocated_options);
@@ -622,7 +591,7 @@ fn partition_from<T>(
                     e,
                     &allocated_options,
                     &mut budget,
-                    &mut config,
+                    &config,
                     unit.id,
                     unit.depth,
                     &leaf,
@@ -658,7 +627,7 @@ fn partition_from<T>(
                     &ready,
                     &allocated_options,
                     &mut budget,
-                    &mut config,
+                    &config,
                     unit.id,
                     unit.depth,
                     &leaf,

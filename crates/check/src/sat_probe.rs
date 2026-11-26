@@ -85,6 +85,18 @@ struct Stop {
     hook: Option<Box<dyn Fn()>>,
 }
 impl Stop {
+    /// Cancellation and deadlines only; completion reports its own allowances.
+    fn check_time(&self) -> Result<()> {
+        self.cancellation.check()?;
+        let now = Instant::now();
+        if self.deadline.is_some_and(|d| now >= d) {
+            return Err(CheckError::deadline("SAT shared deadline", self.timeout));
+        }
+        if now.saturating_duration_since(self.start) >= self.timeout {
+            return Err(CheckError::deadline("SAT probe", self.timeout));
+        }
+        Ok(())
+    }
     fn check(&self) -> Result<()> {
         self.cancellation.check()?;
         let now = Instant::now();

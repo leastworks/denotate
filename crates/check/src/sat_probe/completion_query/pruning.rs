@@ -461,7 +461,9 @@ pub(super) fn view_using(
     let mut report = structural_report;
     let mut rounds = 0;
     let mut successes = Successes::default();
-    let mut round_engine = engine.clone();
+    // A pruning pass is shared by the questions that read its views: it owns
+    // one allowance across all its rounds, not a question's.
+    let round_engine = engine.with_scope();
     let mut needs_reduction = false;
     let stop = loop {
         if needs_reduction {
@@ -499,22 +501,6 @@ pub(super) fn view_using(
             &mut successes,
             None,
         );
-        round_engine.config.max_solves = round_engine
-            .config
-            .max_solves
-            .saturating_sub(used.max_solves);
-        round_engine.config.max_solver_polls = round_engine
-            .config
-            .max_solver_polls
-            .saturating_sub(used.max_solver_polls);
-        round_engine.config.max_conflicts = round_engine
-            .config
-            .max_conflicts
-            .saturating_sub(used.max_conflicts);
-        round_engine.config.max_propagations = round_engine
-            .config
-            .max_propagations
-            .saturating_sub(used.max_propagations);
         needs_reduction = (report.removed, report.removed_literals) != removed;
         if let Err(error) = answer {
             // Keep every proved prefix. Optimization exhaustion is not a verdict.

@@ -36,6 +36,7 @@ pub use symbolic::branches::{
     SplitAlternative, SplitCandidate, SplitChild,
 };
 pub use symbolic::planning::*;
+mod ledger;
 #[cfg(test)]
 mod tests;
 
@@ -250,8 +251,9 @@ pub struct Engine {
     forcing: bool,
     probe: bool,
     branch_phase: Option<&'static str>,
-    // One exploration question shares actual SAT usage across its branch units.
-    exploration_usage: Option<Arc<std::sync::Mutex<QueryLimits>>>,
+    /// The scope (question or standalone pass) whose cumulative SAT allowance
+    /// every run on this engine debits. `None`: each run owns a private one.
+    ledger: Option<Arc<ledger::SatLedger>>,
     exploration_work: Option<Arc<std::sync::atomic::AtomicUsize>>,
     program: Arc<GroundProgram>,
     original: Arc<crate::ground::OriginalDependencies>,
@@ -415,7 +417,7 @@ impl Engine {
             forcing: false,
             probe: false,
             branch_phase: None,
-            exploration_usage: None,
+            ledger: None,
             exploration_work: None,
             program: Arc::new(program),
             original,

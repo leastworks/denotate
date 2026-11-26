@@ -7,15 +7,12 @@ pub(super) struct Run<'a, 'b, 'l> {
     pub(super) truth: Lit,
     pub(super) world: Encoding,
     inactive: Vec<Lit>,
-    pub(super) solves: usize,
-    pub(super) solve_limit: usize,
+    /// This run's allowance: capped by its engine's `config` (a local cap),
+    /// debiting the enclosing scope (question or pass) with every solve.
+    pub(super) ledger: Arc<super::ledger::SatLedger>,
     certified: bool,
     formula_pins: bool,
     work_started: usize,
-    conflict_base: u64,
-    propagation_base: u64,
-    retired_conflicts: u64,
-    retired_propagations: u64,
     solve_timings: Vec<crate::CompletionSolveTiming>,
     omitted_solve_timings: usize,
     solve_time: Duration,
@@ -23,14 +20,6 @@ pub(super) struct Run<'a, 'b, 'l> {
 
 impl Drop for Run<'_, '_, '_> {
     fn drop(&mut self) {
-        if let Some(usage) = &self.engine.exploration_usage {
-            let used = self.usage();
-            let mut total = usage.lock().unwrap();
-            total.max_solves = total.max_solves.saturating_add(used.max_solves);
-            total.max_solver_polls = total.max_solver_polls.saturating_add(used.max_solver_polls);
-            total.max_conflicts = total.max_conflicts.saturating_add(used.max_conflicts);
-            total.max_propagations = total.max_propagations.saturating_add(used.max_propagations);
-        }
         if let Some((_, stats)) = &mut self.cnf.measurement {
             stats.solve_timings = std::mem::take(&mut self.solve_timings);
             stats.omitted_solve_timings = self.omitted_solve_timings;
@@ -45,9 +34,12 @@ impl Engine {
     /// Certified W alone. No completion equations outside selected restrictions
     /// can suppress an otherwise permitted observation.
     pub fn worlds(&self, query: &WorldQuery) -> Result<WorldAnswer> {
-        let result = self.worlds_using(query, &mut Budget::new(&self.limits))?;
+        // One allowance for the query and its no-world assumption audit.
+        let scoped = self.scoped();
+        let this = &*scoped;
+        let result = this.worlds_using(query, &mut Budget::new(&this.limits))?;
         if matches!(result, WorldAnswer::NoWorld)
-            && self
+            && this
                 .assumption_analysis(&CheckOptions::default())?
                 .iter()
                 .any(|a| !a.certified())
@@ -109,6 +101,9 @@ impl Engine {
         budget: &mut Budget<'_>,
         processing: bool,
     ) -> Result<ObservationOutcome> {
+        // One allowance for the whole observation: assumption audits and the query.
+        let scoped = self.scoped();
+        let this = &*scoped;
         let mut present_set = BTreeSet::new();
         let result = (|| {
             for a in present {
@@ -118,14 +113,12 @@ impl Engine {
                 }
                 present_set.insert(a);
             }
-            let mut solves = 0;
-            let issues = self.assumptions_at(&present_set, budget, &mut solves)?;
+            let issues = this.assumptions_at(&present_set, budget)?;
             if !issues.is_empty() {
                 return Ok(ObservationOutcome::UndeterminedAssumptions(issues));
             }
-            let mut run = Run::new(self, budget)?;
+            let mut run = Run::new(this, budget)?;
             run.label("completion observation");
-            run.solve_limit = self.config.max_solves.saturating_sub(solves);
             // Inputs stay pinned through every query below; their assumption
             // determinacy was already established independently.
             run.certified = false;
@@ -340,13 +333,32 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         Ok(run)
     }
     pub(super) fn universe(engine: &'a Engine, budget: &'b mut Budget<'l>) -> Result<Self> {
-        Self::base(engine, budget, true)
+        Self::base(engine, budget, true, engine.run_ledger())
+    }
+    /// A run inside another run's allowance (certification): it shares and
+    /// debits all four of that run's allowances, with no cap of its own.
+    pub(super) fn universe_under(
+        engine: &'a Engine,
+        budget: &'b mut Budget<'l>,
+        parent: &Arc<super::ledger::SatLedger>,
+    ) -> Result<Self> {
+        Self::base(
+            engine,
+            budget,
+            true,
+            parent.child(super::ledger::unbounded()),
+        )
     }
     /// Local boundary queries need neither W nor an input-universe encoding.
     pub(super) fn local(engine: &'a Engine, budget: &'b mut Budget<'l>) -> Result<Self> {
-        Self::base(engine, budget, false)
+        Self::base(engine, budget, false, engine.run_ledger())
     }
-    fn base(engine: &'a Engine, budget: &'b mut Budget<'l>, universe: bool) -> Result<Self> {
+    fn base(
+        engine: &'a Engine,
+        budget: &'b mut Budget<'l>,
+        universe: bool,
+        ledger: Arc<super::ledger::SatLedger>,
+    ) -> Result<Self> {
         let work_started = budget.used();
         budget.begin_query_work();
         budget.check("completion query")?;
@@ -381,9 +393,10 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
                         .completion_exploration
                         .then(|| engine.limits.progress.clone()),
                     deadline: engine.limits.run_deadline,
+                    // Each solve sets its own poll room from the ledger.
                     polls: Some(PollLimit {
                         used: std::cell::Cell::new(0),
-                        max: engine.config.max_solver_polls,
+                        max: usize::MAX,
                     }),
                     cancellation: engine.limits.cancellation.clone(),
                     start: Instant::now(),
@@ -420,15 +433,10 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             truth,
             world,
             inactive: vec![],
-            solves: 0,
-            solve_limit: engine.config.max_solves,
+            ledger,
             certified: false,
             formula_pins: false,
             work_started,
-            conflict_base: 0,
-            propagation_base: 0,
-            retired_conflicts: 0,
-            retired_propagations: 0,
             solve_timings: vec![],
             omitted_solve_timings: 0,
             solve_time: Duration::ZERO,
@@ -507,9 +515,9 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
                 }
                 // A separate solver prevents downstream equations, H, other
                 // restrictions and candidate exclusions from choosing A's truth.
-                let mut check = Run::universe(self.engine, self.budget)?;
+                let parent = self.ledger.clone();
+                let mut check = Run::universe_under(self.engine, self.budget, &parent)?;
                 check.label("completion assumption certification");
-                check.solve_limit = self.solve_limit.saturating_sub(self.solves);
                 let result: Result<_> = (|| {
                     let e = encode(
                         &a.cone,
@@ -532,7 +540,6 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
                         check.budget,
                     )?))
                 })();
-                self.solves += check.solves;
                 drop(check);
                 if let Some(cube) = result? {
                     self.exclude(&cube)?;
@@ -550,13 +557,8 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
     /// The enclosing work/CNF allowances and deadline never restart.
     pub(super) fn next_property_part(&mut self) -> Result<()> {
         self.budget.check("completion property")?;
-        self.cnf.solver.cb().check()?;
-        self.solves = 0;
-        self.conflict_base = self.cnf.solver.num_conflicts() + self.retired_conflicts;
-        self.propagation_base = self.cnf.solver.num_propagations() + self.retired_propagations;
-        if let Some(polls) = &self.cnf.solver.cb().polls {
-            polls.used.set(0);
-        }
+        self.cnf.solver.cb().check_time()?;
+        self.ledger.reset();
         Ok(())
     }
     /// Local uniqueness uses arbitrary shared boundary values, with no W/H.
@@ -578,9 +580,9 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
                         .completion_exploration
                         .then(|| self.engine.limits.progress.clone()),
                     deadline: self.cnf.solver.cb().deadline,
-                    polls: self.cnf.solver.cb().polls.as_ref().map(|p| PollLimit {
-                        used: std::cell::Cell::new(p.used.get()),
-                        max: p.max,
+                    polls: Some(PollLimit {
+                        used: std::cell::Cell::new(0),
+                        max: usize::MAX,
                     }),
                     cancellation: self.engine.limits.cancellation.clone(),
                     start: Instant::now(),
@@ -597,8 +599,6 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         let original = std::mem::replace(&mut self.cnf, local);
         // This solver has free boundary values, not the branch's input universe.
         let formula_pins = std::mem::replace(&mut self.formula_pins, false);
-        self.retired_conflicts += original.solver.num_conflicts();
-        self.retired_propagations += original.solver.num_propagations();
         let result = (|| {
             let truth = self.cnf.var(self.budget)?;
             self.cnf.clause(vec![truth], self.budget)?;
@@ -639,14 +639,6 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         })();
         let variables = self.cnf.solver.num_vars() as usize;
         let clauses = self.cnf.clauses;
-        self.retired_conflicts += self.cnf.solver.num_conflicts();
-        self.retired_conflicts -= original.solver.num_conflicts();
-        self.retired_propagations += self.cnf.solver.num_propagations();
-        self.retired_propagations -= original.solver.num_propagations();
-        if let (Some(out), Some(local)) = (&original.solver.cb().polls, &self.cnf.solver.cb().polls)
-        {
-            out.used.set(local.used.get());
-        }
         self.cnf = original;
         self.formula_pins = formula_pins;
         let validation_work = validation_started.map_or(0, |start| self.budget.used() - start);
@@ -654,36 +646,17 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
     }
 
     pub(super) fn usage(&self) -> QueryLimits {
-        QueryLimits {
-            max_solves: self.solves,
-            max_solver_polls: self
-                .cnf
-                .solver
-                .cb()
-                .polls
-                .as_ref()
-                .map_or(0, |p| p.used.get()),
-            max_conflicts: self
-                .cnf
-                .solver
-                .num_conflicts()
-                .saturating_add(self.retired_conflicts)
-                .saturating_sub(self.conflict_base),
-            max_propagations: self
-                .cnf
-                .solver
-                .num_propagations()
-                .saturating_add(self.retired_propagations)
-                .saturating_sub(self.propagation_base),
-        }
+        self.ledger.used()
+    }
+    #[cfg(test)]
+    pub(super) fn solves(&self) -> usize {
+        self.ledger.used().max_solves
     }
 
     pub(super) fn raw_solve(&mut self, pins: &[Lit]) -> Result<bool> {
         self.budget.tick("completion solve")?;
-        self.cnf.solver.cb().check()?;
-        self.budget
-            .room(self.solves, self.solve_limit, "completion solve", "solves")?;
-        self.solves += 1;
+        self.cnf.solver.cb().check_time()?;
+        self.ledger.admit(self.budget)?;
         let started = Instant::now();
         let remaining = self
             .engine
@@ -700,10 +673,14 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
         // Progress observers are synchronous. Do not enter the solver if output
         // or an observer consumed the remaining time after the first check.
         self.budget.check("completion solve")?;
-        self.cnf.solver.cb().check()?;
-        // A probe work cap must also bound a single long solver call. Count
-        // callback polls as work only in the probe; production accounting stays
-        // unchanged until the separate deterministic-budget increment.
+        self.cnf.solver.cb().check_time()?;
+        // Enforce the remaining allowance inside the call: batsat stops when a
+        // count reaches its budget, so allow R more and stop on the (R + 1)th;
+        // polls stop past `max`. A probe's work cap stops polls the same way, one
+        // past the remaining work, so its stop is charged as work below.
+        let room = self.ledger.remaining();
+        let conflicts = self.cnf.solver.num_conflicts();
+        let propagations = self.cnf.solver.num_propagations();
         let before_polls = self
             .cnf
             .solver
@@ -711,28 +688,44 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             .polls
             .as_ref()
             .map_or(0, |p| p.used.get());
-        if self.engine.probe {
-            if let Some(p) = &mut self.cnf.solver.cb_mut().polls {
-                p.max = self.engine.config.max_solver_polls.min(
-                    before_polls
-                        .saturating_add(self.budget.remaining())
-                        .saturating_sub(1),
-                );
-            }
+        let poll_room = if self.engine.probe {
+            room.polls.min(self.budget.remaining())
+        } else {
+            room.polls
+        };
+        if let Some(p) = &mut self.cnf.solver.cb_mut().polls {
+            p.max = before_polls.saturating_add(poll_room);
         }
+        self.cnf.solver.set_budgets(
+            Some(conflicts.saturating_add(room.conflicts).saturating_add(1)),
+            Some(
+                propagations
+                    .saturating_add(room.propagations)
+                    .saturating_add(1),
+            ),
+        );
         let answer = self.cnf.solver.solve_limited(pins);
-        if self.engine.probe {
-            let polls = self
+        let polls = self
+            .cnf
+            .solver
+            .cb()
+            .polls
+            .as_ref()
+            .map_or(0, |p| p.used.get())
+            .saturating_sub(before_polls);
+        if let Some(p) = &mut self.cnf.solver.cb_mut().polls {
+            p.max = usize::MAX;
+        }
+        self.ledger.debit(&QueryLimits {
+            max_solves: 1,
+            max_solver_polls: polls,
+            max_conflicts: self.cnf.solver.num_conflicts().saturating_sub(conflicts),
+            max_propagations: self
                 .cnf
                 .solver
-                .cb()
-                .polls
-                .as_ref()
-                .map_or(0, |p| p.used.get())
-                .saturating_sub(before_polls);
-            self.budget
-                .charge(polls, "completion unsplit probe solver work")?;
-        }
+                .num_propagations()
+                .saturating_sub(propagations),
+        });
         let elapsed = started.elapsed();
         self.solve_time += elapsed;
         let overrun = self.engine.limits.run_deadline.map_or(Duration::ZERO, |d| {
@@ -748,35 +741,19 @@ impl<'a, 'b, 'l> Run<'a, 'b, 'l> {
             self.omitted_solve_timings += 1;
         }
 
-        self.cnf.solver.cb().check()?;
-        for (used, limit, resource) in [
-            (
-                self.cnf
-                    .solver
-                    .num_conflicts()
-                    .saturating_add(self.retired_conflicts)
-                    .saturating_sub(self.conflict_base),
-                self.engine.config.max_conflicts,
-                "conflicts",
-            ),
-            (
-                self.cnf
-                    .solver
-                    .num_propagations()
-                    .saturating_add(self.retired_propagations)
-                    .saturating_sub(self.propagation_base),
-                self.engine.config.max_propagations,
-                "propagations",
-            ),
-        ] {
-            if used > limit {
-                return Err(CheckError::limit(
-                    "completion solve",
-                    resource,
-                    limit.try_into().unwrap_or(usize::MAX),
-                    Some(used.try_into().unwrap_or(usize::MAX)),
-                ));
+        // Precedence: cancellation and deadlines, then the allowance that
+        // stopped the call, then the probe's work. A call that proved SAT or
+        // UNSAT at the crossing checkpoint keeps its answer; the overshoot
+        // refuses the next call.
+        self.cnf.solver.cb().check_time()?;
+        if answer == lbool::UNDEF {
+            if let Some(error) = self.ledger.exhausted() {
+                return Err(error);
             }
+        }
+        if self.engine.probe {
+            self.budget
+                .charge(polls, "completion unsplit probe solver work")?;
         }
         self.budget.check("completion solve")?;
         if answer == lbool::TRUE {

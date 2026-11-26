@@ -70,6 +70,7 @@ pub(super) fn prepare(
         }
     }
     let mut eligibility = BTreeMap::new();
+    let mut providers_ledger: Option<Arc<super::ledger::SatLedger>> = None;
     let mut ignored = Vec::new();
     let mut issues = Vec::new();
     let mut dependencies: Option<BTreeMap<RelationId, BTreeSet<RelationId>>> = None;
@@ -170,6 +171,12 @@ pub(super) fn prepare(
             )?;
             let cone = Arc::make_mut(&mut e.cone);
             cone.rules.retain(|r| members.contains(&cone.atoms[r.head]));
+            // Every provider query of this preparation shares one allowance.
+            e.ledger = Some(
+                providers_ledger
+                    .get_or_insert_with(|| super::ledger::SatLedger::root(config.clone()))
+                    .clone(),
+            );
             let mut run = Run::universe(&e, b)?;
             run.label("completion input provider");
             let encoded = encoding::encode_named(

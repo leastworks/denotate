@@ -1,2 +1,6 @@
 Denotate
 Copyright 2026 Least Works
+
+third_party/batsat is batsat 0.6.0 (https://github.com/c-cube/batsat), MIT licensed,
+derived from MiniSat; its copyright notices remain in its files and LICENSE. Local
+changes are listed in third_party/batsat/PATCHES.md.

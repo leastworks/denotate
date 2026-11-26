@@ -295,7 +295,8 @@ invalid configuration or a filtered `--verification` run; otherwise **1** for fa
 General grounding/CNF/work/deadline limits apply. SAT-specific options are
 `--sat-max-worlds`, `--sat-max-tuples`, `--sat-max-solves`, `--sat-max-refinements`,
 `--sat-max-polls`, `--sat-max-conflicts` and `--sat-max-propagations`; see `--help` for
-defaults. `--empty-examples` controls retention, not the tuple-checking allowance.
+defaults. In completion verifications the last four are cumulative per question and
+interrupt a running solve ([policy](../../docs/checker-policies.md#completion-sat-allowances)). `--empty-examples` controls retention, not the tuple-checking allowance.
 BDD/admission options such as `--checking-within-w`, `--input-order`, `--sat-probe`,
 condition profiling and committed-graph export are rejected in SAT mode. No
 measurement-only simplification/elimination is applied. Each selected verification

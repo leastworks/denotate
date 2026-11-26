@@ -509,8 +509,8 @@ mod owner_tests {
         fixed.cache.empty_core = true; // Deliberately wrong claim; solver still wins.
         assert!(fixed.solve(&[input]).unwrap());
         assert_eq!(fixed.stats().mismatches, 1);
-        assert_eq!(fixed.run.solves, 5, "shadow mode must not skip a solve");
-        fixed.run.solve_limit = fixed.run.solves;
+        assert_eq!(fixed.run.solves(), 5, "shadow mode must not skip a solve");
+        fixed.run.ledger = fixed.run.ledger.no_more_solves();
         assert!(
             fixed.solve(&[input]).is_err(),
             "a cache hit must not bypass solver limits in shadow mode"
@@ -541,10 +541,10 @@ mod owner_tests {
         assert_eq!(fixed.stats().sampled_hits, 2);
         assert_eq!(fixed.stats().enforced_hits, 198);
         assert_eq!(fixed.stats().mismatches, 0);
-        assert_eq!(fixed.run.solves, 3, "enforced hits issue no solve");
+        assert_eq!(fixed.run.solves(), 3, "enforced hits issue no solve");
         // UNSAT queries are never answered from the model cache.
         assert!(!fixed.solve(&[!input]).unwrap());
-        assert_eq!(fixed.run.solves, 4);
+        assert_eq!(fixed.run.solves(), 4);
     }
 
     #[test]
@@ -583,7 +583,7 @@ mod owner_tests {
         run.cnf.clause(vec![input], run.budget).unwrap();
         let mut fixed = FixedQueries::enforcing(&mut run).unwrap();
         assert!(fixed.solve(&[input]).unwrap());
-        fixed.run.solve_limit = fixed.run.solves;
+        fixed.run.ledger = fixed.run.ledger.no_more_solves();
         // The first claim is sampled; its re-solve has no solve left.
         let error = fixed.solve(&[input]).unwrap_err();
         assert!(
@@ -619,7 +619,7 @@ mod owner_tests {
         let mut fixed = FixedQueries::enforcing(&mut run).unwrap();
         assert!(fixed.solve(&[input]).unwrap()); // miss
         assert!(fixed.solve(&[input]).unwrap()); // claim 1, sampled
-        let solves = fixed.run.solves;
+        let solves = fixed.run.solves();
         std::thread::sleep(Duration::from_millis(300));
         // Claim 2 would be answered from the cache; the deadline wins first.
         let error = fixed.solve(&[input]).unwrap_err();
@@ -627,7 +627,7 @@ mod owner_tests {
             inconclusive(error).is_ok(),
             "a deadline cutoff, not an error"
         );
-        assert_eq!(fixed.run.solves, solves);
+        assert_eq!(fixed.run.solves(), solves);
         assert_eq!(fixed.stats().enforced_hits, 0);
     }
 }

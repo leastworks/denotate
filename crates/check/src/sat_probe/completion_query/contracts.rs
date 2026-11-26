@@ -182,7 +182,11 @@ fn groups(
 }
 
 impl Engine {
+    /// One cumulative SAT allowance for this pass (its runs share it).
     pub fn assumption_analysis(&self, options: &CheckOptions) -> Result<Vec<AssumptionAnalysis>> {
+        self.scoped().assumption_analysis_in(options)
+    }
+    fn assumption_analysis_in(&self, options: &CheckOptions) -> Result<Vec<AssumptionAnalysis>> {
         self.assumptions
             .iter()
             .map(|a| {
@@ -321,12 +325,10 @@ impl Engine {
         &self,
         present: &BTreeSet<GroundAtom>,
         b: &mut Budget<'_>,
-        solves: &mut usize,
     ) -> Result<Vec<AssumptionAnalysis>> {
         let mut out = Vec::new();
         for a in self.assumptions.iter().filter(|a| a.recursive) {
             let mut run = Run::universe(self, b)?;
-            run.solve_limit = self.config.max_solves.saturating_sub(*solves);
             let result: Result<Option<AssumptionAnalysis>> = (|| {
                 let mut pins = Vec::new();
                 for atom in &self.program.inputs {
@@ -388,7 +390,6 @@ impl Engine {
                 }
                 Ok(None)
             })();
-            *solves += run.solves;
             if let Some(issue) = result? {
                 out.push(issue);
             }

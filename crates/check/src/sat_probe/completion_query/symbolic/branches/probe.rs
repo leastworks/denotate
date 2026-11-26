@@ -10,7 +10,7 @@ pub(super) fn run<T>(
     e: &Engine,
     options: &CheckOptions,
     budget: &mut Budget<'_>,
-    remaining: &mut QueryLimits,
+    remaining: &QueryLimits,
     id: usize,
     depth: usize,
     leaf: &impl Fn(&Engine, &CheckOptions) -> Result<Search<T>>,
@@ -21,21 +21,13 @@ pub(super) fn run<T>(
         return Ok(None);
     }
     let started = Instant::now();
-    let mut probe = e.clone();
+    // The probe's own scope, inside the question's: its solves debit both.
+    let mut probe = e.sub_scope(remaining.clone());
     probe.probe = true;
     probe.limits.max_work = budget.remaining().min(e.limits.completion_probe_work);
     probe.limits.timeout = budget.remaining_time();
-    probe.config = remaining.clone();
-    probe.config.max_solver_polls = probe.config.max_solver_polls.min(probe.limits.max_work);
     let work = Arc::new(AtomicUsize::new(0));
-    let usage = Arc::new(std::sync::Mutex::new(QueryLimits {
-        max_solves: 0,
-        max_solver_polls: 0,
-        max_conflicts: 0,
-        max_propagations: 0,
-    }));
     probe.exploration_work = Some(work.clone());
-    probe.exploration_usage = Some(usage.clone());
     // Reuse only existing context-correct views; the probe never initiates SAT
     // pruning, forcing or ranking. Search-free Fitting remains charged work.
     if let Some(cache) = &e.pruning {
@@ -53,22 +45,6 @@ pub(super) fn run<T>(
         Duration::ZERO,
     );
     let result = leaf(&probe, &opts);
-    let used = usage.lock().unwrap();
-    remaining.max_solves = remaining.max_solves.saturating_sub(used.max_solves);
-    remaining.max_solver_polls = remaining
-        .max_solver_polls
-        .saturating_sub(used.max_solver_polls);
-    remaining.max_conflicts = remaining.max_conflicts.saturating_sub(used.max_conflicts);
-    remaining.max_propagations = remaining
-        .max_propagations
-        .saturating_sub(used.max_propagations);
-    if let Some(total) = &e.exploration_usage {
-        let mut total = total.lock().unwrap();
-        total.max_solves = total.max_solves.saturating_add(used.max_solves);
-        total.max_solver_polls = total.max_solver_polls.saturating_add(used.max_solver_polls);
-        total.max_conflicts = total.max_conflicts.saturating_add(used.max_conflicts);
-        total.max_propagations = total.max_propagations.saturating_add(used.max_propagations);
-    }
     let work = work.load(Ordering::Relaxed);
     let complete = matches!(&result, Ok(Search::None | Search::Exists(_)));
     let cutoff = match &result {

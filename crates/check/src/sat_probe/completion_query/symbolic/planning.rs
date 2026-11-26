@@ -47,7 +47,15 @@ impl Engine {
     /// selected contract is audited independently over U, exactly as in checking.
     /// Without H every certified observation is accepted; output meaning is a
     /// separate query and may still fail.
+    /// One cumulative SAT allowance for this pass (its runs share it).
     pub fn planning_context(
+        &self,
+        path: &RuntimePath,
+        options: &CheckOptions,
+    ) -> Result<PlanningContext> {
+        self.scoped().planning_context_in(path, options)
+    }
+    fn planning_context_in(
         &self,
         path: &RuntimePath,
         options: &CheckOptions,
@@ -128,7 +136,18 @@ impl Engine {
     /// freedom. This is a conditional value proof, NOT an acceptance certificate,
     /// proof of scoped existence for every observation, or permission to fabricate
     /// a raw input/task result. Runtime outcome is always `planning_context`.
+    /// One cumulative SAT allowance for this pass (its runs share it).
     pub fn planning_constant(
+        &self,
+        path: &RuntimePath,
+        target: &GroundAtom,
+        scope: ConstantScope,
+        options: &CheckOptions,
+    ) -> Result<PlanningConstant> {
+        self.scoped()
+            .planning_constant_in(path, target, scope, options)
+    }
+    fn planning_constant_in(
         &self,
         path: &RuntimePath,
         target: &GroundAtom,
@@ -228,7 +247,16 @@ impl PlanningOutputs {
     }
 }
 impl Engine {
+    /// One cumulative SAT allowance for this pass (its runs share it).
     pub fn planning_outputs(
+        &self,
+        path: &RuntimePath,
+        targets: &BTreeSet<GroundAtom>,
+        options: &CheckOptions,
+    ) -> Result<PlanningOutputs> {
+        self.scoped().planning_outputs_in(path, targets, options)
+    }
+    fn planning_outputs_in(
         &self,
         path: &RuntimePath,
         targets: &BTreeSet<GroundAtom>,
