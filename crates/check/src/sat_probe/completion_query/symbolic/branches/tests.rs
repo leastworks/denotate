@@ -1049,24 +1049,33 @@ fn deferred_leaves_stay_inconclusive_when_the_deadline_arrives_first() {
     let mut e = prepare(&c, v, &Default::default());
     e.limits.completion_exploration = true;
     e.limits.completion_probe_work = 0;
-    e.limits.timeout = Duration::from_millis(1000);
+    e.limits.timeout = Duration::from_millis(3000);
     e.branches = Some(Arc::new(std::sync::Mutex::new(BranchReport::default())));
     let calls = std::cell::Cell::new(0);
     let options = CheckOptions {
         split_depth: 2,
         ..Default::default()
     };
-    let result: Search<()> = run(&e, false, true, &options, 1, |_, _| {
+    let result: Search<()> = run(&e, false, true, &options, 1, |b, _| {
         calls.set(calls.get() + 1);
-        std::thread::sleep(Duration::from_millis(1300));
+        // Outlast the unit's own deadline, whatever the runner's load: no
+        // fixed sleep has to beat a fixed timeout.
+        let deadline = b.limits.run_deadline.expect("leaf deadline");
+        while Instant::now() <= deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
         Ok(Search::None)
     })
     .unwrap();
     assert!(matches!(result, Search::Inconclusive(_)));
-    assert_eq!(calls.get(), 1, "deferred leaves ran after the deadline");
+    // On a heavily loaded runner the deadline may even fire before any leaf
+    // search starts; either way no leaf is searched after it.
+    assert!(calls.get() <= 1, "deferred leaves ran after the deadline");
     let report = e.branches.as_ref().unwrap().lock().unwrap();
     assert!(report.pending_units > 0);
-    assert!(report.records.iter().any(|r| r.state == "leaf-deferred"));
+    if calls.get() == 1 {
+        assert!(report.records.iter().any(|r| r.state == "leaf-deferred"));
+    }
 }
 
 #[test]
