@@ -2380,7 +2380,11 @@ its structural work without a split is recorded as `leaf-deferred`; its residual
 search runs only after every pending unit has been ranked and split, so one
 unbounded leaf search cannot starve sibling units. A unit whose ranking finds no
 partition records why (`rankingGap`: the witness cycle used and where candidate
-discovery stopped). A cutoff proceeds to reductions, requested pruning to
+discovery stopped). Exploration trial children prune but do not force; the selected
+partition's children force in their own units, so a cut that appears only after forcing
+cannot win a trial (on the first real program forcing found no constants in any trial).
+A view already pruned to a fixed point is not pruned again until it changes (forced
+constants, a successful proof, new pins). A cutoff proceeds to reductions, requested pruning to
 saturation, forcing, complete shortlisted trials, then a verified split. Residual
 queries run only at leaves. Both cut and uncut children rank surviving components.
 Ordinary mode changes only classification existence's order: enabled forcing/splits

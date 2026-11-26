@@ -919,7 +919,7 @@ fn verify(
                     bundle.child_with_formula(&pins, choices[i].formula.as_ref(), &mut trial)?;
                 let (attempts, proved, cutoff) =
                     child_bundle.prune(e, classification, &heads, remaining, &mut trial)?;
-                child_bundle.settle(e, classification, remaining, &mut trial)?;
+                child_bundle.settle(e, classification, true, remaining, &mut trial)?;
                 row.child_trials.last_mut().unwrap().forcing = child_bundle.forcing.clone();
                 row.pruning_attempts += attempts;
                 row.pruning_proved += proved;

@@ -433,7 +433,7 @@ mod tests {
         let y = e.program.atom_index[&atom(y)];
         assert!(consistency::analyse(&e.cone, None, &mut b).unwrap().cyclic[y]);
         bundle
-            .settle(&e, false, &mut e.config.clone(), &mut b)
+            .settle(&e, false, false, &mut e.config.clone(), &mut b)
             .unwrap();
         let (state, _) = bundle.ranking(false, false);
         let view = state.cone(&mut b).unwrap();

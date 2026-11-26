@@ -228,6 +228,10 @@ pub(super) struct Bundle {
     pub proofs: Vec<PruningReport>,
     pub forcing: Vec<forcing::ForcingRecord>,
     forced_scopes: BTreeSet<(Vec<usize>, PruningContext)>,
+    /// Scopes (classification or not) whose current views were pruned to a
+    /// fixed point; any view change clears it. Re-pruning an unchanged view
+    /// repeats the same attempts and proves nothing new.
+    saturated: BTreeSet<bool>,
 }
 impl Bundle {
     pub fn new(e: &Engine, b: &mut Budget<'_>) -> Result<Self> {
@@ -246,6 +250,7 @@ impl Bundle {
             proofs: vec![],
             forcing: vec![],
             forced_scopes: BTreeSet::new(),
+            saturated: BTreeSet::new(),
             trials: e
                 .pruning
                 .as_ref()
@@ -288,6 +293,7 @@ impl Bundle {
             proofs: vec![],
             forcing: vec![],
             forced_scopes: BTreeSet::new(),
+            saturated: BTreeSet::new(),
             views: self
                 .views
                 .iter()
@@ -414,6 +420,7 @@ impl Bundle {
             let key = (self.scope(classification), context, self.pins.clone());
             out.views.insert(key, State::new(reduced, b)?);
         }
+        out.saturated.clear();
         Ok(out)
     }
 
@@ -528,6 +535,7 @@ impl Bundle {
                 key.1 = context;
                 key.2 = self.pins.clone();
                 self.views.insert(key, state);
+                self.saturated.clear();
                 self.proofs.push(report);
             }
         }
@@ -543,6 +551,9 @@ impl Bundle {
         b: &mut Budget<'_>,
     ) -> Result<usize> {
         if self.trials.is_none() {
+            return Ok(0);
+        }
+        if self.saturated.contains(&classification) {
             return Ok(0);
         }
         let started = Instant::now();
@@ -569,10 +580,14 @@ impl Bundle {
             }
             if heads.is_empty() {
                 e.exploration(phase, "completed", b.used() - before, started.elapsed());
+                self.saturated.insert(classification);
                 return Ok(total);
             }
             let (_, proved, cutoff) = self.prune(e, classification, &heads, config, b)?;
             total += proved;
+            if cutoff.is_none() && proved == 0 {
+                self.saturated.insert(classification);
+            }
             if cutoff.is_some() || proved == 0 {
                 e.exploration(
                     phase,
@@ -594,6 +609,7 @@ impl Bundle {
         &mut self,
         e: &Engine,
         classification: bool,
+        trial: bool,
         config: &mut QueryLimits,
         b: &mut Budget<'_>,
     ) -> Result<()> {
@@ -603,7 +619,11 @@ impl Bundle {
                 self.forced_scopes.retain(|(s, _)| *s != scope);
             }
         }
-        if !e.forcing {
+        // Exploration forces only the selected partition's children (in their
+        // own units): on the corpus, forcing inside every trial child found no
+        // constants while costing most of each ranking. Trial scores stay
+        // structural.
+        if !e.forcing || (trial && e.limits.completion_exploration) {
             return Ok(());
         }
         let contexts: Vec<_> = [PruningContext::World, PruningContext::Hypothesis]
@@ -680,6 +700,7 @@ impl Bundle {
                             (self.scope(classification), context, self.pins.clone()),
                             state,
                         );
+                        self.saturated.clear();
                     }
                     self.forcing.push(report);
                     if cutoff {

@@ -651,7 +651,7 @@ fn partition_from<T>(
                 }
             }
             let mut settled = (*state).clone();
-            settled.settle(e, classification, &mut config, &mut budget)?;
+            settled.settle(e, classification, false, &mut config, &mut budget)?;
             record.forcing = settled.forcing.clone();
             let state = Arc::new(settled);
             let mut branch = state.engine(e, &mut budget)?;

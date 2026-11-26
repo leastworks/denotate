@@ -466,3 +466,73 @@ fn derived_guard_eligibility_checks_the_whole_upstream_not_just_its_own_scc() {
             .any(|g| g.atom == atom(guard) && !g.acyclic_upstream)
     );
 }
+
+#[test]
+fn unchanged_saturated_views_are_not_pruned_again() {
+    // With the guard false the odd loop survives pruning: the first settle does
+    // real work and proves nothing; repeating it on the unchanged view would
+    // repeat the same attempts (three times per trial child on the corpus).
+    let (_, mut e, g, _) = fixture(false);
+    e.limits.completion_exploration = true;
+    let mut b = Budget::new(&e.limits);
+    let root = fitting::Bundle::new(&e, &mut b).unwrap();
+    let mut child = root.child(&[(g, false)], &mut b).unwrap();
+    let mut config = e.config.clone();
+    let start = b.used();
+    child.settle(&e, false, true, &mut config, &mut b).unwrap();
+    assert!(b.used() > start, "the first pass prunes");
+    let start = b.used();
+    child.settle(&e, false, true, &mut config, &mut b).unwrap();
+    assert_eq!(
+        b.used(),
+        start,
+        "an unchanged saturated view was pruned again"
+    );
+    // A new bundle (as for a child unit or a new pin set) prunes again.
+    let mut fresh = child.child(&[(g, false)], &mut b).unwrap();
+    let start = b.used();
+    fresh.settle(&e, false, true, &mut config, &mut b).unwrap();
+    assert!(b.used() > start);
+}
+
+/// Counts `completion unit pruning` starts; a saturated scope returns before that
+/// event, so the count shows whether pruning actually ran again.
+fn count_pruning_starts(e: &mut Engine) -> Arc<std::sync::atomic::AtomicUsize> {
+    let starts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let seen = starts.clone();
+    e.limits.progress = crate::CheckingProgress::new(move |event| {
+        if event.stage == "completion unit pruning" && event.state == "started" {
+            seen.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    });
+    starts
+}
+
+#[test]
+fn exploration_trials_leave_forcing_to_selected_children() {
+    // As in production: the completed trial state becomes the selected child's
+    // prepared state, then its unit settles it with forcing. Here forcing W
+    // installs constants once and then finds nothing more.
+    let (_, mut e, g, _) = fixture(false);
+    e.limits.completion_exploration = true;
+    e.forcing = true;
+    let starts = count_pruning_starts(&mut e);
+    let mut b = Budget::new(&e.limits);
+    let root = fitting::Bundle::new(&e, &mut b).unwrap();
+    let mut config = e.config.clone();
+    let mut trial = root.child(&[(g, false)], &mut b).unwrap();
+    trial.settle(&e, false, true, &mut config, &mut b).unwrap();
+    assert!(trial.forcing.is_empty(), "a trial child forced");
+    assert_eq!(starts.load(std::sync::atomic::Ordering::Relaxed), 1);
+    let mut unit = trial.clone();
+    unit.settle(&e, false, false, &mut config, &mut b).unwrap();
+    assert!(
+        unit.forcing.iter().any(|r| r.forced > 0),
+        "the selected child's unit forces"
+    );
+    // The unit skips re-pruning the trial's saturated view; the installed
+    // constants invalidate it, so pruning runs exactly once more; the second
+    // forcing round changes nothing, so no third pass. Without the memo this
+    // is 4, without invalidation 1.
+    assert_eq!(starts.load(std::sync::atomic::Ordering::Relaxed), 2);
+}
