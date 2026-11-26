@@ -446,7 +446,9 @@ fn ranking_counts_edges_across_components_and_reports_the_runner_up_within_the_c
         emit(&mut c, r, &[(guard, None, true), (r, None, false)]);
     }
     let v = c.verifications().next().unwrap().id;
-    let e = prepare(&c, v, &[(sort, vs)].into());
+    let mut e = prepare(&c, v, &[(sort, vs)].into());
+    // The runner-up is reported only when every shortlisted candidate is tried.
+    e.limits.completion_full_shortlist = true;
     for cap in [2, 3] {
         let mut b = Budget::new(&e.limits);
         let state = fitting::Bundle::new(&e, &mut b).unwrap();
@@ -1421,4 +1423,180 @@ fn exploration_rejection_probe_covers_hypothesis_models_within_its_cap() {
         &e.check_enumerated(&keys(&c), &Default::default()).unwrap(),
     );
     assert!(matches!(got.classification.unwrap().rejected, Search::None));
+}
+
+/// Odd self-loops `x :- [guard], !x`, one per (name, guard, polarity); `true`
+/// means the guard appears negated in the body.
+fn guarded_loops(c: &mut Corpus, loops: &[(&str, RelationId, bool)]) {
+    for (name, guard, negated) in loops {
+        let x = rel(c, name, false);
+        rule(c, x, &[(*guard, *negated), (x, true)]);
+    }
+}
+
+fn rank(e: &Engine) -> (Choice, Vec<SplitCandidate>) {
+    let mut b = Budget::new(&e.limits);
+    let state = fitting::Bundle::new(e, &mut b).unwrap();
+    let branch = state.engine(e, &mut b).unwrap();
+    let mut telemetry = vec![];
+    let (winner, _) = choose(
+        &branch,
+        &state,
+        false,
+        true,
+        8,
+        &mut e.config.clone(),
+        &mut telemetry,
+        &mut 0,
+        &mut b,
+    )
+    .unwrap()
+    .unwrap();
+    (winner, telemetry)
+}
+
+#[test]
+fn ranking_stops_at_the_first_trial_that_cuts_in_every_child() {
+    // i guards two loops of opposite polarity (each child cuts one); j guards one.
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let j = rel(&mut c, "j", true);
+    guarded_loops(&mut c, &[("p", i, false), ("q", i, true), ("r", j, false)]);
+    let v = verification(&mut c, None, &[]);
+    let mut e = prepare(&c, v, &Default::default());
+    let (winner, telemetry) = rank(&e);
+    let ii = e.program.atom_index[&GroundAtom::new(i, [])];
+    assert_eq!(winner.selected, vec![ii]);
+    let j_row = telemetry
+        .iter()
+        .find(|r| r.split == GroundAtom::new(j, []))
+        .unwrap();
+    assert_eq!(j_row.state, "not-started", "ranking stopped early");
+    e.limits.completion_full_shortlist = true;
+    let (full, telemetry) = rank(&e);
+    assert_eq!(full.selected, vec![ii]);
+    let j_row = telemetry
+        .iter()
+        .find(|r| r.split == GroundAtom::new(j, []))
+        .unwrap();
+    assert_ne!(
+        j_row.state, "not-started",
+        "comparison mode tries every candidate"
+    );
+}
+
+#[test]
+fn a_one_sided_trial_is_a_fallback_while_ranking_widens() {
+    // a and z each guard three loops, all cut only when false (one-sided, tried
+    // first, higher scores); b guards two loops of opposite polarity (cuts in both
+    // children). Two higher-scoring fallbacks would hold the top-two prepared
+    // child states; the early-stop winner must keep its own.
+    let mut c = Corpus::new();
+    let a = rel(&mut c, "a", true);
+    let z = rel(&mut c, "z", true);
+    let b = rel(&mut c, "b", true);
+    guarded_loops(
+        &mut c,
+        &[
+            ("p1", a, false),
+            ("p2", a, false),
+            ("p3", a, false),
+            ("r1", z, false),
+            ("r2", z, false),
+            ("r3", z, false),
+            ("q1", b, false),
+            ("q2", b, true),
+        ],
+    );
+    let v = verification(&mut c, None, &[]);
+    let e = prepare(&c, v, &Default::default());
+    let (winner, telemetry) = rank(&e);
+    let bi = e.program.atom_index[&GroundAtom::new(b, [])];
+    for one_sided in [a, z] {
+        let row = telemetry
+            .iter()
+            .find(|r| r.split == GroundAtom::new(one_sided, []))
+            .unwrap();
+        assert_ne!(row.state, "not-started", "the one-sided trials ran first");
+    }
+    assert_eq!(
+        winner.selected,
+        vec![bi],
+        "the all-child cut wins over the higher-scoring one-sided ones"
+    );
+    assert_eq!(
+        winner.child_states.len(),
+        2,
+        "the winner keeps its prepared children"
+    );
+    // With no all-child cut anywhere, the one-sided trial is the fallback.
+    let mut c = Corpus::new();
+    let a = rel(&mut c, "a", true);
+    guarded_loops(&mut c, &[("p1", a, false), ("p2", a, false)]);
+    let v = verification(&mut c, None, &[]);
+    let e = prepare(&c, v, &Default::default());
+    let (winner, _) = rank(&e);
+    assert_eq!(
+        winner.selected,
+        vec![e.program.atom_index[&GroundAtom::new(a, [])]]
+    );
+}
+
+#[test]
+fn leaves_run_smallest_residual_first_and_ties_keep_queue_order() {
+    let mut leaves = vec![(1, 0, 'a'), (0, 1, 'b'), (1, 2, 'c'), (0, 3, 'd')];
+    let mut order = vec![];
+    while let Some(x) = pop_smallest(&mut leaves) {
+        order.push(x);
+    }
+    assert_eq!(order, ['b', 'd', 'a', 'c']);
+}
+
+#[test]
+fn a_large_final_unit_waits_behind_a_smaller_deferred_leaf() {
+    // Root splits on i. The i-true child keeps only `p :- i, !p` (size 1) and is
+    // deferred first. The i-false child splits on j: j true kills the four-atom
+    // loop (size 0); j false, the last structural unit, keeps it (size 4).
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let j = rel(&mut c, "j", true);
+    let p = rel(&mut c, "p", false);
+    rule(&mut c, p, &[(i, false), (p, true)]);
+    let q: Vec<_> = (1..=4)
+        .map(|n| rel(&mut c, &format!("q{n}"), false))
+        .collect();
+    rule(&mut c, q[0], &[(j, true), (i, true), (q[1], true)]);
+    rule(&mut c, q[1], &[(q[2], false)]);
+    rule(&mut c, q[2], &[(q[3], false)]);
+    rule(&mut c, q[3], &[(q[0], false)]);
+    let v = verification(&mut c, None, &[]);
+    let mut e = prepare(&c, v, &Default::default());
+    e.limits.completion_exploration = true;
+    e.limits.completion_probe_work = 0;
+    e.branches = Some(Arc::new(std::sync::Mutex::new(BranchReport::default())));
+    let calls = std::cell::RefCell::new(vec![]);
+    let options = CheckOptions {
+        split_depth: 2,
+        ..Default::default()
+    };
+    let result: Search<()> = run(&e, false, true, &options, 1, |b, _| {
+        let ii = b.program.atom_index[&GroundAtom::new(i, [])];
+        let jj = b.program.atom_index[&GroundAtom::new(j, [])];
+        calls
+            .borrow_mut()
+            .push((b.cone.fixed[ii], b.cone.fixed[jj]));
+        Ok(Search::None)
+    })
+    .unwrap();
+    assert!(matches!(result, Search::None));
+    let calls = calls.into_inner();
+    assert_eq!(
+        calls,
+        [
+            (Some(false), Some(true)),
+            (Some(true), None),
+            (Some(false), Some(false)),
+        ],
+        "leaves by residual size: 0, 1, 4"
+    );
 }

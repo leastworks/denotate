@@ -2387,10 +2387,21 @@ rejection and eligibility covers and lifting, under that cap; it reuses existing
 views and never starts pruning, forcing or ranking. Exhausting the cap is charged,
 is never a proof, and leaves the remaining allowance to the structural driver; a
 counterexample found inside the probe is reported as one. This does not promise
-that every ordinary unsplit proof fits the cap. In exploration, a unit that finishes
-its structural work without a split is recorded as `leaf-deferred`; its residual
-search runs only after every pending unit has been ranked and split, so one
-unbounded leaf search cannot starve sibling units. A unit whose ranking finds no
+that every ordinary unsplit proof fits the cap. In exploration, every unit that finishes
+its structural work without a split, the last structural unit included, is recorded
+as `leaf-deferred`; residual searches run only after every pending unit has been
+ranked and split, so one unbounded leaf search cannot starve sibling units. Leaves
+then run smallest first, by unfixed atoms in cyclic components of the question's
+applicable view (W+H when it ranks under H, W otherwise), ties in queue order; a
+heuristic, since a small residual need not finish quickly.
+
+Split ranking trials candidates in shortlist order (witness involvement first) and
+stops at the first trial whose children, the rest child included, are all verified
+and each cut a witness cycle; that trial is selected. A trial that cuts only some
+children is kept as the fallback while ranking widens down the shortlist within the
+same allowance. Untried candidates are reported `not-started`. Residual checking is
+unchanged. `Limits::completion_full_shortlist` (`--completion-full-shortlist`)
+trials every shortlisted candidate, for comparisons. A unit whose ranking finds no
 partition records why (`rankingGap`: the witness cycle used and where candidate
 discovery stopped). Exploration trial children prune but do not force; the selected
 partition's children force in their own units, so a cut that appears only after forcing

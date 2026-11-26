@@ -75,6 +75,7 @@ impl DeterministicLimits {
             completion_exploration: false,
             completion_probe_work: Limits::default().completion_probe_work,
             completion_cache_enforce: Limits::default().completion_cache_enforce,
+            completion_full_shortlist: Limits::default().completion_full_shortlist,
             run_deadline: o.run_deadline,
             search_guards: o.search_guards.clone(),
             pruning_allowance: o.pruning_allowance,

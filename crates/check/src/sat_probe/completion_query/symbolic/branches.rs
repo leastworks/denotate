@@ -481,7 +481,10 @@ fn partition_from<T>(
         residual_only: None,
         leaf: None,
     }]);
-    let mut leaves = std::collections::VecDeque::new();
+    // Exploration leaves wait here with their residual size; they run after all
+    // structural work, smallest residual first (ties keep queue order).
+    let mut leaves: Vec<(usize, usize, Unit)> = Vec::new();
+    let mut leaf_seq = 0;
     let mut report = BranchReport::default();
     let usage = e.limits.completion_exploration.then(|| {
         Arc::new(std::sync::Mutex::new(QueryLimits {
@@ -495,7 +498,7 @@ fn partition_from<T>(
     let mut next_id = 2;
     let mut unknown = None;
     let mut answer = None;
-    while let Some(unit) = queue.pop_front().or_else(|| leaves.pop_front()) {
+    while let Some(unit) = queue.pop_front().or_else(|| pop_smallest(&mut leaves)) {
         e.limits.cancellation.check()?;
         if Instant::now() >= deadline {
             let cause = CheckError::deadline(phase, limits.timeout);
@@ -596,6 +599,7 @@ fn partition_from<T>(
         let mut budget = Budget::new(&local_limits);
         let mut config = allocation.config;
         let mut probe_answer = None;
+        let mut leaf_size = 0;
         let result: Result<Option<Engine>> = (|| {
             if let Some(branch) = &unit.leaf {
                 return Ok(Some(branch.clone()));
@@ -787,6 +791,19 @@ fn partition_from<T>(
                     }
                 }
             }
+            if e.limits.completion_exploration {
+                // The question's applicable view: W+H when it ranks under H.
+                let hypothesis = e.classification.is_some() && !(classification && existence);
+                let (view, _) = state.ranking(classification, hypothesis);
+                let cone = view.cone(&mut budget)?;
+                let graph = consistency::analyse(&cone, None, &mut budget)?;
+                leaf_size = graph
+                    .cyclic
+                    .iter()
+                    .enumerate()
+                    .filter(|(i, c)| **c && cone.fixed[*i].is_none())
+                    .count();
+            }
             Ok(Some(
                 if unit.pins.is_empty() && !e.forcing && !e.limits.completion_exploration {
                     e.clone()
@@ -809,13 +826,10 @@ fn partition_from<T>(
                     report.record(e, record);
                     continue;
                 }
-                Ok(Some(branch))
-                    if e.limits.completion_exploration
-                        && unit.leaf.is_none()
-                        && !queue.is_empty() =>
-                {
+                Ok(Some(branch)) if e.limits.completion_exploration && unit.leaf.is_none() => {
                     // One unbounded leaf search must not starve units that
-                    // still have structural work; leaves run after all of it.
+                    // still have structural work; every leaf, the last
+                    // structural unit's included, waits for all of it.
                     remaining_work = remaining_work.saturating_sub(record.work);
                     let prepared = record.work;
                     forward(e, &sink, unit.depth);
@@ -824,11 +838,16 @@ fn partition_from<T>(
                     report.record(e, record);
                     // Preparation is charged once: the search later gets only
                     // what this unit's allowance has left.
-                    leaves.push_back(Unit {
-                        leaf: Some(branch),
-                        work: unit.work.saturating_sub(prepared),
-                        ..unit
-                    });
+                    leaves.push((
+                        leaf_size,
+                        leaf_seq,
+                        Unit {
+                            leaf: Some(branch),
+                            work: unit.work.saturating_sub(prepared),
+                            ..unit
+                        },
+                    ));
+                    leaf_seq += 1;
                     continue;
                 }
                 Ok(Some(mut branch)) => {
@@ -917,6 +936,17 @@ fn partition_from<T>(
         }
     }
     Ok(answer.unwrap_or_else(|| unknown.map_or(Search::None, Search::Inconclusive)))
+}
+
+/// Smallest residual first; equal sizes keep queue order. A heuristic: a small
+/// residual need not finish quickly.
+fn pop_smallest<T>(leaves: &mut Vec<(usize, usize, T)>) -> Option<T> {
+    let at = leaves
+        .iter()
+        .enumerate()
+        .min_by_key(|(_, (size, seq, _))| (*size, *seq))?
+        .0;
+    Some(leaves.remove(at).2)
 }
 
 fn forward(e: &Engine, sink: &crate::CompletionSizes, depth: usize) {

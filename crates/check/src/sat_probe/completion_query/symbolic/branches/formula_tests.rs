@@ -227,6 +227,8 @@ fn splice_trial_reports_pruned_self_admission_and_false_child_settlement() {
     rule(&mut c, q, &[(g, false), (value, false), (p, true)]);
     let v = verification(&mut c, None, &[]);
     let mut e = prepare(&c, v, &Default::default());
+    // This test inspects a particular trial's telemetry, not stopping.
+    e.limits.completion_full_shortlist = true;
     let gi = e.program.atom_index[&atom(g)];
     let mut cache = pruning::Cache::for_engine(&e);
     cache.enable_trials(&e);

@@ -857,7 +857,13 @@ fn verify(
             telemetry[*i].state = "not-started";
         }
     }
-    for (position, i) in selected.into_iter().enumerate() {
+    // Early stop: the first trial whose every child (rest included) is verified and
+    // cuts a witness cycle is accepted; one-sided trials stay as fallbacks while
+    // ranking widens down the shortlist. Residual checking is unchanged.
+    let order = selected;
+    let mut stopped = None;
+    for position in 0..order.len() {
+        let i = order[position];
         let mut candidate_limits = limits.clone();
         candidate_limits.max_work =
             trials.remaining() / e.limits.completion_share(count - position);
@@ -1057,7 +1063,22 @@ fn verify(
                 }
             }
         }
+        // Decide an early stop before evicting prepared children: the stopping
+        // trial is the winner, so its child states must survive the top-two cut.
+        let row = &telemetry[i];
+        let every_child = row.state == "verified"
+            && row.child_trials.len() == choices[i].child_count()
+            && row
+                .child_trials
+                .iter()
+                .all(|c| c.complete && c.cutoff.is_none() && c.cycles_cut > 0);
+        let stop = every_child && !e.limits.completion_full_shortlist;
         completed.sort_by(|a, b| compare_trials(*a, *b, telemetry, &choices));
+        if stop {
+            completed.retain(|j| *j != i);
+            completed.insert(0, i);
+            stopped = Some(i);
+        }
         for old in completed.iter().skip(2) {
             choices[*old].child_states.clear();
         }
@@ -1068,8 +1089,18 @@ fn verify(
             inconclusive(error)?;
             break;
         }
+        if stop {
+            for j in &order[position + 1..] {
+                telemetry[*j].state = "not-started";
+            }
+            break;
+        }
     }
     completed.sort_by(|a, b| compare_trials(*a, *b, telemetry, &choices));
+    if let Some(i) = stopped {
+        completed.retain(|j| *j != i);
+        completed.insert(0, i);
+    }
     if let Some(i) = completed.first().copied() {
         let mut limits = e.limits.clone();
         limits.timeout =

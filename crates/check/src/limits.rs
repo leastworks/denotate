@@ -159,6 +159,9 @@ pub struct Limits {
     /// Forcing answers SAT from cached models (sampled tripwire); false keeps the
     /// cache in shadow mode, where every query is solved.
     pub completion_cache_enforce: bool,
+    /// Trial every shortlisted split candidate instead of stopping at the first
+    /// one that cuts a witness cycle in every child (comparison mode).
+    pub completion_full_shortlist: bool,
     /// Opt-in completion measurement, excluded from semantic/cache configuration.
     pub completion_sizes: Option<crate::CompletionSizes>,
     pub profile: crate::Profile,
@@ -222,6 +225,7 @@ impl Default for Limits {
             completion_exploration: false,
             completion_probe_work: 256_000_000,
             completion_cache_enforce: true,
+            completion_full_shortlist: false,
             completion_sizes: None,
             cancellation: Cancellation::default(),
             profile: Default::default(),
