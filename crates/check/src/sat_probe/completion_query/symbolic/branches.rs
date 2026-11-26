@@ -5,6 +5,19 @@ mod fitting;
 mod forcing;
 pub use forcing::ForcingRecord;
 mod groups;
+/// The declared input value groups as (exactly-one, inputs), read as the split
+/// ranking reads them (assumption cones under Fitting), for cover telemetry.
+pub(super) fn value_groups(e: &Engine, b: &mut Budget<'_>) -> Result<Vec<(bool, Vec<usize>)>> {
+    let states = e
+        .assumptions
+        .iter()
+        .map(|a| fitting::State::new(Arc::new(a.cone.clone()), b))
+        .collect::<Result<Vec<_>>>()?;
+    Ok(groups::groups_under(e, &states, b)?
+        .into_iter()
+        .map(|g| (g.exact, g.atoms))
+        .collect())
+}
 mod probe;
 mod ranking;
 use groups::{Choice, Group};

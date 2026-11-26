@@ -709,6 +709,7 @@ impl AdmissionDetails<'_> {
                         &s,
                         |r| Ok(json!(names(r.into()))),
                         |o| odd.as_ref().map_or(Ok(Value::Null), |f| f(o)),
+                        |a| Ok(json!(atom_text(a, &*names))),
                     )
                     .unwrap(),
                 ),

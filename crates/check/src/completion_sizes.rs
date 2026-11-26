@@ -89,6 +89,31 @@ pub struct CompletionExistenceStats {
     pub validation_work: usize,
     pub lifting_attempts: usize,
     pub lifted_pins: usize,
+    /// One record per cover loop (identified by its selector), at most 16, the
+    /// most recent retained; loops of one search cover different spaces.
+    pub covers: Vec<CompletionCoverStats>,
+    pub omitted_covers: usize,
+}
+/// One cover loop's progress. Diagnostic only, never evidence.
+#[derive(Debug, Clone, Default)]
+pub struct CompletionCoverStats {
+    /// `search` (a question's cover loop) or `component` (a component's totality
+    /// loop over its boundary).
+    pub kind: &'static str,
+    /// Order of this loop's first cube within the search.
+    pub index: usize,
+    pub cubes: usize,
+    pub pins: usize,
+    pub max_pins: usize,
+    /// Share of the input space the loop's cubes cover, estimated as if declared
+    /// at-most-one / exactly-one input groups and all other inputs were
+    /// independent: per group, the share of its values a cube still allows, 1/2
+    /// per other pin, summed over cubes (which may overlap). Other W correlations
+    /// and branch conditioning are ignored, so it is neither an upper nor a lower
+    /// bound. `None` when the group index was not built (its cap was reached).
+    pub coverage_estimate: Option<f64>,
+    /// Inputs pinned most often in this loop's cubes after lifting (at most 8).
+    pub pinned: Vec<(GroundAtom, usize)>,
 }
 #[derive(Debug, Clone)]
 pub struct CompletionSolveTiming {

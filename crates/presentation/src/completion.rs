@@ -881,7 +881,7 @@ pub fn completion_sizes_with_explanations(
         preparations.push(json!({"scope":if p.static_provider {"static-provider"} else {"runtime"},"provider":p.provider.map(relation).transpose()?,"work":p.work,"workByStage":p.work_by_stage,"error":p.error.as_ref().map(ToString::to_string),"complete":p.complete,"atoms":p.atoms,"rules":p.rules,"peakPossibilityAtoms":p.peak_possibility_atoms,"possibilityObserved":p.relations.values().map(|r|r.observed).sum::<usize>(),"possibilityComplete":p.relations.values().all(|r|r.fixed),"countKind":if p.complete {"exact"} else {"at-least"},"leastEnabled":p.least_enabled,"leastComplete":p.least_complete,"leastError":p.least_error.as_ref().map(ToString::to_string),"relations":relations,"omittedRelations":rows.len().saturating_sub(32),"positiveRelationComponents":components.iter().take(32).map(|(_,v)|v).collect::<Vec<_>>(),"omittedComponents":components.len().saturating_sub(32)}));
     }
     Ok(
-        json!({"preparationWork":preparation_work,"preparations":preparations,"searches":sizes.searches.iter().map(|s| -> Result<Value> { Ok(json!({"phase":s.phase,"branchDepth":s.branch_depth,"solveMs":s.solve_time.as_secs_f64()*1000.0,"solveTimings":s.solve_timings.iter().map(|t|json!({"remainingMsAtStart":t.remaining_at_start.map(|d|d.as_secs_f64()*1000.0),"elapsedMs":t.elapsed.as_secs_f64()*1000.0,"overrunMs":t.overrun.as_secs_f64()*1000.0})).collect::<Vec<_>>(),"omittedSolveTimings":s.omitted_solve_timings,"elapsedMs":s.elapsed.as_secs_f64()*1000.0,"work":s.work,"workByPhase":s.work_by_phase,"variables":s.variables,"clauses":s.clauses,"literals":s.literals,"encodingsStarted":s.encodings,"encodingDetails":s.encoding_details.iter().map(|e|json!({"purpose":e.purpose,"complete":e.complete,"atoms":e.atoms,"inputAtoms":e.input_atoms,"foldedTrue":e.folded_true,"foldedFalse":e.folded_false,"variables":e.variables,"clauses":e.clauses})).collect::<Vec<_>>(),"existence":completion_existence_stats(&s.existence, relation, &explanation)?,"omittedEncodings":s.omitted_encodings})) }).collect::<Result<Vec<_>>>()?,"omittedPreparations":sizes.omitted_preparations,"omittedSearches":sizes.omitted_searches}),
+        json!({"preparationWork":preparation_work,"preparations":preparations,"searches":sizes.searches.iter().map(|s| -> Result<Value> { Ok(json!({"phase":s.phase,"branchDepth":s.branch_depth,"solveMs":s.solve_time.as_secs_f64()*1000.0,"solveTimings":s.solve_timings.iter().map(|t|json!({"remainingMsAtStart":t.remaining_at_start.map(|d|d.as_secs_f64()*1000.0),"elapsedMs":t.elapsed.as_secs_f64()*1000.0,"overrunMs":t.overrun.as_secs_f64()*1000.0})).collect::<Vec<_>>(),"omittedSolveTimings":s.omitted_solve_timings,"elapsedMs":s.elapsed.as_secs_f64()*1000.0,"work":s.work,"workByPhase":s.work_by_phase,"variables":s.variables,"clauses":s.clauses,"literals":s.literals,"encodingsStarted":s.encodings,"encodingDetails":s.encoding_details.iter().map(|e|json!({"purpose":e.purpose,"complete":e.complete,"atoms":e.atoms,"inputAtoms":e.input_atoms,"foldedTrue":e.folded_true,"foldedFalse":e.folded_false,"variables":e.variables,"clauses":e.clauses})).collect::<Vec<_>>(),"existence":completion_existence_stats(&s.existence, relation, &explanation, |a| atom(a, keys))?,"omittedEncodings":s.omitted_encodings})) }).collect::<Result<Vec<_>>>()?,"omittedPreparations":sizes.omitted_preparations,"omittedSearches":sizes.omitted_searches}),
     )
 }
 
@@ -963,6 +963,7 @@ pub fn completion_existence_stats(
     s: &denotate_check::CompletionExistenceStats,
     relation: impl Fn(RelationId) -> Result<Value>,
     explanation: impl Fn(&denotate_check::CompletionOddExplanation) -> Result<Value>,
+    atom: impl Fn(&GroundAtom) -> Result<Value>,
 ) -> Result<Value> {
     let detail = |c: &denotate_check::CompletionComponentStats| -> Result<Value> {
         Ok(
@@ -976,6 +977,12 @@ pub fn completion_existence_stats(
         json!({"coupledFallbackSkipped":s.coupled_fallback_skipped,"uniqueComponents":s.unique_components,"sharedAtoms":s.shared_atoms,"components":s.components,"totalComponents":s.total_components,"fallbackComponents":s.fallback_components,
         "rounds":s.rounds,"cubes":s.cubes,"pins":s.pins,"maxPins":s.max_pins,"validationWork":s.validation_work,
         "liftingAttempts":s.lifting_attempts,"liftedPins":s.lifted_pins,
+        "covers":s.covers.iter().map(|c| -> Result<Value> { Ok(json!({
+            "kind":c.kind,"index":c.index,"cubes":c.cubes,"pins":c.pins,"maxPins":c.max_pins,
+            "coverageEstimate":c.coverage_estimate,
+            "projectedCubes":c.coverage_estimate.filter(|m| *m > 0.0).map(|m| c.cubes as f64 / m),
+            "pinnedInputs":c.pinned.iter().map(|(a,n)|Ok(json!({"atom":atom(a)?,"cubes":n}))).collect::<Result<Vec<_>>>()?})) }).collect::<Result<Vec<_>>>()?,
+        "omittedCovers":s.omitted_covers,
         "currentComponent":s.current_component.as_ref().map(&detail).transpose()?,
         "componentDetails":s.component_details.iter().map(detail).collect::<Result<Vec<_>>>()?,"omittedComponents":s.omitted_components}),
     )

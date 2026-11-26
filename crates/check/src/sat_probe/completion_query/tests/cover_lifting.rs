@@ -66,6 +66,27 @@ fn no_hypothesis_fallback_cubes_are_lifted() {
     assert!(rounds > 0, "the odd component needs covers");
     assert!(attempts > 0, "no-H cubes are lifted");
     assert!(lifted > 0, "the pin on d is redundant");
+    // Telemetry: every cube pins b (the loop's guard); the covered mass is positive.
+    let search = sizes
+        .snapshot()
+        .searches
+        .into_iter()
+        .find(|s| s.phase == "completion classification existence" && s.existence.rounds > 0)
+        .unwrap();
+    let cover = search
+        .existence
+        .covers
+        .iter()
+        .find(|c| c.kind == "search")
+        .unwrap();
+    assert!(cover.coverage_estimate.unwrap() > 0.0);
+    assert_eq!(
+        cover.pinned.first().map(|(a, _)| a.clone()),
+        Some(GroundAtom::new(
+            c.relations().find(|r| r.name == "b").unwrap().id,
+            [],
+        ))
+    );
 }
 
 #[test]

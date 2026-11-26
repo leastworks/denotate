@@ -1813,7 +1813,35 @@ certificates still justify the earlier residual reduction.
 
 Model cubes fix only the retained interpretation, allowing the acyclic remainder
 to vary with unpinned inputs. SAT lifting attempts up to 64 deterministic block
-deletions against those retained equations. H-coverage, its no-H fallback, and the
+deletions against those retained equations. Each lift encodes the check for its
+model's derived values (constants fold away) under its own gate. Every solve
+assumes each inactive gate false, so over thousands of cover rounds solves carry
+thousands of dead gate assumptions (a first real program's leaf slowed to 3.7
+rounds a second before hitting the 50M-literal budget after 8,813 rounds). The
+opt-in `completion_retire_lift_gates` (`--completion-retire-lift-gates`) retires
+each gate when its lift ends: a unit clause keeps its clauses off and the gate
+leaves the assumption list. The clauses stay stored and counted (batsat 0.6 does
+not remove satisfied original clauses), so retirement bounds solve assumptions,
+not CNF size. It also changes the solver's search path: on the formula control the
+property search no longer reached an obligation counterexample the default finds,
+so it stays opt-in until a corpus A/B decides. Encoding the check once, with
+derived values as assumptions on fresh variables, was measured and rejected:
+thousands of assumptions per solve made rounds three times slower.
+
+Cover telemetry is per cover loop (each loop's selector; at most 16 loops retained,
+a new loop releasing the oldest loop's record and pin counts): cubes, pins, the
+inputs pinned most often, and a coverage estimate: per declared at-most-one or
+exactly-one input group, read as the split ranking reads them (a derived
+field-value group maps to its inputs when each member's live producer has one
+unknown premise, a positive input), the share of values a cube still allows, 1/2
+per other pin, summed over cubes. It assumes those groups and all other inputs
+are independent, ignoring other W correlations and branch conditioning, so it is
+neither an upper nor a lower bound; projected cubes are cubes / estimate. The
+group index is built once on its own budget (capped work, the question's
+remaining time, the same cancellation and run deadline), so telemetry never
+spends the question's work; past the cap the estimate is reported unavailable.
+A progress signal for deciding between
+covering and splitting, never evidence. H-coverage, its no-H fallback, and the
 ordinary residual existence query use the same boundary for CNF and cubes, and all
 three lift their cubes: the no-H fallback lifts against the no-H encoding (on a first
 real program, one leaf whose inputs mostly had no H model ran 94,940 unlifted

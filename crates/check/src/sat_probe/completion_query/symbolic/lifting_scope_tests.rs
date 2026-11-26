@@ -583,3 +583,343 @@ fn sliced_pairs_agree_with_enumeration() {
         }
     }
 }
+
+#[test]
+fn lifting_retires_its_gate_so_assumptions_do_not_accumulate() {
+    // The 297-value presence fixture's H-coverage cube, lifted repeatedly with
+    // retirement: the gate list does not grow, every lift gives the same cube, and
+    // the CNF counters keep counting what the solver still stores (batsat 0.6 does
+    // not remove satisfied original clauses).
+    let f = fixture(297, Form::Redundant, false);
+    let mut e = f.engine.clone();
+    e.limits.completion_retire_lift_gates = true;
+    let original = &e.classification.as_ref().unwrap().0;
+    let h = e.classification.as_ref().unwrap().2;
+    let mut budget = Budget::new(&e.limits);
+    let mut s = Solver::new(&e, &mut budget).unwrap();
+    let view = s.simplified(original, true).unwrap();
+    let slice = existence_slice::Slice::new(&view, Some(h), s.run.budget).unwrap();
+    let accepted = s.encode_view(&slice.core, original, true).unwrap();
+    let pins = s.pins(&f.observation).unwrap();
+    assert!(s.solve(&[accepted.gate], &pins).unwrap());
+    let values = s.existence_values(&slice, original, &accepted).unwrap();
+    let cube = cover(&slice.core, &values, Some(h), s.run.budget).unwrap();
+    let mut first = None;
+    for _ in 0..3 {
+        let gates = s.gates.len();
+        let counted = s.run.cnf.clauses;
+        let stored = s.run.cnf.solver.num_clauses();
+        let mut lifted = cube.clone();
+        existence::lift(&slice.core, &values, &accepted, &mut lifted, &mut s).unwrap();
+        assert_eq!(s.gates.len(), gates, "a retired gate is no longer assumed");
+        let counted = s.run.cnf.clauses - counted;
+        let stored = (s.run.cnf.solver.num_clauses() - stored) as usize;
+        assert!(counted > 1, "the lift's encoding stays counted");
+        assert!(
+            stored <= counted,
+            "the solver stores no more than is counted"
+        );
+        assert_eq!(*first.get_or_insert(lifted.clone()), lifted);
+    }
+}
+
+#[test]
+fn by_default_a_lift_keeps_its_gate() {
+    // Retirement is opt-in: by default each lift leaves its gate inactive, as before.
+    let f = fixture(3, Form::Redundant, false);
+    let e = f.engine.clone();
+    let original = &e.classification.as_ref().unwrap().0;
+    let h = e.classification.as_ref().unwrap().2;
+    let mut budget = Budget::new(&e.limits);
+    let mut s = Solver::new(&e, &mut budget).unwrap();
+    let view = s.simplified(original, true).unwrap();
+    let slice = existence_slice::Slice::new(&view, Some(h), s.run.budget).unwrap();
+    let accepted = s.encode_view(&slice.core, original, true).unwrap();
+    let pins = s.pins(&f.observation).unwrap();
+    assert!(s.solve(&[accepted.gate], &pins).unwrap());
+    let values = s.existence_values(&slice, original, &accepted).unwrap();
+    let mut cube = cover(&slice.core, &values, Some(h), s.run.budget).unwrap();
+    assert!(!cube.is_empty());
+    let gates = s.gates.len();
+    existence::lift(&slice.core, &values, &accepted, &mut cube, &mut s).unwrap();
+    assert_eq!(s.gates.len(), gates + 1);
+}
+
+#[test]
+fn cover_telemetry_weighs_group_pins_by_the_values_they_allow() {
+    // An input field with three values under at-most-one, plus a plain input.
+    let mut c = Corpus::new();
+    let vs = c.declare_sort("Value").unwrap();
+    let values: Vec<_> = ["a", "b", "c"]
+        .iter()
+        .map(|v| c.declare_constant(*v, vs).unwrap())
+        .collect();
+    let field = c
+        .declare_relation(
+            "field",
+            RelationRole::Input,
+            vec![Parameter::new("value", vs)],
+        )
+        .unwrap();
+    let flag = rel(&mut c, "flag", true);
+    let one = c
+        .assume_in(
+            Namespace::default(),
+            "one_value",
+            denotate_ir::Cardinality::AtMostOne,
+            field,
+            [],
+        )
+        .unwrap();
+    let v = verification(&mut c, None, &[one]);
+    let e = prepare(&c, v, &[(vs, values.clone())].into());
+    let index = |a: GroundAtom| e.program.atom_index[&a];
+    let fa = index(GroundAtom::new(field, [values[0]]));
+    let fb = index(GroundAtom::new(field, [values[1]]));
+    let fl = index(atom(flag));
+    let mut budget = Budget::new(&e.limits);
+    let mut s = Solver::new(&e, &mut budget).unwrap();
+    let world = e.world.clone();
+    let selector = s.gate().unwrap();
+    let estimate = |s: &Solver<'_, '_, '_>| s.stats.covers[0].coverage_estimate.unwrap();
+    let mass = |cube: &[(usize, bool)], s: &mut Solver<'_, '_, '_>| {
+        let before = if s.stats.covers.is_empty() {
+            0.0
+        } else {
+            estimate(s)
+        };
+        s.cube_metrics(&cube.iter().copied().collect(), &world, true, selector)
+            .unwrap();
+        estimate(s) - before
+    };
+    // One value chosen: 1 of 4 options (three values or none).
+    assert!((mass(&[(fa, true)], &mut s) - 0.25).abs() < 1e-12);
+    // Two values excluded: 2 of 4 options remain.
+    assert!((mass(&[(fa, false), (fb, false)], &mut s) - 0.5).abs() < 1e-12);
+    // A plain input halves the mass.
+    assert!((mass(&[(fa, true), (fl, false)], &mut s) - 0.125).abs() < 1e-12);
+    // Field a was pinned in all three cubes: the most frequent pin.
+    assert_eq!(
+        s.stats.covers[0].pinned[0],
+        (GroundAtom::new(field, [values[0]]), 3)
+    );
+    // A second loop (its own selector) keeps its own counters.
+    let other = s.gate().unwrap();
+    s.cube_metrics(&[(fl, true)].into_iter().collect(), &world, true, other)
+        .unwrap();
+    assert_eq!(s.stats.covers.len(), 2);
+    assert_eq!(s.stats.covers[0].cubes, 3);
+    assert_eq!(s.stats.covers[1].cubes, 1);
+    assert!((s.stats.covers[1].coverage_estimate.unwrap() - 0.5).abs() < 1e-12);
+    assert_eq!(s.stats.covers[1].pinned, vec![(atom(flag), 1)]);
+    // A capped group index makes the estimate unavailable, not wrong.
+    assert!(GroupIndex::capped(&e, 0, s.run.budget).unwrap().is_none());
+    // At most 16 loops are retained; a new one releases the oldest record.
+    for _ in 0..15 {
+        let next = s.gate().unwrap();
+        s.cube_metrics(&[(fl, true)].into_iter().collect(), &world, true, next)
+            .unwrap();
+    }
+    assert_eq!(s.stats.covers.len(), 16);
+    assert_eq!(s.stats.omitted_covers, 1);
+    assert_eq!(s.stats.covers[0].index, 1, "the oldest loop was released");
+    assert_eq!(s.covers.len(), 16);
+}
+
+#[test]
+fn cover_telemetry_maps_a_derived_value_group_to_its_inputs() {
+    // The corpus shape: at-most-one is stated over a derived relation whose members
+    // each read a fact and one input (`scalar_observed(E, V) :- scalar(E),
+    // observed_value(E, V)`); the estimate weighs the inputs as that group.
+    let mut c = Corpus::new();
+    let vs = c.declare_sort("Value").unwrap();
+    let values: Vec<_> = ["a", "b", "c"]
+        .iter()
+        .map(|v| c.declare_constant(*v, vs).unwrap())
+        .collect();
+    let raw = c
+        .declare_relation(
+            "raw",
+            RelationRole::Input,
+            vec![Parameter::new("value", vs)],
+        )
+        .unwrap();
+    let field = c
+        .declare_relation(
+            "field",
+            RelationRole::Derived,
+            vec![Parameter::new("value", vs)],
+        )
+        .unwrap();
+    let scalar = c
+        .declare_relation("scalar", RelationRole::Derived, vec![])
+        .unwrap();
+    emit(&mut c, &GroundAtom::new(scalar, []), &[]);
+    for v in &values {
+        emit(
+            &mut c,
+            &GroundAtom::new(field, [*v]),
+            &[
+                (&GroundAtom::new(scalar, []), true),
+                (&GroundAtom::new(raw, [*v]), true),
+            ],
+        );
+    }
+    let one = c
+        .assume_in(
+            Namespace::default(),
+            "one_value",
+            denotate_ir::Cardinality::AtMostOne,
+            field,
+            [],
+        )
+        .unwrap();
+    let v = verification(&mut c, None, &[one]);
+    let e = prepare(&c, v, &[(vs, values.clone())].into());
+    let premises = e.assumptions[0]
+        .cone
+        .rules
+        .iter()
+        .map(|r| r.body.len())
+        .max();
+    assert_eq!(
+        premises,
+        Some(2),
+        "the fact premise stays in the assumption cone"
+    );
+    let ra = e.program.atom_index[&GroundAtom::new(raw, [values[0]])];
+    let mut budget = Budget::new(&e.limits);
+    let mut s = Solver::new(&e, &mut budget).unwrap();
+    let world = e.world.clone();
+    let selector = s.gate().unwrap();
+    s.cube_metrics(&[(ra, true)].into_iter().collect(), &world, true, selector)
+        .unwrap();
+    assert!((s.stats.covers[0].coverage_estimate.unwrap() - 0.25).abs() < 1e-12);
+}
+
+#[test]
+fn group_index_construction_polls_cancellation_and_deadlines() {
+    // One at-most-one input group of 5,000 values: the scan crosses a poll point.
+    let mut c = Corpus::new();
+    let vs = c.declare_sort("Value").unwrap();
+    let values: Vec<_> = (0..5000)
+        .map(|n| c.declare_constant(format!("v{n}"), vs).unwrap())
+        .collect();
+    let field = c
+        .declare_relation(
+            "field",
+            RelationRole::Input,
+            vec![Parameter::new("value", vs)],
+        )
+        .unwrap();
+    let one = c
+        .assume_in(
+            Namespace::default(),
+            "one_value",
+            denotate_ir::Cardinality::AtMostOne,
+            field,
+            [],
+        )
+        .unwrap();
+    let v = verification(&mut c, None, &[one]);
+    let e = prepare(&c, v, &[(vs, values)].into());
+    let budget = Budget::new(&e.limits);
+    assert!(
+        GroupIndex::capped(&e, usize::MAX, &budget)
+            .unwrap()
+            .is_some()
+    );
+    let mut expired = e.limits.clone();
+    expired.timeout = std::time::Duration::ZERO;
+    let budget = Budget::new(&expired);
+    let error = GroupIndex::capped(&e, usize::MAX, &budget).err().unwrap();
+    assert!(inconclusive(error).is_ok(), "a deadline cutoff");
+    e.limits.cancellation.cancel();
+    let budget = Budget::new(&e.limits);
+    assert!(matches!(
+        GroupIndex::capped(&e, usize::MAX, &budget),
+        Err(CheckError::Cancelled)
+    ));
+}
+
+#[test]
+fn equally_pinned_inputs_rank_by_atom_whatever_the_cube_order() {
+    // Nine inputs pinned once each, the smallest last: it displaces the largest.
+    let mut c = Corpus::new();
+    let vs = c.declare_sort("Value").unwrap();
+    let values: Vec<_> = (0..9)
+        .map(|n| c.declare_constant(format!("v{n}"), vs).unwrap())
+        .collect();
+    let field = c
+        .declare_relation(
+            "field",
+            RelationRole::Input,
+            vec![Parameter::new("value", vs)],
+        )
+        .unwrap();
+    let v = verification(&mut c, None, &[]);
+    let e = prepare(&c, v, &[(vs, values.clone())].into());
+    let index = |v| e.program.atom_index[&GroundAtom::new(field, [v])];
+    let mut budget = Budget::new(&e.limits);
+    let mut s = Solver::new(&e, &mut budget).unwrap();
+    let world = e.world.clone();
+    let selector = s.gate().unwrap();
+    for v in values[1..].iter().chain(&values[..1]) {
+        s.cube_metrics(
+            &[(index(*v), true)].into_iter().collect(),
+            &world,
+            true,
+            selector,
+        )
+        .unwrap();
+    }
+    let pinned: Vec<_> = s.stats.covers[0]
+        .pinned
+        .iter()
+        .map(|(a, _)| a.clone())
+        .collect();
+    let expected: Vec<_> = values[..8]
+        .iter()
+        .map(|v| GroundAtom::new(field, [*v]))
+        .collect();
+    assert_eq!(pinned, expected);
+}
+
+#[test]
+fn empty_coverage_groups_count_toward_the_group_index_cap() {
+    // Exactly-one per key over a relation nothing derives: one empty group per
+    // key, 5,000 of them, and no members to scan.
+    let mut c = Corpus::new();
+    let ks = c.declare_sort("Key").unwrap();
+    let keys: Vec<_> = (0..5000)
+        .map(|n| c.declare_constant(format!("k{n}"), ks).unwrap())
+        .collect();
+    let vs = c.declare_sort("Value").unwrap();
+    let value = c.declare_constant("v", vs).unwrap();
+    let field = c
+        .declare_relation(
+            "field",
+            RelationRole::Derived,
+            vec![Parameter::new("key", ks), Parameter::new("value", vs)],
+        )
+        .unwrap();
+    let one = c
+        .assume_in(
+            Namespace::default(),
+            "one_value",
+            denotate_ir::Cardinality::ExactlyOne,
+            field,
+            [denotate_ir::Column::Index(0)],
+        )
+        .unwrap();
+    let v = verification(&mut c, None, &[one]);
+    let e = prepare(&c, v, &[(ks, keys), (vs, vec![value])].into());
+    assert_eq!(e.assumptions[0].groups.len(), 5000);
+    let budget = Budget::new(&e.limits);
+    assert!(
+        GroupIndex::capped(&e, usize::MAX, &budget)
+            .unwrap()
+            .is_some()
+    );
+    assert!(GroupIndex::capped(&e, 1000, &budget).unwrap().is_none());
+}

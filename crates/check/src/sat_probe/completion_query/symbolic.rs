@@ -110,6 +110,65 @@ struct Encoded {
     gate: Lit,
     encoding: Encoding,
 }
+/// Declared at-most-one / exactly-one input groups, for the cover estimate only,
+/// read as the split ranking reads them (`branches::value_groups`). Groups it does
+/// not recognise leave their pins counted as independent inputs: an estimate,
+/// never evidence.
+struct GroupIndex {
+    /// (exactly-one, number of values) per group.
+    groups: Vec<(bool, usize)>,
+    of: BTreeMap<usize, usize>,
+}
+/// Work the optional index may take before the estimate is reported unavailable.
+const GROUP_INDEX_WORK: usize = 4_000_000;
+impl GroupIndex {
+    fn new(e: &Engine, parent: &Budget<'_>) -> Result<Option<Self>> {
+        Self::capped(e, GROUP_INDEX_WORK, parent)
+    }
+    /// Built on its own budget, so telemetry never spends the question's work:
+    /// `cap` work, the parent's remaining time, the same cancellation and run
+    /// deadline (polled as any budget polls). `None` past the cap; cancellation
+    /// and deadlines propagate.
+    fn capped(e: &Engine, cap: usize, parent: &Budget<'_>) -> Result<Option<Self>> {
+        let mut limits = parent.limits.clone();
+        limits.max_work = cap;
+        limits.timeout = parent.remaining_time();
+        limits.completion_exploration = false;
+        let mut b = Budget::new(&limits);
+        let groups = match branches::value_groups(e, &mut b) {
+            Err(CheckError::LimitExceeded {
+                resource: "work", ..
+            }) => return Ok(None),
+            other => other?,
+        };
+        let mut out = Self {
+            groups: vec![],
+            of: BTreeMap::new(),
+        };
+        for (exact, inputs) in groups {
+            match b.charge(inputs.len() + 1, "completion cover telemetry") {
+                Err(CheckError::LimitExceeded {
+                    resource: "work", ..
+                }) => return Ok(None),
+                other => other?,
+            }
+            if inputs.is_empty() || inputs.iter().any(|i| out.of.contains_key(i)) {
+                continue;
+            }
+            let g = out.groups.len();
+            out.groups.push((exact, inputs.len()));
+            for i in inputs {
+                out.of.insert(i, g);
+            }
+        }
+        Ok(Some(out))
+    }
+}
+/// One cover loop's running counters; published into `stats.covers`.
+struct CoverLoop {
+    stats: crate::CompletionCoverStats,
+    counts: BTreeMap<GroundAtom, usize>,
+}
 struct Solver<'a, 'b, 'l> {
     run: Run<'a, 'b, 'l>,
     gates: Vec<Lit>,
@@ -119,6 +178,12 @@ struct Solver<'a, 'b, 'l> {
     property_index: Option<validation::Index>,
     property_state: validation::State,
     stats: crate::CompletionExistenceStats,
+    /// Cover telemetry per loop, keyed by the loop's selector, and the declared
+    /// input groups for the estimate (built once; `Some(None)` if capped).
+    covers: BTreeMap<Lit, CoverLoop>,
+    /// Loops seen so far (indices), retained or released.
+    cover_count: usize,
+    group_index: Option<Option<GroupIndex>>,
 }
 impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
     fn new(engine: &'a Engine, budget: &'b mut Budget<'l>) -> Result<Self> {
@@ -131,6 +196,9 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
             property_index: None,
             property_state: Default::default(),
             stats: Default::default(),
+            covers: BTreeMap::new(),
+            cover_count: 0,
+            group_index: None,
         })
     }
     fn metrics(&mut self) {
@@ -143,16 +211,129 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
             .progress
             .completion_existence(&self.stats);
     }
-    fn cube_metrics(&mut self, cube: &Cube) {
+    /// Per-loop cover telemetry. `selector` identifies the loop; `c` is the cone
+    /// whose atom indices the cube uses (its atoms name the pins). Only cubes in
+    /// program indices (`program`) are weighed by declared groups; a renumbered
+    /// component cone's boundary pins count 1/2 each.
+    fn cube_metrics(&mut self, cube: &Cube, c: &Cone, program: bool, selector: Lit) -> Result<()> {
         self.stats.cubes += 1;
         self.stats.pins += cube.len();
         self.stats.max_pins = self.stats.max_pins.max(cube.len());
+        self.run
+            .budget
+            .charge(cube.len() + 1, "completion cover telemetry")?;
+        if program && self.group_index.is_none() {
+            self.group_index = Some(GroupIndex::new(self.run.engine, self.run.budget)?);
+        }
+        // An unbuilt (capped) index leaves the estimate unavailable.
+        let groups = if program {
+            self.group_index.as_ref().unwrap().as_ref().map(Some)
+        } else {
+            Some(None)
+        };
+        // Retain at most 16 loops: a new loop releases the oldest loop's record
+        // and pin counts, so many component loops cannot grow memory or work.
+        if !self.covers.contains_key(&selector) {
+            if self.covers.len() == 16 {
+                let oldest = *self
+                    .covers
+                    .iter()
+                    .min_by_key(|(_, l)| l.stats.index)
+                    .unwrap()
+                    .0;
+                self.covers.remove(&oldest);
+                self.stats.omitted_covers += 1;
+            }
+            self.cover_count += 1;
+        }
+        let next = self.cover_count - 1;
+        let entry = self.covers.entry(selector).or_insert_with(|| CoverLoop {
+            stats: crate::CompletionCoverStats {
+                kind: if program { "search" } else { "component" },
+                index: next,
+                coverage_estimate: Some(0.0),
+                ..Default::default()
+            },
+            counts: BTreeMap::new(),
+        });
+        let stats = &mut entry.stats;
+        stats.cubes += 1;
+        stats.pins += cube.len();
+        stats.max_pins = stats.max_pins.max(cube.len());
+        match groups {
+            None => stats.coverage_estimate = None,
+            Some(groups) => {
+                let mut log2 = 0.0f64;
+                let mut touched = BTreeMap::<usize, (bool, usize)>::new();
+                for (i, v) in cube {
+                    match groups.and_then(|g| g.of.get(i)) {
+                        Some(g) => {
+                            let t = touched.entry(*g).or_default();
+                            if *v {
+                                t.0 = true;
+                            } else {
+                                t.1 += 1;
+                            }
+                        }
+                        None => log2 -= 1.0,
+                    }
+                }
+                for (g, (chosen, excluded)) in touched {
+                    let (exact, size) = groups.unwrap().groups[g];
+                    let options = size as f64 + if exact { 0.0 } else { 1.0 };
+                    let allowed = if chosen {
+                        1.0
+                    } else {
+                        (options - excluded as f64).max(1.0)
+                    };
+                    log2 += (allowed / options).log2();
+                }
+                if let Some(mass) = &mut stats.coverage_estimate {
+                    *mass += log2.exp2();
+                }
+            }
+        }
+        for i in cube.keys() {
+            if let Some(atom) = c.atoms.get(*i) {
+                let n = entry.counts.entry(atom.clone()).or_default();
+                *n += 1;
+                let n = *n;
+                // Counts only grow, so the top 8 stay exact.
+                let pinned = &mut entry.stats.pinned;
+                if let Some(slot) = pinned.iter_mut().find(|(a, _)| a == atom) {
+                    slot.1 = n;
+                } else if pinned.len() < 8
+                    || pinned
+                        .last()
+                        .is_some_and(|(last, m)| n > *m || (n == *m && atom < last))
+                {
+                    pinned.push((atom.clone(), n));
+                }
+                pinned.sort_by(|(a, x), (b, y)| y.cmp(x).then_with(|| a.cmp(b)));
+                pinned.truncate(8);
+            }
+        }
+        // Publish the retained (at most 16) loops, in the order they started.
+        let mut loops: Vec<_> = self.covers.values().map(|l| l.stats.clone()).collect();
+        loops.sort_by_key(|l| l.index);
+        self.stats.covers = loops;
         self.metrics();
+        Ok(())
     }
     fn gate(&mut self) -> Result<Lit> {
         let gate = self.run.cnf.var(self.run.budget)?;
         self.gates.push(gate);
         Ok(gate)
+    }
+    /// Permanently disable a per-round gate. Every solve assumes each inactive
+    /// gate false, so gates created per cover round would otherwise make every
+    /// later solve carry them all. The unit clause keeps the gate's clauses off and
+    /// the gate leaves the assumption list. Its clauses stay stored (batsat 0.6
+    /// does not remove satisfied original clauses) and stay counted.
+    fn retire(&mut self, gate: Lit) -> Result<()> {
+        self.run.cnf.gate = None;
+        self.gates.retain(|g| *g != gate);
+        self.run.cnf.clause(vec![!gate], self.run.budget)
     }
     fn simplified(&mut self, cone: &Cone, h: bool) -> Result<pruning::View> {
         pruning::view_using(
@@ -447,7 +628,8 @@ impl<'a, 'b, 'l> Solver<'a, 'b, 'l> {
             .collect()
     }
     fn exclude(&mut self, selector: Lit, cube: &Cube) -> Result<()> {
-        self.cube_metrics(cube);
+        let world = self.run.engine.world.clone();
+        self.cube_metrics(cube, &world, true, selector)?;
         self.run
             .budget
             .charge(cube.len(), "completion cube exclusion")?;

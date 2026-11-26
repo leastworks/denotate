@@ -11,6 +11,17 @@ pub(super) fn groups(
     state: &fitting::Bundle,
     b: &mut Budget<'_>,
 ) -> Result<Vec<Group>> {
+    groups_under(e, &state.assumptions, b)
+}
+/// The declared value groups over inputs, reading each assumption cone under its
+/// Fitting state `assumptions` (one per `e.assumptions`): settled members and
+/// premises (facts) drop out, so a derived member counts when its one live
+/// producer has exactly one unknown premise, a positive input.
+pub(super) fn groups_under(
+    e: &Engine,
+    assumptions: &[fitting::State],
+    b: &mut Budget<'_>,
+) -> Result<Vec<Group>> {
     let mut out = vec![];
     for (kind, atoms) in &e.world.groups {
         b.charge(atoms.len() + 1, "completion split groups")?;
@@ -25,11 +36,13 @@ pub(super) fn groups(
             });
         }
     }
-    for (a, s) in e.assumptions.iter().zip(&state.assumptions) {
+    for (a, s) in e.assumptions.iter().zip(assumptions) {
         if !matches!(a.kind, Cardinality::AtMostOne | Cardinality::ExactlyOne) {
             continue;
         }
         for (_, members) in &a.groups {
+            // Coverage groups exist for every key, empty ones included.
+            b.tick("completion split certificate")?;
             let mut inputs = BTreeSet::new();
             let mut mapping = vec![];
             let mut valid = true;

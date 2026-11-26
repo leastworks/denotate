@@ -295,7 +295,7 @@ fn total(c: &Cone, s: &mut Solver<'_, '_, '_>, options: &CheckOptions) -> Result
                 lift(c, &values, &target, &mut cube, s)?;
             }
         }
-        s.cube_metrics(&cube);
+        s.cube_metrics(&cube, c, false, selector)?;
         s.run.cnf.gate = Some(selector);
         let clause = cube
             .iter()
@@ -317,6 +317,10 @@ fn total(c: &Cone, s: &mut Solver<'_, '_, '_>, options: &CheckOptions) -> Result
 /// equation* can be violated after dropping a pin. UNSAT alone permits removal.
 /// The deterministic 64-attempt cap bounds optional block lifting; retaining a pin is
 /// always sound. Required search/solver allowances still charge every operation.
+/// Each call encodes the check for this model's derived values (constants fold
+/// away, so solves stay small) under its own gate. With
+/// `completion_retire_lift_gates` the gate is retired when the call ends; otherwise
+/// it stays inactive, and every later solve assumes it false.
 pub(super) fn lift(
     c: &Cone,
     values: &[bool],
@@ -329,6 +333,30 @@ pub(super) fn lift(
     }
     let gate = s.gate()?;
     s.run.cnf.gate = Some(gate);
+    let result = lift_under(c, values, target, cube, s, gate);
+    s.run.cnf.gate = None;
+    result?;
+    if s.run.engine.limits.completion_retire_lift_gates {
+        s.retire(gate)?;
+    }
+    Ok(())
+}
+
+fn lift_under(
+    c: &Cone,
+    values: &[bool],
+    target: &Encoded,
+    cube: &mut Cube,
+    s: &mut Solver<'_, '_, '_>,
+    gate: Lit,
+) -> Result<()> {
+    let signed = |i: usize, p: bool| {
+        if p {
+            target.encoding.vars[i]
+        } else {
+            !target.encoding.vars[i]
+        }
+    };
     let mut bodies = vec![Vec::new(); c.fixed.len()];
     for r in &c.rules {
         s.run
@@ -347,13 +375,7 @@ pub(super) fn lift(
             .body
             .iter()
             .filter(|(i, _)| c.input[*i] && c.fixed[*i].is_none())
-            .map(|(i, p)| {
-                if *p {
-                    target.encoding.vars[*i]
-                } else {
-                    !target.encoding.vars[*i]
-                }
-            })
+            .map(|(i, p)| signed(*i, *p))
             .collect();
         let body = if lits.is_empty() {
             s.run.truth
@@ -389,13 +411,7 @@ pub(super) fn lift(
             let lits: Vec<_> = body
                 .iter()
                 .filter(|(i, _)| c.input[*i] && c.fixed[*i].is_none())
-                .map(|(i, p)| {
-                    if *p {
-                        target.encoding.vars[*i]
-                    } else {
-                        !target.encoding.vars[*i]
-                    }
-                })
+                .map(|(i, p)| signed(*i, *p))
                 .collect();
             terms.push(if lits.is_empty() {
                 s.run.truth
@@ -429,13 +445,7 @@ pub(super) fn lift(
         let pins: Vec<_> = cube
             .iter()
             .filter(|(i, _)| **i < low || **i > high)
-            .map(|(i, v)| {
-                if *v {
-                    target.encoding.vars[*i]
-                } else {
-                    !target.encoding.vars[*i]
-                }
-            })
+            .map(|(i, v)| signed(*i, *v))
             .collect();
         attempts += 1;
         s.stats.lifting_attempts += 1;
@@ -450,7 +460,6 @@ pub(super) fn lift(
         }
         s.metrics();
     }
-
     Ok(())
 }
 

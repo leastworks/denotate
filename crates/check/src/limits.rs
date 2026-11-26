@@ -162,6 +162,10 @@ pub struct Limits {
     /// Trial every shortlisted split candidate instead of stopping at the first
     /// one that cuts a witness cycle in every child (comparison mode).
     pub completion_full_shortlist: bool,
+    /// Retire each cube-lifting gate when its lift ends (opt-in, for corpus A/B):
+    /// keeps solve assumptions from growing with cover rounds (the gate's clauses
+    /// stay stored and counted), but changes the solver's search path.
+    pub completion_retire_lift_gates: bool,
     /// Opt-in completion measurement, excluded from semantic/cache configuration.
     pub completion_sizes: Option<crate::CompletionSizes>,
     pub profile: crate::Profile,
@@ -226,6 +230,7 @@ impl Default for Limits {
             completion_probe_work: 256_000_000,
             completion_cache_enforce: true,
             completion_full_shortlist: false,
+            completion_retire_lift_gates: false,
             completion_sizes: None,
             cancellation: Cancellation::default(),
             profile: Default::default(),
