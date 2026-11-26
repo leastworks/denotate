@@ -1046,7 +1046,8 @@ fn completion_forcing(
         "omitted":r.omitted,"cutoff":r.cutoff.map(reason),
         "shadowCache":{"queries":r.cache.queries,"modelHits":r.cache.model_hits,"coreHits":r.cache.core_hits,
             "checkedHits":r.cache.checked_hits,"mismatches":r.cache.mismatches,"models":r.cache.models,"cores":r.cache.cores,
-            "skippedModels":r.cache.skipped_models,"skippedCores":r.cache.skipped_cores}
+            "skippedModels":r.cache.skipped_models,"skippedCores":r.cache.skipped_cores,
+            "enforcedHits":r.cache.enforced_hits,"sampledHits":r.cache.sampled_hits}
     }))).collect()
 }
 

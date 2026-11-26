@@ -1591,8 +1591,10 @@ obligations and planning are unchanged.
 
 Forcing uses part of the existing optional ranking allocation and shares it
 between applicable W/H contexts; residual searches retain their allocation.
-Every query still runs the solver. Encoding-local model/core caches are shadow
-only, with claimed hits compared to actual answers. Branch and trial-child
+Forcing answers SAT from an encoding-local model cache, re-solving every 100th
+claimed hit as a tripwire (a contradiction is a hard internal error); core claims are
+still only compared against the solver. `Limits::completion_cache_enforce = false`
+keeps the cache in shadow mode, where every query is solved. Branch and trial-child
 telemetry reports forced constants (32 named examples per pass), forced witness
 atoms, candidate attempts, cache claims/checks/mismatches and cutoffs. A cache
 claim interrupted before solving is not a checked hit. See checker policies for

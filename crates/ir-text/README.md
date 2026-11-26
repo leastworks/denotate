@@ -687,7 +687,9 @@ sat --completion-split-depth 2 --completion-force`. It requires positive split
 depth and is off by default; forcing stays within funded trials and residual
 branch units. Ordinary processing existence and ambiguity keep their initial
 unsplit attempt; classification existence follows forcing and splits. Human branch output and JSON include per-context forced constants and
-shadow-cache model/core claims, checked claims, mismatches and cutoffs. Residual
+cache model/core claims, model hits answered without a solve, sampled re-solves,
+checked claims, mismatches and cutoffs. `--completion-cache-shadow` makes forcing
+solve every query (comparison mode). Residual
 constraints preserve no-model inputs; enabling forcing does not assume existence.
 
 For algorithm measurements, add `--completion-explore`. It removes implicit local

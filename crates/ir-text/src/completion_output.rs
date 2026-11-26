@@ -235,8 +235,8 @@ pub fn pruning_formatter(
 fn forcing_text(records: &[denotate_check::completion_query::ForcingRecord]) -> String {
     let mut text = String::new();
     for r in records {
-        text.push_str(&format!("; forcing [{}]: {} constants ({} witness atoms), {}/{} candidates; shadow cache {} model / {} core claims, {} checked, {} mismatches{}",
-            r.context,r.forced,r.forced_witnesses,r.attempted,r.candidates,r.cache.model_hits,r.cache.core_hits,r.cache.checked_hits,r.cache.mismatches,
+        text.push_str(&format!("; forcing [{}]: {} constants ({} witness atoms), {}/{} candidates; cache {} model / {} core claims, {} answered from models, {} sampled, {} checked, {} mismatches{}",
+            r.context,r.forced,r.forced_witnesses,r.attempted,r.candidates,r.cache.model_hits,r.cache.core_hits,r.cache.enforced_hits,r.cache.sampled_hits,r.cache.checked_hits,r.cache.mismatches,
             if r.no_model { "; context has no model; no constants installed" } else { "" }));
         if let Some(c) = r.cutoff {
             text.push_str(&format!(

@@ -2328,7 +2328,19 @@ insertions. A resource cutoff can leave a claim unchecked; it cannot validate th
 claim. Model reads are disabled while removable clauses are active; this slice
 also declines all core writes in that case, rather than trying to retain selector
 conditions. Batsat's conflict literals are negated back into assumption literals
-before subset indexing. Enforcing hits is a separate future switch.
+before subset indexing.
+
+Forcing enforces **model** hits by default (`Limits::completion_cache_enforce`;
+`--completion-cache-shadow` restores shadow mode). This is Boolean-only and
+forcing-only: forcing reads just SAT/UNSAT, and an enforced hit does not update the
+solver's model, so a caller needing a witness must solve. A wrong SAT claim can only
+leave an atom unforced; constants come only from UNSAT answers, which the model cache
+never gives. Every 100th claimed model hit, starting with the first, is re-solved:
+a conclusive contradiction is a hard internal error, while a re-solve interrupted by
+an allowance reports its cutoff and is not a disagreement. A hit costs lookup work
+only (no solve, conflicts, propagations or polls); the sampled re-solve spends the
+ordinary allowance; cancellation and deadlines are checked on hit paths. Core hits
+stay advisory; core enforcement and cover-loop integration are later work.
 
 ### Optional per-path completion forcing
 

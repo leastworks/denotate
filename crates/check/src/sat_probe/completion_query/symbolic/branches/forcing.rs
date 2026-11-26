@@ -95,7 +95,11 @@ pub(super) fn force(
                 .2;
             assumptions.push(encoded.vars[h]);
         }
-        let mut queries = shadow_cache::FixedQueries::new(&mut run)?;
+        let mut queries = if e.limits.completion_cache_enforce {
+            shadow_cache::FixedQueries::enforcing(&mut run)?
+        } else {
+            shadow_cache::FixedQueries::new(&mut run)?
+        };
         let outcome: Result<()> = (|| {
             if !queries.solve(&assumptions)? {
                 report.no_model = true;
@@ -393,6 +397,10 @@ mod tests {
                     };
                     let actual = e.check(&keys(&c), &options).unwrap();
                     same_report(&actual, &expected);
+                    // Cache on/off agreement: shadow mode solves every query.
+                    let mut shadow = e.clone();
+                    shadow.limits.completion_cache_enforce = false;
+                    same_report(&actual, &shadow.check(&keys(&c), &options).unwrap());
 
                     same_report(&actual, &e.check(&keys(&c), &options).unwrap());
                     same_report(

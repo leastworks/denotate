@@ -1,5 +1,8 @@
-//! Bounded advisory caches owned by ONE immutable CNF and W/H context.
-//! No hit supplies an answer: callers must solve and compare every claimed hit.
+//! Bounded caches owned by ONE immutable CNF and W/H context. In shadow mode no
+//! hit supplies an answer: callers solve and compare every claimed hit. Forcing
+//! may enforce MODEL hits only (`FixedQueries::enforcing`): a wrong SAT claim can
+//! only keep an atom unforced, never install a constant, and a deterministic
+//! sample of claimed hits is re-solved as a tripwire. Core hits stay advisory.
 use super::*;
 use std::collections::HashMap;
 
@@ -14,6 +17,10 @@ pub struct Stats {
     pub cores: usize,
     pub skipped_models: usize,
     pub skipped_cores: usize,
+    /// Model hits answered without a solve (enforcing mode).
+    pub enforced_hits: usize,
+    /// Model hits re-solved as the tripwire sample (enforcing mode).
+    pub sampled_hits: usize,
 }
 #[derive(Clone, Copy)]
 pub(super) struct Caps {
@@ -271,9 +278,22 @@ pub(super) struct FixedQueries<'r, 'a, 'b, 'l> {
     run: &'r mut queries::Run<'a, 'b, 'l>,
     cache: Cache,
     encoding: (usize, usize, usize),
+    enforce_models: bool,
+    claimed_models: usize,
 }
+/// Every `MODEL_HIT_SAMPLE`th claimed model hit, starting with the first, is
+/// re-solved in enforcing mode.
+pub(super) const MODEL_HIT_SAMPLE: usize = 100;
 impl<'r, 'a, 'b, 'l> FixedQueries<'r, 'a, 'b, 'l> {
     pub fn new(run: &'r mut queries::Run<'a, 'b, 'l>) -> Result<Self> {
+        Self::with_mode(run, false)
+    }
+    /// Boolean answers only: an enforced hit does not update the solver's current
+    /// model, so a caller needing a witness must solve.
+    pub fn enforcing(run: &'r mut queries::Run<'a, 'b, 'l>) -> Result<Self> {
+        Self::with_mode(run, true)
+    }
+    fn with_mode(run: &'r mut queries::Run<'a, 'b, 'l>, enforce_models: bool) -> Result<Self> {
         let encoding = (
             run.cnf.solver.num_vars() as usize,
             run.cnf.clauses,
@@ -284,6 +304,8 @@ impl<'r, 'a, 'b, 'l> FixedQueries<'r, 'a, 'b, 'l> {
             run,
             cache,
             encoding,
+            enforce_models,
+            claimed_models: 0,
         })
     }
     pub fn solve(&mut self, pins: &[Lit]) -> Result<bool> {
@@ -295,7 +317,30 @@ impl<'r, 'a, 'b, 'l> FixedQueries<'r, 'a, 'b, 'l> {
         if current != self.encoding {
             return Err(CheckError::Internal("shadow cache encoding changed"));
         }
+        // Cancellation and deadlines apply on every path, cache hits included.
+        self.run.engine.limits.cancellation.check()?;
+        self.run.budget.check("completion cached solve")?;
         let hit = self.cache.lookup(pins, false, self.run.budget)?;
+        if self.enforce_models && hit == Some(true) {
+            self.claimed_models += 1;
+            if (self.claimed_models - 1) % MODEL_HIT_SAMPLE != 0 {
+                self.cache.stats.enforced_hits += 1;
+                return Ok(true);
+            }
+            // The sample spends the ordinary allowance; an interrupted re-solve
+            // propagates its cutoff and is never counted as a disagreement.
+            let actual = self.run.raw_solve(pins)?;
+            self.cache.stats.sampled_hits += 1;
+            self.cache.compare(hit, actual);
+            if !actual {
+                return Err(CheckError::Internal(
+                    "cached SAT model contradicted by the solver",
+                ));
+            }
+            self.cache
+                .model(self.run.cnf.solver.get_model(), self.run.budget)?;
+            return Ok(true);
+        }
         let actual = self.run.raw_solve(pins)?;
         self.cache.compare(hit, actual);
         if actual {
@@ -471,5 +516,118 @@ mod owner_tests {
             "a cache hit must not bypass solver limits in shadow mode"
         );
         assert!(fixed.stats().model_hits + fixed.stats().core_hits > fixed.stats().checked_hits);
+    }
+
+    /// One input forced true by a clause: `[input]` is SAT, `[!input]` UNSAT.
+    fn forced_input() -> (Engine, GroundAtom) {
+        let mut c = Corpus::new();
+        let i = rel(&mut c, "input", true);
+        let v = verification(&mut c, None, &[]);
+        (prepare(&c, v, &Default::default()), atom(i))
+    }
+
+    #[test]
+    fn enforced_model_hits_skip_the_solver_except_the_sample() {
+        let (e, i) = forced_input();
+        let mut b = Budget::new(&e.limits);
+        let mut run = queries::Run::new(&e, &mut b).unwrap();
+        let input = run.world.vars[e.program.atom_index[&i]];
+        run.cnf.clause(vec![input], run.budget).unwrap();
+        let mut fixed = FixedQueries::enforcing(&mut run).unwrap();
+        for _ in 0..201 {
+            assert!(fixed.solve(&[input]).unwrap());
+        }
+        // One miss, then 200 claims: claims 1 and 101 are re-solved.
+        assert_eq!(fixed.stats().sampled_hits, 2);
+        assert_eq!(fixed.stats().enforced_hits, 198);
+        assert_eq!(fixed.stats().mismatches, 0);
+        assert_eq!(fixed.run.solves, 3, "enforced hits issue no solve");
+        // UNSAT queries are never answered from the model cache.
+        assert!(!fixed.solve(&[!input]).unwrap());
+        assert_eq!(fixed.run.solves, 4);
+    }
+
+    #[test]
+    fn a_wrong_cached_model_trips_the_tripwire() {
+        let (e, i) = forced_input();
+        let mut b = Budget::new(&e.limits);
+        let mut run = queries::Run::new(&e, &mut b).unwrap();
+        let var = e.program.atom_index[&i];
+        let input = run.world.vars[var];
+        run.cnf.clause(vec![input], run.budget).unwrap();
+        let mut fixed = FixedQueries::enforcing(&mut run).unwrap();
+        assert!(fixed.solve(&[input]).unwrap());
+        // Inject a model violating the clause: it claims `[!input]` is SAT.
+        let mut wrong: Vec<_> = fixed.run.cnf.solver.get_model().to_vec();
+        let v = input.var().idx() as usize;
+        wrong[v] = if input.sign() {
+            lbool::FALSE
+        } else {
+            lbool::TRUE
+        };
+        fixed.cache.model(&wrong, fixed.run.budget).unwrap();
+        let result = fixed.solve(&[!input]);
+        assert!(
+            matches!(result, Err(CheckError::Internal(m)) if m.contains("contradicted")),
+            "{result:?}"
+        );
+        assert_eq!(fixed.stats().mismatches, 1);
+    }
+
+    #[test]
+    fn an_interrupted_sample_reports_its_cutoff_not_a_mismatch() {
+        let (e, i) = forced_input();
+        let mut b = Budget::new(&e.limits);
+        let mut run = queries::Run::new(&e, &mut b).unwrap();
+        let input = run.world.vars[e.program.atom_index[&i]];
+        run.cnf.clause(vec![input], run.budget).unwrap();
+        let mut fixed = FixedQueries::enforcing(&mut run).unwrap();
+        assert!(fixed.solve(&[input]).unwrap());
+        fixed.run.solve_limit = fixed.run.solves;
+        // The first claim is sampled; its re-solve has no solve left.
+        let error = fixed.solve(&[input]).unwrap_err();
+        assert!(
+            inconclusive(error).is_ok(),
+            "a resource cutoff, not an error"
+        );
+        assert_eq!(fixed.stats().mismatches, 0);
+        assert_eq!(fixed.stats().checked_hits, 0);
+    }
+
+    #[test]
+    fn enforced_hits_still_honour_cancellation() {
+        let (e, i) = forced_input();
+        let mut b = Budget::new(&e.limits);
+        let mut run = queries::Run::new(&e, &mut b).unwrap();
+        let input = run.world.vars[e.program.atom_index[&i]];
+        run.cnf.clause(vec![input], run.budget).unwrap();
+        let mut fixed = FixedQueries::enforcing(&mut run).unwrap();
+        assert!(fixed.solve(&[input]).unwrap());
+        assert!(fixed.solve(&[input]).unwrap()); // sampled claim 1
+        e.limits.cancellation.cancel();
+        assert!(matches!(fixed.solve(&[input]), Err(CheckError::Cancelled)));
+    }
+
+    #[test]
+    fn an_unsampled_hit_stops_at_an_expired_deadline() {
+        let (mut e, i) = forced_input();
+        e.limits.timeout = Duration::from_millis(200);
+        let mut b = Budget::new(&e.limits);
+        let mut run = queries::Run::new(&e, &mut b).unwrap();
+        let input = run.world.vars[e.program.atom_index[&i]];
+        run.cnf.clause(vec![input], run.budget).unwrap();
+        let mut fixed = FixedQueries::enforcing(&mut run).unwrap();
+        assert!(fixed.solve(&[input]).unwrap()); // miss
+        assert!(fixed.solve(&[input]).unwrap()); // claim 1, sampled
+        let solves = fixed.run.solves;
+        std::thread::sleep(Duration::from_millis(300));
+        // Claim 2 would be answered from the cache; the deadline wins first.
+        let error = fixed.solve(&[input]).unwrap_err();
+        assert!(
+            inconclusive(error).is_ok(),
+            "a deadline cutoff, not an error"
+        );
+        assert_eq!(fixed.run.solves, solves);
+        assert_eq!(fixed.stats().enforced_hits, 0);
     }
 }
