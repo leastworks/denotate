@@ -145,3 +145,36 @@ fn exploration_classification_existence_runs_after_gating_questions() {
         );
     }
 }
+
+#[test]
+fn exploration_records_unit_searches_in_the_question_sizes() {
+    // Units run on their own engines with their own size sinks; their searches
+    // (cover telemetry included) must still reach the caller's sink.
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let x = rel(&mut c, "x", false);
+    rule(&mut c, x, &[(i, false), (x, true)]);
+    let v = verification(&mut c, None, &[]);
+    let mut e = prepare(&c, v, &Default::default());
+    let sizes = crate::CompletionSizes::default();
+    e.limits.completion_sizes = Some(sizes.clone());
+    e.limits.completion_exploration = true;
+    e.limits.completion_probe_work = 0;
+    let options = CheckOptions {
+        prune: true,
+        split_depth: 2,
+        ..Default::default()
+    };
+    e.check(&keys(&c), &options).unwrap();
+    let searches = sizes.snapshot().searches;
+    assert!(
+        searches
+            .iter()
+            .any(|s| s.branch_depth.is_some() && s.phase.starts_with("completion ")),
+        "{:?}",
+        searches
+            .iter()
+            .map(|s| (s.phase, s.branch_depth))
+            .collect::<Vec<_>>()
+    );
+}

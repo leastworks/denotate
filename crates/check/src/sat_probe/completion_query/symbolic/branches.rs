@@ -453,6 +453,9 @@ fn partition_from<T>(
         return leaf(e, options);
     }
     let phase = question_phase(e, classification, existence);
+    // The question's size sink. Exploration shadows `e` with each unit's engine,
+    // whose sink is the unit's own; unit searches must reach this one.
+    let sizes = e.limits.completion_sizes.clone();
     let limits = e.shared_limits(shares);
     let local_deadline = Instant::now() + limits.timeout;
     let deadline = limits
@@ -803,7 +806,7 @@ fn partition_from<T>(
             match result {
                 Ok(None) => {
                     remaining_work = remaining_work.saturating_sub(record.work);
-                    forward(e, &sink, unit.depth);
+                    forward(&sizes, &sink, unit.depth);
                     record.elapsed = started.elapsed();
                     report.record(e, record);
                     continue;
@@ -814,7 +817,7 @@ fn partition_from<T>(
                     // structural unit's included, waits for all of it.
                     remaining_work = remaining_work.saturating_sub(record.work);
                     let prepared = record.work;
-                    forward(e, &sink, unit.depth);
+                    forward(&sizes, &sink, unit.depth);
                     record.state = "leaf-deferred";
                     record.elapsed = started.elapsed();
                     report.record(e, record);
@@ -874,7 +877,7 @@ fn partition_from<T>(
                 .as_ref()
                 .map_or(0, |w| w.load(std::sync::atomic::Ordering::Relaxed)),
         );
-        forward(e, &sink, unit.depth);
+        forward(&sizes, &sink, unit.depth);
         record.elapsed = started.elapsed();
         match result {
             Search::Exists(value) => {
@@ -931,8 +934,8 @@ fn pop_smallest<T>(leaves: &mut Vec<(usize, usize, T)>) -> Option<T> {
     Some(leaves.remove(at).2)
 }
 
-fn forward(e: &Engine, sink: &crate::CompletionSizes, depth: usize) {
-    if let Some(out) = &e.limits.completion_sizes {
+fn forward(out: &Option<crate::CompletionSizes>, sink: &crate::CompletionSizes, depth: usize) {
+    if let Some(out) = out {
         for mut search in sink.snapshot().searches {
             search.branch_depth = Some(depth);
             out.search(search);
