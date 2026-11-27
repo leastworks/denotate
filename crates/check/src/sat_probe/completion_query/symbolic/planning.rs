@@ -323,3 +323,106 @@ impl Engine {
         Ok(answer)
     }
 }
+
+/// One step of the planner's path driver on a runtime path (input pins only).
+#[derive(Debug, Clone)]
+pub enum PathStep {
+    /// No permitted message on the path has an interpretation of the scope (with
+    /// H when requested). Never a vacuous constant proof.
+    Empty,
+    /// Interpretations exist. `constants`: derived atoms of the scope with one
+    /// value in all of them. `discharged`: their definitions hold in every
+    /// interpretation of the scope with the constants substituted, so the
+    /// constants alone define the same interpretations; otherwise the plan must
+    /// check each definition at runtime.
+    Forced {
+        constants: Vec<(GroundAtom, bool)>,
+        discharged: bool,
+    },
+    Inconclusive(Inconclusive),
+}
+impl Engine {
+    /// The driver's satisfiability and forcing question on `path`. Scope: C(H)
+    /// when `outputs` is `None` (requires H), else the frozen union of the output
+    /// cones and C(H). `hypothesis` adds H (ignored without one).
+    pub fn planning_path_step(
+        &self,
+        path: &RuntimePath,
+        outputs: Option<&BTreeSet<GroundAtom>>,
+        hypothesis: bool,
+    ) -> Result<PathStep> {
+        self.scoped()
+            .planning_path_step_in(path, outputs, hypothesis)
+    }
+    fn planning_path_step_in(
+        &self,
+        path: &RuntimePath,
+        outputs: Option<&BTreeSet<GroundAtom>>,
+        hypothesis: bool,
+    ) -> Result<PathStep> {
+        let limits = self.shared_limits(1);
+        let mut budget = Budget::new(&limits);
+        let cone = match outputs {
+            None => match &self.classification {
+                Some((c, _, _)) => c.as_ref().clone(),
+                None => {
+                    return Err(CheckError::InvalidRequest(
+                        "a classification step requires a hypothesis",
+                    ));
+                }
+            },
+            Some(targets) => {
+                for atom in targets {
+                    self.program.validate_atom(atom)?;
+                }
+                let mut members = self
+                    .program
+                    .dependency_cone_with_budget(targets.iter().cloned(), &mut budget)?
+                    .facts;
+                if let Some((_, cm, _)) = &self.classification {
+                    members.extend(cm.iter().cloned());
+                }
+                budget.charge(
+                    self.cone.atoms.len() + self.cone.rules.len(),
+                    "completion planning scope",
+                )?;
+                let mut cone = self.cone.as_ref().clone();
+                cone.rules.retain(|r| members.contains(&cone.atoms[r.head]));
+                cone
+            }
+        };
+        let satisfiable = self.symbolic_search_in(path, "completion planning path", 1, |s| {
+            let encoded = s.encode(&cone, hypothesis)?;
+            Ok(s.solve(&[encoded.gate], &[])?.then_some(()))
+        })?;
+        match satisfiable {
+            Search::Exists(()) => {}
+            Search::None => return Ok(PathStep::Empty),
+            Search::Inconclusive(c) => return Ok(PathStep::Inconclusive(c)),
+            Search::NotAnalysed => unreachable!(),
+        }
+        let mut pins = vec![];
+        for (atom, value) in path {
+            budget.tick("completion planning path")?;
+            if let Some(i) = self.program.atom_index.get(atom) {
+                pins.push((*i, *value));
+            }
+        }
+        let forced = (|| {
+            branches::force_on_path(self, Arc::new(cone.clone()), hypothesis, &pins, &mut budget)
+        })();
+        match forced {
+            Ok((constants, discharged)) => Ok(PathStep::Forced {
+                constants: constants
+                    .into_iter()
+                    .map(|(i, v)| (cone.atoms[i].clone(), v))
+                    .collect(),
+                discharged,
+            }),
+            Err(error) => {
+                self.limits.cancellation.check()?;
+                Ok(PathStep::Inconclusive(inconclusive(error)?))
+            }
+        }
+    }
+}

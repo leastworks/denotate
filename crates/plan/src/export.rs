@@ -26,7 +26,7 @@ fn rule(k: &RuleKey) -> Value {
         }
     }
 }
-fn expression(e: &Expression) -> Value {
+pub(crate) fn expression(e: &Expression) -> Value {
     json!({"root":e.root,"nodes":e.nodes.iter().map(|n|match n {
         Term::Constant(v)=>json!({"constant":v}),Term::Read(k)=>json!({"read":atom(k)}),Term::Not(i)=>json!({"not":i}),Term::And(xs)=>json!({"and":xs}),Term::Or(xs)=>json!({"or":xs}),Term::If {atom:k,when_true,when_false}=>json!({"if":atom(k),"then":when_true,"else":when_false})
     }).collect::<Vec<_>>()})

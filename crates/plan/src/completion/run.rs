@@ -11,6 +11,8 @@ pub struct Execution {
     pub outcome: Outcome,
     /// Actual computations only. Rejected runs never enter the accepted region.
     pub trace: Vec<AtomKey>,
+    /// Splits taken, in order: the input and its actual value.
+    pub branches: Vec<(AtomKey, bool)>,
 }
 impl Plan {
     /// Caller certifies W for the full observation. No runtime solver or contract
@@ -38,42 +40,98 @@ impl Plan {
         let mut executed = BTreeSet::new();
         let mut callback =
             |_: &crate::Invocation| Err("completion task scheduling is not implemented".into());
-        crate::run::execute_region(
-            &self.classification,
-            &self.outputs,
-            &mut values,
-            order,
-            &mut work,
-            &mut trace,
-            &mut branches,
-            &mut callback,
-            &mut tasks,
-            &mut executed,
-        )?;
-        work.tick()?;
-        let accept = match &self.terminal {
-            Terminal::Accept => true,
-            Terminal::Reject => false,
-            Terminal::Test(h) => *values.get(h).ok_or(ExecutionError::InvalidPlan)?,
-        };
-        if !accept {
-            return Ok(Execution {
-                outcome: Outcome::Rejected,
+        let mut run = |nodes: &BTreeMap<AtomKey, Node>,
+                       values: &mut BTreeMap<AtomKey, bool>,
+                       work: &mut crate::run::Work,
+                       trace: &mut Vec<AtomKey>,
+                       branches: &mut Vec<(AtomKey, bool)>| {
+            crate::run::execute_region(
+                nodes,
+                &self.outputs,
+                values,
+                order,
+                work,
                 trace,
-            });
+                branches,
+                &mut callback,
+                &mut tasks,
+                &mut executed,
+            )
+        };
+        let mut region = &self.root;
+        let accepted = loop {
+            run(
+                &region.nodes,
+                &mut values,
+                &mut work,
+                &mut trace,
+                &mut branches,
+            )?;
+            match &region.next {
+                Next::Split {
+                    on,
+                    then,
+                    otherwise,
+                } => {
+                    work.tick()?;
+                    let value = *values.get(on).ok_or(ExecutionError::InvalidPlan)?;
+                    branches.push((on.clone(), value));
+                    region = if value { then } else { otherwise };
+                }
+                Next::Leaf {
+                    checks,
+                    terminal,
+                    accepted,
+                } => {
+                    let mut accept = true;
+                    for c in checks {
+                        if crate::run::evaluate(&c.definition, &values, &mut work)? != c.value {
+                            accept = false;
+                            break;
+                        }
+                    }
+                    work.tick()?;
+                    accept &= match terminal {
+                        Terminal::Accept => true,
+                        Terminal::Reject => false,
+                        Terminal::Test(h) => *values.get(h).ok_or(ExecutionError::InvalidPlan)?,
+                    };
+                    if !accept {
+                        return Ok(Execution {
+                            outcome: Outcome::Rejected,
+                            trace,
+                            branches,
+                        });
+                    }
+                    break accepted.as_deref().ok_or(ExecutionError::InvalidPlan)?;
+                }
+            }
+        };
+        let mut part = accepted;
+        loop {
+            run(
+                &part.nodes,
+                &mut values,
+                &mut work,
+                &mut trace,
+                &mut branches,
+            )?;
+            match &part.next {
+                AcceptedNext::Return => break,
+                // An accepted message on an arm proved unreachable: W was violated.
+                AcceptedNext::Unreachable => return Err(ExecutionError::InvalidPlan),
+                AcceptedNext::Split {
+                    on,
+                    then,
+                    otherwise,
+                } => {
+                    work.tick()?;
+                    let value = *values.get(on).ok_or(ExecutionError::InvalidPlan)?;
+                    branches.push((on.clone(), value));
+                    part = if value { then } else { otherwise };
+                }
+            }
         }
-        crate::run::execute_region(
-            &self.accepted,
-            &self.outputs,
-            &mut values,
-            order,
-            &mut work,
-            &mut trace,
-            &mut branches,
-            &mut callback,
-            &mut tasks,
-            &mut executed,
-        )?;
         let mut outputs = BTreeMap::new();
         for k in self.outputs.keys() {
             work.tick()?;
@@ -85,6 +143,7 @@ impl Plan {
         Ok(Execution {
             outcome: Outcome::Accepted { outputs },
             trace,
+            branches,
         })
     }
 }

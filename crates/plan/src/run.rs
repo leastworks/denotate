@@ -112,7 +112,7 @@ impl Plan {
     }
 }
 
-fn evaluate(
+pub(crate) fn evaluate(
     expr: &Expression,
     values: &BTreeMap<AtomKey, bool>,
     work: &mut Work,

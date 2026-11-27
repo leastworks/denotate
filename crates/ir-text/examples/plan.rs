@@ -737,27 +737,29 @@ mod completion_tests {
         ));
         assert_eq!(code, 0);
         assert_eq!(j["version"], 5);
-        assert_eq!(j["classification"]["terminal"]["else"]["kind"], "reject");
-        for phase in ["classification", "accepted"] {
-            assert_eq!(
-                j[phase]["nodes"][0]["origins"][0]["uri"],
-                "file:///completion.den"
-            );
+        // The leaf tests h on its actual value; its accepted region follows.
+        let leaf = &j["plan"]["next"];
+        assert_eq!(leaf["terminal"]["kind"], "classify");
+        for nodes in [&j["plan"]["nodes"], &leaf["accepted"]["nodes"]] {
+            assert_eq!(nodes[0]["origins"][0]["uri"], "file:///completion.den");
         }
     }
     #[test]
     fn reject_only_is_success_and_unresolved_or_invalid_meaning_is_not() {
         let (code, j) = run(&format!("relation h();relation out();out():-!out();{V}"));
         assert_eq!(code, 0);
-        assert_eq!(j["classification"]["terminal"]["kind"], "reject");
-        for text in [
-            "relation h();h():-!h();relation out();out();",
-            "input raw();relation p();p():-p();relation h();h():-raw(),p();relation out();out();",
-        ] {
-            let (code, j) = run(&format!("{text}{V}"));
-            assert_eq!(code, 2);
-            assert!(j.get("classification").is_none());
-        }
+        assert_eq!(j["plan"]["next"]["terminal"]["kind"], "reject");
+        // No classification interpretation at all: invalid input, rejected (024.38).
+        let (code, j) = run(&format!("relation h();h():-!h();relation out();out();{V}"));
+        assert_eq!(code, 0);
+        assert_eq!(j["plan"]["next"]["terminal"]["kind"], "reject");
+        // A decision that varies under H with nothing to split on: unresolved.
+        let (code, j) = run(
+            "relation p();p():-p();relation q();q():-q();relation h();h():-p();h():-q();relation out();out();verification checks{semantics:completion;hypothesis:h;decisions:[p];assumptions:[];obligations:[];}",
+        );
+        assert_eq!(code, 2);
+        assert_eq!(j["code"], "plan-value-unresolved");
+        assert!(j.get("plan").is_none());
     }
     #[test]
     fn no_hypothesis_completion_runs_without_descriptors() {
@@ -766,6 +768,6 @@ mod completion_tests {
         );
         assert_eq!(code, 0);
         assert!(j["hypothesis"].is_null());
-        assert_eq!(j["classification"]["terminal"]["kind"], "accept");
+        assert_eq!(j["plan"]["next"]["terminal"]["kind"], "accept");
     }
 }

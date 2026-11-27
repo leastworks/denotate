@@ -2,7 +2,7 @@ use denotate_check::{AtomKey, GroundAtom, Limits};
 use denotate_ir_text::*;
 use denotate_plan::{
     Options, Order, Output,
-    completion::{Build, Outcome, Plan, Planner, Problem, Terminal},
+    completion::{Build, Next, Outcome, Plan, Planner, Problem, Terminal},
 };
 use std::collections::{BTreeMap, BTreeSet};
 fn loaded(text: &str) -> LoadedProgram {
@@ -53,7 +53,7 @@ fn actual_raw_drives_rejection_and_processing_never_runs_after_reject() {
         "input raw();relation h();h():-raw();relation out();out():-raw();{V}"
     ));
     let plan = ready(build(&p, &["out"], &Options::default()));
-    assert!(matches!(plan.terminal(), Terminal::Test(_)));
+    assert!(matches!(plan.terminal(), Some(Terminal::Test(_))));
     for raw in [false, true] {
         for order in [
             Order::Semantic,
@@ -86,10 +86,11 @@ fn actual_raw_drives_rejection_and_processing_never_runs_after_reject() {
     let json = plan.to_json();
     assert_eq!(json["version"], 5);
     assert_eq!(json["semantics"], "completion");
-    assert_eq!(
-        json["accepted"]["controlPredecessor"],
-        "classification.accept"
-    );
+    // The accepted region hangs off the accepting leaf: processing follows
+    // acceptance by construction.
+    assert_eq!(json["plan"]["next"]["kind"], "leaf");
+    assert_eq!(json["plan"]["next"]["terminal"]["kind"], "classify");
+    assert!(json["plan"]["next"]["accepted"]["nodes"].is_array());
     assert_eq!(
         json,
         ready(build(&p, &["out"], &Options::default())).to_json()
@@ -99,7 +100,8 @@ fn actual_raw_drives_rejection_and_processing_never_runs_after_reject() {
 fn hypothesis_settles_self_support_without_a_least_fixpoint_kernel() {
     let p = loaded(&format!("relation p();p():-p();relation h();h():-p();{V}"));
     let plan = ready(build(&p, &["p"], &Options::default()));
-    assert_eq!(plan.terminal(), &Terminal::Accept);
+    // Under H, h and p are constant true and their definitions hold: no check.
+    assert!(matches!(plan.terminal(), Some(Terminal::Test(_))));
     for order in [
         Order::Semantic,
         Order::ReverseSemantic,
@@ -116,8 +118,11 @@ fn hypothesis_settles_self_support_without_a_least_fixpoint_kernel() {
 fn all_rejected_is_complete_and_outside_contradictions_do_not_reject() {
     let p = loaded(&format!("relation h();relation bad();bad():-!bad();{V}"));
     let plan = ready(build(&p, &["bad"], &Options::default()));
-    assert_eq!(plan.terminal(), &Terminal::Reject);
-    assert!(plan.accepted().is_empty());
+    assert_eq!(plan.terminal(), Some(&Terminal::Reject));
+    assert!(matches!(
+        plan.root().next,
+        Next::Leaf { accepted: None, .. }
+    ));
     assert!(matches!(
         plan.execute_permitted(&BTreeMap::new(), Order::Semantic, 100)
             .unwrap()
@@ -131,9 +136,12 @@ fn all_rejected_is_complete_and_outside_contradictions_do_not_reject() {
         build(&p, &["out"], &Options::default()),
         Build::Ready(_)
     ));
+    // No classification interpretation at all: every input is invalid and
+    // rejects (024.38), rather than blocking the plan.
     let p = loaded(&format!("relation h();h():-!h();relation out();out();{V}"));
-    assert!(
-        matches!(build(&p,&["out"],&Options::default()),Build::Problem(p) if matches!(*p,Problem::Context(_)))
+    assert_eq!(
+        ready(build(&p, &["out"], &Options::default())).terminal(),
+        Some(&Terminal::Reject)
     );
 }
 #[test]
@@ -143,8 +151,10 @@ fn output_scope_needs_existence_on_every_accepted_observation_and_explicit_deter
         "input raw();relation h();h();relation p();p():-!raw();p():-raw(),!p();{V}"
     ));
     let b = build(&p, &["p"], &Options::default());
+    // The raw = true arm reaches acceptance with no processing interpretation.
     assert!(
-        matches!(b,Build::Problem(p) if matches!(*p,Problem::Outputs(ref o) if o.no_meaning.exists()))
+        matches!(b,Build::Problem(ref p) if matches!(**p,Problem::MeaningFailure{ref path} if path.len() == 1)),
+        "{b:?}"
     );
     let p = loaded(&format!(
         "relation h();h();relation p();p():-p();relation out();out();{V}"
@@ -153,8 +163,9 @@ fn output_scope_needs_existence_on_every_accepted_observation_and_explicit_deter
         build(&p, &["out"], &Options::default()),
         Build::Ready(_)
     ));
+    // p :- p has two values and nothing to split on: unresolved, never guessed.
     assert!(
-        matches!(build(&p,&["p"],&Options::default()),Build::Problem(p) if matches!(*p,Problem::Outputs(ref o) if o.ambiguous.exists()))
+        matches!(build(&p,&["p"],&Options::default()),Build::Problem(p) if matches!(*p,Problem::Unresolved{phase:"processing",..}))
     );
 }
 #[test]
@@ -171,7 +182,7 @@ fn union_of_output_cones_is_checked_and_helpers_need_not_be_unique() {
         Build::Ready(_)
     ));
     assert!(
-        matches!(build(&p,&["a","b"],&Options::default()),Build::Problem(p) if matches!(*p,Problem::Outputs(ref o) if o.no_meaning.exists()))
+        matches!(build(&p,&["a","b"],&Options::default()),Build::Problem(p) if matches!(*p,Problem::MeaningFailure{..}))
     );
 }
 #[test]
@@ -207,7 +218,7 @@ fn selected_assumptions_are_separate_from_rejection_and_invalid_contracts_block_
     );
     assert_eq!(
         ready(build(&p, &["out"], &Options::default())).terminal(),
-        &Terminal::Reject
+        Some(&Terminal::Reject)
     );
     let p = loaded(
         "input raw();relation h();h():-raw();relation out();out();assumption absent:empty(raw);assumption present:at_least_one(raw,group_by:());verification checks{semantics:completion;hypothesis:h;decisions:[];assumptions:[absent,present];obligations:[];}",
@@ -226,12 +237,29 @@ fn selected_assumptions_are_separate_from_rejection_and_invalid_contracts_block_
 }
 #[test]
 fn unresolved_mixed_cycles_and_resource_cutoffs_never_publish_partial_plans() {
-    let p = loaded(&format!(
-        "input raw();relation p();p():-p();relation h();h():-raw(),p();relation out();out();{V}"
-    ));
+    // A decision that varies under H with nothing to split on stays unresolved.
+    let p = loaded(
+        "relation p();p():-p();relation q();q():-q();relation h();h():-p();h():-q();relation out();out();verification checks{semantics:completion;hypothesis:h;decisions:[p];assumptions:[];obligations:[];}",
+    );
     assert!(
         matches!(build(&p,&["out"],&Options::default()),Build::Problem(p) if matches!(*p,Problem::Unresolved{phase:"classification",..}))
     );
+    // With no declared decision, H forces the helper loop and runtime checks keep
+    // the actual acceptance test: raw rejects when false.
+    let p = loaded(&format!(
+        "input raw();relation p();p():-p();relation h();h():-raw(),p();relation out();out();{V}"
+    ));
+    let plan = ready(build(&p, &["out"], &Options::default()));
+    for raw in [false, true] {
+        let run = plan
+            .execute_permitted(
+                &BTreeMap::from([(key(&p, "raw"), raw)]),
+                Order::Semantic,
+                1000,
+            )
+            .unwrap();
+        assert_eq!(matches!(run.outcome, Outcome::Accepted { .. }), raw);
+    }
     let p = loaded(&format!(
         "input raw();relation h();h():-raw();relation out();out();{V}"
     ));
@@ -338,8 +366,9 @@ fn complete_plans_agree_with_independent_equation_enumeration_on_every_input() {
             }
             if let Build::Ready(plan) = result {
                 completed += 1;
-                for (raw, (exists, accepts, outputs)) in [false, true].into_iter().zip(expected) {
-                    assert!(exists, "classification contradiction must block plan");
+                for (raw, (_exists, accepts, outputs)) in [false, true].into_iter().zip(expected) {
+                    // Inputs with no classification interpretation are invalid and
+                    // must reject (024.38): `accepts` is false for them.
                     for order in [
                         Order::Semantic,
                         Order::ReverseSemantic,
@@ -436,4 +465,162 @@ fn explicit_tuple_determinacy_does_not_require_its_siblings() {
             .unwrap();
         assert_eq!(matches!(result, Build::Ready(_)), name == "a");
     }
+}
+
+/// Brute force over nullary programs: for each input assignment, whether an
+/// interpretation of C(H) with H exists, and the output's values over full
+/// interpretations of the output and classification scopes with H.
+fn semantic(
+    p: &LoadedProgram,
+    inputs: &[&str],
+    output: &str,
+) -> Vec<(BTreeMap<String, bool>, bool, BTreeSet<bool>)> {
+    let names: Vec<String> = p.corpus.relations().map(|r| r.name.clone()).collect();
+    let derived: Vec<String> = names
+        .iter()
+        .filter(|n| !inputs.contains(&n.as_str()))
+        .cloned()
+        .collect();
+    let id = |n: &str| p.corpus.relations().find(|r| r.name == n).unwrap().id;
+    let closure = |roots: &[&str]| {
+        let mut scope: BTreeSet<_> = roots.iter().map(|n| id(n)).collect();
+        loop {
+            let mut next = scope.clone();
+            for r in p
+                .corpus
+                .rules()
+                .filter(|r| scope.contains(&r.head.relation()))
+            {
+                next.extend(r.body.iter().map(|l| l.atom().relation()));
+            }
+            if next == scope {
+                return scope;
+            }
+            scope = next;
+        }
+    };
+    let class = closure(&["h"]);
+    let mut full = closure(&[output]);
+    full.extend(class.iter().copied());
+    let mut out = vec![];
+    for bits in 0..1usize << inputs.len() {
+        let world: BTreeMap<String, bool> = inputs
+            .iter()
+            .enumerate()
+            .map(|(i, n)| (n.to_string(), bits & (1 << i) != 0))
+            .collect();
+        let mut accepts = false;
+        let mut outputs = BTreeSet::new();
+        for d in 0..1usize << derived.len() {
+            let mut values: BTreeMap<_, bool> = world.iter().map(|(n, v)| (id(n), *v)).collect();
+            for (i, n) in derived.iter().enumerate() {
+                values.insert(id(n), d & (1 << i) != 0);
+            }
+            let holds = |r: denotate_ir::RelationId| {
+                values[&r]
+                    == p.corpus
+                        .rules()
+                        .filter(|x| x.head.relation() == r)
+                        .any(|x| {
+                            x.body.iter().all(|l| {
+                                values[&l.atom().relation()]
+                                    == matches!(l, denotate_ir::Literal::Positive(_))
+                            })
+                        })
+            };
+            if !values[&id("h")] {
+                continue;
+            }
+            let derived_in = |scope: &BTreeSet<denotate_ir::RelationId>| {
+                scope
+                    .iter()
+                    .filter(|r| !inputs.iter().any(|n| id(n) == **r))
+                    .all(|r| holds(*r))
+            };
+            if derived_in(&class) {
+                accepts = true;
+                if derived_in(&full) {
+                    outputs.insert(values[&id(output)]);
+                }
+            }
+        }
+        out.push((world, accepts, outputs));
+    }
+    out
+}
+
+#[test]
+fn driver_plans_keep_the_outcome_invariant_on_every_input() {
+    let programs = [
+        // Guarded self-admission (k3b shape): H forces h and readable; their
+        // definitions stay as runtime checks, so tag = false rejects.
+        (
+            "input tag();input g();relation h();relation readable();h():-tag(),readable();readable():-h();relation out();out():-g();",
+            vec!["tag", "g"],
+            "out",
+        ),
+        // x :- j; x :- i, !x: i, !j has no interpretation and must reject.
+        (
+            "input i();input j();input k();relation x();x():-j();x():-i(),!x();relation h();h():-!x(),k();relation out();out():-k();",
+            vec!["i", "j", "k"],
+            "out",
+        ),
+        // A guarded odd loop: s makes the input invalid.
+        (
+            "input s();relation a();a():-s(),!a();relation h();h():-!a();relation out();out():-a();",
+            vec!["s"],
+            "out",
+        ),
+        // A helper that varies under H: the driver splits on s.
+        (
+            "input s();relation a();a():-s(),a();relation h();h():-!s();h():-s(),a();relation out();out():-a();",
+            vec!["s"],
+            "out",
+        ),
+        // An output with two values under H when i holds: never a complete plan.
+        (
+            "input i();relation h();h():-i();relation p();p():-p(),i();p():-!i();",
+            vec!["i"],
+            "p",
+        ),
+    ];
+    let mut ready_plans = 0;
+    let mut split_plans = 0;
+    for (text, inputs, output) in programs {
+        let p = loaded(&format!("{text}{V}"));
+        let expected = semantic(&p, &inputs, output);
+        match build(&p, &[output], &Options::default()) {
+            Build::Ready(plan) => {
+                ready_plans += 1;
+                split_plans += usize::from(plan.splits() > 0);
+                for (world, accepts, outputs) in &expected {
+                    let observed = world.iter().map(|(n, v)| (key(&p, n), *v)).collect();
+                    let run = plan
+                        .execute_permitted(&observed, Order::Semantic, 10_000)
+                        .unwrap();
+                    assert_eq!(
+                        matches!(run.outcome, Outcome::Accepted { .. }),
+                        *accepts,
+                        "{text} at {world:?}"
+                    );
+                    if let Outcome::Accepted { outputs: actual } = run.outcome {
+                        assert_eq!(
+                            *outputs,
+                            BTreeSet::from([actual[&key(&p, output)]]),
+                            "{text} at {world:?}"
+                        );
+                    }
+                }
+            }
+            other => {
+                // A refusal is allowed only where an accepted input has no unique output.
+                assert!(
+                    expected.iter().any(|(_, a, o)| *a && o.len() != 1),
+                    "{text}: {other:?}"
+                );
+            }
+        }
+    }
+    assert_eq!(ready_plans, 4);
+    assert!(split_plans >= 1);
 }

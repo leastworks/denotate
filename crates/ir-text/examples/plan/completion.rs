@@ -1,6 +1,6 @@
 use super::*;
 use denotate_check::completion_query as q;
-use denotate_plan::completion::{Build, Planner, Problem};
+use denotate_plan::completion::{Accepted, AcceptedNext, Build, Next, Planner, Problem, Region};
 
 pub(super) fn export(
     p: &LoadedProgram,
@@ -29,18 +29,7 @@ pub(super) fn export(
         Build::Ready(plan) => {
             let mut j = plan.to_json();
             let mut sources = denotate_ir_text::origins::SourceIndex::new(&p.sources);
-            attach_origins(
-                p,
-                &mut sources,
-                plan.classification(),
-                &mut j["classification"]["nodes"],
-            )?;
-            attach_origins(
-                p,
-                &mut sources,
-                plan.accepted(),
-                &mut j["accepted"]["nodes"],
-            )?;
+            region_origins(p, &mut sources, plan.root(), &mut j["plan"])?;
             (0, j)
         }
         Build::NoPermittedWorlds => (2, json!({"state":"no-permitted-worlds"})),
@@ -158,48 +147,19 @@ fn problem_json(p: &LoadedProgram, problem: Problem) -> Result<Value, String> {
             j["inconclusive"] = json!(cutoffs);
             j
         }
-        Problem::Outputs(o) => {
-            if !matches!(
-                o.context.outcome,
-                q::PathOutcome::Accept | q::PathOutcome::Mixed
-            ) {
-                return problem_json(p, Problem::Context(o.context));
-            }
-            let mut j =
-                json!({"state":"unresolved","code":"plan-meaning-failure","phase":"outputs"});
-            match o.no_meaning {
-                q::Search::Exists(w) => {
-                    j["reason"] = json!("no-meaning");
-                    j["world"] = observation(&w)?;
-                }
-                q::Search::Inconclusive(c) => {
-                    j["state"] = json!("inconclusive");
-                    j["phase"] = json!(c.phase);
-                    j["resource"] = json!(c.resource);
-                }
-                _ => (),
-            }
-            match o.ambiguous {
-                q::Search::Exists(pair) => {
-                    j["reason"] = json!("multiple-meanings");
-                    j["first"] = model(&pair.first)?;
-                    j["second"] = model(&pair.second)?;
-                }
-                q::Search::Inconclusive(c) => {
-                    j["state"] = json!("inconclusive");
-                    j["phase"] = json!(c.phase);
-                    j["resource"] = json!(c.resource);
-                }
-                _ => (),
-            }
-            j
+        Problem::MeaningFailure { path } => {
+            json!({"state":"unresolved","code":"plan-meaning-failure","phase":"outputs","reason":"no-meaning","path":path_json(&path)})
+        }
+        Problem::PathInconclusive { path, cause } => {
+            json!({"state":"inconclusive","phase":cause.phase,"resource":cause.resource,"path":path_json(&path)})
         }
         Problem::Unresolved {
             phase,
+            path,
             atoms,
             dependencies,
         } => {
-            json!({"state":"unresolved","code":"plan-value-unresolved","phase":phase,"reason":"straight-line-strategy-unresolved","atoms":atoms.iter().map(denotate_plan::atom_json).collect::<Vec<_>>(),"dependencies":dependencies.iter().map(|(a,b,p)|json!({"consumer":denotate_plan::atom_json(a),"provider":denotate_plan::atom_json(b),"positive":p})).collect::<Vec<_>>()})
+            json!({"state":"unresolved","code":"plan-value-unresolved","phase":phase,"reason":"path-driver-unresolved","path":path_json(&path),"atoms":atoms.iter().map(denotate_plan::atom_json).collect::<Vec<_>>(),"dependencies":dependencies.iter().map(|(a,b,p)|json!({"consumer":denotate_plan::atom_json(a),"provider":denotate_plan::atom_json(b),"positive":p})).collect::<Vec<_>>()})
         }
     })
 }
@@ -209,4 +169,48 @@ fn cause<T>(search: &q::Search<T>) -> Option<Value> {
         q::Search::Inconclusive(c) => Some(json!({"phase":c.phase,"resource":c.resource})),
         _ => None,
     }
+}
+
+fn path_json(path: &[(denotate_check::AtomKey, bool)]) -> Value {
+    json!(
+        path.iter()
+            .map(|(a, v)| json!({"atom": denotate_plan::atom_json(a), "value": v}))
+            .collect::<Vec<_>>()
+    )
+}
+fn region_origins(
+    p: &LoadedProgram,
+    sources: &mut denotate_ir_text::origins::SourceIndex<'_>,
+    r: &Region,
+    j: &mut Value,
+) -> Result<(), String> {
+    attach_origins(p, sources, &r.nodes, &mut j["nodes"])?;
+    match &r.next {
+        Next::Split {
+            then, otherwise, ..
+        } => {
+            region_origins(p, sources, then, &mut j["next"]["then"])?;
+            region_origins(p, sources, otherwise, &mut j["next"]["else"])
+        }
+        Next::Leaf {
+            accepted: Some(a), ..
+        } => accepted_origins(p, sources, a, &mut j["next"]["accepted"]),
+        Next::Leaf { .. } => Ok(()),
+    }
+}
+fn accepted_origins(
+    p: &LoadedProgram,
+    sources: &mut denotate_ir_text::origins::SourceIndex<'_>,
+    a: &Accepted,
+    j: &mut Value,
+) -> Result<(), String> {
+    attach_origins(p, sources, &a.nodes, &mut j["nodes"])?;
+    if let AcceptedNext::Split {
+        then, otherwise, ..
+    } = &a.next
+    {
+        accepted_origins(p, sources, then, &mut j["next"]["then"])?;
+        accepted_origins(p, sources, otherwise, &mut j["next"]["else"])?;
+    }
+    Ok(())
 }

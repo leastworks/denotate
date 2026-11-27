@@ -5,6 +5,41 @@ mod fitting;
 mod forcing;
 pub use forcing::ForcingRecord;
 mod groups;
+/// Forcing for the planner's path driver: the derived atoms of `cone` constant in
+/// every interpretation under W, the input `pins` and (with `hypothesis`) H, and
+/// whether their definitions are implied there (then the constants alone define
+/// the same interpretations; otherwise each needs a runtime check).
+pub(super) fn force_on_path(
+    e: &Engine,
+    cone: Arc<Cone>,
+    hypothesis: bool,
+    pins: &[(usize, bool)],
+    b: &mut Budget<'_>,
+) -> Result<(Vec<(usize, bool)>, bool)> {
+    let context = if hypothesis && e.classification.is_some() {
+        PruningContext::Hypothesis
+    } else {
+        PruningContext::World
+    };
+    let mut remaining = e.config.clone();
+    let (forced, report) = forcing::force(e, cone.clone(), context, pins, b, &mut remaining)?;
+    if let Some(cause) = report.cutoff {
+        return Err(CheckError::LimitExceeded {
+            phase: cause.phase,
+            resource: cause.resource,
+            details: cause.details,
+        });
+    }
+    let constants: Vec<_> = (0..forced.fixed.len())
+        .filter_map(|i| match (cone.fixed[i], forced.fixed[i]) {
+            (None, Some(v)) => Some((i, v)),
+            _ => None,
+        })
+        .collect();
+    let discharged =
+        constants.is_empty() || forcing::implied(e, &forced, context, pins, b, &mut remaining)?;
+    Ok((constants, discharged))
+}
 /// The declared input value groups as (exactly-one, inputs), read as the split
 /// ranking reads them (assumption cones under Fitting), for cover telemetry.
 pub(super) fn value_groups(e: &Engine, b: &mut Budget<'_>) -> Result<Vec<(bool, Vec<usize>)>> {

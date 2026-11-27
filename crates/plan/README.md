@@ -239,50 +239,53 @@ orders. Message inputs are available at entry. Task-produced inputs require the
 later completion task-scheduling increment; this API does not infer task ownership
 from names or accept task descriptors yet.
 
-Construction first certifies W and classification, including existence without H
-and the selected classification decisions. It then checks existence on **every
-accepted observation** and determinacy of the explicitly requested atoms in the
-union of their live cones and C(H). Requested outputs require determinacy even if
-omitted from the declaration's `decisions`; unrelated helpers need not be unique.
-Outside processing rules do not block the plan. A direct bounded-input output also
-causes its `within` provider to be prepared, without changing declared decisions.
+Construction certifies only the input contract (W) up front. A path driver then
+walks runtime paths from entry: on each path (input pins along the splits taken)
+it sequences ordinary equations over available values, substitutes constants the
+checker proves on the path, splits on an input when stuck, and ends the path in an
+explicit terminal. Outcome invariant, the first property its tests check: on every
+permitted observation the plan accepts exactly when a classification
+interpretation with H exists (unique on the decisions), rejects otherwise, and then
+returns the unique requested values.
 
-This slice produces two straight-line regions with an explicit control barrier:
+- **Classification.** If no message on the path has an H-interpretation, the path
+  rejects. Otherwise the checker proves constants for stuck cyclic derived atoms
+  under W, the path and H (`planning_path_step`), never for inputs. A constant whose
+  definition is not implied there keeps a runtime check: the plan rejects unless the
+  definition, evaluated on the computed values, gives the constant. The terminal
+  tests the actual computed H value. So `h :- raw` rejects when raw is false, and an
+  input with no classification interpretation at all (invalid input, 024.38)
+  rejects through a check or the test. Targets are H and the declared decisions in
+  C(H); unused helpers stay free, but the unsequenced remainder must have no odd loop.
+- **Processing**, per accepted leaf with that leaf's path facts and values: if an
+  accepted message on the path has no processing interpretation, construction
+  reports `plan-meaning-failure`; an arm no accepted message reaches is
+  `unreachable`. Only constants with implied definitions are substituted; otherwise
+  the driver splits or reports the path unresolved. Outputs sequenced on every
+  accepted leaf are determined by construction.
+- **Splits** are on inputs only (computed-expression splits follow), chosen by a
+  structural test: the pin must let stuck atoms sequence in at least one arm.
 
-- Classification uses ordinary equations over entry inputs. For mixed outcomes,
-  its terminal tests the actual computed H value; it never substitutes an
-  H-conditional proof into that runtime test. `h :- raw` therefore rejects when
-  raw is false. An independently certified accept-only/reject-only context can
-  instead have a constant terminal.
-- Only the accepted continuation computes processing outputs. Ordinary dependency
-  sequencing comes first; bounded constant proofs under H can cut remaining loops.
-  For `p :- p; h :- p`, the accepted p value is true. No least-fixpoint kernel is
-  used, and no general expression synthesis or scheduling split is attempted.
+`completion::Plan::execute_permitted` follows the splits on actual input values,
+evaluates a leaf's checks and terminal, then that leaf's accepted region, and
+returns `Accepted { outputs }` or `Rejected` with the computations and branches
+taken. The caller certifies the input contract; missing input values are errors. It
+performs no runtime SAT query. A rejected run cannot execute an accepted region.
+Reject-only plans are complete and `plan-den` exits 0 for them. Unresolved paths,
+meaning failures and limits exit 2 and expose no partial plan; the problem names the
+path. Checking verdicts remain independent.
 
-A constant proof alone is insufficient: its scope might lack an interpretation on
-some accepted inputs. The preceding output-existence check prevents such gaps from
-being hidden. Computations agree with every accepted interpretation by induction:
-entry inputs agree, ordinary equations preserve agreement, and the checker proves
-constant steps in their live scope. Runtime classification is independently valid
-on rejecting inputs. The barrier keeps all processing after acceptance regardless
-of ready-node order.
+The v5 header names the verification, assumptions, hypothesis and decision
+selection, with live scope counts. `plan` is the tree: a region's `nodes`, then
+`next`: a `split` (`on`, `then`, `else`) or a `leaf` with `checks`, `terminal`
+(`accept`, `reject` or `classify` on H) and its `accepted` region (`nodes`, then
+`return`, `unreachable` or a `split`). `.den` adds origins for every region.
+Plan-only failures retain unresolved atoms and signed dependencies; bounded failure
+does not prove that no executable order exists.
 
-`completion::Plan::execute_permitted` returns `Accepted { outputs }` or `Rejected`
-with the computations actually executed in its trace. The caller certifies the
-input contract; missing input values are errors. It performs no runtime SAT query.
-A rejected run cannot execute the accepted region. Reject-only plans are complete
-and `plan-den` exits 0 for them. Invalid meaning, unresolved construction and limits
-exit 2 and expose no partial plan. Checking verdicts remain independent.
-
-The v5 header names the verification, assumptions, hypothesis and decision selection,
-with live scope counts. It separates `classification` and `accepted` regions and
-records the conditional constant steps. `.den` adds origins for both regions.
-Plan-only failures retain scoped evidence or unresolved atoms and signed dependencies;
-bounded failure does not prove that no executable order exists.
-
-Existing node, oracle-call, work and deadline bounds apply. Preparation has its own
-checker budget; each oracle operation remains bounded. Repeated builds prepare
-fresh immutable engines: there is no completion planner/session cache or scale
-claim. Splits/joins, H-justified classification computations, conditional tasks and
-the task-only sidecar follow in the next slice. Until then a mixed classification
-cycle that ordinary sequencing cannot resolve remains explicitly unresolved.
+Existing node, oracle-call, split, split-depth, work and deadline bounds apply.
+Repeated builds prepare fresh immutable engines: there is no planner cache or scale
+claim. Joins of compatible continuations, splits on computed expressions, SAT
+diagnosis of stuck paths and conditional tasks follow. On the public guarded-schema
+controls the input-split strategy does not yet finish (it splits one element-level
+input at a time).
