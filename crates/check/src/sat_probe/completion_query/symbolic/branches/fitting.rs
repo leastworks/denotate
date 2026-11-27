@@ -181,6 +181,24 @@ impl State {
     pub fn source(&self) -> &Cone {
         &self.index.cone
     }
+    /// The same state with its retained equations dropped (they were shown
+    /// implied). Incidence depends only on rules, so values carry over.
+    pub fn without_retained(&self, b: &mut Budget<'_>) -> Result<Self> {
+        let c = &self.index.cone;
+        b.charge(
+            c.fixed.len() + c.rules.len(),
+            "completion forcing discharge",
+        )?;
+        let mut cone = (**c).clone();
+        cone.retained = vec![].into();
+        let mut out = self.clone();
+        out.index = Arc::new(Incidence {
+            cone: Arc::new(cone),
+            readers: self.index.readers.clone(),
+            producers: self.index.producers.clone(),
+        });
+        Ok(out)
+    }
     /// Only ancestor-proved constants and explicit assignments enter a proof.
     /// Ordinary propagation is for ranking/execution, not a common-equations premise.
     fn proof_cone(&self, pins: &[(usize, bool)], b: &mut Budget<'_>) -> Result<Arc<Cone>> {
@@ -702,6 +720,21 @@ impl Bundle {
                         );
                         self.saturated.clear();
                     }
+                    // Installed first, then the optional discharge: a cutoff
+                    // there keeps the installed constants and their equations.
+                    // Dropping implied equations changes no value, rule or model,
+                    // so it is not a change for pruning or another forcing round.
+                    if !cutoff {
+                        self.discharge(
+                            &engine,
+                            classification,
+                            context,
+                            &mut report,
+                            &mut allowance,
+                            &mut local,
+                        )?;
+                    }
+                    let cutoff = report.cutoff.is_some();
                     self.forcing.push(report);
                     if cutoff {
                         break;
@@ -777,6 +810,66 @@ impl Bundle {
         Ok(())
     }
 
+    /// Drop the context view's retained definitions (installed here or inherited
+    /// from an ancestor or the W pass) when its constants imply them under this
+    /// branch's pins: they block the structural existence certificate. A cutoff
+    /// is recorded on `report` and keeps the view.
+    fn discharge(
+        &mut self,
+        e: &Engine,
+        classification: bool,
+        context: PruningContext,
+        report: &mut forcing::ForcingRecord,
+        allowance: &mut QueryLimits,
+        b: &mut Budget<'_>,
+    ) -> Result<bool> {
+        let (state, _) = self.ranking(classification, context == PruningContext::Hypothesis);
+        if state.source().retained.is_empty() {
+            return Ok(false);
+        }
+        let state = state.clone();
+        let result = (|| {
+            let cone = state.cone(b)?;
+            if !forcing::implied(e, &cone, context, &self.pins, b, allowance)? {
+                return Ok(None);
+            }
+            Ok(Some(state.without_retained(b)?))
+        })();
+        match result {
+            Ok(Some(state)) => {
+                self.views.insert(
+                    (self.scope(classification), context, self.pins.clone()),
+                    state,
+                );
+                report.discharged = true;
+                Ok(true)
+            }
+            Ok(None) => Ok(false),
+            Err(error) => {
+                e.limits.cancellation.check()?;
+                report.cutoff = Some(inconclusive(error)?);
+                Ok(false)
+            }
+        }
+    }
+    #[cfg(test)]
+    pub(super) fn discharge_for_test(
+        &mut self,
+        e: &Engine,
+        classification: bool,
+        report: &mut forcing::ForcingRecord,
+        allowance: &mut QueryLimits,
+        b: &mut Budget<'_>,
+    ) -> Result<bool> {
+        self.discharge(
+            e,
+            classification,
+            PruningContext::World,
+            report,
+            allowance,
+            b,
+        )
+    }
     pub fn publish(&mut self, e: &Engine) {
         if let Some(cache) = &e.pruning {
             let mut cache = cache.lock().unwrap();

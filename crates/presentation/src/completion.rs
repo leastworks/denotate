@@ -1051,7 +1051,7 @@ fn completion_forcing(
 ) -> Result<Vec<Value>> {
     records.iter().map(|r| Ok(json!({
         "context":r.context,"candidates":r.candidates,"attempted":r.attempted,
-        "forced":r.forced,"forcedWitnesses":r.forced_witnesses,"noModel":r.no_model,
+        "forced":r.forced,"forcedWitnesses":r.forced_witnesses,"discharged":r.discharged,"noModel":r.no_model,
         "witnesses":r.witnesses.iter().map(|(a,v)|Ok(json!({"atom":atom(a)?,"value":v}))).collect::<Result<Vec<_>>>()?,
         "examples":r.examples.iter().map(|(a,v)|Ok(json!({"atom":atom(a)?,"value":v}))).collect::<Result<Vec<_>>>()?,
         "omitted":r.omitted,"cutoff":r.cutoff.map(reason),

@@ -9,6 +9,9 @@ pub struct ForcingRecord {
     pub attempted: usize,
     pub forced: usize,
     pub forced_witnesses: usize,
+    /// The view's retained definitions (this pass's or inherited) were implied
+    /// by its constants in this context and were dropped.
+    pub discharged: bool,
     /// The forced witness atoms (at most 32), with their constants.
     pub witnesses: Vec<(GroundAtom, bool)>,
     pub examples: Vec<(GroundAtom, bool)>,
@@ -23,6 +26,7 @@ impl ForcingRecord {
         self.cutoff = Some(inconclusive(error)?);
         self.forced = 0;
         self.forced_witnesses = 0;
+        self.discharged = false;
         self.witnesses.clear();
         self.examples.clear();
         self.omitted = 0;
@@ -196,11 +200,104 @@ pub(super) fn force(
     }
 }
 
+/// Whether every model of `out` without its retained equations satisfies them,
+/// under W, the branch pins and (for W+H) H. Then the constants alone define the
+/// same models and the equations can be dropped. A fresh solver: no other
+/// encoding may restrict the inputs, since existence is what remains to be shown.
+pub(super) fn implied(
+    e: &Engine,
+    out: &Cone,
+    context: PruningContext,
+    pins: &[(usize, bool)],
+    b: &mut Budget<'_>,
+    remaining: &mut QueryLimits,
+) -> Result<bool> {
+    if out.retained.is_empty() {
+        return Ok(true);
+    }
+    let mut view = out.clone();
+    view.retained = vec![].into();
+    let mut local = e.clone();
+    local.config = remaining.clone();
+    let mut run = queries::Run::new(&local, b)?;
+    run.label("completion branch forcing discharge");
+    let result = (|| {
+        let encoded = encoding::encode_named(
+            &view,
+            &mut run.cnf,
+            run.truth,
+            Some(&run.world.vars),
+            run.budget,
+            "branch-forcing-discharge",
+        )?;
+        let mut logic = encoding::Booleans::new(run.truth);
+        let mut violations = vec![];
+        for eq in out.retained.iter() {
+            let value = out.fixed[eq.head].ok_or(CheckError::Internal(
+                "retained definition without a constant",
+            ))?;
+            let mut bodies = vec![];
+            for body in &eq.bodies {
+                run.budget
+                    .charge(body.len() + 1, "completion forcing discharge")?;
+                let lits: Vec<_> = body
+                    .iter()
+                    .map(|(i, p)| {
+                        if *p {
+                            encoded.vars[*i]
+                        } else {
+                            !encoded.vars[*i]
+                        }
+                    })
+                    .collect();
+                bodies.push(logic.and(&lits, &mut run.cnf, run.budget)?);
+            }
+            let some = logic.or(&bodies, &mut run.cnf, run.budget)?;
+            // Violated: a body holds although the constant is false, or none
+            // holds although it is true.
+            violations.push(if value { !some } else { some });
+        }
+        let violated = logic.or(&violations, &mut run.cnf, run.budget)?;
+        let mut assumptions: Vec<_> = pins
+            .iter()
+            .filter(|(i, _)| view.input[*i])
+            .map(|(i, v)| {
+                if *v {
+                    encoded.vars[*i]
+                } else {
+                    !encoded.vars[*i]
+                }
+            })
+            .collect();
+        if context == PruningContext::Hypothesis {
+            let h = e
+                .classification
+                .as_ref()
+                .ok_or(CheckError::Internal("forcing H without classification"))?
+                .2;
+            assumptions.push(encoded.vars[h]);
+        }
+        assumptions.push(violated);
+        Ok(!run.raw_solve(&assumptions)?)
+    })();
+    let used = run.usage();
+    remaining.max_solves = remaining.max_solves.saturating_sub(used.max_solves);
+    remaining.max_solver_polls = remaining
+        .max_solver_polls
+        .saturating_sub(used.max_solver_polls);
+    remaining.max_conflicts = remaining.max_conflicts.saturating_sub(used.max_conflicts);
+    remaining.max_propagations = remaining
+        .max_propagations
+        .saturating_sub(used.max_propagations);
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::sat_probe::completion_query::tests::{prepare, verification};
     use crate::test_support::rewrites::{atom, rel, rule};
+    use denotate_ir::Namespace;
 
     fn models(e: &Engine, c: &Cone, h: bool) -> BTreeSet<Vec<bool>> {
         let mut b = Budget::new(&e.limits);
@@ -251,6 +348,9 @@ mod tests {
         .unwrap();
         assert_eq!(report.examples, [(atom(x), false)]);
         assert!(!forced.retained.is_empty());
+        // Not implied: with x = false alone, i = true would gain a model.
+        let mut config = e.config.clone();
+        assert!(!implied(&e, &forced, PruningContext::World, &[], &mut b, &mut config).unwrap());
         assert_eq!(models(&e, &e.cone, false), models(&e, &forced, false));
         assert_eq!(models(&e, &forced, false).len(), 1);
         // The existential slice may not discard the retained defining equation.
@@ -274,6 +374,44 @@ mod tests {
         )
         .unwrap();
         assert_eq!(report.forced, 0);
+    }
+    #[test]
+    fn a_definition_implied_under_w_is_not_retained() {
+        // x :- j, not x has no model when j holds, but W excludes j: x is forced
+        // false, its definition (j must be false) holds in every W world, so
+        // the constant alone defines the same models and nothing is retained.
+        let mut c = Corpus::new();
+        let j = rel(&mut c, "j", true);
+        let d = rel(&mut c, "d", false);
+        rule(&mut c, d, &[(j, false)]);
+        let none = c.assume_empty_in(Namespace::default(), "no_j", d).unwrap();
+        let x = rel(&mut c, "x", false);
+        rule(&mut c, x, &[(j, false), (x, true)]);
+        let v = verification(&mut c, None, &[none]);
+        let e = prepare(&c, v, &Default::default());
+        let mut b = Budget::new(&e.limits);
+        let (forced, report) = force(
+            &e,
+            e.cone.clone(),
+            PruningContext::World,
+            &[],
+            &mut b,
+            &mut e.config.clone(),
+        )
+        .unwrap();
+        assert!(report.examples.contains(&(atom(x), false)));
+        assert!(!forced.retained.is_empty());
+        let mut config = e.config.clone();
+        assert!(implied(&e, &forced, PruningContext::World, &[], &mut b, &mut config).unwrap());
+        let mut forced = (*forced).clone();
+        forced.retained = vec![].into();
+        assert_eq!(models(&e, &e.cone, false), models(&e, &forced, false));
+        assert_eq!(
+            consistency::analyse(&forced, None, &mut b)
+                .unwrap()
+                .odd_components,
+            0
+        );
     }
     #[test]
     fn every_tiny_signed_equation_model_is_preserved_including_vacuous_contexts() {

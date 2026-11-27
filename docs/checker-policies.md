@@ -2420,8 +2420,19 @@ cut scores, while requiring at least one actual cut to select a partition.
 
 Each pass builds one immutable encoding, checks context satisfiability, and then
 queries positive/negative literals as assumptions. No-model contexts install no
-constants. Every retained constant has a residual defining-equation constraint;
-iteration with propagation and pruning stops at a fixed point or cutoff. Queries,
+constants. Every installed constant has a residual defining-equation constraint,
+unless the forced view already implies it: a retained definition blocks the
+structural existence certificate (no odd component and no retained equation), so
+after each forcing pass installs its constants (or finds none), one SAT query in a
+fresh solver, under W, the branch pins and H for W+H, asks whether the view without
+any of its retained definitions (installed here or inherited from an ancestor
+branch or the W pass) has a model violating one. If not, the constants alone define
+the same models and the definitions are dropped (`discharged` in the forcing
+record). A SAT answer keeps them; a cutoff keeps them and the installed constants
+and is recorded as the pass's cutoff. Without this a constant could remove a node's only odd component
+(ranking then finds no split target) while its retained definition sent the node
+into a cover loop enumerating inputs the constant made irrelevant. Iteration with
+propagation and pruning stops at a fixed point or cutoff. Queries,
 failed work, shadow-cache work and installation are charged. Cutoffs leave the
 last successfully installed equivalent view. No node, time or selected-witness
 golden is introduced; compare outcomes and inspect per-path telemetry.

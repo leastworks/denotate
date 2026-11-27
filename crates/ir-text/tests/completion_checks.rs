@@ -885,3 +885,49 @@ fn one_sided_formula_cut_is_visible_per_child_in_json_and_human_output() {
         "a cut cannot hide the other child's no-meaning"
     );
 }
+#[test]
+fn a_forced_constant_that_breaks_the_only_odd_loop_closes_the_question_structurally() {
+    // The fallback `other` admits a message nothing else classifies; only its
+    // profile gives field f, and `term_f` reads f: other -> given_f -> term_f ->
+    // not other is an odd loop when f = x. W ties f = x to an r-message, which
+    // `term_r` classifies first, so forcing proves term_f false. Its definition
+    // then holds in every W world, so the constant alone defines the same models:
+    // the loop is gone and no cover loop over the free toggles may run.
+    let text = "
+        sort Toggle; const t1, t2, t3, t4: Toggle;
+        sort Clash; const c_x, c_not_r: Clash;
+        input present_f(); input f_is_x(); input msg_r(); input msg_p(); input msg_q();
+        input present_g(); input toggle(t: Toggle);
+        relation clash(c: Clash); clash(c_x) :- f_is_x(); clash(c_not_r) :- !msg_r();
+        assumption x_needs_r: at_most_one(clash, group_by: ());
+        relation p_block(); p_block() :- msg_p(), !msg_q();
+        relation term_p(); term_p() :- p_block();
+        relation term_r(); term_r() :- msg_r(), !p_block();
+        relation given_f(); given_f() :- present_f(), other(), !p_block();
+        relation term_f(); term_f() :- given_f(), f_is_x();
+        relation given_g(); given_g() :- present_g(), !p_block();
+        relation term_b(t: Toggle); term_b(T) :- given_g(), toggle(T);
+        relation any_b(); any_b() :- term_b(T);
+        relation other(); other() :- !term_f(), !any_b(), !term_r(), !term_p();
+        relation classified();
+        classified() :- term_f(); classified() :- any_b(); classified() :- term_r();
+        classified() :- term_p(); classified() :- other();
+        verification v {
+            semantics: completion; hypothesis: classified;
+            decisions: [term_f, term_b, term_r, term_p, other];
+            assumptions: [x_needs_r]; obligations: [];
+        }";
+    let (_, r) = checked(
+        text,
+        CheckOptions {
+            prune: true,
+            force: true,
+            split_depth: 32,
+            ..Default::default()
+        },
+    );
+    // Default query limits: covering the 2^4 toggle combinations instead would
+    // exhaust the solves (inconclusive before the definition was dropped).
+    let no_meaning = r.classification.unwrap().no_meaning;
+    assert!(matches!(no_meaning, Search::None), "{no_meaning:?}");
+}

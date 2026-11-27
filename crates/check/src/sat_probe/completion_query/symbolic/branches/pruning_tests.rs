@@ -541,3 +541,68 @@ fn exploration_trials_leave_forcing_to_selected_children() {
     // is 4, without invalidation 1.
     assert_eq!(starts.load(std::sync::atomic::Ordering::Relaxed), 2);
 }
+
+/// `x :- i, not x`: forcing proves x false with its definition (i must be false)
+/// retained, because i is free at the root.
+fn retained_fixture() -> (Engine, usize, usize) {
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let x = rel(&mut c, "x", false);
+    rule(&mut c, x, &[(i, false), (x, true)]);
+    let v = verification(&mut c, None, &[]);
+    let mut e = prepare(&c, v, &Default::default());
+    e.forcing = true;
+    let index = |r| e.cone.atoms.iter().position(|a| a.relation == r).unwrap();
+    let (i, x) = (index(i), index(x));
+    (e, i, x)
+}
+
+#[test]
+fn an_inherited_definition_is_discharged_where_the_branch_implies_it() {
+    let (e, i, x) = retained_fixture();
+    let mut b = Budget::new(&e.limits);
+    let mut config = e.config.clone();
+    let mut root = fitting::Bundle::new(&e, &mut b).unwrap();
+    root.settle(&e, false, false, &mut config, &mut b).unwrap();
+    let (view, _) = root.ranking(false, false);
+    assert_eq!(view.value(x), Some(false));
+    assert!(
+        !view.source().retained.is_empty(),
+        "not implied at the root"
+    );
+    assert!(root.forcing.iter().all(|r| !r.discharged));
+    // Under i = false the inherited definition holds: no new constant, but the
+    // child drops it.
+    let mut child = root.child(&[(i, false)], &mut b).unwrap();
+    child.settle(&e, false, false, &mut config, &mut b).unwrap();
+    let (view, _) = child.ranking(false, false);
+    assert!(view.source().retained.is_empty());
+    assert!(child.forcing.iter().any(|r| r.discharged && r.forced == 0));
+    // A discharge changes no value, rule or model: no second round.
+    assert_eq!(child.forcing.len(), 1);
+}
+
+#[test]
+fn a_discharge_cutoff_keeps_the_installed_constants_and_records_it() {
+    let (e, _, x) = retained_fixture();
+    let mut b = Budget::new(&e.limits);
+    let mut config = e.config.clone();
+    let mut root = fitting::Bundle::new(&e, &mut b).unwrap();
+    root.settle(&e, false, false, &mut config, &mut b).unwrap();
+    // A later discharge with no solve left: refused, recorded, view unchanged.
+    let mut report = forcing::ForcingRecord::default();
+    let mut none = QueryLimits {
+        max_solves: 0,
+        ..e.config.clone()
+    };
+    assert!(
+        !root
+            .discharge_for_test(&e, false, &mut report, &mut none, &mut b)
+            .unwrap()
+    );
+    assert!(report.cutoff.is_some());
+    assert!(!report.discharged);
+    let (view, _) = root.ranking(false, false);
+    assert_eq!(view.value(x), Some(false));
+    assert!(!view.source().retained.is_empty());
+}
