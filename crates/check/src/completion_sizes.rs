@@ -87,8 +87,15 @@ pub struct CompletionExistenceStats {
     pub pins: usize,
     pub max_pins: usize,
     pub validation_work: usize,
+    /// Lifting solver attempts. One attempt can drop a block of pins, so
+    /// `lifted_pins` can exceed it.
     pub lifting_attempts: usize,
+    /// Pins dropped from cubes by lifting.
     pub lifted_pins: usize,
+    /// Work spent building the cover estimate's group index, on the search that
+    /// built it only (the preparation's other searches reuse it): `None` when
+    /// unmeasured, reused, or no program-space cover ran. Safe to sum.
+    pub group_index_work: Option<usize>,
     /// One record per cover loop (identified by its selector), at most 16, the
     /// most recent retained; loops of one search cover different spaces.
     pub covers: Vec<CompletionCoverStats>,
@@ -110,10 +117,19 @@ pub struct CompletionCoverStats {
     /// independent: per group, the share of its values a cube still allows, 1/2
     /// per other pin, summed over cubes (which may overlap). Other W correlations
     /// and branch conditioning are ignored, so it is neither an upper nor a lower
-    /// bound. `None` when the group index was not built (its cap was reached).
+    /// bound. `None` when the group index was not built: sizes not measured,
+    /// or its work or time cap was reached (see `group_index_work`).
     pub coverage_estimate: Option<f64>,
-    /// Inputs pinned most often in this loop's cubes after lifting (at most 8).
-    pub pinned: Vec<(GroundAtom, usize)>,
+    /// Inputs pinned most often in this loop's cubes after lifting, among those
+    /// not pinned in every cube (at most 8): (input, cubes, cubes pinning it true).
+    pub pinned: Vec<(GroundAtom, usize, usize)>,
+    /// Inputs pinned with both values most often, by min(true, false), always-
+    /// pinned ones included (at most 8): (input, cubes, cubes pinning it true).
+    pub mixed: Vec<(GroundAtom, usize, usize)>,
+    /// Inputs pinned in every cube of this loop.
+    pub always_pinned: usize,
+    /// Up to 8 of them (atom order), with how many cubes pinned each true.
+    pub always_pinned_sample: Vec<(GroundAtom, usize)>,
 }
 #[derive(Debug, Clone)]
 pub struct CompletionSolveTiming {

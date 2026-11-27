@@ -976,12 +976,15 @@ pub fn completion_existence_stats(
     Ok(
         json!({"coupledFallbackSkipped":s.coupled_fallback_skipped,"uniqueComponents":s.unique_components,"sharedAtoms":s.shared_atoms,"components":s.components,"totalComponents":s.total_components,"fallbackComponents":s.fallback_components,
         "rounds":s.rounds,"cubes":s.cubes,"pins":s.pins,"maxPins":s.max_pins,"validationWork":s.validation_work,
-        "liftingAttempts":s.lifting_attempts,"liftedPins":s.lifted_pins,
+        "liftingAttempts":s.lifting_attempts,"liftedPins":s.lifted_pins,"groupIndexWork":s.group_index_work,
         "covers":s.covers.iter().map(|c| -> Result<Value> { Ok(json!({
             "kind":c.kind,"index":c.index,"cubes":c.cubes,"pins":c.pins,"maxPins":c.max_pins,
             "coverageEstimate":c.coverage_estimate,
             "projectedCubes":c.coverage_estimate.filter(|m| *m > 0.0).map(|m| c.cubes as f64 / m),
-            "pinnedInputs":c.pinned.iter().map(|(a,n)|Ok(json!({"atom":atom(a)?,"cubes":n}))).collect::<Result<Vec<_>>>()?})) }).collect::<Result<Vec<_>>>()?,
+            "pinnedInputs":c.pinned.iter().map(|(a,n,t)|Ok(json!({"atom":atom(a)?,"cubes":n,"pinnedTrue":t}))).collect::<Result<Vec<_>>>()?,
+            "mixedInputs":c.mixed.iter().map(|(a,n,t)|Ok(json!({"atom":atom(a)?,"cubes":n,"pinnedTrue":t}))).collect::<Result<Vec<_>>>()?,
+            "alwaysPinned":c.always_pinned,
+            "alwaysPinnedSample":c.always_pinned_sample.iter().map(|(a,t)|Ok(json!({"atom":atom(a)?,"pinnedTrue":t}))).collect::<Result<Vec<_>>>()?})) }).collect::<Result<Vec<_>>>()?,
         "omittedCovers":s.omitted_covers,
         "currentComponent":s.current_component.as_ref().map(&detail).transpose()?,
         "componentDetails":s.component_details.iter().map(detail).collect::<Result<Vec<_>>>()?,"omittedComponents":s.omitted_components}),
@@ -1049,6 +1052,7 @@ fn completion_forcing(
     records.iter().map(|r| Ok(json!({
         "context":r.context,"candidates":r.candidates,"attempted":r.attempted,
         "forced":r.forced,"forcedWitnesses":r.forced_witnesses,"noModel":r.no_model,
+        "witnesses":r.witnesses.iter().map(|(a,v)|Ok(json!({"atom":atom(a)?,"value":v}))).collect::<Result<Vec<_>>>()?,
         "examples":r.examples.iter().map(|(a,v)|Ok(json!({"atom":atom(a)?,"value":v}))).collect::<Result<Vec<_>>>()?,
         "omitted":r.omitted,"cutoff":r.cutoff.map(reason),
         "shadowCache":{"queries":r.cache.queries,"modelHits":r.cache.model_hits,"coreHits":r.cache.core_hits,

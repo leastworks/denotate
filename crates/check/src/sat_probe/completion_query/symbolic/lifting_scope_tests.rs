@@ -672,7 +672,9 @@ fn cover_telemetry_weighs_group_pins_by_the_values_they_allow() {
         )
         .unwrap();
     let v = verification(&mut c, None, &[one]);
-    let e = prepare(&c, v, &[(vs, values.clone())].into());
+    let mut e = prepare(&c, v, &[(vs, values.clone())].into());
+    // The estimate is built only when sizes are measured.
+    e.limits.completion_sizes = Some(Default::default());
     let index = |a: GroundAtom| e.program.atom_index[&a];
     let fa = index(GroundAtom::new(field, [values[0]]));
     let fb = index(GroundAtom::new(field, [values[1]]));
@@ -698,10 +700,27 @@ fn cover_telemetry_weighs_group_pins_by_the_values_they_allow() {
     assert!((mass(&[(fa, false), (fb, false)], &mut s) - 0.5).abs() < 1e-12);
     // A plain input halves the mass.
     assert!((mass(&[(fa, true), (fl, false)], &mut s) - 0.125).abs() < 1e-12);
-    // Field a was pinned in all three cubes: the most frequent pin.
+    // Field a was pinned in all three cubes (true in two): counted apart,
+    // and the ranking lists only the inputs that vary.
+    let first = &s.stats.covers[0];
+    assert_eq!(first.always_pinned, 1);
     assert_eq!(
-        s.stats.covers[0].pinned[0],
-        (GroundAtom::new(field, [values[0]]), 3)
+        first.always_pinned_sample,
+        vec![(GroundAtom::new(field, [values[0]]), 2)]
+    );
+    let mut varying = first.pinned.clone();
+    varying.sort();
+    let mut expected = vec![
+        (GroundAtom::new(field, [values[1]]), 1, 0),
+        (atom(flag), 1, 0),
+    ];
+    expected.sort();
+    assert_eq!(varying, expected);
+    assert!(s.stats.group_index_work.is_some());
+    // Field a was pinned both ways (true twice, false once): the mixed list.
+    assert_eq!(
+        first.mixed,
+        vec![(GroundAtom::new(field, [values[0]]), 3, 2)]
     );
     // A second loop (its own selector) keeps its own counters.
     let other = s.gate().unwrap();
@@ -711,9 +730,15 @@ fn cover_telemetry_weighs_group_pins_by_the_values_they_allow() {
     assert_eq!(s.stats.covers[0].cubes, 3);
     assert_eq!(s.stats.covers[1].cubes, 1);
     assert!((s.stats.covers[1].coverage_estimate.unwrap() - 0.5).abs() < 1e-12);
-    assert_eq!(s.stats.covers[1].pinned, vec![(atom(flag), 1)]);
+    assert_eq!(s.stats.covers[1].always_pinned, 1);
+    assert!(s.stats.covers[1].pinned.is_empty());
     // A capped group index makes the estimate unavailable, not wrong.
-    assert!(GroupIndex::capped(&e, 0, s.run.budget).unwrap().is_none());
+    assert!(
+        GroupIndex::capped(&e, 0, std::time::Duration::MAX, s.run.budget)
+            .unwrap()
+            .index
+            .is_none()
+    );
     // At most 16 loops are retained; a new one releases the oldest record.
     for _ in 0..15 {
         let next = s.gate().unwrap();
@@ -775,7 +800,8 @@ fn cover_telemetry_maps_a_derived_value_group_to_its_inputs() {
         )
         .unwrap();
     let v = verification(&mut c, None, &[one]);
-    let e = prepare(&c, v, &[(vs, values.clone())].into());
+    let mut e = prepare(&c, v, &[(vs, values.clone())].into());
+    e.limits.completion_sizes = Some(Default::default());
     let premises = e.assumptions[0]
         .cone
         .rules
@@ -825,19 +851,23 @@ fn group_index_construction_polls_cancellation_and_deadlines() {
     let e = prepare(&c, v, &[(vs, values)].into());
     let budget = Budget::new(&e.limits);
     assert!(
-        GroupIndex::capped(&e, usize::MAX, &budget)
+        GroupIndex::capped(&e, usize::MAX, std::time::Duration::MAX, &budget)
             .unwrap()
+            .index
             .is_some()
     );
     let mut expired = e.limits.clone();
     expired.timeout = std::time::Duration::ZERO;
     let budget = Budget::new(&expired);
-    let error = GroupIndex::capped(&e, usize::MAX, &budget).err().unwrap();
+    // The caller's own deadline propagates; it is not a quiet cutoff.
+    let error = GroupIndex::capped(&e, usize::MAX, budget.remaining_time(), &budget)
+        .err()
+        .unwrap();
     assert!(inconclusive(error).is_ok(), "a deadline cutoff");
     e.limits.cancellation.cancel();
     let budget = Budget::new(&e.limits);
     assert!(matches!(
-        GroupIndex::capped(&e, usize::MAX, &budget),
+        GroupIndex::capped(&e, usize::MAX, std::time::Duration::MAX, &budget),
         Err(CheckError::Cancelled)
     ));
 }
@@ -876,7 +906,7 @@ fn equally_pinned_inputs_rank_by_atom_whatever_the_cube_order() {
     let pinned: Vec<_> = s.stats.covers[0]
         .pinned
         .iter()
-        .map(|(a, _)| a.clone())
+        .map(|(a, _, _)| a.clone())
         .collect();
     let expected: Vec<_> = values[..8]
         .iter()
@@ -917,9 +947,78 @@ fn empty_coverage_groups_count_toward_the_group_index_cap() {
     assert_eq!(e.assumptions[0].groups.len(), 5000);
     let budget = Budget::new(&e.limits);
     assert!(
-        GroupIndex::capped(&e, usize::MAX, &budget)
+        GroupIndex::capped(&e, usize::MAX, std::time::Duration::MAX, &budget)
             .unwrap()
+            .index
             .is_some()
     );
-    assert!(GroupIndex::capped(&e, 1000, &budget).unwrap().is_none());
+    assert!(
+        GroupIndex::capped(&e, 1000, std::time::Duration::MAX, &budget)
+            .unwrap()
+            .index
+            .is_none()
+    );
+}
+
+#[test]
+fn the_group_index_is_built_once_per_preparation_and_only_when_measured() {
+    let mut c = Corpus::new();
+    let vs = c.declare_sort("Value").unwrap();
+    let values: Vec<_> = ["a", "b"]
+        .iter()
+        .map(|v| c.declare_constant(*v, vs).unwrap())
+        .collect();
+    let field = c
+        .declare_relation(
+            "field",
+            RelationRole::Input,
+            vec![Parameter::new("value", vs)],
+        )
+        .unwrap();
+    let one = c
+        .assume_in(
+            Namespace::default(),
+            "one_value",
+            denotate_ir::Cardinality::AtMostOne,
+            field,
+            [],
+        )
+        .unwrap();
+    let v = verification(&mut c, None, &[one]);
+    let mut e = prepare(&c, v, &[(vs, values.clone())].into());
+    let fa = e.program.atom_index[&GroundAtom::new(field, [values[0]])];
+    let world = e.world.clone();
+    // Not measured: no index, no estimate.
+    {
+        let mut budget = Budget::new(&e.limits);
+        let mut s = Solver::new(&e, &mut budget).unwrap();
+        let selector = s.gate().unwrap();
+        s.cube_metrics(&[(fa, true)].into_iter().collect(), &world, true, selector)
+            .unwrap();
+        assert!(s.stats.covers[0].coverage_estimate.is_none());
+        assert!(s.stats.group_index_work.is_none());
+        assert!(e.group_index.lock().unwrap().is_none());
+    }
+    // Measured: built by the first search, reused by a clone's search.
+    e.limits.completion_sizes = Some(Default::default());
+    let mut budget = Budget::new(&e.limits);
+    // A time cutoff of the builder's own share is not shared: the next search
+    // builds the index.
+    let (cut, built) = GroupIndex::shared_with(&e, || {
+        GroupIndex::capped(&e, usize::MAX, std::time::Duration::ZERO, &budget)
+    })
+    .unwrap();
+    assert!(built && cut.timed_out && cut.index.is_none());
+    assert!(e.group_index.lock().unwrap().is_none());
+    let (first, built) = GroupIndex::shared(&e, &budget).unwrap();
+    assert!(built && first.index.is_some());
+    let branch = e.clone();
+    let (again, built) = GroupIndex::shared(&branch, &budget).unwrap();
+    assert!(!built, "a clone reuses the index");
+    assert!(Arc::ptr_eq(&first, &again));
+    let mut s = Solver::new(&branch, &mut budget).unwrap();
+    let selector = s.gate().unwrap();
+    s.cube_metrics(&[(fa, true)].into_iter().collect(), &world, true, selector)
+        .unwrap();
+    assert!((s.stats.covers[0].coverage_estimate.unwrap() - 1.0 / 3.0).abs() < 1e-12);
 }

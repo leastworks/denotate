@@ -254,6 +254,10 @@ pub struct Engine {
     /// The scope (question or standalone pass) whose cumulative SAT allowance
     /// every run on this engine debits. `None`: each run owns a private one.
     ledger: Option<Arc<ledger::SatLedger>>,
+    /// The cover estimate's input-group index, built once per preparation when
+    /// sizes are measured (it reads only the declared input groups and the
+    /// assumptions, both fixed at preparation).
+    group_index: Arc<std::sync::Mutex<Option<Arc<symbolic::GroupIndexOutcome>>>>,
     exploration_work: Option<Arc<std::sync::atomic::AtomicUsize>>,
     program: Arc<GroundProgram>,
     original: Arc<crate::ground::OriginalDependencies>,
@@ -418,6 +422,7 @@ impl Engine {
             probe: false,
             branch_phase: None,
             ledger: None,
+            group_index: Default::default(),
             exploration_work: None,
             program: Arc::new(program),
             original,

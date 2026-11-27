@@ -66,7 +66,7 @@ fn no_hypothesis_fallback_cubes_are_lifted() {
     assert!(rounds > 0, "the odd component needs covers");
     assert!(attempts > 0, "no-H cubes are lifted");
     assert!(lifted > 0, "the pin on d is redundant");
-    // Telemetry: every cube pins b (the loop's guard); the covered mass is positive.
+    // Telemetry: every cube pins b (the loop's guard); the estimate is positive.
     let search = sizes
         .snapshot()
         .searches
@@ -80,13 +80,11 @@ fn no_hypothesis_fallback_cubes_are_lifted() {
         .find(|c| c.kind == "search")
         .unwrap();
     assert!(cover.coverage_estimate.unwrap() > 0.0);
-    assert_eq!(
-        cover.pinned.first().map(|(a, _)| a.clone()),
-        Some(GroundAtom::new(
-            c.relations().find(|r| r.name == "b").unwrap().id,
-            [],
-        ))
-    );
+    // b is pinned in every cube: counted apart from the varying inputs.
+    let b = GroundAtom::new(c.relations().find(|r| r.name == "b").unwrap().id, []);
+    assert!(cover.always_pinned >= 1);
+    assert!(cover.always_pinned_sample.iter().any(|(a, _)| *a == b));
+    assert!(cover.pinned.iter().all(|(a, _, _)| *a != b));
 }
 
 #[test]

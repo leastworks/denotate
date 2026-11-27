@@ -530,6 +530,11 @@ fn exploration_trials_leave_forcing_to_selected_children() {
         unit.forcing.iter().any(|r| r.forced > 0),
         "the selected child's unit forces"
     );
+    // Records name the forced witness atoms, not only their count.
+    for r in &unit.forcing {
+        assert_eq!(r.witnesses.len(), r.forced_witnesses.min(32));
+    }
+    assert!(unit.forcing.iter().any(|r| !r.witnesses.is_empty()));
     // The unit skips re-pruning the trial's saturated view; the installed
     // constants invalidate it, so pruning runs exactly once more; the second
     // forcing round changes nothing, so no third pass. Without the memo this

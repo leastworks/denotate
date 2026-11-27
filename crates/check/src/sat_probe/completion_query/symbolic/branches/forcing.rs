@@ -9,6 +9,8 @@ pub struct ForcingRecord {
     pub attempted: usize,
     pub forced: usize,
     pub forced_witnesses: usize,
+    /// The forced witness atoms (at most 32), with their constants.
+    pub witnesses: Vec<(GroundAtom, bool)>,
     pub examples: Vec<(GroundAtom, bool)>,
     pub omitted: usize,
     pub no_model: bool,
@@ -21,6 +23,7 @@ impl ForcingRecord {
         self.cutoff = Some(inconclusive(error)?);
         self.forced = 0;
         self.forced_witnesses = 0;
+        self.witnesses.clear();
         self.examples.clear();
         self.omitted = 0;
         Ok(())
@@ -146,6 +149,12 @@ pub(super) fn force(
         .iter()
         .filter(|(i, _)| witness.contains(i))
         .count();
+    report.witnesses = constants
+        .iter()
+        .filter(|(i, _)| witness.contains(i))
+        .take(32)
+        .map(|(i, v)| (c.atoms[*i].clone(), *v))
+        .collect();
     report.examples = constants
         .iter()
         .take(32)

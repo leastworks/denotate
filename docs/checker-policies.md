@@ -1829,17 +1829,26 @@ derived values as assumptions on fresh variables, was measured and rejected:
 thousands of assumptions per solve made rounds three times slower.
 
 Cover telemetry is per cover loop (each loop's selector; at most 16 loops retained,
-a new loop releasing the oldest loop's record and pin counts): cubes, pins, the
-inputs pinned most often, and a coverage estimate: per declared at-most-one or
-exactly-one input group, read as the split ranking reads them (a derived
-field-value group maps to its inputs when each member's live producer has one
-unknown premise, a positive input), the share of values a cube still allows, 1/2
-per other pin, summed over cubes. It assumes those groups and all other inputs
-are independent, ignoring other W correlations and branch conditioning, so it is
-neither an upper nor a lower bound; projected cubes are cubes / estimate. The
-group index is built once on its own budget (capped work, the question's
-remaining time, the same cancellation and run deadline), so telemetry never
-spends the question's work; past the cap the estimate is reported unavailable.
+a new loop releasing the oldest loop's record and pin counts): cubes, pins, inputs
+pinned in every cube (a count and a sample of 8, each with how many cubes pinned it
+true), the 8 most-pinned inputs among the rest (with their true counts), the 8 inputs
+pinned with both values most often (by the smaller of their true and false counts,
+always-pinned inputs included: a toggle pinned both ways is being enumerated), and a
+coverage estimate: per declared at-most-one or exactly-one input group, read as the
+split ranking reads them (a derived field-value group maps to its inputs when each
+member's live producer has one unknown premise, a positive input), the share of
+values a cube still allows, 1/2 per other pin, summed over cubes. It assumes those
+groups and all other inputs are independent, ignoring other W correlations and
+branch conditioning, so it is neither an upper nor a lower bound; projected cubes
+are cubes / estimate. The group index is built only when sizes are measured, once
+per preparation (it reads only the declared input groups and the assumptions), on
+its own budget: 256M work and a quarter of the question's remaining time, the same
+cancellation and run deadline, so telemetry never spends the question's work. Past
+either cap the estimate is reported unavailable; a time cutoff is not shared, so
+later searches try again. `groupIndexWork` reports the build's work on the search
+that built it. `liftedPins` can
+exceed `liftingAttempts`: one attempt can drop a block of pins. Forcing records name
+up to 32 forced witness atoms with their constants.
 A progress signal for deciding between
 covering and splitting, never evidence. H-coverage, its no-H fallback, and the
 ordinary residual existence query use the same boundary for CNF and cubes, and all
