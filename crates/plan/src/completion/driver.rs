@@ -11,15 +11,17 @@ type Step<T> = Result<std::result::Result<T, Problem>>;
 pub(super) struct State {
     pins: BTreeMap<AtomKey, bool>,
     available: BTreeSet<AtomKey>,
-    /// Constants substituted on this path whose definitions need a runtime check.
-    checks: BTreeMap<AtomKey, bool>,
+    /// Classification constants substituted on this path. At the leaf, exactly
+    /// this set is either shown implied or checked at runtime; their bodies are
+    /// sequenced so the checks can be evaluated.
+    substituted: BTreeMap<AtomKey, bool>,
 }
 impl State {
     pub(super) fn entry(inputs: &BTreeSet<AtomKey>) -> Self {
         Self {
             pins: BTreeMap::new(),
             available: inputs.clone(),
-            checks: BTreeMap::new(),
+            substituted: BTreeMap::new(),
         }
     }
     fn path(&self) -> PathFacts {
@@ -34,6 +36,7 @@ impl State {
 pub(super) struct Driver<'e, 'o, 'w> {
     pub engine: &'e q::Engine,
     pub atoms: BTreeMap<AtomKey, GroundAtom>,
+    pub keys_of: BTreeMap<GroundAtom, AtomKey>,
     pub rules: BTreeMap<AtomKey, Vec<Rule>>,
     pub inputs: BTreeSet<AtomKey>,
     pub hypothesis: Option<AtomKey>,
@@ -109,20 +112,48 @@ impl Driver<'_, '_, '_> {
         }
         Ok(needed)
     }
-    /// Sequence the targets, and the bodies of checked constants, using an
-    /// expression where one exists and otherwise a proved constant. Returns the
-    /// atoms still needed (empty when done).
+    /// Substitute every proved constant not yet computed on this path, before
+    /// sequencing: no atom of the substituted set is then computed from its
+    /// rules, so `planning_discharged` is asked about exactly what the plan uses.
+    fn substitute(
+        &mut self,
+        s: &mut State,
+        constants: &BTreeMap<AtomKey, bool>,
+        mut processing: Option<&mut BTreeMap<AtomKey, bool>>,
+        nodes: &mut BTreeMap<AtomKey, Node>,
+    ) -> Result<()> {
+        for (k, v) in constants {
+            if s.available.contains(k) {
+                continue;
+            }
+            let rs = self.rules.get(k).cloned().unwrap_or_default();
+            self.emit(nodes, constant_node(k, *v, &rs))?;
+            s.available.insert(k.clone());
+            match processing.as_deref_mut() {
+                Some(map) => map.insert(k.clone(), *v),
+                None => s.substituted.insert(k.clone(), *v),
+            };
+        }
+        Ok(())
+    }
+    /// Sequence the targets (and, for classification, the bodies of the path's
+    /// substituted constants, so their checks can be evaluated) by expressions.
+    /// Returns the atoms still needed (empty when done).
     fn settle(
         &mut self,
         s: &mut State,
         targets: &BTreeSet<AtomKey>,
-        constants: &BTreeMap<AtomKey, bool>,
-        checked: bool,
+        classification: bool,
         nodes: &mut BTreeMap<AtomKey, Node>,
     ) -> Result<Vec<AtomKey>> {
         loop {
             let mut all = targets.clone();
-            for k in s.checks.keys().cloned().collect::<Vec<_>>() {
+            let bodies: Vec<_> = if classification {
+                s.substituted.keys().cloned().collect()
+            } else {
+                vec![]
+            };
+            for k in bodies {
                 for r in self.simplified(&k, s)? {
                     all.extend(r.body.iter().map(|(a, _)| a.clone()));
                 }
@@ -141,19 +172,6 @@ impl Driver<'_, '_, '_> {
                 }
             }
             if progress {
-                continue;
-            }
-            // Only when nothing sequences: one constant, then resume.
-            if let Some((k, v)) = needed
-                .iter()
-                .find_map(|k| constants.get(k).map(|v| (k.clone(), *v)))
-            {
-                let rs = self.rules.get(&k).cloned().unwrap_or_default();
-                self.emit(nodes, constant_node(&k, v, &rs))?;
-                s.available.insert(k.clone());
-                if checked {
-                    s.checks.insert(k, v);
-                }
                 continue;
             }
             return Ok(needed.into_iter().collect());
@@ -249,7 +267,7 @@ impl Driver<'_, '_, '_> {
                 let before = child.available.len();
                 // Structural only: no constants, no checker call.
                 let saved = self.nodes;
-                self.settle(&mut child, &stuck, &BTreeMap::new(), false, &mut scratch)?;
+                self.settle(&mut child, &stuck, false, &mut scratch)?;
                 self.nodes = saved;
                 score += child.available.len() - before;
             }
@@ -285,7 +303,7 @@ impl Driver<'_, '_, '_> {
                 },
             }));
         };
-        let (constants, discharged) = match self.oracle(&s, None, true)? {
+        let constants = match self.oracle(&s, None, true)? {
             PathStep::Empty => {
                 return Ok(Ok(Region {
                     nodes,
@@ -302,13 +320,11 @@ impl Driver<'_, '_, '_> {
                     cause,
                 }));
             }
-            PathStep::Forced {
-                constants,
-                discharged,
-            } => (self.keyed(constants)?, discharged),
+            PathStep::Forced { constants } => self.keyed(constants)?,
         };
+        self.substitute(&mut s, &constants, None, &mut nodes)?;
         let targets = self.class_targets.clone();
-        let stuck = self.settle(&mut s, &targets, &constants, !discharged, &mut nodes)?;
+        let stuck = self.settle(&mut s, &targets, true, &mut nodes)?;
         if stuck.is_empty() {
             let scope = self.class_scope.clone();
             let odd = self.odd_remainder(&s, &scope)?;
@@ -317,8 +333,21 @@ impl Driver<'_, '_, '_> {
                     .unresolved("classification", &s, odd)?
                     .map(|()| unreachable!()));
             }
+            // Exactly the substituted set: implied, or every definition checked.
+            let substituted = s.substituted.clone();
+            let checked = !substituted.is_empty()
+                && match self.discharged(&s, None, true, &substituted)? {
+                    q::Discharge::Implied => false,
+                    q::Discharge::NotImplied => true,
+                    q::Discharge::Inconclusive(cause) => {
+                        return Ok(Err(Problem::PathInconclusive {
+                            path: s.path(),
+                            cause,
+                        }));
+                    }
+                };
             let mut checks = vec![];
-            for (k, v) in s.checks.clone() {
+            for (k, v) in substituted.into_iter().filter(|_| checked) {
                 let rs = self.simplified(&k, &s)?;
                 match crate::search::expression(&rs, &s.available, &mut self.work)? {
                     Some(definition) => checks.push(Check {
@@ -370,21 +399,36 @@ impl Driver<'_, '_, '_> {
             },
         }))
     }
+    /// Proved constants by key. H itself is never substituted: it is computed
+    /// from its definition and tested.
     fn keyed(&mut self, constants: Vec<(GroundAtom, bool)>) -> Result<BTreeMap<AtomKey, bool>> {
         let mut out = BTreeMap::new();
         for (a, v) in constants {
             self.work.tick(1)?;
-            if let Some(k) = self
-                .atoms
-                .iter()
-                .find_map(|(k, x)| (*x == a).then(|| k.clone()))
-            {
-                if !self.inputs.contains(&k) {
-                    out.insert(k, v);
+            if let Some(k) = self.keys_of.get(&a) {
+                if !self.inputs.contains(k) && self.hypothesis.as_ref() != Some(k) {
+                    out.insert(k.clone(), v);
                 }
             }
         }
         Ok(out)
+    }
+    fn discharged(
+        &mut self,
+        s: &State,
+        outputs: Option<&BTreeSet<GroundAtom>>,
+        hypothesis: bool,
+        substituted: &BTreeMap<AtomKey, bool>,
+    ) -> Result<q::Discharge> {
+        room(self.calls, self.options.max_oracle_calls, "oracle calls")?;
+        self.calls += 1;
+        let path = self.runtime(s);
+        let constants: Vec<_> = substituted
+            .iter()
+            .map(|(k, v)| (self.atoms[k].clone(), *v))
+            .collect();
+        self.engine
+            .planning_discharged(&path, outputs, hypothesis, &constants)
     }
     /// Processing for an accepted leaf's path; checks from classification stay
     /// in force, and only constants with implied definitions are substituted.
@@ -418,26 +462,50 @@ impl Driver<'_, '_, '_> {
                     cause,
                 }));
             }
-            PathStep::Forced {
-                constants,
-                discharged,
-            } => {
-                if discharged {
-                    self.keyed(constants)?
-                } else {
-                    BTreeMap::new()
-                }
-            }
+            PathStep::Forced { constants } => self.keyed(constants)?,
         };
         let targets = self.outputs.clone();
-        let stuck = self.settle(&mut s, &targets, &constants, false, &mut nodes)?;
-        if stuck.is_empty() {
+        // With the proved constants first; if their substitution is not implied
+        // (nothing may reject after acceptance), again without them.
+        let entry = (s.clone(), nodes.clone(), self.nodes);
+        let mut stuck = vec![];
+        for substitute in [true, false] {
+            (s, nodes, self.nodes) = entry.clone();
+            let mut substituted = BTreeMap::new();
+            if substitute {
+                if constants.is_empty() {
+                    continue;
+                }
+                self.substitute(&mut s, &constants, Some(&mut substituted), &mut nodes)?;
+            }
+            stuck = self.settle(&mut s, &targets, false, &mut nodes)?;
+            if !stuck.is_empty() {
+                if substitute {
+                    continue;
+                }
+                break;
+            }
             let scope = self.output_scope.clone();
             let odd = self.odd_remainder(&s, &scope)?;
             if !odd.is_empty() {
+                if substitute {
+                    continue;
+                }
                 return Ok(self
                     .unresolved("processing", &s, odd)?
                     .map(|()| unreachable!()));
+            }
+            if !substituted.is_empty() {
+                match self.discharged(&s, Some(&outputs), hypothesis, &substituted)? {
+                    q::Discharge::Implied => {}
+                    q::Discharge::NotImplied => continue,
+                    q::Discharge::Inconclusive(cause) => {
+                        return Ok(Err(Problem::PathInconclusive {
+                            path: s.path(),
+                            cause,
+                        }));
+                    }
+                }
             }
             return Ok(Ok(Accepted {
                 nodes,

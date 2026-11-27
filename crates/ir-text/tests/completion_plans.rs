@@ -577,6 +577,14 @@ fn driver_plans_keep_the_outcome_invariant_on_every_input() {
             vec!["s"],
             "out",
         ),
+        // Forcing finds a = b = false, implied only together; a plan that
+        // substitutes a alone and computes b must still reject raw = true (no
+        // interpretation at all there).
+        (
+            "input raw();relation a();relation b();a():-raw(),!a();a():-b(),raw();b():-raw(),!a();relation h();h():-!raw();h():-b();relation out();out();",
+            vec!["raw"],
+            "out",
+        ),
         // An output with two values under H when i holds: never a complete plan.
         (
             "input i();relation h();h():-i();relation p();p():-p(),i();p():-!i();",
@@ -621,6 +629,6 @@ fn driver_plans_keep_the_outcome_invariant_on_every_input() {
             }
         }
     }
-    assert_eq!(ready_plans, 4);
+    assert_eq!(ready_plans, 5);
     assert!(split_plans >= 1);
 }

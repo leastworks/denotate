@@ -252,8 +252,8 @@ impl Eq for Rule {}
 // Named atoms precede anonymous acyclic BDD nodes; all indexed arrays include both.
 #[derive(Debug, Clone)]
 struct RetainedEquation {
-    head: usize,
-    bodies: Vec<Vec<(usize, bool)>>,
+    pub(crate) head: usize,
+    pub(crate) bodies: Vec<Vec<(usize, bool)>>,
 }
 
 #[derive(Clone)]

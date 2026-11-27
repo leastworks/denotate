@@ -182,7 +182,9 @@ fn runtime_outcome_matches_exhaustive_equations_including_reject_and_no_meaning(
                 let expected = if models.contains(&3) {
                     PathOutcome::Accept
                 } else if models.is_empty() {
-                    PathOutcome::Invalid
+                    // No classification interpretation: invalid input, which
+                    // the runtime plan rejects (024.38).
+                    PathOutcome::Reject
                 } else {
                     PathOutcome::Reject
                 };

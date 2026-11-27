@@ -1074,3 +1074,279 @@ fn output_order_and_priorities_reuse_scope_without_leaking_old_metadata() {
 }
 
 mod tasks;
+
+/// The outcome invariant for one completion program over inputs i, j and
+/// derived a, b, h (H), rules written as indices into [i, j, a, b, h] with a
+/// negation flag: every complete plan must, on every input and in every ready
+/// order, accept exactly when C(H) has an interpretation with h (unique on the
+/// decisions), then output the unique value of a over the output and
+/// classification scopes. Refusals are allowed; a meaning failure must be real.
+/// Returns (ready, split, rejecting worlds).
+fn completion_outcome_invariant(
+    rules: &[(usize, Vec<(usize, bool)>)],
+    decide_h: bool,
+    label: &str,
+) -> (bool, bool, usize) {
+    use crate::completion::{
+        Build as CBuild, Outcome as COutcome, Planner as CPlanner, Problem as CProblem,
+    };
+    let mut c = Corpus::new();
+    let i = rel(&mut c, "i", true);
+    let j = rel(&mut c, "j", true);
+    let a = rel(&mut c, "a", false);
+    let b = rel(&mut c, "b", false);
+    let h = rel(&mut c, "h", false);
+    let all = [i, j, a, b, h];
+    let mut rules: Vec<(RelationId, Vec<(RelationId, bool)>)> = rules
+        .iter()
+        .map(|(head, body)| {
+            let mut body: Vec<_> = body.iter().map(|(x, n)| (all[*x], *n)).collect();
+            body.sort();
+            body.dedup();
+            (all[*head], body)
+        })
+        .collect();
+    rules.sort();
+    rules.dedup();
+    for (head, body) in &rules {
+        rule(&mut c, *head, body);
+    }
+    let decisions = decide_h.then(|| BTreeSet::from([h]));
+    let v = c
+        .verification_with_options_in(
+            Namespace::new(["test"]).unwrap(),
+            "checks",
+            [],
+            [],
+            [],
+            VerificationOptions {
+                semantics: Semantics::Completion,
+                hypothesis: Some(h),
+                decisions: decisions.clone(),
+            },
+        )
+        .unwrap();
+    let mut k = keys(&c);
+    for r in c.rules() {
+        let key = k.rule(r.id).unwrap().clone();
+        for (n, atom) in std::iter::once(&r.head)
+            .chain(r.body.iter().map(Literal::atom))
+            .enumerate()
+        {
+            k.bind_occurrence(
+                &c,
+                atom.id(),
+                OccurrenceKey::Library {
+                    rule: key.clone(),
+                    atom: n,
+                    argument: None,
+                },
+            )
+            .unwrap();
+        }
+    }
+    let result = CPlanner::prepare(
+        &c,
+        &Domains::new(),
+        &k,
+        v,
+        &Limits::default(),
+        Default::default(),
+    )
+    .unwrap()
+    .build(
+        &[Output {
+            atom: atom(a),
+            priority: 0,
+        }],
+        &Options::default(),
+    )
+    .unwrap();
+    // The oracle: live scopes and equations (as in the checker's frozen live
+    // cones, a rule with a positive body atom that can never hold is dead;
+    // under completion a positive loop can hold, so this is the greatest
+    // fixpoint), then brute force.
+    let mut possible: BTreeSet<_> = all.iter().copied().collect();
+    loop {
+        let alive: BTreeSet<_> = possible
+            .iter()
+            .copied()
+            .filter(|x| {
+                [i, j].contains(x)
+                    || rules.iter().any(|(head, body)| {
+                        head == x && body.iter().all(|(y, neg)| *neg || possible.contains(y))
+                    })
+            })
+            .collect();
+        if alive == possible {
+            break;
+        }
+        possible = alive;
+    }
+    let live =
+        |body: &Vec<(RelationId, bool)>| body.iter().all(|(x, neg)| *neg || possible.contains(x));
+    let closure = |root: RelationId| {
+        let mut scope = BTreeSet::from([root]);
+        loop {
+            let mut more = scope.clone();
+            for (head, body) in &rules {
+                if scope.contains(head) && live(body) {
+                    more.extend(body.iter().map(|(r, _)| *r));
+                }
+            }
+            if more == scope {
+                return scope;
+            }
+            scope = more;
+        }
+    };
+    let class = closure(h);
+    let mut full = closure(a);
+    full.extend(class.iter().copied());
+    let mut worlds = vec![];
+    for w in 0..4usize {
+        let mut models = vec![];
+        for d in 0..8usize {
+            let value = |r: RelationId| match all.iter().position(|x| *x == r).unwrap() {
+                0 => w & 1 != 0,
+                1 => w & 2 != 0,
+                p => d & (1 << (p - 2)) != 0,
+            };
+            let holds = |r: RelationId| {
+                value(r)
+                    == rules
+                        .iter()
+                        .filter(|(head, body)| *head == r && live(body))
+                        .any(|(_, body)| body.iter().all(|(x, negative)| value(*x) != *negative))
+            };
+            let scoped = |scope: &BTreeSet<RelationId>| {
+                [a, b, h]
+                    .iter()
+                    .filter(|r| scope.contains(r))
+                    .all(|r| holds(*r))
+            };
+            if value(h) && scoped(&class) {
+                models.push((
+                    // Decision values: only atoms of C(H) count.
+                    [a, b, h].map(|r| class.contains(&r).then(|| value(r))),
+                    scoped(&full).then(|| value(a)),
+                ));
+            }
+        }
+        let accepts = !models.is_empty();
+        let unique = decisions.is_some() || models.windows(2).all(|m| m[0].0 == m[1].0);
+        let outputs: BTreeSet<bool> = models.iter().filter_map(|m| m.1).collect();
+        worlds.push((w, accepts, unique, outputs));
+    }
+    match result {
+        CBuild::Ready(plan) => {
+            let mut rejecting = 0;
+            for (w, accepts, unique, outputs) in &worlds {
+                rejecting += usize::from(!accepts);
+                let observed = BTreeMap::from([
+                    (AtomKey::from_atom(&k, &atom(i)).unwrap(), w & 1 != 0),
+                    (AtomKey::from_atom(&k, &atom(j)).unwrap(), w & 2 != 0),
+                ]);
+                for order in [
+                    Order::Semantic,
+                    Order::ReverseSemantic,
+                    Order::OutputPriority,
+                ] {
+                    let run = plan.execute_permitted(&observed, order, 100_000).unwrap();
+                    let context = format!("{label}, world {w}, {order:?}, rules {rules:?}");
+                    assert_eq!(
+                        matches!(run.outcome, COutcome::Accepted { .. }),
+                        *accepts,
+                        "{context}"
+                    );
+                    if let COutcome::Accepted { outputs: actual } = run.outcome {
+                        assert!(*unique, "accepted without unique decisions: {context}");
+                        let value = actual[&AtomKey::from_atom(&k, &atom(a)).unwrap()];
+                        assert_eq!(*outputs, BTreeSet::from([value]), "{context}");
+                    }
+                }
+            }
+            (true, plan.splits() > 0, rejecting)
+        }
+        CBuild::Problem(p) => {
+            if let CProblem::MeaningFailure { .. } = *p {
+                assert!(
+                    worlds
+                        .iter()
+                        .any(|(_, accepts, _, outputs)| *accepts && outputs.is_empty()),
+                    "{label}: false meaning failure, rules {rules:?}"
+                );
+            }
+            (false, false, 0)
+        }
+        other => panic!("{label}: {other:?}"),
+    }
+}
+
+/// Seeded sweep: up to two rules per head of a, b, h with one- or two-literal
+/// bodies over all five atoms; decisions undeclared or [h].
+#[test]
+fn completion_plans_keep_the_outcome_invariant_on_a_seeded_sweep() {
+    let mut seed: u64 = 0x0244_38a1;
+    let mut next = |n: u64| {
+        seed = seed
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        (seed >> 33) % n
+    };
+    let (mut ready, mut split, mut rejecting) = (0, 0, 0);
+    for case in 0..4000 {
+        let mut rules = vec![];
+        for head in 2..5 {
+            for _ in 0..next(3) {
+                let body: Vec<_> = (0..1 + next(2))
+                    .map(|_| (next(5) as usize, next(2) == 1))
+                    .collect();
+                rules.push((head, body));
+            }
+        }
+        let (r, s, n) = completion_outcome_invariant(&rules, next(2) == 1, &format!("case {case}"));
+        ready += usize::from(r);
+        split += usize::from(s);
+        rejecting += n;
+    }
+    assert!(
+        ready > 1200 && split > 40 && rejecting > 400,
+        "ready {ready}, split {split}, rejecting {rejecting}"
+    );
+}
+
+/// Every subset of ten guarded templates over one input (i) and a, b, h,
+/// including the five rules of the substitution/discharge mismatch fixed after
+/// 9e206c4 (a random sweep did not reach that shape), both decision settings.
+#[test]
+fn completion_plans_keep_the_outcome_invariant_on_guarded_template_subsets() {
+    let (i, a, b, h) = (0, 2, 3, 4);
+    let templates: [(usize, Vec<(usize, bool)>); 10] = [
+        (a, vec![(i, false), (a, true)]),
+        (a, vec![(b, false), (i, false)]),
+        (a, vec![(i, true)]),
+        (b, vec![(i, false), (a, true)]),
+        (b, vec![(b, true)]),
+        (b, vec![(a, false)]),
+        (h, vec![(i, true)]),
+        (h, vec![(b, false)]),
+        (h, vec![(a, false), (b, true)]),
+        (h, vec![(i, false)]),
+    ];
+    let mut ready = 0;
+    for subset in 0..1usize << templates.len() {
+        let rules: Vec<_> = templates
+            .iter()
+            .enumerate()
+            .filter(|(n, _)| subset & (1 << n) != 0)
+            .map(|(_, t)| t.clone())
+            .collect();
+        for decide_h in [false, true] {
+            ready += usize::from(
+                completion_outcome_invariant(&rules, decide_h, &format!("subset {subset:#b}")).0,
+            );
+        }
+    }
+    assert!(ready > 500, "ready {ready}");
+}

@@ -102,7 +102,7 @@ impl Plan {
             Next::Split { .. } => None,
         }
     }
-    /// Number of classification splits (both arms of every split count once).
+    /// Number of splits, in classification and in accepted regions.
     pub fn splits(&self) -> usize {
         fn region(r: &Region) -> usize {
             match &r.next {
@@ -374,8 +374,10 @@ impl<'a> Planner<'a> {
                 class_targets.insert(k);
             }
         }
+        let keys_of = atoms.iter().map(|(k, a)| (a.clone(), k.clone())).collect();
         let mut driver = driver::Driver {
             engine: &engine,
+            keys_of,
             atoms,
             rules,
             inputs: inputs.clone(),

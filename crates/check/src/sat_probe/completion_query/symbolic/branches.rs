@@ -6,21 +6,29 @@ mod forcing;
 pub use forcing::ForcingRecord;
 mod groups;
 /// Forcing for the planner's path driver: the derived atoms of `cone` constant in
-/// every interpretation under W, the input `pins` and (with `hypothesis`) H, and
-/// whether their definitions are implied there (then the constants alone define
-/// the same interpretations; otherwise each needs a runtime check).
+/// every interpretation under W, the input `pins` and (with `hypothesis`) H.
+pub(super) struct PathForcing {
+    pub constants: Vec<(usize, bool)>,
+    /// The context has no interpretation (answered by forcing's first solve).
+    pub no_model: bool,
+    /// Forcing had candidates, so it also answered satisfiability.
+    pub solved: bool,
+}
+fn path_context(e: &Engine, hypothesis: bool) -> PruningContext {
+    if hypothesis && e.classification.is_some() {
+        PruningContext::Hypothesis
+    } else {
+        PruningContext::World
+    }
+}
 pub(super) fn force_on_path(
     e: &Engine,
     cone: Arc<Cone>,
     hypothesis: bool,
     pins: &[(usize, bool)],
     b: &mut Budget<'_>,
-) -> Result<(Vec<(usize, bool)>, bool)> {
-    let context = if hypothesis && e.classification.is_some() {
-        PruningContext::Hypothesis
-    } else {
-        PruningContext::World
-    };
+) -> Result<PathForcing> {
+    let context = path_context(e, hypothesis);
     let mut remaining = e.config.clone();
     let (forced, report) = forcing::force(e, cone.clone(), context, pins, b, &mut remaining)?;
     if let Some(cause) = report.cutoff {
@@ -30,15 +38,50 @@ pub(super) fn force_on_path(
             details: cause.details,
         });
     }
-    let constants: Vec<_> = (0..forced.fixed.len())
+    let constants = (0..forced.fixed.len())
         .filter_map(|i| match (cone.fixed[i], forced.fixed[i]) {
             (None, Some(v)) => Some((i, v)),
             _ => None,
         })
         .collect();
-    let discharged =
-        constants.is_empty() || forcing::implied(e, &forced, context, pins, b, &mut remaining)?;
-    Ok((constants, discharged))
+    Ok(PathForcing {
+        constants,
+        no_model: report.no_model,
+        solved: report.candidates > 0,
+    })
+}
+/// Whether substituting exactly `constants` in `cone` keeps its interpretations
+/// under W, `pins` and (with `hypothesis`) H: every interpretation of the
+/// substituted cone satisfies the substituted atoms' definitions.
+pub(super) fn implied_on_path(
+    e: &Engine,
+    cone: &Cone,
+    constants: &[(usize, bool)],
+    hypothesis: bool,
+    pins: &[(usize, bool)],
+    b: &mut Budget<'_>,
+) -> Result<bool> {
+    let mut out = cone.clone();
+    let mut retained: Vec<_> = cone.retained.iter().cloned().collect();
+    for (i, v) in constants {
+        let mut bodies = vec![];
+        for rule in cone.rules.iter().filter(|r| r.head == *i) {
+            b.charge(rule.body.len() + 1, "completion planning discharge")?;
+            bodies.push(rule.body.clone());
+        }
+        retained.push(crate::sat_probe::RetainedEquation { head: *i, bodies });
+        out.fixed[*i] = Some(*v);
+    }
+    out.retained = retained.into();
+    let mut remaining = e.config.clone();
+    forcing::implied(
+        e,
+        &out,
+        path_context(e, hypothesis),
+        pins,
+        b,
+        &mut remaining,
+    )
 }
 /// The declared input value groups as (exactly-one, inputs), read as the split
 /// ranking reads them (assumption cones under Fitting), for cover telemetry.

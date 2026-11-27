@@ -832,6 +832,16 @@ all certified inputs are accepted and output meaning is still checked separately
 `prepare_for_planning(..., outputs)` prepares bounded input providers required by
 explicit outputs without changing the verification's decision selection.
 
+The completion planner's path driver uses two operations. `planning_path_step(path,
+outputs, hypothesis)` answers whether any permitted message on the path has an
+interpretation of the scope (C(H), or the output cones with C(H); with H when
+requested) and, if so, which derived atoms are constant in all of them (forcing).
+`planning_discharged(path, outputs, hypothesis, constants)` asks whether
+substituting exactly those constants keeps the scope's interpretations (every
+interpretation with them substituted satisfies their definitions); the planner
+checks the definitions at runtime otherwise. In `planning_context`, a
+classification no-meaning observation counts as a rejection (invalid input, 024.38).
+
 The planning foundation exposes `planning_context(path, options)` and
 `planning_constant(path, target, scope, options)`. A runtime path pins actual input
 atoms; derived pins are refused. Without a hypothesis, certified inputs are accepted
