@@ -975,6 +975,18 @@ pub(super) fn completion_inner(
             }
         }
         print_diagnostics(p, &shown, output, verbose)?;
+        if let Some(o) = report
+            .classification
+            .as_ref()
+            .and_then(|c| c.no_meaning_explanation.as_deref())
+        {
+            let value = denotate_ir_text::completion_output::explanations(p)(o)
+                .map_err(|e| (3, e.to_string()))?;
+            writeln!(output, "Classification no-meaning odd loop:").unwrap();
+            for line in denotate_ir_text::completion_output::odd_lines(&value) {
+                writeln!(output, "  {line}").unwrap();
+            }
+        }
         for o in s["obligations"].as_array().unwrap() {
             writeln!(
                 output,

@@ -117,7 +117,7 @@ fn exploration_reports_live_work_and_honours_cancellation_during_non_sat_work() 
 }
 
 #[test]
-fn exploration_classification_existence_runs_after_gating_questions() {
+fn classification_existence_runs_after_the_gating_questions_in_every_mode() {
     let mut c = Corpus::new();
     let i = rel(&mut c, "i", true);
     let h = rel(&mut c, "h", false);
@@ -138,9 +138,9 @@ fn exploration_classification_existence_runs_after_gating_questions() {
         );
         let events = events.lock().unwrap();
         let first = |phase| events.iter().position(|(p, _)| *p == phase).unwrap();
-        assert_eq!(
+        // A diagnostic (024.38): last, in ordinary mode too.
+        assert!(
             first("completion classification existence") > first("completion processing ambiguity"),
-            explore,
             "{events:?}"
         );
     }

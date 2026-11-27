@@ -128,6 +128,7 @@ impl Engine {
             rejected,
             no_meaning,
             ambiguous,
+            no_meaning_explanation: None,
         });
         Ok(result)
     }

@@ -565,11 +565,13 @@ consumer's validation independently.
 
 Human and `--json` output identify the semantics and hypothesis, classification
 acceptance/rejection/ambiguity/no-meaning, the declared determinacy interface,
-processing meaning, properties and advisory status. Classification no-meaning is a
-specification failure even when rejection is allowed: a genuine reject needs an
-interpretation of the live classification cone without H and none with H.
+processing meaning, properties and advisory status. Classification no-meaning (an
+input with no interpretation of the classification cone even without H) is invalid
+input: a warning with its witness input and odd-loop explanation, not a failure, and
+an unsettled search is a note; neither changes the exit status. A genuine reject
+needs an interpretation of the live classification cone without H and none with H.
 Rejection evidence retains that checked interpretation and the unsatisfiable-query
-confirmation. All-rejected excludes classification no-meaning and unknowns.
+confirmation. All-rejected counts no-meaning inputs as invalid and excludes unknowns.
 The configuration is `original-completion-v1`. Rejections are allowed unless selected
 `no_rejections(H)` forbids them. Fully established `all-rejected` is explicit,
 processing is not applicable, and processing obligations are vacuous. It can exit 0;
@@ -708,9 +710,9 @@ A conclusive probe skips structural trials. The probe is the ordinary unsplit
 search, covers included, under that cap; an exhausted probe is charged and never a
 proof. After cutoff, each unit reduces, prunes and forces
 before ranking and taking a verified partition; only leaves run residual searches.
-Classification existence runs last in exploration. Default mode gives it a bounded
-question share and runs enabled forcing/splits before classification existence
-covers. Ordinary processing existence and ambiguity keep their first attempt;
+Classification existence runs last in every mode: default mode on a bounded share
+(the share it would have had beside the gating questions), exploration on the
+invocation's remaining time; enabled forcing/splits precede its covers. Ordinary processing existence and ambiguity keep their first attempt;
 rejection and acceptance keep direct unsplit searches.
 Progress goes to stderr, including live work/poll counters and completed/cut-off/
 not-started stages; `--no-progress` disables it. JSON/human semantic results and

@@ -11,9 +11,19 @@ pub(super) fn explain(
     core: Option<&consistency::Core>,
     b: &mut Budget<'_>,
 ) -> Option<Arc<crate::CompletionOddExplanation>> {
-    if core.is_some_and(|c| c.odd_components == 0)
-        || (!engine.limits.progress.enabled() && engine.limits.completion_sizes.is_none())
-    {
+    if !engine.limits.progress.enabled() && engine.limits.completion_sizes.is_none() {
+        return None;
+    }
+    explain_always(engine, c, core, b)
+}
+/// As `explain`, even when nothing records sizes or progress (a finding's evidence).
+pub(super) fn explain_always(
+    engine: &Engine,
+    c: &Cone,
+    core: Option<&consistency::Core>,
+    b: &mut Budget<'_>,
+) -> Option<Arc<crate::CompletionOddExplanation>> {
+    if core.is_some_and(|c| c.odd_components == 0) {
         return None;
     }
     let mut limits = engine.limits.clone();

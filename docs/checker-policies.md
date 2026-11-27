@@ -1871,8 +1871,9 @@ uses compact arrays. Global validation indexes retain every original producer an
 constant while skipping unrelated producer-less false slots.
 
 With a shared run deadline, required searches get an equal share of the remaining
-time by remaining question count (each obligation counts once). Rejection and
-classification existence precede ambiguity; accepted-input eligibility remains
+time by remaining question count (each obligation counts once). Rejection precedes
+ambiguity; classification existence, a diagnostic, runs last on the share it would
+have had beside the gating questions; accepted-input eligibility remains
 independently checked. Unused time passes forward. Preparation, input-contract
 validation, global cancellation and the final deadline are unchanged. No time or
 count is a test golden.

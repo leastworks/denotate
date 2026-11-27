@@ -1275,7 +1275,14 @@ are not stable replay evidence or an editor capability switch.
   model (inline or referenced) of the same classification cone without requiring H, with
   `hypothesis: null` and scope `classification-without-hypothesis`.
   `completion-no-meaning` with that scope records that even this second query was
-  unsatisfiable; it is distinct from rejection and independently fails verification.
+  unsatisfiable: invalid input, distinct from rejection. Its diagnostic kind is
+  `classification-no-meaning`, a Warning that never fails verification; its
+  evidence adds `oddExplanation` (the odd loop active at the observation, as in
+  completion sizes, or null), and the loop's producing rules are its locations. An
+  unsettled search is an Information diagnostic `{completionMeaning:
+  "classification-existence-unsettled"}` with evidence kind
+  `classification-existence-unsettled` and its `reason`; it never makes the
+  verification incomplete.
   `completion-ambiguity` contains two interpretations of the same scope and
   observation. Diagnostic ambiguity evidence repeats `determinacy` from the summary.
 - Existing obligation finding identities are unchanged. `no_rejections` uses
@@ -1283,8 +1290,8 @@ are not stable replay evidence or an editor capability switch.
   use `{completionMeaning: phase}`; `classification-no-meaning` is the new phase for
   a contradictory classification cone. The all-rejected advisory uses
   `{context: "all-rejected"}`. Each includes the verification key as usual.
-- `ambiguous-meaning` is an Error. `all-rejected` and opt-in `circular-support` are
-  Information. Circular support is keyed by `circularSupport`, the semantic atoms
+- `ambiguous-meaning` is an Error; `classification-no-meaning` is a Warning.
+  `all-rejected` and opt-in `circular-support` are Information. Circular support is keyed by `circularSupport`, the semantic atoms
   of the original positive ground component; the chosen cycle/world is evidence.
   `advisories.circularSupport.state` is `not-requested`, `none`, `findings` or
   `incomplete`; advisory exhaustion never changes required completeness.

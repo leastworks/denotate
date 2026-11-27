@@ -40,8 +40,15 @@ pub struct Classification {
     pub accepted: Search<Model>,
     /// Validated classification model without H; the H query was unsatisfiable.
     pub rejected: Search<Model>,
+    /// A diagnostic, not a verdict: inputs with no classification interpretation
+    /// (even without H) are invalid input, as in the DSL compiler. Neither a
+    /// finding nor a cutoff here makes the verification fail or incomplete.
+    /// Searched last, on a bounded share.
     pub no_meaning: Search<Observation>,
     pub ambiguous: Search<Pair>,
+    /// For a confirmed no-meaning: the first odd component of the classification
+    /// equations without H, with witness cycles (bounded; `None` if cut off).
+    pub no_meaning_explanation: Option<Arc<crate::CompletionOddExplanation>>,
 }
 #[derive(Debug, Clone)]
 pub struct Meaning {
@@ -137,7 +144,6 @@ impl Report {
             && self.classification.as_ref().is_some_and(|c| {
                 matches!(c.accepted, Search::None)
                     && matches!(c.ambiguous, Search::None)
-                    && matches!(c.no_meaning, Search::None)
                     && c.rejected.exists()
             })
     }
@@ -150,7 +156,7 @@ impl Report {
             || self
                 .classification
                 .as_ref()
-                .is_some_and(|c| c.ambiguous.exists() || c.no_meaning.exists())
+                .is_some_and(|c| c.ambiguous.exists())
             || self.meaning.no_meaning.exists()
             || self.meaning.ambiguous.exists()
             || self.obligations.values().any(ObligationResult::failed)
@@ -167,10 +173,7 @@ impl Report {
             || !self.notices_not_analysed.is_empty()
             || self.obligations.values().any(|o| !o.complete())
             || self.classification.as_ref().is_some_and(|c| {
-                !c.accepted.complete()
-                    || !c.rejected.complete()
-                    || !c.ambiguous.complete()
-                    || !c.no_meaning.complete()
+                !c.accepted.complete() || !c.rejected.complete() || !c.ambiguous.complete()
             })
             || (self.meaning.applicable
                 && (!self.meaning.no_meaning.complete() || !self.meaning.ambiguous.complete()))
@@ -200,6 +203,7 @@ impl Engine {
                 rejected: Search::NotAnalysed,
                 no_meaning: Search::NotAnalysed,
                 ambiguous: Search::NotAnalysed,
+                no_meaning_explanation: None,
             }),
             meaning: Meaning {
                 no_meaning: Search::NotAnalysed,
@@ -273,6 +277,8 @@ impl Engine {
                     ObservationOutcome::ClassificationNoMeaning => {
                         let c = report.classification.as_mut().unwrap();
                         if !c.no_meaning.exists() {
+                            c.no_meaning_explanation =
+                                self.classification_odd_explanation(&world)?;
                             c.no_meaning = Search::Exists(world.clone());
                         }
                         false
@@ -444,6 +450,7 @@ impl Engine {
                 rejected: Search::NotAnalysed,
                 no_meaning: Search::NotAnalysed,
                 ambiguous: Search::NotAnalysed,
+                no_meaning_explanation: None,
             });
             report.meaning.no_meaning = Search::NotAnalysed;
             report.meaning.ambiguous = Search::NotAnalysed;

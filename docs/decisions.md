@@ -2495,9 +2495,30 @@ any new model still satisfies the retained equation and the unchanged equations.
 Fitting and subsequent context-tagged pruning preserve this equality. Existence
 projection retains residual constraints and their dependencies, cube coverage and
 lifting certify them, and replay checks them. A structural totality shortcut is
-not sufficient while such constraints remain. H-dependent constants never enter
+not sufficient while such constraints remain. When the forced view (its constants
+without the retained equations) already implies them, in the same context and
+under the same pins, the equations are dropped: the view alone then has exactly
+the original models. Otherwise a constant that removes a node's only odd component
+leaves the node unsplittable yet unable to close structurally, and its cover loop
+enumerates inputs the constant made irrelevant. H-dependent constants never enter
 no-H views. Shadow SAT-cache hits are always checked by the solver; enabling hits
 to answer queries is a separate decision.
+
+## Classification no-meaning is a diagnostic
+
+An input whose classification equations have no interpretation even without the
+hypothesis is invalid input, as in the DSL compilers this checker follows: such a
+message is neither accepted nor processed (the compiler rejects it at runtime). So
+classification existence does not gate a completion verification (user decision,
+2026-11-24). A confirmed no-meaning input is a warning with its witness input and
+the odd loop that causes it; an unsettled search is an information note; neither
+makes the verification fail or incomplete, nor changes the exit status, and
+all-rejected counts such inputs as invalid. Other questions are unaffected: an input
+with no classification interpretation has no H-model, so processing under H never
+sees it. The search runs after every gating question, on a bounded share (the share
+it would have had beside them; exploration gives it the invocation's remaining
+time), so it cannot starve them. On a first real program it was the one question
+that would not conclude, while every gating question did.
 
 ## Completion exploration separates algorithm measurements from scheduling shares
 

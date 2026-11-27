@@ -539,7 +539,8 @@ fn completion_cli_does_not_call_classification_contradictions_rejections() {
             flags.push("--json");
         }
         let (code, out) = f.run(&flags);
-        assert_eq!(code, 1, "{out}");
+        // Classification no-meaning is a warning (024.38): the run succeeds.
+        assert_eq!(code, 0, "{out}");
         assert!(out.contains("no-meaning"), "{out}");
         assert!(!out.contains("all-rejected"), "{out}");
         assert!(!out.contains("rejected-observation"), "{out}");

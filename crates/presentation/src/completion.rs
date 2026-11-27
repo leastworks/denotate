@@ -272,17 +272,52 @@ fn findings_using(
         );
     }
     if let Some(c) = &r.classification {
-        if let Search::Exists(w) = &c.no_meaning {
-            add(
+        // A diagnostic (024.38): invalid input, as in the DSL compiler; neither
+        // a finding nor a cutoff here fails the verification or leaves it incomplete.
+        match &c.no_meaning {
+            Search::Exists(w) => {
+                let mut notes = vec![obs_note(w)?];
+                notes.push("Such inputs are invalid: no classification exists, so they are neither accepted nor processed. This is a diagnostic, not a verification failure.".into());
+                let explanation = c
+                    .no_meaning_explanation
+                    .as_deref()
+                    .map(|o| odd_explanation(o, keys))
+                    .transpose()?;
+                // The rules of the odd loop, like circular support's cycle.
+                let mut locations = base.clone();
+                let mut rules = std::collections::BTreeSet::new();
+                for edge in c.no_meaning_explanation.iter().flat_map(|o| o.cycles.iter().flatten()) {
+                    for rule in edge.producers.iter().filter_map(|p| p.source) {
+                        if rules.len() < 8 && rules.insert(rule) {
+                            locations.push(location(rule.into(), Role::Producer));
+                        }
+                    }
+                }
+                add(
+                    &mut out,
+                    Identity::CompletionMeaning("classification-no-meaning"),
+                    Kind::ClassificationNoMeaning,
+                    "Some permitted observation has no classification interpretation, even without the hypothesis."
+                        .into(),
+                    notes,
+                    locations,
+                    json!({"kind":"completion-no-meaning","scope":"classification-without-hypothesis","observation":observation(w,keys, evidence)?,"oddExplanation":explanation}),
+                );
+            }
+            Search::Inconclusive(cause) => add(
                 &mut out,
-                Identity::CompletionMeaning("classification-no-meaning"),
-                Kind::NoMeaning,
-                "The classification equations have no interpretation even without the hypothesis."
+                Identity::CompletionMeaning("classification-existence-unsettled"),
+                Kind::Inconclusive,
+                "Whether every permitted observation has a classification interpretation was not settled."
                     .into(),
-                vec![obs_note(w)?],
+                vec![
+                    cause_text(*cause),
+                    "A diagnostic only: the verification result does not depend on it.".into(),
+                ],
                 base.clone(),
-                json!({"kind":"completion-no-meaning","scope":"classification-without-hypothesis","observation":observation(w,keys, evidence)?}),
-            );
+                json!({"kind":"classification-existence-unsettled","reason":reason(*cause)}),
+            ),
+            _ => (),
         }
         if let Search::Exists(p) = &c.ambiguous {
             add(
@@ -799,28 +834,33 @@ fn observation_note(
     ))
 }
 
+fn odd_explanation(
+    o: &denotate_check::CompletionOddExplanation,
+    keys: &SemanticKeys,
+) -> Result<Value> {
+    completion_odd_explanation(
+        o,
+        |a| atom(a, keys),
+        |r| Ok(crate::identity::rule(keys.rule(r)?)),
+        |r| Ok(crate::identity::relation(keys.relation(r)?)),
+        |g| {
+            Ok(
+                json!({"relation":crate::identity::relation(keys.relation(g.relation)?),
+            "values":g.values.iter().map(|v| keys.constant(*v).map(crate::identity::constant)).collect::<std::result::Result<Vec<_>,_>>()?,
+            "assumption":g.assumption.map(|a|keys.assumption(a).map(|k|json!([k.0.namespace.as_ref(),k.0.name.as_ref()]))).transpose()?,
+            "declared":g.declared}),
+            )
+        },
+    )
+}
+
 /// Bounded size report, separate from verdicts and evidence. Counts at an
 /// unfinished descending round are observations, not lower bounds on its GFP.
 pub fn completion_sizes(
     keys: &SemanticKeys,
     sizes: &denotate_check::CompletionSizeSnapshot,
 ) -> Result<Value> {
-    completion_sizes_with_explanations(keys, sizes, |o| {
-        completion_odd_explanation(
-            o,
-            |a| atom(a, keys),
-            |r| Ok(crate::identity::rule(keys.rule(r)?)),
-            |r| Ok(crate::identity::relation(keys.relation(r)?)),
-            |g| {
-                Ok(
-                    json!({"relation":crate::identity::relation(keys.relation(g.relation)?),
-                "values":g.values.iter().map(|v| keys.constant(*v).map(crate::identity::constant)).collect::<std::result::Result<Vec<_>,_>>()?,
-                "assumption":g.assumption.map(|a|keys.assumption(a).map(|k|json!([k.0.namespace.as_ref(),k.0.name.as_ref()]))).transpose()?,
-                "declared":g.declared}),
-                )
-            },
-        )
-    })
+    completion_sizes_with_explanations(keys, sizes, |o| odd_explanation(o, keys))
 }
 pub fn completion_sizes_with_explanations(
     keys: &SemanticKeys,

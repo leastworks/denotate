@@ -1152,6 +1152,48 @@ impl Engine {
             }
         })
     }
+    /// Why `world` has no classification interpretation: an odd component of the
+    /// classification equations without H that stays active at `world` (its
+    /// inputs pinned before reduction, so an inactive odd loop elsewhere is not
+    /// blamed), with witness cycles. Structural and bounded; `None` if none is
+    /// found in time.
+    pub(super) fn classification_odd_explanation(
+        &self,
+        world: &Observation,
+    ) -> Result<Option<Arc<crate::CompletionOddExplanation>>> {
+        let Some((cone, _, _)) = &self.classification else {
+            return Ok(None);
+        };
+        let limits = self.shared_limits(1);
+        let mut b = Budget::new(&limits);
+        let found = (|| {
+            b.charge(cone.atoms.len(), "completion no-meaning explanation")?;
+            let mut pinned = (**cone).clone();
+            for (i, atom) in cone.atoms.iter().enumerate() {
+                if cone.input[i] {
+                    pinned.fixed[i] = Some(world.present.contains(atom));
+                }
+            }
+            let reduced = search_free::reduce(&pinned, &mut b)?.cone;
+            let (producers, groups) = existence::components(&reduced, &mut b)?;
+            for heads in groups {
+                let local = existence::component(&reduced, &producers, &heads, &mut b)?;
+                let core = consistency::analyse(&local, None, &mut b)?;
+                if core.odd_components > 0 {
+                    return Ok(odd::explain_always(self, &local, Some(&core), &mut b));
+                }
+            }
+            Ok(None)
+        })();
+        match found {
+            Ok(found) => Ok(found),
+            Err(error) => {
+                self.limits.cancellation.check()?;
+                inconclusive(error)?;
+                Ok(None)
+            }
+        }
+    }
     fn symbolic_no_meaning(
         &self,
         classification: bool,
@@ -1646,6 +1688,7 @@ impl Engine {
                 rejected: Search::NotAnalysed,
                 no_meaning: Search::NotAnalysed,
                 ambiguous: Search::NotAnalysed,
+                no_meaning_explanation: None,
             }),
             meaning: Meaning {
                 no_meaning: Search::NotAnalysed,
@@ -1697,34 +1740,29 @@ impl Engine {
             return Ok(report);
         }
         let mut globally_unique = true;
+        // Classification existence is a diagnostic searched last (024.38): the
+        // gating questions share the time without it.
         let mut remaining = report.obligations.len()
             + 2
             + if report.classification.is_some() {
-                4
+                3
             } else {
                 0
             };
+        // Its bounded slice: the share it had beside the gating questions.
+        let existence_shares = remaining + 1;
         if let Some(c) = &mut report.classification {
             // Ordinary searches receive a bounded part of the remaining
             // shared deadline. Exploration moves the potentially expensive
             // classification cover behind the gating questions below.
             c.rejected = self.symbolic_rejected(options, remaining)?;
             remaining -= 1;
-            if !self.limits.completion_exploration {
-                c.no_meaning = self.symbolic_no_meaning(true, true, options, remaining)?;
-                remaining -= 1;
-            }
             c.ambiguous = self.symbolic_pair(true, true, options, remaining)?;
             remaining -= 1;
             globally_unique = matches!(c.ambiguous, Search::None);
             c.accepted = self.symbolic_accepted(globally_unique, options, remaining)?;
             remaining -= 1;
-            for state in [
-                &c.accepted as &dyn Unknown,
-                &c.rejected,
-                &c.no_meaning,
-                &c.ambiguous,
-            ] {
+            for state in [&c.accepted as &dyn Unknown, &c.rejected, &c.ambiguous] {
                 if let Some(cause) = state.unknown() {
                     report.incomplete.push(cause);
                 }
@@ -1850,15 +1888,16 @@ impl Engine {
         if options.circular_support {
             report.advisory = self.symbolic_advisory(globally_unique, options, keys)?;
         }
-        // Classification existence is independent of the gating questions.
-        // Its universal cover can be the hardest search, so exploration spends
-        // only the invocation's remaining time here. Its verdict is unchanged.
-        if self.limits.completion_exploration {
-            if let Some(c) = &mut report.classification {
-                c.no_meaning = self.symbolic_no_meaning(true, true, options, remaining)?;
-                if let Some(cause) = c.no_meaning.unknown() {
-                    report.incomplete.push(cause);
-                }
+        report.dead_producers = self.dead_producer_advisory(options)?;
+        // Classification existence (024.38): a diagnostic, searched last so it
+        // cannot starve the gating questions, on a bounded slice in ordinary
+        // mode (exploration spends the invocation's remaining time). A finding
+        // is a warning and a cutoff a note: neither is a failure or makes the
+        // verification incomplete.
+        if let Some(c) = &mut report.classification {
+            c.no_meaning = self.symbolic_no_meaning(true, true, options, existence_shares)?;
+            if let Search::Exists(world) = &c.no_meaning {
+                c.no_meaning_explanation = self.classification_odd_explanation(world)?;
             }
         }
         if contract_incomplete {
@@ -1866,7 +1905,6 @@ impl Engine {
         }
         report.incomplete.sort_by_key(|c| (c.phase, c.resource));
         report.incomplete.dedup();
-        report.dead_producers = self.dead_producer_advisory(options)?;
         Ok(report)
     }
 }

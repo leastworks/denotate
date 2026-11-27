@@ -5,7 +5,10 @@ use super::*;
 
 /// Analysis components belong to the current solver view, never the frozen
 /// preparation graph. Semantic classification/property membership stays frozen.
-fn components(c: &Cone, b: &mut Budget<'_>) -> Result<(Vec<Vec<usize>>, Vec<BTreeSet<usize>>)> {
+pub(super) fn components(
+    c: &Cone,
+    b: &mut Budget<'_>,
+) -> Result<(Vec<Vec<usize>>, Vec<BTreeSet<usize>>)> {
     let graph = consistency::analyse(c, None, b)?;
     let mut producers = vec![vec![]; c.fixed.len()];
     for (ri, r) in c.rules.iter().enumerate() {

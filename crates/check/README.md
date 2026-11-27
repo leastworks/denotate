@@ -965,9 +965,12 @@ processing meaning and obligation results. Established witnesses survive cutoff.
 Only confirmed unique decision classification admits a world to processing
 obligations; unknown classification never completes a property proof.
 `Classification::no_meaning` records worlds without an interpretation even before
-H. These fail verification independently of `no_rejections`, which forbids genuine
-rejections only. An all-rejected context excludes classification no-meaning,
-ambiguity and unknowns. It is explicit, processing is not applicable, and processing
+H: invalid input, a diagnostic (decisions: "Classification no-meaning is a
+diagnostic"). It is searched last on a bounded share; neither a finding nor a
+cutoff fails the verification or makes it incomplete, and
+`no_meaning_explanation` gives the odd loop active at the witness world.
+`no_rejections` forbids genuine rejections only. An all-rejected context counts
+classification no-meaning worlds as invalid and excludes ambiguity and unknowns. It is explicit, processing is not applicable, and processing
 properties are vacuous; inconsistent W is a context error instead.
 
 Property queries use the live obligation and classification cones and H.

@@ -24,6 +24,9 @@ pub enum Kind {
     EmptyGroupingDomain,
     Counterexample,
     NoMeaning,
+    /// Some permitted input has no classification interpretation even without
+    /// the hypothesis: invalid input, a diagnostic (024.38).
+    ClassificationNoMeaning,
     UnsupportedGroup,
     UnsupportedRegion,
     Inconclusive,
@@ -53,6 +56,7 @@ impl Kind {
             Self::Counterexample => "counterexample",
             Self::EmptyGroupingDomain => "empty-grouping-domain",
             Self::NoMeaning => "no-meaning",
+            Self::ClassificationNoMeaning => "classification-no-meaning",
             Self::UnsupportedGroup => "unsupported-group",
             Self::UnsupportedRegion => "unsupported-region",
             Self::Inconclusive => "inconclusive",
@@ -76,6 +80,7 @@ impl Kind {
             | Self::Rewrite
             | Self::GuardedSettlement
             | Self::AssumedConclusion
+            | Self::ClassificationNoMeaning
             | Self::ImpossibleCondition => Severity::Warning,
             Self::UnvalidatedAssumption
             | Self::AllRejected

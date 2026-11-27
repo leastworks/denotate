@@ -28,6 +28,34 @@ fn checked_with_limits(
     let r = e.check(&p.keys, &options).unwrap();
     (p, r)
 }
+/// The fallback `other` admits a message nothing else classifies; only its
+/// profile gives field f, and `term_f` reads f: other -> given_f -> term_f ->
+/// not other is an odd loop when f = x. W ties f = x to an r-message, which
+/// `term_r` classifies first. Four free toggles feed terms read under g.
+const TOGGLES: &str = "
+        sort Toggle; const t1, t2, t3, t4: Toggle;
+        sort Clash; const c_x, c_not_r: Clash;
+        input present_f(); input f_is_x(); input msg_r(); input msg_p(); input msg_q();
+        input present_g(); input toggle(t: Toggle);
+        relation clash(c: Clash); clash(c_x) :- f_is_x(); clash(c_not_r) :- !msg_r();
+        assumption x_needs_r: at_most_one(clash, group_by: ());
+        relation p_block(); p_block() :- msg_p(), !msg_q();
+        relation term_p(); term_p() :- p_block();
+        relation term_r(); term_r() :- msg_r(), !p_block();
+        relation given_f(); given_f() :- present_f(), other(), !p_block();
+        relation term_f(); term_f() :- given_f(), f_is_x();
+        relation given_g(); given_g() :- present_g(), !p_block();
+        relation term_b(t: Toggle); term_b(T) :- given_g(), toggle(T);
+        relation any_b(); any_b() :- term_b(T);
+        relation other(); other() :- !term_f(), !any_b(), !term_r(), !term_p();
+        relation classified();
+        classified() :- term_f(); classified() :- any_b(); classified() :- term_r();
+        classified() :- term_p(); classified() :- other();
+        verification v {
+            semantics: completion; hypothesis: classified;
+            decisions: [term_f, term_b, term_r, term_p, other];
+            assumptions: [x_needs_r]; obligations: [];
+        }";
 fn evidence_model<'a>(
     status: &'a serde_json::Value,
     reference: &serde_json::Value,
@@ -219,16 +247,21 @@ fn classification_no_meaning_is_distinct_from_rejection_in_findings_and_summary(
         Default::default(),
     );
     let s = presentation::present_completion(&p, &r).unwrap();
-    assert!(!r.all_rejected());
+    // i = false is rejected; i = true has no classification at all, which is
+    // invalid input (024.38), so every permitted observation is rejected.
+    assert!(r.all_rejected());
     assert_eq!(s.status["classification"]["noMeaning"]["state"], "exists");
     assert_eq!(s.status["classification"]["rejected"]["state"], "exists");
     let d = s
         .diagnostics
         .iter()
-        .find(|d| d.kind == denotate_presentation::Kind::NoMeaning)
+        .find(|d| d.kind == denotate_presentation::Kind::ClassificationNoMeaning)
         .unwrap();
     assert_eq!(d.evidence["scope"], "classification-without-hypothesis");
     assert!(d.message.contains("even without the hypothesis"));
+    // A diagnostic (024.38): a warning with the odd loop that causes it.
+    assert_eq!(d.kind.severity(), denotate_presentation::Severity::Warning);
+    assert!(!d.evidence["oddExplanation"].is_null());
     let d = s
         .diagnostics
         .iter()
@@ -893,32 +926,8 @@ fn a_forced_constant_that_breaks_the_only_odd_loop_closes_the_question_structura
     // `term_r` classifies first, so forcing proves term_f false. Its definition
     // then holds in every W world, so the constant alone defines the same models:
     // the loop is gone and no cover loop over the free toggles may run.
-    let text = "
-        sort Toggle; const t1, t2, t3, t4: Toggle;
-        sort Clash; const c_x, c_not_r: Clash;
-        input present_f(); input f_is_x(); input msg_r(); input msg_p(); input msg_q();
-        input present_g(); input toggle(t: Toggle);
-        relation clash(c: Clash); clash(c_x) :- f_is_x(); clash(c_not_r) :- !msg_r();
-        assumption x_needs_r: at_most_one(clash, group_by: ());
-        relation p_block(); p_block() :- msg_p(), !msg_q();
-        relation term_p(); term_p() :- p_block();
-        relation term_r(); term_r() :- msg_r(), !p_block();
-        relation given_f(); given_f() :- present_f(), other(), !p_block();
-        relation term_f(); term_f() :- given_f(), f_is_x();
-        relation given_g(); given_g() :- present_g(), !p_block();
-        relation term_b(t: Toggle); term_b(T) :- given_g(), toggle(T);
-        relation any_b(); any_b() :- term_b(T);
-        relation other(); other() :- !term_f(), !any_b(), !term_r(), !term_p();
-        relation classified();
-        classified() :- term_f(); classified() :- any_b(); classified() :- term_r();
-        classified() :- term_p(); classified() :- other();
-        verification v {
-            semantics: completion; hypothesis: classified;
-            decisions: [term_f, term_b, term_r, term_p, other];
-            assumptions: [x_needs_r]; obligations: [];
-        }";
     let (_, r) = checked(
-        text,
+        TOGGLES,
         CheckOptions {
             prune: true,
             force: true,
@@ -930,4 +939,84 @@ fn a_forced_constant_that_breaks_the_only_odd_loop_closes_the_question_structura
     // exhaust the solves (inconclusive before the definition was dropped).
     let no_meaning = r.classification.unwrap().no_meaning;
     assert!(matches!(no_meaning, Search::None), "{no_meaning:?}");
+}
+
+#[test]
+fn classification_no_meaning_alone_is_a_warning_not_a_failure_or_incomplete() {
+    // h :- i, not h has no classification interpretation when i holds. Such
+    // inputs are invalid (as in the DSL compiler); with nothing else selected the
+    // verification is neither failed nor incomplete.
+    let text = "input i();relation h();h():-i(),!h();verification v{semantics:completion;hypothesis:h;decisions:[];assumptions:[];obligations:[];}";
+    let (p, r) = checked(text, Default::default());
+    assert!(r.classification.as_ref().unwrap().no_meaning.exists());
+    assert!(!r.has_failures());
+    assert!(!r.is_incomplete());
+    let s = presentation::present_completion(&p, &r).unwrap();
+    assert!(
+        s.diagnostics
+            .iter()
+            .all(|d| d.kind.severity() != denotate_presentation::Severity::Error),
+        "{:?}",
+        s.diagnostics.iter().map(|d| d.kind).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn an_unsettled_classification_existence_is_a_note_not_an_incomplete_verification() {
+    // Without forcing, library default limits cannot cover the toggle program's
+    // classification existence; every gating question still concludes.
+    let (p, r) = checked(
+        TOGGLES,
+        CheckOptions {
+            prune: true,
+            split_depth: 32,
+            ..Default::default()
+        },
+    );
+    let c = r.classification.as_ref().unwrap();
+    assert!(
+        matches!(c.no_meaning, Search::Inconclusive(_)),
+        "{:?}",
+        c.no_meaning
+    );
+    assert!(!r.is_incomplete(), "{:?}", r.incomplete);
+    assert!(!r.has_failures());
+    let s = presentation::present_completion(&p, &r).unwrap();
+    let d = s
+        .diagnostics
+        .iter()
+        .find(|d| d.evidence["kind"] == "classification-existence-unsettled")
+        .unwrap();
+    assert_eq!(
+        d.kind.severity(),
+        denotate_presentation::Severity::Information
+    );
+    assert_eq!(s.status["state"], "proved");
+}
+#[test]
+fn the_no_meaning_warning_carries_the_odd_loop_at_its_rule() {
+    // The explanation is the odd loop of the witness input, located at its rule
+    // (which loop is active at which input is unit-tested in the checker).
+    let text = "input t();relation bad();bad():-t(),!bad();relation h();h():-!bad();verification v{semantics:completion;hypothesis:h;decisions:[];assumptions:[];obligations:[];}";
+    let (p, r) = checked(text, Default::default());
+    let c = r.classification.as_ref().unwrap();
+    assert!(c.no_meaning.exists());
+    let o = c.no_meaning_explanation.as_deref().unwrap();
+    let relations: std::collections::BTreeSet<_> = o
+        .cycles
+        .iter()
+        .flatten()
+        .flat_map(|e| [e.from.relation, e.to.relation])
+        .map(|r| p.corpus.relation(r).unwrap().name.clone())
+        .collect();
+    assert_eq!(relations, ["bad".to_string()].into());
+    let s = presentation::present_completion(&p, &r).unwrap();
+    let d = s
+        .diagnostics
+        .iter()
+        .find(|d| d.kind == denotate_presentation::Kind::ClassificationNoMeaning)
+        .unwrap();
+    // Producing rules sort first, so the loop's rule is the primary location.
+    let at = &text[d.primary.byte_range()];
+    assert!(at.starts_with("bad()"), "{at:?}");
 }

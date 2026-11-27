@@ -41,7 +41,8 @@ fn a_contradictory_classification_is_not_rejection_even_with_empty_decisions() {
             let class = r.classification.as_ref().unwrap();
             assert!(class.no_meaning.exists());
             assert!(matches!(class.rejected, Search::None));
-            assert!(r.has_failures());
+            // Classification no-meaning is a diagnostic (024.38), not a failure.
+            assert!(!r.has_failures());
             assert!(!r.all_rejected());
             assert!(!r.is_incomplete());
             assert!(r.obligations[&total].complete());
@@ -91,7 +92,7 @@ fn second_query_cutoff_is_unknown_and_one_base_model_suffices_for_rejection() {
 }
 
 #[test]
-fn no_meaning_and_rejection_coexist_without_an_all_rejected_label() {
+fn no_meaning_inputs_are_invalid_so_the_others_being_rejected_is_all_rejected() {
     let mut c = Corpus::new();
     let i = rel(&mut c, "i", true);
     let h = rel(&mut c, "h", false);
@@ -107,8 +108,11 @@ fn no_meaning_and_rejection_coexist_without_an_all_rejected_label() {
     assert!(class.rejected.exists());
     assert!(class.no_meaning.exists());
     assert!(!class.accepted.exists());
-    assert!(!r.all_rejected());
+    // Inputs with no classification are invalid (024.38); every other permitted
+    // observation is rejected. The no-rejections obligation still fails.
+    assert!(r.all_rejected());
     assert!(r.has_failures());
+    assert!(r.obligations[&total].failed());
     assert!(!r.is_incomplete());
 }
 
@@ -572,5 +576,38 @@ fn disjoint_downstream_equations_avoid_the_coupled_pair_but_shared_constraints_d
                 .any(|c| c.query == "coupled-decisions"),
             coupled
         );
+    }
+}
+
+#[test]
+fn the_no_meaning_explanation_is_the_odd_loop_active_at_the_witness() {
+    // Two odd loops, each guarded by its own input. At a witness with t and not
+    // g, only bad's loop is active; a's must not be blamed, whichever comes first.
+    let mut c = Corpus::new();
+    let g = rel(&mut c, "g", true);
+    let t = rel(&mut c, "t", true);
+    let a = rel(&mut c, "a", false);
+    let bad = rel(&mut c, "bad", false);
+    let h = rel(&mut c, "h", false);
+    rule(&mut c, a, &[(g, false), (a, true)]);
+    rule(&mut c, bad, &[(t, false), (bad, true)]);
+    rule(&mut c, h, &[(a, true), (bad, true)]);
+    let v = declared(&mut c, Some(h), None, &[]);
+    let mut e = prepare(&c, v, &Domains::new());
+    // Explanations are also built for findings when nothing is measured.
+    e.limits.completion_sizes = None;
+    for (present, active) in [(t, bad), (g, a)] {
+        let world = Observation {
+            present: [atom(present)].into(),
+            absent: [atom(if present == t { g } else { t })].into(),
+        };
+        let o = e.classification_odd_explanation(&world).unwrap().unwrap();
+        let relations: BTreeSet<_> = o
+            .cycles
+            .iter()
+            .flatten()
+            .flat_map(|e| [e.from.relation, e.to.relation])
+            .collect();
+        assert_eq!(relations, [active].into());
     }
 }
